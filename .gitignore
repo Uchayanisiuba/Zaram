@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.venv/
+venv/
+ENV/
+
+# Node / frontend
+node_modules/
+dist/
+build/
+.vite/
+
+# Local runtime artifacts
+backend/audio_output/
+backend/temp/
+backend/__pycache__/
+frontend/.vite/
+
+# OS/editor files
+.DS_Store
+Thumbs.db
+.vscode/
+
+# Secrets / local config
+.env
+.env.*

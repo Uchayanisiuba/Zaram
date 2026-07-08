@@ -1,0 +1,28 @@
+{
+  "offline_brain": {
+    "type": "local",
+    "provider": "ollama",
+    "model": "qwen3",
+    "use_case": "general_chat"
+  },
+  "reasoning_brain": {
+    "type": "local",
+    "provider": "ollama",
+    "model": "gemma3",
+    "use_case": "complex_logic"
+  },
+  "cloud_creative": {
+    "type": "cloud",
+    "provider": "openai",
+    "model": "gpt-4o",
+    "api_key_env": "OPENAI_API_KEY",
+    "use_case": "creative_writing"
+  },
+  "cloud_coding": {
+    "type": "cloud",
+    "provider": "anthropic",
+    "model": "claude-3.5-sonnet",
+    "api_key_env": "ANTHROPIC_API_KEY",
+    "use_case": "programming"
+  }
+}
