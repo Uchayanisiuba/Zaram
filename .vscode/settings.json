@@ -1,0 +1,8 @@
+{
+  "chat.agent.enabled": true,
+  "chat.agent.maxRequests": 20,
+  "github.copilot.chat.codeGeneration.useInstructionFiles": true,
+  "github.copilot.chat.agent.enabled": true,
+  "github.copilot.chat.localeOverride": "en",
+  "chat.mcp.access": "none"
+}
