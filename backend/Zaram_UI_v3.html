@@ -1,0 +1,921 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Zaram - AI Voice Assistant</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #0a0a0f;
+            color: #e0e0e0;
+            height: 100vh;
+            display: flex;
+            overflow: hidden;
+        }
+
+        /* Sidebar */
+        .sidebar {
+            width: 260px;
+            background: #12121a;
+            border-right: 1px solid #1e1e2e;
+            display: flex;
+            flex-direction: column;
+            padding: 20px;
+        }
+        .logo {
+            font-size: 24px;
+            font-weight: 700;
+            color: #a855f7;
+            margin-bottom: 4px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .logo-icon {
+            width: 32px; height: 32px;
+            background: linear-gradient(135deg, #a855f7, #7c3aed);
+            border-radius: 8px;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 18px;
+        }
+        .subtitle { font-size: 12px; color: #6b7280; margin-bottom: 24px; }
+
+        .new-chat-btn {
+            background: linear-gradient(135deg, #a855f7, #7c3aed);
+            border: none;
+            color: white;
+            padding: 12px;
+            border-radius: 10px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 20px;
+            transition: opacity 0.2s;
+        }
+        .new-chat-btn:hover { opacity: 0.9; }
+
+        .status-card {
+            background: #1a1a2e;
+            border-radius: 10px;
+            padding: 12px;
+            margin-bottom: 16px;
+        }
+        .status-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+            margin-bottom: 8px;
+        }
+        .status-row:last-child { margin-bottom: 0; }
+        .status-dot {
+            width: 8px; height: 8px;
+            border-radius: 50%;
+            background: #ef4444;
+            transition: background 0.3s;
+        }
+        .status-dot.online { background: #22c55e; box-shadow: 0 0 6px #22c55e; }
+        .status-dot.connecting { background: #f59e0b; animation: pulse 1s infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+        .feature-toggles {
+            margin-top: auto;
+        }
+        .toggle-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 0;
+            border-bottom: 1px solid #1e1e2e;
+            font-size: 13px;
+        }
+        .toggle-switch {
+            width: 36px; height: 20px;
+            background: #374151;
+            border-radius: 10px;
+            position: relative;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .toggle-switch.active { background: #a855f7; }
+        .toggle-switch::after {
+            content: '';
+            position: absolute;
+            width: 16px; height: 16px;
+            background: white;
+            border-radius: 50%;
+            top: 2px; left: 2px;
+            transition: transform 0.2s;
+        }
+        .toggle-switch.active::after { transform: translateX(16px); }
+
+        /* Main Chat Area */
+        .main {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            position: relative;
+        }
+        .header {
+            padding: 16px 24px;
+            border-bottom: 1px solid #1e1e2e;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .header-title { font-size: 16px; font-weight: 600; }
+        .header-actions { display: flex; gap: 8px; }
+        .header-btn {
+            background: #1a1a2e;
+            border: 1px solid #2e2e3e;
+            color: #9ca3af;
+            padding: 6px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 12px;
+            transition: all 0.2s;
+        }
+        .header-btn:hover { background: #2e2e3e; color: #e0e0e0; }
+        .header-btn.active { background: #a855f7; color: white; border-color: #a855f7; }
+
+        .chat-area {
+            flex: 1;
+            overflow-y: auto;
+            padding: 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+        .welcome {
+            text-align: center;
+            padding: 40px 20px;
+            color: #6b7280;
+        }
+        .welcome h2 {
+            color: #e0e0e0;
+            font-size: 28px;
+            margin-bottom: 12px;
+        }
+        .suggestion-chips {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            justify-content: center;
+            margin-top: 24px;
+        }
+        .chip {
+            background: #1a1a2e;
+            border: 1px solid #2e2e3e;
+            color: #9ca3af;
+            padding: 8px 16px;
+            border-radius: 20px;
+            cursor: pointer;
+            font-size: 13px;
+            transition: all 0.2s;
+        }
+        .chip:hover { background: #2e2e3e; color: #e0e0e0; border-color: #a855f7; }
+
+        .message {
+            display: flex;
+            gap: 12px;
+            max-width: 80%;
+            animation: fadeIn 0.3s ease;
+        }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+        .message.user { align-self: flex-end; flex-direction: row-reverse; }
+        .message.ai { align-self: flex-start; }
+
+        .avatar {
+            width: 32px; height: 32px;
+            border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 14px;
+            flex-shrink: 0;
+        }
+        .avatar.user { background: #374151; }
+        .avatar.ai { background: linear-gradient(135deg, #a855f7, #7c3aed); }
+
+        .bubble {
+            padding: 12px 16px;
+            border-radius: 16px;
+            font-size: 14px;
+            line-height: 1.5;
+            position: relative;
+        }
+        .message.user .bubble { background: #7c3aed; color: white; border-bottom-right-radius: 4px; }
+        .message.ai .bubble { background: #1a1a2e; color: #e0e0e0; border: 1px solid #2e2e3e; border-bottom-left-radius: 4px; }
+
+        .message-actions {
+            display: flex;
+            gap: 6px;
+            margin-top: 6px;
+            opacity: 0;
+            transition: opacity 0.2s;
+        }
+        .message:hover .message-actions { opacity: 1; }
+        .msg-btn {
+            background: transparent;
+            border: 1px solid #2e2e3e;
+            color: #6b7280;
+            padding: 4px 8px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 11px;
+            transition: all 0.2s;
+        }
+        .msg-btn:hover { background: #2e2e3e; color: #e0e0e0; }
+
+        .audio-player {
+            margin-top: 8px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .audio-player audio { height: 32px; width: 200px; }
+
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 11px;
+            padding: 2px 8px;
+            border-radius: 4px;
+            margin-bottom: 6px;
+        }
+        .badge.web { background: #1e3a5f; color: #60a5fa; }
+        .badge.vision { background: #1e3a2e; color: #4ade80; }
+        .badge.voice { background: #3a1e3a; color: #f472b6; }
+
+        /* Input Area */
+        .input-area {
+            padding: 16px 24px;
+            border-top: 1px solid #1e1e2e;
+            background: #0a0a0f;
+        }
+        .input-wrapper {
+            display: flex;
+            align-items: flex-end;
+            gap: 8px;
+            background: #1a1a2e;
+            border: 1px solid #2e2e3e;
+            border-radius: 12px;
+            padding: 8px 12px;
+        }
+        .input-wrapper:focus-within { border-color: #a855f7; }
+
+        .input-field {
+            flex: 1;
+            background: transparent;
+            border: none;
+            color: #e0e0e0;
+            font-size: 14px;
+            resize: none;
+            max-height: 120px;
+            min-height: 20px;
+            outline: none;
+            font-family: inherit;
+        }
+        .input-field::placeholder { color: #6b7280; }
+
+        .input-btn {
+            width: 32px; height: 32px;
+            border-radius: 8px;
+            border: none;
+            background: transparent;
+            color: #6b7280;
+            cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+            transition: all 0.2s;
+            font-size: 16px;
+        }
+        .input-btn:hover { background: #2e2e3e; color: #e0e0e0; }
+        .input-btn.send { background: #a855f7; color: white; }
+        .input-btn.send:hover { background: #7c3aed; }
+        .input-btn.recording { background: #ef4444; color: white; animation: pulse 1s infinite; }
+
+        .file-input { display: none; }
+
+        /* Typing indicator */
+        .typing {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            padding: 12px 16px;
+        }
+        .typing-dot {
+            width: 8px; height: 8px;
+            background: #a855f7;
+            border-radius: 50%;
+            animation: typingBounce 1.4s infinite ease-in-out both;
+        }
+        .typing-dot:nth-child(1) { animation-delay: -0.32s; }
+        .typing-dot:nth-child(2) { animation-delay: -0.16s; }
+        @keyframes typingBounce {
+            0%, 80%, 100% { transform: scale(0); }
+            40% { transform: scale(1); }
+        }
+
+        /* Connection overlay */
+        .connection-overlay {
+            position: fixed;
+            top: 0; left: 0; right: 0;
+            background: #7c3aed;
+            color: white;
+            padding: 8px 16px;
+            text-align: center;
+            font-size: 13px;
+            z-index: 100;
+            transform: translateY(-100%);
+            transition: transform 0.3s;
+        }
+        .connection-overlay.show { transform: translateY(0); }
+        .connection-overlay.error { background: #ef4444; }
+
+        /* Image preview */
+        .image-preview {
+            max-width: 200px;
+            max-height: 150px;
+            border-radius: 8px;
+            margin-bottom: 8px;
+        }
+
+        /* Code block */
+        pre {
+            background: #0d0d15;
+            border: 1px solid #2e2e3e;
+            border-radius: 8px;
+            padding: 12px;
+            overflow-x: auto;
+            margin: 8px 0;
+        }
+        code {
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 13px;
+            color: #e0e0e0;
+        }
+    </style>
+</head>
+<body>
+    <div class="connection-overlay" id="connectionOverlay">
+        Connecting to Zaram server...
+    </div>
+
+    <div class="sidebar">
+        <div class="logo">
+            <div class="logo-icon">Z</div>
+            Zaram
+        </div>
+        <div class="subtitle">Your private AI assistant</div>
+
+        <button class="new-chat-btn" onclick="newChat()">+ New Chat</button>
+
+        <div class="status-card">
+            <div class="status-row">
+                <div class="status-dot" id="serverDot"></div>
+                <span id="serverStatus">Checking...</span>
+            </div>
+            <div class="status-row">
+                <div class="status-dot" id="voiceDot"></div>
+                <span>Voice Ready</span>
+            </div>
+            <div class="status-row">
+                <div class="status-dot" id="visionDot"></div>
+                <span>Vision Ready</span>
+            </div>
+        </div>
+
+        <div class="feature-toggles">
+            <div class="toggle-row">
+                <span>Auto Audio</span>
+                <div class="toggle-switch active" id="autoAudioToggle" onclick="toggleFeature('autoAudio')"></div>
+            </div>
+            <div class="toggle-row">
+                <span>Web Search</span>
+                <div class="toggle-switch" id="webSearchToggle" onclick="toggleFeature('webSearch')"></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="main">
+        <div class="header">
+            <div class="header-title">Zaram Chat</div>
+            <div class="header-actions">
+                <button class="header-btn" id="voiceSelectBtn" onclick="showVoiceSelect()">Voice: Default</button>
+                <button class="header-btn" onclick="testConnection()">Test</button>
+            </div>
+        </div>
+
+        <div class="chat-area" id="chatArea">
+            <div class="welcome" id="welcome">
+                <h2>Hello, I'm Zaram</h2>
+                <p>Your local AI assistant with voice and vision.</p>
+                <div class="suggestion-chips">
+                    <div class="chip" onclick="sendQuick('Explain quantum computing simply')">Explain quantum computing</div>
+                    <div class="chip" onclick="sendQuick('Write a Python function to sort a list')">Write Python code</div>
+                    <div class="chip" onclick="sendQuick('What is the latest news about AI?')">Latest AI news</div>
+                    <div class="chip" onclick="document.getElementById('imageInput').click()">Upload an image</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="input-area">
+            <div class="input-wrapper">
+                <button class="input-btn" onclick="document.getElementById('imageInput').click()" title="Upload image">&#128206;</button>
+                <input type="file" id="imageInput" class="file-input" accept="image/*" onchange="handleImageUpload(event)">
+
+                <textarea class="input-field" id="messageInput" placeholder="Message Zaram..." rows="1" onkeydown="handleKeydown(event)" oninput="autoResize(this)"></textarea>
+
+                <button class="input-btn" id="micBtn" onclick="toggleRecording()" title="Voice input">&#127908;</button>
+                <button class="input-btn send" onclick="sendMessage()" title="Send">&#10148;</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // -----------------------------------------------------------------
+        // CONFIG
+        // -----------------------------------------------------------------
+        const API_BASE = 'http://127.0.0.1:8000';
+        let messageHistory = [];
+        let isRecording = false;
+        let mediaRecorder = null;
+        let audioChunks = [];
+        let currentImage = null;
+
+        const features = {
+            autoAudio: true,
+            webSearch: false
+        };
+
+        // -----------------------------------------------------------------
+        // CONNECTION
+        // -----------------------------------------------------------------
+        async function checkConnection() {
+            try {
+                const res = await fetch(`${API_BASE}/health`, { method: 'GET', mode: 'cors' });
+                if (res.ok) {
+                    setServerStatus(true);
+                    return true;
+                }
+            } catch (e) {}
+            setServerStatus(false);
+            return false;
+        }
+
+        function setServerStatus(online) {
+            const dot = document.getElementById('serverDot');
+            const status = document.getElementById('serverStatus');
+            const voiceDot = document.getElementById('voiceDot');
+            const visionDot = document.getElementById('visionDot');
+
+            if (online) {
+                dot.className = 'status-dot online';
+                status.textContent = 'Zaram Online';
+                voiceDot.className = 'status-dot online';
+                visionDot.className = 'status-dot online';
+                hideOverlay();
+            } else {
+                dot.className = 'status-dot';
+                status.textContent = 'Server Offline';
+                voiceDot.className = 'status-dot';
+                visionDot.className = 'status-dot';
+            }
+        }
+
+        function showOverlay(text, isError = false) {
+            const overlay = document.getElementById('connectionOverlay');
+            overlay.textContent = text;
+            overlay.className = 'connection-overlay show' + (isError ? ' error' : '');
+        }
+
+        function hideOverlay() {
+            document.getElementById('connectionOverlay').classList.remove('show');
+        }
+
+        // Auto-check connection every 5 seconds
+        setInterval(checkConnection, 5000);
+        checkConnection();
+
+        // -----------------------------------------------------------------
+        // FEATURE TOGGLES
+        // -----------------------------------------------------------------
+        function toggleFeature(name) {
+            features[name] = !features[name];
+            const el = document.getElementById(name + 'Toggle');
+            el.classList.toggle('active', features[name]);
+        }
+
+        // -----------------------------------------------------------------
+        // CHAT
+        // -----------------------------------------------------------------
+        function handleKeydown(e) {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage();
+            }
+        }
+
+        function autoResize(textarea) {
+            textarea.style.height = 'auto';
+            textarea.style.height = Math.min(textarea.scrollHeight, 120) + 'px';
+        }
+
+        function sendQuick(text) {
+            document.getElementById('messageInput').value = text;
+            sendMessage();
+        }
+
+        function newChat() {
+            messageHistory = [];
+            currentImage = null;
+            const chatArea = document.getElementById('chatArea');
+            chatArea.innerHTML = `
+                <div class="welcome">
+                    <h2>Hello, I'm Zaram</h2>
+                    <p>Your local AI assistant with voice and vision.</p>
+                    <div class="suggestion-chips">
+                        <div class="chip" onclick="sendQuick('Explain quantum computing simply')">Explain quantum computing</div>
+                        <div class="chip" onclick="sendQuick('Write a Python function to sort a list')">Write Python code</div>
+                        <div class="chip" onclick="sendQuick('What is the latest news about AI?')">Latest AI news</div>
+                        <div class="chip" onclick="document.getElementById('imageInput').click()">Upload an image</div>
+                    </div>
+                </div>
+            `;
+        }
+
+        async function sendMessage() {
+            const input = document.getElementById('messageInput');
+            const text = input.value.trim();
+            if (!text && !currentImage) return;
+
+            const chatArea = document.getElementById('chatArea');
+            // Remove welcome if present
+            const welcome = document.getElementById('welcome');
+            if (welcome) welcome.remove();
+
+            // Add user message
+            addMessage('user', text || '[Image uploaded]');
+            if (currentImage && text) {
+                addImageToLastMessage(currentImage);
+            }
+
+            input.value = '';
+            input.style.height = 'auto';
+
+            // Show typing
+            const typingId = 'typing-' + Date.now();
+            showTyping(typingId);
+
+            try {
+                let response;
+
+                if (currentImage) {
+                    // Vision request
+                    const formData = new FormData();
+                    formData.append('file', currentImage);
+                    formData.append('prompt', text || 'Describe this image.');
+
+                    response = await fetch(`${API_BASE}/vision`, {
+                        method: 'POST',
+                        body: formData,
+                        mode: 'cors'
+                    });
+                    currentImage = null;
+                } else {
+                    // Chat request
+                    response = await fetch(`${API_BASE}/chat`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            message: text,
+                            web_search_override: features.webSearch
+                        }),
+                        mode: 'cors'
+                    });
+                }
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+
+                const data = await response.json();
+                removeTyping(typingId);
+
+                const meta = {
+                    model: data.model_used,
+                    webSearch: data.web_search_used,
+                    audioUrl: data.audio_url,
+                    responseSpeech: data.response_speech
+                };
+
+                addMessage('ai', data.response_display || data.response || data.description, meta);
+
+                // Auto-play audio
+                if (features.autoAudio && data.audio_url) {
+                    setTimeout(() => playAudio(data.audio_url), 300);
+                }
+
+            } catch (err) {
+                removeTyping(typingId);
+                addMessage('ai', `Error: ${err.message}. Is the Zaram server running?`);
+                console.error('Chat error:', err);
+            }
+        }
+
+        function addMessage(role, text, meta = {}) {
+            const chatArea = document.getElementById('chatArea');
+            const msgId = 'msg-' + Date.now() + '-' + Math.random().toString(36).substr(2, 5);
+
+            const div = document.createElement('div');
+            div.className = `message ${role}`;
+            div.id = msgId;
+
+            let badges = '';
+            if (meta.webSearch) badges += '<div class="badge web">&#127760; Web Search Used</div>';
+            if (meta.vision) badges += '<div class="badge vision">&#128247; Vision</div>';
+            if (meta.voice) badges += '<div class="badge voice">&#127908; Voice Input</div>';
+
+            const avatar = role === 'user' ? '&#128100;' : 'Z';
+            const formattedText = formatText(text);
+
+            let audioHtml = '';
+            if (meta.audioUrl) {
+                audioHtml = `
+                    <div class="audio-player">
+                        <audio controls src="${meta.audioUrl}" id="audio-${msgId}"></audio>
+                    </div>
+                `;
+            }
+
+            let actionsHtml = '';
+            if (role === 'ai') {
+                actionsHtml = `
+                    <div class="message-actions">
+                        <button class="msg-btn" onclick="copyMessage('${msgId}')">&#128203; Copy</button>
+                        <button class="msg-btn" onclick="downloadMessage('${msgId}')">&#11015; Download</button>
+                    </div>
+                `;
+            }
+
+            div.innerHTML = `
+                <div class="avatar ${role}">${avatar}</div>
+                <div>
+                    ${badges}
+                    <div class="bubble" id="text-${msgId}">${formattedText}</div>
+                    ${audioHtml}
+                    ${actionsHtml}
+                </div>
+            `;
+
+            chatArea.appendChild(div);
+            chatArea.scrollTop = chatArea.scrollHeight;
+            return msgId;
+        }
+
+        function addImageToLastMessage(imageFile) {
+            const chatArea = document.getElementById('chatArea');
+            const lastMsg = chatArea.lastElementChild;
+            if (!lastMsg) return;
+
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const img = document.createElement('img');
+                img.src = e.target.result;
+                img.className = 'image-preview';
+                const bubble = lastMsg.querySelector('.bubble');
+                if (bubble) bubble.insertBefore(img, bubble.firstChild);
+            };
+            reader.readAsDataURL(imageFile);
+        }
+
+        function formatText(text) {
+            if (!text) return '';
+            // Escape HTML
+            let t = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            // Code blocks
+            t = t.replace(/```(\w+)?
+([\s\S]*?)```/g, '<pre><code>$2</code></pre>');
+            t = t.replace(/`([^`]+)`/g, '<code>$1</code>');
+            // Bold
+            t = t.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+            // Links
+            t = t.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" style="color:#a855f7;">$1</a>');
+            // Line breaks
+            t = t.replace(/
+/g, '<br>');
+            return t;
+        }
+
+        function showTyping(id) {
+            const chatArea = document.getElementById('chatArea');
+            const div = document.createElement('div');
+            div.className = 'message ai';
+            div.id = id;
+            div.innerHTML = `
+                <div class="avatar ai">Z</div>
+                <div class="bubble typing">
+                    <div class="typing-dot"></div>
+                    <div class="typing-dot"></div>
+                    <div class="typing-dot"></div>
+                </div>
+            `;
+            chatArea.appendChild(div);
+            chatArea.scrollTop = chatArea.scrollHeight;
+        }
+
+        function removeTyping(id) {
+            const el = document.getElementById(id);
+            if (el) el.remove();
+        }
+
+        // -----------------------------------------------------------------
+        // VOICE INPUT (Web Audio API)
+        // -----------------------------------------------------------------
+        async function toggleRecording() {
+            const btn = document.getElementById('micBtn');
+
+            if (isRecording) {
+                stopRecording();
+            } else {
+                startRecording();
+            }
+        }
+
+        async function startRecording() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                mediaRecorder = new MediaRecorder(stream);
+                audioChunks = [];
+
+                mediaRecorder.ondataavailable = (e) => {
+                    if (e.data.size > 0) audioChunks.push(e.data);
+                };
+
+                mediaRecorder.onstop = async () => {
+                    const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
+                    await sendVoiceAudio(audioBlob);
+                    stream.getTracks().forEach(t => t.stop());
+                };
+
+                mediaRecorder.start();
+                isRecording = true;
+                document.getElementById('micBtn').classList.add('recording');
+
+            } catch (err) {
+                alert('Microphone access denied. Please allow microphone permission.');
+                console.error('Mic error:', err);
+            }
+        }
+
+        function stopRecording() {
+            if (mediaRecorder && isRecording) {
+                mediaRecorder.stop();
+                isRecording = false;
+                document.getElementById('micBtn').classList.remove('recording');
+            }
+        }
+
+        async function sendVoiceAudio(audioBlob) {
+            const chatArea = document.getElementById('chatArea');
+            const welcome = document.getElementById('welcome');
+            if (welcome) welcome.remove();
+
+            // Show user voice message
+            addMessage('user', '[Voice message]', { voice: true });
+
+            // Show typing
+            const typingId = 'typing-voice-' + Date.now();
+            showTyping(typingId);
+
+            try {
+                // Convert blob to base64
+                const reader = new FileReader();
+                const base64Promise = new Promise((resolve) => {
+                    reader.onloadend = () => resolve(reader.result.split(',')[1]);
+                });
+                reader.readAsDataURL(audioBlob);
+                const audioBase64 = await base64Promise;
+
+                // Send to backend
+                const response = await fetch(`${API_BASE}/voice_chat`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ audio_base64: audioBase64 }),
+                    mode: 'cors'
+                });
+
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+                const data = await response.json();
+                removeTyping(typingId);
+
+                const meta = {
+                    model: data.model_used,
+                    audioUrl: data.audio_url,
+                    voice: true
+                };
+
+                // Show transcript + response
+                const fullResponse = `[Transcript: "${data.transcript}"]\n\n${data.response}`;
+                addMessage('ai', fullResponse, meta);
+
+                if (features.autoAudio && data.audio_url) {
+                    setTimeout(() => playAudio(data.audio_url), 300);
+                }
+
+            } catch (err) {
+                removeTyping(typingId);
+                addMessage('ai', `Voice error: ${err.message}`);
+                console.error('Voice error:', err);
+            }
+        }
+
+        // -----------------------------------------------------------------
+        // VISION / IMAGE UPLOAD
+        // -----------------------------------------------------------------
+        function handleImageUpload(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            currentImage = file;
+
+            // Show preview in input area
+            const input = document.getElementById('messageInput');
+            input.placeholder = `Image selected: ${file.name}. Type your question...`;
+            input.focus();
+        }
+
+        // -----------------------------------------------------------------
+        // AUDIO PLAYBACK
+        // -----------------------------------------------------------------
+        function playAudio(url) {
+            const audio = new Audio(url);
+            audio.play().catch(e => console.log('Audio play failed:', e));
+        }
+
+        // -----------------------------------------------------------------
+        // COPY / DOWNLOAD
+        // -----------------------------------------------------------------
+        function copyMessage(msgId) {
+            const textEl = document.getElementById('text-' + msgId);
+            if (!textEl) return;
+            const text = textEl.innerText;
+            navigator.clipboard.writeText(text).then(() => {
+                showToast('Copied to clipboard');
+            });
+        }
+
+        function downloadMessage(msgId) {
+            const textEl = document.getElementById('text-' + msgId);
+            if (!textEl) return;
+            const text = textEl.innerText;
+            const blob = new Blob([text], { type: 'text/plain' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `zaram-response-${msgId}.txt`;
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+
+        function showToast(msg) {
+            // Simple toast - could be styled better
+            const toast = document.createElement('div');
+            toast.style.cssText = 'position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#1a1a2e;border:1px solid #a855f7;color:#e0e0e0;padding:8px 16px;border-radius:8px;font-size:13px;z-index:200;';
+            toast.textContent = msg;
+            document.body.appendChild(toast);
+            setTimeout(() => toast.remove(), 2000);
+        }
+
+        // -----------------------------------------------------------------
+        // TEST CONNECTION
+        // -----------------------------------------------------------------
+        async function testConnection() {
+            const ok = await checkConnection();
+            if (ok) {
+                // Quick chat test
+                try {
+                    const res = await fetch(`${API_BASE}/chat`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ message: 'Hello' }),
+                        mode: 'cors'
+                    });
+                    const data = await res.json();
+                    showToast(`Connected! Model: ${data.model_used}`);
+                } catch (e) {
+                    showToast('Server reachable but chat failed');
+                }
+            } else {
+                showToast('Cannot reach server');
+            }
+        }
+
+        function showVoiceSelect() {
+            showToast('Voice selection coming in v3.3 with Kokoro');
+        }
+    </script>
+</body>
+</html>

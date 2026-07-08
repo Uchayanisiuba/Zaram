@@ -1,0 +1,580 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Zaram AI Assistant</title>
+<style>
+:root {
+  --bg: #0d0d12; --surface: #16161f; --surface-2: #1e1e2a;
+  --text: #e8e8ef; --text-2: #a0a0b0; --accent: #8b5cf6; --accent-2: #a78bfa;
+  --user-bubble: #8b5cf6; --ai-bubble: #1e1e2a;
+  --border: #2a2a3a; --success: #22c55e; --error: #ef4444;
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: var(--bg); color: var(--text); height: 100vh; overflow: hidden;
+}
+.app { display: flex; height: 100vh; }
+
+/* Sidebar */
+.sidebar {
+  width: 260px; background: var(--surface); border-right: 1px solid var(--border);
+  display: flex; flex-direction: column; padding: 20px; gap: 16px;
+}
+.brand { display: flex; align-items: center; gap: 12px; }
+.brand-icon {
+  width: 36px; height: 36px; background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  border-radius: 10px; display: flex; align-items: center; justify-content: center;
+  font-weight: 700; font-size: 18px; color: #fff;
+}
+.brand-text h1 { font-size: 18px; font-weight: 600; }
+.brand-text p { font-size: 12px; color: var(--text-2); }
+
+.status-card {
+  background: var(--surface-2); border-radius: 12px; padding: 14px;
+  border: 1px solid var(--border);
+}
+.status-row { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+.status-dot {
+  width: 10px; height: 10px; border-radius: 50%; background: var(--error);
+  box-shadow: 0 0 8px var(--error); transition: all 0.3s;
+}
+.status-dot.online { background: var(--success); box-shadow: 0 0 8px var(--success); }
+.status-dot.connecting { background: #f59e0b; box-shadow: 0 0 8px #f59e0b; animation: pulse 1.5s infinite; }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+
+.server-url {
+  margin-top: 10px; display: flex; gap: 6px;
+}
+.server-url input {
+  flex: 1; background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+  padding: 8px 10px; color: var(--text); font-size: 12px;
+}
+.server-url button {
+  background: var(--accent); border: none; border-radius: 8px; padding: 8px 14px;
+  color: #fff; font-size: 12px; cursor: pointer;
+}
+.server-url button:hover { background: var(--accent-2); }
+
+.features { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+.feature-toggle {
+  display: flex; align-items: center; justify-content: space-between;
+  background: var(--surface-2); border-radius: 10px; padding: 10px 14px;
+  border: 1px solid var(--border); cursor: pointer; font-size: 13px;
+}
+.feature-toggle:hover { border-color: var(--accent); }
+.feature-toggle.active { border-color: var(--accent); background: rgba(139,92,246,0.08); }
+.toggle-switch {
+  width: 36px; height: 20px; background: var(--border); border-radius: 10px;
+  position: relative; transition: 0.2s;
+}
+.toggle-switch::after {
+  content: ''; position: absolute; width: 16px; height: 16px; background: #fff;
+  border-radius: 50%; top: 2px; left: 2px; transition: 0.2s;
+}
+.feature-toggle.active .toggle-switch { background: var(--accent); }
+.feature-toggle.active .toggle-toggle-switch::after { left: 18px; }
+
+.quick-tests { margin-top: auto; display: flex; flex-direction: column; gap: 8px; }
+.quick-tests h3 { font-size: 12px; color: var(--text-2); text-transform: uppercase; letter-spacing: 0.5px; }
+.qtest {
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px;
+  padding: 10px 12px; font-size: 12px; cursor: pointer; color: var(--text-2);
+  text-align: left; transition: 0.15s;
+}
+.qtest:hover { border-color: var(--accent); color: var(--text); }
+
+/* Main Chat */
+.main { flex: 1; display: flex; flex-direction: column; }
+.header {
+  height: 60px; background: var(--surface); border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: space-between; padding: 0 24px;
+}
+.header-title { font-size: 15px; font-weight: 500; color: var(--text-2); }
+.header-actions { display: flex; gap: 10px; }
+.header-btn {
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px;
+  padding: 8px 14px; color: var(--text-2); font-size: 13px; cursor: pointer;
+}
+.header-btn:hover { border-color: var(--accent); color: var(--text); }
+
+.chat-area {
+  flex: 1; overflow-y: auto; padding: 24px; display: flex; flex-direction: column; gap: 16px;
+}
+.welcome {
+  text-align: center; padding: 40px 20px; color: var(--text-2);
+}
+.welcome h2 { font-size: 24px; margin-bottom: 8px; color: var(--text); }
+.welcome p { font-size: 14px; margin-bottom: 24px; }
+.suggestion-chips { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }
+.chip {
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: 20px;
+  padding: 10px 18px; font-size: 13px; cursor: pointer; color: var(--text-2); transition: 0.15s;
+}
+.chip:hover { border-color: var(--accent); color: var(--text); background: rgba(139,92,246,0.08); }
+
+.message { display: flex; gap: 12px; max-width: 85%; animation: msgIn 0.3s ease; }
+@keyframes msgIn { from { opacity:0; transform: translateY(10px); } to { opacity:1; transform: translateY(0); } }
+.message.user { align-self: flex-end; flex-direction: row-reverse; }
+.message.ai { align-self: flex-start; }
+
+.avatar {
+  width: 32px; height: 32px; border-radius: 50%; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 600;
+}
+.avatar.user { background: var(--user-bubble); color: #fff; }
+.avatar.ai {
+  background: linear-gradient(135deg, var(--accent), var(--accent-2)); color: #fff;
+}
+
+.bubble {
+  padding: 14px 18px; border-radius: 18px; font-size: 14px; line-height: 1.6;
+  max-width: 100%; word-wrap: break-word;
+}
+.message.user .bubble { background: var(--user-bubble); color: #fff; border-bottom-right-radius: 4px; }
+.message.ai .bubble { background: var(--ai-bubble); color: var(--text); border: 1px solid var(--border); border-bottom-left-radius: 4px; }
+
+.msg-meta { display: flex; align-items: center; gap: 8px; margin-top: 6px; font-size: 11px; color: var(--text-2); }
+.msg-badge {
+  background: rgba(139,92,246,0.15); color: var(--accent-2); padding: 2px 8px;
+  border-radius: 4px; font-size: 10px; font-weight: 500;
+}
+
+.audio-player {
+  margin-top: 10px; display: flex; align-items: center; gap: 10px;
+  background: var(--bg); border-radius: 10px; padding: 10px 14px; border: 1px solid var(--border);
+}
+.audio-player button {
+  width: 32px; height: 32px; border-radius: 50%; background: var(--accent); border: none;
+  color: #fff; cursor: pointer; display: flex; align-items: center; justify-content: center;
+}
+.audio-player button:hover { background: var(--accent-2); }
+.audio-waveform { display: flex; align-items: center; gap: 3px; flex: 1; }
+.audio-waveform .bar {
+  width: 3px; background: var(--accent); border-radius: 2px; animation: wave 1s ease-in-out infinite;
+}
+.audio-waveform .bar:nth-child(1) { height: 8px; animation-delay: 0s; }
+.audio-waveform .bar:nth-child(2) { height: 14px; animation-delay: 0.1s; }
+.audio-waveform .bar:nth-child(3) { height: 10px; animation-delay: 0.2s; }
+.audio-waveform .bar:nth-child(4) { height: 18px; animation-delay: 0.3s; }
+.audio-waveform .bar:nth-child(5) { height: 12px; animation-delay: 0.4s; }
+.audio-waveform .bar:nth-child(6) { height: 16px; animation-delay: 0.5s; }
+.audio-waveform .bar:nth-child(7) { height: 9px; animation-delay: 0.6s; }
+.audio-waveform .bar:nth-child(8) { height: 14px; animation-delay: 0.7s; }
+@keyframes wave { 0%,100%{transform:scaleY(0.6)} 50%{transform:scaleY(1)} }
+.audio-player.paused .audio-waveform .bar { animation-play-state: paused; opacity: 0.4; }
+
+/* Input */
+.input-area {
+  padding: 16px 24px; background: var(--surface); border-top: 1px solid var(--border);
+  display: flex; gap: 10px; align-items: flex-end;
+}
+.input-box {
+  flex: 1; background: var(--bg); border: 1px solid var(--border); border-radius: 14px;
+  padding: 12px 16px; color: var(--text); font-size: 14px; resize: none; min-height: 48px; max-height: 120px;
+  font-family: inherit;
+}
+.input-box:focus { outline: none; border-color: var(--accent); }
+.input-btn {
+  width: 44px; height: 44px; border-radius: 12px; background: var(--surface-2);
+  border: 1px solid var(--border); color: var(--text-2); cursor: pointer;
+  display: flex; align-items: center; justify-content: center; font-size: 18px;
+}
+.input-btn:hover { border-color: var(--accent); color: var(--text); }
+.input-btn.send { background: var(--accent); color: #fff; border-color: var(--accent); }
+.input-btn.send:hover { background: var(--accent-2); }
+
+/* Typing indicator */
+.typing { display: flex; gap: 6px; padding: 12px 18px; }
+.typing .dot { width: 8px; height: 8px; background: var(--text-2); border-radius: 50%; animation: typingBounce 1.4s infinite; }
+.typing .dot:nth-child(2) { animation-delay: 0.2s; }
+.typing .dot:nth-child(3) { animation-delay: 0.4s; }
+@keyframes typingBounce { 0%,60%,100%{transform:translateY(0)} 30%{transform:translateY(-6px)} }
+
+/* Debug panel */
+.debug-panel {
+  position: fixed; bottom: 20px; left: 20px; background: var(--surface);
+  border: 1px solid var(--border); border-radius: 12px; padding: 14px;
+  font-size: 11px; color: var(--text-2); max-width: 400px; max-height: 200px;
+  overflow-y: auto; display: none; z-index: 100;
+}
+.debug-panel.open { display: block; }
+.debug-toggle {
+  position: fixed; bottom: 20px; left: 20px; z-index: 101;
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px;
+  padding: 8px 12px; font-size: 11px; color: var(--text-2); cursor: pointer;
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-icon">Z</div>
+      <div class="brand-text">
+        <h1>Zaram</h1>
+        <p>Local AI Assistant</p>
+      </div>
+    </div>
+
+    <div class="status-card">
+      <div class="status-row">
+        <div class="status-dot" id="statusDot"></div>
+        <span id="statusText">Checking server...</span>
+      </div>
+      <div class="server-url">
+        <input type="text" id="serverUrl" value="http://127.0.0.1:8000" placeholder="Server URL">
+        <button onclick="setServerUrl()">Set</button>
+      </div>
+    </div>
+
+    <div class="features">
+      <div class="feature-toggle" id="toggleVoice" onclick="toggleFeature('voice')">
+        <span>Auto Audio</span>
+        <div class="toggle-switch"></div>
+      </div>
+      <div class="feature-toggle" id="toggleWeb" onclick="toggleFeature('web')">
+        <span>Web Search</span>
+        <div class="toggle-switch"></div>
+      </div>
+    </div>
+
+    <div class="quick-tests">
+      <h3>Quick Tests</h3>
+      <button class="qtest" onclick="quickTest('hello')">Say Hello</button>
+      <button class="qtest" onclick="quickTest('code')">Code Help</button>
+      <button class="qtest" onclick="quickTest('news')">Web Search</button>
+      <button class="qtest" onclick="quickTest('tts')">Test TTS Audio</button>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="header">
+      <div class="header-title">Zaram Chat</div>
+      <div class="header-actions">
+        <button class="header-btn" onclick="clearChat()">New Chat</button>
+      </div>
+    </div>
+
+    <div class="chat-area" id="chatArea">
+      <div class="welcome" id="welcome">
+        <h2>Hello, I'm Zaram</h2>
+        <p>Your private AI assistant. Ask me anything, upload files, or just say hello.</p>
+        <div class="suggestion-chips">
+          <div class="chip" onclick="sendChip('Explain quantum computing simply')">Explain quantum computing</div>
+          <div class="chip" onclick="sendChip('Write a Python hello world')">Python hello world</div>
+          <div class="chip" onclick="sendChip('What is the latest news about AI?')">Latest AI news</div>
+          <div class="chip" onclick="sendChip('Generate an image of a cyberpunk city')">Cyberpunk city image</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="input-area">
+      <button class="input-btn" title="Upload file">&#128206;</button>
+      <textarea class="input-box" id="inputBox" placeholder="Message Zaram..." rows="1"
+        onkeydown="if(event.key==='Enter' && !event.shiftKey){event.preventDefault();sendMessage();}"></textarea>
+      <button class="input-btn" title="Voice input">&#127908;</button>
+      <button class="input-btn send" title="Send" onclick="sendMessage()">&#10148;</button>
+    </div>
+  </main>
+</div>
+
+<button class="debug-toggle" onclick="toggleDebug()">Debug</button>
+<div class="debug-panel" id="debugPanel"></div>
+
+<script>
+// ===================== CONFIG =====================
+let API_BASE = localStorage.getItem('zaram_server_url') || 'http://127.0.0.1:8000';
+let isConnected = false;
+let msgCounter = 0;
+let audioCtx = null;
+const features = { voice: true, web: false };
+
+const chatArea = document.getElementById('chatArea');
+const inputBox = document.getElementById('inputBox');
+const statusDot = document.getElementById('statusDot');
+const statusText = document.getElementById('statusText');
+const serverUrlInput = document.getElementById('serverUrl');
+const debugPanel = document.getElementById('debugPanel');
+
+serverUrlInput.value = API_BASE;
+
+// ===================== DEBUG =====================
+function log(msg) {
+  const line = document.createElement('div');
+  line.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+  debugPanel.appendChild(line);
+  debugPanel.scrollTop = debugPanel.scrollHeight;
+  console.log('[Zaram]', msg);
+}
+function toggleDebug() { debugPanel.classList.toggle('open'); }
+
+// ===================== CONNECTION =====================
+async function checkConnection() {
+  statusDot.className = 'status-dot connecting';
+  statusText.textContent = 'Connecting...';
+  log(`Trying: ${API_BASE}`);
+
+  try {
+    const res = await fetch(`${API_BASE}/`, { method: 'GET', mode: 'cors', cache: 'no-store' });
+    if (res.ok) {
+      const data = await res.json();
+      isConnected = true;
+      statusDot.className = 'status-dot online';
+      statusText.textContent = `Zaram Online (v${data.version || '?'})`;
+      log(`Connected! ${data.status}`);
+      return;
+    }
+  } catch (e) {
+    log(`Fetch failed: ${e.message}`);
+  }
+
+  isConnected = false;
+  statusDot.className = 'status-dot';
+  statusText.textContent = 'Server Offline';
+  log('Server not found');
+}
+
+function setServerUrl() {
+  API_BASE = serverUrlInput.value.trim();
+  localStorage.setItem('zaram_server_url', API_BASE);
+  log(`URL set to: ${API_BASE}`);
+  checkConnection();
+}
+
+// Auto-check every 5s
+setInterval(checkConnection, 5000);
+checkConnection();
+
+// ===================== FEATURES =====================
+function toggleFeature(name) {
+  features[name] = !features[name];
+  document.getElementById('toggle' + (name==='voice'?'Voice':'Web')).classList.toggle('active', features[name]);
+  log(`${name} = ${features[name]}`);
+}
+// Init toggles
+document.getElementById('toggleVoice').classList.add('active');
+
+// ===================== CHAT =====================
+function clearChat() {
+  chatArea.innerHTML = `
+    <div class="welcome" id="welcome">
+      <h2>Hello, I'm Zaram</h2>
+      <p>Your private AI assistant. Ask me anything.</p>
+      <div class="suggestion-chips">
+        <div class="chip" onclick="sendChip('Explain quantum computing simply')">Explain quantum computing</div>
+        <div class="chip" onclick="sendChip('Write a Python hello world')">Python hello world</div>
+        <div class="chip" onclick="sendChip('What is the latest news about AI?')">Latest AI news</div>
+      </div>
+    </div>`;
+  msgCounter = 0;
+}
+
+function sendChip(text) {
+  document.getElementById('welcome').style.display = 'none';
+  addMessage(text, 'user');
+  sendToServer(text);
+}
+
+function sendMessage() {
+  const text = inputBox.value.trim();
+  if (!text) return;
+  inputBox.value = '';
+  document.getElementById('welcome')?.style.display = 'none';
+  addMessage(text, 'user');
+  sendToServer(text);
+}
+
+function addMessage(text, sender, meta = {}) {
+  msgCounter++;
+  const msgId = `msg-${msgCounter}`;
+  const div = document.createElement('div');
+  div.className = `message ${sender}`;
+  div.id = msgId;
+
+  const avatar = document.createElement('div');
+  avatar.className = 'avatar';
+  avatar.textContent = sender === 'user' ? 'U' : 'Z';
+
+  const bubble = document.createElement('div');
+  bubble.className = 'bubble';
+  bubble.innerHTML = escapeHtml(text).replace(/\n/g, '<br>');
+
+  const metaDiv = document.createElement('div');
+  metaDiv.className = 'msg-meta';
+  if (meta.model) metaDiv.innerHTML += `<span class="msg-badge">${meta.model}</span>`;
+  if (meta.web) metaDiv.innerHTML += `<span class="msg-badge">&#127760; Web Search</span>`;
+  if (meta.time) metaDiv.innerHTML += `<span>${meta.time}s</span>`;
+
+  const content = document.createElement('div');
+  content.appendChild(bubble);
+  if (metaDiv.innerHTML) content.appendChild(metaDiv);
+
+  // Audio player
+  if (meta.audioUrl && features.voice) {
+    const audioWrap = document.createElement('div');
+    audioWrap.className = 'audio-player paused';
+    audioWrap.id = `audio-${msgId}`;
+    audioWrap.innerHTML = `
+      <button onclick="toggleAudio('${msgId}', '${meta.audioUrl}')">&#9654;</button>
+      <div class="audio-waveform">
+        <div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div>
+        <div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div>
+      </div>
+      <span style="font-size:11px;color:var(--text-2)">AI Voice</span>
+    `;
+    content.appendChild(audioWrap);
+
+    // Auto-play after a short delay
+    setTimeout(() => toggleAudio(msgId, meta.audioUrl), 500);
+  }
+
+  div.appendChild(avatar);
+  div.appendChild(content);
+  chatArea.appendChild(div);
+  chatArea.scrollTop = chatArea.scrollHeight;
+  return msgId;
+}
+
+function showTyping() {
+  const id = `typing-${Date.now()}`;
+  const div = document.createElement('div');
+  div.className = 'message ai';
+  div.id = id;
+  div.innerHTML = `
+    <div class="avatar">Z</div>
+    <div class="bubble" style="padding:18px 22px">
+      <div class="typing"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>
+    </div>`;
+  chatArea.appendChild(div);
+  chatArea.scrollTop = chatArea.scrollHeight;
+  return id;
+}
+
+function removeTyping(id) {
+  const el = document.getElementById(id);
+  if (el) el.remove();
+}
+
+// ===================== SERVER COMMUNICATION =====================
+async function sendToServer(text) {
+  if (!isConnected) {
+    await checkConnection();
+    if (!isConnected) {
+      addMessage('Cannot connect to server. Make sure Zaram backend is running.', 'ai');
+      return;
+    }
+  }
+
+  const typingId = showTyping();
+  const startTime = performance.now();
+
+  const form = new FormData();
+  form.append('message', text);
+  if (features.web) form.append('web_search_override', 'true');
+
+  try {
+    const res = await fetch(`${API_BASE}/chat`, {
+      method: 'POST',
+      body: form,
+      mode: 'cors',
+    });
+
+    removeTyping(typingId);
+
+    if (!res.ok) {
+      const err = await res.text();
+      log(`Server error ${res.status}: ${err}`);
+      addMessage(`Server error (${res.status}). Check backend logs.`, 'ai');
+      return;
+    }
+
+    const data = await res.json();
+    log(`Response: model=${data.model_used}, audio=${data.audio_url ? 'yes' : 'no'}, web=${data.web_search_used}`);
+
+    const elapsed = ((performance.now() - startTime) / 1000).toFixed(1);
+    addMessage(data.response_display || data.response, 'ai', {
+      model: data.model_used,
+      web: data.web_search_used,
+      time: elapsed,
+      audioUrl: data.audio_url,
+    });
+
+  } catch (e) {
+    removeTyping(typingId);
+    log(`Network error: ${e.message}`);
+    addMessage('Network error. Server may have stopped.', 'ai');
+  }
+}
+
+// ===================== AUDIO =====================
+const activeAudio = {};
+
+function toggleAudio(msgId, url) {
+  const wrap = document.getElementById(`audio-${msgId}`);
+  if (!wrap) return;
+
+  // Unlock audio context on first user interaction
+  if (!audioCtx) {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  }
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+
+  if (activeAudio[msgId]) {
+    activeAudio[msgId].pause();
+    activeAudio[msgId] = null;
+    wrap.classList.add('paused');
+    wrap.querySelector('button').innerHTML = '&#9654;';
+    return;
+  }
+
+  const audio = new Audio(url);
+  audio.onended = () => {
+    activeAudio[msgId] = null;
+    wrap.classList.add('paused');
+    wrap.querySelector('button').innerHTML = '&#9654;';
+  };
+  audio.onerror = (e) => {
+    log(`Audio error: ${e.message || 'failed to load'} (URL: ${url})`);
+    activeAudio[msgId] = null;
+    wrap.classList.add('paused');
+  };
+
+  audio.play().then(() => {
+    activeAudio[msgId] = audio;
+    wrap.classList.remove('paused');
+    wrap.querySelector('button').innerHTML = '&#10074;&#10074;';
+  }).catch(e => {
+    log(`Audio play failed: ${e.message}`);
+    activeAudio[msgId] = null;
+  });
+}
+
+// ===================== QUICK TESTS =====================
+function quickTest(type) {
+  if (type === 'hello') sendChip('Hello Zaram, introduce yourself');
+  if (type === 'code') sendChip('Write a Python function to reverse a string');
+  if (type === 'news') { features.web = true; document.getElementById('toggleWeb').classList.add('active'); sendChip('What is the latest news about AI?'); }
+  if (type === 'tts') {
+    // Direct TTS test
+    sendChip('Say "Hello, I am Zaram, your AI assistant. I am online and ready to help."');
+  }
+}
+
+// ===================== UTILS =====================
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+// Auto-resize textarea
+inputBox.addEventListener('input', function() {
+  this.style.height = 'auto';
+  this.style.height = Math.min(this.scrollHeight, 120) + 'px';
+});
+</script>
+</body>
+</html>

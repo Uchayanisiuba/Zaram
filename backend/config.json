@@ -1,0 +1,20 @@
+{
+  "WHISPER_MODEL": "base",
+  "OLLAMA_HOST": "http://localhost:11434",
+  "CHAT_MODEL": "qwen3",
+  "VISION_MODEL": "gemma3",
+  "LIGHTWEIGHT_MODEL": "llama3.2",
+  "CODING_MODEL": "qwen3",
+  "SAMPLE_RATE": 16000,
+  "ENABLE_WEB_SEARCH": true,
+  "MAX_SEARCH_RESULTS": 5,
+  "ENABLE_IMAGE_GENERATION": false,
+  "AUDIO_CLEANUP_MODE": "conversation",
+  "MAX_AUDIO_FILES": 5,
+  "SPEECH_CLEAN_MODE": "natural",
+  "TTS_ENGINE": "kokoro",
+  "TTS_VOICE": "heart",
+  "TTS_LANG": "a",
+  "PORT": 8000,
+  "SYSTEM_PROMPT": "You are Zaram, an advanced AI assistant. Respond concisely, efficiently, and with calm authority. Use a slightly formal, witty tone. Keep responses to 1-3 sentences. When citing web sources, include the source URL in brackets."
+}

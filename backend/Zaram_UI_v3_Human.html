@@ -1,0 +1,1097 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Zaram AI Assistant</title>
+<style>
+  :root {
+    --bg: #0d0d0f;
+    --surface: #16161a;
+    --surface-hover: #1e1e24;
+    --border: #2a2a35;
+    --text: #e8e8ec;
+    --text-secondary: #8b8b9a;
+    --accent: #7c5cff;
+    --accent-glow: rgba(124, 92, 255, 0.3);
+    --user-bubble: #7c5cff;
+    --ai-bubble: #1e1e24;
+    --success: #4ade80;
+    --warning: #fbbf24;
+    --error: #f87171;
+    --radius: 14px;
+    --radius-sm: 8px;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    height: 100vh;
+    display: flex;
+    overflow: hidden;
+  }
+
+  /* ─── Sidebar ────────────────────────────────────────────── */
+  .sidebar {
+    width: 260px;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    padding: 20px;
+    gap: 16px;
+  }
+  .logo {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: -0.5px;
+  }
+  .logo-icon {
+    width: 36px; height: 36px;
+    background: linear-gradient(135deg, var(--accent), #a78bfa);
+    border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px; font-weight: 800; color: white;
+  }
+  .new-chat-btn {
+    background: var(--accent);
+    color: white;
+    border: none;
+    padding: 12px;
+    border-radius: var(--radius-sm);
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+  }
+  .new-chat-btn:hover { background: #6b4fe0; transform: translateY(-1px); }
+  .sidebar-section { margin-top: 8px; }
+  .sidebar-section h4 {
+    font-size: 11px; text-transform: uppercase; letter-spacing: 1px;
+    color: var(--text-secondary); margin-bottom: 10px;
+  }
+  .feature-toggle {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 12px;
+    background: var(--bg);
+    border-radius: var(--radius-sm);
+    margin-bottom: 8px;
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.2s;
+    border: 1px solid transparent;
+  }
+  .feature-toggle:hover { border-color: var(--border); }
+  .feature-toggle.active { border-color: var(--accent); background: rgba(124,92,255,0.08); }
+  .toggle-switch {
+    width: 36px; height: 20px;
+    background: var(--border);
+    border-radius: 10px;
+    position: relative;
+    transition: all 0.2s;
+  }
+  .toggle-switch::after {
+    content: ''; position: absolute;
+    width: 16px; height: 16px;
+    background: white; border-radius: 50%;
+    top: 2px; left: 2px;
+    transition: all 0.2s;
+  }
+  .feature-toggle.active .toggle-switch { background: var(--accent); }
+  .feature-toggle.active .toggle-switch::after { left: 18px; }
+  .status-card {
+    margin-top: auto;
+    padding: 14px;
+    background: var(--bg);
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+  }
+  .status-row {
+    display: flex; align-items: center; gap: 10px;
+    font-size: 13px; margin-bottom: 8px;
+  }
+  .status-row:last-child { margin-bottom: 0; }
+  .status-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--text-secondary);
+    transition: all 0.3s;
+  }
+  .status-dot.online { background: var(--success); box-shadow: 0 0 8px var(--success); }
+  .status-dot.connecting { background: var(--warning); animation: pulse 1.5s infinite; }
+  .status-dot.offline { background: var(--error); }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+  .server-url-input {
+    width: 100%;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 8px 10px;
+    color: var(--text);
+    font-size: 12px;
+    margin-top: 6px;
+    font-family: monospace;
+  }
+  .server-url-input:focus { outline: none; border-color: var(--accent); }
+  .set-url-btn {
+    width: 100%;
+    background: var(--surface-hover);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 6px;
+    border-radius: var(--radius-sm);
+    font-size: 12px;
+    cursor: pointer;
+    margin-top: 6px;
+    transition: all 0.2s;
+  }
+  .set-url-btn:hover { border-color: var(--accent); }
+
+  /* ─── Main Chat Area ─────────────────────────────────────── */
+  .main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    position: relative;
+  }
+  .chat-header {
+    height: 60px;
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 24px;
+    background: var(--surface);
+  }
+  .chat-header h2 { font-size: 16px; font-weight: 600; }
+  .header-badges { display: flex; gap: 8px; }
+  .badge {
+    padding: 4px 10px;
+    border-radius: 20px;
+    font-size: 11px;
+    font-weight: 600;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+  }
+  .badge.purple { background: rgba(124,92,255,0.15); border-color: var(--accent); color: var(--accent); }
+  .badge.green { background: rgba(74,222,128,0.15); border-color: var(--success); color: var(--success); }
+  .messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+  .message {
+    display: flex;
+    gap: 12px;
+    max-width: 85%;
+    animation: fadeIn 0.3s ease;
+  }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+  .message.user { align-self: flex-end; flex-direction: row-reverse; }
+  .message.ai { align-self: flex-start; }
+  .avatar {
+    width: 32px; height: 32px;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px; font-weight: 700;
+    flex-shrink: 0;
+  }
+  .avatar.user { background: var(--user-bubble); color: white; }
+  .avatar.ai {
+    background: linear-gradient(135deg, var(--accent), #a78bfa);
+    color: white;
+    position: relative;
+  }
+  .avatar.ai.speaking::after {
+    content: '';
+    position: absolute;
+    inset: -4px;
+    border-radius: 50%;
+    border: 2px solid var(--accent);
+    animation: speakRing 1s ease-in-out infinite;
+  }
+  @keyframes speakRing { 0%,100%{transform:scale(1);opacity:1} 50%{transform:scale(1.15);opacity:0.5} }
+  .bubble {
+    padding: 14px 18px;
+    border-radius: var(--radius);
+    font-size: 14px;
+    line-height: 1.6;
+    position: relative;
+    word-wrap: break-word;
+  }
+  .bubble.user {
+    background: var(--user-bubble);
+    color: white;
+    border-bottom-right-radius: 4px;
+  }
+  .bubble.ai {
+    background: var(--ai-bubble);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-bottom-left-radius: 4px;
+  }
+  .bubble-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 10px;
+    opacity: 0;
+    transition: opacity 0.2s;
+  }
+  .message:hover .bubble-actions { opacity: 1; }
+  .bubble-btn {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-size: 11px;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex; align-items: center; gap: 4px;
+  }
+  .bubble-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .msg-meta {
+    font-size: 11px;
+    color: var(--text-secondary);
+    margin-top: 6px;
+    display: flex;
+    gap: 10px;
+    align-items: center;
+  }
+  .msg-meta .model-badge {
+    background: rgba(124,92,255,0.1);
+    color: var(--accent);
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 600;
+  }
+  .msg-meta .search-badge {
+    background: rgba(74,222,128,0.1);
+    color: var(--success);
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 600;
+  }
+
+  /* ─── Audio Player ───────────────────────────────────────── */
+  .audio-player {
+    margin-top: 12px;
+    padding: 10px 14px;
+    background: var(--bg);
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .audio-play-btn {
+    width: 32px; height: 32px;
+    border-radius: 50%;
+    background: var(--accent);
+    border: none;
+    color: white;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 12px;
+    transition: all 0.2s;
+    flex-shrink: 0;
+  }
+  .audio-play-btn:hover { transform: scale(1.1); }
+  .waveform {
+    flex: 1;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    gap: 3px;
+  }
+  .wave-bar {
+    width: 3px;
+    background: var(--accent);
+    border-radius: 2px;
+    transition: height 0.15s;
+    opacity: 0.6;
+  }
+  .wave-bar.active { opacity: 1; background: var(--accent); }
+  .audio-time {
+    font-size: 11px;
+    color: var(--text-secondary);
+    font-family: monospace;
+    min-width: 36px;
+    text-align: right;
+  }
+  .audio-error {
+    font-size: 11px;
+    color: var(--error);
+    margin-top: 6px;
+  }
+
+  /* ─── Typing Indicator ─────────────────────────────────── */
+  .typing-indicator {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 18px;
+    background: var(--ai-bubble);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    border-bottom-left-radius: 4px;
+    max-width: 200px;
+  }
+  .typing-dots {
+    display: flex;
+    gap: 4px;
+    align-items: center;
+    height: 24px;
+  }
+  .typing-dots span {
+    width: 7px; height: 7px;
+    background: var(--accent);
+    border-radius: 50%;
+    animation: bounce 1.4s ease-in-out infinite;
+  }
+  .typing-dots span:nth-child(2) { animation-delay: 0.2s; }
+  .typing-dots span:nth-child(3) { animation-delay: 0.4s; }
+  @keyframes bounce { 0%,80%,100%{transform:translateY(0)} 40%{transform:translateY(-6px)} }
+  .thinking-text {
+    font-size: 13px;
+    color: var(--text-secondary);
+    line-height: 24px;
+    display: flex;
+    align-items: center;
+  }
+
+  /* ─── Input Area ───────────────────────────────────────── */
+  .input-area {
+    padding: 16px 24px 24px;
+    border-top: 1px solid var(--border);
+    background: var(--surface);
+  }
+  .input-box {
+    display: flex;
+    align-items: flex-end;
+    gap: 10px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 10px 14px;
+    transition: border-color 0.2s;
+  }
+  .input-box:focus-within { border-color: var(--accent); }
+  .input-box textarea {
+    flex: 1;
+    background: transparent;
+    border: none;
+    color: var(--text);
+    font-size: 14px;
+    resize: none;
+    outline: none;
+    max-height: 120px;
+    font-family: inherit;
+    line-height: 1.5;
+  }
+  .input-box textarea::placeholder { color: var(--text-secondary); }
+  .input-btn {
+    width: 36px; height: 36px;
+    border-radius: 50%;
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px;
+    transition: all 0.2s;
+    flex-shrink: 0;
+  }
+  .input-btn:hover { color: var(--text); background: var(--surface-hover); }
+  .input-btn.send { background: var(--accent); color: white; }
+  .input-btn.send:hover { background: #6b4fe0; }
+  .input-btn.mic.recording { background: var(--error); color: white; animation: pulse 1s infinite; }
+
+  /* ─── Suggestion Chips ─────────────────────────────────── */
+  .suggestions {
+    display: flex;
+    gap: 8px;
+    padding: 0 24px 12px;
+    overflow-x: auto;
+  }
+  .chip {
+    padding: 8px 14px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    font-size: 13px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    white-space: nowrap;
+    transition: all 0.2s;
+  }
+  .chip:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* ─── Debug Panel ────────────────────────────────────────── */
+  .debug-panel {
+    position: fixed;
+    bottom: 20px;
+    left: 280px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 12px 16px;
+    font-size: 11px;
+    font-family: monospace;
+    color: var(--text-secondary);
+    max-width: 500px;
+    max-height: 200px;
+    overflow-y: auto;
+    display: none;
+    z-index: 100;
+  }
+  .debug-panel.show { display: block; }
+  .debug-toggle {
+    position: fixed;
+    bottom: 20px;
+    left: 280px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 8px 14px;
+    font-size: 11px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    z-index: 101;
+  }
+  .debug-toggle:hover { color: var(--accent); }
+
+  /* ─── Empty State ──────────────────────────────────────── */
+  .empty-state {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    color: var(--text-secondary);
+    text-align: center;
+    padding: 40px;
+  }
+  .empty-state .logo-icon { width: 56px; height: 56px; font-size: 28px; }
+  .empty-state h3 { font-size: 20px; color: var(--text); }
+  .empty-state p { font-size: 14px; max-width: 360px; }
+
+  /* ─── Scrollbar ────────────────────────────────────────── */
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--text-secondary); }
+</style>
+</head>
+<body>
+
+<!-- Sidebar -->
+<div class="sidebar">
+  <div class="logo">
+    <div class="logo-icon">Z</div>
+    <span>Zaram</span>
+  </div>
+  <button class="new-chat-btn" onclick="newChat()">
+    <span>+</span> New Chat
+  </button>
+
+  <div class="sidebar-section">
+    <h4>Features</h4>
+    <div class="feature-toggle" id="toggle-voice" onclick="toggleFeature('voice')">
+      <span>Auto Voice</span>
+      <div class="toggle-switch"></div>
+    </div>
+    <div class="feature-toggle" id="toggle-web" onclick="toggleFeature('web')">
+      <span>Web Search</span>
+      <div class="toggle-switch"></div>
+    </div>
+    <div class="feature-toggle" id="toggle-human" onclick="toggleFeature('human')">
+      <span>Human Mode</span>
+      <div class="toggle-switch"></div>
+    </div>
+  </div>
+
+  <div class="sidebar-section">
+    <h4>Quick Tests</h4>
+    <div class="feature-toggle" onclick="runTest('chat')">
+      <span>Test Chat</span>
+      <span style="font-size:11px;color:var(--text-secondary)">&#9654;</span>
+    </div>
+    <div class="feature-toggle" onclick="runTest('tts')">
+      <span>Test TTS Audio</span>
+      <span style="font-size:11px;color:var(--text-secondary)">&#9654;</span>
+    </div>
+  </div>
+
+  <div class="status-card">
+    <div class="status-row">
+      <div class="status-dot offline" id="status-dot"></div>
+      <span id="status-text">Checking server...</span>
+    </div>
+    <div class="status-row">
+      <span style="font-size:11px;color:var(--text-secondary)">Server URL:</span>
+    </div>
+    <input type="text" class="server-url-input" id="server-url" value="http://127.0.0.1:8000">
+    <button class="set-url-btn" onclick="manualSetServer()">Set Server URL</button>
+    <div class="status-row" style="margin-top:8px;font-size:11px;color:var(--text-secondary)" id="last-tried"></div>
+  </div>
+</div>
+
+<!-- Main Chat -->
+<div class="main">
+  <div class="chat-header">
+    <h2>Zaram Conversation</h2>
+    <div class="header-badges">
+      <span class="badge purple" id="model-badge" style="display:none">qwen3</span>
+      <span class="badge green" id="search-badge" style="display:none">Web Search</span>
+    </div>
+  </div>
+
+  <div class="messages" id="messages">
+    <div class="empty-state" id="empty-state">
+      <div class="logo-icon">Z</div>
+      <h3>Welcome to Zaram</h3>
+      <p>Your private AI assistant. Type a message below or use voice input to start a conversation.</p>
+    </div>
+  </div>
+
+  <div class="suggestions" id="suggestions">
+    <div class="chip" onclick="sendChip('Explain quantum computing simply')">Explain quantum computing</div>
+    <div class="chip" onclick="sendChip('Write a Python hello world')">Python hello world</div>
+    <div class="chip" onclick="sendChip('What is the latest news about AI?')">Latest AI news</div>
+    <div class="chip" onclick="sendChip('Generate an image of a cyberpunk city')">Cyberpunk image</div>
+  </div>
+
+  <div class="input-area">
+    <div class="input-box">
+      <textarea id="input" rows="1" placeholder="Message Zaram..." onkeydown="handleKey(event)"></textarea>
+      <button class="input-btn" id="attach-btn" title="Attach file">&#128206;</button>
+      <button class="input-btn" id="mic-btn" title="Voice input" onclick="toggleMic()">&#127908;</button>
+      <button class="input-btn send" id="send-btn" title="Send" onclick="sendMessage()">&#9654;</button>
+    </div>
+  </div>
+</div>
+
+<button class="debug-toggle" onclick="toggleDebug()" id="debug-btn">Debug</button>
+<div class="debug-panel" id="debug-panel"></div>
+
+<script>
+// ─── Configuration ──────────────────────────────────────────────────
+const API_CANDIDATES = [
+  'http://127.0.0.1:8000',
+  'http://localhost:8000',
+  'http://127.0.0.1:8080',
+  'http://localhost:8080'
+];
+
+let API_BASE = localStorage.getItem('zaram_server_url') || API_CANDIDATES[0];
+let serverOnline = false;
+let autoConnectInterval = null;
+let features = {
+  voice: localStorage.getItem('zaram_voice') !== 'false',
+  web: localStorage.getItem('zaram_web') === 'true',
+  human: localStorage.getItem('zaram_human') === 'true'
+};
+let msgCounter = 0;
+let currentAudio = null;
+let audioContext = null;
+
+// ─── Init ─────────────────────────────────────────────────────────
+document.getElementById('server-url').value = API_BASE;
+updateFeatureToggles();
+startAutoConnect();
+
+// Unlock audio context on first user interaction
+document.addEventListener('click', unlockAudio, { once: true });
+document.addEventListener('keydown', unlockAudio, { once: true });
+
+function unlockAudio() {
+  if (!audioContext) {
+    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    if (audioContext.state === 'suspended') {
+      audioContext.resume();
+    }
+  }
+}
+
+// ─── Auto-Connect ─────────────────────────────────────────────────
+function startAutoConnect() {
+  checkConnection();
+  if (autoConnectInterval) clearInterval(autoConnectInterval);
+  autoConnectInterval = setInterval(checkConnection, 5000);
+}
+
+async function checkConnection() {
+  const urlsToTry = [API_BASE, ...API_CANDIDATES.filter(u => u !== API_BASE)];
+  let connected = false;
+
+  for (const url of urlsToTry) {
+    try {
+      debugLog(`Trying: ${url}/health`);
+      const resp = await fetch(`${url}/health`, {
+        method: 'GET',
+        mode: 'cors',
+        cache: 'no-cache',
+        signal: AbortSignal.timeout(3000)
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        API_BASE = url;
+        localStorage.setItem('zaram_server_url', url);
+        serverOnline = true;
+        connected = true;
+        updateStatus('online', `Zaram Online ${data.version || 'v3.0'}`);
+        debugLog(`SERVER FOUND: ${url}`);
+        document.getElementById('last-tried').textContent = '';
+        break;
+      }
+    } catch (e) {
+      debugLog(`Failed: ${url}/health — ${e.name}`);
+    }
+  }
+
+  if (!connected) {
+    serverOnline = false;
+    updateStatus('offline', 'Server Offline');
+    document.getElementById('last-tried').textContent = `Last tried: ${API_BASE}`;
+  }
+}
+
+function updateStatus(state, text) {
+  const dot = document.getElementById('status-dot');
+  const txt = document.getElementById('status-text');
+  dot.className = 'status-dot ' + state;
+  txt.textContent = text;
+}
+
+function manualSetServer() {
+  const url = document.getElementById('server-url').value.trim();
+  if (url) {
+    API_BASE = url.replace(/\/$/, '');
+    localStorage.setItem('zaram_server_url', API_BASE);
+    updateStatus('connecting', 'Connecting...');
+    checkConnection();
+  }
+}
+
+// ─── Feature Toggles ──────────────────────────────────────────────
+function toggleFeature(name) {
+  features[name] = !features[name];
+  localStorage.setItem(`zaram_${name}`, features[name]);
+  updateFeatureToggles();
+}
+
+function updateFeatureToggles() {
+  for (const [name, on] of Object.entries(features)) {
+    const el = document.getElementById('toggle-' + name);
+    if (el) el.classList.toggle('active', on);
+  }
+}
+
+// ─── Messaging ─────────────────────────────────────────────────────
+function handleKey(e) {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    sendMessage();
+  }
+}
+
+function sendChip(text) {
+  document.getElementById('input').value = text;
+  sendMessage();
+}
+
+function newChat() {
+  document.getElementById('messages').innerHTML = `
+    <div class="empty-state" id="empty-state">
+      <div class="logo-icon">Z</div>
+      <h3>Welcome to Zaram</h3>
+      <p>Your private AI assistant. Type a message below or use voice input to start a conversation.</p>
+    </div>`;
+  document.getElementById('model-badge').style.display = 'none';
+  document.getElementById('search-badge').style.display = 'none';
+  msgCounter = 0;
+  if (currentAudio) {
+    currentAudio.pause();
+    currentAudio = null;
+  }
+}
+
+async function sendMessage() {
+  const input = document.getElementById('input');
+  const text = input.value.trim();
+  if (!text) return;
+
+  if (!serverOnline) {
+    await checkConnection();
+    if (!serverOnline) {
+      addSystemMessage('Cannot connect to Zaram server. Make sure it is running on port 8000.');
+      return;
+    }
+  }
+
+  // Remove empty state
+  const empty = document.getElementById('empty-state');
+  if (empty) empty.remove();
+
+  // Hide suggestions
+  document.getElementById('suggestions').style.display = 'none';
+
+  // Add user message
+  const userMsgId = addUserMessage(text);
+  input.value = '';
+  input.style.height = 'auto';
+
+  // Show typing indicator
+  const typingId = addTypingIndicator();
+
+  try {
+    const form = new FormData();
+    form.append('message', text);
+    if (features.web) form.append('web_search_override', 'true');
+
+    debugLog(`POST ${API_BASE}/chat`);
+    const resp = await fetch(`${API_BASE}/chat`, {
+      method: 'POST',
+      mode: 'cors',
+      body: form
+    });
+
+    // Remove typing
+    document.getElementById(typingId)?.remove();
+
+    if (!resp.ok) {
+      const err = await resp.text();
+      addSystemMessage(`Server error: ${resp.status} — ${err}`);
+      return;
+    }
+
+    const data = await resp.json();
+    debugLog(`Response: model=${data.model_used} tts=${data.tts_success} audio=${data.audio_url}`);
+
+    // Update badges
+    if (data.model_used) {
+      const badge = document.getElementById('model-badge');
+      badge.textContent = data.model_used;
+      badge.style.display = 'inline-block';
+    }
+    if (data.web_search_used) {
+      document.getElementById('search-badge').style.display = 'inline-block';
+    }
+
+    // Add AI message
+    const aiMsgId = addAIMessage(data.response_display || data.response, {
+      model: data.model_used,
+      search: data.web_search_used,
+      audioUrl: data.audio_url,
+      ttsSuccess: data.tts_success,
+      rawResponse: data.response
+    });
+
+    // Auto-play audio
+    if (data.audio_url && features.voice) {
+      setTimeout(() => playAudio(data.audio_url, aiMsgId), 300);
+    }
+
+  } catch (e) {
+    document.getElementById(typingId)?.remove();
+    addSystemMessage(`Connection failed: ${e.message}`);
+    debugLog(`Fetch error: ${e.message}`);
+  }
+}
+
+// ─── Message Rendering ────────────────────────────────────────────
+function addUserMessage(text) {
+  msgCounter++;
+  const id = `msg-${msgCounter}`;
+  const html = `
+    <div class="message user" id="${id}">
+      <div class="avatar user">You</div>
+      <div class="bubble user">${escapeHtml(text)}</div>
+    </div>`;
+  appendMessage(html);
+  return id;
+}
+
+function addAIMessage(text, meta = {}) {
+  msgCounter++;
+  const id = `msg-${msgCounter}`;
+  const textId = `text-${id}`;
+
+  let metaHtml = '';
+  if (meta.model || meta.search) {
+    metaHtml = '<div class="msg-meta">';
+    if (meta.model) metaHtml += `<span class="model-badge">${escapeHtml(meta.model)}</span>`;
+    if (meta.search) metaHtml += `<span class="search-badge">Web Search Used</span>`;
+    metaHtml += '</div>';
+  }
+
+  let audioHtml = '';
+  if (meta.audioUrl) {
+    audioHtml = `
+      <div class="audio-player" id="audio-${id}">
+        <button class="audio-play-btn" onclick="playAudio('${meta.audioUrl}', '${id}')">&#9654;</button>
+        <div class="waveform" id="wave-${id}">
+          ${Array(16).fill(0).map((_,i)=>`<div class="wave-bar" style="height:${6+Math.random()*16}px"></div>`).join('')}
+        </div>
+        <span class="audio-time" id="time-${id}">0:00</span>
+      </div>`;
+  } else if (meta.ttsSuccess === false) {
+    audioHtml = `<div class="audio-error">Audio generation failed. Text response available above.</div>`;
+  }
+
+  const html = `
+    <div class="message ai" id="${id}">
+      <div class="avatar ai" id="avatar-${id}">Z</div>
+      <div>
+        <div class="bubble ai">
+          <div id="${textId}">${formatText(text)}</div>
+          ${metaHtml}
+        </div>
+        ${audioHtml}
+        <div class="bubble-actions">
+          <button class="bubble-btn" onclick="copyMessageText('${textId}')">&#128203; Copy</button>
+          <button class="bubble-btn" onclick="downloadMessageText('${textId}')">&#11015; Download</button>
+        </div>
+      </div>
+    </div>`;
+  appendMessage(html);
+
+  // Human mode: stream text word by word
+  if (features.human && text) {
+    const el = document.getElementById(textId);
+    const words = text.split(' ');
+    el.innerHTML = '<span class="cursor-blink">|</span>';
+    let i = 0;
+    const interval = setInterval(() => {
+      if (i >= words.length) {
+        clearInterval(interval);
+        el.innerHTML = formatText(text);
+        return;
+      }
+      el.innerHTML = formatText(words.slice(0, i+1).join(' ')) + '<span class="cursor-blink">|</span>';
+      i++;
+    }, 80);
+  }
+
+  return id;
+}
+
+function addTypingIndicator() {
+  msgCounter++;
+  const id = `typing-${msgCounter}`;
+  const html = `
+    <div class="message ai" id="${id}">
+      <div class="avatar ai">Z</div>
+      <div class="typing-indicator">
+        <div class="typing-dots">
+          <span></span><span></span><span></span>
+        </div>
+        <span class="thinking-text">Zaram is thinking...</span>
+      </div>
+    </div>`;
+  appendMessage(html);
+  return id;
+}
+
+function addSystemMessage(text) {
+  msgCounter++;
+  const id = `msg-${msgCounter}`;
+  const html = `
+    <div class="message ai" id="${id}">
+      <div class="avatar ai" style="background:var(--error)">!</div>
+      <div class="bubble ai" style="border-color:var(--error)">${escapeHtml(text)}</div>
+    </div>`;
+  appendMessage(html);
+  return id;
+}
+
+function appendMessage(html) {
+  const container = document.getElementById('messages');
+  const div = document.createElement('div');
+  div.innerHTML = html;
+  container.appendChild(div.firstElementChild);
+  container.scrollTop = container.scrollHeight;
+}
+
+// ─── Audio Playback ───────────────────────────────────────────────
+async function playAudio(url, msgId) {
+  if (!url) return;
+
+  debugLog(`Playing audio: ${url}`);
+
+  // Stop previous audio
+  if (currentAudio) {
+    currentAudio.pause();
+    currentAudio = null;
+  }
+
+  // Update avatar
+  const avatar = document.getElementById(`avatar-${msgId}`);
+  if (avatar) avatar.classList.add('speaking');
+
+  // Create audio element
+  const audio = new Audio(url);
+  currentAudio = audio;
+
+  // Waveform animation
+  const waveContainer = document.getElementById(`wave-${msgId}`);
+  let waveInterval = null;
+  if (waveContainer) {
+    const bars = waveContainer.querySelectorAll('.wave-bar');
+    waveInterval = setInterval(() => {
+      bars.forEach(bar => {
+        bar.style.height = (6 + Math.random() * 20) + 'px';
+      });
+    }, 100);
+  }
+
+  // Time update
+  const timeEl = document.getElementById(`time-${msgId}`);
+  const timeInterval = setInterval(() => {
+    if (timeEl && audio.currentTime) {
+      const m = Math.floor(audio.currentTime / 60);
+      const s = Math.floor(audio.currentTime % 60).toString().padStart(2, '0');
+      timeEl.textContent = `${m}:${s}`;
+    }
+  }, 500);
+
+  // Play button state
+  const playBtn = document.querySelector(`#audio-${msgId} .audio-play-btn`);
+  if (playBtn) playBtn.innerHTML = '&#9646;&#9646;';
+
+  audio.onended = () => {
+    if (avatar) avatar.classList.remove('speaking');
+    if (waveInterval) clearInterval(waveInterval);
+    clearInterval(timeInterval);
+    if (playBtn) playBtn.innerHTML = '&#9654;';
+    if (currentAudio === audio) currentAudio = null;
+  };
+
+  audio.onerror = (e) => {
+    debugLog(`Audio error: ${e.message || 'unknown'}`);
+    if (avatar) avatar.classList.remove('speaking');
+    if (waveInterval) clearInterval(waveInterval);
+    clearInterval(timeInterval);
+    if (playBtn) playBtn.innerHTML = '&#9654;';
+    addSystemMessage(`Audio playback failed. Try opening ${url} directly in a new tab.`);
+  };
+
+  try {
+    await audio.play();
+  } catch (e) {
+    debugLog(`Audio play blocked: ${e.message}`);
+    if (avatar) avatar.classList.remove('speaking');
+  }
+}
+
+// ─── Tests ────────────────────────────────────────────────────────
+async function runTest(type) {
+  if (!serverOnline) {
+    addSystemMessage('Server not connected. Cannot run test.');
+    return;
+  }
+
+  if (type === 'chat') {
+    document.getElementById('input').value = 'Hello Zaram, this is a test message.';
+    sendMessage();
+  } else if (type === 'tts') {
+    addSystemMessage('Running TTS test...');
+    try {
+      const resp = await fetch(`${API_BASE}/tts_test`, { mode: 'cors' });
+      const data = await resp.json();
+      if (data.status === 'success') {
+        addSystemMessage(`TTS test passed! Audio: ${data.audio_file} (${data.file_size} bytes)`);
+        if (data.audio_url) {
+          setTimeout(() => playAudio(data.audio_url, 'test'), 500);
+        }
+      } else {
+        addSystemMessage(`TTS test failed: ${data.error}`);
+      }
+    } catch (e) {
+      addSystemMessage(`TTS test error: ${e.message}`);
+    }
+  }
+}
+
+// ─── Utilities ──────────────────────────────────────────────────────
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+function formatText(text) {
+  // Simple markdown: bold, code blocks, line breaks
+  let html = escapeHtml(text);
+  html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  html = html.replace(/`(.+?)`/g, '<code style="background:var(--bg);padding:2px 6px;border-radius:4px;font-family:monospace;font-size:12px">$1</code>');
+  html = html.replace(/
+/g, '<br>');
+  return html;
+}
+
+function copyMessageText(textId) {
+  const el = document.getElementById(textId);
+  if (!el) return;
+  const text = el.innerText;
+  navigator.clipboard.writeText(text).then(() => {
+    debugLog('Copied to clipboard');
+  });
+}
+
+function downloadMessageText(textId) {
+  const el = document.getElementById(textId);
+  if (!el) return;
+  const text = el.innerText;
+  const blob = new Blob([text], { type: 'text/plain' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `zaram-response-${Date.now()}.txt`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+// ─── Debug ────────────────────────────────────────────────────────
+function toggleDebug() {
+  document.getElementById('debug-panel').classList.toggle('show');
+}
+
+function debugLog(msg) {
+  const panel = document.getElementById('debug-panel');
+  const time = new Date().toLocaleTimeString();
+  panel.innerHTML += `<div>[${time}] ${escapeHtml(msg)}</div>`;
+  panel.scrollTop = panel.scrollHeight;
+  console.log(`[Zaram UI] ${msg}`);
+}
+
+// ─── Mic (placeholder) ────────────────────────────────────────────
+function toggleMic() {
+  const btn = document.getElementById('mic-btn');
+  btn.classList.toggle('recording');
+  if (btn.classList.contains('recording')) {
+    addSystemMessage('Voice recording started... (click mic again to stop)');
+  } else {
+    addSystemMessage('Voice recording stopped. (Voice input requires server-side processing)');
+  }
+}
+
+// ─── Textarea auto-resize ─────────────────────────────────────────
+document.getElementById('input').addEventListener('input', function() {
+  this.style.height = 'auto';
+  this.style.height = Math.min(this.scrollHeight, 120) + 'px';
+});
+</script>
+</body>
+</html>
