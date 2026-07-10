@@ -1,0 +1,46 @@
+import { useEffect } from 'react'
+import { BrowserRouter, Routes, Route } from 'react-router-dom'
+import { Sidebar } from '@/components/layout/Sidebar'
+import { Workspace } from '@/pages/Workspace'
+import { Models } from '@/pages/Models'
+import { VoiceStudio } from '@/pages/VoiceStudio'
+import { Memory } from '@/pages/Memory'
+import { KnowledgeVault } from '@/pages/KnowledgeVault'
+import { Providers } from '@/pages/Providers'
+import { Placeholder } from '@/pages/Placeholder'
+import { useModelStore } from '@/stores/modelStore'
+
+function App() {
+  const { initializeMockData } = useModelStore()
+
+  useEffect(() => {
+    initializeMockData()
+  }, [initializeMockData])
+
+  return (
+    <BrowserRouter>
+      <div className="flex h-screen bg-background">
+        <Sidebar />
+        <div className="flex-1 flex flex-col overflow-hidden">
+          <Routes>
+            <Route path="/" element={<Workspace />} />
+            <Route path="/models" element={<Models />} />
+            <Route path="/voice-studio" element={<VoiceStudio />} />
+            <Route path="/memory" element={<Memory />} />
+            <Route path="/knowledge-vault" element={<KnowledgeVault />} />
+            <Route path="/providers" element={<Providers />} />
+            <Route path="/chat" element={<Workspace />} />
+            <Route path="/agents" element={<Placeholder title="Agents" description="AI agent management coming soon" />} />
+            <Route path="/automation" element={<Placeholder title="Automation" description="Workflow automation coming soon" />} />
+            <Route path="/marketplace" element={<Placeholder title="Marketplace" description="AI model marketplace coming soon" />} />
+            <Route path="/analytics" element={<Placeholder title="Analytics" description="Usage analytics coming soon" />} />
+            <Route path="/settings" element={<Placeholder title="Settings" description="System settings coming soon" />} />
+            <Route path="/developer" element={<Placeholder title="Developer" description="Developer tools coming soon" />} />
+          </Routes>
+        </div>
+      </div>
+    </BrowserRouter>
+  )
+}
+
+export default App
