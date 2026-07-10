@@ -9,13 +9,19 @@ interface Particle {
   life: number;
   maxLife: number;
   size: number;
+  baseSize: number;
 }
 
 export function ParticleSystem() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const { state, audioLevel, getColors } = useOrbState();
+  const { state, audioLevel, hasInteracted, getColors } = useOrbState();
   const particlesRef = useRef<Particle[]>([]);
   const animationRef = useRef<number>();
+  const audioLevelRef = useRef(audioLevel);
+  
+  useEffect(() => {
+    audioLevelRef.current = audioLevel;
+  }, [audioLevel]);
   
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -31,50 +37,72 @@ export function ParticleSystem() {
     
     const createParticle = (): Particle => {
       const angle = Math.random() * Math.PI * 2;
-      const radius = 150 + Math.random() * 100;
+      const radius = 120 + Math.random() * 120;
+      // Increased by 30% (0.6 * 1.3 = 0.78)
+      const baseSize = 0.78; 
       return {
         x: 300 + Math.cos(angle) * radius,
         y: 300 + Math.sin(angle) * radius,
-        vx: (Math.random() - 0.5) * 2,
-        vy: (Math.random() - 0.5) * 2,
-        life: 0,
-        maxLife: 100 + Math.random() * 100,
-        size: 1 + Math.random() * 2,
+        vx: (Math.random() - 0.5) * 1.5,
+        vy: (Math.random() - 0.5) * 1.5,
+        life: Math.random() * 100,
+        maxLife: 100 + Math.random() * 150,
+        size: baseSize,
+        baseSize,
       };
     };
     
-    for (let i = 0; i < 100; i++) {
+    for (let i = 0; i < 150; i++) {
       particlesRef.current.push(createParticle());
     }
     
     const animate = () => {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       
+      const currentAudio = audioLevelRef.current;
+      
       particlesRef.current.forEach((particle, index) => {
         particle.life++;
         
         const dx = particle.x - 300;
         const dy = particle.y - 300;
-        const distance = Math.sqrt(dx * dx + dy * dy);
         const angle = Math.atan2(dy, dx);
         
-        const orbitalSpeed = 0.02 + (audioLevel * 0.05);
+        // Orbital velocity
+        const orbitalSpeed = 0.015 + (currentAudio * 0.04);
         particle.vx += Math.cos(angle + Math.PI / 2) * orbitalSpeed;
         particle.vy += Math.sin(angle + Math.PI / 2) * orbitalSpeed;
+        
+        // Outward force: 50% of previous default at mean volume, 100% at max volume
+        const outwardForce = currentAudio * 0.125;
+        particle.vx += Math.cos(angle) * outwardForce * 0.1;
+        particle.vy += Math.sin(angle) * outwardForce * 0.1;
         
         particle.x += particle.vx;
         particle.y += particle.vy;
         
-        particle.vx *= 0.98;
-        particle.vy *= 0.98;
+        particle.vx *= 0.97;
+        particle.vy *= 0.97;
+        
+        // Size: Base 0.78, Max volume 1.625 (Increased by 30%)
+        particle.size = 0.78 + (currentAudio * 0.845);
         
         const lifeRatio = particle.life / particle.maxLife;
         const opacity = lifeRatio < 0.1 ? lifeRatio * 10 : lifeRatio > 0.9 ? (1 - lifeRatio) * 10 : 1;
         
+        // Glow: Reduced by 50% at max volume (max blur is now 2.5 instead of 5)
+        if (currentAudio > 0.1) {
+          ctx.shadowBlur = 2.5 * currentAudio;
+          ctx.shadowColor = colors.primary;
+        } else {
+          ctx.shadowBlur = 0;
+        }
+        
         ctx.beginPath();
         ctx.arc(particle.x, particle.y, particle.size, 0, Math.PI * 2);
-        ctx.fillStyle = `${colors.primary}${Math.floor(opacity * 255).toString(16).padStart(2, '0')}`;
+        ctx.fillStyle = `${colors.primary}${Math.floor(opacity * 200).toString(16).padStart(2, '0')}`;
         ctx.fill();
+        ctx.shadowBlur = 0;
         
         if (particle.life >= particle.maxLife) {
           particlesRef.current[index] = createParticle();
@@ -91,7 +119,7 @@ export function ParticleSystem() {
         cancelAnimationFrame(animationRef.current);
       }
     };
-  }, [state, audioLevel, getColors]);
+  }, [state, getColors]);
   
   return (
     <canvas

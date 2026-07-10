@@ -28,11 +28,13 @@ const STATE_COLORS: Record<ConversationState, OrbColors> = {
 interface ConversationStore {
   state: ConversationState;
   audioLevel: number;
+  hasInteracted: boolean;
   messages: { role: 'user' | 'assistant'; content: string }[];
   currentAssistantText: string;
   
   setState: (state: ConversationState) => void;
   setAudioLevel: (level: number) => void;
+  setHasInteracted: (value: boolean) => void;
   addMessage: (role: 'user' | 'assistant', content: string) => void;
   appendCurrentText: (text: string) => void;
   clearCurrentText: () => void;
@@ -43,11 +45,13 @@ interface ConversationStore {
 export const useOrbState = create<ConversationStore>((set, get) => ({
   state: 'idle',
   audioLevel: 0,
-  messages: [{ role: 'assistant', content: 'Zaram OS initialized. Systems online.' }],
+  hasInteracted: false,
+  messages: [],
   currentAssistantText: '',
 
   setState: (state) => set({ state }),
   setAudioLevel: (level) => set({ audioLevel: level }),
+  setHasInteracted: (value) => set({ hasInteracted: value }),
   
   addMessage: (role, content) => set((prev) => ({
     messages: [...prev.messages, { role, content }],
