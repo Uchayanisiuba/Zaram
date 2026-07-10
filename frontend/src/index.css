@@ -2,65 +2,39 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  --bg-deep: #050810;
-  --panel-bg: rgba(15, 20, 35, 0.6);
-  --panel-border: rgba(255, 255, 255, 0.08);
-  
-  /* State Colors */
-  --orb-color-1: #3b82f6; /* Default: Blue (Idle) */
-  --orb-color-2: #06b6d4;
-  --orb-glow: rgba(59, 130, 246, 0.5);
-  --deform-scale: 40; /* Default deformation */
-}
-
-body {
-  background-color: var(--bg-deep);
-  color: #e0e6f0;
-  font-family: 'Inter', sans-serif;
-  overflow: hidden;
+/* CRITICAL: Lock the browser window to prevent the whole UI from scrolling/jumping */
+html, body {
   margin: 0;
+  padding: 0;
+  height: 100%;
+  width: 100%;
+  overflow: hidden; /* This physically prevents the window from scrolling */
+  background-color: #050810;
 }
 
-/* The Living Orb Filter */
-.orb-container {
-  filter: url(#plasma-filter);
-  transition: all 1.5s cubic-bezier(0.4, 0, 0.2, 1);
+#root {
+  height: 100%;
+  width: 100%;
 }
 
-.orb-blob {
-  transition: all 1.5s ease;
-}
-
-/* Blob Animations */
-@keyframes float-1 {
-  0%, 100% { transform: translate(0, 0) scale(1); }
-  33% { transform: translate(30px, -50px) scale(1.1); }
-  66% { transform: translate(-20px, 20px) scale(0.9); }
-}
-@keyframes float-2 {
-  0%, 100% { transform: translate(0, 0) scale(1); }
-  33% { transform: translate(-40px, 30px) scale(0.9); }
-  66% { transform: translate(50px, -20px) scale(1.2); }
-}
-@keyframes float-3 {
-  0%, 100% { transform: translate(0, 0) scale(1); }
-  50% { transform: translate(20px, 40px) scale(1.1); }
-}
-
-.blob-1 { animation: float-1 8s ease-in-out infinite; }
-.blob-2 { animation: float-2 10s ease-in-out infinite reverse; }
-.blob-3 { animation: float-3 12s ease-in-out infinite; }
-
-/* Glass Panels */
+/* Custom glassmorphism utility */
 .glass-panel {
-  background: var(--panel-bg);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid var(--panel-border);
+  background: rgba(255, 255, 255, 0.03);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
 }
 
-/* Scrollbar */
-::-webkit-scrollbar { width: 6px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 3px; }
+/* Hide scrollbar for a cleaner cinematic look, but keep functionality */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
