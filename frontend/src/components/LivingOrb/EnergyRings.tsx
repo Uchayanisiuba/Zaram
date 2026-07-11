@@ -1,119 +1,87 @@
-import { motion } from 'framer-motion';
+import { useEffect, useRef } from 'react';
 import { useOrbState } from './useOrbState';
 
 export function EnergyRings() {
-  const { state, audioLevel, hasInteracted, getColors } = useOrbState();
-  const colors = getColors();
-  
-  // REDUCED: All amplitude effects halved
-  const ringPulse = 1 + audioLevel * 0.075;
-  const glowIntensity = 0.4 + audioLevel * 0.3;
-  const strokeWidth = 2 + audioLevel * 1;
-  const rotationSpeed = Math.max(8, 30 - audioLevel * 12.5);
-  
+  const { audioLevel, getColors } = useOrbState();
+  const audioLevelRef = useRef(audioLevel);
+  const animationRef = useRef<number>();
+  const timeRef = useRef(0);
+  const pathRefs = useRef<(SVGPathElement | null)[]>([]);
+
+  useEffect(() => {
+    audioLevelRef.current = audioLevel;
+  }, [audioLevel]);
+
+  useEffect(() => {
+    const colors = getColors();
+    
+    const ringConfigs = [
+      { radius: 140, phase: 0, frequency: 2, amplitude: 5, speed: 0.02, color: colors.primary, dash: '0', width: 1, rotate: false },
+      { radius: 160, phase: Math.PI / 3, frequency: 3, amplitude: 7.5, speed: 0.015, color: colors.secondary, dash: '4 8', width: 1.5, rotate: true },
+      { radius: 180, phase: Math.PI / 1.5, frequency: 1.5, amplitude: 10, speed: 0.025, color: colors.glow, dash: '2 6', width: 2, rotate: true },
+      { radius: 200, phase: Math.PI, frequency: 2.5, amplitude: 6, speed: 0.018, color: colors.primary, dash: '0', width: 1, rotate: false },
+    ];
+
+    const animate = () => {
+      timeRef.current += 1;
+      const time = timeRef.current;
+      const currentAudio = audioLevelRef.current;
+      
+      // CONSTANT PULSATION: Subtle sine wave breathing effect
+      const breathe = Math.sin(time * 0.02) * 3; 
+
+      ringConfigs.forEach((config, index) => {
+        const pathEl = pathRefs.current[index];
+        if (!pathEl) return;
+
+        const points = [];
+        const segments = 120;
+
+        // Combine base wave, audio reactivity, and constant breathing
+        const dynamicAmplitude = config.amplitude + (currentAudio * 30) + breathe;
+        const dynamicSpeed = config.speed + (currentAudio * 0.04);
+
+        for (let i = 0; i <= segments; i++) {
+          const angle = (i / segments) * Math.PI * 2;
+          const baseX = 300 + Math.cos(angle) * config.radius;
+          const baseY = 300 + Math.sin(angle) * config.radius;
+          const wave = Math.sin(angle * config.frequency + time * dynamicSpeed + config.phase) * dynamicAmplitude;
+          const offsetX = Math.cos(angle + Math.PI / 2) * wave;
+          const offsetY = Math.sin(angle + Math.PI / 2) * wave;
+          points.push(`${baseX + offsetX},${baseY + offsetY}`);
+        }
+
+        pathEl.setAttribute('d', `M ${points.join(' L ')} Z`);
+        pathEl.setAttribute('stroke', config.color);
+        pathEl.setAttribute('stroke-width', config.width.toString());
+        pathEl.setAttribute('stroke-dasharray', config.dash);
+        
+        // Base opacity + audio reactivity + subtle breathing
+        const baseOpacity = 0.3 + (Math.sin(time * 0.015) * 0.1);
+        pathEl.setAttribute('opacity', `${baseOpacity + (currentAudio * 0.5)}`);
+        pathEl.style.filter = `drop-shadow(0 0 ${2 + currentAudio * 10 + breathe}px ${config.color})`;
+
+        if (config.rotate) {
+          const rotation = (time * 0.15) % 360;
+          pathEl.style.transform = `rotate(${rotation}deg)`;
+          pathEl.style.transformOrigin = '300px 300px';
+        } else {
+          pathEl.style.transform = '';
+        }
+      });
+
+      animationRef.current = requestAnimationFrame(animate);
+    };
+
+    animate();
+    return () => { if (animationRef.current) cancelAnimationFrame(animationRef.current); };
+  }, [getColors]);
+
   return (
-    <div className="absolute inset-0 flex items-center justify-center">
-      <svg width="600" height="600" viewBox="0 0 600 600" className="absolute">
-        <defs>
-          <linearGradient id="ring-gradient-1" x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stopColor={colors.primary}>
-              <animate attributeName="stop-color" values={`${colors.primary};${colors.secondary};${colors.primary}`} dur="4s" repeatCount="indefinite" />
-            </stop>
-            <stop offset="50%" stopColor={colors.secondary}>
-              <animate attributeName="stop-color" values={`${colors.secondary};${colors.primary};${colors.secondary}`} dur="4s" repeatCount="indefinite" />
-            </stop>
-            <stop offset="100%" stopColor={colors.primary}>
-              <animate attributeName="stop-color" values={`${colors.primary};${colors.secondary};${colors.primary}`} dur="4s" repeatCount="indefinite" />
-            </stop>
-          </linearGradient>
-          
-          <linearGradient id="ring-gradient-2" x1="100%" y1="0%" x2="0%" y2="100%">
-            <stop offset="0%" stopColor={colors.secondary}>
-              <animate attributeName="stop-color" values={`${colors.secondary};${colors.primary};${colors.secondary}`} dur="6s" repeatCount="indefinite" />
-            </stop>
-            <stop offset="100%" stopColor={colors.primary}>
-              <animate attributeName="stop-color" values={`${colors.primary};${colors.secondary};${colors.primary}`} dur="6s" repeatCount="indefinite" />
-            </stop>
-          </linearGradient>
-          
-          <filter id="glow">
-            <feGaussianBlur stdDeviation={3 + audioLevel * 3} result="coloredBlur"/>
-            <feMerge>
-              <feMergeNode in="coloredBlur"/>
-              <feMergeNode in="SourceGraphic"/>
-            </feMerge>
-          </filter>
-        </defs>
-        
-        {/* Outer Energy Ring */}
-        <motion.g
-          animate={{ rotate: 360 }}
-          transition={{ duration: rotationSpeed, repeat: Infinity, ease: "linear" }}
-          style={{ originX: 0.5, originY: 0.5 }}
-        >
-          <ellipse
-            cx="300"
-            cy="300"
-            rx={240 * ringPulse}
-            ry={200 * ringPulse}
-            fill="none"
-            stroke="url(#ring-gradient-1)"
-            strokeWidth={strokeWidth}
-            opacity={glowIntensity}
-            filter="url(#glow)"
-          />
-        </motion.g>
-        
-        {/* Inner Energy Ring */}
-        <motion.g
-          animate={{ rotate: -360 }}
-          transition={{ duration: rotationSpeed * 0.7, repeat: Infinity, ease: "linear" }}
-          style={{ originX: 0.5, originY: 0.5 }}
-        >
-          <ellipse
-            cx="300"
-            cy="300"
-            rx={200 * ringPulse}
-            ry={240 * ringPulse}
-            fill="none"
-            stroke="url(#ring-gradient-2)"
-            strokeWidth={strokeWidth * 0.8}
-            opacity={glowIntensity * 0.9}
-            filter="url(#glow)"
-          />
-        </motion.g>
-        
-        {/* Particle Ring */}
-        <motion.g
-          animate={{ rotate: 360 }}
-          transition={{ duration: rotationSpeed * 1.3, repeat: Infinity, ease: "linear" }}
-          style={{ originX: 0.5, originY: 0.5 }}
-        >
-          <ellipse
-            cx="300"
-            cy="300"
-            rx={180 * ringPulse}
-            ry={160 * ringPulse}
-            fill="none"
-            stroke={colors.primary}
-            strokeWidth={1.5 + audioLevel * 0.5}
-            strokeDasharray={`${5 + audioLevel * 5} ${10 - audioLevel * 2.5}`}
-            opacity={0.5 + audioLevel * 0.15}
-          />
-        </motion.g>
-        
-        {/* Core Glow Ring */}
-        <motion.circle
-          cx="300"
-          cy="300"
-          r={120 + audioLevel * 15}
-          fill="none"
-          stroke={colors.glow}
-          strokeWidth={3 + audioLevel * 1.5}
-          opacity={0.3 + audioLevel * 0.25}
-          style={{ originX: 0.5, originY: 0.5 }}
-        />
-      </svg>
-    </div>
+    <svg className="absolute inset-0 pointer-events-none" viewBox="0 0 600 600" style={{ mixBlendMode: 'screen' }}>
+      {[0, 1, 2, 3].map((i) => (
+        <path key={i} ref={(el) => { pathRefs.current[i] = el; }} fill="none" strokeLinecap="round" strokeLinejoin="round" />
+      ))}
+    </svg>
   );
 }
