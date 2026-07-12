@@ -1,5 +1,6 @@
 import re
 
+
 def remove_emojis(text: str) -> str:
     """Removes all standard emojis."""
     emoji_pattern = re.compile(
@@ -22,21 +23,21 @@ def preprocess_text(text: str) -> str:
     """
     # 1. Remove emojis
     text = remove_emojis(text)
-    
+
     # 2. Remove asterisks (bold/italics) and underscores
     text = re.sub(r'\*+', '', text)
     text = re.sub(r'_+', '', text)
-    
+
     # 3. Remove code blocks and inline code
     text = re.sub(r'```[\s\S]*?```', ' [Code block displayed on screen] ', text)
     text = re.sub(r'`[^`]+`', '', text)
-    
+
     # 4. Remove markdown headers and links
     text = re.sub(r'^#+\s*', '', text, flags=re.MULTILINE)
     text = re.sub(r'\[([^\]]+)\]\([^\)]+\)', r'\1', text)
-    
+
     # 5. Normalize whitespace and punctuation for natural pauses
     text = re.sub(r'\s+', ' ', text).strip()
     text = re.sub(r'\.{2,}', '.', text) # Convert ellipses to periods for better TTS pacing
-    
+
     return text

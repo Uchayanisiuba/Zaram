@@ -1,8 +1,24 @@
 {
-  "chat.agent.enabled": true,
-  "chat.agent.maxRequests": 20,
-  "github.copilot.chat.codeGeneration.useInstructionFiles": true,
-  "github.copilot.chat.agent.enabled": true,
-  "github.copilot.chat.localeOverride": "en",
-  "chat.mcp.access": "none"
+  "python.defaultInterpreterPath": "./backend/venv/Scripts/python.exe",
+  "python.analysis.typeCheckingMode": "basic",
+  "editor.formatOnSave": true,
+  "editor.codeActionsOnSave": {
+    "source.organizeImports": "explicit",
+    "source.fixAll": "explicit"
+  },
+  "[python]": {
+    "editor.defaultFormatter": "charliermarsh.ruff",
+    "editor.codeActionsOnSave": {
+      "source.organizeImports": "explicit",
+      "source.fixAll": "explicit"
+    }
+  },
+  "files.exclude": {
+    "**/__pycache__": true,
+    "**/.pytest_cache": true,
+    "**/.mypy_cache": true,
+    "**/.ruff_cache": true,
+    "**/node_modules": true,
+    "**/venv": true
+  }
 }
