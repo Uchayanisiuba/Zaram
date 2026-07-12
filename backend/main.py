@@ -1,71 +1,190 @@
+import asyncio
 import json
 import os
+import sys
+import traceback
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from pathlib import Path
 
+if sys.stdout.encoding != 'utf-8':
+    sys.stdout.reconfigure(encoding='utf-8')
+if sys.stderr.encoding != 'utf-8':
+    sys.stderr.reconfigure(encoding='utf-8')
+
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import StreamingResponse, FileResponse
 from pydantic import BaseModel
 
-from implementations.kokoro_tts import KokoroTTS
+from core.event_bus import ZaramEvent
 
-# Import our new modular components
+# Load environment variables (Feature Flag)
+load_dotenv()
+USE_NEW_KERNEL = os.getenv("USE_NEW_KERNEL", "false").lower() == "true"
+
+# --- KERNEL IMPORTS (Strict Boundary) ---
+from core.bootstrapper import KernelBootstrapper
+from core.execution_engine import ExecutionEngine
+
+# --- LEGACY IMPORTS (Isolated for Fallback) ---
 from implementations.ollama_llm import OllamaLLM
 from services.conversation_manager import ConversationManager
 
 print("🚀 Starting Zaram Backend...")
 
-# --- APP INITIALIZATION ---
-app = FastAPI()
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    global execution_engine
+    print("[Startup] Booting Zaram Kernel...")
+    await kernel.boot()
+
+    from runtimes.models.models_runtime import ModelsRuntime
+    models_runtime = ModelsRuntime(kernel.event_bus)
+    kernel.registry.register(models_runtime)
+    await models_runtime.initialize()
+
+    execution_engine = ExecutionEngine(kernel.registry, kernel.event_bus)
+    print(f"[Startup] Kernel Online. USE_NEW_KERNEL={USE_NEW_KERNEL}")
+
+    yield
+
+    print("[Shutdown] Powering down Zaram Kernel...")
+    await kernel.shutdown()
+
+
+app = FastAPI(lifespan=lifespan)
+
+# CORS Setup
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["http://localhost:5173", "http://localhost:3000"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Initialize engines ONCE at startup
-print("⏳ Initializing Engines...")
-ollama_engine = OllamaLLM()
-kokoro_engine = KokoroTTS()
-conversation_manager = ConversationManager(ollama_engine, kokoro_engine)
-print("✅ Engines initialized successfully. Zaram is ready.")
+# --- KERNEL LIFECYCLE ---
+kernel = KernelBootstrapper()
+execution_engine = None
 
-def format_sse(data_dict):
-    return f"data: {json.dumps(data_dict)}\n\n"
-
-# --- ENDPOINTS ---
-@app.get("/audio/{filename}")
-async def get_audio(filename: str):
-    file_path = os.path.join("audio_cache", filename)
-    if os.path.exists(file_path):
-        return FileResponse(file_path, media_type="audio/wav")
-    raise HTTPException(status_code=404, detail="Audio file not found")
-
-@app.get("/personalities")
-def get_personalities():
-    return {
-        "personalities": {
-            "af_heart": {"name": "Alexis", "gender": "female", "description": "Professional, calm, and authoritative."},
-            "af_bella": {"name": "Bella", "gender": "female", "description": "Warm, friendly, and expressive."},
-            "af_nicole": {"name": "Nicole", "gender": "female", "description": "Clear, concise, and helpful."},
-            "am_adam": {"name": "Adam", "gender": "male", "description": "Deep, confident, and reassuring."},
-            "am_michael": {"name": "Michael", "gender": "male", "description": "Casual, conversational, and relaxed."}
-        }
-    }
-
+# --- REQUEST MODELS ---
 class ChatRequest(BaseModel):
     text: str
     model: str = "gemma3:latest"
-    personality: str = "af_heart"
+    personality: str = "default"
+
+
+# --- GENERATORS ---
+async def legacy_stream_generator(request: ChatRequest):
+    """Legacy path: Direct LLM call (preserved for rollback)"""
+    llm = OllamaLLM()
+    conversation_manager = ConversationManager(llm, None)
+    for event in conversation_manager.run_conversation(request.text, request.model, request.personality):
+        yield f"data: {json.dumps(event)}\n\n"
+    yield "data: [DONE]\n\n"
+
+
+async def kernel_stream_generator(text: str):
+    """New Kernel path: Execution Engine orchestration."""
+    loop = asyncio.get_running_loop()
+    queue: asyncio.Queue[str | dict | None] = asyncio.Queue()
+
+    def _produce() -> None:
+        try:
+            for token in execution_engine.execute(text):
+                loop.call_soon_threadsafe(queue.put_nowait, {"type": "token", "content": token})
+        except Exception as e:
+            tb = (
+                "".join(traceback.format_exception(type(e), e, e.__traceback__))
+                if e.__traceback__
+                else ""
+            )
+            loop.call_soon_threadsafe(queue.put_nowait, {"type": "error", "content": str(e)})
+            loop.call_soon_threadsafe(
+                kernel.event_bus.publish,
+                ZaramEvent(
+                    source_runtime="execution_engine",
+                    event_type="execution.error",
+                    priority="high",
+                    data={
+                        "correlation_id": getattr(execution_engine, "correlation_id", ""),
+                        "error_type": type(e).__name__,
+                        "error_message": str(e),
+                        "traceback": tb,
+                    },
+                ),
+            )
+        finally:
+            loop.call_soon_threadsafe(queue.put_nowait, None)
+
+    fut = loop.run_in_executor(None, _produce)
+    while True:
+        item = await queue.get()
+        if item is None:
+            break
+        yield f"data: {json.dumps(item)}\n\n"
+    await fut
+    yield "data: [DONE]\n\n"
+
+
+# --- PERSISTENCE HELPERS ---
+BASE_DIR = Path(__file__).resolve().parent
+PERSONALITIES_PATH = BASE_DIR / "characters.json"
+AUDIO_CACHE_DIR = BASE_DIR / "audio_cache"
+
+
+def load_personalities() -> dict:
+    if os.path.exists(PERSONALITIES_PATH):
+        with open(PERSONALITIES_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return {}
+
+
+def save_personalities(data: dict) -> None:
+    with open(PERSONALITIES_PATH, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+
+
+# --- API ENDPOINTS ---
+@app.get("/personalities")
+def get_personalities():
+    return {"personalities": load_personalities()}
+
+
+@app.post("/personalities")
+def update_personalities(payload: dict):
+    save_personalities(payload)
+    return {"personalities": payload}
+
+
+@app.get("/audio/{filename}")
+def get_audio(filename: str):
+    # Resolve against the canonical audio cache directory to avoid
+    # broken relative paths and path-traversal attempts.
+    requested = (AUDIO_CACHE_DIR / filename).resolve()
+    cache_root = AUDIO_CACHE_DIR.resolve()
+    if requested != cache_root and cache_root not in requested.parents:
+        raise HTTPException(status_code=400, detail="Invalid audio path")
+    if requested.is_file():
+        return FileResponse(requested, media_type="audio/wav", filename=filename)
+    raise HTTPException(status_code=404, detail="Audio not found")
+
+
+@app.post("/api/chat")
+async def chat_api(request: ChatRequest):
+    if USE_NEW_KERNEL:
+        return StreamingResponse(kernel_stream_generator(request.text), media_type="text/event-stream")
+    else:
+        return StreamingResponse(legacy_stream_generator(request), media_type="text/event-stream")
+
 
 @app.post("/chat")
-def chat(request: ChatRequest):
-    def event_generator():
-        for event in conversation_manager.run_conversation(request.text, request.model, request.personality):
-            yield format_sse(event)
+async def chat(request: ChatRequest):
+    return await chat_api(request)
 
-    return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 if __name__ == "__main__":
     import uvicorn
