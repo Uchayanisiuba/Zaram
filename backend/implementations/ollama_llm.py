@@ -1,6 +1,8 @@
-import requests
 import json
-from typing import Iterator
+from collections.abc import Iterator
+
+import requests
+
 
 class OllamaLLM:
     """Concrete implementation of the LLMEngine interface using Ollama."""

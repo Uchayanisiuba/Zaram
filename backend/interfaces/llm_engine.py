@@ -1,4 +1,6 @@
-from typing import Protocol, Iterator
+from collections.abc import Iterator
+from typing import Protocol
+
 
 class LLMEngine(Protocol):
     """Abstract interface for ANY LLM model."""

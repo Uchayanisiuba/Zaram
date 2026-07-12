@@ -1,5 +1,7 @@
 from typing import Protocol
+
 import numpy as np
+
 
 class TTSEngine(Protocol):
     """Abstract interface for ANY TTS model."""

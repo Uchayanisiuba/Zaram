@@ -1,12 +1,14 @@
 import queue
 import threading
 import time
-from typing import Iterator, Any
-from core.events import TokenGenerated, AudioChunkReady
-from implementations.ollama_llm import OllamaLLM
+from collections.abc import Iterator
+from typing import Any
+
 from implementations.kokoro_tts import KokoroTTS
-from services.speech_planner import SpeechPlanner
+from implementations.ollama_llm import OllamaLLM
 from services.speech_manager import SpeechManager
+from services.speech_planner import SpeechPlanner
+
 
 class ConversationManager:
     def __init__(self, llm: OllamaLLM, tts: KokoroTTS):
@@ -17,7 +19,7 @@ class ConversationManager:
         planner = SpeechPlanner()
         manager = SpeechManager(self.tts)
         manager.set_voice(personality)
-        
+
         out_queue = queue.Queue()
         error_occurred = [False]
 
@@ -28,7 +30,7 @@ class ConversationManager:
                     sentence_event = planner.process_token(token)
                     if sentence_event:
                         manager.submit_sentence(sentence_event)
-                
+
                 last_sentence = planner.flush()
                 if last_sentence:
                     manager.submit_sentence(last_sentence)
@@ -44,7 +46,7 @@ class ConversationManager:
         llm_done = False
         while True:
             got_event = False
-            
+
             try:
                 event = out_queue.get(timeout=0.1)
                 got_event = True
@@ -70,12 +72,12 @@ class ConversationManager:
 
             if error_occurred[0]:
                 break
-            
+
             # FIX: Use pending_tasks instead of input_queue.empty() to prevent race condition
             if llm_done and manager.pending_tasks == 0 and manager.output_queue.empty():
                 break
-            
+
             if not got_event:
                 time.sleep(0.01)
-                
+
         yield {"type": "done"}

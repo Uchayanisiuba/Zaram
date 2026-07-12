@@ -1,13 +1,15 @@
-import os
 import json
+import os
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse, FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
+
+from implementations.kokoro_tts import KokoroTTS
 
 # Import our new modular components
 from implementations.ollama_llm import OllamaLLM
-from implementations.kokoro_tts import KokoroTTS
 from services.conversation_manager import ConversationManager
 
 print("🚀 Starting Zaram Backend...")
@@ -62,7 +64,7 @@ def chat(request: ChatRequest):
     def event_generator():
         for event in conversation_manager.run_conversation(request.text, request.model, request.personality):
             yield format_sse(event)
-            
+
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 if __name__ == "__main__":
