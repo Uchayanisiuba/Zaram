@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 import os
 import sys
 import traceback
@@ -28,30 +29,47 @@ USE_NEW_KERNEL = os.getenv("USE_NEW_KERNEL", "false").lower() == "true"
 from core.bootstrapper import KernelBootstrapper
 from core.execution_engine import ExecutionEngine
 
+# --- VOICE RUNTIME IMPORTS (Modular, Kernel-independent) ---
+from voice.voice_manager import VoiceRuntime
+
 # --- LEGACY IMPORTS (Isolated for Fallback) ---
 from implementations.ollama_llm import OllamaLLM
 from services.conversation_manager import ConversationManager
+
+logger = logging.getLogger(__name__)
 
 print("🚀 Starting Zaram Backend...")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    global execution_engine
-    print("[Startup] Booting Zaram Kernel...")
+    global execution_engine, voice_runtime
+    logger.info("Booting Zaram Kernel...")
     await kernel.boot()
 
     from runtimes.models.models_runtime import ModelsRuntime
     models_runtime = ModelsRuntime(kernel.event_bus)
     kernel.registry.register(models_runtime)
     await models_runtime.initialize()
+    logger.info("✓ Kernel Runtime ready")
+    logger.info("✓ Models Runtime ready")
 
     execution_engine = ExecutionEngine(kernel.registry, kernel.event_bus)
-    print(f"[Startup] Kernel Online. USE_NEW_KERNEL={USE_NEW_KERNEL}")
+
+    # Voice Runtime is initialized independently from the Kernel. No TTS
+    # provider is loaded in this milestone; the runtime is ready to accept
+    # providers in a later step.
+    voice_runtime = VoiceRuntime()
+    try:
+        await voice_runtime.initialize()
+    except Exception as exc:
+        logger.error("Voice Runtime failed to initialize: %s", exc)
 
     yield
 
-    print("[Shutdown] Powering down Zaram Kernel...")
+    logger.info("Powering down Zaram Kernel...")
+    if voice_runtime is not None:
+        await voice_runtime.shutdown()
     await kernel.shutdown()
 
 
@@ -69,6 +87,7 @@ app.add_middleware(
 # --- KERNEL LIFECYCLE ---
 kernel = KernelBootstrapper()
 execution_engine = None
+voice_runtime = None
 
 # --- REQUEST MODELS ---
 class ChatRequest(BaseModel):
