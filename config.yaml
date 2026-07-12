@@ -1,0 +1,31 @@
+name: Zaram OS Config
+version: 0.0.1
+
+models:
+  - title: Gemma3 (Local Chat)
+    provider: ollama
+    model: gemma3:latest
+    roles:
+      - chat
+      - edit
+    apiBase: http://localhost:11434
+
+  - title: Qwen2.5-Coder (Local Chat)
+    provider: ollama
+    model: qwen2.5-coder:latest
+    roles:
+      - chat
+      - edit
+    apiBase: http://localhost:11434
+
+tabAutocompleteModel:
+  title: Qwen Autocomplete
+  provider: ollama
+  model: qwen2.5-coder:latest
+  apiBase: http://localhost:11434
+
+context:
+  - provider: code
+  - provider: folder
+    name: Zaram Constitution
+    path: .ai
