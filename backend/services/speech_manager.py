@@ -2,6 +2,7 @@ import os
 import queue
 import threading
 import time
+from pathlib import Path
 
 import soundfile as sf
 from core.events import AudioChunkReady, SentenceReady
@@ -12,7 +13,7 @@ from implementations.kokoro_tts import KokoroTTS
 class SpeechManager:
     def __init__(self, tts_engine: KokoroTTS):
         self.tts = tts_engine
-        self.audio_dir = "backend/audio_cache"
+        self.audio_dir = str(Path(__file__).resolve().parent.parent / "audio_cache")
         self.voice = "af_heart"
         os.makedirs(self.audio_dir, exist_ok=True)
 
@@ -39,7 +40,9 @@ class SpeechManager:
                 if event is None:
                     break
 
-                audio = self.tts.generate_audio(event.text, self.voice)
+                audio = None
+                if self.tts is not None:
+                    audio = self.tts.generate_audio(event.text, self.voice)
 
                 if audio is not None:
                     filename = f"{event.sentence_id}.wav"
