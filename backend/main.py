@@ -30,7 +30,7 @@ from core.bootstrapper import KernelBootstrapper
 from core.execution_engine import ExecutionEngine
 
 # --- VOICE RUNTIME IMPORTS (Modular, Kernel-independent) ---
-from voice.voice_manager import VoiceRuntime
+from voice.voice_manager import VoiceManager, VoiceRuntime
 
 # --- LEGACY IMPORTS (Isolated for Fallback) ---
 from implementations.ollama_llm import OllamaLLM
@@ -56,14 +56,18 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     execution_engine = ExecutionEngine(kernel.registry, kernel.event_bus)
 
-    # Voice Runtime is initialized independently from the Kernel. No TTS
-    # provider is loaded in this milestone; the runtime is ready to accept
-    # providers in a later step.
+    # Voice Runtime is initialized independently from the Kernel.
     voice_runtime = VoiceRuntime(auto_register_kokoro=True)
     try:
         await voice_runtime.initialize()
     except Exception as exc:
         logger.error("Voice Runtime failed to initialize: %s", exc)
+
+    # Single canonical speech path: ConversationManager depends only on the
+    # VoiceManager (which routes to the registered Kokoro provider).
+    global conversation_manager
+    conversation_manager = ConversationManager(OllamaLLM(), voice_runtime.manager)
+    logger.info("Legacy Speech Pipeline disabled")
 
     yield
 
@@ -88,6 +92,7 @@ app.add_middleware(
 kernel = KernelBootstrapper()
 execution_engine = None
 voice_runtime = None
+conversation_manager = None
 
 # --- REQUEST MODELS ---
 class ChatRequest(BaseModel):
@@ -98,9 +103,9 @@ class ChatRequest(BaseModel):
 
 # --- GENERATORS ---
 async def legacy_stream_generator(request: ChatRequest):
-    """Legacy path: Direct LLM call (preserved for rollback)"""
-    llm = OllamaLLM()
-    conversation_manager = ConversationManager(llm, None)
+    """Legacy path: ConversationManager -> VoiceManager -> KokoroProvider."""
+    if conversation_manager is None:
+        conversation_manager = ConversationManager(OllamaLLM(), VoiceManager())
     for event in conversation_manager.run_conversation(request.text, request.model, request.personality):
         yield f"data: {json.dumps(event)}\n\n"
     yield "data: [DONE]\n\n"

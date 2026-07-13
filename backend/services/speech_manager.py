@@ -1,3 +1,10 @@
+"""DEPRECATED (v0.5.3) — scheduled for removal in v0.5.6.
+
+Replaced by the Voice Runtime: ``VoiceManager`` -> ``VoiceRegistry`` ->
+``KokoroProvider``. No active runtime code imports this module anymore; it is
+kept only so the previous speech path can be restored if rollback is needed.
+"""
+
 import os
 import queue
 import threading
@@ -7,6 +14,9 @@ from pathlib import Path
 import soundfile as sf
 from core.events import AudioChunkReady, SentenceReady
 
+
+# Deprecated: see module docstring. Use voice.providers.kokoro.KokoroProvider.
+class SpeechManager:
 from implementations.kokoro_tts import KokoroTTS
 
 

@@ -139,13 +139,15 @@ class _FakeLLM:
 
 
 def test_legacy_conversation_terminates_without_tts():
-    """Legacy path must complete cleanly even when TTS is unavailable (None)."""
+    """Conversation must complete cleanly when speech is unavailable."""
     from services.conversation_manager import ConversationManager
+    from voice.voice_manager import VoiceManager
 
-    manager = ConversationManager(_FakeLLM(), None)
+    manager = ConversationManager(_FakeLLM(), VoiceManager())
     events = list(manager.run_conversation("hi", "gemma3:latest", "default"))
 
     assert events, "conversation produced no events"
     assert events[-1] == {"type": "done"}, "must terminate with a 'done' event"
     assert not any(e.get("type") == "error" for e in events), "no error events expected"
     assert any(e.get("type") == "token" for e in events), "expected token events"
+    assert not any(e.get("type") == "audio" for e in events), "no audio when speech disabled"
