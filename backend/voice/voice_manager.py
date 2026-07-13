@@ -77,6 +77,12 @@ class VoiceManager:
                 logger.warning("Error during voice provider shutdown: %s", exc)
             logger.info("Voice provider '%s' shut down", self._active_name)
 
+    # --- voice discovery ---
+    async def available_voices(self) -> Dict[str, Any]:
+        """Return the active provider's discovered voices (structured metadata)."""
+        provider = self.get_provider()
+        return await provider.available_voices()
+
     # --- request routing ---
     async def synthesize(
         self, text: str, *, voice: str = "", provider_name: Optional[str] = None
@@ -123,12 +129,32 @@ class VoiceRuntime:
     coupling the runtime to the Kernel registry.
     """
 
-    def __init__(self, audio_dir: str = "audio_cache", base_url: str = "http://127.0.0.1:8000") -> None:
+    def __init__(
+        self,
+        audio_dir: str = "audio_cache",
+        base_url: str = "http://127.0.0.1:8000",
+        *,
+        auto_register_kokoro: bool = False,
+        kokoro_config: Any = None,
+    ) -> None:
         self.manager = VoiceManager(audio_dir, base_url)
+        self.auto_register_kokoro = auto_register_kokoro
+        self.kokoro_config = kokoro_config
 
     async def initialize(self) -> None:
-        await self.manager.initialize()
-        logger.info("✓ Voice Runtime ready")
+        logger.info("✓ Voice Runtime initialized")
+        if self.auto_register_kokoro:
+            try:
+                from voice.providers.kokoro import bootstrap_kokoro
+
+                await bootstrap_kokoro(self.manager, self.kokoro_config)
+            except Exception as exc:  # registration must never break chat
+                logger.error(
+                    "Kokoro provider registration failed (chat remains operational): %s",
+                    exc,
+                )
+        else:
+            await self.manager.initialize()
 
     async def shutdown(self) -> None:
         await self.manager.shutdown()

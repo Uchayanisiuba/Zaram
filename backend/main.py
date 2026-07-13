@@ -59,7 +59,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Voice Runtime is initialized independently from the Kernel. No TTS
     # provider is loaded in this milestone; the runtime is ready to accept
     # providers in a later step.
-    voice_runtime = VoiceRuntime()
+    voice_runtime = VoiceRuntime(auto_register_kokoro=True)
     try:
         await voice_runtime.initialize()
     except Exception as exc:
