@@ -9,12 +9,10 @@ All tests run offline with injected fakes; no legacy classes are referenced.
 
 from __future__ import annotations
 
-import asyncio
 import sys
 from pathlib import Path
 
 import numpy as np
-import pytest
 
 from services.conversation_manager import ConversationManager
 from voice.config import KokoroConfig
@@ -27,8 +25,7 @@ SAMPLE_VOICES = ["af_heart", "af_bella", "am_adam"]
 
 class FakeLLM:
     def stream_response(self, prompt: str, model: str):
-        for token in ["Hello", " world", ".", " This is one sentence.", " This is another sentence."]:
-            yield token
+        yield from ["Hello", " world", ".", " This is one sentence.", " This is another sentence."]
 
 
 class FakePipeline:
@@ -142,8 +139,9 @@ async def test_provider_exception_no_crash(tmp_path: Path, monkeypatch):
 
     async def boom(*args, **kwargs):
         raise RuntimeError("provider exploded")
+        yield  # make it an async generator so async-for fails on first step
 
-    monkeypatch.setattr(manager, "synthesize", boom)
+    monkeypatch.setattr(manager, "stream_synthesis", boom)
     cm = ConversationManager(FakeLLM(), manager)
     events = list(cm.run_conversation("hi", "gemma3:latest", "default"))
     assert events[-1] == {"type": "done"}
