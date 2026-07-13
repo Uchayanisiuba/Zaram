@@ -24,6 +24,6 @@ ignore_missing_imports = true
 exclude = ["venv", "node_modules", "frontend"]
 
 [tool.pytest.ini_options]
-testpaths = ["backend/tests", "backend/voice/tests"]
+testpaths = ["backend/tests", "backend/voice/tests", "backend/media/tests"]
 asyncio_mode = "auto"
 addopts = "-v --tb=short"
