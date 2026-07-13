@@ -1,3 +1,10 @@
+"""DEPRECATED (v0.5.3) — scheduled for removal in v0.5.6.
+
+Replaced by ``voice.providers.kokoro.KokoroProvider``. No active runtime code
+imports this module anymore; kept only for rollback. Do not call Kokoro
+directly from application code.
+"""
+
 import numpy as np
 from kokoro import KPipeline
 

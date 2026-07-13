@@ -277,8 +277,10 @@ class KokoroProvider(VoiceProvider):
 
         try:
             pipeline = self._ensure_pipeline()
-        except ProviderUnavailableError as exc:
-            self._log.error("Kokoro unavailable: %s", exc, extra=extra)
+        except Exception as exc:
+            self._log.error(
+                "Kokoro unavailable: %s", exc, extra={**extra, "failure": type(exc).__name__}
+            )
             return AudioResult(success=False, request_id=request_id, voice=selected, error=str(exc))
 
         try:

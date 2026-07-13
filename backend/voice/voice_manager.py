@@ -142,7 +142,7 @@ class VoiceRuntime:
         self.kokoro_config = kokoro_config
 
     async def initialize(self) -> None:
-        logger.info("✓ Voice Runtime initialized")
+        logger.info("✓ Voice Runtime ready")
         if self.auto_register_kokoro:
             try:
                 from voice.providers.kokoro import bootstrap_kokoro
