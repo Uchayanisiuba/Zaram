@@ -32,6 +32,9 @@ from core.execution_engine import ExecutionEngine
 # --- VOICE RUNTIME IMPORTS (Modular, Kernel-independent) ---
 from voice.voice_manager import VoiceManager, VoiceRuntime
 
+# --- MEDIA RUNTIME IMPORTS (orchestrates media subsystems) ---
+from media.runtime import MediaRuntime
+
 # --- LEGACY IMPORTS (Isolated for Fallback) ---
 from implementations.ollama_llm import OllamaLLM
 from services.conversation_manager import ConversationManager
@@ -43,7 +46,7 @@ print("🚀 Starting Zaram Backend...")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    global execution_engine, voice_runtime
+    global execution_engine, voice_runtime, media_runtime
     logger.info("Booting Zaram Kernel...")
     await kernel.boot()
 
@@ -63,6 +66,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     except Exception as exc:
         logger.error("Voice Runtime failed to initialize: %s", exc)
 
+    # Media Runtime orchestrates every media subsystem and registers with the
+    # Kernel exactly like the other runtimes. It discovers the (still intact)
+    # Voice Runtime as the first media capability before Kernel registration.
+    media_runtime = MediaRuntime(kernel.event_bus)
+    if voice_runtime is not None:
+        media_runtime.discover_voice_runtime(voice_runtime.manager)
+    kernel.registry.register(media_runtime)
+    await media_runtime.initialize()
+    logger.info("✓ Media Runtime ready")
+
     # Single canonical speech path: ConversationManager depends only on the
     # VoiceManager (which routes to the registered Kokoro provider).
     global conversation_manager
@@ -72,6 +85,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     yield
 
     logger.info("Powering down Zaram Kernel...")
+    if media_runtime is not None:
+        await media_runtime.shutdown()
     if voice_runtime is not None:
         await voice_runtime.shutdown()
     await kernel.shutdown()
@@ -92,6 +107,7 @@ app.add_middleware(
 kernel = KernelBootstrapper()
 execution_engine = None
 voice_runtime = None
+media_runtime = None
 conversation_manager = None
 
 # --- REQUEST MODELS ---
