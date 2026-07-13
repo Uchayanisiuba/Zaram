@@ -40,7 +40,12 @@ from voice.providers.base import VoiceProvider
 # --------------------------------------------------------------------------- #
 @dataclass
 class AudioResult:
-    """Outcome of a synthesis request. Always returned; never raises to caller."""
+    """Outcome of a synthesis request. Always returned; never raises to caller.
+
+    The data structure is provider-agnostic and extensible for real-time systems
+    (MetaHuman / ARKit / low-latency voice). ``metadata`` is a free-form bucket
+    reserved for future phonemes, visemes, emotion markers, and timing info.
+    """
 
     success: bool
     request_id: str = ""
@@ -50,11 +55,23 @@ class AudioResult:
     sample_rate: int = 0
     duration_ms: float = 0.0
     error: Optional[str] = None
+    # --- streaming / real-time extensions (all optional) ---
+    audio_id: str = ""
+    format: str = "wav"
+    channels: int = 1
+    stream_available: bool = False
+    metadata: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
 class AudioChunk:
-    """A single streamed audio frame (future-ready for real-time emission)."""
+    """A single streamed audio frame in the provider-agnostic stream.
+
+    A stream is an ordered sequence of chunks: chunk 0, chunk 1, ... final chunk.
+    ``index`` is the 0-based sequence number. ``timestamp``/``duration`` are in
+    milliseconds relative to the start of the utterance. ``audio_id`` links the
+    chunk back to its originating :class:`AudioResult`.
+    """
 
     request_id: str
     voice: str
@@ -62,6 +79,9 @@ class AudioChunk:
     audio: Any
     sample_rate: int
     final: bool
+    timestamp: float = 0.0
+    duration: float = 0.0
+    audio_id: str = ""
     path: Optional[str] = None
 
 
@@ -322,36 +342,76 @@ class KokoroProvider(VoiceProvider):
             path=path,
             sample_rate=self.config.sample_rate,
             duration_ms=duration_ms,
+            audio_id=request_id,
+            format="wav",
+            channels=1,
+            stream_available=True,
+            metadata={},
         )
 
     async def stream_audio(self, text: str, voice: str = "", **kwargs: Any) -> AsyncIterator[Any]:
-        """Yield audio as :class:`AudioChunk` frames.
+        """Stream an utterance as an ordered sequence of :class:`AudioChunk`.
 
-        Kokoro currently emits a complete utterance; we slice it into ~100 ms
-        frames so future real-time backends (Unreal lip-sync, SSE) can stream
-        without changing this method's contract.
+        Kokoro generates a complete utterance, so we simulate streaming by
+        slicing the audio into ~100 ms frames and yielding them in order. The
+        contract (ordered chunks, timestamps, ``final`` flag, ``audio_id`` link)
+        is provider-independent, so a future native-streaming engine can replace
+        this simulation without any caller changes.
+
+        The event loop is never blocked: synthesis runs in a worker thread and
+        control is yielded between frames so the stream can be cancelled.
         """
-        result = await self.generate_audio(text, voice=voice, **kwargs)
+        request_id = kwargs.get("request_id") or self._next_request_id()
+        extra = {"provider": self.name, "request_id": request_id}
+
+        try:
+            result = await self.generate_audio(text, voice=voice, request_id=request_id)
+        except Exception as exc:
+            self._log.error(
+                "Streaming aborted: synthesis error",
+                extra={**extra, "failure": type(exc).__name__},
+            )
+            return
+
         if not result.success or result.audio is None:
             self._log.error(
                 "Streaming aborted: synthesis failed",
-                extra={"provider": self.name, "request_id": result.request_id, "error": result.error},
+                extra={**extra, "error": result.error},
             )
             return
+
         audio = np.asarray(result.audio)
-        frame = max(1, self.config.sample_rate // 10)
-        total = (len(audio) + frame - 1) // frame
+        sample_rate = result.sample_rate or self.config.sample_rate
+        frame = max(1, sample_rate // 10)
+        frame_ms = (frame / sample_rate) * 1000.0
+        total = max(1, (len(audio) + frame - 1) // frame)
+
+        self._log.info("Streaming started", extra={**extra, "chunks": total, "voice": result.voice})
+        start = time.perf_counter()
         for idx in range(total):
+            is_final = idx == total - 1
             chunk = audio[idx * frame : (idx + 1) * frame]
             yield AudioChunk(
-                request_id=result.request_id,
+                request_id=request_id,
                 voice=result.voice,
                 index=idx,
                 audio=chunk,
-                sample_rate=result.sample_rate,
-                final=idx == total - 1,
+                sample_rate=sample_rate,
+                final=is_final,
+                timestamp=round(idx * frame_ms, 2),
+                duration=round(len(chunk) / sample_rate * 1000.0, 2),
+                audio_id=result.audio_id,
                 path=result.path if idx == 0 else None,
             )
+            # Yield control between frames so the loop stays responsive and the
+            # stream can be cancelled mid-utterance.
+            if not is_final:
+                await asyncio.sleep(0)
+
+        self._log.info(
+            "Streaming complete",
+            extra={**extra, "chunks": total, "duration_ms": round((time.perf_counter() - start) * 1000, 2)},
+        )
 
     async def available_voices(self) -> Dict[str, Any]:
         return dict(self._voices)

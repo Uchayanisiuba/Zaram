@@ -18,9 +18,14 @@ from .exceptions import (
     ProviderUnavailableError,
     VoiceRuntimeError,
 )
+from .audio_events import (
+    audio_event_from_chunk,
+    audio_event_from_result,
+    to_audio_event,
+)
 from .config import KokoroConfig
 from .health import AudioCache
-from .providers.kokoro import KokoroProvider, bootstrap_kokoro
+from .providers.kokoro import AudioChunk, AudioResult, KokoroProvider, bootstrap_kokoro
 from .registry import VoiceRegistry
 from .voice_manager import VoiceManager, VoiceRuntime
 
@@ -31,7 +36,12 @@ __all__ = [
     "KokoroProvider",
     "KokoroConfig",
     "AudioCache",
+    "AudioResult",
+    "AudioChunk",
     "bootstrap_kokoro",
+    "to_audio_event",
+    "audio_event_from_result",
+    "audio_event_from_chunk",
     "VoiceRuntimeError",
     "ProviderNotFoundError",
     "DuplicateProviderError",
