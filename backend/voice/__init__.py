@@ -18,6 +18,9 @@ from .exceptions import (
     ProviderUnavailableError,
     VoiceRuntimeError,
 )
+from .config import KokoroConfig
+from .health import AudioCache
+from .providers.kokoro import KokoroProvider, bootstrap_kokoro
 from .registry import VoiceRegistry
 from .voice_manager import VoiceManager, VoiceRuntime
 
@@ -25,6 +28,10 @@ __all__ = [
     "VoiceManager",
     "VoiceRuntime",
     "VoiceRegistry",
+    "KokoroProvider",
+    "KokoroConfig",
+    "AudioCache",
+    "bootstrap_kokoro",
     "VoiceRuntimeError",
     "ProviderNotFoundError",
     "DuplicateProviderError",
