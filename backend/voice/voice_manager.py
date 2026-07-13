@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import logging
 import threading
-from typing import Any, Dict, Optional, Union
+from typing import Any, AsyncIterator, Dict, Optional, Union
 
 from .exceptions import ProviderNotFoundError, ProviderUnavailableError
 from .providers.base import VoiceProvider
@@ -93,6 +93,36 @@ class VoiceManager:
         """
         provider = self.get_provider(provider_name)
         return await provider.generate_audio(text, voice=voice)
+
+    # --- streaming routing ---
+    async def stream_synthesis(
+        self, text: str, *, voice: str = "", provider_name: Optional[str] = None
+    ) -> AsyncIterator[Any]:
+        """Stream a synthesized utterance as an ordered sequence of chunks.
+
+        Provider-agnostic, async, non-blocking, failure-safe and cancellation-safe.
+        On an unavailable provider or any synthesis error the generator simply
+        closes cleanly (yields nothing) so callers never have to handle exceptions.
+        Cancellation (``GeneratorExit`` / ``asyncio.CancelledError``) propagates
+        out so the underlying synthesis can be aborted without hanging.
+        """
+        try:
+            provider = self.get_provider(provider_name)
+        except ProviderUnavailableError as exc:
+            logger.warning("Streaming unavailable (no active provider): %s", exc)
+            return
+
+        try:
+            async for chunk in provider.stream_audio(text, voice=voice):
+                yield chunk
+        except ProviderUnavailableError as exc:
+            logger.warning("Streaming stopped (provider unavailable): %s", exc)
+        except Exception as exc:
+            logger.error(
+                "Streaming failed: %s",
+                exc,
+                extra={"voice": voice, "failure": type(exc).__name__},
+            )
 
     # --- health ---
     async def health(self) -> Dict[str, Any]:
