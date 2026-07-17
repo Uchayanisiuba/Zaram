@@ -1,0 +1,6 @@
+export { VSCodeCapabilityPack, buildVSCodeRollback } from './vscode-capability'
+export { VSCodeAdapter } from './vscode-adapter'
+export type { VSCodeAdapterOptions } from './vscode-adapter'
+export { createVSCodeHandlers, handleVSCodeEditorActive, handleVSCodeWorkspaceFolders, handleVSCodeDiagnostics, handleVSCodeGitStatus } from './vscode-handler'
+export type { VSCodeHandlerContext } from './vscode-handler'
+export * from './vscode-types'
