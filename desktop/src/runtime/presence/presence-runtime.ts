@@ -90,6 +90,7 @@ export class PresenceRuntime implements IPresenceRuntime, IPresenceDiagnostics {
   private timer: ReturnType<typeof setInterval> | null = null
   private lastTickTime = 0
   private unsubscribeState: (() => void) | null = null
+  private animationEngineFailed = false
 
   constructor(options: PresenceRuntimeOptions = {}) {
     this.engineAdapter = options.engineAdapter
@@ -371,6 +372,45 @@ export class PresenceRuntime implements IPresenceRuntime, IPresenceDiagnostics {
     return toCharacterFrame(this.characterRuntime.getState(), this.sequence)
   }
 
+  getRendererFrame(): Record<string, unknown> | null {
+    const snap = this.executiveRuntime?.getSnapshot()
+    const intent = snap?.intent?.decision || snap?.state?.currentIntent || 'idle'
+    const confidence = snap?.state?.confidence ?? 0.5
+    const systemState = mapIntentToSystemState(intent)
+
+    return {
+      visual: {
+        presence: 0.5,
+        energy: systemState === 'Thinking' ? 0.7 : systemState === 'Speaking' ? 0.8 : systemState === 'Working' ? 0.9 : 0.4,
+        focus: systemState === 'Thinking' ? 0.8 : 0.5,
+        activity: systemState === 'Working' ? 0.9 : systemState === 'Thinking' ? 0.6 : 0.3
+      },
+      audio: {
+        voiceLevel: 0,
+        microphoneLevel: 0
+      },
+      emotion: {
+        calmness: 0.5,
+        confidence,
+        curiosity: 0.5,
+        warmth: 0.5,
+        empathy: 0.5,
+        playfulness: 0.3
+      },
+      system: {
+        state: systemState,
+        cognitiveLoad: 0.2,
+        visualIdentity: 0.5
+      },
+      metadata: {
+        timestamp: Date.now(),
+        correlationId: 'presence',
+        version: '1.0.0'
+      },
+      sequence: this.sequence
+    }
+  }
+
   hasCharacterRuntime(): boolean {
     return Boolean(this.characterRuntime)
   }
@@ -441,15 +481,26 @@ export class PresenceRuntime implements IPresenceRuntime, IPresenceDiagnostics {
 
   private tick(): void {
     if (this.lifecycle !== 'running' || !this.engineAdapter || !this.stateProvider) return
+    if (this.animationEngineFailed) return
     const tickStart = performance.now()
     const snapshot = this.stateProvider.getSnapshot()
     const runtimeState = this.mapSnapshot(snapshot)
     const dt = this.lastTickTime ? Math.min((tickStart - this.lastTickTime) / 1000, 0.1) : 1 / 30
     this.lastTickTime = tickStart
-    const frameState = this.engineAdapter.update(dt, runtimeState)
-    const tickEnd = performance.now()
-    this.diagnostics.setCpuFrameTime(tickEnd - tickStart)
-    this.consumeFrameState(frameState)
+    try {
+      const frameState = this.engineAdapter.update(dt, runtimeState)
+      const tickEnd = performance.now()
+      this.diagnostics.setCpuFrameTime(tickEnd - tickStart)
+      this.consumeFrameState(frameState)
+    } catch (error) {
+      console.error('[PresenceRuntime] Animation engine crashed, disabling:', error)
+      this.animationEngineFailed = true
+      this.stopEngineTick()
+      this.diagnostics.setAnimationRuntimeStatus('stopped')
+      this.diagnostics.setAnimationConnection('disconnected')
+      this.diagnostics.setPresenceRuntimeStatus('error')
+      return
+    }
     // Milestone 1.1: drive the injected CharacterRuntime on the SAME existing
     // frame tick. No new render loop is introduced.
     if (this.characterRuntime) {
@@ -499,6 +550,22 @@ export class PresenceRuntime implements IPresenceRuntime, IPresenceDiagnostics {
   }
 
   private mapSnapshot(snapshot: RuntimeSnapshot): RuntimeState {
+    const execSnapshot = this.executiveRuntime?.getSnapshot()
+    let derivedState = snapshot.system.state
+
+    if (execSnapshot) {
+      const intent = (execSnapshot.intent?.decision || '').toLowerCase()
+      const focus = (execSnapshot.state?.focus || '').toLowerCase()
+      if (intent.includes('error') || focus.includes('error')) derivedState = 'error'
+      else if (intent.includes('speak') || focus.includes('speak')) derivedState = 'speaking'
+      else if (intent.includes('generate') || focus.includes('generate') || focus.includes('respond')) derivedState = 'working'
+      else if (intent.includes('think') || focus.includes('think')) derivedState = 'thinking'
+      else if (intent.includes('plan') || focus.includes('plan')) derivedState = 'thinking'
+      else if (intent.includes('search') || focus.includes('search')) derivedState = 'working'
+      else if (intent.includes('read') || focus.includes('read')) derivedState = 'working'
+      else derivedState = 'idle'
+    }
+
     const stateMap: Record<string, RuntimeState['state']> = {
       'idle': 'Idle',
       'listening': 'Listening',
@@ -509,7 +576,7 @@ export class PresenceRuntime implements IPresenceRuntime, IPresenceDiagnostics {
       'error': 'Error'
     }
     return {
-      state: stateMap[snapshot.system.state] ?? 'Idle',
+      state: stateMap[derivedState] ?? 'Idle',
       cognitiveLoad: snapshot.system.cognitiveLoad,
       audio: {
         voiceLevel: snapshot.voice.voiceLevel,
@@ -659,4 +726,15 @@ function reasoningToMode(reasoning: string): import('../executive/types').Reason
     default:
       return 'reactive'
   }
+}
+
+function mapIntentToSystemState(intent: string): string {
+  const lower = intent.toLowerCase()
+  if (lower.includes('think') || lower.includes('plan')) return 'Thinking'
+  if (lower.includes('speak') || lower.includes('respond') || lower.includes('reply')) return 'Speaking'
+  if (lower.includes('work') || lower.includes('execute') || lower.includes('search') || lower.includes('read')) return 'Working'
+  if (lower.includes('listen') || lower.includes('hear')) return 'Listening'
+  if (lower.includes('error') || lower.includes('fail')) return 'Error'
+  if (lower.includes('sleep') || lower.includes('idle')) return 'Sleeping'
+  return 'Idle'
 }

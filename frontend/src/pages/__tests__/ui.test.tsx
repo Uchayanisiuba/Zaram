@@ -87,7 +87,7 @@ beforeEach(async () => {
 describe('ConversationPanel', () => {
   it('renders empty state when no messages', () => {
     render(<ConversationPanel />)
-    expect(screen.getByText('Start a conversation with the Executive Runtime')).toBeTruthy()
+    expect(screen.getByText('How can I help you today?')).toBeTruthy()
   })
 
   it('shows workspace context pill when snapshot exists', async () => {
@@ -108,7 +108,7 @@ describe('ConversationPanel', () => {
 
   it('has an input field and send button', () => {
     render(<ConversationPanel />)
-    expect(screen.getByPlaceholderText('Send to Executive Runtime...')).toBeTruthy()
+    expect(screen.getByPlaceholderText('Message Zaram...')).toBeTruthy()
   })
 })
 

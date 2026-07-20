@@ -1,38 +1,22 @@
-"""DEPRECATED (v0.5.3) — scheduled for removal in v0.5.6.
-
-Replaced by the Voice Runtime: ``VoiceManager`` -> ``VoiceRegistry`` ->
-``KokoroProvider``. No active runtime code imports this module anymore; it is
-kept only so the previous speech path can be restored if rollback is needed.
-"""
-
+# backend/services/speech_manager.py
 import os
+import time
 import queue
 import threading
-import time
-from pathlib import Path
-
 import soundfile as sf
-from core.events import AudioChunkReady, SentenceReady
-
-
-# Deprecated: see module docstring. Use voice.providers.kokoro.KokoroProvider.
-class SpeechManager:
+from core.events import SentenceReady, AudioChunkReady
 from implementations.kokoro_tts import KokoroTTS
-
 
 class SpeechManager:
     def __init__(self, tts_engine: KokoroTTS):
         self.tts = tts_engine
-        self.audio_dir = str(Path(__file__).resolve().parent.parent / "audio_cache")
+        self.audio_dir = "backend/audio_cache"
         self.voice = "af_heart"
         os.makedirs(self.audio_dir, exist_ok=True)
-
         self.input_queue = queue.Queue()
         self.output_queue = queue.Queue()
-
         # FIX: Track active tasks to prevent the stream from cutting off prematurely
         self.pending_tasks = 0
-
         threading.Thread(target=self._tts_worker, daemon=True).start()
         threading.Thread(target=self._cleanup_janitor, daemon=True).start()
 
@@ -49,21 +33,15 @@ class SpeechManager:
                 event = self.input_queue.get()
                 if event is None:
                     break
-
-                audio = None
-                if self.tts is not None:
-                    audio = self.tts.generate_audio(event.text, self.voice)
-
+                audio = self.tts.generate_audio(event.text, self.voice)
                 if audio is not None:
                     filename = f"{event.sentence_id}.wav"
                     filepath = os.path.join(self.audio_dir, filename)
                     sf.write(filepath, audio, 24000)
-
                     self.output_queue.put(AudioChunkReady(
                         sentence_id=event.sentence_id,
                         audio_path=filepath
                     ))
-
                 self.input_queue.task_done()
                 # FIX: Decrement when the task is fully complete
                 self.pending_tasks -= 1

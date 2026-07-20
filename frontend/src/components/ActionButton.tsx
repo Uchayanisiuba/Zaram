@@ -1,23 +1,20 @@
 import { motion, AnimatePresence } from 'framer-motion';
 import { Send, Square, Mic } from 'lucide-react';
-import { useOrbState } from './LivingOrb/useOrbState';
 
 interface ActionButtonProps {
   onSend: () => void;
   onStop: () => void;
   onMic: () => void;
   isInputEmpty: boolean;
+  state?: string;
 }
 
-export function ActionButton({ onSend, onStop, onMic, isInputEmpty }: ActionButtonProps) {
-  const { state, getColors } = useOrbState();
-  const colors = getColors();
-
+export function ActionButton({ onSend, onStop, onMic, isInputEmpty, state = 'idle' }: ActionButtonProps) {
   const handleClick = () => {
     if (state === 'speaking' || state === 'generating' || state === 'thinking') {
       onStop();
     } else if (state === 'listening') {
-      onMic(); // Toggle mic off
+      onMic();
     } else {
       onSend();
     }
@@ -28,8 +25,8 @@ export function ActionButton({ onSend, onStop, onMic, isInputEmpty }: ActionButt
       onClick={handleClick}
       className="relative flex items-center justify-center rounded-full transition-shadow duration-300"
       style={{
-        background: state === 'idle' && isInputEmpty ? 'rgba(255,255,255,0.1)' : colors.primary,
-        boxShadow: `0 0 20px ${colors.glow}`,
+        background: state === 'idle' && isInputEmpty ? 'rgba(255,255,255,0.1)' : '#3b82f6',
+        boxShadow: `0 0 20px rgba(59,130,246,0.5)`,
         width: '40px',
         height: '40px',
       }}

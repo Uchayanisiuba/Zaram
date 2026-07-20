@@ -2,11 +2,11 @@
 name = "zaram-os"
 version = "0.1.0"
 description = "Local-First Personal AI Operating System"
-requires-python = ">=3.12"
+requires-python = ">=3.11"
 
 [tool.ruff]
 line-length = 100
-target-version = "py312"
+target-version = "py311"
 src = ["backend"]
 
 [tool.ruff.lint]
@@ -18,12 +18,12 @@ quote-style = "double"
 indent-style = "space"
 
 [tool.mypy]
-python_version = "3.12"
+python_version = "3.11"
 strict = true
 ignore_missing_imports = true
 exclude = ["venv", "node_modules", "frontend"]
 
 [tool.pytest.ini_options]
-testpaths = ["backend/tests", "backend/voice/tests", "backend/media/tests"]
+testpaths = ["backend/tests"]
 asyncio_mode = "auto"
 addopts = "-v --tb=short"

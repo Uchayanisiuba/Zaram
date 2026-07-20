@@ -6,7 +6,6 @@ export const Memory = () => {
     memories,
     addMemory,
     deleteMemory,
-    updateMemory,
     exportMemories,
     selectedMemory,
     setSelectedMemory,

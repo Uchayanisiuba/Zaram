@@ -1,56 +1,24 @@
-# Zaram Runtime Contract
-**Version:** 1.0
-**Status:** Frozen (Requires ADR to modify)
-**Dependencies:** `00_AI_ENGINEERING_MANIFEST.md`
-
-> **Every Runtime must be independently startable, testable, replaceable, and deployable without modifying other Runtimes.**
-
-> **Any subsystem capable of independent lifecycle management is considered a Runtime and must implement this contract.**
-
----
+# Runtime Contract
+**Version:** 1.0 | **Status:** Frozen
 
 ## 1. The Architecture Hierarchy
-
-Responsibilities are strictly separated into three layers. The Engine is always an Interface, never a hardcoded implementation.
-
-1. **Runtime:** Owns the lifecycle, health, configuration, and Event Bus integration.
-2. **Service:** Owns the business logic and orchestration.
+Responsibilities are strictly separated into three layers:
+1. **Runtime:** Owns lifecycle, health, configuration, and Event Bus integration.
+2. **Service:** Owns business logic and orchestration.
 3. **Engine (Interface):** Defines the contract for the underlying implementation.
 
----
+## 2. Universal Runtime Interface
+Every Runtime must expose:
+- `initialize()`, `shutdown()`
+- `get_state()`, `health_check()`
+- `get_capabilities()`, `get_dependencies()`
+- `load_config()`, `reload_config()`
 
-## 2. The Universal Runtime Interface
+## 3. Strict Runtime Rules
+A Runtime may NEVER:
+- Directly call or import another Runtime's implementation.
+- Access another Runtime's internal state.
+- Bypass Zaram Core or the Event Bus.
 
-```python
-from typing import Protocol, Any, Dict
-from enum import Enum
-
-class RuntimeState(Enum):
-    UNINITIALIZED = "uninitialized"
-    INITIALIZING = "initializing"
-    READY = "ready"
-    RUNNING = "running"
-    PAUSED = "paused"
-    DEGRADED = "degraded"
-    STOPPING = "stopping"
-    STOPPED = "stopped"
-    ERROR = "error"
-
-class Runtime(Protocol):
-    # --- Identity ---
-    def get_runtime_id(self) -> str: ...
-    def get_version(self) -> str: ...
-
-    # --- Configuration ---
-    def load_config(self, config: Dict[str, Any]) -> None: ...
-    def reload_config(self, config: Dict[str, Any]) -> None: ...
-
-    # --- Lifecycle ---
-    async def initialize(self) -> None: ...
-    async def shutdown(self) -> None: ...
-
-    # --- Observability ---
-    def get_state(self) -> RuntimeState: ...
-    def health_check(self) -> Dict[str, Any]: ...
-    def get_capabilities(self) -> Dict[str, Any]: ...
-    def get_dependencies(self) -> list[str]: ...
+## 4. Failure Philosophy
+A Runtime failure must never crash Zaram. It must catch exceptions, transition to `DEGRADED`, publish a `runtime.degraded` event, and continue operating in limited capacity.

@@ -1,16 +1,17 @@
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { motion } from 'framer-motion'
-import { Send, Paperclip, Mic, Brain, Database, FolderOpen, Globe } from 'lucide-react'
+import { Send, Paperclip, Mic, Brain, Database, FolderOpen, Globe, Loader2 } from 'lucide-react'
 import { useChatStore } from '@/stores/chatStore'
 import { useThemeStore } from '@/stores/themeStore'
 
 export function InputArea() {
   const [rows, setRows] = useState(1)
-  const { inputValue, setInputValue, addMessage, setLoading } = useChatStore()
+  const { inputValue, setInputValue, addMessage, setLoading, isLoading } = useChatStore()
   const { currentTheme } = useThemeStore()
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   const handleSubmit = async () => {
-    if (!inputValue.trim()) return
+    if (!inputValue.trim() || isLoading) return
 
     addMessage({
       id: Date.now().toString(),
@@ -20,9 +21,9 @@ export function InputArea() {
     })
 
     setInputValue('')
+    setRows(1)
     setLoading(true)
 
-    // Mock response
     setTimeout(() => {
       addMessage({
         id: (Date.now() + 1).toString(),
@@ -50,6 +51,7 @@ export function InputArea() {
       <div className="max-w-4xl mx-auto">
         <div className="glass rounded-2xl p-4 space-y-3">
           <textarea
+            ref={textareaRef}
             value={inputValue}
             onChange={(e) => {
               setInputValue(e.target.value)
@@ -58,9 +60,10 @@ export function InputArea() {
             onKeyDown={handleKeyDown}
             rows={rows}
             placeholder="Type your message..."
-            className="w-full bg-transparent border-none outline-none resize-none text-sm placeholder:text-muted-foreground"
+            disabled={isLoading}
+            className="w-full bg-transparent border-none outline-none resize-none text-sm placeholder:text-muted-foreground disabled:opacity-50"
           />
-          
+
           <div className="flex items-center justify-between pt-3 border-t border-white/10">
             <div className="flex items-center gap-2">
               <button className="p-2 rounded-lg hover:bg-white/5 transition-colors" title="Attach file">
@@ -79,14 +82,20 @@ export function InputArea() {
                 <Globe className="w-4 h-4" />
               </button>
             </div>
-            
+
             <div className="flex items-center gap-2">
+              {isLoading && (
+                <span className="flex items-center gap-1 text-xs text-cyan-400">
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                  Generating...
+                </span>
+              )}
               <button className="p-2 rounded-lg hover:bg-white/5 transition-colors" title="Voice input">
                 <Mic className="w-4 h-4" />
               </button>
               <button
                 onClick={handleSubmit}
-                disabled={!inputValue.trim()}
+                disabled={!inputValue.trim() || isLoading}
                 className="px-4 py-2 rounded-lg bg-gradient-to-r from-cyan-500 to-orange-500 text-white font-medium text-sm disabled:opacity-50 disabled:cursor-not-allowed hover:opacity-90 transition-opacity"
               >
                 Send

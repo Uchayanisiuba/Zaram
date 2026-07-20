@@ -9,19 +9,19 @@ from core.registry import RuntimeRegistry
 
 class ExecutionEngine:
     """The operational core of Zaram. Orchestrates the lifecycle of a user request."""
-    
     def __init__(self, registry: RuntimeRegistry, event_bus: EventBus):
         self._registry = registry
         self._event_bus = event_bus
         self._planner = IntentPlanner()
         self._router = CapabilityRouter(registry)
         self._dispatcher = ExecutionDispatcher(self._router)
-        
-    def execute(self, prompt: str) -> Iterator[str]:
+
+    def execute(self, prompt: str, model: str = "gemma3:latest", system_prompt: str = "") -> Iterator[str]:
         """End-to-end execution: Plan -> Route -> Dispatch -> Stream."""
-        # 1. Plan
+        print(f"[STAGE-8][Kernel] execute() called with prompt: '{prompt[:50]}...' model={model}")
         plan = self._planner.create_plan(prompt)
         plan.state = PlanState.RUNNING
+        print(f"[STAGE-8][Kernel] Plan created: {len(plan.steps)} steps")
         
         self._event_bus.publish(ZaramEvent(
             source_runtime="execution_engine",
@@ -29,7 +29,7 @@ class ExecutionEngine:
             priority="high",
             data={"correlation_id": plan.correlation_id, "step_count": len(plan.steps)}
         ))
-        
+
         # 2. Dispatch Steps
         for step in plan.steps:
             self._event_bus.publish(ZaramEvent(
@@ -40,7 +40,7 @@ class ExecutionEngine:
             ))
             
             # 3. Execute and Stream
-            for token in self._dispatcher.execute_step(step):
+            for token in self._dispatcher.execute_step(step, model, system_prompt):
                 yield token
                 
         # 4. Complete

@@ -23,7 +23,12 @@ class ModelsRuntime(Runtime):
             version="1.0.0",
             priority="critical",
             capabilities=[
-                Capability(id="reasoning.generate", runtime_id="models")
+                Capability(id="reasoning.generate", runtime_id="models"),
+                Capability(id="vision.analyze", runtime_id="models"),
+                Capability(id="vision.screen", runtime_id="models"),
+                Capability(id="vision.camera", runtime_id="models"),
+                Capability(id="vision.document", runtime_id="models"),
+                Capability(id="vision.ocr", runtime_id="models"),
             ],
             dependencies=["event_bus"],
             auto_start=True
@@ -31,13 +36,10 @@ class ModelsRuntime(Runtime):
 
     async def initialize(self) -> None:
         self._state = RuntimeState.INITIALIZING
-        
         # 1. Instantiate Engine and Service
         engine = OllamaEngine()
         self._service = ModelsService(engine)
-        
         self._state = RuntimeState.READY
-        
         # 2. Notify the Event Bus
         self._event_bus.publish(ZaramEvent(
             source_runtime="models",
@@ -61,7 +63,7 @@ class ModelsRuntime(Runtime):
             "state": self._state.value,
             "healthy": self._state == RuntimeState.READY
         }
-        
+
     def get_service(self) -> ModelsService:
         """Helper to access the service for the Capability Router."""
         return self._service

@@ -4,7 +4,6 @@ from core.registry import RuntimeRegistry
 
 class CapabilityRouter:
     """Resolves capabilities to Runtime providers via the Registry."""
-
     def __init__(self, registry: RuntimeRegistry):
         self._registry = registry
 
