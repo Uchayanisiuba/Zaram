@@ -1,68 +1,61 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
 import {
-  MessageSquare, Bot, User, Loader2, Copy, Check,
-  Play, Mic, FolderOpen, Clock, CheckCircle2, XCircle,
-  ChevronRight, FileText, Search, Globe, Cpu, HardDrive,
-  FileCode, ExternalLink, Eye
+  MessageSquare, Bot, User, Loader2, Copy,
+  Play, Mic, FolderOpen, RefreshCw,
+  ImagePlus, Camera, Monitor, X, Paperclip, ThumbsUp, ThumbsDown,
+  Wifi, WifiOff
 } from 'lucide-react'
 import { desktop } from '@/desktop/desktop-bridge'
 import { Button } from '@/components/ui/Button'
-import { Markdown } from '@/components/common/Markdown'
+import { OrbEngine } from '@/components/OrbEngine/OrbEngine'
+import { ResizablePanels, PresenceCanvas, ConversationFeed, ConversationInput } from '@/components/conversation'
 import { useWorkspaceContextStore } from '@/stores/workspaceContextStore'
+import { useZaram } from '@/hooks/useZaram'
 import {
   buildContextPill,
   type WorkspaceSnapshot,
 } from '@/lib/workspaceConversation'
 
-type ExecutiveState = 'idle' | 'thinking' | 'planning' | 'searching' | 'reading' | 'generating' | 'done' | 'error'
+export type ExecutiveState = 'idle' | 'thinking' | 'planning' | 'searching' | 'reading' | 'generating' | 'done' | 'error' | 'searchingInternet'
 
-interface ExecutiveSnapshot {
+export interface ExecutiveSnapshot {
   state?: { currentIntent?: string; focus?: string }
   intent?: { decision?: string }
   goal?: string
   steps?: Array<{ description: string; capabilityId?: string; status?: string }>
 }
 
-interface Message {
+export interface Message {
   id: string
-  role: 'user' | 'assistant' | 'system'
+  role: 'user' | 'assistant'
   content: string
   timestamp: number
+  error?: boolean
   workspaceContext?: WorkspaceSnapshot
-  confidence?: number
-  evidence?: string[]
-  durationMs?: number
-  capabilities?: string[]
-  executionTimeline?: ExecutionTimelineEntry[]
-  referencedFiles?: ReferencedFile[]
+  referencedFiles?: Array<{ path: string; name: string; preview?: string }>
 }
 
 interface ExecutionTimelineEntry {
   id: string
   step: string
-  capabilityId?: string
   status: 'pending' | 'running' | 'completed' | 'failed'
-  durationMs?: number
-  output?: any
+  capabilityId?: string
+  output?: unknown
   error?: string
+  durationMs?: number
 }
 
-interface ReferencedFile {
-  path: string
-  name: string
-  preview?: string
-}
-
-const EXECUTIVE_STATE_COPY: Record<string, ExecutiveState> = {
-  idle: 'idle',
-  thinking: 'thinking',
-  planning: 'planning',
-  searching: 'searching',
-  reading: 'reading',
-  generating: 'generating',
-  done: 'done',
-  error: 'error',
+interface CapabilitySnapshot {
+  total: number
+  enabled: number
+  byCategory: Record<string, number>
+  capabilities: Array<{
+    id: string
+    name: string
+    category: string
+    availability: string
+    latencyEstimateMs: number
+  }>
 }
 
 function mapExecutiveState(snap: ExecutiveSnapshot | null): ExecutiveState {
@@ -70,6 +63,7 @@ function mapExecutiveState(snap: ExecutiveSnapshot | null): ExecutiveState {
   const intent = (snap.intent?.decision || '').toLowerCase()
   const focus = (snap.state?.focus || '').toLowerCase()
   if (intent.includes('error') || focus.includes('error')) return 'error'
+  if (focus.includes('internet') || intent.includes('internet') || focus.includes('knowledge') || intent.includes('knowledge')) return 'searchingInternet'
   if (focus.includes('search') || intent.includes('search')) return 'searching'
   if (focus.includes('read') || intent.includes('read')) return 'reading'
   if (focus.includes('plan') || intent.includes('plan')) return 'planning'
@@ -86,7 +80,8 @@ function executiveStateLabel(state: ExecutiveState): string {
   switch (state) {
     case 'thinking': return 'Thinking...'
     case 'planning': return 'Planning...'
-    case 'searching': return 'Searching Workspace...'
+    case 'searching': return 'Searching...'
+    case 'searchingInternet': return 'Searching Internet...'
     case 'reading': return 'Reading Files...'
     case 'generating': return 'Generating Response...'
     case 'done': return 'Done'
@@ -95,53 +90,14 @@ function executiveStateLabel(state: ExecutiveState): string {
   }
 }
 
-function buildOrchestratedResponse(query: string, results: any[], confidence: number, evidence: string[], durationMs: number): string {
-  const lines: string[] = []
-  lines.push(`**Goal:** ${query}`)
-  lines.push('')
-  lines.push('**Plan:**')
-  for (const result of results) {
-    if (result.error) {
-      lines.push(`- ✗ ${result.step}: ${result.error}`)
-    } else {
-      lines.push(`- ✓ ${result.step}`)
-    }
+function extractFileReferences(text: string): Array<{ path: string; name: string }> {
+  const refs: Array<{ path: string; name: string }> = []
+  const regex = /(?:file:|path:)\s*([^\s]+(?:\.[a-zA-Z0-9]+)?)/g
+  let match
+  while ((match = regex.exec(text)) !== null) {
+    refs.push({ path: match[1], name: match[1].split('/').pop() || match[1] })
   }
-  lines.push('')
-  lines.push('**Execution**')
-  for (const result of results) {
-    if (result.output) {
-      const outputStr = typeof result.output === 'string' ? result.output : JSON.stringify(result.output)
-      lines.push(`\`\`\`${outputStr.slice(0, 500)}\`\`\``)
-    }
-  }
-  lines.push('')
-  lines.push('**Completed**')
-  lines.push('')
-  lines.push(`**Confidence:** ${Math.round(confidence * 100)}%`)
-  lines.push('')
-  lines.push(`**Finished in:** ${durationMs}ms`)
-  if (evidence.length > 0) {
-    lines.push('')
-    lines.push('**Evidence**')
-    for (const item of evidence) {
-      lines.push(`- ${item}`)
-    }
-  }
-  return lines.join('\n')
-}
-
-function extractFileReferences(text: string): ReferencedFile[] {
-  const patterns = [
-    /(?:package\.json|tsconfig\.json|\.tsx?|\.jsx?|\.py|\.rs|\.go|\.java|\.c(?:pp)?|\.h|\.cs|\.rb|\.php|\.swift|\.kt|\.scala|\.sql|\.sh|\.yaml|\.yml|\.toml|\.xml|\.html|\.css|\.scss|\.md)/g,
-    /(?:\.\/[^\s]+|\/[^\s]+)/g,
-  ]
-  const files = new Map<string, string>()
-  for (const pattern of patterns) {
-    const matches = text.match(pattern)
-    if (matches) matches.forEach(m => files.set(m, m.split('/').pop() || m))
-  }
-  return Array.from(files.entries()).slice(0, 10).map(([path, name]) => ({ path, name }))
+  return refs
 }
 
 export function ConversationPanel() {
@@ -151,22 +107,41 @@ export function ConversationPanel() {
   const [executiveState, setExecutiveState] = useState<ExecutiveSnapshot | null>(null)
   const [mappedState, setMappedState] = useState<ExecutiveState>('idle')
   const [isListening, setIsListening] = useState(false)
-  const [currentTimeline, setCurrentTimeline] = useState<ExecutionTimelineEntry[]>([])
-  const [activeCapabilities, setActiveCapabilities] = useState<string[]>([])
+  const [attachedImages, setAttachedImages] = useState<string[]>([])
+  const [showAttachmentMenu, setShowAttachmentMenu] = useState(false)
+  const [capabilitySnapshot, setCapabilitySnapshot] = useState<CapabilitySnapshot | null>(null)
+  const [backendStatus, setBackendStatus] = useState<{ running: boolean; error?: string } | null>(null)
+  const [backendRetrying, setBackendRetrying] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
-  const timelineRef = useRef<HTMLDivElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const snapshot = useWorkspaceContextStore((s) => s.snapshot)
   const indexing = useWorkspaceContextStore((s) => s.indexing)
   const subscribeToWorkspace = useWorkspaceContextStore((s) => s.subscribeToWorkspace)
 
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages, currentTimeline])
+  const { selectedCharacter, selectedModel } = useZaram()
 
   useEffect(() => {
-    timelineRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [currentTimeline])
+    let mounted = true
+    const checkBackend = async () => {
+      try {
+        const status = await desktop.backend.getStatus()
+        if (mounted) setBackendStatus(status)
+      } catch {
+        // ignore
+      }
+    }
+    checkBackend()
+    const interval = setInterval(checkBackend, 3000)
+    return () => {
+      mounted = false
+      clearInterval(interval)
+    }
+  }, [])
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages])
 
   useEffect(() => {
     const unsub = desktop.executive.onSnapshot((snap: any) => {
@@ -174,89 +149,100 @@ export function ConversationPanel() {
       setMappedState(mapExecutiveState(snap))
     })
     const unsubWorkspace = subscribeToWorkspace()
-    const unsubExec = desktop.execution.onEvent((evt: any) => {
-      if (evt.event_type === 'execution.completed' || evt.event_type === 'execution.failed' || evt.event_type === 'execution.running') {
-        setCurrentTimeline(prev => {
-          const next = [...prev]
-          const idx = next.findIndex(t => t.id === evt.data?.executionId)
-          if (idx >= 0) {
-            next[idx] = {
-              ...next[idx],
-              status: evt.event_type === 'execution.completed' ? 'completed' : evt.event_type === 'execution.failed' ? 'failed' : 'running',
-              durationMs: evt.data?.durationMs,
-              output: evt.data?.output,
-              error: evt.data?.error?.message,
-            }
-          }
-          return next
-        })
-      }
-    })
     return () => {
       unsub()
       unsubWorkspace()
-      unsubExec()
     }
   }, [subscribeToWorkspace])
+
+  useEffect(() => {
+    const loadCapabilities = async () => {
+      try {
+        const caps = await desktop.capability.getSnapshot()
+        setCapabilitySnapshot(caps)
+      } catch {
+        // ignore
+      }
+    }
+    loadCapabilities()
+    const interval = setInterval(loadCapabilities, 5000)
+    return () => clearInterval(interval)
+  }, [])
 
   const waitForExecution = useCallback(async (executionId: string, timelineId: string): Promise<any> => {
     return new Promise((resolve, reject) => {
       const startTime = Date.now()
+      console.log('[IPC] waitForExecution started for:', executionId)
       const unsub = desktop.execution.onEvent((evt: any) => {
-        if (evt.executionId === executionId) {
+        const eventExecutionId = evt?.data?.executionId
+        console.log('[IPC] Event received in waitForExecution, eventExecutionId:', eventExecutionId, 'looking for:', executionId, 'match:', eventExecutionId === executionId)
+        if (eventExecutionId === executionId) {
           const durationMs = Date.now() - startTime
-          setCurrentTimeline(prev => prev.map(t =>
-            t.id === timelineId
-              ? { ...t, status: evt.status === 'completed' ? 'completed' : evt.status === 'failed' ? 'failed' : 'running', durationMs }
-              : t
-          ))
-          if (evt.status === 'completed' || evt.status === 'failed' || evt.status === 'cancelled') {
+          const eventStatus = evt?.data?.status
+          if (eventStatus === 'completed' || eventStatus === 'failed' || eventStatus === 'cancelled') {
             unsub()
-            resolve(evt)
+            resolve({
+              status: evt.data.status,
+              output: evt.data.output,
+              error: evt.data.error,
+              durationMs: evt.data.durationMs,
+            })
           }
         }
       })
 
-      desktop.execution.getExecution(executionId).then((status: any) => {
-        if (status && (status.status === 'completed' || status.status === 'failed' || status.status === 'cancelled')) {
+      desktop.execution.getExecution(executionId).then((execResult: any) => {
+        if (execResult && (execResult.status === 'completed' || execResult.status === 'failed' || execResult.status === 'cancelled')) {
           unsub()
-          resolve(status)
+          resolve({
+            status: execResult.status,
+            output: execResult.output,
+            error: execResult.error,
+            durationMs: execResult.durationMs,
+          })
         }
       }).catch(() => {
-        // wait for event
+        // execution may not exist yet, wait for event
       })
+
+      setTimeout(() => {
+        if (Date.now() - startTime > 30000) {
+          unsub()
+          reject(new Error('Execution timeout'))
+        }
+      }, 30000)
     })
   }, [])
 
-  const sendMessage = async () => {
-    if (!input.trim() || isLoading) return
-    const text = input.trim()
+  const sendMessage = async (overrideText?: string) => {
+    const text = (overrideText || input).trim()
+    if (!text || isLoading) return
     setInput('')
     setIsLoading(true)
     const startTime = Date.now()
     const timeline: ExecutionTimelineEntry[] = []
 
+    console.log('[STAGE-1][UI] sendMessage:', text)
+
     setMessages(prev => [...prev, { id: `u-${Date.now()}`, role: 'user', content: text, timestamp: Date.now() }])
-    setCurrentTimeline([])
-    setActiveCapabilities([])
 
     const currentSnapshot = useWorkspaceContextStore.getState().snapshot
     const usedCapabilities: string[] = []
 
     try {
-      const plan = await desktop.executive.plan(text)
-      if (!plan || !plan.steps || plan.steps.length === 0) {
-        throw new Error('Executive Runtime did not return a plan')
+      if (!backendStatus?.running) {
+        throw new Error('Backend unavailable — cannot process conversation. Please ensure the backend is running.')
       }
 
-      timeline.push({
-        id: 'plan',
-        step: `Goal: ${plan.goal || text}`,
-        status: 'completed',
-        durationMs: 0,
-      })
+      console.log('[STAGE-2][IPC] Calling desktop.executive.plan()')
+      const plan = await desktop.executive.plan(text, { persona: selectedCharacter, model: selectedModel })
+      console.log('[STAGE-3][Runtime] Executive plan received:', plan)
+      if (!plan || !plan.steps || plan.steps.length === 0) {
+        throw new Error('Runtime did not return a plan')
+      }
 
       const results: any[] = []
+      const stepOutputs = new Map<string, any>()
       for (const step of plan.steps) {
         const timelineId = `step-${step.id || Date.now()}-${Math.random().toString(36).slice(2, 7)}`
         timeline.push({
@@ -265,21 +251,52 @@ export function ConversationPanel() {
           capabilityId: step.capabilityId,
           status: 'running',
         })
-        setCurrentTimeline([...timeline])
-        setActiveCapabilities(prev => step.capabilityId ? [...prev, step.capabilityId] : prev)
 
         try {
-          const execResult = await desktop.execution.execute(step.capabilityId, step.input || {})
+          console.log('[STAGE-4][IPC] Calling desktop.execution.execute:', step.capabilityId)
+          let stepInput = step.input || {}
+          if (step.capabilityId.startsWith('vision.') && attachedImages.length > 0) {
+            stepInput = {
+              ...stepInput,
+              image: attachedImages[0],
+              images: attachedImages
+            }
+          }
+          if (step.capabilityId === 'reasoning.generate') {
+            const prior = stepOutputs.get('knowledge.search')
+            if (prior) {
+              const searchContext = typeof prior === 'string' ? prior : JSON.stringify(prior)
+              stepInput = {
+                ...stepInput,
+                prompt: `${stepInput.prompt || ''}\n\nSearch results:\n${searchContext}`
+              }
+            }
+          }
+          const execResult = await desktop.execution.execute(step.capabilityId, stepInput)
+          console.log('[STAGE-5][IPC] Execution started, result:', execResult)
           if (execResult && execResult.id) {
             const status = await waitForExecution(execResult.id, timelineId)
-            if (status.status === 'completed') {
-              results.push({ step: step.description, output: status.output })
-              if (step.capabilityId) usedCapabilities.push(step.capabilityId)
-              const idx = timeline.findIndex(t => t.id === timelineId)
-              if (idx >= 0) {
-                timeline[idx] = { ...timeline[idx], status: 'completed', output: status.output }
-              }
-            } else if (status.status === 'failed') {
+            console.log('[STAGE-6][IPC] Execution completed, status:', status)
+             if (status.status === 'completed') {
+               const rawOutput = status.output
+               let assistantText = ''
+               if (typeof rawOutput === 'string') {
+                 assistantText = rawOutput
+               } else if (rawOutput && typeof rawOutput.response === 'string') {
+                 assistantText = rawOutput.response
+               } else if (rawOutput && typeof rawOutput === 'object') {
+                 assistantText = JSON.stringify(rawOutput)
+               }
+               results.push({ step: step.description, output: rawOutput })
+               if (step.capabilityId) {
+                 usedCapabilities.push(step.capabilityId)
+                 stepOutputs.set(step.capabilityId, rawOutput)
+               }
+               const idx = timeline.findIndex(t => t.id === timelineId)
+               if (idx >= 0) {
+                 timeline[idx] = { ...timeline[idx], status: 'completed', output: rawOutput }
+               }
+             } else if (status.status === 'failed') {
               results.push({ step: step.description, error: status.error?.message || 'Failed' })
               const idx = timeline.findIndex(t => t.id === timelineId)
               if (idx >= 0) {
@@ -294,48 +311,45 @@ export function ConversationPanel() {
             timeline[idx] = { ...timeline[idx], status: 'failed', error: err instanceof Error ? err.message : String(err) }
           }
         }
-        setCurrentTimeline([...timeline])
-        setActiveCapabilities(prev => step.capabilityId ? prev.filter(c => c !== step.capabilityId) : prev)
       }
 
-      const confidence = await desktop.executive.getConfidence()
-      const evidence = await desktop.executive.getEvidence()
-      const durationMs = Date.now() - startTime
-      const response = buildOrchestratedResponse(text, results, confidence, evidence, durationMs)
-      const referencedFiles = extractFileReferences(response)
+      const successfulResult = results.find(r => !r.error && r.output && (typeof r.output === 'string' || r.output.response))
+      const assistantText = successfulResult
+        ? (typeof successfulResult.output === 'string' ? successfulResult.output : successfulResult.output.response || '')
+        : results.map(r => r.error || JSON.stringify(r.output)).join('\n') || 'No response generated'
+      const referencedFiles = extractFileReferences(assistantText)
 
-      timeline.push({
-        id: 'response',
-        step: 'Response Generated',
-        status: 'completed',
-        durationMs,
-      })
-      setCurrentTimeline([...timeline])
-
+      console.log('[STAGE-7][Renderer] Appending assistant message, length:', assistantText.length)
       setMessages(prev => [...prev, {
         id: `a-${Date.now()}`,
         role: 'assistant',
-        content: response,
+        content: assistantText,
         timestamp: Date.now(),
-        workspaceContext: currentSnapshot ?? undefined,
-        confidence,
-        evidence,
-        durationMs,
-        capabilities: usedCapabilities,
-        executionTimeline: timeline,
         referencedFiles,
       }])
-    } catch (err) {
+      console.log('[STAGE-8][Renderer] Assistant message appended')
+    } catch {
       setMessages(prev => [...prev, {
         id: `a-${Date.now()}`,
         role: 'assistant',
-        content: `Error: ${err instanceof Error ? err.message : String(err)}`,
+        content: `Something went wrong. Please try again.`,
         timestamp: Date.now(),
+        error: true,
       }])
     } finally {
       setIsLoading(false)
-      setCurrentTimeline([])
-      setActiveCapabilities([])
+      setAttachedImages([])
+    }
+  }
+
+  const chooseWorkspace = async () => {
+    try {
+      const root = await desktop.dialog?.selectDirectory?.()
+      if (root) {
+        await desktop.workspace?.setRootPath?.(root)
+      }
+    } catch {
+      // ignore
     }
   }
 
@@ -347,15 +361,105 @@ export function ConversationPanel() {
     setIsListening(true)
     if (desktop.dialog?.showOpen) {
       try {
-        const files = await desktop.dialog.showOpen()
-        if (files && Array.isArray(files) && files.length > 0) {
-          setInput(prev => prev + ' ' + files[0])
+        const result = await desktop.dialog.showOpen()
+        const filePaths = result?.filePaths || []
+        if (filePaths.length > 0) {
+          setInput(prev => prev + ' ' + filePaths[0])
         }
       } catch {
         // ignore
       }
     }
     setIsListening(false)
+  }
+
+  const retryBackend = async () => {
+    setBackendRetrying(true)
+    try {
+      const status = await desktop.backend.getStatus()
+      setBackendStatus(status)
+    } catch {
+      // ignore
+    } finally {
+      setBackendRetrying(false)
+    }
+  }
+
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files
+    if (!files || files.length === 0) return
+    
+    for (const file of files) {
+      const reader = new FileReader()
+      reader.onload = () => {
+        const base64 = reader.result as string
+        setAttachedImages(prev => [...prev, base64])
+      }
+      reader.readAsDataURL(file)
+    }
+    
+    if (fileInputRef.current) {
+      fileInputRef.current.value = ''
+    }
+  }
+
+  const handleScreenCapture = async () => {
+    setShowAttachmentMenu(false)
+    try {
+      const sources = await desktop.runtime?.desktopGetSources?.({ types: ['window', 'screen'] })
+      if (!sources || sources.length === 0) return
+      
+      const selected = sources[0]
+      if (selected.thumbnail) {
+        setAttachedImages(prev => [...prev, selected.thumbnail])
+      }
+    } catch {
+      // ignore screen capture errors
+    }
+  }
+
+  const handleCameraCapture = async () => {
+    setShowAttachmentMenu(false)
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } })
+      const video = document.createElement('video')
+      video.srcObject = stream
+      video.play()
+      
+      await new Promise((resolve) => {
+        video.onloadedmetadata = () => {
+          setTimeout(resolve, 500)
+        }
+      })
+      
+      const canvas = document.createElement('canvas')
+      canvas.width = video.videoWidth
+      canvas.height = video.videoHeight
+      const ctx = canvas.getContext('2d')
+      ctx?.drawImage(video, 0, 0)
+      
+      const tracks = stream.getTracks()
+      tracks.forEach(track => track.stop())
+      
+      const base64 = canvas.toDataURL('image/png')
+      setAttachedImages(prev => [...prev, base64])
+    } catch {
+      // ignore camera errors
+    }
+  }
+
+  const handleClipboardPaste = async () => {
+    setShowAttachmentMenu(false)
+    try {
+      const text = await navigator.clipboard.readText()
+      setInput(prev => prev + text)
+    } catch {
+      // ignore clipboard errors
+    }
+  }
+
+  const removeImage = (index: number) => {
+    setAttachedImages(prev => prev.filter((_, i) => i !== index))
   }
 
   const copyToClipboard = async (text: string) => {
@@ -379,237 +483,137 @@ export function ConversationPanel() {
     }
   }
 
+  const noWorkspace = !snapshot || !snapshot.workspace || snapshot.workspace === 'root' || snapshot.projects === 0
+
+  const backendBanner = () => {
+    if (backendStatus?.running) return null
+    if (!backendStatus) return null
+    
+    return (
+      <div className="fixed bottom-4 right-4 z-50">
+        <div className="flex items-center gap-2 px-4 py-2 bg-red-500/10 border border-red-500/20 text-red-400 text-xs rounded-lg backdrop-blur-sm">
+          <WifiOff className="w-3.5 h-3.5" />
+          <span>Connection unavailable</span>
+          <Button variant="ghost" size="sm" onClick={retryBackend} className="ml-2 h-6 px-2 text-xs">
+            Retry
+          </Button>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="h-full flex flex-col">
-      <div className="flex items-center justify-between px-6 py-4 border-b border-white/5">
-        <div>
-          <h2 className="text-lg font-bold text-white tracking-wide">CONVERSATION</h2>
-          <p className="text-xs text-slate-400 mt-1">Connected to Executive Runtime</p>
-        </div>
-        <div className="flex items-center gap-2">
-          {isLoading && (
-            <div className="flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-mono border border-blue-400/30 bg-blue-400/5 text-blue-300">
-              <Loader2 className="w-3 h-3 animate-spin" />
-              <span>{executiveStateLabel(mappedState)}</span>
-            </div>
-          )}
-          {!isLoading && mappedState !== 'idle' && (
-            <div className="flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-mono border border-white/10 text-slate-300">
-              <span>{executiveStateLabel(mappedState)}</span>
-            </div>
-          )}
-          {snapshot && (
-            <div className="flex items-center gap-2 px-3 py-1.5 rounded-full text-xs border border-cyan-400/30 bg-cyan-400/5 text-cyan-300">
-              <FolderOpen className="w-3 h-3" />
-              <span className="font-medium">{snapshot.workspace}</span>
-              <span className="text-slate-400">|</span>
-              <span>{buildContextPill(snapshot)}</span>
-            </div>
-          )}
-          {indexing && (
-            <div className="flex items-center gap-2 px-3 py-1.5 rounded-full text-xs border border-blue-400/30 bg-blue-400/5 text-blue-300">
-              <Loader2 className="w-3 h-3 animate-spin" />
-              <span>Indexing workspace...</span>
-            </div>
-          )}
-        </div>
-      </div>
+      {backendBanner()}
 
-      <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
-        {messages.length === 0 && (
-          <div className="flex items-center justify-center h-full">
-            <div className="text-center">
-              <MessageSquare className="w-12 h-12 mx-auto mb-4 text-slate-600" />
-              <p className="text-slate-400 text-sm">Start a conversation with the Executive Runtime</p>
-              <p className="text-slate-500 text-xs mt-2">All responses come from the real runtime pipeline</p>
-            </div>
+      {/* Project Pill */}
+      <div className="flex items-center justify-center px-6 py-3 border-b border-white/5">
+        {!noWorkspace && snapshot ? (
+          <div className="flex items-center gap-2 px-3.5 py-1.5 rounded-full text-xs border border-white/10 bg-white/5 text-slate-300">
+            <FolderOpen className="w-3.5 h-3.5 text-cyan-400" />
+            <span className="font-medium text-white">{snapshot.workspace}</span>
+            <span className="text-slate-500">|</span>
+            <span>{buildContextPill(snapshot)}</span>
+            {snapshot.confidence > 0 && (
+              <>
+                <span className="text-slate-500">|</span>
+                <span className="text-cyan-400/80">{snapshot.confidence}% match</span>
+              </>
+            )}
           </div>
-        )}
-        <AnimatePresence>
-          {messages.map((msg) => (
-            <motion.div
-              key={msg.id}
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -10 }}
-              className={`flex gap-3 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
-            >
-              {msg.role === 'assistant' && (
-                <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-cyan-500 to-orange-500 flex items-center justify-center flex-shrink-0">
-                  <Bot className="w-4 h-4 text-white" />
-                </div>
-              )}
-              <div className={`flex flex-col gap-1.5 ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
-                {msg.workspaceContext && (
-                  <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] border border-cyan-400/20 bg-cyan-400/5 text-cyan-300/90">
-                    <span>📁</span>
-                    <span className="font-medium">Workspace</span>
-                    <span className="text-slate-400">|</span>
-                    <span>{buildContextPill(msg.workspaceContext)}</span>
-                    <span className="text-slate-400">|</span>
-                    <span className="text-cyan-400/80">Confidence {msg.workspaceContext.confidence}%</span>
-                  </div>
-                )}
-                {msg.capabilities && msg.capabilities.length > 0 && (
-                  <div className="flex items-center gap-1.5">
-                    {msg.capabilities.map((cap) => (
-                      <span key={cap} className="px-2 py-0.5 rounded-full text-[10px] font-mono border border-white/10 bg-white/5 text-slate-300">
-                        {cap}
-                      </span>
-                    ))}
-                  </div>
-                )}
-                {msg.executionTimeline && msg.executionTimeline.length > 0 && (
-                  <div className="space-y-1 max-w-[80%]">
-                    {msg.executionTimeline.map((entry, i) => (
-                      <div key={i} className="flex items-center gap-2 text-xs p-2 rounded-lg bg-white/5 border border-white/10">
-                        <div className={`w-1.5 h-1.5 rounded-full ${
-                          entry.status === 'completed' ? 'bg-green-400' :
-                          entry.status === 'failed' ? 'bg-red-400' :
-                          entry.status === 'running' ? 'bg-blue-400 animate-pulse' : 'bg-slate-500'
-                        }`} />
-                        <span className="text-slate-300 flex-1">{entry.step}</span>
-                        {entry.durationMs && (
-                          <span className="text-[10px] text-slate-500 font-mono">{entry.durationMs}ms</span>
-                        )}
-                        {entry.status === 'completed' && <CheckCircle2 className="w-3 h-3 text-green-400" />}
-                        {entry.status === 'failed' && <XCircle className="w-3 h-3 text-red-400" />}
-                      </div>
-                    ))}
-                  </div>
-                )}
-                <div className={`max-w-[80%] rounded-2xl p-4 ${msg.role === 'user' ? 'bg-white/10' : 'bg-black/40 border border-white/10'}`}>
-                  {msg.role === 'assistant' ? (
-                    <Markdown content={msg.content} />
-                  ) : (
-                    <p className="text-sm text-slate-200 whitespace-pre-wrap">{msg.content}</p>
-                  )}
-                  {msg.referencedFiles && msg.referencedFiles.length > 0 && (
-                    <div className="mt-3 space-y-1">
-                      {msg.referencedFiles.map((file, i) => (
-                        <button
-                          key={i}
-                          onClick={() => openFilePreview(file.path)}
-                          className="flex items-center gap-2 px-2 py-1 rounded-lg text-xs bg-white/5 hover:bg-white/10 border border-white/10 text-slate-300 transition-colors"
-                        >
-                          <FileText className="w-3 h-3" />
-                          <span className="font-mono truncate max-w-[200px]">{file.name}</span>
-                          <Eye className="w-3 h-3 ml-auto" />
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                  <div className="flex items-center gap-3 mt-2">
-                    <p className="text-[10px] text-slate-500">
-                      {new Date(msg.timestamp).toLocaleTimeString()}
-                    </p>
-                    {msg.durationMs !== undefined && (
-                      <p className="text-[10px] text-slate-500 flex items-center gap-1">
-                        <Clock className="w-3 h-3" />
-                        Finished in {msg.durationMs}ms
-                      </p>
-                    )}
-                    {msg.confidence !== undefined && (
-                      <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-green-400/10 text-green-400 border border-green-400/20">
-                        Confidence {Math.round(msg.confidence * 100)}%
-                      </span>
-                    )}
-                    {msg.evidence && msg.evidence.length > 0 && (
-                      <span className="text-[10px] text-slate-500">
-                        Evidence: {msg.evidence.length} sources
-                      </span>
-                    )}
-                  </div>
-                </div>
-                {msg.role === 'user' && (
-                  <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center flex-shrink-0">
-                    <User className="w-4 h-4 text-white" />
-                  </div>
-                )}
-              </div>
-            </motion.div>
-          ))}
-        </AnimatePresence>
-        {isLoading && currentTimeline.length > 0 && (
-          <div className="space-y-1 max-w-[80%]">
-            {currentTimeline.map((entry) => (
-              <div key={entry.id} className="flex items-center gap-2 text-xs p-2 rounded-lg bg-white/5 border border-white/10">
-                <div className={`w-1.5 h-1.5 rounded-full ${
-                  entry.status === 'completed' ? 'bg-green-400' :
-                  entry.status === 'failed' ? 'bg-red-400' :
-                  entry.status === 'running' ? 'bg-blue-400 animate-pulse' : 'bg-slate-500'
-                }`} />
-                <span className="text-slate-300 flex-1">{entry.step}</span>
-                {entry.durationMs && (
-                  <span className="text-[10px] text-slate-500 font-mono">{entry.durationMs}ms</span>
-                )}
-                {entry.status === 'completed' && <CheckCircle2 className="w-3 h-3 text-green-400" />}
-                {entry.status === 'failed' && <XCircle className="w-3 h-3 text-red-400" />}
-              </div>
-            ))}
-            <div ref={timelineRef} />
-          </div>
-        )}
-        {isLoading && currentTimeline.length === 0 && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex gap-3 justify-start">
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-cyan-500 to-orange-500 flex items-center justify-center flex-shrink-0">
-              <Bot className="w-4 h-4 text-white" />
-            </div>
-            <div className="rounded-2xl p-4 bg-black/40 border border-white/10 flex items-center gap-2">
-              <motion.div
-                animate={{ opacity: [0.4, 1, 0.4] }}
-                transition={{ duration: 1.5, repeat: Infinity }}
-              >
-                <Loader2 className="w-4 h-4 animate-spin text-cyan-400" />
-              </motion.div>
-              <span className="text-sm text-white/60">{executiveStateLabel(mappedState)}</span>
-            </div>
-          </motion.div>
-        )}
-        <div ref={messagesEndRef} />
-      </div>
-
-      {activeCapabilities.length > 0 && (
-        <div className="px-6 py-2 border-t border-white/5 bg-black/20">
+        ) : (
           <div className="flex items-center gap-2">
-            <span className="text-[10px] text-slate-500 uppercase tracking-wider">Active:</span>
-            {activeCapabilities.map((cap) => (
-              <span key={cap} className="px-2 py-0.5 rounded-full text-[10px] font-mono border border-blue-400/30 bg-blue-400/5 text-blue-300 animate-pulse">
-                {cap}
-              </span>
-            ))}
+            <span className="text-xs text-slate-500">Open a project to enable workspace context</span>
           </div>
-        </div>
-      )}
+        )}
+        {indexing && (
+          <div className="flex items-center gap-2 px-3 py-1.5 rounded-full text-xs border border-blue-400/30 bg-blue-400/5 text-blue-300 ml-3">
+            <Loader2 className="w-3 h-3 animate-spin" />
+            <span>Indexing...</span>
+          </div>
+        )}
+      </div>
 
-      <div className="px-6 py-4 border-t border-white/5">
-        <div className="max-w-4xl mx-auto">
-          <div className="glass rounded-2xl p-2 flex items-center gap-2 border border-white/10">
-            <input
-              type="text"
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault()
-                  sendMessage()
-                }
-              }}
-              placeholder="Send to Executive Runtime..."
-              className="flex-1 bg-transparent outline-none text-sm text-white px-4"
-            />
-            <button
-              onClick={handleVoice}
-              className={`p-2 rounded-lg transition-colors ${isListening ? 'bg-red-500/20 text-red-400' : 'text-slate-400 hover:text-white'}`}
-            >
-              <Mic className="w-4 h-4" />
-            </button>
-            <Button onClick={sendMessage} disabled={!input.trim() || isLoading}>
-              <Play className="w-4 h-4" />
-            </Button>
+      {/* Main Content: Resizable Three-Panel Layout */}
+      <div className="flex-1 flex min-h-0">
+        <ResizablePanels
+          defaultSizes={{ sidebar: 15, canvas: 55, conversation: 30 }}
+          minWidths={{ sidebar: 220, canvas: 500, conversation: 350 }}
+        >
+          {/* Left Connections Panel */}
+          <div className="h-full flex flex-col border-r border-white/5 overflow-hidden">
+            <div className="p-4 border-b border-white/5">
+              <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Connections</h3>
+            </div>
+            <div className="flex-1 overflow-y-auto p-3 space-y-1">
+              <ConnectionItem icon="📁" label="Projects" onClick={() => {}} />
+              <ConnectionItem icon="🌐" label="Browser" onClick={() => {}} />
+              <ConnectionItem icon="📄" label="Documents" onClick={() => {}} />
+              <div className="h-px bg-white/5 my-2" />
+              <ConnectionItem icon="📧" label="Email" onClick={() => {}} />
+              <ConnectionItem icon="📅" label="Calendar" onClick={() => {}} />
+              <ConnectionItem icon="📰" label="RSS" onClick={() => {}} />
+              <div className="h-px bg-white/5 my-2" />
+              <ConnectionItem icon="📷" label="Camera" onClick={() => {}} />
+              <ConnectionItem icon="🖥" label="Screen Share" onClick={() => {}} />
+              <div className="h-px bg-white/5 my-2" />
+              <ConnectionItem icon="⚡" label="Automation" onClick={() => {}} />
+            </div>
           </div>
-        </div>
+
+          {/* Center: Presence Canvas */}
+          <PresenceCanvas
+            state={mappedState}
+            mode="orb"
+          />
+
+          {/* Right: Conversation Feed */}
+          <ConversationFeed
+            messages={messages}
+            isLoading={isLoading}
+            mappedState={mappedState}
+            noWorkspace={noWorkspace}
+            onFilePreview={openFilePreview}
+          >
+            <ConversationInput
+              input={input}
+              isLoading={isLoading}
+              isListening={isListening}
+              attachedImages={attachedImages}
+              showAttachmentMenu={showAttachmentMenu}
+              onInputChange={setInput}
+              onSend={sendMessage}
+              onVoice={handleVoice}
+              onFileSelect={handleFileSelect}
+              onCameraCapture={handleCameraCapture}
+              onScreenCapture={handleScreenCapture}
+              onClipboardPaste={handleClipboardPaste}
+              onRemoveImage={removeImage}
+              onToggleAttachmentMenu={() => setShowAttachmentMenu(!showAttachmentMenu)}
+            />
+          </ConversationFeed>
+        </ResizablePanels>
       </div>
     </div>
+  )
+}
+
+function ClipboardIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+    </svg>
+  )
+}
+
+function ConnectionItem({ icon, label, onClick }: { icon: string; label: string; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs text-slate-300 hover:bg-white/5 hover:text-white transition-colors text-left"
+    >
+      <span className="text-sm">{icon}</span>
+      <span>{label}</span>
+    </button>
   )
 }

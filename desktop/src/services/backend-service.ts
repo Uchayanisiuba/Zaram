@@ -1,8 +1,8 @@
 import { ChildProcess, spawn } from 'child_process'
 import path from 'path'
 import fs from 'fs'
-import { getBackendPath, getAppDataPath } from '../config/paths'
-import { isDevelopment } from '../config/environment'
+import http from 'http'
+import { getBackendPath, getAppDataPath, isDevelopment } from '../config/paths'
 
 export interface BackendServiceOptions {
   host?: string
@@ -24,10 +24,12 @@ export interface BackendStatus {
 
 const DEFAULT_BACKEND_PORT = 8000
 const DEFAULT_HEALTH_CHECK_INTERVAL = 5000
-const DEFAULT_BACKEND_SCRIPT = path.join(__dirname, '..', '..', '..', 'backend', 'main.py')
+const DEFAULT_BACKEND_SCRIPT = path.join(__dirname, '..', '..', '..', '..', 'backend', 'main.py')
+const VENV_PYTHON = path.join(__dirname, '..', '..', '..', '..', '.venv', 'Scripts', 'python.exe')
 
 export class BackendService {
   private process: ChildProcess | null = null
+  private processExited = false
   private status: BackendStatus = {
     running: false,
     host: '127.0.0.1',
@@ -41,7 +43,7 @@ export class BackendService {
     this.options = {
       host: options.host || '127.0.0.1',
       port: options.port || DEFAULT_BACKEND_PORT,
-      pythonPath: options.pythonPath || 'python',
+      pythonPath: options.pythonPath || (fs.existsSync(VENV_PYTHON) ? VENV_PYTHON : 'python'),
       backendScript: options.backendScript || DEFAULT_BACKEND_SCRIPT,
       autoStart: options.autoStart ?? true,
       healthCheckInterval: options.healthCheckInterval || DEFAULT_HEALTH_CHECK_INTERVAL
@@ -64,7 +66,6 @@ export class BackendService {
         await this.startProduction()
       }
 
-      this.status.running = true
       this.startHealthCheck()
       return this.status
     } catch (error) {
@@ -74,6 +75,12 @@ export class BackendService {
   }
 
   private async startDevelopment(): Promise<void> {
+    const healthy = await this.checkHealth()
+    if (healthy) {
+      this.status.running = true
+      return
+    }
+
     return new Promise((resolve, reject) => {
       const script = this.options.backendScript!
       if (!fs.existsSync(script)) {
@@ -90,7 +97,7 @@ export class BackendService {
 
       this.process = spawn(this.options.pythonPath!, args, {
         env,
-        cwd: path.join(__dirname, '..', '..', '..', 'backend'),
+        cwd: path.join(__dirname, '..', '..', '..', '..', 'backend'),
         stdio: 'pipe'
       })
 
@@ -146,10 +153,12 @@ export class BackendService {
 
       this.process.on('spawn', () => {
         this.status.pid = this.process!.pid!
+        this.processExited = false
         resolve()
       })
 
       this.process.on('exit', (code) => {
+        this.processExited = true
         if (code !== 0 && this.status.running) {
           this.status.running = false
           this.status.error = `Backend exited with code ${code}`
@@ -169,33 +178,53 @@ export class BackendService {
   }
 
   async checkHealth(): Promise<boolean> {
-    try {
-      const controller = new AbortController()
-      const timeout = setTimeout(() => controller.abort(), 3000)
-
-      const response = await fetch(`http://${this.status.host}:${this.status.port}/health`, {
-        signal: controller.signal as any
+    return new Promise((resolve) => {
+      const url = `http://127.0.0.1:${this.status.port}/health`
+      const req = http.get(url, (res) => {
+        resolve(res.statusCode === 200)
       })
-
-      clearTimeout(timeout)
-      return response.ok
-    } catch {
-      return false
-    }
+      req.on('error', (err: any) => {
+        resolve(false)
+      })
+      req.setTimeout(5000, () => {
+        req.destroy()
+        resolve(false)
+      })
+    })
   }
 
   getStatus(): BackendStatus {
     return { ...this.status }
   }
-
   private startHealthCheck(): void {
     this.stopHealthCheck()
+    const startTime = Date.now()
+    const warmupMs = 10000
     this.healthCheckTimer = setInterval(async () => {
+      const elapsed = Date.now() - startTime
       const healthy = await this.checkHealth()
-      if (!healthy && this.status.running) {
-        console.error('Backend health check failed')
+      if (healthy) {
+        this.status.running = true
+        this.status.error = undefined
+      }
+      else if (this.status.running && elapsed > warmupMs) {
         this.status.running = false
         this.status.error = 'Backend health check failed'
+        if (this.processExited || !this.process) {
+          this.process = null
+          this.processExited = false
+          try {
+            if (isDevelopment()) {
+              await this.startDevelopment()
+            } else {
+              await this.startProduction()
+            }
+            this.status.running = true
+            this.status.error = undefined
+          } catch (err) {
+            this.status.error = err instanceof Error ? err.message : String(err)
+          }
+        }
       }
     }, this.healthCheckInterval)
   }

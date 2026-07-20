@@ -257,6 +257,7 @@ export class ExecutionRuntime implements IExecutionRuntime {
   private invokeHandler(exec: ExecutionResult): void {
     const handler = this.invoker.resolve(exec.capabilityId)
     if (!handler) {
+      console.error(`[ExecutionRuntime] No handler registered for ${exec.capabilityId}`)
       this.completeFail(exec, { code: 'capability-unavailable', message: `No handler registered for ${exec.capabilityId}`, attempt: exec.attempts, kind: 'capability-unavailable' })
       return
     }
@@ -296,6 +297,7 @@ export class ExecutionRuntime implements IExecutionRuntime {
           : typeof error === 'string'
             ? { code: 'handler', message: error, attempt: exec.attempts, kind: 'handler' }
             : error
+        console.error(`[ExecutionRuntime] Handler failed for ${exec.capabilityId}:`, err.message)
         this.completeFail(exec, err)
       },
       isCancelled: () => exec.cancelled,
@@ -303,6 +305,7 @@ export class ExecutionRuntime implements IExecutionRuntime {
     }
 
     try {
+      console.log(`[ExecutionRuntime] Invoking handler for ${exec.capabilityId}`)
       const result = handler(request, request.context, controls)
       if (result && typeof result.then === 'function') {
         result.then(
@@ -312,6 +315,7 @@ export class ExecutionRuntime implements IExecutionRuntime {
           (err) => {
             if (!isTerminal(exec.status)) {
               const msg = err instanceof Error ? err.message : String(err)
+              console.error(`[ExecutionRuntime] Handler promise rejected for ${exec.capabilityId}:`, msg)
               this.completeFail(exec, { code: 'handler', message: msg, attempt: exec.attempts, kind: 'handler' })
             }
           }
@@ -319,6 +323,7 @@ export class ExecutionRuntime implements IExecutionRuntime {
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
+      console.error(`[ExecutionRuntime] Handler threw for ${exec.capabilityId}:`, msg)
       this.completeFail(exec, { code: 'handler', message: msg, attempt: exec.attempts, kind: 'handler' })
     }
   }
@@ -465,7 +470,15 @@ export class ExecutionRuntime implements IExecutionRuntime {
       event_type: type,
       version: 1,
       priority: type === 'execution.failed' || type === 'execution.cancelled' ? 'high' : 'normal',
-      data: { executionId: exec.id, status: exec.status, capabilityId: exec.capabilityId, progress: exec.progress },
+      data: { 
+        executionId: exec.id, 
+        status: exec.status, 
+        capabilityId: exec.capabilityId, 
+        progress: exec.progress,
+        output: isTerminal(exec.status) ? exec.output : undefined,
+        error: isTerminal(exec.status) ? exec.error : undefined,
+        durationMs: exec.durationMs,
+      },
       correlation_id: exec.correlationId
     }
     this.subscribers.forEach((l) => {

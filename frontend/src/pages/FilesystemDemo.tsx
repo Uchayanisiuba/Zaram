@@ -39,10 +39,10 @@ export function FilesystemDemo() {
   const waitForExecution = useCallback(async (executionId: string): Promise<any> => {
     return new Promise((resolve, reject) => {
       const unsub = desktop.execution.onEvent((evt: any) => {
-        if (evt.executionId === executionId) {
+        if (evt?.data?.executionId === executionId) {
           unsub()
-          if (evt.status === 'completed') resolve(evt)
-          else if (evt.status === 'failed' || evt.status === 'cancelled') reject(new Error(evt.error?.message || 'Execution failed'))
+          if (evt?.data?.status === 'completed') resolve(evt)
+          else if (evt?.data?.status === 'failed' || evt?.data?.status === 'cancelled') reject(new Error(evt?.data?.error?.message || 'Execution failed'))
         }
       })
       desktop.execution.getExecution(executionId).then((status: any) => {

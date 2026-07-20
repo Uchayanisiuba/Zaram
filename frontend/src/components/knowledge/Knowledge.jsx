@@ -8,18 +8,15 @@ export const Knowledge = () => {
     deleteKnowledgeItem,
     searchKnowledge,
     searchQuery,
-    isSearching,
   } = useZaram();
 
   const fileInputRef = useRef(null);
-  const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState(null);
 
   const handleFileSelect = async (e) => {
     const files = Array.from(e.target.files || []);
     if (files.length === 0) return;
 
-    setUploading(true);
     setUploadError(null);
 
     for (const file of files) {
@@ -53,7 +50,6 @@ export const Knowledge = () => {
       }
     }
 
-    setUploading(false);
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }

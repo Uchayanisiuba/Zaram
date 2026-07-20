@@ -1,0 +1,41 @@
+appId: ai.zaram.desktop
+productName: Zaram
+copyright: Copyright © 2026 Zaram
+artifactName: Zaram
+directories:
+  app: .
+  output: dist-electron
+  buildResources: build
+files:
+  - electron
+  - desktop/dist
+  - frontend/dist
+  - backend
+  - package.json
+  - "!**/__pycache__"
+  - "!**/*.pyc"
+  - "!backend/.venv"
+  - "!backend/__pycache__"
+  - "!**/node_modules"
+extraMetadata:
+  main: electron/main.js
+asar: true
+win:
+  target:
+    - nsis
+    - portable
+  artifactName: Zaram-${version}-${arch}.${ext}
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  shortcutName: Zaram
+portable:
+  artifactName: Zaram-Portable-${version}-${arch}.${ext}
+fileAssociations: []
+protocols:
+  - name: Zaram Deep Link
+    schemes:
+      - zaram
+publish: null

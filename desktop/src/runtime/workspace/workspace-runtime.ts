@@ -34,6 +34,7 @@ import { WorkspaceCache } from './workspace-cache'
 import { WorkerPool } from './workspace-pool'
 import { buildProjectSignals, detectLanguage, PROTECTED_PATTERNS, SKIPPED_PATTERNS } from './workspace-detector'
 import { buildWorkspaceContext } from './workspace-context'
+import * as fs from 'fs'
 
 export interface WorkspaceRuntimeOptions {
   rootPath?: string
@@ -102,11 +103,17 @@ export class WorkspaceRuntime implements IWorkspaceRuntime {
 
   async discover(signals: DetectionSignal[], mode: 'shallow' | 'deep' = 'shallow'): Promise<void> {
     if (!this.rootPath) return
-    if (signals.length === 0) return
+
+    // Auto-detect project signals from the workspace root when none are supplied.
+    let effectiveSignals = signals
+    if (!signals || signals.length === 0) {
+      effectiveSignals = this._scanRootSignals()
+    }
+    if (effectiveSignals.length === 0) return
     this.publish('workspace.scan_started', { rootPath: this.rootPath })
 
     try {
-      const filtered = this.applyProtectedPolicy(signals)
+      const filtered = this.applyProtectedPolicy(effectiveSignals)
       const job: IndexingJob = {
         id: `index-${Date.now()}`,
         rootPath: this.rootPath,
@@ -126,6 +133,42 @@ export class WorkspaceRuntime implements IWorkspaceRuntime {
     } catch (error) {
       this.publish('workspace.error', { error: String(error) })
     }
+  }
+
+  private _scanRootSignals(): DetectionSignal[] {
+    const signals: DetectionSignal[] = []
+    let entries: string[] = []
+    try {
+      entries = fs.readdirSync(this.rootPath)
+    } catch {
+      return signals
+    }
+    const manifestNames = new Set<string>()
+    const configNames = new Set<string>()
+    const fileNames = new Set<string>()
+    const dirNames = new Set<string>()
+    for (const name of entries) {
+      let isDir = false
+      try {
+        isDir = fs.statSync(require('path').join(this.rootPath, name)).isDirectory()
+      } catch {
+        continue
+      }
+      if (isDir) {
+        dirNames.add(name)
+      } else {
+        fileNames.add(name)
+        if (name.includes('.')) {
+          if (name.endsWith('.json') || name.endsWith('.toml') || name.endsWith('.yaml') || name.endsWith('.yml') || name.endsWith('.xml') || name.endsWith('.lock')) {
+            configNames.add(name)
+          }
+          if (name.endsWith('.json') || name.endsWith('.toml') || name.endsWith('.lock') || name === 'package.json') {
+            manifestNames.add(name)
+          }
+        }
+      }
+    }
+    return buildProjectSignals(manifestNames, configNames, fileNames, dirNames)
   }
 
   // --- Time evolution on the existing 30Hz tick -----------------------------
@@ -159,15 +202,15 @@ export class WorkspaceRuntime implements IWorkspaceRuntime {
     const identity = this.state.identity
     const primaryFramework = this.state.frameworks[0] || identity.primaryFramework || 'unknown'
     const primaryLanguage = this.state.languages[0] || identity.primaryLanguage || 'unknown'
-    const name = identity.name || computeWorkspaceName(this.rootPath)
+    const name = this.rootPath ? (identity.name || computeWorkspaceName(this.rootPath)) : 'No workspace selected'
 
     const snapshot: WorkspaceSnapshot = {
       workspace: name,
-      framework: primaryFramework,
-      language: primaryLanguage,
-      projects: this.state.totalProjects,
-      confidence: identity.confidence,
-      open_modules: this.deriveOpenModules()
+      framework: this.rootPath ? primaryFramework : 'none',
+      language: this.rootPath ? primaryLanguage : 'none',
+      projects: this.rootPath ? this.state.totalProjects : 0,
+      confidence: this.rootPath ? identity.confidence : 0,
+      open_modules: this.rootPath ? this.deriveOpenModules() : []
     }
     return deepFreeze(snapshot)
   }
@@ -311,12 +354,14 @@ export class WorkspaceRuntime implements IWorkspaceRuntime {
 }
 
 function computeWorkspaceId(rootPath: string): string {
+  if (!rootPath) return 'workspace-none'
   const base = rootPath.toLowerCase().replace(/[^a-z0-9]/g, '-')
-  return `workspace-${base || 'root'}`
+  return `workspace-${base || 'none'}`
 }
 
 function computeWorkspaceName(rootPath: string): string {
+  if (!rootPath) return 'No workspace selected'
   const parts = rootPath.split(/[\\/]/)
   const last = parts[parts.length - 1] || rootPath
-  return last || 'root'
+  return last || 'No workspace selected'
 }

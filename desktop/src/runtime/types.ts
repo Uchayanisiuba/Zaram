@@ -50,6 +50,7 @@ export type PresenceLifecycle =
   | 'running'
   | 'paused'
   | 'shutdown'
+  | 'error'
 
 export type GpuContextStatus = 'unknown' | 'ok' | 'lost' | 'recovering'
 

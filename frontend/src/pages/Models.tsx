@@ -43,16 +43,16 @@ export function Models() {
               <div className="space-y-2 mb-4">
                 <div className="flex items-center gap-2 text-xs text-muted-foreground">
                   <Cpu className="w-4 h-4" />
-                  <span>{model.ram}</span>
+                  <span>{model.ram ?? 'N/A'}</span>
                 </div>
                 <div className="flex items-center gap-2 text-xs text-muted-foreground">
                   <Brain className="w-4 h-4" />
-                  <span>{model.contextLength.toLocaleString()} tokens</span>
+                  <span>{(model.contextLength ?? 0).toLocaleString()} tokens</span>
                 </div>
               </div>
 
               <div className="flex flex-wrap gap-2">
-                {model.capabilities.map((cap) => {
+                {(model.capabilities ?? []).map((cap) => {
                   const Icon = capabilityIcons[cap as keyof typeof capabilityIcons]
                   return (
                     <span key={cap} className="px-2 py-1 rounded-md bg-white/5 text-xs">

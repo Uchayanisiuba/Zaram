@@ -10,13 +10,10 @@
 ## Engineering Constitution
 
 This document is the highest-level engineering document in the repository.
-
 If another document, codebase, or AI suggestion conflicts with this Manifest, this Manifest takes precedence.
-
 Major changes to these principles require deliberate review and approval by the Product Owner. No AI is permitted to override the architectural principles defined here.
 
 > AI contributors do not invent architecture. They implement the contracts defined by the architecture documents. When uncertainty exists, they must request clarification rather than introducing new architectural patterns.
-
 > Architecture documents define **stable interfaces**. Implementations may evolve freely provided they remain contract compliant.
 
 ---
@@ -46,26 +43,20 @@ Major changes to these principles require deliberate review and approval by the 
 ## 1. What is Zaram?
 
 Zaram is a **Local-First Personal AI Operating System**.
-
 It is not a chatbot. It is not an AI assistant. It is not a coding tool. Those are merely features.
-
 The objective of Zaram is to create an intelligent companion that lives with the user, remembers what matters, reasons across time, grows with experience, and can take multiple forms—from a Living Energy Orb to a MetaHuman or future AR embodiment.
-
 Everything in this repository exists to support that vision.
 
 ## 2. The Vision
 
 Five years from now, people should describe Zaram as:
 *"The personal AI operating system that lives with you."*
-
 Not "the chatbot." Not "the coding assistant." Not "the Unreal avatar."
-
 One intelligence. Many embodiments. One companion. Built entirely around the user.
 
 ## 3. The User Promise
 
 Every feature should make the user feel that:
-
 - Their data belongs to them.
 - Their AI understands them better over time.
 - They are interacting with one persistent intelligence.
@@ -75,7 +66,6 @@ Every feature should make the user feel that:
 ## 4. Core Philosophy
 
 The user should never need to think about LLMs, APIs, model routing, prompt engineering, embeddings, or vector databases.
-
 The user talks to **one intelligence**. Zaram decides everything else. Technology should disappear into the background, leaving only the feeling of interacting with a living, thinking entity.
 
 ## 5. What Zaram Is NOT
@@ -102,7 +92,6 @@ Everything begins with Core. The UI is only one embodiment. Changing the body mu
 ## 7. AI Collaboration Policy
 
 The project uses multiple AI systems with clearly defined responsibilities. No AI is "in charge" of the project.
-
 - **Product Owner (Uche):** Owns product direction, final decisions, and integration testing.
 - **Chief Architect:** Defines long-term architecture, runtime design, engineering standards, and technical review. Should rarely generate production code.
 - **Lead Implementation Engineer:** Transforms architecture into production-quality implementations, refactoring, and feature delivery.
@@ -135,7 +124,6 @@ When multiple solutions exist, choose the one that:
 ## 10. Definition of Done
 
 A feature is complete only when it is:
-
 - ✓ Reliable and testable.
 - ✓ Follows the Runtime Contract.
 - ✓ Documented and observable.
@@ -150,7 +138,6 @@ Working code alone is not considered complete.
 ## 11. The Zaram Test
 
 Before implementing any feature, ask:
-
 Does this make Zaram feel...
 - More intelligent?
 - More personal?
@@ -165,4 +152,5 @@ If not, reconsider the design.
 > They should simply experience one intelligent companion.
 
 ---
+
 *End of Manifest.*

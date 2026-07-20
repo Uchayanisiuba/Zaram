@@ -1,12 +1,18 @@
 {
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
   "devDependencies": {
     "@types/node": "^26.1.1",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "autoprefixer": "^10.5.2",
+    "concurrently": "^8.2.2",
     "postcss": "^8.5.16",
     "tailwindcss": "^3.4.19",
-    "typescript": "^7.0.2"
+    "typescript": "^7.0.2",
+    "wait-on": "^7.2.0"
   },
   "dependencies": {
     "@monaco-editor/react": "^4.7.0",
@@ -26,6 +32,22 @@
     "reactflow": "^11.11.4",
     "socket.io-client": "^4.8.3",
     "tailwind-merge": "^3.6.0",
-    "zustand": "^5.0.14"
+    "zustand": "^5.0.14",
+    "electron": "^28.0.0",
+    "electron-builder": "^24.9.1"
+  },
+  "scripts": {
+    "dev": "concurrently \"npm run dev:frontend\" \"npm run dev:backend\" \"npm run dev:desktop\"",
+    "dev:frontend": "cd frontend && npm run dev",
+    "dev:backend": "cd backend && python main.py",
+    "dev:desktop": "cd desktop && npm run dev",
+    "build": "npm run build:frontend && npm run build:desktop",
+    "build:frontend": "cd frontend && npm run build",
+    "build:desktop": "cd desktop && npm run build && cd .. && electron-builder --win",
+    "build:desktop:portable": "cd desktop && npm run build && electron-builder --win --target portable",
+    "build:engine": "cd packages/zaram-engine && npm run build",
+    "preview": "cd frontend && npm run preview",
+    "install:desktop": "cd desktop && npm install",
+    "postinstall": "npm run install:desktop"
   }
 }

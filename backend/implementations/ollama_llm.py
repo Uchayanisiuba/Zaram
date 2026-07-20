@@ -9,11 +9,18 @@ class OllamaLLM:
     def __init__(self, base_url: str = "http://localhost:11434"):
         self.base_url = base_url
 
-    def stream_response(self, prompt: str, model: str) -> Iterator[str]:
+    def stream_response(self, prompt: str, model: str = "gemma3:latest", system_prompt: str = "") -> Iterator[str]:
         try:
+            payload = {
+                "model": model,
+                "prompt": prompt,
+                "stream": True
+            }
+            if system_prompt:
+                payload["system"] = system_prompt
             with requests.post(
                 f"{self.base_url}/api/generate",
-                json={"model": model, "prompt": prompt, "stream": True},
+                json=payload,
                 stream=True, timeout=120
             ) as response:
                 response.raise_for_status()
@@ -24,5 +31,4 @@ class OllamaLLM:
                         if token:
                             yield token
         except Exception as e:
-            print(f"❌ Ollama LLM Error: {e}")
             yield f"⚠️ Error connecting to LLM: {str(e)}"

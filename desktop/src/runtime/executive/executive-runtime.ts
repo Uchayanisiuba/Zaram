@@ -330,11 +330,15 @@ export class ExecutiveRuntime {
     this.recompute()
   }
 
-  plan(query: string): ExecutionPlan {
+  plan(query: string, options?: { persona?: string; model?: string }): ExecutionPlan {
+    console.log(`[EXECUTIVE] plan() called with query: "${query}" persona=${options?.persona} model=${options?.model}`)
     const plan = createExecutionPlan(query)
     const lower = query.toLowerCase()
+    const persona = options?.persona
+    const model = options?.model
 
     if (this.capabilityRuntime) {
+      console.log(`[EXECUTIVE] Capability runtime available, evaluating query...`)
       if (lower.includes('project') || lower.includes('workspace') || lower.includes('how many')) {
         plan.steps.push(createExecutionStep('workspace.getWorkspaceSnapshot', 'Read Workspace Snapshot'))
         plan.evidence.push('Workspace Snapshot')
@@ -376,16 +380,40 @@ export class ExecutiveRuntime {
         plan.steps.push(createExecutionStep('vscode.diagnostics', 'Get Diagnostics'))
         plan.evidence.push('Diagnostics')
       }
+
+      if (lower.includes('look at this') || lower.includes('what do you see') || lower.includes('describe image') || 
+          lower.includes('analyze screenshot') || lower.includes('read this pdf') || lower.includes('ocr') ||
+          lower.includes('camera') || lower.includes('screen') || lower.includes('diagram') ||
+          lower.includes('ui') || lower.includes('chart') || lower.includes('image') || lower.includes('photo') ||
+          lower.includes('picture') || lower.includes('screenshot') || lower.includes('scan') || lower.includes('document')) {
+        const capabilityId = lower.includes('screen') || lower.includes('screenshot') ? 'vision.screen' :
+                            lower.includes('camera') || lower.includes('photo') ? 'vision.camera' :
+                            lower.includes('pdf') || lower.includes('document') ? 'vision.document' :
+                            lower.includes('ocr') || lower.includes('scan') ? 'vision.ocr' :
+                            'vision.analyze'
+        plan.steps.push(createExecutionStep(capabilityId, capabilityId.replace('vision.', 'Analyze ').replace(/\b\w/g, l => l.toUpperCase()), { prompt: query }))
+        plan.evidence.push('Vision Analysis')
+      }
+
+      if (lower.includes('latest') || lower.includes('news') || lower.includes('current') || lower.includes('today') ||
+          lower.includes('search') || lower.includes('browse') || lower.includes('internet') || lower.includes('online')) {
+        plan.steps.push(createExecutionStep('knowledge.search', 'Search Internet', { query }))
+        plan.steps.push(createExecutionStep('reasoning.generate', 'Generate response from search', { prompt: `Based on internet search results for: ${query}`, persona, model }))
+        plan.evidence.push('Internet Search')
+      }
+    } else {
+      console.log(`[EXECUTIVE] No capability runtime available`)
     }
 
     if (plan.steps.length === 0) {
-      plan.steps.push(createExecutionStep('conversation.runtime', 'Conversation response'))
+      plan.steps.push(createExecutionStep('conversation.runtime', 'Conversation response', { text: query, prompt: query, persona, model }))
       plan.evidence.push('Executive Reasoning')
     }
 
     plan.confidence = this.computePlanConfidence(plan)
     plan.updatedAt = Date.now()
     this.currentPlan = plan
+    console.log(`[EXECUTIVE] plan() returning plan with ${plan.steps.length} steps, confidence: ${plan.confidence}`)
     return cloneExecutionPlan(plan)
   }
 

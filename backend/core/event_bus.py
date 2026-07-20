@@ -1,11 +1,9 @@
 # backend/core/event_bus.py
 import asyncio
+from dataclasses import dataclass, field
+from typing import Callable, Any, Dict, List
 import time
 import uuid
-from collections.abc import Callable
-from dataclasses import dataclass, field
-from typing import Any
-
 
 @dataclass(frozen=True)
 class ZaramEvent:
@@ -15,13 +13,13 @@ class ZaramEvent:
     event_type: str = "unknown"
     version: int = 1
     priority: str = "normal"  # critical, high, normal, background
-    data: dict[str, Any] = field(default_factory=dict)
+    data: Dict[str, Any] = field(default_factory=dict)
     correlation_id: str = ""
 
 class EventBus:
     def __init__(self):
-        self._subscribers: dict[str, list[Callable]] = {}
-        self._history: list[ZaramEvent] = []
+        self._subscribers: Dict[str, List[Callable]] = {}
+        self._history: List[ZaramEvent] = []
 
     def subscribe(self, event_type: str, callback: Callable[[ZaramEvent], Any]) -> str:
         if event_type not in self._subscribers:
@@ -32,7 +30,6 @@ class EventBus:
     def publish(self, event: ZaramEvent):
         self._history.append(event)
         callbacks = self._subscribers.get(event.event_type, [])
-
         for callback in callbacks:
             try:
                 if asyncio.iscoroutinefunction(callback):
@@ -42,5 +39,5 @@ class EventBus:
             except Exception as e:
                 print(f"[EventBus] Error in subscriber for {event.event_type}: {e}")
 
-    def get_history(self, limit: int = 50) -> list[ZaramEvent]:
+    def get_history(self, limit: int = 50) -> List[ZaramEvent]:
         return self._history[-limit:]

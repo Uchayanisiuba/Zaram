@@ -155,7 +155,7 @@ export function CapabilityExplorer() {
       <div className="flex items-center justify-between px-6 py-4 border-b border-white/5">
         <div>
           <h2 className="text-lg font-bold text-white tracking-wide">CAPABILITY EXPLORER</h2>
-          <p className="text-xs text-slate-400 mt-1">Read-only view of the Capability Runtime registry</p>
+          <p className="text-xs text-slate-400 mt-1">Browse available capabilities</p>
         </div>
         <Button variant="ghost" size="sm" onClick={load} disabled={loading}>
           <Filter className="w-3 h-3 mr-1" /> Refresh

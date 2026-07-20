@@ -8,7 +8,6 @@ export const Chat = () => {
   const {
     messages,
     addMessage,
-    inputText,
     setInputText,
     isLoading,
     setIsLoading,

@@ -3,11 +3,9 @@
 Template for creating a new Zaram Runtime.
 Copy this file and rename it to your specific runtime (e.g., speech_runtime.py).
 """
-from typing import Any
-
-from core.contracts import Capability, Runtime, RuntimeMetadata, RuntimeState
+from typing import Any, Dict
+from core.contracts import Runtime, RuntimeMetadata, Capability, RuntimeState
 from core.event_bus import EventBus, ZaramEvent
-
 
 class NewRuntime(Runtime):
     def __init__(self, event_bus: EventBus):
@@ -50,7 +48,7 @@ class NewRuntime(Runtime):
     def get_state(self) -> RuntimeState:
         return self._state
 
-    def health_check(self) -> dict[str, Any]:
+    def health_check(self) -> Dict[str, Any]:
         return {
             "runtime_id": self.get_runtime_id(),
             "state": self._state.value,

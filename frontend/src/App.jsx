@@ -1,49 +1,66 @@
 import { useState, useEffect } from 'react'
-import { motion } from 'framer-motion'
 import {
-  Activity, MessageSquare, Brain, Database, Settings,
-  Code, HardDrive, Terminal, Cpu, Search,
-  FolderOpen, ChevronRight
+  MessageSquare, FolderOpen, Settings as SettingsIcon, ChevronRight, Activity,
+  Terminal, Cpu, Search
 } from 'lucide-react'
 import { desktop } from './desktop/desktop-bridge'
-import { OrbEngine } from './components/OrbEngine/OrbEngine'
 import { Button } from './components/ui/Button'
-import { Orchestration } from './pages/Orchestration'
 import { ConversationPanel } from './pages/ConversationPanel'
+import { FilesystemDemo } from './pages/FilesystemDemo'
+import { Settings } from './components/settings/Settings'
 import { AuditTerminal } from './pages/AuditTerminal'
 import { RuntimeInspector } from './pages/RuntimeInspector'
 import { CapabilityExplorer } from './pages/CapabilityExplorer'
-import { FilesystemDemo } from './pages/FilesystemDemo'
 import { useNotifications, NotificationContainer } from './hooks/useNotifications'
+import { ZaramProvider } from './context/ZaramContext'
+import { useZaram } from './hooks/useZaram'
 
 const NAV_ITEMS = [
-  { id: 'orchestration', label: 'Orchestration', icon: Activity },
   { id: 'conversation', label: 'Conversation', icon: MessageSquare },
+  { id: 'files', label: 'Files', icon: FolderOpen },
   { id: 'audit', label: 'Audit Terminal', icon: Terminal },
   { id: 'runtime', label: 'Runtime Inspector', icon: Cpu },
   { id: 'capabilities', label: 'Capabilities', icon: Search },
-  { id: 'filesystem', label: 'Filesystem', icon: FolderOpen },
+  { id: 'hq', label: 'HQ', icon: SettingsIcon },
 ]
 
-const STORAGE_KEY = 'zaram-dev-preview-view'
+const STORAGE_KEY = 'zaram-view'
+
+function ContextHeader() {
+  const { selectedCharacter } = useZaram()
+  const [projectName, setProjectName] = useState('Zaram')
+  
+  return (
+    <div className="h-12 flex items-center justify-between px-4 border-b border-white/5 bg-[#0a0f1c]/80 backdrop-blur-sm">
+      <div className="flex items-center gap-4">
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-slate-500">Project</span>
+          <span className="text-sm font-medium text-slate-200">{projectName}</span>
+        </div>
+      </div>
+      <div className="flex items-center gap-4">
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-slate-500">Persona</span>
+          <span className="text-sm font-medium text-cyan-400">{selectedCharacter || 'Zaram Prime'}</span>
+        </div>
+      </div>
+    </div>
+  )
+}
 
 function App() {
   const [view, setView] = useState(() => {
     try {
-      return localStorage.getItem(STORAGE_KEY) || 'orchestration'
+      return localStorage.getItem(STORAGE_KEY) || 'conversation'
     } catch {
-      return 'orchestration'
+      return 'conversation'
     }
   })
   const [isDesktop, setIsDesktop] = useState(false)
-  const [backendStatus, setBackendStatus] = useState(null)
   const { notifications, addNotification, removeNotification } = useNotifications()
 
   useEffect(() => {
     setIsDesktop(desktop.isDesktop)
-    if (desktop.backend.onStatus) {
-      desktop.backend.onStatus((status) => setBackendStatus(status))
-    }
   }, [])
 
   useEffect(() => {
@@ -83,8 +100,6 @@ function App() {
 
   const renderView = () => {
     switch (view) {
-      case 'orchestration':
-        return <Orchestration />
       case 'conversation':
         return <ConversationPanel />
       case 'audit':
@@ -93,90 +108,63 @@ function App() {
         return <RuntimeInspector />
       case 'capabilities':
         return <CapabilityExplorer />
-      case 'filesystem':
+      case 'files':
         return <FilesystemDemo />
+      case 'hq':
+        return <Settings />
       default:
-        return <Orchestration />
+        return <ConversationPanel />
     }
   }
 
   return (
-    <div className="h-screen w-screen flex overflow-hidden bg-[#050810] text-slate-200">
-      <div className="w-64 flex flex-col bg-[#0a0f1c] border-r border-white/5">
-        <div className="p-6 border-b border-white/5">
-          <h1 className="text-2xl font-bold text-white tracking-wider">ZARAM</h1>
-          <p className="text-[10px] mt-1 uppercase tracking-widest text-cyan-400">Developer Preview</p>
-        </div>
-        <nav className="flex-1 p-4 space-y-1">
-          {NAV_ITEMS.map((item) => (
-            <button
-              key={item.id}
-              onClick={() => setView(item.id)}
-              className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-all duration-200 ${view === item.id ? 'bg-white/10 text-white border border-white/10' : 'text-slate-400 hover:text-white hover:bg-white/5 border border-transparent'}`}
-            >
-              <item.icon size={18} />
-              <span className="text-sm font-medium">{item.label}</span>
-              {view === item.id && <ChevronRight className="w-4 h-4 ml-auto" />}
-            </button>
-          ))}
-        </nav>
-        <div className="p-4 border-t border-white/5">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-cyan-500 to-orange-500 flex items-center justify-center font-bold text-white">
-              Z
-            </div>
-            <div>
-              <div className="text-sm font-semibold text-white tracking-wide">ZARAM OS</div>
-              <div className="text-[10px] text-green-400 flex items-center gap-1">
-                <div className="w-1.5 h-1.5 rounded-full bg-green-400"></div>
-                {isDesktop ? 'Desktop Runtime' : 'Browser Mode'}
+    <ZaramProvider>
+      <div className="h-full w-full flex overflow-hidden bg-[#050810] text-slate-200">
+        <div className="w-60 flex flex-col bg-[#0a0f1c] border-r border-white/5">
+          <div className="p-5 border-b border-white/5">
+            <h1 className="text-xl font-bold text-white tracking-wider">ZARAM</h1>
+            <p className="text-[10px] mt-1 uppercase tracking-widest text-cyan-400">OS</p>
+          </div>
+          <nav className="flex-1 p-3 space-y-0.5">
+            {NAV_ITEMS.map((item) => (
+              <button
+                key={item.id}
+                onClick={() => setView(item.id)}
+                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-200 text-sm ${view === item.id ? 'bg-white/10 text-white border border-white/10' : 'text-slate-400 hover:text-white hover:bg-white/5 border border-transparent'}`}
+              >
+                <item.icon size={18} />
+                <span className="font-medium">{item.label}</span>
+                {view === item.id && <ChevronRight className="w-4 h-4 ml-auto" />}
+              </button>
+            ))}
+          </nav>
+
+          <div className="p-4 border-t border-white/5">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-cyan-500 to-orange-500 flex items-center justify-center font-bold text-white text-sm">
+                Z
+              </div>
+              <div>
+                <div className="text-sm font-semibold text-white tracking-wide">Zaram</div>
+                <div className="text-[10px] text-green-400 flex items-center gap-1">
+                  <div className="w-1.5 h-1.5 rounded-full bg-green-400"></div>
+                  {isDesktop ? 'Native' : 'Browser'}
+                </div>
               </div>
             </div>
           </div>
         </div>
+
+        <div className="flex-1 flex flex-col relative overflow-hidden">
+          <ContextHeader />
+          <div className="flex-1 overflow-hidden">
+            {renderView()}
+          </div>
+        </div>
+
+        <NotificationContainer notifications={notifications} onRemove={removeNotification} />
       </div>
-
-      <div className="flex-1 flex flex-col relative overflow-hidden">
-        <div className="h-12 flex items-center justify-between px-6 border-b border-white/5 bg-black/20 z-30">
-          <div className="flex items-center gap-3 text-[10px] font-mono">
-            <span className="text-slate-500">ZARAM OS</span>
-            <span className="text-slate-700">|</span>
-            <span className="font-bold text-cyan-400">{view.toUpperCase()}</span>
-            {backendStatus && (
-              <>
-                <span className="text-slate-700">|</span>
-                <span className={backendStatus.running ? 'text-green-400' : 'text-red-400'}>
-                  BACKEND: {backendStatus.running ? 'ONLINE' : 'OFFLINE'}
-                </span>
-              </>
-            )}
-          </div>
-          <div className="text-[10px] text-slate-500">
-            {isDesktop ? 'Native Runtime' : 'Web Preview'}
-          </div>
-        </div>
-
-        <div className="flex-1 overflow-hidden">
-          {renderView()}
-        </div>
-
-        <div className="h-8 flex items-center justify-between px-6 border-t border-white/5 bg-black/20 text-[10px] text-slate-500">
-          <div className="flex items-center gap-4">
-            <span className="flex items-center gap-1.5">
-              <span className="w-1.5 h-1.5 rounded-full bg-green-400"></span>
-              Executive Runtime Ready
-            </span>
-            <span className="text-slate-700">|</span>
-            <span>Workspace Synced</span>
-          </div>
-          <div className="flex items-center gap-4">
-            <span>620 Tests Passing</span>
-          </div>
-        </div>
-      </div>
-
-      <NotificationContainer notifications={notifications} onRemove={removeNotification} />
-    </div>
+    </ZaramProvider>
   )
 }
 

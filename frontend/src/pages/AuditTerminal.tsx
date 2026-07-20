@@ -280,7 +280,7 @@ export function AuditTerminal() {
       'vscode.active_file_changed': 'Active file changed',
       'vscode.diagnostics_updated': 'Diagnostics updated',
       'vscode.git_status_refreshed': 'Git status refreshed',
-      'vscode.context_provided': 'Context provided to Executive Runtime',
+      'vscode.context_provided': 'Context provided to runtime',
       'vscode.disconnected': 'VS Code disconnected',
       'vscode.error': 'VS Code error'
     }

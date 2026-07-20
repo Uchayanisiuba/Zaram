@@ -1,6 +1,6 @@
-from collections.abc import Iterator
+# backend/interfaces/llm_engine.py
 from typing import Protocol
-
+from collections.abc import Iterator
 
 class LLMEngine(Protocol):
     """Abstract interface for ANY LLM model."""

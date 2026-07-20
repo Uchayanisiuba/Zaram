@@ -1,0 +1,15 @@
+# ADR-013: Executive Runtime (Decision Engine)
+**Status:** Accepted
+**Milestone:** 1.4
+**Context:** With Milestones 1.0–1.3 verified, the architecture has a Kernel, Embodiment Framework, Cognitive Runtime, and World Runtime, but no single authority for high-level AI decision-making. Each runtime acts independently and the embodiment derives intent heuristically from conversation phase. The AI needs an executive control system — the "CEO" — that coordinates every cognitive subsystem and is the ONLY runtime that decides what the AI does next (reply, wait, listen, continue thinking, look, remember, ignore, interrupt itself, cancel a task, switch context, launch automation, call tools, ask clarification, be proactive).
+**Decision:** Introduce `ExecutiveRuntime` under `src/runtime/executive/` as the single authority for high-level decision-making. It owns focus, priorities, interrupt handling, task switching, context selection, goal management, and intention generation. Every subsystem (Conversation, Memory, World, Attention, Relationship, Vision, Automation, Tool, Plugin) feeds INTO it via push-based `ingest*` methods; it produces an `ExecutiveState` and a high-level `ExecutiveIntent`. `CharacterRuntime` receives ONLY the `ExecutiveIntent` — never goals, planning, confidence, reasoning, memory, or relationship internals. It reuses the existing 30Hz scheduler (`PresenceRuntime.tick()`) for time evolution — no new timers, polling loops, or `requestAnimationFrame`. It is wired via the existing DI container as singleton `executiveRuntime`, consumed *optionally* by `PresenceRuntime` via DI only, and never imports the drawing layer, body layer, character projection, animation engine, frame snapshots, orb drawing code, desktop shell, or any GPU/3D engine.
+**Consequences:**
+- A single, testable decision surface replaces scattered heuristic intent derivation; behaviour becomes deterministic and observable through `ExecutiveState`.
+- Direction of coupling is correct: subsystems push into the executive; the body layer pulls only the `Intent`. No runtime decides these high-level actions except the executive.
+- 100% drawing-layer and body-layer independence is preserved; the Executive Runtime emits no `FrameState` and no `CharacterFrame`.
+- `CharacterFrame`, `FrameState`, the Embodiment Framework, `AnimationRuntime`, the renderer pipeline, `OrbRenderer`, `LivingOrbAdapter`, and all M1.0–M1.3 contracts remain byte-for-byte unchanged except for the additive DI registration and the single `update(dt)` call in the reused tick, plus the optional executive feed from the existing aggregator subscription.
+**Compliance:**
+- No `setInterval`/`setTimeout`/`requestAnimationFrame`/`while` in `src/runtime/executive/*`.
+- Renderer/embodiment/character-pipeline independence asserted structurally by `tests/runtime/executive/executive-runtime.test.ts`.
+- DI verified by `tests/runtime/executive/executive-runtime.test.ts` and `bootstrapPresence()`.
+- Performance verified by `tests/runtime/executive/benchmarks.test.ts` (10,000 updates < 100ms).
