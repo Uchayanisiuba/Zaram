@@ -86,6 +86,21 @@ export class FrameGraph {
 
     const stats = this.renderer.getStats();
 
+    this.overlay.recordActiveParticles(particles.length);
+    this.overlay.recordLOD(this.lod.getGlobalLODBias());
+    this.overlay.recordRegistries(
+      (this.assetRegistry.list().length > 0 ? 1 : 0) +
+      (this.materialRegistry.list().length > 0 ? 1 : 0) +
+      (this.shaderRegistry.list().length > 0 ? 1 : 0) +
+      (this.embodimentRegistry.list().length > 0 ? 1 : 0)
+    );
+    this.overlay.recordMemory(
+      this.assetRegistry.list().length * 1024 +
+      this.materialRegistry.list().length * 256 +
+      this.shaderRegistry.list().length * 512 +
+      this.embodimentRegistry.list().length * 128
+    );
+
     this.gpu.disposeUnused();
 
     return {
