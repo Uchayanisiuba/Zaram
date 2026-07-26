@@ -3,6 +3,7 @@ from __future__ import annotations
 from .runtime import MemoryRuntimeImpl, create_memory_runtime
 from .embeddings import EmbeddingService, create_embedding_service
 from .graph import MemoryGraph, EdgeType, GraphEdge, create_memory_graph
+from .decay import MemoryDecayEngine, DecayConfig, DecayResult, create_decay_engine
 from .contracts import (
     MemoryRuntime,
     MemoryRecord,
@@ -27,6 +28,10 @@ __all__ = [
     "EdgeType",
     "GraphEdge",
     "create_memory_graph",
+    "MemoryDecayEngine",
+    "DecayConfig",
+    "DecayResult",
+    "create_decay_engine",
     "MemoryRuntime",
     "MemoryRecord",
     "MemoryQuery",
