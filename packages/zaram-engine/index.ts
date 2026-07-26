@@ -13,6 +13,7 @@ export { MaterialRegistry } from './registries/MaterialRegistry';
 export { ShaderRegistry } from './registries/ShaderRegistry';
 export { EmbodimentRegistry } from './registries/EmbodimentRegistry';
 export { ParticleRuntime } from './particle/ParticleRuntime';
+export type { Particle, ParticleEmitterDesc, GPUParticleData, ParticleStats } from './particle/ParticleRuntime';
 export { PerformanceOverlay } from './renderer/PerformanceOverlay';
 export type { FrameState } from './types/FrameState';
 export type { RuntimeState } from './types/RuntimeState';
