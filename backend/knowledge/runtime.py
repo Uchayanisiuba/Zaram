@@ -24,6 +24,19 @@ from .citations import CitationEngine
 from .confidence import ConfidenceEngine
 from .fusion import KnowledgeFusionEngine
 from .telemetry import KnowledgeTelemetry
+from .graph import KnowledgeGraph
+from .entity_extraction import EntityExtractor
+from .relationships import RelationshipBuilder
+from .temporal import TemporalEngine
+from .knowledge_types import KnowledgeTypeClassifier
+from .authority import AuthorityRegistry
+from .incremental_embedding import IncrementalEmbeddingEngine
+from .reindexing import BackgroundReindexer
+from .continuous_learning import ContinuousLearningPipeline
+from .garbage_collection import KnowledgeGarbageCollector
+from .cross_document import CrossDocumentLinker
+from .conflict_resolution import ConflictResolution
+from .stats import KnowledgeStatistics
 
 
 @dataclass
@@ -69,6 +82,22 @@ class KnowledgeRuntime:
         self._confidence = ConfidenceEngine()
         self._fusion = KnowledgeFusionEngine()
         self._telemetry = KnowledgeTelemetry()
+
+        self._graph = KnowledgeGraph()
+        self._entity_extractor = EntityExtractor()
+        self._relationship_builder = RelationshipBuilder()
+        self._temporal = TemporalEngine()
+        self._knowledge_types = KnowledgeTypeClassifier()
+        self._authority = AuthorityRegistry()
+        self._incremental_embedding = IncrementalEmbeddingEngine()
+        self._incremental_embedding.embedding = self._embedding
+        self._reindexer = BackgroundReindexer(self)
+        self._continuous_learning = ContinuousLearningPipeline(runtime=self)
+        self._gc = KnowledgeGarbageCollector(self)
+        self._cross_document = CrossDocumentLinker()
+        self._conflict_resolution = ConflictResolution()
+        self._stats_provider = KnowledgeStatistics(runtime=self)
+        self._objects: list[KnowledgeObject] = []
 
         self._stats = {
             "total_searches": 0,
@@ -210,11 +239,13 @@ class KnowledgeRuntime:
                     connector_status["internet"] = "error"
 
             for r in internet_results:
-                all_results.append(KnowledgeResult(
+                result = KnowledgeResult(
                     title=r.title, url=r.url, snippet=r.snippet, provider=r.connector,
                     confidence=r.score, type=__import__("knowledge.protocol", fromlist=["ResultType"]).ResultType.WEB,
                     metadata=r.metadata, retrieved_at=r.retrieved_at,
-                ))
+                )
+                result = self._authority.apply_to_result(result)
+                all_results.append(result)
 
             if include_memory and self._memory_runtime:
                 try:
@@ -235,7 +266,7 @@ class KnowledgeRuntime:
                     connector_status["memory"] = "error"
 
             for r in memory_results:
-                all_results.append(KnowledgeResult(
+                result = KnowledgeResult(
                     title=r.record.content[:80],
                     url=f"memory:{r.record.id}",
                     snippet=r.record.content[:300],
@@ -244,9 +275,17 @@ class KnowledgeRuntime:
                     type=__import__("knowledge.protocol", fromlist=["ResultType"]).ResultType.MEMORY,
                     metadata={"memory_type": r.record.memory_type.value, "match_reason": r.match_reason},
                     retrieved_at=r.record.created_at,
-                ))
+                )
+                result = self._authority.apply_to_result(result)
+                all_results.append(result)
         finally:
             loop.close()
+
+        graph_results = self._graph_search(query, max_results)
+        all_results.extend(graph_results)
+        for result in graph_results:
+            consulted.append("graph")
+            connector_status["graph"] = "ok"
 
         fusions = self._fusion.fuse(all_results)
         merged = self._merge_fusions(fusions)
@@ -292,6 +331,23 @@ class KnowledgeRuntime:
         self._stats["total_latency_ms"] += latency_ms
         return response
 
+    def _graph_search(self, query: str, max_results: int) -> list[KnowledgeResult]:
+        results: list[KnowledgeResult] = []
+        entities = self._graph.neighborhood_search(query, max_results=max_results)
+        for entity in entities:
+            entity_type = entity.entity_type.value if hasattr(entity.entity_type, "value") else str(entity.entity_type)
+            results.append(KnowledgeResult(
+                title=entity.name,
+                snippet=f"Entity ({entity_type}): {entity.name}. Aliases: {', '.join(entity.aliases)}",
+                provider="graph",
+                confidence=0.8,
+                type=__import__("knowledge.protocol", fromlist=["ResultType"]).ResultType.VECTOR,
+                knowledge_type=__import__("knowledge.protocol", fromlist=["KnowledgeType"]).KnowledgeType.CONCEPT,
+                authority_score=0.6,
+                metadata={"entity_id": entity.id, "entity_type": entity_type, "source": "graph"},
+            ))
+        return results
+
     def _merge_fusions(self, fusions: list[Any]) -> list[Any]:
         merged: list[Any] = []
         seen_urls: set[str] = set()
@@ -331,8 +387,13 @@ class KnowledgeRuntime:
         return ctx
 
     def store(self, obj: KnowledgeObject) -> str:
-        """Store a knowledge object: chunk, embed, index."""
+        """Store a knowledge object: chunk, embed, index, extract entities, build relationships."""
         chunks = self._chunker.chunk(obj.content, citation=obj.citation, metadata=obj.metadata)
+        for chunk in chunks:
+            chunk.metadata["object_id"] = obj.id
+            chunk.knowledge_type = self._knowledge_types.classify_chunk(chunk)
+            extraction = self._entity_extractor.extract_from_chunk(chunk)
+            chunk.entities = extraction.entities
         texts = [c.text for c in chunks]
         embeddings = self._embedding.embed(texts)
         for chunk, vec in zip(chunks, embeddings):
@@ -342,6 +403,22 @@ class KnowledgeRuntime:
             if chunk.freshness:
                 chunk.freshness.indexed = time.time()
         obj.chunks = chunks
+        for chunk in chunks:
+            rels = self._relationship_builder.build_from_chunk(chunk)
+            chunk.relationships.extend(rels)
+            for rel in rels:
+                self._graph.add_relationship(rel)
+        for chunk in chunks:
+            for entity in chunk.entities:
+                self._graph.add_entity(entity)
+        extraction = self._entity_extractor.extract_from_object(obj)
+        obj.entities = extraction.entities
+        obj.relationships = [rel for chunk in chunks for rel in chunk.relationships]
+        self._temporal.apply_to_object(obj)
+        obj.knowledge_type = self._knowledge_types.classify_object(obj)
+        obj.authority_score = self._authority.get_score(obj.citation.provider if obj.citation else "unknown")
+        self._objects.append(obj)
+        self._cross_document_links(obj)
         return obj.id
 
     def update(self, obj_id: str, content: str | None = None, metadata: dict[str, Any] | None = None) -> KnowledgeObject | None:
@@ -396,6 +473,117 @@ class KnowledgeRuntime:
         ]
         return results
 
+    def search_graph(self, query: str, max_results: int = 6) -> list[KnowledgeResult]:
+        """Search the knowledge graph by entity name."""
+        entities = self._graph.neighborhood_search(query, max_results=max_results)
+        results = []
+        for entity in entities:
+            results.append(KnowledgeResult(
+                title=entity.name,
+                snippet=f"Entity ({entity.entity_type.value}): {entity.name}",
+                provider="graph",
+                confidence=0.8,
+                type=__import__("knowledge.protocol", fromlist=["ResultType"]).ResultType.VECTOR,
+                metadata={"entity_id": entity.id, "entity_type": entity.entity_type.value},
+            ))
+        return results
+
+    def traverse_graph(self, entity_id: str, relationship_type: Any = None, max_depth: int = 3) -> list[dict[str, Any]]:
+        """Traverse the knowledge graph from an entity."""
+        entities = self._graph.traverse(entity_id, relationship_type, max_depth)
+        return [{"id": e.id, "name": e.name, "type": e.entity_type.value} for e in entities]
+
+    def get_entity(self, name: str) -> dict[str, Any] | None:
+        """Find an entity by name."""
+        entity = self._graph.find_entity_by_name(name)
+        if not entity:
+            return None
+        return {
+            "id": entity.id,
+            "name": entity.name,
+            "type": entity.entity_type.value,
+            "aliases": entity.aliases,
+            "canonical": entity.canonical,
+        }
+
+    def build_graph(self) -> dict[str, Any]:
+        """Rebuild the knowledge graph from all stored objects."""
+        for obj in self._objects:
+            extraction = self._entity_extractor.extract_from_object(obj)
+            for entity in extraction.entities:
+                self._graph.add_entity(entity)
+            relationships = self._relationship_builder.build_from_object(obj)
+            for rel in relationships:
+                self._graph.add_relationship(rel)
+        return self._graph.stats()
+
+    def detect_conflicts(self, results: list[KnowledgeResult]) -> list[dict[str, Any]]:
+        """Detect conflicts between knowledge results."""
+        fusions = self._fusion.fuse(results)
+        conflicts: list[dict[str, Any]] = []
+        for fusion in fusions:
+            if fusion.duplicates:
+                detected = self._conflict_resolution.detect_conflicts(fusion)
+                conflicts.extend(detected)
+        return conflicts
+
+    def resolve_conflicts(self, results: list[KnowledgeResult], strategy: str = "keep_both") -> list[KnowledgeResult]:
+        """Resolve conflicts between knowledge results."""
+        fusions = self._fusion.fuse(results)
+        resolved: list[KnowledgeResult] = []
+        for fusion in fusions:
+            if fusion.duplicates:
+                resolved_fusion = self._conflict_resolution.resolve(fusion, strategy=strategy)
+                resolved.append(resolved_fusion.primary)
+                resolved.extend(resolved_fusion.duplicates)
+            else:
+                resolved.append(fusion.primary)
+        return resolved
+
+    def run_garbage_collection(self) -> dict[str, Any]:
+        """Run knowledge garbage collection."""
+        result = self._gc.collect()
+        return {
+            "removed_count": result.removed_count,
+            "expired_entries": result.expired_entries,
+            "broken_citations": result.broken_citations,
+            "orphaned_entities": result.orphaned_entities,
+            "duplicate_chunks": result.duplicate_chunks,
+            "unused_graph_nodes": result.unused_graph_nodes,
+        }
+
+    def start_background_worker(self) -> None:
+        """Start background reindexing and continuous learning."""
+        self._reindexer.start()
+        self._continuous_learning.start()
+
+    def stop_background_worker(self) -> None:
+        """Stop background reindexing and continuous learning."""
+        self._reindexer.stop()
+        self._continuous_learning.stop()
+
+    def enqueue_reindex(self, task_type: str, items: list[Any]) -> dict[str, Any]:
+        """Enqueue a background reindex task."""
+        task = self._reindexer.enqueue(task_type, items)
+        return {
+            "task_id": task.task_id,
+            "task_type": task.task_type,
+            "total": task.total,
+            "status": task.status,
+        }
+
+    def get_knowledge_statistics(self) -> dict[str, Any]:
+        """Expose knowledge runtime statistics."""
+        return self._stats_provider.snapshot()
+
+    def _cross_document_links(self, obj: KnowledgeObject) -> None:
+        if len(self._objects) < 2:
+            return
+        candidates = self._objects[-10:]
+        relationships = self._cross_document.link_objects(candidates + [obj])
+        for rel in relationships:
+            self._graph.add_relationship(rel)
+
     # -------------------------------------------------------------------------
     # Health & Diagnostics
     # -------------------------------------------------------------------------
@@ -437,6 +625,7 @@ class KnowledgeRuntime:
         return snap
 
     async def close(self) -> None:
+        self.stop_background_worker()
         if self._internet_runtime:
             await self._internet_runtime.shutdown()
         if self._memory_runtime:
