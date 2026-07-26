@@ -25,6 +25,7 @@ from .episodic import EpisodicMemory
 from .semantic import SemanticMemory
 from .embeddings import EmbeddingService, create_embedding_service
 from .graph import MemoryGraph, EdgeType, create_memory_graph
+from .decay import MemoryDecayEngine, DecayConfig, DecayResult, create_decay_engine
 
 
 class MemoryRuntimeImpl(MemoryRuntime):
@@ -58,6 +59,7 @@ class MemoryRuntimeImpl(MemoryRuntime):
             backend=embedding_backend, dim=embedding_dim
         )
         self._graph: MemoryGraph = create_memory_graph()
+        self._decay_engine: MemoryDecayEngine = create_decay_engine()
 
         self._stats = {
             "stores": 0,
@@ -240,8 +242,73 @@ class MemoryRuntimeImpl(MemoryRuntime):
         return await self._store.delete(record_id)
 
     async def consolidate(self) -> dict[str, Any]:
+        """Consolidate memories by grouping similar episodic memories into semantic memories.
+
+        - Groups episodic memories by similarity (embedding cosine similarity)
+        - Creates semantic memory summaries for groups with 3+ similar memories
+        - Links consolidated memories in the graph
+        """
         stats = await self._store.stats()
-        return {"stats": stats.__dict__, "message": "Consolidation complete"}
+        episodic_records = [
+            r for r in self._store._records.values()
+            if r.memory_type == MemoryType.EPISODIC and r.embedding
+        ]
+
+        consolidated = 0
+        groups_created = 0
+        now = time.time()
+
+        used: set[str] = set()
+        for i, record_a in enumerate(episodic_records):
+            if record_a.id in used:
+                continue
+            group = [record_a]
+            used.add(record_a.id)
+
+            for record_b in episodic_records[i + 1:]:
+                if record_b.id in used:
+                    continue
+                if not record_b.embedding:
+                    continue
+                similarity = self._cosine_similarity(record_a.embedding, record_b.embedding)
+                if similarity > 0.75:
+                    group.append(record_b)
+                    used.add(record_b.id)
+
+            if len(group) >= 3:
+                summary_content = "; ".join(r.content for r in group[:5])
+                summary_record = MemoryRecord(
+                    content=f"Consolidated memory: {summary_content}",
+                    memory_type=MemoryType.SEMANTIC,
+                    metadata={
+                        "consolidated": True,
+                        "source_count": len(group),
+                        "source_ids": [r.id for r in group],
+                    },
+                    tags=["consolidated", "semantic"],
+                    importance=0.7,
+                    source="consolidation",
+                )
+                summary_id = await self.store_record(summary_record)
+
+                for r in group:
+                    self._graph.add_edge(
+                        r.id,
+                        summary_id,
+                        EdgeType.ASSOCIATIVE,
+                        weight=0.8,
+                        metadata={"relation": "consolidated_into"},
+                    )
+                groups_created += 1
+                consolidated += len(group)
+
+        return {
+            "stats": stats.__dict__,
+            "consolidated_memories": consolidated,
+            "groups_created": groups_created,
+            "episodic_reviewed": len(episodic_records),
+            "message": "Consolidation complete",
+        }
 
     async def get_record(self, record_id: str) -> MemoryRecord | None:
         return await self._store.get(record_id)
@@ -302,50 +369,20 @@ class MemoryRuntimeImpl(MemoryRuntime):
         return await self.update_importance(record_id, new_importance)
 
     async def apply_decay(self, decay_threshold: float = 0.1) -> dict[str, Any]:
-        """Apply decay rules to memories below the importance threshold.
+        """Apply decay rules to memories.
 
         Memories with importance below the threshold are forgotten.
         Memories with importance above the threshold but below 0.3 are decayed
         (importance reduced based on age).
+        Recently accessed memories get a boost.
         """
-        stats = await self._store.stats()
-        decayed = 0
-        forgotten = 0
-        now = time.time()
-
-        if hasattr(self._store, '_records'):
-            record_ids = list(self._store._records.keys())
-        else:
-            record_ids = []
-
-        for rid in record_ids:
-            record = await self._store.get(rid)
-            if not record:
-                continue
-
-            age_days = (now - record.created_at) / 86400
-            decay_factor = 1.0 / (1.0 + age_days / 90.0)
-
-            if record.importance < decay_threshold:
-                await self.forget(rid)
-                forgotten += 1
-            elif record.importance < 0.3:
-                decayed_importance = record.importance * decay_factor * 0.95
-                if decayed_importance < decay_threshold:
-                    await self.forget(rid)
-                    forgotten += 1
-                else:
-                    await self.update_importance(rid, decayed_importance)
-                    decayed += 1
-
-        self._stats["decayed"] = decayed
-        self._stats["forgotten"] = forgotten
-        return {
-            "decayed": decayed,
-            "forgotten": forgotten,
-            "total_records": stats.total_records,
-            "decay_threshold": decay_threshold,
-        }
+        config = DecayConfig(forget_threshold=decay_threshold)
+        result = await self._decay_engine.apply_decay(
+            self._store, graph=self._graph, config=config
+        )
+        self._stats["decayed"] = result.decayed
+        self._stats["forgotten"] = result.forgotten
+        return result.to_dict()
 
     def _calculate_importance(
         self,
