@@ -29,6 +29,45 @@ class ResultType(str, Enum):
     PLACEHOLDER = "placeholder"
 
 
+class KnowledgeType(str, Enum):
+    FACT = "fact"
+    CONCEPT = "concept"
+    PROCEDURE = "procedure"
+    OPINION = "opinion"
+    OBSERVATION = "observation"
+    PERSONAL = "personal"
+    EXTERNAL = "external"
+    GENERATED = "generated"
+
+
+class EntityType(str, Enum):
+    PERSON = "person"
+    ORGANIZATION = "organization"
+    PLACE = "place"
+    PRODUCT = "product"
+    TECHNOLOGY = "technology"
+    EVENT = "event"
+    DATE = "date"
+    DOCUMENT = "document"
+    CONCEPT = "concept"
+
+
+class RelationshipType(str, Enum):
+    WORKS_AT = "works_at"
+    OWNS = "owns"
+    CREATED = "created"
+    PART_OF = "part_of"
+    USES = "uses"
+    DEPENDS_ON = "depends_on"
+    MENTIONS = "mentions"
+    REFERENCES = "references"
+    RELATED_TO = "related_to"
+    LOCATED_IN = "located_in"
+    MEMBER_OF = "member_of"
+    PREDECESSOR_OF = "predecessor_of"
+    SUCCESSOR_OF = "successor_of"
+
+
 @dataclass(frozen=True)
 class KnowledgeResult:
     """Uniform result object returned by every provider."""
@@ -40,6 +79,8 @@ class KnowledgeResult:
     confidence: float = 0.8
     score: float = 0.0
     type: ResultType = ResultType.WEB
+    knowledge_type: KnowledgeType = KnowledgeType.EXTERNAL
+    authority_score: float = 0.5
     metadata: dict[str, Any] = field(default_factory=dict)
     retrieved_at: float = field(default_factory=time.time)
 
@@ -53,6 +94,8 @@ class KnowledgeResult:
             "confidence": self.confidence,
             "score": self.score,
             "type": self.type.value if hasattr(self.type, "value") else str(self.type),
+            "knowledge_type": self.knowledge_type.value if hasattr(self.knowledge_type, "value") else str(self.knowledge_type),
+            "authority_score": self.authority_score,
             "metadata": self.metadata,
             "retrieved_at": self.retrieved_at,
         }
@@ -85,7 +128,7 @@ class Citation:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
-@dataclass(frozen=True)
+@dataclass
 class FreshnessScore:
     """Freshness tracking for a knowledge object."""
     created: float = field(default_factory=time.time)
@@ -130,6 +173,68 @@ class ConfidenceScore:
 
 
 @dataclass(frozen=True)
+class AuthorityScore:
+    """Authority scoring for a knowledge source."""
+    source_id: str = ""
+    score: float = 0.5
+    category: str = ""
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class Entity:
+    """An extracted entity from knowledge."""
+    id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    name: str = ""
+    entity_type: EntityType = EntityType.CONCEPT
+    aliases: list[str] = field(default_factory=list)
+    canonical: bool = True
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class EntityAlias:
+    """An alias for an entity."""
+    alias: str = ""
+    entity_id: str = ""
+    confidence: float = 1.0
+
+
+@dataclass(frozen=True)
+class Relationship:
+    """A relationship between two entities."""
+    id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    source_id: str = ""
+    target_id: str = ""
+    relationship_type: RelationshipType = RelationshipType.RELATED_TO
+    confidence: float = 1.0
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class Edge:
+    """A graph edge connecting entities."""
+    source: str = ""
+    target: str = ""
+    relationship_type: RelationshipType = RelationshipType.RELATED_TO
+    weight: float = 1.0
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class TemporalVersion:
+    """Temporal versioning for knowledge objects."""
+    valid_from: float = field(default_factory=time.time)
+    valid_until: float = 0.0
+    created: float = field(default_factory=time.time)
+    indexed: float = field(default_factory=time.time)
+    last_updated: float = field(default_factory=time.time)
+    version: int = 1
+    is_current: bool = True
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
 class KnowledgeChunk:
     """A normalized chunk of knowledge text with metadata."""
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
@@ -140,6 +245,11 @@ class KnowledgeChunk:
     confidence: ConfidenceScore | None = None
     token_count: int = 0
     chunk_index: int = 0
+    entities: list[Entity] = field(default_factory=list)
+    relationships: list[Relationship] = field(default_factory=list)
+    knowledge_type: KnowledgeType = KnowledgeType.EXTERNAL
+    temporal: TemporalVersion | None = None
+    authority_score: float = 0.5
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
@@ -163,6 +273,11 @@ class KnowledgeObject:
     freshness: FreshnessScore | None = None
     confidence: ConfidenceScore | None = None
     embedding: list[float] | None = None
+    entities: list[Entity] = field(default_factory=list)
+    relationships: list[Relationship] = field(default_factory=list)
+    knowledge_type: KnowledgeType = KnowledgeType.EXTERNAL
+    authority_score: float = 0.5
+    temporal: TemporalVersion | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
@@ -203,6 +318,8 @@ class KnowledgeFusion:
     agreement_score: float = 1.0
     fused_confidence: float = 0.0
     sources: list[str] = field(default_factory=list)
+    resolved: bool = False
+    resolution: str | None = None
 
 
 @dataclass(frozen=True)

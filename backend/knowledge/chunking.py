@@ -12,7 +12,7 @@ class ChunkingConfig:
     max_tokens: int = 512
     overlap_tokens: int = 50
     token_chars: int = 4
-    min_chunk_chars: int = 80
+    min_chunk_chars: int = 20
     document_aware: bool = True
     paragraph_aware: bool = True
 
