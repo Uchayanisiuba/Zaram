@@ -9,6 +9,7 @@ export { LODManager } from './lod/LODManager';
 export type { LODSelection, LODState, LODConfig, LODCamera, EntityLODInfo } from './lod/LODManager';
 export { Renderer } from './renderer/Renderer';
 export { AssetRegistry } from './registries/AssetRegistry';
+export type { AssetLoadState } from './registries/AssetRegistry';
 export { MaterialRegistry } from './registries/MaterialRegistry';
 export { ShaderRegistry } from './registries/ShaderRegistry';
 export { EmbodimentRegistry } from './registries/EmbodimentRegistry';
