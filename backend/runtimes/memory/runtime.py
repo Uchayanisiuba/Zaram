@@ -24,6 +24,7 @@ from .history import ConversationHistory
 from .episodic import EpisodicMemory
 from .semantic import SemanticMemory
 from .embeddings import EmbeddingService, create_embedding_service
+from .graph import MemoryGraph, EdgeType, create_memory_graph
 
 
 class MemoryRuntimeImpl(MemoryRuntime):
@@ -56,6 +57,7 @@ class MemoryRuntimeImpl(MemoryRuntime):
         self._embedder: EmbeddingService = create_embedding_service(
             backend=embedding_backend, dim=embedding_dim
         )
+        self._graph: MemoryGraph = create_memory_graph()
 
         self._stats = {
             "stores": 0,
@@ -112,6 +114,7 @@ class MemoryRuntimeImpl(MemoryRuntime):
         retriever_health = asyncio.run(self._retriever.health_check()) if hasattr(self._retriever, 'health_check') else {"status": "unknown"}
         ranker_health = asyncio.run(self._ranker.health_check()) if hasattr(self._ranker, 'health_check') else {"status": "unknown"}
         embedder_health = self._embedder.health_check()
+        graph_health = self._graph.health_check()
 
         return {
             "runtime_id": self._runtime_id,
@@ -122,6 +125,7 @@ class MemoryRuntimeImpl(MemoryRuntime):
             "retriever": retriever_health,
             "ranker": ranker_health,
             "embedder": embedder_health,
+            "graph": graph_health,
             "stats": self._stats,
         }
 
@@ -383,6 +387,93 @@ class MemoryRuntimeImpl(MemoryRuntime):
     @property
     def semantic(self) -> SemanticMemory:
         return self._semantic
+
+    @property
+    def graph(self) -> MemoryGraph:
+        return self._graph
+
+    async def link_memories(
+        self,
+        source_id: str,
+        target_id: str,
+        edge_type: EdgeType = EdgeType.ASSOCIATIVE,
+        weight: float = 1.0,
+        metadata: dict[str, Any] | None = None,
+    ) -> bool:
+        """Create a relationship between two memories."""
+        source = await self._store.get(source_id)
+        target = await self._store.get(target_id)
+        if not source or not target:
+            return False
+        self._graph.add_edge(source_id, target_id, edge_type, weight, metadata)
+        return True
+
+    async def get_related_memories(
+        self,
+        record_id: str,
+        edge_types: list[EdgeType] | None = None,
+        max_results: int = 10,
+    ) -> list[MemoryResult]:
+        """Get memories related to a given memory via the graph."""
+        related = self._graph.get_related(record_id, edge_types, max_weight=0.0, max_results=max_results)
+        results = []
+        for rid, weight, edge_type in related:
+            record = await self._store.get(rid)
+            if record:
+                results.append(MemoryResult(
+                    record=record,
+                    score=weight,
+                    match_reason=f"graph:{edge_type.value}",
+                    rank=0,
+                ))
+        return results
+
+    async def find_memory_path(
+        self,
+        source_id: str,
+        target_id: str,
+        max_depth: int = 5,
+    ) -> list[str] | None:
+        """Find a path between two memories in the graph."""
+        return self._graph.find_path(source_id, target_id, max_depth)
+
+    async def get_graph_stats(self) -> dict[str, Any]:
+        """Get memory graph statistics."""
+        return self._graph.get_stats()
+
+    async def auto_link_memories(self, record_id: str, max_links: int = 5) -> int:
+        """Automatically link a memory to similar memories based on embeddings."""
+        record = await self._store.get(record_id)
+        if not record or not record.embedding:
+            return 0
+
+        linked = 0
+        for other_id, other_record in self._store._records.items():
+            if other_id == record_id or not other_record.embedding:
+                continue
+            similarity = self._cosine_similarity(record.embedding, other_record.embedding)
+            if similarity > 0.7:
+                self._graph.add_edge(
+                    record_id,
+                    other_id,
+                    EdgeType.SIMILARITY,
+                    weight=similarity,
+                )
+                linked += 1
+                if linked >= max_links:
+                    break
+        return linked
+
+    def _cosine_similarity(self, a: list[float], b: list[float]) -> float:
+        import math
+        if len(a) != len(b):
+            return 0.0
+        dot = sum(x * y for x, y in zip(a, b))
+        norm_a = math.sqrt(sum(x * x for x in a))
+        norm_b = math.sqrt(sum(y * y for y in b))
+        if norm_a == 0 or norm_b == 0:
+            return 0.0
+        return dot / (norm_a * norm_b)
 
 
 def create_memory_runtime(**kwargs) -> MemoryRuntimeImpl:
