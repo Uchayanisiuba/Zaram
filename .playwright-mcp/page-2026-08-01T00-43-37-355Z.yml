@@ -1,0 +1,12 @@
+- main [ref=e5]:
+  - generic:
+    - generic:
+      - generic [ref=e8]:
+        - img "Living Intelligence Orb"
+      - button "Build" [ref=e10] [cursor=pointer]
+      - button "Memory" [ref=e18] [cursor=pointer]
+      - button "Knowledge" [ref=e30] [cursor=pointer]
+      - button "Plugins" [ref=e36] [cursor=pointer]
+      - button "Canvas" [ref=e42] [cursor=pointer]
+      - button "Settings" [ref=e51] [cursor=pointer]
+    - paragraph [ref=e57]: Living Intelligence · Local First

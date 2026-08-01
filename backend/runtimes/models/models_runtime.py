@@ -6,10 +6,11 @@ from .models_service import ModelsService
 from .engines.ollama_engine import OllamaEngine
 
 class ModelsRuntime(Runtime):
-    def __init__(self, event_bus: EventBus):
+    def __init__(self, event_bus: EventBus, knowledge_runtime=None):
         self._event_bus = event_bus
         self._state = RuntimeState.UNINITIALIZED
         self._service = None
+        self._knowledge_runtime = knowledge_runtime
 
     def get_runtime_id(self) -> str:
         return "models"
@@ -24,6 +25,7 @@ class ModelsRuntime(Runtime):
             priority="critical",
             capabilities=[
                 Capability(id="reasoning.generate", runtime_id="models"),
+                Capability(id="knowledge.search", runtime_id="models"),
                 Capability(id="vision.analyze", runtime_id="models"),
                 Capability(id="vision.screen", runtime_id="models"),
                 Capability(id="vision.camera", runtime_id="models"),
@@ -38,7 +40,7 @@ class ModelsRuntime(Runtime):
         self._state = RuntimeState.INITIALIZING
         # 1. Instantiate Engine and Service
         engine = OllamaEngine()
-        self._service = ModelsService(engine)
+        self._service = ModelsService(engine, knowledge_runtime=self._knowledge_runtime)
         self._state = RuntimeState.READY
         # 2. Notify the Event Bus
         self._event_bus.publish(ZaramEvent(

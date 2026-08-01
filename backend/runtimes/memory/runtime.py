@@ -4,6 +4,7 @@ import asyncio
 import time
 from typing import Any
 
+from core.event_bus import ZaramEvent
 from .contracts import (
     MemoryRecord,
     MemoryQuery,
@@ -38,11 +39,13 @@ class MemoryRuntimeImpl(MemoryRuntime):
         persist_path: str | None = None,
         embedding_dim: int = 384,
         embedding_backend: str = "hash",
+        event_bus: Any | None = None,
     ):
         self._runtime_id = "memory"
         self._state = MemoryStatus.INITIALIZING
         self._start_time = time.time()
         self._initialized = False
+        self._event_bus = event_bus
 
         self._store: MemoryStore = create_memory_store(
             store_type, persist_path=persist_path
@@ -77,6 +80,14 @@ class MemoryRuntimeImpl(MemoryRuntime):
             print(f"[MemoryRuntime] Embedding service degraded: {embed_health}")
         self._state = MemoryStatus.READY
         self._initialized = True
+        if self._event_bus:
+            self._event_bus.subscribe("memory.store", self._handle_store_event)
+            self._event_bus.subscribe("memory.retrieve", self._handle_retrieve_event)
+            self._event_bus.publish(ZaramEvent(
+                source_runtime="memory",
+                event_type="runtime.ready",
+                data={"runtime_id": self.get_runtime_id()},
+            ))
         print(f"[MemoryRuntime] Initialized with store={type(self._store).__name__}, index={type(self._index).__name__}, embedder={self._embedder._backend}")
 
     async def shutdown(self) -> None:
@@ -157,6 +168,19 @@ class MemoryRuntimeImpl(MemoryRuntime):
             record_id = await self._store.put(record)
             await self._index.add(record)
             self._stats["stores"] += 1
+            if self._event_bus:
+                self._event_bus.publish(ZaramEvent(
+                    source_runtime="memory",
+                    event_type="memory.stored",
+                    priority="normal",
+                    data={
+                        "record_id": record_id,
+                        "memory_type": memory_type.value,
+                        "session_id": session_id,
+                        "user_id": user_id,
+                        "tags": tags or [],
+                    },
+                ))
             return record_id
         except Exception as e:
             self._stats["errors"] += 1
@@ -195,6 +219,18 @@ class MemoryRuntimeImpl(MemoryRuntime):
             results = await self._retriever.retrieve(memory_query)
             results = await self._ranker.rank(results, memory_query)
             self._stats["retrievals"] += 1
+            if self._event_bus:
+                self._event_bus.publish(ZaramEvent(
+                    source_runtime="memory",
+                    event_type="memory.retrieved",
+                    priority="normal",
+                    data={
+                        "query": query[:100],
+                        "result_count": len(results),
+                        "session_id": session_id,
+                        "user_id": user_id,
+                    },
+                ))
             return results
         except Exception as e:
             self._stats["errors"] += 1
@@ -452,7 +488,7 @@ class MemoryRuntimeImpl(MemoryRuntime):
         max_results: int = 10,
     ) -> list[MemoryResult]:
         """Get memories related to a given memory via the graph."""
-        related = self._graph.get_related(record_id, edge_types, max_weight=0.0, max_results=max_results)
+        related = self._graph.get_related(record_id, edge_types, min_weight=0.0, max_results=max_results)
         results = []
         for rid, weight, edge_type in related:
             record = await self._store.get(rid)
@@ -511,6 +547,38 @@ class MemoryRuntimeImpl(MemoryRuntime):
         if norm_a == 0 or norm_b == 0:
             return 0.0
         return dot / (norm_a * norm_b)
+
+    # ------------------------------------------------------------------
+    # Event Bus handlers
+    # ------------------------------------------------------------------
+
+    def _handle_store_event(self, event: Any) -> None:
+        data = event.data if hasattr(event, "data") else event
+        content = data.get("content", "")
+        memory_type_str = data.get("memory_type", "conversation")
+        try:
+            memory_type = MemoryType(memory_type_str)
+        except ValueError:
+            memory_type = MemoryType.CONVERSATION
+        asyncio.create_task(self.store(
+            content=content,
+            memory_type=memory_type,
+            metadata=data.get("metadata", {}),
+            session_id=data.get("session_id"),
+            user_id=data.get("user_id"),
+            tags=data.get("tags", []),
+            importance=data.get("importance", 0.5),
+        ))
+
+    def _handle_retrieve_event(self, event: Any) -> None:
+        data = event.data if hasattr(event, "data") else event
+        query = data.get("query", "")
+        asyncio.create_task(self.retrieve(
+            query=query,
+            max_results=data.get("max_results", 10),
+            session_id=data.get("session_id"),
+            user_id=data.get("user_id"),
+        ))
 
 
 def create_memory_runtime(**kwargs) -> MemoryRuntimeImpl:

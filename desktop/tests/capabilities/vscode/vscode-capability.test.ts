@@ -58,6 +58,7 @@ describe('VS Code Capability Pack', () => {
         { correlationId: '1', grantedPermissions: [], createdAt: Date.now() },
         {
           reportProgress: () => {},
+          reportToken: () => {},
           succeed: () => resolve(),
           fail: () => resolve(),
           isCancelled: () => false,

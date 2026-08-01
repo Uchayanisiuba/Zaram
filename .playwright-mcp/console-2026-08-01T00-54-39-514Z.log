@@ -1,0 +1,36 @@
+[    3142ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://localhost:5174/node_modules/.vite/deps/react-dom_client.js?v=5ad0b90e:20102
+[   27107ms] [LOG] Landing container: {width: 0, height: 861} @ :3
+[   27108ms] [LOG] Orb visible, dimensions: 354x354 @ :10
+[   27108ms] [LOG] Orbital buttons found: 6 @ :13
+[  147552ms] [LOG] Orb rect: {"x":99.25204467773438,"y":529.7520751953125,"width":361.49591064453125,"height":361.495849609375,"top":529.7520751953125,"left":99.25204467773438} @ :7
+[  147553ms] [LOG] Orb parent rect: {"x":0,"y":430.5,"width":560,"height":560} @ :11
+[  147553ms] [LOG] Buttons: @ :15
+[  147553ms] [LOG]   Build: {"x":394.4193115234375,"y":705.8191528320312,"w":49,"h":65.5} @ :18
+[  147553ms] [LOG]   Memory: {"x":451.75537109375,"y":188.9898223876953,"w":49,"h":65.5} @ :18
+[  147553ms] [LOG]   Knowledge: {"x":-88.18763732910156,"y":914.579345703125,"w":61.703125,"h":65.5} @ :18
+[  147553ms] [LOG]   Plugins: {"x":32.8360710144043,"y":-119.079345703125,"w":49.000003814697266,"h":65.5} @ :18
+[  147553ms] [LOG]   Canvas: {"x":-500.75537109375,"y":606.5101928710938,"w":49,"h":65.5} @ :18
+[  147553ms] [LOG]   Settings: {"x":-443.4193115234375,"y":89.68084716796875,"w":49,"h":65.5} @ :18
+[  147553ms] [LOG] div[14] rect: {"x":81,"y":511.5,"w":398,"h":398} @ :26
+[  147554ms] [LOG] h-screen elements: 1 @ :32
+[  147554ms] [LOG]   h-screen[0] tag=DIV rect: {"x":0,"y":0,"w":0,"h":861} @ :35
+[  250156ms] [LOG] === .h-screen element details === @ :2
+[  250580ms] [LOG] outerHTML (first 500 chars): <div class="h-screen overflow-hidden text-slate-100 flex items-center justify-center" style="background: radial-gradient(at 25% 15%, rgba(99, 102, 241, 0.08) 0%, transparent 52%), radial-gradient(at 75% 85%, rgba(168, 85, 247, 0.06) 0%, transparent 52%), rgb(8, 8, 15); font-family: &quot;Space Grotesk&quot;, Inter, sans-serif;"><div class="absolute inset-0 opacity-[0.04] pointer-events-none" style="background-image: linear-gradient(rgba(99, 102, 241, 0.6) 1px, transparent 1px), linear-gradient(9 @ :3
+[  250580ms] [LOG] parent tag: DIV @ :4
+[  250580ms] [LOG] parent classes:  @ :5
+[  250580ms] [LOG] parent style: flex: 1 1 0%; display: flex; animation: 0.25s ease 0s 1 normal none running fade-in; @ :6
+[  250580ms] [LOG] parent computed width: 929px @ :7
+[  250581ms] [LOG] parent offsetWidth: 929 @ :8
+[  250581ms] [LOG] 
+=== .h-screen computed style === @ :10
+[  250581ms] [LOG] width: 0px @ :13
+[  250581ms] [LOG] height: 861px @ :14
+[  250581ms] [LOG] display: flex @ :15
+[  250581ms] [LOG] flex-direction: row @ :16
+[  250581ms] [LOG] 
+=== Parent hierarchy === @ :19
+[  250581ms] [LOG] Level 0: DIV class="h-screen overflow-hidden text-slate-100 flex items-center justify-center" style="background: radial-gradient(at 25% 15%, rgba(99, 102, 241, 0.08) 0%, transparent 52%), radial-gradient(at 75% 85%, rgba(168, 85, 247, 0.06) 0%, transparent 52%), rgb(8, 8, 15); font-family: "Space Grotesk", Inter, sans-serif;" w=0 h=861 @ :23
+[  250581ms] [LOG] Level 1: DIV class="" style="flex: 1 1 0%; display: flex; animation: 0.25s ease 0s 1 normal none running fade-in;" w=929 h=861 @ :23
+[  250581ms] [LOG] Level 2: MAIN class="" style="flex: 1 1 0%; display: flex; overflow: hidden; position: relative; background: rgb(8, 10, 14);" w=929 h=861 @ :23
+[  250581ms] [LOG] Level 3: DIV class="" style="flex: 1 1 0%; display: flex; overflow: hidden; position: relative;" w=929 h=861 @ :23
+[  250581ms] [LOG] Level 4: DIV class="" style="height: 100vh; display: flex; flex-direction: column; background: rgb(8, 10, 14); overflow: hidden;" w=929 h=861 @ :23

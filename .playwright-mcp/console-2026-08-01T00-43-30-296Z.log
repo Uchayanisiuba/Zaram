@@ -1,0 +1,36 @@
+[    4981ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://localhost:5174/node_modules/.vite/deps/react-dom_client.js?v=5ad0b90e:20102
+[    7040ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://localhost:5174/favicon.ico:0
+[  258503ms] [LOG] Orb img found: true @ :3
+[  258503ms] [LOG] Orb src: /src/assets/living-orb-globe.png @ :4
+[  258503ms] [LOG] Orb dimensions: {width: 354, height: 354, offsetWidth: 354, offsetHeight: 354} @ :5
+[  258504ms] [LOG] Orb container: {width: 560, height: 560, position: static} @ :6
+[  258504ms] [LOG] Button: Build offset: 49x66 @ :10
+[  258504ms] [LOG] Button: Memory offset: 49x66 @ :10
+[  258504ms] [LOG] Button: Knowledge offset: 62x66 @ :10
+[  258504ms] [LOG] Button: Plugins offset: 49x66 @ :10
+[  258504ms] [LOG] Button: Canvas offset: 49x66 @ :10
+[  258504ms] [LOG] Button: Settings offset: 49x66 @ :10
+[  258504ms] [LOG] Total divs: 37 @ :14
+[  258504ms] [LOG] Total elements: 88 @ :15
+[  482876ms] [LOG] Orb computed style: {opacity: 1, display: block, visibility: visible, width: 354px, height: 354px} @ :4
+[  482877ms] [LOG] div[0]: w=929 h=861 pos=static bg=false border=false overflow=hidden @ :22
+[  482877ms] [LOG] div[1]: w=929 h=861 pos=static bg=true border=false overflow=hidden @ :22
+[  482877ms] [LOG] div[2]: w=929 h=861 pos=relative bg=false border=false overflow=hidden @ :22
+[  482877ms] [LOG] div[3]: w=0 h=861 pos=static bg=true border=false overflow=hidden @ :22
+[  482877ms] [LOG] div[4]: w=929 h=861 pos=absolute bg=false border=false overflow=visible @ :22
+[  482877ms] [LOG] div[5]: w=0 h=861 pos=relative bg=false border=false overflow=visible @ :22
+[  482877ms] [LOG] div[6]: w=1100 h=1100 pos=absolute bg=false border=true overflow=visible @ :22
+[  482877ms] [LOG] div[7]: w=1150 h=1150 pos=absolute bg=false border=true overflow=visible @ :22
+[  482877ms] [LOG] div[8]: w=560 h=560 pos=absolute bg=false border=false overflow=visible @ :22
+[  482878ms] [LOG] div[9]: w=560 h=560 pos=static bg=false border=false overflow=visible @ :22
+[  482878ms] [LOG] div[10]: w=560 h=560 pos=relative bg=false border=false overflow=visible @ :22
+[  482878ms] [LOG] div[11]: w=806 h=806 pos=absolute bg=false border=false overflow=visible @ :22
+[  482878ms] [LOG] div[12]: w=582 h=582 pos=absolute bg=false border=true overflow=visible @ :22
+[  482878ms] [LOG] div[13]: w=398 h=398 pos=absolute bg=false border=true overflow=visible @ :22
+[  482878ms] [LOG] div[14]: w=20 h=20 pos=absolute bg=true border=false overflow=visible @ :22
+[  482878ms] [LOG] div[15]: w=5 h=5 pos=absolute bg=true border=false overflow=visible @ :22
+[  482878ms] [LOG] div[16]: w=4 h=4 pos=absolute bg=true border=false overflow=visible @ :22
+[  482878ms] [LOG] div[17]: w=5 h=5 pos=absolute bg=true border=false overflow=visible @ :22
+[  482879ms] [LOG] div[18]: w=3 h=3 pos=absolute bg=true border=false overflow=visible @ :22
+[  482879ms] [LOG] div[19]: w=4 h=4 pos=absolute bg=true border=false overflow=visible @ :22
+[  482879ms] [LOG] Landing container: {width: 0, height: 861, position: static, overflow: hidden} @ :30

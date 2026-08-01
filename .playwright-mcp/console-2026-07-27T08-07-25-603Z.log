@@ -1,0 +1,223 @@
+[    1383ms] [INFO] %cDownload the React DevTools for a better development experience: https://reactjs.org/link/react-devtools font-weight:bold @ http://localhost:5173/node_modules/.vite/deps/chunk-2EG2ZD3U.js?v=6057410a:21550
+[    2136ms] [WARNING] [DEPRECATED] Default export is deprecated. Instead use `import { create } from 'zustand'`. @ http://localhost:5173/node_modules/.vite/deps/zustand.js?v=6057410a:233
+[    2442ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://localhost:5173/favicon.ico:0
+[    5308ms] TypeError: Cannot read properties of undefined (reading 'nodes')
+    at useFrameStateBridge (http://localhost:5173/src/core/bridge/FrameStateBridge.ts:203:13)
+    at UniverseView (http://localhost:5173/src/pages/UniverseView.tsx?t=1785121609291:48:7)
+    at renderWithHooks (http://localhost:5173/node_modules/.vite/deps/chunk-2EG2ZD3U.js?v=6057410a:11548:26)
+    at mountIndeterminateComponent (http://localhost:5173/node_modules/.vite/deps/chunk-2EG2ZD3U.js?v=6057410a:14926:21)
+    at beginWork (http://localhost:5173/node_modules/.vite/deps/chunk-2EG2ZD3U.js?v=6057410a:15914:22)
+    at HTMLUnknownElement.callCallback2 (http://localhost:5173/node_modules/.vite/deps/chunk-2EG2ZD3U.js?v=6057410a:3674:22)
+    at Object.invokeGuardedCallbackDev (http://localhost:5173/node_modules/.vite/deps/chunk-2EG2ZD3U.js?v=6057410a:3699:24)
+    at invokeGuardedCallback (http://localhost:5173/node_modules/.vite/deps/chunk-2EG2ZD3U.js?v=6057410a:3733:39)
+    at beginWork$1 (http://localhost:5173/node_modules/.vite/deps/chunk-2EG2ZD3U.js?v=6057410a:19765:15)
+    at performUnitOfWork (http://localhost:5173/node_modules/.vite/deps/chunk-2EG2ZD3U.js?v=6057410a:19198:20)
+[    5336ms] TypeError: Cannot read properties of undefined (reading 'nodes')
+    at useFrameStateBridge (http://localhost:5173/src/core/bridge/FrameStateBridge.ts:203:13)
+    at UniverseView (http://localhost:5173/src/pages/UniverseView.tsx?t=1785121609291:48:7)
+    at renderWithHooks (http://localhost:5173/node_modules/.vite/deps/chunk-2EG2ZD3U.js?v=6057410a:11548:26)
+    at mountIndeterminateComponent (http://localhost:5173/node_modules/.vite/deps/chunk-2EG2ZD3U.js?v=6057410a:14926:21)
+    at beginWork (http://localhost:5173/node_modules/.vite/deps/chunk-2EG2ZD3U.js?v=6057410a:15914:22)
+    at HTMLUnknownElement.callCallback2 (http://localhost:5173/node_modules/.vite/deps/chunk-2EG2ZD3U.js?v=6057410a:3674:22)
+    at Object.invokeGuardedCallbackDev (http://localhost:5173/node_modules/.vite/deps/chunk-2EG2ZD3U.js?v=6057410a:3699:24)
+    at invokeGuardedCallback (http://localhost:5173/node_modules/.vite/deps/chunk-2EG2ZD3U.js?v=6057410a:3733:39)
+    at beginWork$1 (http://localhost:5173/node_modules/.vite/deps/chunk-2EG2ZD3U.js?v=6057410a:19765:15)
+    at performUnitOfWork (http://localhost:5173/node_modules/.vite/deps/chunk-2EG2ZD3U.js?v=6057410a:19198:20)
+[    5339ms] [ERROR] The above error occurred in the <UniverseView> component:
+
+    at UniverseView (http://localhost:5173/src/pages/UniverseView.tsx?t=1785121609291:30:3)
+    at R3FErrorBoundary (http://localhost:5173/src/components/R3FErrorBoundary.tsx:7:5)
+    at div
+    at MotionComponent (http://localhost:5173/node_modules/.vite/deps/framer-motion.js?v=6057410a:945:40)
+    at div
+    at CameraController2 (http://localhost:5173/src/components/spatial/camera/CameraController.tsx?t=1785127696740:25:3)
+    at div
+    at DesktopShell (http://localhost:5173/src/components/layout/DesktopShell.tsx?t=1785129319275:28:32)
+    at div
+    at div
+    at div
+    at ZaramProvider (http://localhost:5173/src/context/ZaramContext.jsx:20:33)
+    at App (http://localhost:5173/src/App.jsx?t=1785129319275:112:27)
+    at ThemeProvider (http://localhost:5173/src/theme/ThemeProvider.tsx:22:33)
+    at PresenceProvider (http://localhost:5173/src/context/PresenceContext.tsx:25:36)
+    at QueryClientProvider (http://localhost:5173/node_modules/.vite/deps/@tanstack_react-query.js?v=6057410a:3239:3)
+    at ErrorBoundary (http://localhost:5173/src/components/common/ErrorBoundary.tsx:7:5)
+
+React will try to recreate this component tree from scratch using the error boundary you provided, R3FErrorBoundary. @ http://localhost:5173/node_modules/.vite/deps/@react-three_fiber.js?v=6057410a:17704
+[    5339ms] [ERROR] [R3FErrorBoundary] Caught error: TypeError: Cannot read properties of undefined (reading 'nodes')
+    at useFrameStateBridge (http://localhost:5173/src/core/bridge/FrameStateBridge.ts:203:13)
+    at UniverseView (http://localhost:5173/src/pages/UniverseView.tsx?t=1785121609291:48:7)
+    at renderWithHooks (http://localhost:5173/node_modules/.vite/deps/chunk-2EG2ZD3U.js?v=6057410a:11548:26)
+    at mountIndeterminateComponent (http://localhost:5173/node_modules/.vite/deps/chunk-2EG2ZD3U.js?v=6057410a:14926:21)
+    at beginWork (http://localhost:5173/node_modules/.vite/deps/chunk-2EG2ZD3U.js?v=6057410a:15914:22)
+    at beginWork$1 (http://localhost:5173/node_modules/.vite/deps/chunk-2EG2ZD3U.js?v=6057410a:19753:22)
+    at performUnitOfWork (http://localhost:5173/node_modules/.vite/deps/chunk-2EG2ZD3U.js?v=6057410a:19198:20)
+    at workLoopSync (http://localhost:5173/node_modules/.vite/deps/chunk-2EG2ZD3U.js?v=6057410a:19137:13)
+    at renderRootSync (http://localhost:5173/node_modules/.vite/deps/chunk-2EG2ZD3U.js?v=6057410a:19116:15)
+    at recoverFromConcurrentError (http://localhost:5173/node_modules/.vite/deps/chunk-2EG2ZD3U.js?v=6057410a:18736:28) @ http://localhost:5173/node_modules/.vite/deps/@react-three_fiber.js?v=6057410a:17704
+[    5340ms] [ERROR] [R3FErrorBoundary] Component stack: 
+    at UniverseView (http://localhost:5173/src/pages/UniverseView.tsx?t=1785121609291:30:3)
+    at R3FErrorBoundary (http://localhost:5173/src/components/R3FErrorBoundary.tsx:7:5)
+    at div
+    at MotionComponent (http://localhost:5173/node_modules/.vite/deps/framer-motion.js?v=6057410a:945:40)
+    at div
+    at CameraController2 (http://localhost:5173/src/components/spatial/camera/CameraController.tsx?t=1785127696740:25:3)
+    at div
+    at DesktopShell (http://localhost:5173/src/components/layout/DesktopShell.tsx?t=1785129319275:28:32)
+    at div
+    at div
+    at div
+    at ZaramProvider (http://localhost:5173/src/context/ZaramContext.jsx:20:33)
+    at App (http://localhost:5173/src/App.jsx?t=1785129319275:112:27)
+    at ThemeProvider (http://localhost:5173/src/theme/ThemeProvider.tsx:22:33)
+    at PresenceProvider (http://localhost:5173/src/context/PresenceContext.tsx:25:36)
+    at QueryClientProvider (http://localhost:5173/node_modules/.vite/deps/@tanstack_react-query.js?v=6057410a:3239:3)
+    at ErrorBoundary (http://localhost:5173/src/components/common/ErrorBoundary.tsx:7:5) @ http://localhost:5173/node_modules/.vite/deps/@react-three_fiber.js?v=6057410a:17704
+[   86555ms] [INFO] %cDownload the React DevTools for a better development experience: https://reactjs.org/link/react-devtools font-weight:bold @ http://localhost:5173/node_modules/.vite/deps/chunk-2EG2ZD3U.js?v=6057410a:21550
+[   86995ms] [WARNING] [DEPRECATED] Default export is deprecated. Instead use `import { create } from 'zustand'`. @ http://localhost:5173/node_modules/.vite/deps/zustand.js?v=6057410a:233
+[   90051ms] TypeError: Cannot read properties of undefined (reading 'nodes')
+    at useFrameStateBridge (http://localhost:5173/src/core/bridge/FrameStateBridge.ts:203:13)
+    at UniverseView (http://localhost:5173/src/pages/UniverseView.tsx?t=1785121609291:48:7)
+    at renderWithHooks (http://localhost:5173/node_modules/.vite/deps/chunk-2EG2ZD3U.js?v=6057410a:11548:26)
+    at mountIndeterminateComponent (http://localhost:5173/node_modules/.vite/deps/chunk-2EG2ZD3U.js?v=6057410a:14926:21)
+    at beginWork (http://localhost:5173/node_modules/.vite/deps/chunk-2EG2ZD3U.js?v=6057410a:15914:22)
+    at HTMLUnknownElement.callCallback2 (http://localhost:5173/node_modules/.vite/deps/chunk-2EG2ZD3U.js?v=6057410a:3674:22)
+    at Object.invokeGuardedCallbackDev (http://localhost:5173/node_modules/.vite/deps/chunk-2EG2ZD3U.js?v=6057410a:3699:24)
+    at invokeGuardedCallback (http://localhost:5173/node_modules/.vite/deps/chunk-2EG2ZD3U.js?v=6057410a:3733:39)
+    at beginWork$1 (http://localhost:5173/node_modules/.vite/deps/chunk-2EG2ZD3U.js?v=6057410a:19765:15)
+    at performUnitOfWork (http://localhost:5173/node_modules/.vite/deps/chunk-2EG2ZD3U.js?v=6057410a:19198:20)
+[   90061ms] TypeError: Cannot read properties of undefined (reading 'nodes')
+    at useFrameStateBridge (http://localhost:5173/src/core/bridge/FrameStateBridge.ts:203:13)
+    at UniverseView (http://localhost:5173/src/pages/UniverseView.tsx?t=1785121609291:48:7)
+    at renderWithHooks (http://localhost:5173/node_modules/.vite/deps/chunk-2EG2ZD3U.js?v=6057410a:11548:26)
+    at mountIndeterminateComponent (http://localhost:5173/node_modules/.vite/deps/chunk-2EG2ZD3U.js?v=6057410a:14926:21)
+    at beginWork (http://localhost:5173/node_modules/.vite/deps/chunk-2EG2ZD3U.js?v=6057410a:15914:22)
+    at HTMLUnknownElement.callCallback2 (http://localhost:5173/node_modules/.vite/deps/chunk-2EG2ZD3U.js?v=6057410a:3674:22)
+    at Object.invokeGuardedCallbackDev (http://localhost:5173/node_modules/.vite/deps/chunk-2EG2ZD3U.js?v=6057410a:3699:24)
+    at invokeGuardedCallback (http://localhost:5173/node_modules/.vite/deps/chunk-2EG2ZD3U.js?v=6057410a:3733:39)
+    at beginWork$1 (http://localhost:5173/node_modules/.vite/deps/chunk-2EG2ZD3U.js?v=6057410a:19765:15)
+    at performUnitOfWork (http://localhost:5173/node_modules/.vite/deps/chunk-2EG2ZD3U.js?v=6057410a:19198:20)
+[   90066ms] [ERROR] The above error occurred in the <UniverseView> component:
+
+    at UniverseView (http://localhost:5173/src/pages/UniverseView.tsx?t=1785121609291:30:3)
+    at R3FErrorBoundary (http://localhost:5173/src/components/R3FErrorBoundary.tsx:7:5)
+    at div
+    at MotionComponent (http://localhost:5173/node_modules/.vite/deps/framer-motion.js?v=6057410a:945:40)
+    at div
+    at CameraController2 (http://localhost:5173/src/components/spatial/camera/CameraController.tsx?t=1785127696740:25:3)
+    at div
+    at DesktopShell (http://localhost:5173/src/components/layout/DesktopShell.tsx?t=1785129319275:28:32)
+    at div
+    at div
+    at div
+    at ZaramProvider (http://localhost:5173/src/context/ZaramContext.jsx:20:33)
+    at App (http://localhost:5173/src/App.jsx?t=1785129319275:112:27)
+    at ThemeProvider (http://localhost:5173/src/theme/ThemeProvider.tsx:22:33)
+    at PresenceProvider (http://localhost:5173/src/context/PresenceContext.tsx:25:36)
+    at QueryClientProvider (http://localhost:5173/node_modules/.vite/deps/@tanstack_react-query.js?v=6057410a:3239:3)
+    at ErrorBoundary (http://localhost:5173/src/components/common/ErrorBoundary.tsx:7:5)
+
+React will try to recreate this component tree from scratch using the error boundary you provided, R3FErrorBoundary. @ http://localhost:5173/node_modules/.vite/deps/@react-three_fiber.js?v=6057410a:17704
+[   90067ms] [ERROR] [R3FErrorBoundary] Caught error: TypeError: Cannot read properties of undefined (reading 'nodes')
+    at useFrameStateBridge (http://localhost:5173/src/core/bridge/FrameStateBridge.ts:203:13)
+    at UniverseView (http://localhost:5173/src/pages/UniverseView.tsx?t=1785121609291:48:7)
+    at renderWithHooks (http://localhost:5173/node_modules/.vite/deps/chunk-2EG2ZD3U.js?v=6057410a:11548:26)
+    at mountIndeterminateComponent (http://localhost:5173/node_modules/.vite/deps/chunk-2EG2ZD3U.js?v=6057410a:14926:21)
+    at beginWork (http://localhost:5173/node_modules/.vite/deps/chunk-2EG2ZD3U.js?v=6057410a:15914:22)
+    at beginWork$1 (http://localhost:5173/node_modules/.vite/deps/chunk-2EG2ZD3U.js?v=6057410a:19753:22)
+    at performUnitOfWork (http://localhost:5173/node_modules/.vite/deps/chunk-2EG2ZD3U.js?v=6057410a:19198:20)
+    at workLoopSync (http://localhost:5173/node_modules/.vite/deps/chunk-2EG2ZD3U.js?v=6057410a:19137:13)
+    at renderRootSync (http://localhost:5173/node_modules/.vite/deps/chunk-2EG2ZD3U.js?v=6057410a:19116:15)
+    at recoverFromConcurrentError (http://localhost:5173/node_modules/.vite/deps/chunk-2EG2ZD3U.js?v=6057410a:18736:28) @ http://localhost:5173/node_modules/.vite/deps/@react-three_fiber.js?v=6057410a:17704
+[   90067ms] [ERROR] [R3FErrorBoundary] Component stack: 
+    at UniverseView (http://localhost:5173/src/pages/UniverseView.tsx?t=1785121609291:30:3)
+    at R3FErrorBoundary (http://localhost:5173/src/components/R3FErrorBoundary.tsx:7:5)
+    at div
+    at MotionComponent (http://localhost:5173/node_modules/.vite/deps/framer-motion.js?v=6057410a:945:40)
+    at div
+    at CameraController2 (http://localhost:5173/src/components/spatial/camera/CameraController.tsx?t=1785127696740:25:3)
+    at div
+    at DesktopShell (http://localhost:5173/src/components/layout/DesktopShell.tsx?t=1785129319275:28:32)
+    at div
+    at div
+    at div
+    at ZaramProvider (http://localhost:5173/src/context/ZaramContext.jsx:20:33)
+    at App (http://localhost:5173/src/App.jsx?t=1785129319275:112:27)
+    at ThemeProvider (http://localhost:5173/src/theme/ThemeProvider.tsx:22:33)
+    at PresenceProvider (http://localhost:5173/src/context/PresenceContext.tsx:25:36)
+    at QueryClientProvider (http://localhost:5173/node_modules/.vite/deps/@tanstack_react-query.js?v=6057410a:3239:3)
+    at ErrorBoundary (http://localhost:5173/src/components/common/ErrorBoundary.tsx:7:5) @ http://localhost:5173/node_modules/.vite/deps/@react-three_fiber.js?v=6057410a:17704
+[   93648ms] [INFO] %cDownload the React DevTools for a better development experience: https://reactjs.org/link/react-devtools font-weight:bold @ http://localhost:5173/node_modules/.vite/deps/chunk-2EG2ZD3U.js?v=6057410a:21550
+[   94078ms] [WARNING] [DEPRECATED] Default export is deprecated. Instead use `import { create } from 'zustand'`. @ http://localhost:5173/node_modules/.vite/deps/zustand.js?v=6057410a:233
+[   97135ms] TypeError: Cannot read properties of undefined (reading 'nodes')
+    at useFrameStateBridge (http://localhost:5173/src/core/bridge/FrameStateBridge.ts:203:13)
+    at UniverseView (http://localhost:5173/src/pages/UniverseView.tsx?t=1785121609291:48:7)
+    at renderWithHooks (http://localhost:5173/node_modules/.vite/deps/chunk-2EG2ZD3U.js?v=6057410a:11548:26)
+    at mountIndeterminateComponent (http://localhost:5173/node_modules/.vite/deps/chunk-2EG2ZD3U.js?v=6057410a:14926:21)
+    at beginWork (http://localhost:5173/node_modules/.vite/deps/chunk-2EG2ZD3U.js?v=6057410a:15914:22)
+    at HTMLUnknownElement.callCallback2 (http://localhost:5173/node_modules/.vite/deps/chunk-2EG2ZD3U.js?v=6057410a:3674:22)
+    at Object.invokeGuardedCallbackDev (http://localhost:5173/node_modules/.vite/deps/chunk-2EG2ZD3U.js?v=6057410a:3699:24)
+    at invokeGuardedCallback (http://localhost:5173/node_modules/.vite/deps/chunk-2EG2ZD3U.js?v=6057410a:3733:39)
+    at beginWork$1 (http://localhost:5173/node_modules/.vite/deps/chunk-2EG2ZD3U.js?v=6057410a:19765:15)
+    at performUnitOfWork (http://localhost:5173/node_modules/.vite/deps/chunk-2EG2ZD3U.js?v=6057410a:19198:20)
+[   97144ms] TypeError: Cannot read properties of undefined (reading 'nodes')
+    at useFrameStateBridge (http://localhost:5173/src/core/bridge/FrameStateBridge.ts:203:13)
+    at UniverseView (http://localhost:5173/src/pages/UniverseView.tsx?t=1785121609291:48:7)
+    at renderWithHooks (http://localhost:5173/node_modules/.vite/deps/chunk-2EG2ZD3U.js?v=6057410a:11548:26)
+    at mountIndeterminateComponent (http://localhost:5173/node_modules/.vite/deps/chunk-2EG2ZD3U.js?v=6057410a:14926:21)
+    at beginWork (http://localhost:5173/node_modules/.vite/deps/chunk-2EG2ZD3U.js?v=6057410a:15914:22)
+    at HTMLUnknownElement.callCallback2 (http://localhost:5173/node_modules/.vite/deps/chunk-2EG2ZD3U.js?v=6057410a:3674:22)
+    at Object.invokeGuardedCallbackDev (http://localhost:5173/node_modules/.vite/deps/chunk-2EG2ZD3U.js?v=6057410a:3699:24)
+    at invokeGuardedCallback (http://localhost:5173/node_modules/.vite/deps/chunk-2EG2ZD3U.js?v=6057410a:3733:39)
+    at beginWork$1 (http://localhost:5173/node_modules/.vite/deps/chunk-2EG2ZD3U.js?v=6057410a:19765:15)
+    at performUnitOfWork (http://localhost:5173/node_modules/.vite/deps/chunk-2EG2ZD3U.js?v=6057410a:19198:20)
+[   97156ms] [ERROR] The above error occurred in the <UniverseView> component:
+
+    at UniverseView (http://localhost:5173/src/pages/UniverseView.tsx?t=1785121609291:30:3)
+    at R3FErrorBoundary (http://localhost:5173/src/components/R3FErrorBoundary.tsx:7:5)
+    at div
+    at MotionComponent (http://localhost:5173/node_modules/.vite/deps/framer-motion.js?v=6057410a:945:40)
+    at div
+    at CameraController2 (http://localhost:5173/src/components/spatial/camera/CameraController.tsx?t=1785127696740:25:3)
+    at div
+    at DesktopShell (http://localhost:5173/src/components/layout/DesktopShell.tsx?t=1785129319275:28:32)
+    at div
+    at div
+    at div
+    at ZaramProvider (http://localhost:5173/src/context/ZaramContext.jsx:20:33)
+    at App (http://localhost:5173/src/App.jsx?t=1785129319275:112:27)
+    at ThemeProvider (http://localhost:5173/src/theme/ThemeProvider.tsx:22:33)
+    at PresenceProvider (http://localhost:5173/src/context/PresenceContext.tsx:25:36)
+    at QueryClientProvider (http://localhost:5173/node_modules/.vite/deps/@tanstack_react-query.js?v=6057410a:3239:3)
+    at ErrorBoundary (http://localhost:5173/src/components/common/ErrorBoundary.tsx:7:5)
+
+React will try to recreate this component tree from scratch using the error boundary you provided, R3FErrorBoundary. @ http://localhost:5173/node_modules/.vite/deps/@react-three_fiber.js?v=6057410a:17704
+[   97156ms] [ERROR] [R3FErrorBoundary] Caught error: TypeError: Cannot read properties of undefined (reading 'nodes')
+    at useFrameStateBridge (http://localhost:5173/src/core/bridge/FrameStateBridge.ts:203:13)
+    at UniverseView (http://localhost:5173/src/pages/UniverseView.tsx?t=1785121609291:48:7)
+    at renderWithHooks (http://localhost:5173/node_modules/.vite/deps/chunk-2EG2ZD3U.js?v=6057410a:11548:26)
+    at mountIndeterminateComponent (http://localhost:5173/node_modules/.vite/deps/chunk-2EG2ZD3U.js?v=6057410a:14926:21)
+    at beginWork (http://localhost:5173/node_modules/.vite/deps/chunk-2EG2ZD3U.js?v=6057410a:15914:22)
+    at beginWork$1 (http://localhost:5173/node_modules/.vite/deps/chunk-2EG2ZD3U.js?v=6057410a:19753:22)
+    at performUnitOfWork (http://localhost:5173/node_modules/.vite/deps/chunk-2EG2ZD3U.js?v=6057410a:19198:20)
+    at workLoopSync (http://localhost:5173/node_modules/.vite/deps/chunk-2EG2ZD3U.js?v=6057410a:19137:13)
+    at renderRootSync (http://localhost:5173/node_modules/.vite/deps/chunk-2EG2ZD3U.js?v=6057410a:19116:15)
+    at recoverFromConcurrentError (http://localhost:5173/node_modules/.vite/deps/chunk-2EG2ZD3U.js?v=6057410a:18736:28) @ http://localhost:5173/node_modules/.vite/deps/@react-three_fiber.js?v=6057410a:17704
+[   97157ms] [ERROR] [R3FErrorBoundary] Component stack: 
+    at UniverseView (http://localhost:5173/src/pages/UniverseView.tsx?t=1785121609291:30:3)
+    at R3FErrorBoundary (http://localhost:5173/src/components/R3FErrorBoundary.tsx:7:5)
+    at div
+    at MotionComponent (http://localhost:5173/node_modules/.vite/deps/framer-motion.js?v=6057410a:945:40)
+    at div
+    at CameraController2 (http://localhost:5173/src/components/spatial/camera/CameraController.tsx?t=1785127696740:25:3)
+    at div
+    at DesktopShell (http://localhost:5173/src/components/layout/DesktopShell.tsx?t=1785129319275:28:32)
+    at div
+    at div
+    at div
+    at ZaramProvider (http://localhost:5173/src/context/ZaramContext.jsx:20:33)
+    at App (http://localhost:5173/src/App.jsx?t=1785129319275:112:27)
+    at ThemeProvider (http://localhost:5173/src/theme/ThemeProvider.tsx:22:33)
+    at PresenceProvider (http://localhost:5173/src/context/PresenceContext.tsx:25:36)
+    at QueryClientProvider (http://localhost:5173/node_modules/.vite/deps/@tanstack_react-query.js?v=6057410a:3239:3)
+    at ErrorBoundary (http://localhost:5173/src/components/common/ErrorBoundary.tsx:7:5) @ http://localhost:5173/node_modules/.vite/deps/@react-three_fiber.js?v=6057410a:17704

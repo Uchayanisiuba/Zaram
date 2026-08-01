@@ -1,0 +1,102 @@
+
+---
+
+## **File 3: `.trae/AGENT_INSTRUCTIONS.md`**
+
+```markdown
+# Agent Instructions for Zaram
+
+**For:** Trae, Cursor, Kilo, Cline, Claude Code, Gemini CLI  
+**Purpose:** How to work on Zaram without breaking things
+
+---
+
+## Before You Start
+
+**Read these files in order:**
+1. `CONTEXT.md` - Understand what Zaram is
+2. `DESIGN_SYSTEM.md` - Know the UI specifications
+3. This file - Follow these rules
+
+---
+
+## Core Principles
+
+### 1. Preserve the Architecture
+
+**Never:**
+- Modify backend contracts without permission
+- Create circular dependencies
+- Hardcode colors (use design tokens)
+- Bypass the Memory Graph
+- Skip plugin isolation
+
+**Always:**
+- Use the 8-engine structure
+- Route through System Engine
+- Validate all inputs
+- Log errors with context
+- Test before committing
+
+### 2. Respect the Design
+
+**Never:**
+- Change the Orb's position or size
+- Remove the Floating Dock
+- Add UI chrome that hides the workspace
+- Use light mode
+- Ignore accessibility
+
+**Always:**
+- Use design tokens (no hardcoded values)
+- Maintain 60fps
+- Follow WCAG 2.1 AA
+- Test keyboard navigation
+- Check color contrast
+
+### 3. Think Long-Term
+
+**Never:**
+- Create technical debt
+- Use `any` types
+- Skip tests
+- Hardcode API endpoints
+- Ignore error handling
+
+**Always:**
+- Write TypeScript (strict mode)
+- Add JSDoc comments
+- Update documentation
+- Consider edge cases
+- Ask: "Will this scale?"
+
+---
+
+## Coding Standards
+
+### TypeScript
+
+```typescript
+// ✅ DO
+interface User {
+  id: string;
+  name: string;
+  email: string;
+}
+
+function createUser(data: Omit<User, 'id'>): User {
+  return {
+    id: crypto.randomUUID(),
+    ...data
+  };
+}
+
+// ❌ DON'T
+interface User {
+  id: any;
+  name: any;
+}
+
+function createUser(data: any): any {
+  return data;
+}

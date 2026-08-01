@@ -1,0 +1,78 @@
+@theme {
+  --color-primary: oklch(var(--primary-light));
+  --color-secondary: oklch(var(--secondary-light));
+  --color-accent: oklch(var(--accent-light));
+  --background: oklch(var(--background-light));
+  --text-primary: oklch(var(--text-primary-light));
+  --text-secondary: oklch(var(--text-secondary-light));
+
+  --primary-light: 62.8% 0.224 240;
+  --secondary-light: 85.9% 0.131 270;
+  --accent-light: 72.2% 0.225 300;
+  --background-light: 98% 0.01 240;
+  --text-primary-light: 20% 0.01 240;
+  --text-secondary-light: 40% 0.01 240;
+
+  --primary-dark: 72.2% 0.225 300;
+  --secondary-dark: 85.9% 0.131 270;
+  --accent-dark: 62.8% 0.224 240;
+  --background-dark: 15% 0.02 240;
+  --text-primary-dark: 98% 0.01 240;
+  --text-secondary-dark: 70% 0.01 240;
+
+  --presence-online: #2e7d32;
+  --presence-away: #ff8f00;
+  --presence-dnd: #c62828;
+  --presence-offline: #616161;
+
+  --glass-background: rgba(255, 255, 255, 0.1);
+  --glass-border: rgba(255, 255, 255, 0.2);
+  --glass-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.37);
+
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+  --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+  --shadow-2xl: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+  --shadow-inner: inset 0 2px 4px 0 rgba(0, 0, 0, 0.06);
+
+  --radius-sm: 0.25rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 1rem;
+  --radius-xl: 2rem;
+  --radius-full: 9999px;
+
+  --blur-sm: 4px;
+  --blur-md: 8px;
+  --blur-lg: 16px;
+  --blur-xl: 24px;
+
+  --timing-fast: 150ms;
+  --timing-normal: 300ms;
+  --timing-slow: 500ms;
+
+  --motion-duration-fast: 150ms;
+  --motion-duration-normal: 300ms;
+  --motion-duration-slow: 500ms;
+  --motion-ease-in: cubic-bezier(0.4, 0, 1, 1);
+  --motion-ease-out: cubic-bezier(0, 0, 0.2, 1);
+  --motion-ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+:root {
+  --color-primary: oklch(var(--primary-light));
+  --color-secondary: oklch(var(--secondary-light));
+  --color-accent: oklch(var(--accent-light));
+  --background: oklch(var(--background-light));
+  --text-primary: oklch(var(--text-primary-light));
+  --text-secondary: oklch(var(--text-secondary-light));
+}
+
+.dark {
+  --color-primary: oklch(var(--primary-dark));
+  --color-secondary: oklch(var(--secondary-dark));
+  --color-accent: oklch(var(--accent-dark));
+  --background: oklch(var(--background-dark));
+  --text-primary: oklch(var(--text-primary-dark));
+  --text-secondary: oklch(var(--text-secondary-dark));
+}

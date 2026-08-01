@@ -36,3 +36,4 @@ export type {
   SystemSnapshot,
   SystemRuntimeState
 } from './sources/types'
+export { eventBus, EventBus } from './event-bus'

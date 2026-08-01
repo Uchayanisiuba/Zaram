@@ -1,0 +1,12 @@
+[    2277ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://localhost:5174/node_modules/.vite/deps/react-dom_client.js?v=5ad0b90e:20102
+[   21936ms] [LOG] Orb center: {x: 465, y: 431, w: 221, h: 221} @ :7
+[   21936ms] [LOG] Landing ring[0] center: {x: 465, y: 431, w: 540} @ :14
+[   21937ms] [LOG] Landing ring[1] center: {x: 465, y: 431, w: 590} @ :14
+[   21937ms] [LOG] Landing ring[2] center: {x: 465, y: 431, w: 463} @ :14
+[   21939ms] [LOG] Landing ring[3] center: {x: 465, y: 431, w: 332} @ :14
+[   21939ms] [LOG] Build center: {x: 415, y: 196} @ :19
+[   21940ms] [LOG] Memory center: {x: 236, y: 356} @ :19
+[   21940ms] [LOG] Knowledge center: {x: 643, y: 270} @ :19
+[   21940ms] [LOG] Plugins center: {x: 286, y: 591} @ :19
+[   21940ms] [LOG] Canvas center: {x: 693, y: 505} @ :19
+[   21940ms] [LOG] Settings center: {x: 514, y: 665} @ :19

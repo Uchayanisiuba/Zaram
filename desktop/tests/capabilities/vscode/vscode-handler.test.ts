@@ -20,6 +20,7 @@ function createMockControls() {
   const calls: Array<{ type: string; value?: any; output?: any; error?: any }> = []
   const controls: ExecutionControls = {
     reportProgress: (p: number) => calls.push({ type: 'progress', value: p }),
+    reportToken: () => calls.push({ type: 'token' }),
     succeed: (output: any) => calls.push({ type: 'succeed', output }),
     fail: (error: any) => calls.push({ type: 'fail', error }),
     isCancelled: () => false,

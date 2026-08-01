@@ -1,0 +1,29 @@
+[    2094ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://localhost:5173/node_modules/.vite/deps/react-dom_client.js?v=2fc193b0:20102
+[    3273ms] [ERROR] %o
+
+%s
+
+%s
+ TypeError: selector is not a function
+    at http://localhost:5173/src/hooks/useFrameState.ts:3:35
+    at memoizedSelector (http://localhost:5173/node_modules/.vite/deps/zustand.js?v=b4d8bfdd:107:32)
+    at http://localhost:5173/node_modules/.vite/deps/zustand.js?v=b4d8bfdd:127:24
+    at mountSyncExternalStore (http://localhost:5173/node_modules/.vite/deps/react-dom_client.js?v=2fc193b0:6001:26)
+    at Object.useSyncExternalStore (http://localhost:5173/node_modules/.vite/deps/react-dom_client.js?v=2fc193b0:18758:18)
+    at exports.useSyncExternalStore (http://localhost:5173/node_modules/.vite/deps/chunk-3JZVWPCX.js?v=b233ce90:962:36)
+    at exports.useSyncExternalStoreWithSelector (http://localhost:5173/node_modules/.vite/deps/zustand.js?v=b4d8bfdd:136:21)
+    at useStore (http://localhost:5173/node_modules/.vite/deps/zustand.js?v=b4d8bfdd:210:17)
+    at useBoundStore (http://localhost:5173/node_modules/.vite/deps/zustand.js?v=b4d8bfdd:227:51)
+    at useFrameState (http://localhost:5173/src/hooks/useFrameState.ts:3:10) The above error occurred in the <SpatialBackground> component. React will try to recreate this component tree from scratch using the error boundary you provided, ErrorBoundary. @ http://localhost:5173/node_modules/.vite/deps/react-dom_client.js?v=2fc193b0:7000
+[    3274ms] [ERROR] [ErrorBoundary] TypeError: selector is not a function
+    at http://localhost:5173/src/hooks/useFrameState.ts:3:35
+    at memoizedSelector (http://localhost:5173/node_modules/.vite/deps/zustand.js?v=b4d8bfdd:107:32)
+    at http://localhost:5173/node_modules/.vite/deps/zustand.js?v=b4d8bfdd:127:24
+    at mountSyncExternalStore (http://localhost:5173/node_modules/.vite/deps/react-dom_client.js?v=2fc193b0:6001:26)
+    at Object.useSyncExternalStore (http://localhost:5173/node_modules/.vite/deps/react-dom_client.js?v=2fc193b0:18758:18)
+    at exports.useSyncExternalStore (http://localhost:5173/node_modules/.vite/deps/chunk-3JZVWPCX.js?v=b233ce90:962:36)
+    at exports.useSyncExternalStoreWithSelector (http://localhost:5173/node_modules/.vite/deps/zustand.js?v=b4d8bfdd:136:21)
+    at useStore (http://localhost:5173/node_modules/.vite/deps/zustand.js?v=b4d8bfdd:210:17)
+    at useBoundStore (http://localhost:5173/node_modules/.vite/deps/zustand.js?v=b4d8bfdd:227:51)
+    at useFrameState (http://localhost:5173/src/hooks/useFrameState.ts:3:10) {componentStack: 
+    at SpatialBackground (http://localhost:5173/s…5173/src/components/common/ErrorBoundary.tsx:5:8)} @ http://localhost:5173/src/components/common/ErrorBoundary.tsx:10

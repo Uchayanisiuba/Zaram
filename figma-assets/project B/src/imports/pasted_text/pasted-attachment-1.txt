@@ -1,0 +1,724 @@
+ZARAM AI Operating System - Figma Design Prompt
+Project Overview
+Design a complete, modular UI design system for ZARAM - an AI-powered Desktop Operating System built with Electron + React. The interface should embody a calm, minimal, spatial, and futuristic aesthetic inspired by Apple Vision Pro, OpenAI's design language, Nothing OS, Arc Browser, and Iron Man's JARVIS.
+🎨 Design Philosophy & Core Principles
+Primary Concept: The interface must feel ALIVE - users should interact with an intelligent digital lifeform, not traditional software. The Living Orb is the emotional center; everything else orbits around it.
+Key Attributes:
+Calm & Minimal: No clutter, no neon cyberpunk, no visual noise
+Premium & AAA Quality: Every pixel should feel intentional and polished
+Organic & Cinematic: Soft shadows, deep blacks, subtle gradients, dynamic depth
+Spatial & Futuristic: Glassmorphism, layered depth, fluid animations
+Invisible Interface: UI recedes when not needed; content is primary
+📐 Canvas & Resolution Specifications
+Primary Canvas: 2560×1440px (QHD)
+Responsive Breakpoints:
+Large: 2560×1440px
+Medium: 1920×1080px
+Small: 1366×768px
+Grid System:
+12-column grid with 24px gutters
+80px margins on large, 40px on medium, 24px on small
+8px baseline grid for all spacing
+🎨 Color Palette & Design Tokens
+Primary Colors
+1234567891011121314151617181920212223242526
+Gradient Specifications
+123456789101112
+🔤 Typography System
+Primary Font: Inter (or SF Pro Display as fallback)
+Type Scale
+1234567891011121314151617
+🧩 Core Component Library
+1. LIVING ORB (Primary Emotional Center)
+Size: 340×340px container (scalable 260-400px)
+Structure:
+Layer 1 (Outer Glow): Radial gradient blur layer, 340px, animate scale 1.0→1.15→1.0 over 6s
+Layer 2 (Energy Ring 1): 280px circle, border 1px cyan@20%, rotate 360° over 20s linear
+Layer 3 (Energy Ring 2): 240px circle, border 1px violet@30% with cyan@60% top segment, rotate -360° over 12s
+Layer 4 (Core Sphere): 180px circle, gradient cyan@20%→violet@20%, backdrop-blur-md, border white@10%, shadow 0 0 60px cyan@20%
+Layer 5 (Inner Pulse): 12px white circle at center, animate opacity 0.4→0.8→0.4 over 3s
+States:
+Idle: Breathing animation (scale 1.0→1.08→1.0 over 5s)
+Listening: Scale 1.15, increased glow intensity, cyan dominant
+Thinking: Multi-color pulse (cyan→violet→blue), faster rotation
+Speaking: Audio waveform rings emanating outward
+Active: Slight floating animation (translateY -12px over 8s)
+Variants:
+Default (260-340px)
+Compact (180px)
+Expanded (400px+)
+Voice Mode (450px with waveform)
+Future Embodiment Ready (placeholder for 3D MetaHuman)
+2. GLASS PANEL (Foundation Component)
+Base Properties:
+Background: rgba(255,255,255,0.05)
+Backdrop Filter: blur(16px) saturate(180%)
+Border: 1px solid rgba(255,255,255,0.08)
+Border Radius: 16px (lg), 20px (xl), 24px (2xl)
+Shadow: 0 8px 32px 0 rgba(0,0,0,0.36)
+Variants:
+Default: As above
+Elevated: Background rgba(255,255,255,0.08), shadow 0 12px 48px rgba(0,0,0,0.48)
+Interactive: Hover state - background rgba(255,255,255,0.10), border rgba(255,255,255,0.15)
+Active: Background rgba(255,255,255,0.12), border cyan@30%
+Minimal: Background rgba(255,255,255,0.03), border none
+Padding Tokens:
+sm: 12px
+md: 20px
+lg: 28px
+xl: 36px
+3. TOP MENU BAR
+Height: 40px
+Position: Fixed top, full width
+Background: rgba(6,7,9,0.80) with backdrop-blur-xl
+Left Section:
+ZARAM logo/text (14px, 600 weight)
+Mode indicator pill (glass, 10px text, uppercase)
+Status dots (8px, animated pulse for active)
+Center Section:
+Current window/app title (13px, 500 weight, text-secondary)
+Breadcrumb navigation (optional)
+Right Section:
+System metrics (GPU, Memory - monospace 11px)
+Cloud/Local indicator (icon + text)
+Notification bell (icon with badge)
+Clock (12px, monospace)
+Auto-Layout: Horizontal, space-between, padding 0 24px
+4. LEFT SIDEBAR
+Width: 260px (collapsible to 72px)
+Position: Fixed left, below menu bar, full height
+Sections (Vertical Auto-Layout, gap 16px):
+Navigation Menu (Glass panel, padding 16px)
+Conversation History (icon + text)
+Memory Timeline (icon + text)
+Projects (icon + text)
+Knowledge (icon + text)
+Agents (icon + text)
+Pinned Conversations (icon + text)
+Each item: 44px height, horizontal auto-layout, 12px gap, padding 0 16px, rounded-lg, hover state
+Quick Actions (Glass panel, padding 16px)
+New Chat button (primary, cyan accent)
+Import/Export buttons
+Storage Indicator (Mini progress bar, glass panel)
+Collapsed State:
+Width 72px
+Icons only, tooltips on hover
+48px icon buttons
+5. RIGHT SIDEBAR (Dynamic Context Panel)
+Width: 320px (resizable 280-400px)
+Position: Fixed right, below menu bar, full height
+Content Areas (Stack with gap 12px):
+Active Context Card: Current agent status, task progress
+Memory Details: Selected memory preview
+Knowledge Graph Mini: 3-5 related nodes
+Runtime Metrics: CPU, Memory, Token usage
+Quick Actions: Context-specific buttons
+Auto-Layout: Vertical, padding 20px, gap 16px
+6. BOTTOM DOCK
+Height: 80px (content area 64px + padding)
+Position: Fixed bottom, centered
+Structure:
+Glass panel container (rounded-2xl, padding 12px 16px)
+Horizontal auto-layout, gap 8px
+Centered horizontally
+Dock Items:
+Size: 48×48px base
+Icon Size: 24px
+Hover Effect: Scale to 1.2, translateY -8px (spring physics)
+Active Indicator: 4px dot below item (cyan glow)
+Tooltip: Appears on hover (glass panel, 8px radius)
+Sections:
+Search (magnifying glass icon)
+Divider (1px vertical, 32px height, white@10%)
+Voice Mode (microphone icon)
+Memory (brain icon)
+Projects (folder icon)
+Knowledge (book icon)
+Embodiments (user icon)
+Divider
+Settings (gear icon)
+Notifications (bell icon with badge)
+Magnification Effect:
+Items within 100px of cursor scale up
+Max scale 1.3
+Smooth spring transition (duration 200ms, ease-out)
+7. WINDOW MANAGER
+Window Frame:
+Minimum size: 400×300px
+Default size: 800×600px
+Border radius: 12px (slightly less than panels)
+Glass background with stronger border (white@12%)
+Title Bar:
+Height: 44px
+Left: Window controls (close, minimize, maximize - 12px circles)
+Center: Window title (14px, 500 weight)
+Right: Action buttons (optional)
+Content Area:
+Padding: 24px
+Scrollable if needed
+Optional toolbar below title bar
+Window States:
+Active: Border cyan@30%, shadow increased
+Inactive: Border white@8%, opacity 0.95
+Minimized: Animate to dock position
+Maximized: Full screen (minus menu bar and dock)
+Drag Handles:
+Top bar for dragging
+Bottom-right corner for resize (16×16px handle)
+8. COMMAND PALETTE (⌘K / Ctrl+K)
+Container:
+Width: 640px max
+Max height: 520px
+Centered on screen (vertically 20% from top)
+Glass panel with elevated shadow
+Border radius: 16px
+Search Input:
+Height: 56px
+Padding: 0 20px
+Font: 16px
+Placeholder: "Search apps, memories, commands..."
+Left icon: Search (20px, text-tertiary)
+Right: Keyboard shortcut hint (⌘K badge)
+Results List:
+Max height: 400px
+Scrollable
+Grouped by category (Apps, Memories, Commands, Files)
+Each item: 48px height, horizontal auto-layout
+Left: Icon (20px)
+Center: Title (14px, 500) + Subtitle (12px, text-secondary)
+Right: Keyboard shortcut or action hint
+Selected State:
+Background: white@10%
+Border-left: 3px cyan
+Footer:
+Height: 44px
+Border-top: 1px white@8%
+Hints: "↑↓ Navigate" "↵ Select" "⎋ Close"
+9. AI CHAT INTERFACE
+Container:
+Width: 420px
+Height: 560px
+Position: Floating (default top-right quadrant)
+Glass panel, rounded-2xl
+Header:
+Height: 64px
+Padding: 0 20px
+Title: "ZARAM Assistant" (14px, 600)
+Subtitle: "Neural Engine v2.0 • Local Active" (11px, text-secondary)
+Close button (right)
+Message Area:
+Flex: 1 (scrollable)
+Padding: 20px
+Gap: 16px between messages
+User Message:
+Align: Right
+Max-width: 85%
+Background: cyan@10%
+Border: 1px cyan@20%
+Border-radius: 16px (top-right 4px)
+Padding: 14px 18px
+Text: 14px, leading-relaxed
+AI Message:
+Align: Left
+Max-width: 90%
+Background: glass (white@5%)
+Border-radius: 16px (top-left 4px)
+Padding: 14px 18px
+Text: 14px, leading-relaxed
+Typing Indicator:
+3 dots, 6px circles
+Bounce animation (staggered 0.1s, 0.2s)
+Glass background
+Input Area:
+Height: 72px
+Padding: 16px
+Border-top: 1px white@10%
+Horizontal layout, gap 12px
+Input Field:
+Flex: 1
+Height: 44px
+Background: white@5%
+Border: 1px white@10%
+Border-radius: 12px
+Padding: 0 16px
+Font: 14px
+Focus: Border cyan@30%, background white@8%
+Send Button:
+Width: 44px
+Height: 44px
+Background: cyan@10%
+Border: 1px cyan@30%
+Border-radius: 12px
+Icon: Send (18px, cyan)
+Hover: Background cyan@20%
+10. NOTIFICATION SYSTEM
+Toast Container:
+Position: Top-right, below menu bar
+Max-width: 360px
+Vertical stack, gap 12px
+Padding: 20px from edges
+Toast Item:
+Width: 360px
+Glass panel, rounded-xl
+Padding: 16px 20px
+Horizontal auto-layout, gap 14px
+Border-left: 3px (color by type)
+Types:
+Info: Border cyan
+Success: Border emerald
+Warning: Border amber
+Error: Border red
+Structure:
+Left: Icon (20px, color by type)
+Center:
+Title (14px, 600)
+Message (13px, text-secondary, mt-1)
+Right: Close button (optional)
+Bottom: Progress bar (height 2px, auto-decrease)
+Animation:
+Enter: Slide from right + fade (300ms, ease-out)
+Exit: Slide right + fade (250ms, ease-in)
+Progress bar: Width 100%→0% over duration
+11. DESKTOP WIDGETS
+Base Widget:
+Size: 192×128px (small), 256×192px (medium), 320×256px (large)
+Glass panel, rounded-2xl
+Draggable (cursor: move)
+Resize handles (bottom-right)
+Widget Types:
+Clock Widget:
+Large time display (48px, 600, mono)
+Date below (13px, text-secondary)
+Timezone indicator (11px, text-tertiary)
+Optional: Multiple timezones
+Weather Widget:
+Temperature (40px, 600)
+Condition icon (32px, cyan)
+Location (13px, text-secondary)
+Details row (humidity, wind - 11px)
+System Stats Widget:
+CPU usage (progress bar + percentage)
+Memory usage (progress bar + GB used/total)
+Storage (progress bar + percentage)
+Network (up/down speeds)
+Memory Timeline Widget:
+Horizontal scrollable cards
+Each card: Memory preview (title, timestamp, type icon)
+"View All" button
+Quick Notes Widget:
+Textarea (auto-expand)
+Save indicator
+Pin to desktop option
+12. APP ICONS (Desktop)
+Size: 80×80px container
+Icon: 48×48px centered
+Label: Below icon, 12px, text-secondary, max-width 80px, truncate
+States:
+Default: Glass background (white@5%), rounded-2xl
+Hover: Background white@10%, scale 1.05, label text-primary
+Selected: Border cyan@30%, background white@10%, shadow cyan glow
+Active: Bottom indicator (4px dot, cyan)
+Grid Layout:
+Desktop: 1 column, gap 24px (vertical)
+Auto-align to left edge, 24px from left, 96px from top
+13. MEMORY INTERFACE
+View Modes:
+Timeline: Vertical list, chronological
+Clusters: Grid of semantic groups
+Graph: Node visualization (mini)
+Memory Card:
+Glass panel, rounded-xl
+Padding: 16px
+Horizontal layout
+Gap: 14px
+Structure:
+Left: Type icon (20px, color-coded)
+Center:
+Title (14px, 600)
+Preview text (13px, text-secondary, 1 line truncate)
+Metadata row (timestamp, source - 11px, text-tertiary)
+Right:
+Pin button (if pinned, cyan)
+Importance indicator (glow intensity)
+Pinned Memories:
+Border cyan@20%
+Subtle cyan glow shadow
+Always at top of list
+Important Memories:
+Gradient border (cyan→violet)
+Slightly larger (padding 18px)
+14. PROJECT WORKSPACE (Kanban)
+Board Container:
+Full width/height of window
+Horizontal scroll
+Padding: 24px
+Gap: 24px between columns
+Column:
+Width: 320px
+Vertical auto-layout
+Gap: 12px
+Column Header:
+Horizontal layout, space-between
+Title (14px, 600)
+Count badge (glass, 11px)
+Add button (icon only)
+Task Card:
+Glass panel, rounded-xl
+Padding: 16px
+Gap: 12px
+Structure:
+Title (14px, 500)
+Description (13px, text-secondary, 2 line max)
+Tags (horizontal, glass pills, 10px)
+Meta row:
+Assignee avatar (20px)
+Agent indicator (icon + name, 11px)
+Progress bar (if applicable)
+Dependencies (link icon)
+Card States:
+Todo: Default
+In Progress: Border cyan@20%, left accent bar cyan
+Blocked: Border red@20%, left accent bar red
+Completed: Opacity 0.7, strikethrough title
+15. KNOWLEDGE GRAPH VISUALIZATION
+Container:
+Full window or widget size
+Dark background (rgba(6,7,9,0.60))
+Interactive canvas
+Nodes:
+Size: Small (32px), Medium (48px), Large (64px)
+Shape: Circle with glass fill
+Border: 2px (color by type)
+Label: Below node, 11px, text-secondary
+Hover: Scale 1.1, show details tooltip
+Node Types:
+Concept: Cyan border
+Document: Blue border
+Code: Violet border
+Person: Emerald border
+Project: Amber border
+Connections:
+Lines between nodes
+Width: 1px (inactive), 2px (active)
+Color: white@20%
+Animated flow for active connections
+Controls:
+Zoom in/out buttons (bottom-right)
+Fit to screen button
+Search/filter (top-right)
+Legend (top-left, collapsible)
+16. AGENT DASHBOARD
+Container:
+Glass panel or full window
+Grid layout (2-3 columns)
+Agent Card:
+Glass panel, rounded-xl
+Padding: 20px
+Gap: 16px
+Structure:
+Header:
+Avatar (40px, glass circle)
+Name (14px, 600)
+Status badge (pill, 10px, color-coded)
+Model Info:
+Model name (12px, text-secondary)
+Capabilities tags (small pills)
+Current Task:
+Task title (13px, 500)
+Progress bar (height 4px, rounded)
+ETA or time elapsed (11px, text-tertiary)
+Actions:
+Pause/Resume button
+View Details button
+Terminate button (red, destructive)
+Status Colors:
+Thinking: Cyan, animated pulse
+Running: Emerald
+Waiting: Amber
+Completed: Blue
+Error: Red
+17. VOICE MODE INTERFACE
+Container:
+Full screen overlay
+Background: rgba(6,7,9,0.95)
+Centered content
+Elements:
+Large Orb: 450px diameter, enhanced glow
+Audio Waveform:
+Below orb
+5-7 bars, animated height
+Cyan/violet gradient
+Smooth spring physics
+Transcription:
+Below waveform
+24px text, centered
+Fade in/out as speaking
+Microphone Indicator:
+Top-center
+Red dot when recording
+"Listening..." text (13px, text-secondary)
+Controls:
+Bottom-center
+End Call button (red, large)
+Mute toggle (glass button)
+Settings (gear icon)
+Animations:
+Orb reacts to voice amplitude
+Waveform bars bounce with audio
+Smooth transitions between states
+18. SETTINGS PANEL
+Layout:
+Two-column (sidebar + content)
+Sidebar width: 240px
+Glass panel container
+Sidebar Navigation:
+Vertical list
+44px items
+Icon + text
+Active state: background white@10%, border-left cyan
+Categories:
+General
+Appearance
+AI & Models
+Memory & Privacy
+Keyboard Shortcuts
+Integrations
+Advanced
+Content Area:
+Padding: 32px
+Max-width: 640px
+Setting Item:
+Vertical gap: 24px
+Label (14px, 600)
+Description (13px, text-secondary, mt-1)
+Control (toggle, dropdown, input, slider)
+Toggle Switch:
+Width: 44px
+Height: 24px
+Background: white@10% (off), cyan@40% (on)
+Knob: 18px white circle, shadow
+Transition: 200ms
+19. SEARCH RESULTS (Expanded)
+Container:
+Full screen or large modal
+Max-width: 900px
+Centered
+Search Header:
+Large input (56px height)
+Query display
+Filter chips (horizontal, glass pills)
+Result count (text-secondary)
+Results Grid:
+2-3 columns
+Gap: 16px
+Masonry or fixed height
+Result Card:
+Glass panel, rounded-xl
+Padding: 16px
+Gap: 12px
+Structure:
+Type icon + badge (top-right)
+Title (14px, 600)
+Preview/snippet (13px, text-secondary, 3 lines)
+Metadata (source, date, relevance score)
+Quick actions (hover: open, copy, share)
+Highlighting:
+Search terms: cyan background, cyan text
+20. CONTEXT MENUS & DROPDOWNS
+Menu Container:
+Min-width: 200px
+Max-width: 320px
+Glass panel, rounded-xl
+Padding: 8px vertical
+Shadow: 0 12px 48px rgba(0,0,0,0.48)
+Menu Item:
+Height: 36px
+Padding: 0 12px
+Horizontal layout, gap 12px
+Rounded-lg
+Hover: background white@8%
+Structure:
+Left: Icon (16px, text-secondary)
+Center: Label (13px)
+Right: Shortcut hint (11px, text-tertiary, glass pill)
+Divider:
+Height: 1px
+Background: white@8%
+Margin: 6px 12px
+Submenu Indicator:
+Chevron right (14px, text-tertiary)
+🎬 Animation & Motion Specifications
+Global Animation Tokens
+12345678910
+Component Animations
+Window Open:
+Scale: 0.95→1.0
+Opacity: 0→1
+Y: 20px→0
+Duration: 250ms
+Easing: smooth-out
+Window Close:
+Scale: 1.0→0.98
+Opacity: 1→0
+Duration: 150ms
+Easing: ease-in
+Dock Item Hover:
+Scale: 1.0→1.2
+Y: 0→-8px
+Duration: 200ms
+Easing: spring
+Glass Panel Hover:
+Background: 0.05→0.08
+Border: 0.08→0.15
+Shadow: increase 20%
+Duration: 200ms
+Orb Breathing:
+Scale: 1.0→1.08→1.0
+Opacity: 0.8→1.0→0.8
+Duration: 5000ms
+Easing: ease-in-out
+Repeat: infinite
+Notification Enter:
+X: 100%→0
+Opacity: 0→1
+Duration: 300ms
+Easing: smooth-out
+Command Palette Open:
+Scale: 0.95→1.0
+Opacity: 0→1
+Y: -10px→0
+Duration: 200ms
+Easing: smooth-out
+Tooltip:
+Scale: 0.9→1.0
+Opacity: 0→1
+Duration: 150ms
+Easing: ease-out
+Loading Spinner:
+Rotate: 0→360deg
+Duration: 1000ms
+Easing: linear
+Repeat: infinite
+📐 Auto-Layout & Spacing System
+Spacing Scale (8px base)
+12345678910111213141516
+Auto-Layout Patterns
+Vertical Stack:
+1234
+Horizontal Stack:
+1234
+Grid:
+1
+🔌 Component Variants & States
+Button Component
+Variants:
+Primary (cyan background)
+Secondary (glass background)
+Ghost (transparent, hover glass)
+Destructive (red background)
+States:
+Default
+Hover (scale 1.02, brightness 1.1)
+Active (scale 0.98)
+Disabled (opacity 0.4, cursor not-allowed)
+Loading (spinner replaces icon/text)
+Input Component
+Variants:
+Default (glass background)
+Filled (white@10% background)
+Minimal (border only)
+States:
+Default
+Focus (border cyan@30%, shadow cyan glow)
+Error (border red@40%, shake animation)
+Disabled (opacity 0.4)
+With Icon (left or right padding adjustment)
+Toggle/Switch
+States:
+Off (white@10% background)
+On (cyan@40% background)
+Disabled (opacity 0.3)
+Loading (animated dots)
+Design System Organization
+Figma File Structure
+12345678910111213141516171819202122232425262728293031323334353637383940414243444546474849505152535455565758596061626364656667686970717273
+🔧 Figma-Specific Implementation Notes
+Component Properties
+Use Figma's component properties for:
+Boolean: Show/hide elements (icons, badges, dividers)
+Instance Swap: Icon variants, avatar images
+Text: Labels, titles, dynamic content
+Variant: States (default, hover, active, disabled)
+Auto-Layout Best Practices
+All containers use auto-layout
+Use "Fill container" for flexible widths
+Use "Hug contents" for buttons, badges
+Set min/max widths for responsiveness
+Use padding consistently from spacing scale
+Constraints & Responsive Behavior
+Pin elements to edges appropriately
+Use "Scale" for icons that should grow with container
+Use "Left & Right" for full-width elements
+Test at 2560px, 1920px, and 1366px widths
+Interactive Components
+Create interactive variants for:
+Button hover/active states
+Toggle on/off
+Window controls (minimize, maximize, close)
+Dock item magnification
+Tab switching
+Prototyping Interactions
+Use "Smart Animate" for smooth transitions
+Set appropriate easing (spring for playful, ease-out for UI)
+Use delays for staggered animations
+Create overlay animations for modals, menus
+Design Tokens Export
+Name layers and styles for easy developer handoff:
+Color styles: zaram/bg-primary, zaram/accent-cyan
+Text styles: zaram/display-xl, zaram/body-md
+Effect styles: zaram/glass, zaram/glow-cyan
+Use consistent naming: component/variant/state
+📦 Export & Handoff Specifications
+Asset Export
+Icons: SVG format, 24px base, optimize for web
+Images: WebP format, multiple resolutions (@1x, @2x, @3x)
+Logos: SVG + PNG transparent background
+Developer Notes
+Include in Figma descriptions:
+CSS class names (e.g., .glass-panel, .living-orb)
+Tailwind classes where applicable
+Animation durations and easing functions
+Z-index hierarchy
+Breakpoint behavior
+Documentation
+Create a README frame with:
+Design system overview
+Component usage guidelines
+Do's and Don'ts
+Accessibility notes (contrast ratios, focus states)
+Performance considerations (blur performance)
+✨ Final Polish Checklist
+Before marking as complete, ensure:
+All components have hover, active, and disabled states
+Typography scale is consistent throughout
+Color contrast meets WCAG AA standards (4.5:1 minimum)
+All interactive elements have focus states
+Animations are smooth (60fps) and not jarring
+Glassmorphism effects work on both light and dark backgrounds
+Components are responsive and test at all breakpoints
+Naming convention is consistent (kebab-case for layers)
+All variants are documented
+Prototype flows are complete and functional
+Design tokens are exported as styles
+Component properties are properly configured
+No unused layers or hidden elements
+File is organized and easy to navigate
+🎯 Success Criteria
+The design system is successful when:
+Modular: Any component can be used independently
+Consistent: Visual language is unified across all screens
+Scalable: Easy to add new components or variants
+Accessible: Meets accessibility standards
+Developer-Friendly: Clear handoff with tokens and specs
+Performant: Effects are optimized for real-time rendering
+Future-Proof: Ready for embodiment expansion (MetaHuman, etc.)

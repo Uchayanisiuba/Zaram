@@ -1,0 +1,27 @@
+- generic [ref=e3]:
+  - generic [ref=e4]:
+    - generic [ref=e5]:
+      - heading "ZARAM" [level=1] [ref=e6]
+      - paragraph [ref=e7]: OS
+    - navigation [ref=e8]:
+      - button "Conversation" [ref=e9] [cursor=pointer]
+      - button "Knowledge Universe" [ref=e15] [cursor=pointer]
+      - button "Files" [ref=e22] [cursor=pointer]
+      - button "Audit Terminal" [ref=e26] [cursor=pointer]
+      - button "Runtime Inspector" [ref=e30] [cursor=pointer]
+      - button "Capabilities" [ref=e35] [cursor=pointer]
+      - button "Settings" [ref=e40] [cursor=pointer]
+    - generic [ref=e46]:
+      - generic [ref=e47]: Z
+      - generic [ref=e48]:
+        - generic [ref=e49]: Zaram
+        - generic [ref=e50]: Browser
+  - generic [ref=e52]:
+    - generic [ref=e53]:
+      - generic [ref=e55]:
+        - generic [ref=e56]: Project
+        - generic [ref=e57]: Zaram
+      - generic [ref=e59]:
+        - generic [ref=e60]: Persona
+        - generic [ref=e61]: zaram_prime
+    - generic [ref=e62]: startup
