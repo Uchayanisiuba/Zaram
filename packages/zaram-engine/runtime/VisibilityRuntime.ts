@@ -3,10 +3,8 @@ import { UniverseRuntime, UniverseEntity } from '../universe/UniverseRuntime';
 import { AssetDescriptor } from '../types/AssetDescriptor';
 import { MaterialDescriptor } from '../types/MaterialDescriptor';
 import { ShaderDescriptor } from '../types/ShaderDescriptor';
-import { LODManager, LODSelection } from '../lod/LODManager';import { AssetRegistry } from '../registries/AssetRegistry';
-import { MaterialRegistry } from '../registries/MaterialRegistry';
-import { ShaderRegistry } from '../registries/ShaderRegistry';
-import { EmbodimentRegistry } from '../registries/EmbodimentRegistry';
+import { LODManager, LODSelection } from '../lod/LODManager';
+import { UnifiedRegistry, Embodiment } from '../registries/UnifiedRegistry';
 
 export interface CameraState {
   position: [number, number, number];
@@ -35,6 +33,11 @@ export interface VisibilityResult {
     material: MaterialDescriptor;
     shader: ShaderDescriptor;
     lodOverride?: LODSelection;
+    transform?: {
+      position: [number, number, number];
+      rotation: [number, number, number];
+      scale: [number, number, number];
+    };
   }>;
   sleeping: string[];
   culled: string[];
@@ -88,11 +91,8 @@ export class VisibilityRuntime {
 
   public filter(
     universe: UniverseRuntime,
-    assetRegistry: AssetRegistry,
-    materialRegistry: MaterialRegistry,
-    shaderRegistry: ShaderRegistry,
+    registry: UnifiedRegistry,
     lodManager: LODManager,
-    embodimentRegistry: EmbodimentRegistry,
     camera: CameraState,
     now: number
   ): VisibilityResult {
@@ -109,20 +109,20 @@ export class VisibilityRuntime {
         continue;
       }
 
-      const embodiment = embodimentRegistry.get(entity.embodimentId);
+      const embodiment = registry.getEmbodiment(entity.embodimentId);
       if (!embodiment) {
         culled.push(entity.id);
         continue;
       }
 
-      const asset = assetRegistry.get(embodiment.assetId);
+      const asset = registry.getAsset(embodiment.assetId);
       if (!asset || !isSphereInFrustum(embodiment, planes, camera)) {
         culled.push(entity.id);
         continue;
       }
 
-      const material = materialRegistry.get(embodiment.materialId);
-      const shader = shaderRegistry.get(embodiment.shaderId);
+      const material = registry.getMaterial(embodiment.materialId);
+      const shader = registry.getShader(embodiment.shaderId);
       if (!material || !shader) {
         culled.push(entity.id);
         continue;
@@ -134,7 +134,12 @@ export class VisibilityRuntime {
         asset,
         material,
         shader,
-        lodOverride: lod ?? undefined
+        lodOverride: lod ?? undefined,
+        transform: embodiment.transform ? {
+          position: embodiment.transform.position ?? [0, 0, 0],
+          rotation: embodiment.transform.rotation ?? [0, 0, 0],
+          scale: embodiment.transform.scale ?? [1, 1, 1],
+        } : undefined
       });
     }
 

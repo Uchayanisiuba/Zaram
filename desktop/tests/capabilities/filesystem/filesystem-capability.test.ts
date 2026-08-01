@@ -45,10 +45,11 @@ function makeControls() {
   let error: unknown = null
   return {
     reportProgress: (p: number) => { progress = p },
+    reportToken: () => {},
     succeed: (data: unknown) => { done = true; output = data },
     fail: (e: unknown) => { done = true; error = e },
     isCancelled: () => false,
-    elapsedMs: () => 0
+    elapsedMs: () => 0,
   }
 }
 

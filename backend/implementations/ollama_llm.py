@@ -24,11 +24,16 @@ class OllamaLLM:
                 stream=True, timeout=120
             ) as response:
                 response.raise_for_status()
+                accumulated = ""
                 for line in response.iter_lines():
                     if line:
                         json_data = json.loads(line)
                         token = json_data.get("response", "")
                         if token:
+                            accumulated += token
+                            if "does not support image input" in accumulated or "doesn't support image input" in accumulated:
+                                yield "⚠️ The selected model does not support image input. Switch to a vision-capable model (qwen2.5vl:7b) for image analysis, or remove the image and try again."
+                                return
                             yield token
         except Exception as e:
             yield f"⚠️ Error connecting to LLM: {str(e)}"

@@ -22,7 +22,8 @@ import {
   ExecutionRollback,
   ExecutionStatus,
   ExecutionAuditEntry,
-  ExecutionHistoryEntry
+  ExecutionHistoryEntry,
+  AudioChunkEvent
 } from './types'
 import { canTransition, EXECUTION_TRANSITIONS, isTerminal, transition } from './execution-state-machine'
 import { IExecutionInvoker } from './execution-invoker'
@@ -43,6 +44,7 @@ export interface IExecutionRuntime {
   getExecution(id: string): ExecutionResult | null
   getHistory(): ExecutionResult[]
   update(dt: number): void
+  subscribe(listener: (event: ExecutionEvent) => void): () => void
 }
 
 export class ExecutionRuntime implements IExecutionRuntime {
@@ -252,6 +254,21 @@ export class ExecutionRuntime implements IExecutionRuntime {
     }
   }
 
+  // --- Terminal event helpers -------------------------------------------------
+
+  private isTerminalEvent(eventType: ExecutionEventType): boolean {
+    return (
+      eventType === 'execution.completed' ||
+      eventType === 'execution.cancelled' ||
+      eventType === 'execution.failed' ||
+      eventType === 'execution.rolledback'
+    )
+  }
+
+  private isTerminalStatus(status: ExecutionStatus): boolean {
+    return isTerminal(status)
+  }
+
   // --- Internals ------------------------------------------------------------
 
   private invokeHandler(exec: ExecutionResult): void {
@@ -279,6 +296,18 @@ export class ExecutionRuntime implements IExecutionRuntime {
         if (isTerminal(exec.status)) return
         exec.progress = Math.max(0, Math.min(1, p))
         this.publish('execution.progress', exec)
+      },
+      reportToken: (token: string) => {
+        if (isTerminal(exec.status)) return
+        exec.output = typeof exec.output === 'string' ? exec.output + token : token
+        this.publish('execution.token', exec, {
+          token,
+          partialOutput: exec.output,
+        })
+      },
+      reportAudioChunk: (chunk: AudioChunkEvent) => {
+        if (isTerminal(exec.status)) return
+        this.publish('execution.audio_chunk', exec, chunk as unknown as Record<string, unknown>)
       },
       succeed: (output) => {
         if (isTerminal(exec.status)) return
@@ -462,7 +491,7 @@ export class ExecutionRuntime implements IExecutionRuntime {
     })
   }
 
-  private publish(type: ExecutionEventType, exec: ExecutionResult): void {
+  private publish(type: ExecutionEventType, exec: ExecutionResult, extra?: Record<string, unknown>): void {
     const event: ExecutionEvent = {
       event_id: String(++this.eventSeq),
       timestamp: this.now(),
@@ -478,6 +507,7 @@ export class ExecutionRuntime implements IExecutionRuntime {
         output: isTerminal(exec.status) ? exec.output : undefined,
         error: isTerminal(exec.status) ? exec.error : undefined,
         durationMs: exec.durationMs,
+        ...extra,
       },
       correlation_id: exec.correlationId
     }

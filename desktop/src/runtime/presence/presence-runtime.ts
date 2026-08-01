@@ -9,7 +9,10 @@ import {
   PresenceHealth,
   PresenceLifecycle,
   RendererHealthStatus,
-  DEFAULT_EXPRESSIVE_PARAMS
+  DEFAULT_EXPRESSIVE_PARAMS,
+  PresenceState,
+  PresenceEventType,
+  PresenceEvent
 } from '../types'
 import type { RuntimeSnapshot } from '../sources/types'
 import type { RuntimeState } from '@zaram/engine'
@@ -30,6 +33,7 @@ import { WorldRuntime, IWorldStateProvider } from '../world'
 import type { ExecutiveRuntime, ExecutiveSnapshot, ExecutiveIntent } from '../executive'
 import type { IExecutionRuntime } from '../execution'
 import type { IWorkspaceRuntime } from '../workspace'
+import { eventBus, type ZaramEventType } from '../event-bus'
 
 type Lifecycle = 'uninitialized' | 'initializing' | 'running' | 'paused' | 'shutdown'
 
@@ -92,6 +96,11 @@ export class PresenceRuntime implements IPresenceRuntime, IPresenceDiagnostics {
   private unsubscribeState: (() => void) | null = null
   private animationEngineFailed = false
 
+  // Presence state management
+  private currentPresenceState: PresenceState = 'Idle'
+  private presenceSubscribers: Set<(event: PresenceEvent) => void> = new Set()
+  private currentAudioLevel = 0
+
   constructor(options: PresenceRuntimeOptions = {}) {
     this.engineAdapter = options.engineAdapter
     this.stateProvider = options.stateProvider
@@ -112,6 +121,83 @@ export class PresenceRuntime implements IPresenceRuntime, IPresenceDiagnostics {
         this.latestExpressive = params
       })
     }
+    
+    // Subscribe to Executive Runtime events - the new single source of truth
+    this.unsubscribeExecutiveIntent = eventBus.subscribe('executive:intent_changed' as ZaramEventType, (event) => {
+      const data = event.data as { decision: string; confidence: number; reasoning: string }
+      this.updatePresenceFromIntent(data.decision, data.confidence, data.reasoning)
+    })
+    this.unsubscribeExecutiveState = eventBus.subscribe('executive:state_changed' as ZaramEventType, (event) => {
+      const data = event.data as { focus: string; focus_strength: number; priority: string; urgency: number; goal_active: boolean; conversation_phase: string }
+      this.updatePresenceFromState(data.focus, data.focus_strength, data.priority, data.urgency, data.goal_active, data.conversation_phase)
+    })
+    this.unsubscribeExecutiveFocus = eventBus.subscribe('executive:focus_changed' as ZaramEventType, (event) => {
+      const data = event.data as { focus: string; strength: number }
+      this.updatePresenceFromFocus(data.focus, data.strength)
+    })
+    this.unsubscribeExecutivePriority = eventBus.subscribe('executive:priority_changed' as ZaramEventType, (event) => {
+      const data = event.data as { priority: string; urgency: number }
+      this.updatePresenceFromPriority(data.priority, data.urgency)
+    })
+    this.unsubscribeExecutiveInterrupt = eventBus.subscribe('executive:interrupt_raised' as ZaramEventType, (event) => {
+      const data = event.data as { severity: string; source: string }
+      this.updatePresenceFromInterrupt(data.severity, data.source)
+    })
+
+    // Sprint C.3: Subscribe to Voice Runtime events for presence state
+    this.unsubscribeVoiceStarted = eventBus.subscribe('voice:started' as ZaramEventType, (event) => {
+      this.setPresenceState('Speaking')
+    })
+    this.unsubscribeVoiceFinished = eventBus.subscribe('voice:finished' as ZaramEventType, (event) => {
+      this.setPresenceState('Idle')
+    })
+    this.unsubscribeVoiceFailed = eventBus.subscribe('voice:failed' as ZaramEventType, (event) => {
+      this.setPresenceState('Error')
+    })
+    // Subscribe to voice.level for orb visualization (RMS amplitude)
+    this.unsubscribeVoiceLevel = eventBus.subscribe('voice:level' as ZaramEventType, (event) => {
+      const data = event.data as { level: number; timestamp: number; request_id?: string }
+      if (data.level !== undefined) {
+        this.setAudioLevel(data.level)
+      }
+    })
+    // Subscribe to voice.chunk for orb visualization (waveform data)
+    this.unsubscribeVoiceChunk = eventBus.subscribe('voice:chunk' as ZaramEventType, (event) => {
+      const data = event.data as { audioId: string; sequence: number; rmsLevel?: number; timestamp: number }
+      // Emit presence event with chunk data for orb
+      this.emitPresenceEvent({
+        type: 'presence:voice_chunk',
+        timestamp: data.timestamp,
+        payload: { audioId: data.audioId, sequence: data.sequence, rmsLevel: data.rmsLevel }
+      })
+    })
+
+    // Subscribe to Knowledge/Search events
+    this.unsubscribeKnowledgeSearchStarted = eventBus.subscribe('knowledge:search_started' as ZaramEventType, (event) => {
+      this.setPresenceState('SearchingWeb')
+    })
+    this.unsubscribeKnowledgeSearchComplete = eventBus.subscribe('knowledge:search_complete' as ZaramEventType, (event) => {
+      // Return to previous state or idle
+      this.setPresenceState('Thinking')
+    })
+    this.unsubscribeMemoryRecalled = eventBus.subscribe('knowledge:memory_recalled' as ZaramEventType, (event) => {
+      this.setPresenceState('SearchingMemory')
+    })
+
+    // Subscribe to Conversation phase events
+    this.unsubscribeConversationPhase = eventBus.subscribe('conversation:phase_changed' as ZaramEventType, (event) => {
+      const data = event.data as { phase: string; activity: number; previous_phase?: string }
+      this.updatePresenceFromConversationPhase(data.phase)
+    })
+
+    // Subscribe to Reasoning events
+    this.unsubscribeReasoningStarted = eventBus.subscribe('reasoning:started' as ZaramEventType, (event) => {
+      this.setPresenceState('Thinking')
+    })
+    this.unsubscribeReasoningFinished = eventBus.subscribe('reasoning:finished' as ZaramEventType, (event) => {
+      this.setPresenceState('Speaking')
+    })
+
     // Event-driven feed: subscribe to the aggregated runtime snapshot so the
     // CharacterRuntime (emotion) AND the CognitiveBundle (internal AI state)
     // receive events from conversation, voice, knowledge, system, and memory
@@ -121,6 +207,7 @@ export class PresenceRuntime implements IPresenceRuntime, IPresenceDiagnostics {
         this.feedCharacterFromSnapshot(snapshot)
         this.feedCognitiveFromSnapshot(snapshot)
         this.feedExecutiveFromSnapshot(snapshot)
+        // NO LONGER update presence state from snapshot - it comes from Executive events
       })
       // Seed once with the current snapshot.
       const seed = this.stateProvider.getSnapshot()
@@ -128,6 +215,209 @@ export class PresenceRuntime implements IPresenceRuntime, IPresenceDiagnostics {
       this.feedCognitiveFromSnapshot(seed)
       this.feedExecutiveFromSnapshot(seed)
     }
+  }
+
+  private unsubscribeExecutiveIntent: (() => void) | null = null
+  private unsubscribeExecutiveState: (() => void) | null = null
+  private unsubscribeExecutiveFocus: (() => void) | null = null
+  private unsubscribeExecutivePriority: (() => void) | null = null
+  private unsubscribeExecutiveInterrupt: (() => void) | null = null
+
+  // Voice runtime subscriptions
+  private unsubscribeVoiceStarted: (() => void) | null = null
+  private unsubscribeVoiceFinished: (() => void) | null = null
+  private unsubscribeVoiceFailed: (() => void) | null = null
+  private unsubscribeVoiceLevel: (() => void) | null = null
+  private unsubscribeVoiceChunk: (() => void) | null = null
+
+  // Knowledge/Search subscriptions
+  private unsubscribeKnowledgeSearchStarted: (() => void) | null = null
+  private unsubscribeKnowledgeSearchComplete: (() => void) | null = null
+  private unsubscribeMemoryRecalled: (() => void) | null = null
+
+  // Conversation subscriptions
+  private unsubscribeConversationPhase: (() => void) | null = null
+
+  // Reasoning subscriptions
+  private unsubscribeReasoningStarted: (() => void) | null = null
+  private unsubscribeReasoningFinished: (() => void) | null = null
+
+  // Presence state event system
+  subscribe(listener: (event: PresenceEvent) => void): () => void {
+    this.presenceSubscribers.add(listener)
+    return () => this.presenceSubscribers.delete(listener)
+  }
+
+  getPresenceState(): PresenceState {
+    return this.currentPresenceState
+  }
+
+  setPresenceState(state: PresenceState): void {
+    if (this.currentPresenceState === state) return
+    const previousState = this.currentPresenceState
+    this.currentPresenceState = state
+    this.emitPresenceEvent({
+      type: 'presence:state_changed',
+      timestamp: Date.now(),
+      payload: { state, previousState }
+    })
+    // Also publish to global event bus for IPC forwarding
+    eventBus.publish('presence:state_changed' as ZaramEventType, { state, previousState }, 'presence')
+  }
+
+  setAudioLevel(level: number): void {
+    const clamped = Math.min(1, Math.max(0, level))
+    this.currentAudioLevel = clamped
+    this.emitPresenceEvent({
+      type: 'presence:audio_level',
+      timestamp: Date.now(),
+      payload: { audioLevel: clamped }
+    })
+  }
+
+  private emitPresenceEvent(event: PresenceEvent): void {
+    this.presenceSubscribers.forEach(cb => {
+      try { cb(event) } catch { /* ignore subscriber errors */ }
+    })
+  }
+
+  private updatePresenceFromIntent(decision: string, confidence: number, reasoning: string): void {
+    const lowerDecision = decision.toLowerCase()
+    
+    // Map executive decisions to presence states
+    if (lowerDecision.includes('reply') || lowerDecision.includes('speak')) {
+      this.setPresenceState('Speaking')
+    } else if (lowerDecision.includes('think') || lowerDecision.includes('reason') || lowerDecision.includes('deliberate') || lowerDecision.includes('analyze')) {
+      this.setPresenceState('Thinking')
+    } else if (lowerDecision.includes('search') || lowerDecision.includes('browse') || lowerDecision.includes('look up')) {
+      this.setPresenceState('SearchingWeb')
+    } else if (lowerDecision.includes('memory') || lowerDecision.includes('recall') || lowerDecision.includes('remember')) {
+      this.setPresenceState('SearchingMemory')
+    } else if (lowerDecision.includes('plan') || lowerDecision.includes('schedule') || lowerDecision.includes('organize')) {
+      this.setPresenceState('Planning')
+    } else if (lowerDecision.includes('learn') || lowerDecision.includes('study') || lowerDecision.includes('absorb')) {
+      this.setPresenceState('Learning')
+    } else if (lowerDecision.includes('wait') || lowerDecision.includes('listen') || lowerDecision.includes('idle')) {
+      this.setPresenceState('Listening')
+    } else if (lowerDecision.includes('error') || lowerDecision.includes('fail') || lowerDecision.includes('cancel')) {
+      this.setPresenceState('Error')
+    }
+  }
+
+  private updatePresenceFromState(focus: string, focusStrength: number, priority: string, urgency: number, goalActive: boolean, conversationPhase: string): void {
+    // If we have an active goal or high priority/urgency, we're in an active state
+    if (goalActive && (priority === 'high' || priority === 'critical' || urgency > 0.7)) {
+      if (focus.includes('speak') || focus.includes('reply')) {
+        this.setPresenceState('Speaking')
+      } else if (focus.includes('think') || focus.includes('reason')) {
+        this.setPresenceState('Thinking')
+      } else if (focus.includes('search')) {
+        this.setPresenceState('SearchingWeb')
+      } else if (focus.includes('memory')) {
+        this.setPresenceState('SearchingMemory')
+      } else if (focus.includes('plan')) {
+        this.setPresenceState('Planning')
+      } else if (focus.includes('learn')) {
+        this.setPresenceState('Learning')
+      }
+    } else if (conversationPhase === 'listening') {
+      this.setPresenceState('Listening')
+    } else if (conversationPhase === 'speaking') {
+      this.setPresenceState('Speaking')
+    } else if (conversationPhase === 'thinking' || conversationPhase === 'generating' || conversationPhase === 'working') {
+      this.setPresenceState('Thinking')
+    }
+  }
+
+  private updatePresenceFromFocus(focus: string, strength: number): void {
+    // Focus changes can refine presence state
+    if (strength > 0.8) {
+      if (focus.includes('external') || focus.includes('world') || focus.includes('search')) {
+        // Strong external focus = searching
+        this.setPresenceState('SearchingWeb')
+      }
+    }
+  }
+
+  private updatePresenceFromPriority(priority: string, urgency: number): void {
+    // High priority/critical urgency overrides to active states
+    if (priority === 'critical' || urgency > 0.8) {
+      // Don't override Speaking - let speech complete
+      if (this.currentPresenceState !== 'Speaking') {
+        this.setPresenceState('Thinking')
+      }
+    }
+  }
+
+  private updatePresenceFromInterrupt(severity: string, source: string): void {
+    if (severity === 'critical' || severity === 'high') {
+      this.setPresenceState('Error')
+    }
+  }
+
+  private updatePresenceFromConversationPhase(phase: string): void {
+    const lowerPhase = phase.toLowerCase()
+    if (lowerPhase === 'speaking') {
+      this.setPresenceState('Speaking')
+    } else if (lowerPhase === 'listening') {
+      this.setPresenceState('Listening')
+    } else if (lowerPhase === 'thinking' || lowerPhase === 'generating' || lowerPhase === 'working') {
+      this.setPresenceState('Thinking')
+    } else if (lowerPhase === 'idle' || lowerPhase === 'sleeping') {
+      this.setPresenceState('Idle')
+    } else if (lowerPhase === 'interrupted' || lowerPhase === 'error') {
+      this.setPresenceState('Error')
+    }
+  }
+
+  private updatePresenceStateFromSnapshot(snapshot: RuntimeSnapshot): void {
+    // Determine presence state from conversation phase and voice level
+    const phase = snapshot.conversation.phase
+    const voiceLevel = snapshot.voice.voiceLevel
+
+    let newState: PresenceState = 'Idle'
+
+    switch (phase) {
+      case 'listening':
+        newState = 'Listening'
+        break
+      case 'thinking':
+      case 'generating':
+      case 'working':
+        newState = voiceLevel > 0.1 ? 'Speaking' : 'Thinking'
+        break
+      case 'speaking':
+        newState = 'Speaking'
+        break
+      case 'interrupted':
+        newState = 'Error'
+        break
+      case 'idle':
+      case 'sleeping':
+      default:
+        newState = 'Idle'
+        break
+    }
+
+    // Override with executive intent if available
+    const execSnapshot = this.executiveRuntime?.getSnapshot()
+    if (execSnapshot) {
+      const intent = (execSnapshot.intent?.decision || '').toLowerCase()
+      const focus = (execSnapshot.state?.focus || '').toLowerCase()
+      if (intent.includes('search') || focus.includes('search')) {
+        newState = 'SearchingWeb'
+      } else if (intent.includes('memory') || focus.includes('memory')) {
+        newState = 'SearchingMemory'
+      } else if (intent.includes('plan') || focus.includes('plan')) {
+        newState = 'Planning'
+      } else if (intent.includes('learn') || focus.includes('learn')) {
+        newState = 'Learning'
+      } else if (intent.includes('error') || focus.includes('error')) {
+        newState = 'Error'
+      }
+    }
+
+    this.setPresenceState(newState)
   }
 
   private feedCharacterFromSnapshot(snapshot: RuntimeSnapshot): void {
@@ -326,6 +616,48 @@ export class PresenceRuntime implements IPresenceRuntime, IPresenceDiagnostics {
       this.unsubscribeState()
       this.unsubscribeState = null
     }
+    // Unsubscribe from Executive events
+    this.unsubscribeExecutiveIntent?.()
+    this.unsubscribeExecutiveState?.()
+    this.unsubscribeExecutiveFocus?.()
+    this.unsubscribeExecutivePriority?.()
+    this.unsubscribeExecutiveInterrupt?.()
+    this.unsubscribeExecutiveIntent = null
+    this.unsubscribeExecutiveState = null
+    this.unsubscribeExecutiveFocus = null
+    this.unsubscribeExecutivePriority = null
+    this.unsubscribeExecutiveInterrupt = null
+
+    // Unsubscribe from Voice events
+    this.unsubscribeVoiceStarted?.()
+    this.unsubscribeVoiceFinished?.()
+    this.unsubscribeVoiceFailed?.()
+    this.unsubscribeVoiceLevel?.()
+    this.unsubscribeVoiceChunk?.()
+    this.unsubscribeVoiceStarted = null
+    this.unsubscribeVoiceFinished = null
+    this.unsubscribeVoiceFailed = null
+    this.unsubscribeVoiceLevel = null
+    this.unsubscribeVoiceChunk = null
+
+    // Unsubscribe from Knowledge/Search events
+    this.unsubscribeKnowledgeSearchStarted?.()
+    this.unsubscribeKnowledgeSearchComplete?.()
+    this.unsubscribeMemoryRecalled?.()
+    this.unsubscribeKnowledgeSearchStarted = null
+    this.unsubscribeKnowledgeSearchComplete = null
+    this.unsubscribeMemoryRecalled = null
+
+    // Unsubscribe from Conversation events
+    this.unsubscribeConversationPhase?.()
+    this.unsubscribeConversationPhase = null
+
+    // Unsubscribe from Reasoning events
+    this.unsubscribeReasoningStarted?.()
+    this.unsubscribeReasoningFinished?.()
+    this.unsubscribeReasoningStarted = null
+    this.unsubscribeReasoningFinished = null
+
     this.diagnostics.setAnimationConnection('disconnected')
     this.diagnostics.setPresenceRuntimeStatus('shutdown')
     this.diagnostics.setAnimationRuntimeStatus('stopped')
@@ -386,7 +718,7 @@ export class PresenceRuntime implements IPresenceRuntime, IPresenceDiagnostics {
         activity: systemState === 'Working' ? 0.9 : systemState === 'Thinking' ? 0.6 : 0.3
       },
       audio: {
-        voiceLevel: 0,
+        voiceLevel: this.currentAudioLevel,
         microphoneLevel: 0
       },
       emotion: {

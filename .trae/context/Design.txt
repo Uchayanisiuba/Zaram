@@ -1,0 +1,48 @@
+
+---
+
+## **File 2: `.trae/DESIGN_SYSTEM.md`**
+
+```markdown
+# Zaram Design System
+
+**For:** UI/UX implementation in React + Tailwind  
+**Version:** 1.0  
+**Status:** Canonical
+
+---
+
+## Design Tokens
+
+### Colors
+
+```typescript
+// Backgrounds
+const colors = {
+  bgDeep: '#09090B',           // Absolute base
+  bgCanvas: '#0F1115',         // Workspace background
+  surface1: 'rgba(24, 26, 31, 0.7)',  // Glass panels
+  surface2: 'rgba(39, 42, 49, 0.8)',  // Hover states
+  
+  // Text
+  textPrimary: '#F8FAFC',
+  textSecondary: '#94A3B8',
+  textMuted: '#64748B',
+  
+  // Borders
+  borderSubtle: 'rgba(255, 255, 255, 0.08)',
+  borderActive: 'rgba(99, 102, 241, 0.4)',
+  
+  // Accents (Orb states)
+  orbIdle: ['#6366F1', '#8B5CF6'],        // Indigo → Violet
+  orbListening: ['#10B981', '#34D399'],   // Emerald → Mint
+  orbThinking: ['#3B82F6', '#06B6D4'],    // Blue → Cyan
+  orbExecuting: ['#F59E0B', '#F97316'],   // Amber → Orange
+  orbError: ['#EF4444', '#DC2626'],       // Red
+  
+  // Semantic
+  success: '#10B981',
+  warning: '#F59E0B',
+  error: '#EF4444',
+  info: '#3B82F6'
+};

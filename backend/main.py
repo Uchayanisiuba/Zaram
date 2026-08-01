@@ -1,10 +1,12 @@
 # backend/main.py
-import os
-import json
 import asyncio
+import json
+import os
+from typing import Any, Dict
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse, FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
 # --- KERNEL IMPORTS (Strict Boundary) ---
@@ -31,28 +33,91 @@ app.add_middleware(
 kernel = KernelBootstrapper()
 chat_router = None
 
+
 @app.on_event("startup")
 async def startup_event():
     global chat_router
-    
+
     print("[Startup] Booting Zaram Kernel...")
     await kernel.boot()
-    
-    # Initialize the Chat Router with the new engine and the legacy fallback
-    def legacy_gen(req_text: str, model: str, system_prompt: str = ""):
-        llm = OllamaLLM()
-        cm = ConversationManager(llm, None)
-        for event in cm.run_conversation(req_text, model, system_prompt):
-            yield f"data: {json.dumps(event)}\n\n"
-        yield "data: [DONE]\n\n"
 
-    chat_router = ChatRouter(kernel.execution_engine, legacy_gen)
+    # Speech Runtime is now initialized via KernelBootstrapper
+    speech_runtime = kernel.speech_runtime
+    print("[Startup] Speech Runtime initialized via Kernel.")
+
+    # Initialize the Chat Router with the new engine and the legacy fallback
+    def legacy_gen(req_text: str, model: str, system_prompt: str = "", persona: str = "zaram_prime"):
+        from core.streaming_events import StreamEvent, EventType
+        llm = OllamaLLM()
+        cm = ConversationManager(llm, kernel.event_bus, persona=persona)
+        for event in cm.run_conversation(req_text, model, system_prompt):
+            if isinstance(event, dict):
+                etype = event.get("type")
+                if etype == "token":
+                    yield StreamEvent.token(event.get("content", "")).to_ipc() + "\n"
+                elif etype == "error":
+                    yield StreamEvent.error(event.get("content", "")).to_ipc() + "\n"
+                elif etype == "llm_done":
+                    yield StreamEvent.status("complete").to_ipc() + "\n"
+                elif etype == "done":
+                    pass
+            elif isinstance(event, str):
+                yield StreamEvent.token(event).to_ipc() + "\n"
+        yield StreamEvent.done().to_ipc() + "\n"
+
+    chat_router = ChatRouter(kernel.execution_engine, kernel.event_bus, legacy_gen)
     print("[Startup] Chat Router initialized. Kernel Online.")
+
 
 @app.on_event("shutdown")
 async def shutdown_event():
     print("[Shutdown] Powering down Zaram Kernel...")
     await kernel.shutdown()
+
+
+def _stream_error(message: str):
+    from core.streaming_events import StreamEvent
+    async def _gen():
+        yield StreamEvent.error(message).to_ipc() + "\n"
+        yield StreamEvent.done().to_ipc() + "\n"
+    return _gen()
+
+
+def _format_search_results(query: str, search_result: Dict[str, Any]) -> str:
+    results = search_result.get('results') or []
+    if not results:
+        return query
+    parts = [SEARCH_MARKER]
+    parts.append(f"Query: {query}")
+    parts.append("")
+    for idx, r in enumerate(results[:6], start=1):
+        url = r.get('url') or ''
+        title = (r.get('title') or '').strip()
+        snippet = (r.get('snippet') or '').strip()
+        published = (r.get('published') or '').strip()
+        parts.append(f"Source {idx}:")
+        if title:
+            parts.append(f"Title: {title}")
+        if url:
+            parts.append(f"URL: {url}")
+        if published:
+            parts.append(f"Published: {published}")
+        if snippet:
+            parts.append(f"Snippet: {snippet}")
+        parts.append("")
+    parts.append("=" * len(SEARCH_MARKER))
+    parts.append("")
+    parts.append("INSTRUCTIONS:")
+    parts.append("- Answer the user's question using ONLY the information from the sources above.")
+    parts.append("- If the sources conflict with your training data, ALWAYS trust the live sources.")
+    parts.append("- Do NOT mention your training data cutoff.")
+    parts.append("- Do NOT say you don't have real-time access.")
+    parts.append("- If sources don't fully answer the question, say so based only on what IS in the sources.")
+    parts.append("")
+    parts.append("User Question:")
+    parts.append(query)
+    return "\n".join(parts)
+
 
 # --- REQUEST MODELS ---
 class ChatRequest(BaseModel):
@@ -61,7 +126,9 @@ class ChatRequest(BaseModel):
     personality: str = "af_heart"
     persona: str = "zaram_prime"
 
+
 # --- API ENDPOINTS ---
+
 
 @app.get("/health")
 async def health():
@@ -72,29 +139,73 @@ async def health():
             capabilities = [c.id for c in kernel.registry.list_capabilities()]
     except Exception:
         capabilities = []
+    
+    # Check knowledge providers
+    provider_health = {}
+    try:
+        from knowledge.knowledge_service import get_runtime
+        runtime = get_runtime()
+        for provider_info in runtime.list_providers():
+            provider_health[provider_info['id']] = {
+                "status": provider_info.get('status', 'unknown'),
+                "latency_ms": provider_info.get('latency_ms', 0),
+                "requests": provider_info.get('requests', 0),
+                "failures": provider_info.get('failures', 0),
+            }
+    except Exception:
+        provider_health = {}
+    
+    # Check speech runtime
+    speech_health = {}
+    try:
+        if kernel.speech_runtime:
+            speech_health = kernel.speech_runtime.health_check()
+    except Exception:
+        speech_health = {}
+    
     return {
         "status": "ok",
         "kernel": "online" if chat_router is not None else "offline",
         "capabilities": capabilities,
+        "knowledge_providers": provider_health,
+        "speech": speech_health,
     }
+
 
 @app.post("/chat")
 async def chat(request: ChatRequest):
     """Strangler Fig Endpoint: Routes via ChatRouter."""
     print(f"[STAGE-7][Python] POST /chat received: text='{request.text[:50]}...' model={request.model} persona={request.persona}")
-    
-    # Resolve persona system prompt
+    print(f"[STAGE-7][Python] Full request text length: {len(request.text)} chars")
+
+    if hasattr(request, "image") and request.image:
+        return StreamingResponse(
+            _stream_error("Image input is not supported on this endpoint. Use /vision/analyze for image analysis."),
+            media_type="text/event-stream"
+        )
+    if hasattr(request, "images") and request.images:
+        return StreamingResponse(
+            _stream_error("Image input is not supported on this endpoint. Use /vision/analyze for image analysis."),
+            media_type="text/event-stream"
+        )
+
     persona_data = PERSONAS.get(request.persona, PERSONAS.get("zaram_prime", {}))
     system_prompt = persona_data.get("system_prompt", "") if persona_data else ""
-    
+
+    # The Kernel owns planning, search, grounding, and response generation.
+    # The API layer passes the raw prompt through without independent search.
+    final_prompt = request.text
+
     return StreamingResponse(
-        chat_router.route(request.text, request.model, system_prompt), 
+        chat_router.route(final_prompt, request.model, system_prompt),
         media_type="text/event-stream"
     )
+
 
 class VisionRequest(BaseModel):
     prompt: str
     image: str
+
 
 @app.post("/vision/analyze")
 async def vision_analyze(request: VisionRequest):
@@ -106,64 +217,41 @@ async def vision_analyze(request: VisionRequest):
 
     if not request.image or not request.image.strip():
         async def _empty():
-            yield f"data: {json.dumps({'type': 'error', 'content': 'No image was provided for vision analysis. Capture a screenshot or attach an image first.'})}\n\n"
-            yield "data: [DONE]\n\n"
+            yield StreamEvent.error("No image was provided for vision analysis. Capture a screenshot or attach an image first.").to_ipc() + "\n"
+            yield StreamEvent.done().to_ipc() + "\n"
         return StreamingResponse(_empty(), media_type="text/event-stream")
 
-    return StreamingResponse(
-        engine.stream_vision_response(full_prompt, images=[request.image]),
-        media_type="text/event-stream"
-    )
+    image_data = request.image
+    if isinstance(image_data, str) and image_data.startswith("data:"):
+        image_data = image_data.split(",", 1)[1] if "," in image_data else image_data
+
+    async def _vision_stream():
+        from core.streaming_events import StreamEvent, EventType
+        yield StreamEvent.start().to_ipc() + "\n"
+        for chunk in engine.stream_vision_response(full_prompt, images=[image_data]):
+            parsed = _parse_legacy_sse(chunk)
+            if parsed and parsed.get("type") == "token":
+                yield StreamEvent.token(parsed.get("content", "")).to_ipc() + "\n"
+            elif parsed and parsed.get("type") == "error":
+                yield StreamEvent.error(parsed.get("content", "Vision error")).to_ipc() + "\n"
+        yield StreamEvent.status("complete").to_ipc() + "\n"
+        yield StreamEvent.done().to_ipc() + "\n"
+
+    return StreamingResponse(_vision_stream(), media_type="text/event-stream")
+
 
 class KnowledgeRequest(BaseModel):
     query: str
     persona: str = "zaram_prime"
 
+
 @app.post("/knowledge/search")
 async def knowledge_search(request: KnowledgeRequest):
     """Internet search endpoint."""
     print(f"[STAGE-7][Python] POST /knowledge/search received: query='{request.query[:50]}...' persona={request.persona}")
-    results = await perform_knowledge_search(request.query, request.persona)
-    return results
+    from knowledge.knowledge_service import search_knowledge
+    return search_knowledge(request.query, request.persona)
 
-async def perform_knowledge_search(query: str, persona: str = "zaram_prime"):
-    """Performs internet search and returns results."""
-    import json
-    try:
-        search_results = [
-            {
-                "title": f"Search results for: {query}",
-                "url": "https://example.com/search",
-                "snippet": f"This is a simulated search result for '{query}'. In a production environment, this would connect to a real search API like DuckDuckGo, Google, or Bing to return fresh results."
-            },
-            {
-                "title": f"Latest information about {query}",
-                "url": "https://example.com/latest",
-                "snippet": f"Current information and recent developments related to '{query}'. The AI would synthesize this information to provide an accurate, up-to-date answer."
-            },
-            {
-                "title": f"{query} - Wikipedia",
-                "url": "https://example.com/wiki",
-                "snippet": f"Comprehensive overview of '{query}' with references and detailed explanations. This represents how the AI would gather and synthesize information from authoritative sources."
-            }
-        ]
-        
-        return {
-            "query": query,
-            "persona": persona,
-            "results": search_results,
-            "total_results": len(search_results),
-            "status": "success"
-        }
-    except Exception as exc:
-        return {
-            "query": query,
-            "persona": persona,
-            "results": [],
-            "total_results": 0,
-            "status": "error",
-            "error": str(exc)
-        }
 
 @app.get("/audio/{filename}")
 async def get_audio(filename: str):
@@ -173,12 +261,106 @@ async def get_audio(filename: str):
         return FileResponse(file_path, media_type="audio/wav")
     raise HTTPException(status_code=404, detail="Audio file not found")
 
+
+class VoiceSynthesizeRequest(BaseModel):
+    text: str
+    voice: str = ""
+    persona: str = "zaram_prime"
+
+
+class VoiceStreamRequest(BaseModel):
+    text: str
+    voice: str = ""
+    persona: str = "zaram_prime"
+
+
+@app.post("/voice/synthesize")
+async def voice_synthesize(request: VoiceSynthesizeRequest):
+    """Synthesize speech for a single utterance."""
+    if not kernel.speech_runtime:
+        raise HTTPException(status_code=503, detail="Speech runtime not available")
+    
+    # Resolve voice from persona if not explicitly provided
+    voice = request.voice or PERSONAS.get(request.persona, {}).get("voice", "af_heart")
+    
+    result = await kernel.speech_runtime.execute("speech.tts", {
+        "text": request.text,
+        "voice": voice,
+        "persona": request.persona,
+    })
+    if not result.get("success"):
+        raise HTTPException(status_code=500, detail=result.get("error", "Synthesis failed"))
+    
+    return result
+
+
+@app.post("/voice/stream")
+async def voice_stream(request: VoiceStreamRequest):
+    """Stream speech synthesis as Server-Sent Events."""
+    if not kernel.speech_runtime:
+        raise HTTPException(status_code=503, detail="Speech runtime not available")
+    
+    voice = request.voice or PERSONAS.get(request.persona, {}).get("voice", "af_heart")
+    
+    async def event_generator():
+        try:
+            result = await kernel.speech_runtime.execute("speech.stream", {
+                "text": request.text,
+                "voice": voice,
+                "persona": request.persona,
+            })
+            
+            stream = result.get("stream")
+            if not stream:
+                yield f"data: {json.dumps({'type': 'error', 'content': 'No stream returned'})}\n\n"
+                yield f"data: {json.dumps({'type': 'done'})}\n\n"
+                return
+            
+            async for chunk in stream:
+                # Convert AudioChunk to event format
+                audio_url = f"/audio/{chunk.audio_id}.wav" if chunk.audio_id else ""
+                event = {
+                    "type": "audio",
+                    "audio_id": chunk.audio_id,
+                    "url": audio_url,
+                    "sequence": chunk.index,
+                    "final": chunk.final,
+                    "voice": chunk.voice_id,
+                    "timestamp": chunk.timestamp_ms,
+                    "duration": chunk.duration_ms,
+                }
+                yield f"data: {json.dumps(event)}\n\n"
+        except Exception as e:
+            yield f"data: {json.dumps({'type': 'error', 'content': str(e)})}\n\n"
+        yield f"data: {json.dumps({'type': 'done'})}\n\n"
+    
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
+@app.get("/voice/voices")
+async def voice_list():
+    """List available voices."""
+    if not kernel.speech_runtime:
+        return {"voices": {}}
+    result = await kernel.speech_runtime.execute("speech.voices", {})
+    return result
+
+
+@app.get("/voice/health")
+async def voice_health():
+    """Speech runtime health check."""
+    if not kernel.speech_runtime:
+        return {"status": "unavailable", "reason": "Speech runtime not initialized"}
+    health = kernel.speech_runtime.health_check()
+    return health
+
+
 PERSONAS = {
     "zaram_prime": {
         "name": "Zaram Prime",
         "gender": "neutral",
         "description": "Professional, calm, and authoritative. The primary cybernetic intelligence core.",
-        "system_prompt": "You are Zaram Prime, a professional and authoritative AI assistant. You are calm, structured, and highly capable. You speak with confidence and precision.",
+        "system_prompt": "You are Zaram Prime, a professional and authoritative AI assistant. You are calm, structured, and highly capable. You speak with confidence and precision. CRITICAL: When provided with internet search results, you MUST answer from those results. If search results conflict with your training data, ALWAYS trust the search results. Never mention your training data cutoff. Never say you don't have real-time access when search results have been provided.",
         "voice": "af_heart"
     },
     "baba": {
@@ -232,6 +414,7 @@ PERSONAS = {
     }
 }
 
+
 @app.get("/personalities")
 def get_personalities():
     """Personality Endpoint (Preserved)."""
@@ -248,6 +431,7 @@ def get_personalities():
         }
     }
 
+
 @app.get("/personalities/{persona_id}")
 def get_personality(persona_id: str):
     """Get a specific personality."""
@@ -262,6 +446,7 @@ def get_personality(persona_id: str):
         "system_prompt": p["system_prompt"],
         "voice": p["voice"]
     }
+
 
 if __name__ == "__main__":
     import uvicorn

@@ -8,13 +8,10 @@ import { LODManager } from '../lod/LODManager';
 import { VisibilityRuntime } from './VisibilityRuntime';
 import { ParticleRuntime } from '../particle/ParticleRuntime';
 import { StreamingRuntime } from './StreamingRuntime';
-import { Renderer, RenderPayload } from '../renderer/Renderer';
+import { ThreeRenderer, RenderPayload } from '../renderer/ThreeRenderer';
 import { PerformanceOverlay } from '../renderer/PerformanceOverlay';
 import { GPUResourceManager } from './GPUResourceManager';
-import { AssetRegistry } from '../registries/AssetRegistry';
-import { MaterialRegistry } from '../registries/MaterialRegistry';
-import { ShaderRegistry } from '../registries/ShaderRegistry';
-import { EmbodimentRegistry } from '../registries/EmbodimentRegistry';
+import { UnifiedRegistry } from '../registries/UnifiedRegistry';
 
 export interface FrameGraphInput {
   dt: number;
@@ -28,6 +25,8 @@ export interface FrameGraphResult {
   particles: number;
   streamed: string[];
   stats: ReturnType<PerformanceOverlay['getStats']>;
+  gpuStats: ReturnType<GPUResourceManager['getStats']>;
+  rendererStats: ReturnType<ThreeRenderer['getStats']>;
 }
 
 export class FrameGraph {
@@ -38,17 +37,13 @@ export class FrameGraph {
     private visibility: VisibilityRuntime,
     private particles: ParticleRuntime,
     private streaming: StreamingRuntime,
-    private renderer: Renderer,
+    private renderer: ThreeRenderer,
     private overlay: PerformanceOverlay,
     private gpu: GPUResourceManager,
-    private assetRegistry: AssetRegistry,
-    private materialRegistry: MaterialRegistry,
-    private shaderRegistry: ShaderRegistry,
-    private embodimentRegistry: EmbodimentRegistry
+    private registry: UnifiedRegistry
   ) {}
 
   public execute(input: FrameGraphInput): FrameGraphResult {
-    const t0 = performance.now();
     const { dt, camera, rawState, time } = input;
 
     const frameState = this.animation.update(dt, rawState);
@@ -62,11 +57,8 @@ export class FrameGraph {
 
     const visibility = this.visibility.filter(
       this.universe,
-      this.assetRegistry,
-      this.materialRegistry,
-      this.shaderRegistry,
+      this.registry,
       this.lod,
-      this.embodimentRegistry,
       camera,
       time
     );
@@ -81,24 +73,27 @@ export class FrameGraph {
       shader: v.shader,
       lod: v.lodOverride,
       frameState,
+      transform: v.transform,
     }));
     this.renderer.render(payloads, frameState);
 
     const stats = this.renderer.getStats();
+    const gpuStats = this.gpu.getStats();
+    const rendererStats = this.renderer.getStats();
 
     this.overlay.recordActiveParticles(particles.length);
     this.overlay.recordLOD(this.lod.getGlobalLODBias());
     this.overlay.recordRegistries(
-      (this.assetRegistry.list().length > 0 ? 1 : 0) +
-      (this.materialRegistry.list().length > 0 ? 1 : 0) +
-      (this.shaderRegistry.list().length > 0 ? 1 : 0) +
-      (this.embodimentRegistry.list().length > 0 ? 1 : 0)
+      (this.registry.listAssets().length > 0 ? 1 : 0) +
+      (this.registry.listMaterials().length > 0 ? 1 : 0) +
+      (this.registry.listShaders().length > 0 ? 1 : 0) +
+      (this.registry.listEmbodiments().length > 0 ? 1 : 0)
     );
     this.overlay.recordMemory(
-      this.assetRegistry.list().length * 1024 +
-      this.materialRegistry.list().length * 256 +
-      this.shaderRegistry.list().length * 512 +
-      this.embodimentRegistry.list().length * 128
+      this.registry.listAssets().length * 1024 +
+      this.registry.listMaterials().length * 256 +
+      this.registry.listShaders().length * 512 +
+      this.registry.listEmbodiments().length * 128
     );
 
     this.gpu.disposeUnused();
@@ -107,7 +102,9 @@ export class FrameGraph {
       rendered: visibility.visible.length,
       particles: particles.length,
       streamed: loaded,
-      stats
+      stats,
+      gpuStats,
+      rendererStats,
     };
   }
 }

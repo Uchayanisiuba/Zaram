@@ -1,0 +1,28 @@
+
+---
+
+# 5. RUNTIME_API.md
+
+```markdown
+# Zaram Runtime API
+
+**Document Type:** API Reference  
+**Version:** 2.0.0  
+**Status:** Canonical  
+
+---
+
+## 1. IRuntimeBus
+
+**Description:** The central event dispatcher.
+
+```typescript
+interface IRuntimeBus {
+  emit<T>(event: EventEnvelope<T>): Promise<void>;
+  subscribe<T>(topic: string, handler: (event: EventEnvelope<T>) => void): UnsubscribeFn;
+  subscribeWithMiddleware<T>(
+    topic: string, 
+    middleware: MiddlewareFn[], 
+    handler: (event: EventEnvelope<T>) => void
+  ): UnsubscribeFn;
+}

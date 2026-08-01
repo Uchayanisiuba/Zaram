@@ -26,7 +26,7 @@ export const desktop = {
   },
   backend: {
     getStatus: safe((api) => api.backend?.getStatus?.()),
-    checkHealth: safe((api) => api.backend?.getStatus?.().then((s: any) => s.state === 'available')),
+    checkHealth: safe((api) => api.backend?.checkHealth?.()),
     onStatus: (cb: (status: any) => void) => {
       if (zaram?.backend?.onStatus) return zaram.backend.onStatus(cb)
       return () => {}
@@ -40,8 +40,20 @@ export const desktop = {
       if (zaram?.presence?.onFrame) return zaram.presence.onFrame(cb)
       return () => {}
     },
+    onState: (cb: (state: any) => void) => {
+      if (zaram?.presence?.onState) return zaram.presence.onState(cb)
+      return () => {}
+    },
+    onHealth: (cb: (health: any) => void) => {
+      if (zaram?.presence?.onHealth) return zaram.presence.onHealth(cb)
+      return () => {}
+    },
     onViewport: (cb: (vp: any) => void) => {
       if (zaram?.presence?.onViewport) return zaram.presence.onViewport(cb)
+      return () => {}
+    },
+    onEvent: (cb: (event: any) => void) => {
+      if (zaram?.presence?.onEvent) return zaram.presence.onEvent(cb)
       return () => {}
     },
   },
@@ -52,6 +64,7 @@ export const desktop = {
     getConfidence: safe((api) => api.executive?.getConfidence?.()),
     getEvidence: safe((api) => api.executive?.getEvidence?.()),
     getMetrics: safe((api) => api.executive?.getMetrics?.()),
+    setPendingSpeech: safe((api, text: string, persona?: string) => api.executive?.setPendingSpeech?.(text, persona)),
     onSnapshot: (cb: (snapshot: any) => void) => {
       if (zaram?.executive?.subscribe) return zaram.executive.subscribe(cb)
       return () => {}
@@ -70,7 +83,8 @@ export const desktop = {
     retry: safe((api, id: string) => { console.log('[Bridge] execution.retry:', id); return api.execution?.retry?.(id) }),
     onEvent: (cb: (event: any) => void) => {
       console.log('[Bridge] execution.onEvent subscribed')
-      if (zaram?.execution?.subscribe) return zaram.execution.subscribe(cb)
+      // Use runtime.onExecutionEvent which maps to MAIN_EVENTS.executionEvent
+      if (zaram?.runtime?.onExecutionEvent) return zaram.runtime.onExecutionEvent(cb)
       return () => {}
     },
   },
@@ -143,6 +157,10 @@ export const desktop = {
   },
   runtime: {
     desktopGetSources: safe((api, opts?: any) => api.runtime?.desktopGetSources?.(opts)),
+    onPresenceEvent: (cb: (event: any) => void) => {
+      if (zaram?.runtime?.onPresenceEvent) return zaram.runtime.onPresenceEvent(cb)
+      return () => {}
+    },
   }
 }
 

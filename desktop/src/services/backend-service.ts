@@ -25,7 +25,7 @@ export interface BackendStatus {
 const DEFAULT_BACKEND_PORT = 8000
 const DEFAULT_HEALTH_CHECK_INTERVAL = 5000
 const DEFAULT_BACKEND_SCRIPT = path.join(__dirname, '..', '..', '..', '..', 'backend', 'main.py')
-const VENV_PYTHON = path.join(__dirname, '..', '..', '..', '..', '.venv', 'Scripts', 'python.exe')
+const VENV_PYTHON = path.join(__dirname, '..', '..', '..', '..', 'backend', 'venv', 'Scripts', 'python.exe')
 
 export class BackendService {
   private process: ChildProcess | null = null
@@ -198,16 +198,13 @@ export class BackendService {
   }
   private startHealthCheck(): void {
     this.stopHealthCheck()
-    const startTime = Date.now()
-    const warmupMs = 10000
     this.healthCheckTimer = setInterval(async () => {
-      const elapsed = Date.now() - startTime
       const healthy = await this.checkHealth()
       if (healthy) {
+        // Online the instant /health returns 200 — no warmup gate.
         this.status.running = true
         this.status.error = undefined
-      }
-      else if (this.status.running && elapsed > warmupMs) {
+      } else if (this.status.running) {
         this.status.running = false
         this.status.error = 'Backend health check failed'
         if (this.processExited || !this.process) {

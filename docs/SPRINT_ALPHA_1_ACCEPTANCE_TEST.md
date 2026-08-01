@@ -3,7 +3,7 @@
 ## Prerequisites
 
 - Node.js 18+ installed
-- Python 3.10+ installed
+- Python 3.11.9 installed
 - Ollama installed and running (`ollama serve`)
 - At least one model pulled (`ollama pull gemma3:latest`)
 

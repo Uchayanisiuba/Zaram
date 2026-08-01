@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from typing import Any
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+from core.event_bus import ZaramEvent
 from .cache import KnowledgeCache
 from .protocol import (
     KnowledgeChunk, KnowledgeContext, KnowledgeFusion, KnowledgeObject,
@@ -60,11 +61,15 @@ class KnowledgeRuntime:
         max_workers: int = 8,
         internet_runtime: Any | None = None,
         memory_runtime: Any | None = None,
+        event_bus: Any | None = None,
     ):
         self._connectors: list[Any] = []
         self._providers: list[Any] = []
         self._internet_runtime = internet_runtime
         self._memory_runtime = memory_runtime
+        self._event_bus = event_bus
+        self._state = "ready"
+        self._start_time = time.time()
         self._cache = KnowledgeCache()
         self._default_cache_ttl = cache_ttl
         self._max_workers = max_workers
@@ -583,6 +588,64 @@ class KnowledgeRuntime:
         relationships = self._cross_document.link_objects(candidates + [obj])
         for rel in relationships:
             self._graph.add_relationship(rel)
+
+    # -------------------------------------------------------------------------
+    # Runtime Protocol (Event Bus integration)
+    # -------------------------------------------------------------------------
+
+    def get_runtime_id(self) -> str:
+        return "knowledge"
+
+    def get_version(self) -> str:
+        return "1.0.0"
+
+    def get_metadata(self) -> dict[str, Any]:
+        return {
+            "runtime_id": self.get_runtime_id(),
+            "version": "1.0.0",
+            "priority": "critical",
+            "capabilities": [
+                "knowledge.search",
+                "knowledge.cache",
+                "knowledge.index",
+                "knowledge.telemetry",
+            ],
+            "dependencies": ["event_bus"],
+        }
+
+    def get_state(self) -> str:
+        return self._state
+
+    def health_check(self) -> dict[str, Any]:
+        return {
+            "runtime_id": self.get_runtime_id(),
+            "state": self._state,
+            "uptime_seconds": time.time() - self._start_time,
+            "connectors": self.list_connectors(),
+            "cache": self.get_cache_stats(),
+            "stats": self.get_stats(),
+        }
+
+    async def initialize(self) -> None:
+        self._state = "ready"
+        if self._event_bus:
+            self._event_bus.subscribe("knowledge.search", self._handle_search_event)
+            self._event_bus.publish(ZaramEvent(
+                source_runtime="knowledge",
+                event_type="runtime.ready",
+                data={"runtime_id": self.get_runtime_id()},
+            ))
+        print("[KnowledgeRuntime] Initialized")
+
+    async def shutdown(self) -> None:
+        self._state = "stopped"
+        await self.close()
+
+    def _handle_search_event(self, event: Any) -> None:
+        data = event.data if hasattr(event, "data") else event
+        query = data.get("query", "")
+        if query:
+            self.search(query, max_results=data.get("max_results", 6))
 
     # -------------------------------------------------------------------------
     # Health & Diagnostics

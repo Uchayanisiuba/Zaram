@@ -53,10 +53,11 @@ export class AppLifecycle {
     }
   }
 
-  private wireRuntimeEventForwarding(): void {
+private wireRuntimeEventForwarding(): void {
     const presence = this.presenceKernel?.getPresenceRuntime() as unknown as {
       getExecutiveSnapshot?: () => unknown
       subscribeExecutive?: (cb: (snapshot: unknown) => void) => () => void
+      subscribe?: (cb: (event: unknown) => void) => () => void
     } | null
 
     if (!presence) return
@@ -70,6 +71,17 @@ export class AppLifecycle {
       })
     }
 
+    // Forward PresenceRuntime events (presence:state_changed, etc.) to renderer
+    if (presence.subscribe) {
+      presence.subscribe((event: unknown) => {
+        const win = this.windowManager.getMainWindow()
+        if (win && !win.isDestroyed()) {
+          win.webContents.send('presence:event', event)
+        }
+      })
+    }
+
+    // Also forward Executive events for ThemeProvider
     if (this.container) {
       const exec = this.container.resolve('ExecutionRuntime') as { subscribe?: (cb: (event: unknown) => void) => () => void } | null
       if (exec?.subscribe) {

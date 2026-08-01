@@ -48,3 +48,9 @@ frontend/node_modules/
 frontend/dist/
 frontend/.vite/
 node_modules
+
+# Virtual environment (dot-prefixed)
+.venv/
+
+# TypeScript build info
+*.tsbuildinfo

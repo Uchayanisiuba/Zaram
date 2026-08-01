@@ -1,0 +1,8 @@
+- generic [ref=f7e3]:
+  - generic [ref=f7e11]:
+    - generic [ref=f7e12]: Workspace
+    - paragraph [ref=f7e15]: This is the Workspace Surface.
+  - 'generic "AI state: idle" [ref=f7e23]'
+  - generic [ref=f7e57]:
+    - generic [ref=f7e58]: "GPU: 12%"
+    - generic [ref=f7e59]: "MEM: 4.1GB"

@@ -266,41 +266,7 @@ async function bootstrap() {
       });
     }
 
-    if (desktopRuntime.presenceRuntime) {
-      presenceFrameTimer = setInterval(() => {
-        try {
-          const frame = desktopRuntime.presenceRuntime.getRendererFrame()
-          if (frame) {
-            pushToRenderer(MAIN_EVENTS.presenceFrame, frame)
-          }
-        } catch (e) {
-          // ignore frame push errors
-        }
-      }, 1000 / 30)
-    }
-  }
-
-  // Native capabilities (abstractions; safe no-ops when unavailable).
-  tray = createTray({
-    getWindow: () => windows.getMainWindow(),
-    onQuit: () => app.quit(),
-    iconPath: null,
-    logger,
-  });
-  shortcuts = createGlobalShortcuts({ logger });
-  updater = createAutoUpdater({
-    onState: (s) => pushToRenderer(MAIN_EVENTS.updaterState, s),
-    logger,
-  });
-  createDeepLinks({
-    scheme: 'zaram',
-    onDeepLink: (url) => pushToRenderer(MAIN_EVENTS.deepLink, url),
-  });
-  createFileAssociations({
-    onFileOpen: (f) => pushToRenderer(MAIN_EVENTS.fileOpen, f),
-  });
-
-  // --- Presence Runtime bridge (desktop runtime -> renderer IPC) ---
+    // --- Presence Runtime bridge (desktop runtime -> renderer IPC) ---
   let presenceFrameTimer = null;
 
   function stopPresenceFrameTimer() {
@@ -326,6 +292,40 @@ async function bootstrap() {
   if (windows) {
     windows._mainWindow.on('resize', broadcastViewport);
   }
+
+  if (desktopRuntime.presenceRuntime) {
+    presenceFrameTimer = setInterval(() => {
+      try {
+        const frame = desktopRuntime.presenceRuntime.getRendererFrame()
+        if (frame) {
+          pushToRenderer(MAIN_EVENTS.presenceFrame, frame)
+        }
+      } catch (e) {
+        // ignore frame push errors
+      }
+    }, 1000 / 30)
+  }
+  }
+
+  // Native capabilities (abstractions; safe no-ops when unavailable).
+  tray = createTray({
+    getWindow: () => windows.getMainWindow(),
+    onQuit: () => app.quit(),
+    iconPath: null,
+    logger,
+  });
+  shortcuts = createGlobalShortcuts({ logger });
+  updater = createAutoUpdater({
+    onState: (s) => pushToRenderer(MAIN_EVENTS.updaterState, s),
+    logger,
+  });
+  createDeepLinks({
+    scheme: 'zaram',
+    onDeepLink: (url) => pushToRenderer(MAIN_EVENTS.deepLink, url),
+  });
+  createFileAssociations({
+    onFileOpen: (f) => pushToRenderer(MAIN_EVENTS.fileOpen, f),
+  });
 
   // --- Backend lifecycle -> window state ---
   const startupTimer = setTimeout(() => {

@@ -1,0 +1,64 @@
+
+---
+
+## **Step 3: How to Use with Trae**
+
+1. **Open VS Code** with your Zaram project
+
+2. **Open Trae** (the AI assistant sidebar)
+
+3. **Add Context Files:**
+   - Click "Context" tab in Trae
+   - Click "Add from local files"
+   - Navigate to `.trae/` folder
+   - Select all 3 files:
+     - `CONTEXT.md`
+     - `DESIGN_SYSTEM.md`
+     - `AGENT_INSTRUCTIONS.md`
+   - Click "Confirm"
+
+4. **Verify:**
+   - You should see "Workspace successfully indexed" 
+   - Files appear in Trae's context list
+   - Total size should be < 50 MB
+
+5. **Start Building:**
+   - Now when you ask Trae to build Zaram components, it will:
+     - Know the architecture
+     - Follow the design system
+     - Respect coding standards
+     - Use proper patterns
+
+---
+
+## **Step 4: Maintenance**
+
+**When to update:**
+- Architecture changes → Update `CONTEXT.md`
+- UI changes → Update `DESIGN_SYSTEM.md`
+- Process changes → Update `AGENT_INSTRUCTIONS.md`
+
+**How to update:**
+1. Edit the file in `.trae/`
+2. In Trae, remove old context
+3. Re-add the updated file
+4. Test with a simple prompt
+
+---
+
+## **Summary**
+
+You now have:
+- ✅ **3 files** (not 6)
+- ✅ **1 folder** (`.trae/`)
+- ✅ **Clear instructions** on what to do
+- ✅ **Easy to maintain**
+- ✅ **Ready for Trae**
+
+**Next:**
+1. Create `.trae/` folder
+2. Copy the 3 files above
+3. Add to Trae's context
+4. Start building Zaram!
+
+Need help with anything else?
