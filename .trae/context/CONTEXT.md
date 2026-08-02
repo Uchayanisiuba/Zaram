@@ -1,80 +1,83 @@
-# Zaram - Complete Project Context
+# Zaram — Shared Agent Context
 
-**For:** Trae, Cursor, Kilo, Cline, and all AI coding agents  
-**Version:** 1.0  
-**Last Updated:** 2026-07-28
+**For:** Trae, Cursor, Kilo, Cline, Continue, and any other AI coding agent
+**Last updated:** 2026-08-02
 
----
+`CLAUDE.md` at the repo root is the project contract — vocabulary, immutable rules, v1
+scope, technical decisions. Read it first; it wins over this file. `docs/VISION.md`
+holds the rationale, to be read before proposing product changes.
 
-## What is Zaram?
-
-Zaram is a **Local-First AI Productivity Operating System**—not a chatbot, not an AI assistant, not a wrapper. It's a workspace where users think, create, build, and execute work across industries.
-
-**Core Philosophy:** Human ↔ Living Intelligence ↔ Unified Workspace ↔ Execution
+This file exists for one thing the contract does not cover: **the actual state of the
+code**, so you do not build against assumptions.
 
 ---
 
-## Tech Stack
+## What Zaram is
 
-### Frontend
-- **Electron** (Desktop app)
-- **React 19** (UI framework)
-- **TypeScript** (Language)
-- **Tailwind CSS v4** (Styling)
-- **Framer Motion** (Animations)
-- **Zustand** (State management)
-- **Vite** (Build tool)
+The memory and control layer for people who use more than one AI. It sits between the
+user and whatever models they use, cloud or local. One knowledge base — the **Spine** —
+on the user's machine. Any model can recall from it, with visible provenance. The user
+controls what leaves the device.
 
-### Backend
-- **FastAPI** (Python)
-- **Ollama** (Local LLMs)
-- **LanceDB** (Vector database)
-- **Neo4j/Kuzu** (Graph database)
-- **MCP** (Model Context Protocol)
+Not an operating system. Not an agent framework. Not a workspace suite. Earlier context
+documents described an "8 Engine" productivity OS with a unified memory graph and
+industry plugin packs — that direction is retired in full.
 
----
+## Verified state of the code
 
-## Core Architecture: 8 Engines
+Established by running the code on 2 August 2026, not by reading documentation.
 
-1. **Knowledge Engine** - RAG, semantic search, document understanding
-2. **Memory Engine** - Persistent episodic/semantic memory
-3. **Research Engine** - Deep reasoning, synthesis, citations
-4. **Development Engine** - Code editing, debugging, git
-5. **Creation Engine** - Image/video generation, design
-6. **Automation Engine** - Workflow automation, scripting
-7. **Communication Engine** - Voice, chat, transcription
-8. **System Engine** - Orchestration, plugins, routing
+**Works:**
 
-All engines feed into the **Unified Memory Graph** (single source of truth).
+- Backend FastAPI service boots and serves 11 endpoints.
+- 676 backend tests pass.
+- Frontend compiles clean (0 TypeScript errors) and builds for production.
+- Electron security configuration is correct: `contextIsolation: true`,
+  `nodeIntegration: false`, `webSecurity: true`.
 
----
+**Does not work, or is not connected:**
 
-## Key Design Principles
+- **The frontend makes zero network calls.** It does not talk to the backend at all.
+  Chat replies are a hardcoded string; the memory graph is fabricated sample data.
+- **Only four runtimes boot** (`backend/core/bootstrapper.py`): memory, knowledge,
+  models, speech. Agent, artifacts, capability, filesystem, intent, internet,
+  reliability, tool, discovery and presence are reachable only from their own tests.
+- **One model provider is wired.** `models_runtime.py` imports `OllamaEngine` and
+  nothing else. Multi-provider code exists in `backend/garage/` and does not boot.
+- **The Spine does not persist.** The bootstrapper requests `store_type="memory"`
+  (in-RAM). `SQLiteMemoryStore` exists and is not selected. Embeddings are `hash`-based,
+  not semantic.
+- **16 backend tests fail**, 11 of them the streaming conversation pipeline.
+- **There is no egress log.** Network calls originate independently from
+  `knowledge/providers/*`, `runtimes/internet/*` and `runtimes/memory/embeddings.py`.
+- `frontend/src/runtime/` contains 19 zero-byte files with real-sounding names.
+- `packages/zaram-engine` (3,496 lines) is imported by nothing.
+- `electron/` and `desktop/` are two Electron hosts; the build scripts disagree about
+  which one ships.
 
-### 1. Local-First
-- Everything runs locally by default
-- Cloud is optional enhancement
-- Privacy is non-negotiable
-- Works offline
+Finding dormant code is not permission to activate it. Much of it belongs to surfaces
+that have been cut.
 
-### 2. Unified Memory
-- Everything connects: projects, docs, code, conversations, tasks
-- Graph database stores relationships
-- Vector database for semantic search
-- No isolated data silos
+## Stack
 
-### 3. Workspace-Centric
-- The workspace is the hero, not the AI
-- Living Orb represents AI state (bottom-center)
-- Floating panels on infinite canvas
-- Context preserved across sessions
+Frontend: React 19, TypeScript, Tailwind, Framer Motion, Zustand, Vite.
+Backend: FastAPI, Python 3.11+, Ollama for local inference.
+Tools: MCP only — never invent a plugin or shim format.
 
-### 4. Plugin Architecture
-- Core stays generic
-- Industry packs extend functionality (Medical, Finance, Robotics)
-- Plugins run in isolated sidecars
-- Capability-based security
+## Working method
 
----
+- Read before you write. Verify against the code, not the docs. This repo's
+  documentation has been wrong more often than right, which is why it was reduced to
+  two files.
+- Verify by observation — run it, look at it. Do not report progress you have not seen.
+- Prefer a narrow thing that works over a broad thing that demos.
+- When a plan and the codebase disagree, the codebase wins. Say so.
+- Tools confirm before acting. If a permission is denied, stop and report it — do not
+  route around it.
 
-## Folder Structure
+## Current milestone
+
+The recall demo: ask model A something, ask model B about it later, get a cited answer,
+delete the fact, watch the answer change, open the egress log and see what left.
+
+Everything else waits.
