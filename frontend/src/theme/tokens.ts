@@ -1,9 +1,9 @@
 /**
  * =================================================================================================
- * ZARAM DESIGN TOKENS — Project B Visual Language
+ * ZARAM DESIGN TOKENS — Project A Visual Language
  *
- * Deep-space dark theme: #08080f base, indigo/cyan/purple accent palette.
- * These tokens drive both CSS variables (index.css) and Tailwind config.
+ * Deep-space dark theme: #080a0e base, indigo/cyan/purple accent palette.
+ * Source of truth for fonts, colors, radii, shadows, and motion.
  * =================================================================================================
  */
 
@@ -66,8 +66,9 @@ export const colors = {
 // =================================================================================================
 export const typography = {
   fontFamily: {
-    sans: ["'Space Grotesk'", "'Inter'", 'ui-sans-serif', 'system-ui', 'sans-serif'],
-    mono: ["'Fira Code'", 'ui-monospace', 'monospace'],
+    display: ["'Space Grotesk'", "'Inter'", 'ui-sans-serif', 'system-ui', 'sans-serif'],
+    sans: ["'Inter'", 'ui-sans-serif', 'system-ui', 'sans-serif'],
+    mono: ["'JetBrains Mono'", 'ui-monospace', 'monospace'],
   },
   fontSize: {
     xs:   '0.75rem',

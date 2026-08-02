@@ -29,7 +29,7 @@ export default function TopNav({ workspace, onSearchOpen }: TopNavProps) {
         alignItems: 'center',
         justifyContent: 'space-between',
         paddingInline: 32,
-        borderBottom: '1px solid rgba(255,255,255,0.06)',
+        borderBottom: '1px solid var(--color-border-subtle)',
         flexShrink: 0,
         position: 'relative',
         zIndex: 50,
@@ -39,8 +39,8 @@ export default function TopNav({ workspace, onSearchOpen }: TopNavProps) {
       <div style={{ display: 'flex', alignItems: 'center', gap: 64, minWidth: 200 }}>
         <span
           style={{
-            fontFamily: "'Space Grotesk', sans-serif",
-            fontSize: 26,
+            fontFamily: 'var(--font-display)',
+            fontSize: 'var(--text-h1)',
             fontWeight: 600,
             letterSpacing: '0.02em',
           }}
@@ -50,8 +50,8 @@ export default function TopNav({ workspace, onSearchOpen }: TopNavProps) {
         </span>
         {!isLanding && (
           <>
-            <ChevronRight size={24} style={{ color: '#3a3f5c' }} />
-            <span style={{ fontSize: 26, color: '#6b7099', fontWeight: 500 }}>
+            <ChevronRight size={24} style={{ color: 'var(--color-text-faint)' }} />
+            <span style={{ fontSize: 'var(--text-h1)', color: 'var(--color-text-muted)', fontWeight: 500 }}>
               {WORKSPACE_LABELS[workspace]}
             </span>
           </>
@@ -60,7 +60,7 @@ export default function TopNav({ workspace, onSearchOpen }: TopNavProps) {
 
       {/* Center: status indicators */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 64, position: 'absolute', left: '50%', transform: 'translateX(-50%)' }}>
-        <StatusPill icon={<span style={{ width: 10, height: 10, borderRadius: '50%', background: '#10b981', display: 'inline-block', boxShadow: '0 0 6px #10b981' }} />} label="Local" />
+        <StatusPill icon={<span style={{ width: 10, height: 10, borderRadius: '50%', background: 'var(--color-emerald)', display: 'inline-block', boxShadow: '0 0 6px var(--color-emerald)' }} />} label="Local" />
         <StatusPill icon={<Zap size={20} />} label="Claude 3.5" accent />
         <StatusPill icon={<Wifi size={20} />} label="Synced" />
       </div>
@@ -73,21 +73,21 @@ export default function TopNav({ workspace, onSearchOpen }: TopNavProps) {
             display: 'flex',
             alignItems: 'center',
             gap: 64,
-            background: 'rgba(255,255,255,0.05)',
-            border: '1px solid rgba(255,255,255,0.08)',
+            background: 'var(--color-glass-mid)',
+            border: '1px solid var(--color-border)',
             borderRadius: 12,
             padding: '4px 10px',
             cursor: 'pointer',
-            color: '#6b7099',
-            fontSize: 24,
+            color: 'var(--color-text-muted)',
+            fontSize: 'var(--text-h1)',
             transition: 'all 0.15s',
           }}
-          onMouseEnter={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.08)')}
-          onMouseLeave={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.05)')}
+          onMouseEnter={e => (e.currentTarget.style.background = 'var(--color-border-glass-strong)')}
+          onMouseLeave={e => (e.currentTarget.style.background = 'var(--color-glass-mid)')}
         >
           <Search size={22} />
           <span>Search</span>
-          <span style={{ fontSize: 20, opacity: 0.5, fontFamily: "'JetBrains Mono', monospace" }}>⌘K</span>
+          <span style={{ fontSize: 'var(--text-h2)', opacity: 0.5, fontFamily: 'var(--font-mono)' }}>⌘K</span>
         </button>
 
         <NavIcon>
@@ -98,12 +98,12 @@ export default function TopNav({ workspace, onSearchOpen }: TopNavProps) {
             width: 44,
             height: 44,
             borderRadius: '50%',
-            background: 'linear-gradient(135deg, #6366f1, #22d3ee)',
+            background: 'linear-gradient(135deg, var(--color-indigo), var(--color-cyan-light))',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
           }}>
-            <User size={22} style={{ color: '#fff' }} />
+             <User size={22} style={{ color: 'var(--color-text)' }} />
           </div>
         </NavIcon>
       </div>
@@ -119,10 +119,10 @@ function StatusPill({ icon, label, accent = false }: { icon: React.ReactNode; la
       gap: 10,
       padding: '3px 8px',
       borderRadius: 99,
-      background: accent ? 'rgba(99,102,241,0.12)' : 'rgba(255,255,255,0.04)',
-      border: `1px solid ${accent ? 'rgba(99,102,241,0.2)' : 'rgba(255,255,255,0.06)'}`,
-      fontSize: 22,
-      color: accent ? '#818cf8' : '#6b7099',
+      background: accent ? 'var(--color-indigo-a-12)' : 'var(--color-glass)',
+      border: `1px solid ${accent ? 'var(--color-indigo-a-20)' : 'var(--color-border-subtle)'}`,
+      fontSize: 'var(--text-h2)',
+      color: accent ? 'var(--color-indigo-light)' : 'var(--color-text-muted)',
       fontWeight: 500,
     }}>
       {icon}
@@ -140,14 +140,14 @@ function NavIcon({ children }: { children: React.ReactNode }) {
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
-      background: 'rgba(255,255,255,0.04)',
-      border: '1px solid rgba(255,255,255,0.07)',
+      background: 'var(--color-glass)',
+      border: '1px solid var(--color-glass-hover)',
       cursor: 'pointer',
-      color: '#6b7099',
+      color: 'var(--color-text-muted)',
       transition: 'all 0.15s',
     }}
-    onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.08)'; e.currentTarget.style.color = '#e2e4ee' }}
-    onMouseLeave={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.04)'; e.currentTarget.style.color = '#6b7099' }}
+      onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-border)'; e.currentTarget.style.color = 'var(--color-text)' }}
+      onMouseLeave={e => { e.currentTarget.style.background = 'var(--color-glass)'; e.currentTarget.style.color = 'var(--color-text-muted)' }}
     >
       {children}
     </button>

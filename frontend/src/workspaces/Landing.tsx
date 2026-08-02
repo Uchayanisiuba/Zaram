@@ -1,7 +1,9 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { motion } from 'framer-motion'
 import { Code2, Brain, BookOpen, LayoutGrid, Puzzle, Settings } from 'lucide-react'
 import LivingOrb from '../components/orb/LivingOrb'
+import { useChatModeStore } from '@/stores/chatModeStore'
+import { useIsReducedMotion } from '@/hooks/useReducedMotion'
 
 type WorkspaceId = 'build' | 'memory' | 'knowledge' | 'canvas' | 'plugins' | 'settings'
 
@@ -16,34 +18,72 @@ const ORBITAL_NODES = [
 
 interface LandingProps {
   onNavigate: (id: WorkspaceId) => void
+  onOrbTap?: () => void
 }
 
-export default function Landing({ onNavigate }: LandingProps) {
+const ORB_SIZE = 320
+const ORBIT_RADIUS = 240
+// Orb zooms ~1.4x and glides into the open space left of the chat panel.
+const ORB_ZOOM = 1.4
+const ORB_SHIFT = -160
+
+export default function Landing({ onNavigate, onOrbTap }: LandingProps) {
   const [_, setHovered] = useState<string | null>(null)
+  const reduced = useIsReducedMotion()
+  const { chatView, closeChat } = useChatModeStore()
+  const chat = chatView === 'chat'
+
+  // --- Orbital rAF: gated to 'landing' so the orbit FREEZES during chat.
+  // Continuity refs ensure the loop resumes from the frozen angle (no jump to 0).
   const [orbitAngle, setOrbitAngle] = useState(0)
+  const rafRef = useRef<number>(0)
+  const startRef = useRef<number>(0)
+  const offsetRef = useRef<number>(0)
+  const elapsedRef = useRef<number>(0)
 
   useEffect(() => {
-    let start = 0
-    let animationId: number
-
-    const animate = (timestamp: number) => {
-      if (!start) start = timestamp
-      const elapsed = timestamp - start
-      const angle = (elapsed / 90000) * 360
-      setOrbitAngle(angle % 360)
-      animationId = requestAnimationFrame(animate)
+    if (chat) {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current)
+      return
     }
+    // On resume, continue from the frozen elapsed time so the angle is continuous.
+    if (elapsedRef.current > 0) {
+      offsetRef.current = elapsedRef.current
+      startRef.current = 0
+    }
+    const tick = (ts: number) => {
+      if (!startRef.current) startRef.current = ts
+      const elapsed = (ts - startRef.current) + offsetRef.current
+      elapsedRef.current = elapsed
+      setOrbitAngle((elapsed / 90000) * 360)
+      rafRef.current = requestAnimationFrame(tick)
+    }
+    rafRef.current = requestAnimationFrame(tick)
+    return () => {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current)
+    }
+  }, [chat])
 
-    animationId = requestAnimationFrame(animate)
-    return () => cancelAnimationFrame(animationId)
-  }, [])
+  // Escape reverses the transition (closes chat).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && chat) closeChat()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [chat, closeChat])
 
-  const ORB_SIZE = 320
-  const ORBIT_RADIUS = 240
+  const ring1Size = ORBIT_RADIUS * 2 + 60
+  const ring2Size = ORBIT_RADIUS * 2 + 110
+
+  const orbShift = chat ? { scale: ORB_ZOOM, x: ORB_SHIFT, y: 0 } : { scale: 1, x: 0, y: 0 }
+  const orbTransition = chat
+    ? reduced ? { type: 'tween' as const, duration: 0.22 } : { type: 'spring' as const, stiffness: 200, damping: 24 }
+    : { type: 'tween' as const, duration: 0.35 }
 
   return (
     <div
-       className="h-screen overflow-hidden text-slate-100 flex items-center justify-center w-full flex-1"
+      className="h-screen overflow-hidden text-slate-100 flex items-center justify-center w-full flex-1"
       style={{
         background: 'radial-gradient(ellipse at 25% 15%, rgba(99,102,241,0.08) 0%, transparent 52%), radial-gradient(ellipse at 75% 85%, rgba(168,85,247,0.06) 0%, transparent 52%), #08080f',
         fontFamily: "'Space Grotesk', 'Inter', sans-serif",
@@ -58,108 +98,122 @@ export default function Landing({ onNavigate }: LandingProps) {
         }}
       />
 
-      {/* Orbital system - NO fixed container, fills the available space */}
-      <div className="relative w-full h-full flex items-center justify-center">
-        {/* Orbit track rings - centered on the orb */}
-        <div
+      {/* Orbital system — keeps the same shell; only the orbital motion is gated. */}
+      <div
+        className="relative w-full h-full flex items-center justify-center"
+        style={{ transform: 'scale(1.4)', transformOrigin: 'center center' }}
+      >
+        {/* Orbit track rings — dissolve / restore (centering via framer offset, never inline transform). */}
+        <motion.div
           className="absolute rounded-full pointer-events-none"
           style={{
-            width: ORBIT_RADIUS * 2 + 60,
-            height: ORBIT_RADIUS * 2 + 60,
+            width: ring1Size, height: ring1Size,
+            left: '50%', top: '50%',
+            x: -(ring1Size / 2), y: -(ring1Size / 2),
             border: '1px solid rgba(255,255,255,0.04)',
-            left: '50%',
-            top: '50%',
-            transform: 'translate(-50%, -50%)',
           }}
+          initial={false}
+          animate={chat ? { opacity: 0, scale: reduced ? 1 : 1.15 } : { opacity: 1, scale: 1 }}
+          transition={{ duration: reduced ? 0.2 : 0.4 }}
         />
-        <div
+        <motion.div
           className="absolute rounded-full pointer-events-none"
           style={{
-            width: ORBIT_RADIUS * 2 + 110,
-            height: ORBIT_RADIUS * 2 + 110,
+            width: ring2Size, height: ring2Size,
+            left: '50%', top: '50%',
+            x: -(ring2Size / 2), y: -(ring2Size / 2),
             border: '1px solid rgba(255,255,255,0.025)',
-            left: '50%',
-            top: '50%',
-            transform: 'translate(-50%, -50%)',
           }}
+          initial={false}
+          animate={chat ? { opacity: 0, scale: reduced ? 1 : 1.15 } : { opacity: 1, scale: 1 }}
+          transition={{ duration: reduced ? 0.2 : 0.4, delay: 0.04 }}
         />
 
-        {/* Central Living Orb — STATIC at mathematical center */}
+        {/* Central Living Orb — zooms + glides into the open space beside the chat. */}
         <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-10 flex flex-col items-center">
           <motion.div
             initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={{ duration: 0.4 }}
+            animate={{ opacity: 1, ...orbShift }}
+            transition={chat ? orbTransition : { duration: 0.4 }}
+            whileTap={{ scale: chat ? ORB_ZOOM * 0.9 : 0.9 }}
+            style={{ cursor: 'pointer' }}
+            onClick={onOrbTap}
           >
             <div style={{ width: ORB_SIZE, height: ORB_SIZE }}>
-              <LivingOrb size="lg" />
+              <LivingOrb size="lg" emphasis />
             </div>
           </motion.div>
         </div>
 
-        {/* Orbiting satellite nodes — revolve around orb while maintaining orientation */}
+        {/* Orbiting satellite nodes — parent holds the FROZEN orbit (rAF), child
+            carries the dispersal via framer so the two transforms never fight. */}
         {ORBITAL_NODES.map((node) => {
           const animatedRad = ((node.angle - 90 + orbitAngle) * Math.PI) / 180
-          const x = Math.cos(animatedRad) * ORBIT_RADIUS
-          const y = Math.sin(animatedRad) * ORBIT_RADIUS
+          const restX = Math.cos(animatedRad) * ORBIT_RADIUS
+          const restY = Math.sin(animatedRad) * ORBIT_RADIUS
+          // Dispersal target: push ~0.8 * ORBIT_RADIUS further along the same angle.
+          const dx = Math.cos(animatedRad) * ORBIT_RADIUS * 0.8
+          const dy = Math.sin(animatedRad) * ORBIT_RADIUS * 0.8
+
+          const dispersed = chat
+            ? reduced ? { opacity: 0 } : { opacity: 0, scale: 0.4, x: dx, y: dy }
+            : reduced ? { opacity: 1 } : { opacity: 1, scale: 1, x: 0, y: 0 }
+          const childTransition = reduced
+            ? { duration: 0.18 }
+            : { type: 'spring' as const, stiffness: 240, damping: 26 }
 
           return (
             <div
               key={node.id}
               className="absolute z-20 flex flex-col items-center gap-2"
               style={{
-                left: '50%',
-                top: '50%',
-                transform: `translate(-50%, -50%) translate(${x}px, ${y}px)`,
+                left: '50%', top: '50%',
+                transform: `translate(-50%, -50%) translate(${restX}px, ${restY}px)`,
+                pointerEvents: chat ? 'none' : 'auto',
               }}
             >
-              <motion.button
-                onClick={() => onNavigate(node.id as WorkspaceId)}
-                onHoverStart={() => setHovered(node.id)}
-                onHoverEnd={() => setHovered(null)}
-                className="relative flex flex-col items-center"
-                whileHover={{ scale: 1.18 }}
-                whileTap={{ scale: 0.94 }}
+              <motion.div
+                initial={false}
+                animate={dispersed}
+                transition={{ ...childTransition, delay: chat ? 0.06 * (node.angle / 60) : 0 }}
               >
-                <motion.div
-                  className="w-14 h-14 rounded-2xl flex items-center justify-center"
-                  style={{
-                    background: 'rgba(255,255,255,0.05)',
-                    border: `1px solid ${node.color}35`,
-                    backdropFilter: 'blur(10px)',
-                    boxShadow: `0 4px 24px rgba(0,0,0,0.3)`,
-                  }}
-                  whileHover={{
-                    background: `${node.color}18`,
-                    borderColor: `${node.color}70`,
-                    boxShadow: `0 0 24px ${node.color}50, 0 4px 24px rgba(0,0,0,0.3)`,
-                  }}
-                  transition={{ duration: 0.2 }}
+                <motion.button
+                  onClick={() => onNavigate(node.id as WorkspaceId)}
+                  onHoverStart={() => setHovered(node.id)}
+                  onHoverEnd={() => setHovered(null)}
+                  className="relative flex flex-col items-center"
+                  whileHover={{ scale: 1.18 }}
+                  whileTap={{ scale: 0.94 }}
                 >
-                  {node.icon}
-                </motion.div>
-                <span
-                  className="text-slate-400 whitespace-nowrap select-none"
-                  style={{ fontSize: '11px', letterSpacing: '0.03em' }}
-                >
-                  {node.label}
-                </span>
-              </motion.button>
+                  <motion.div
+                    className="w-14 h-14 rounded-2xl flex items-center justify-center"
+                    style={{
+                      background: 'rgba(255,255,255,0.05)',
+                      border: `1px solid ${node.color}35`,
+                      backdropFilter: 'blur(10px)',
+                      boxShadow: `0 4px 24px rgba(0,0,0,0.3)`,
+                    }}
+                    whileHover={{
+                      background: `${node.color}18`,
+                      borderColor: `${node.color}70`,
+                      boxShadow: `0 0 24px ${node.color}50, 0 4px 24px rgba(0,0,0,0.3)`,
+                    }}
+                    transition={{ duration: 0.2 }}
+                  >
+                    {node.icon}
+                  </motion.div>
+                  <span
+                    className="text-slate-400 whitespace-nowrap select-none"
+                    style={{ fontSize: '11px', letterSpacing: '0.03em' }}
+                  >
+                    {node.label}
+                  </span>
+                </motion.button>
+              </motion.div>
             </div>
           )
         })}
       </div>
-
-      {/* Tagline */}
-      <motion.p
-        className="text-center text-slate-500 text-xs tracking-widest uppercase absolute bottom-8 left-1/2 -translate-x-1/2"
-        style={{ letterSpacing: '0.12em' }}
-        initial={{ opacity: 0, y: 8 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.4 }}
-      >
-        Living Intelligence · Local First
-      </motion.p>
     </div>
   )
 }

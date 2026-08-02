@@ -98,7 +98,7 @@ export default function CanvasWorkspace() {
         borderRadius: 12,
         background: 'rgba(13,15,22,0.9)',
         backdropFilter: 'blur(20px)',
-        border: '1px solid rgba(255,255,255,0.08)',
+        border: '1px solid var(--color-border)',
         boxShadow: '0 4px 20px rgba(0,0,0,0.4)',
       }}>
         {[
@@ -119,38 +119,38 @@ export default function CanvasWorkspace() {
               background: tool.label === 'Pan' ? 'rgba(99,102,241,0.15)' : 'transparent',
               border: `1px solid ${tool.label === 'Pan' ? 'rgba(99,102,241,0.3)' : 'transparent'}`,
               cursor: 'pointer',
-              color: tool.label === 'Pan' ? '#818cf8' : '#6b7099',
+              color: tool.label === 'Pan' ? '#818cf8' : 'var(--color-text-muted)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               transition: 'all 0.15s',
             }}
-            onMouseEnter={e => { if (tool.label !== 'Pan') { e.currentTarget.style.background = 'rgba(255,255,255,0.07)'; e.currentTarget.style.color = '#e2e4ee' }}}
-            onMouseLeave={e => { if (tool.label !== 'Pan') { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = '#6b7099' }}}
+            onMouseEnter={e => { if (tool.label !== 'Pan') { e.currentTarget.style.background = 'var(--color-glass-hover)'; e.currentTarget.style.color = 'var(--color-text)' }}}
+            onMouseLeave={e => { if (tool.label !== 'Pan') { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--color-text-muted)' }}}
           >
             {tool.icon}
           </button>
         ))}
 
-        <div style={{ width: 1, height: 20, background: 'rgba(255,255,255,0.08)', margin: '0 4px' }} />
+        <div style={{ width: 1, height: 20, background: 'var(--color-border)', margin: '0 4px' }} />
 
         <button
           onClick={() => setZoom(z => Math.max(0.5, z - 0.1))}
-          style={{ width: 28, height: 28, borderRadius: 6, background: 'transparent', border: 'none', cursor: 'pointer', color: '#6b7099', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+          style={{ width: 28, height: 28, borderRadius: 6, background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--color-text-muted)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
         >
           <ZoomOut size={13} />
         </button>
-        <span style={{ fontSize: 11, color: '#6b7099', minWidth: 38, textAlign: 'center', fontFamily: "'JetBrains Mono', monospace" }}>
+        <span style={{ fontSize: 11, color: 'var(--color-text-muted)', minWidth: 38, textAlign: 'center', fontFamily: "var(--font-mono)" }}>
           {Math.round(zoom * 100)}%
         </span>
         <button
           onClick={() => setZoom(z => Math.min(2, z + 0.1))}
-          style={{ width: 28, height: 28, borderRadius: 6, background: 'transparent', border: 'none', cursor: 'pointer', color: '#6b7099', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+          style={{ width: 28, height: 28, borderRadius: 6, background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--color-text-muted)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
         >
           <ZoomIn size={13} />
         </button>
 
-        <div style={{ width: 1, height: 20, background: 'rgba(255,255,255,0.08)', margin: '0 4px' }} />
+        <div style={{ width: 1, height: 20, background: 'var(--color-border)', margin: '0 4px' }} />
 
         <button style={{
           width: 28,
@@ -159,7 +159,7 @@ export default function CanvasWorkspace() {
           background: 'transparent',
           border: 'none',
           cursor: 'pointer',
-          color: '#6b7099',
+          color: 'var(--color-text-muted)',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
@@ -242,14 +242,14 @@ export default function CanvasWorkspace() {
                       margin: 0,
                       fontSize: 10.5,
                       color: '#b0b4cc',
-                      fontFamily: "'JetBrains Mono', monospace",
+                      fontFamily: "var(--font-mono)",
                       lineHeight: 1.6,
                       whiteSpace: 'pre-wrap',
                       wordBreak: 'break-word',
                     }}>{item.content}</pre>
                   ) : item.type === 'link' ? (
                     <div>
-                      <div style={{ fontSize: 12, color: '#e2e4ee', fontWeight: 500, marginBottom: 4 }}>{item.content}</div>
+                      <div style={{ fontSize: 12, color: 'var(--color-text)', fontWeight: 500, marginBottom: 4 }}>{item.content}</div>
                       <div style={{ fontSize: 11, color: item.color, textDecoration: 'underline', opacity: 0.7 }}>
                         {item.content}
                       </div>

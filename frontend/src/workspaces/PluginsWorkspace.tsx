@@ -21,7 +21,7 @@ const PLUGINS: Plugin[] = [
     id: 'p1', name: 'Code Intelligence', author: 'Zaram Labs', category: 'Development',
     description: 'Deep code analysis with AST parsing, semantic search, and intelligent refactoring suggestions.',
     version: '2.1.4', installed: true, stars: 4.9,
-    icon: '⬡', iconBg: 'linear-gradient(135deg, #6366f1, #818cf8)',
+    icon: '⬡', iconBg: 'linear-gradient(135deg, var(--color-indigo), var(--color-indigo-light))',
     health: 'healthy', permissions: ['read files', 'write files', 'execute commands'],
   },
   {
@@ -83,16 +83,16 @@ export default function PluginsWorkspace() {
       {/* Header */}
       <div style={{ marginBottom: 24 }}>
         <h1 style={{
-          fontFamily: "'Space Grotesk', sans-serif",
+          fontFamily: "var(--font-display)",
           fontSize: 24,
           fontWeight: 700,
-          color: '#e2e4ee',
+          color: 'var(--color-text)',
           margin: '0 0 6px',
           letterSpacing: '-0.02em',
         }}>
           Plugins
         </h1>
-        <p style={{ fontSize: 13, color: '#6b7099', margin: 0 }}>
+        <p style={{ fontSize: 13, color: 'var(--color-text-muted)', margin: 0 }}>
           Extend Zaram with AI-powered capabilities
         </p>
       </div>
@@ -102,8 +102,8 @@ export default function PluginsWorkspace() {
         {/* Tabs */}
         <div style={{
           display: 'flex',
-          background: 'rgba(255,255,255,0.04)',
-          border: '1px solid rgba(255,255,255,0.08)',
+          background: 'var(--color-glass)',
+          border: '1px solid var(--color-border)',
           borderRadius: 10,
           padding: 4,
           gap: 2,
@@ -118,7 +118,7 @@ export default function PluginsWorkspace() {
                 background: tab === t ? 'rgba(99,102,241,0.2)' : 'transparent',
                 border: `1px solid ${tab === t ? 'rgba(99,102,241,0.35)' : 'transparent'}`,
                 cursor: 'pointer',
-                color: tab === t ? '#818cf8' : '#6b7099',
+                color: tab === t ? 'var(--color-indigo-light)' : 'var(--color-text-muted)',
                 fontSize: 12,
                 fontWeight: 600,
                 transition: 'all 0.15s',
@@ -131,8 +131,8 @@ export default function PluginsWorkspace() {
                 fontSize: 10,
                 padding: '1px 6px',
                 borderRadius: 99,
-                background: tab === t ? 'rgba(99,102,241,0.3)' : 'rgba(255,255,255,0.06)',
-                color: tab === t ? '#818cf8' : '#4a4f6a',
+                background: tab === t ? 'rgba(99,102,241,0.3)' : 'var(--color-border-subtle)',
+                color: tab === t ? 'var(--color-indigo-light)' : 'var(--color-text-secondary)',
               }}>
                 {PLUGINS.filter(p => t === 'installed' ? installedIds.has(p.id) : !installedIds.has(p.id)).length}
               </span>
@@ -145,14 +145,14 @@ export default function PluginsWorkspace() {
           display: 'flex',
           alignItems: 'center',
           gap: 8,
-          background: 'rgba(255,255,255,0.04)',
-          border: '1px solid rgba(255,255,255,0.08)',
+          background: 'var(--color-glass)',
+          border: '1px solid var(--color-border)',
           borderRadius: 8,
           padding: '7px 12px',
           flex: 1,
           maxWidth: 300,
         }}>
-          <Search size={13} style={{ color: '#6b7099' }} />
+          <Search size={13} style={{ color: 'var(--color-text-muted)' }} />
           <input
             value={search}
             onChange={e => setSearch(e.target.value)}
@@ -161,10 +161,10 @@ export default function PluginsWorkspace() {
               background: 'none',
               border: 'none',
               outline: 'none',
-              color: '#e2e4ee',
+              color: 'var(--color-text)',
               fontSize: 13,
               flex: 1,
-              fontFamily: "'Inter', sans-serif",
+              fontFamily: "var(--font-sans)",
             }}
           />
         </div>
@@ -178,10 +178,10 @@ export default function PluginsWorkspace() {
               style={{
                 padding: '5px 12px',
                 borderRadius: 8,
-                background: filter === cat ? 'rgba(99,102,241,0.12)' : 'rgba(255,255,255,0.04)',
-                border: `1px solid ${filter === cat ? 'rgba(99,102,241,0.25)' : 'rgba(255,255,255,0.07)'}`,
+                background: filter === cat ? 'rgba(99,102,241,0.12)' : 'var(--color-glass)',
+                border: `1px solid ${filter === cat ? 'rgba(99,102,241,0.25)' : 'var(--color-glass-hover)'}`,
                 cursor: 'pointer',
-                color: filter === cat ? '#818cf8' : '#6b7099',
+                color: filter === cat ? 'var(--color-indigo-light)' : 'var(--color-text-muted)',
                 fontSize: 11,
                 fontWeight: 500,
                 transition: 'all 0.15s',
@@ -214,7 +214,7 @@ export default function PluginsWorkspace() {
                 padding: 20,
                 borderRadius: 14,
                 background: 'rgba(255,255,255,0.03)',
-                border: '1px solid rgba(255,255,255,0.07)',
+                border: '1px solid var(--color-glass-hover)',
                 display: 'flex',
                 flexDirection: 'column',
                 gap: 14,
@@ -222,7 +222,7 @@ export default function PluginsWorkspace() {
                 cursor: 'default',
               }}
               onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.05)'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.1)' }}
-              onMouseLeave={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.03)'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.07)' }}
+              onMouseLeave={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.03)'; e.currentTarget.style.borderColor = 'var(--color-glass-hover)' }}
             >
               <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14 }}>
                 {/* Icon */}
@@ -243,14 +243,14 @@ export default function PluginsWorkspace() {
 
                 <div style={{ flex: 1, overflow: 'hidden' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 3 }}>
-                    <span style={{ fontSize: 14, fontWeight: 600, color: '#e2e4ee', fontFamily: "'Space Grotesk', sans-serif" }}>
+                    <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--color-text)', fontFamily: "var(--font-display)" }}>
                       {plugin.name}
                     </span>
                     <HealthBadge health={plugin.health} />
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <span style={{ fontSize: 11, color: '#4a4f6a' }}>{plugin.author}</span>
-                    <span style={{ fontSize: 10, color: '#3a3f5c' }}>v{plugin.version}</span>
+                    <span style={{ fontSize: 11, color: 'var(--color-text-secondary)' }}>{plugin.author}</span>
+                    <span style={{ fontSize: 10, color: 'var(--color-text-faint)' }}>v{plugin.version}</span>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 3, marginLeft: 'auto' }}>
                       <Star size={10} fill="#f59e0b" style={{ color: '#f59e0b' }} />
                       <span style={{ fontSize: 10, color: '#f59e0b', fontWeight: 600 }}>{plugin.stars}</span>
@@ -270,9 +270,9 @@ export default function PluginsWorkspace() {
                     fontSize: 10,
                     padding: '2px 7px',
                     borderRadius: 4,
-                    background: 'rgba(255,255,255,0.04)',
-                    border: '1px solid rgba(255,255,255,0.07)',
-                    color: '#6b7099',
+                    background: 'var(--color-glass)',
+                    border: '1px solid var(--color-glass-hover)',
+                    color: 'var(--color-text-muted)',
                   }}>{perm}</span>
                 ))}
               </div>
@@ -283,8 +283,8 @@ export default function PluginsWorkspace() {
                   fontSize: 10,
                   padding: '2px 8px',
                   borderRadius: 4,
-                  background: 'rgba(255,255,255,0.04)',
-                  color: '#4a4f6a',
+                  background: 'var(--color-glass)',
+                  color: 'var(--color-text-secondary)',
                 }}>{plugin.category}</span>
                 <button
                   onClick={() => {
@@ -304,7 +304,7 @@ export default function PluginsWorkspace() {
                     background: installed ? 'rgba(16,185,129,0.1)' : 'rgba(99,102,241,0.15)',
                     border: `1px solid ${installed ? 'rgba(16,185,129,0.25)' : 'rgba(99,102,241,0.3)'}`,
                     cursor: 'pointer',
-                    color: installed ? '#10b981' : '#818cf8',
+                    color: installed ? '#10b981' : 'var(--color-indigo-light)',
                     fontSize: 12,
                     fontWeight: 600,
                     transition: 'all 0.15s',

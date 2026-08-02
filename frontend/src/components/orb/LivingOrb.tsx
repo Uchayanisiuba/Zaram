@@ -1,5 +1,5 @@
 /**
- * LivingOrb â€” Project B design, Zaram architecture
+ * LivingOrb — Project B design, Zaram architecture
  *
  * Globe-based orb with particles and state-driven effects.
  * Driven by orbStore state: idle, listening, thinking, speaking
@@ -33,6 +33,9 @@ export type OrbState = 'idle' | 'listening' | 'thinking' | 'speaking';
 interface LivingOrbProps {
   size?: 'xs' | 'sm' | 'md' | 'lg' | 'xl';
   className?: string;
+  /** When true, intensifies the existing glow via brightness amplification.
+   *  Derives from existing STATE_CONFIG colors — no new hues introduced. */
+  emphasis?: boolean;
 }
 
 // Per-state visual configs
@@ -83,10 +86,13 @@ const STATE_CONFIG = {
   },
 };
 
-const LivingOrb = ({ size = 'xl', className = '' }: LivingOrbProps) => {
+const LivingOrb = ({ size = 'xl', className = '', emphasis = false }: LivingOrbProps) => {
   const { orbState } = useOrbStore();
   const state = orbState as OrbState;
   const cfg = STATE_CONFIG[state];
+
+  /** Amplify existing glow via brightness — no new colors */
+  const orbBrightness = emphasis ? ' brightness(1.4)' : '';
 
   // Map size to pixel dimensions (matching Project A sizes)
   const sizeMap = { xs: 80, sm: 104, md: 192, lg: 320, xl: 560 };
@@ -106,13 +112,13 @@ const LivingOrb = ({ size = 'xl', className = '' }: LivingOrbProps) => {
       className={`relative flex items-center justify-center shrink-0 ${className}`}
       style={{ width: px, height: px }}
     >
-      {/* Outer ambient glow */}
+      {/* Outer ambient glow — amplified when emphasis is active */}
       <motion.div
         className="absolute rounded-full pointer-events-none"
         style={{
           inset: -outerGlowOffset,
           background: `radial-gradient(circle, ${cfg.glowColor} 0%, ${cfg.glowColor2} 45%, transparent 70%)`,
-          filter: 'blur(24px)',
+          filter: `blur(24px)${emphasis ? ' brightness(1.8)' : ''}`,
         }}
         animate={{ scale: cfg.scale, opacity: state === 'idle' ? [0.7, 1, 0.7] : [0.8, 1, 0.8] }}
         transition={{ duration: cfg.scaleDuration, repeat: Infinity, ease: 'easeInOut' }}
@@ -140,7 +146,7 @@ const LivingOrb = ({ size = 'xl', className = '' }: LivingOrbProps) => {
         )}
       </AnimatePresence>
 
-      {/* Energy ring 1 (outer) â€” STATIC, no rotation */}
+      {/* Energy ring 1 (outer) — STATIC, no rotation */}
       {showRings && (
         <motion.div
           className="absolute rounded-full pointer-events-none"
@@ -154,7 +160,7 @@ const LivingOrb = ({ size = 'xl', className = '' }: LivingOrbProps) => {
         />
       )}
 
-      {/* Energy ring 2 (inner) â€” STATIC, no rotation */}
+      {/* Energy ring 2 (inner) — STATIC, no rotation */}
       {showRings && (
         <motion.div
           className="absolute rounded-full pointer-events-none"
@@ -198,12 +204,12 @@ const LivingOrb = ({ size = 'xl', className = '' }: LivingOrbProps) => {
         )}
       </AnimatePresence>
 
-      {/* Core globe image */}
+      {/* Core globe image — drop-shadow amplified when emphasis is active */}
       <motion.img
         src={globeImage}
         alt="Living Intelligence Orb"
         className="relative z-10 object-contain pointer-events-none select-none"
-        style={{ width: corePx + 40, height: corePx + 40, filter: cfg.filter }}
+        style={{ width: corePx + 40, height: corePx + 40, filter: `${cfg.filter}${orbBrightness}` }}
         animate={{ scale: cfg.scale }}
         transition={{ duration: cfg.scaleDuration, repeat: Infinity, ease: 'easeInOut' }}
       />
