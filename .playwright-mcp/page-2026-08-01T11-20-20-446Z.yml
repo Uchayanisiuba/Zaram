@@ -1,0 +1,10 @@
+- main [ref=e5]:
+  - generic [ref=e8]:
+    - generic [ref=e12] [cursor=pointer]:
+      - img "Living Intelligence Orb"
+    - button "Build" [ref=e14] [cursor=pointer]
+    - button "Memory" [ref=e22] [cursor=pointer]
+    - button "Knowledge" [ref=e34] [cursor=pointer]
+    - button "Plugins" [ref=e40] [cursor=pointer]
+    - button "Canvas" [ref=e46] [cursor=pointer]
+    - button "Settings" [ref=e55] [cursor=pointer]
