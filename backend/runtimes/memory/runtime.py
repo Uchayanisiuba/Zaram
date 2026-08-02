@@ -4,6 +4,7 @@ import asyncio
 import time
 from typing import Any
 
+from core.async_bridge import run_sync
 from core.event_bus import ZaramEvent
 from .contracts import (
     MemoryRecord,
@@ -37,8 +38,10 @@ class MemoryRuntimeImpl(MemoryRuntime):
         store_type: str = "memory",
         index_type: str = "hybrid",
         persist_path: str | None = None,
+        db_path: str | None = None,
         embedding_dim: int = 384,
         embedding_backend: str = "hash",
+        embedding_model: str = "nomic-embed-text",
         event_bus: Any | None = None,
     ):
         self._runtime_id = "memory"
@@ -47,9 +50,10 @@ class MemoryRuntimeImpl(MemoryRuntime):
         self._initialized = False
         self._event_bus = event_bus
 
-        self._store: MemoryStore = create_memory_store(
-            store_type, persist_path=persist_path
-        )
+        store_kwargs: dict[str, Any] = {"persist_path": persist_path}
+        if db_path is not None:
+            store_kwargs["db_path"] = db_path
+        self._store: MemoryStore = create_memory_store(store_type, **store_kwargs)
         self._index: MemoryIndex = create_memory_index(
             index_type, embedding_dim=embedding_dim
         )
@@ -59,7 +63,7 @@ class MemoryRuntimeImpl(MemoryRuntime):
         self._episodic: EpisodicMemory = EpisodicMemory(self)
         self._semantic: SemanticMemory = SemanticMemory(self)
         self._embedder: EmbeddingService = create_embedding_service(
-            backend=embedding_backend, dim=embedding_dim
+            backend=embedding_backend, dim=embedding_dim, ollama_model=embedding_model
         )
         self._graph: MemoryGraph = create_memory_graph()
         self._decay_engine: MemoryDecayEngine = create_decay_engine()
@@ -78,6 +82,16 @@ class MemoryRuntimeImpl(MemoryRuntime):
         embed_health = self._embedder.health_check()
         if embed_health.get("status") != "healthy":
             print(f"[MemoryRuntime] Embedding service degraded: {embed_health}")
+
+        # The index is in-memory and starts empty on every boot. Without this,
+        # persisted records exist but cannot be found.
+        try:
+            records = await self._store.all_records()
+            await self._index.rebuild(records)
+            print(f"[MemoryRuntime] Reindexed {len(records)} persisted record(s).")
+        except Exception as e:
+            print(f"[MemoryRuntime] Index rebuild failed: {e}")
+
         self._state = MemoryStatus.READY
         self._initialized = True
         if self._event_bus:
@@ -122,10 +136,12 @@ class MemoryRuntimeImpl(MemoryRuntime):
         return self._state
 
     def health_check(self) -> dict[str, Any]:
-        store_health = asyncio.run(self._store.health_check()) if hasattr(self._store, 'health_check') else {"status": "unknown"}
-        index_health = asyncio.run(self._index.health_check()) if hasattr(self._index, 'health_check') else {"status": "unknown"}
-        retriever_health = asyncio.run(self._retriever.health_check()) if hasattr(self._retriever, 'health_check') else {"status": "unknown"}
-        ranker_health = asyncio.run(self._ranker.health_check()) if hasattr(self._ranker, 'health_check') else {"status": "unknown"}
+        # run_sync, not asyncio.run: this is called from FastAPI's /health while
+        # an event loop is already running on this thread.
+        store_health = run_sync(self._store.health_check()) if hasattr(self._store, 'health_check') else {"status": "unknown"}
+        index_health = run_sync(self._index.health_check()) if hasattr(self._index, 'health_check') else {"status": "unknown"}
+        retriever_health = run_sync(self._retriever.health_check()) if hasattr(self._retriever, 'health_check') else {"status": "unknown"}
+        ranker_health = run_sync(self._ranker.health_check()) if hasattr(self._ranker, 'health_check') else {"status": "unknown"}
         embedder_health = self._embedder.health_check()
         graph_health = self._graph.health_check()
 
@@ -285,8 +301,9 @@ class MemoryRuntimeImpl(MemoryRuntime):
         - Links consolidated memories in the graph
         """
         stats = await self._store.stats()
+        all_records = await self._store.all_records()
         episodic_records = [
-            r for r in self._store._records.values()
+            r for r in all_records
             if r.memory_type == MemoryType.EPISODIC and r.embedding
         ]
 
@@ -521,7 +538,8 @@ class MemoryRuntimeImpl(MemoryRuntime):
             return 0
 
         linked = 0
-        for other_id, other_record in self._store._records.items():
+        for other_record in await self._store.all_records():
+            other_id = other_record.id
             if other_id == record_id or not other_record.embedding:
                 continue
             similarity = self._cosine_similarity(record.embedding, other_record.embedding)

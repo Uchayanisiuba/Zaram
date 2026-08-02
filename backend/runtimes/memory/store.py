@@ -124,6 +124,10 @@ class InMemoryMemoryStore(MemoryStore):
 
         return candidates
 
+    async def all_records(self) -> list[MemoryRecord]:
+        """Every record in the store. Used to rebuild the index on boot."""
+        return list(self._records.values())
+
     async def stats(self) -> MemoryStats:
         by_type = defaultdict(int)
         total_embeddings = 0
@@ -263,6 +267,15 @@ class SQLiteMemoryStore(MemoryStore):
                 f"SELECT * FROM memories {where_sql} ORDER BY created_at DESC LIMIT ?",
                 (*params, query.max_results),
             ).fetchall()
+            return [self._row_to_record(r) for r in rows]
+
+    async def all_records(self) -> list[MemoryRecord]:
+        """Every record in the store. Used to rebuild the index on boot."""
+        import sqlite3
+
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute("SELECT * FROM memories").fetchall()
             return [self._row_to_record(r) for r in rows]
 
     async def stats(self) -> MemoryStats:

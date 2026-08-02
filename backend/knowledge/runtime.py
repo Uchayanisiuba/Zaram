@@ -2,12 +2,14 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 import threading
 from dataclasses import dataclass, field
 from typing import Any
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+from core.async_bridge import run_sync
 from core.event_bus import ZaramEvent
 from .cache import KnowledgeCache
 from .protocol import (
@@ -25,6 +27,8 @@ from .citations import CitationEngine
 from .confidence import ConfidenceEngine
 from .fusion import KnowledgeFusionEngine
 from .telemetry import KnowledgeTelemetry
+
+logger = logging.getLogger(__name__)
 from .graph import KnowledgeGraph
 from .entity_extraction import EntityExtractor
 from .relationships import RelationshipBuilder
@@ -220,8 +224,6 @@ class KnowledgeRuntime:
         all_results: list[KnowledgeResult] = []
         consulted: list[str] = []
         connector_status: dict[str, str] = {}
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
 
         try:
             internet_results = []
@@ -235,12 +237,13 @@ class KnowledgeRuntime:
                         max_results=max_results * 2,
                         connector_types=[InternetConnectorType(c) for c in connectors] if connectors else None,
                     )
-                    internet_results = loop.run_until_complete(self._internet_runtime.search(internet_query))
+                    internet_results = run_sync(self._internet_runtime.search(internet_query))
                     self._stats["internet_searches"] += 1
                     for r in internet_results:
                         consulted.append(r.connector)
                         connector_status[r.connector] = "ok"
                 except Exception as e:
+                    logger.warning("Knowledge: internet search failed: %s: %s", type(e).__name__, e)
                     connector_status["internet"] = "error"
 
             for r in internet_results:
@@ -255,7 +258,7 @@ class KnowledgeRuntime:
             if include_memory and self._memory_runtime:
                 try:
                     from runtimes.memory import MemoryRuntime, MemoryType, RetrievalStrategy
-                    memory_results = loop.run_until_complete(self._memory_runtime.retrieve(
+                    memory_results = run_sync(self._memory_runtime.retrieve(
                         query=query,
                         memory_types=[MemoryType.CONVERSATION, MemoryType.EPISODIC, MemoryType.SEMANTIC],
                         max_results=max_results,
@@ -264,10 +267,11 @@ class KnowledgeRuntime:
                         user_id=user_id,
                     ))
                     self._stats["memory_searches"] += 1
+                    connector_status["memory"] = "ok"
                     for r in memory_results:
                         consulted.append("memory")
-                        connector_status["memory"] = "ok"
                 except Exception as e:
+                    logger.warning("Knowledge: memory search failed: %s: %s", type(e).__name__, e)
                     connector_status["memory"] = "error"
 
             for r in memory_results:
@@ -283,8 +287,8 @@ class KnowledgeRuntime:
                 )
                 result = self._authority.apply_to_result(result)
                 all_results.append(result)
-        finally:
-            loop.close()
+        except Exception as e:
+            logger.warning("Knowledge: search pipeline error: %s: %s", type(e).__name__, e)
 
         graph_results = self._graph_search(query, max_results)
         all_results.extend(graph_results)

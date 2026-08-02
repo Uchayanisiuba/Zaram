@@ -125,6 +125,7 @@ class ChatRequest(BaseModel):
     model: str = "gemma3:latest"
     personality: str = "af_heart"
     persona: str = "zaram_prime"
+    session_id: str = "default"
 
 
 # --- API ENDPOINTS ---
@@ -197,7 +198,7 @@ async def chat(request: ChatRequest):
     final_prompt = request.text
 
     return StreamingResponse(
-        chat_router.route(final_prompt, request.model, system_prompt),
+        chat_router.route(final_prompt, request.model, system_prompt, request.session_id),
         media_type="text/event-stream"
     )
 
@@ -253,11 +254,36 @@ async def knowledge_search(request: KnowledgeRequest):
     return search_knowledge(request.query, request.persona)
 
 
+AUDIO_CACHE_DIR = os.path.abspath("audio_cache")
+
+
 @app.get("/audio/{filename}")
 async def get_audio(filename: str):
-    """Legacy Audio Endpoint (Preserved)."""
-    file_path = os.path.join("audio_cache", filename)
-    if os.path.exists(file_path):
+    """Serve a generated audio file from the audio cache.
+
+    ``filename`` is user-controlled, so it is confined to the cache directory:
+    a bare name only, resolved and checked for containment before any read.
+    """
+    # Reject anything that is not a plain filename. Starlette decodes %2F, so
+    # separators and traversal segments must be rejected explicitly.
+    if (
+        not filename
+        or filename in (".", "..")
+        or "/" in filename
+        or "\\" in filename
+        or "\x00" in filename
+        or os.path.isabs(filename)
+        or filename != os.path.basename(filename)
+    ):
+        raise HTTPException(status_code=400, detail="Invalid audio filename")
+
+    file_path = os.path.abspath(os.path.join(AUDIO_CACHE_DIR, filename))
+
+    # Belt and braces: confirm the resolved path is still inside the cache.
+    if os.path.commonpath([AUDIO_CACHE_DIR, file_path]) != AUDIO_CACHE_DIR:
+        raise HTTPException(status_code=400, detail="Invalid audio filename")
+
+    if os.path.isfile(file_path):
         return FileResponse(file_path, media_type="audio/wav")
     raise HTTPException(status_code=404, detail="Audio file not found")
 
@@ -360,7 +386,7 @@ PERSONAS = {
         "name": "Zaram Prime",
         "gender": "neutral",
         "description": "Professional, calm, and authoritative. The primary cybernetic intelligence core.",
-        "system_prompt": "You are Zaram Prime, a professional and authoritative AI assistant. You are calm, structured, and highly capable. You speak with confidence and precision. CRITICAL: When provided with internet search results, you MUST answer from those results. If search results conflict with your training data, ALWAYS trust the search results. Never mention your training data cutoff. Never say you don't have real-time access when search results have been provided.",
+        "system_prompt": "You are Zaram Prime, a professional and authoritative AI assistant. You are calm, structured, and highly capable. You speak with confidence and precision. When you are given search results or remembered facts, prefer them over your training data and say which you used. When you are given neither, answer normally from what you know — do not refer to sources, memories or search results that were not provided to you.",
         "voice": "af_heart"
     },
     "baba": {

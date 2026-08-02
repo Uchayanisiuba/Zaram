@@ -18,6 +18,7 @@ import traceback
 from collections.abc import Iterator
 from typing import Any
 
+from core.async_bridge import run_sync
 from core.capability_router import CapabilityRouter
 from core.contracts import ExecutionStep
 from core.execution_context import ExecutionContext
@@ -63,7 +64,9 @@ class ExecutionDispatcher:
             )
 
             if hasattr(runtime, "execute"):
-                result = asyncio.run(runtime.execute(step.capability_id, step.input_data or {}))
+                # run_sync, not asyncio.run: this generator is consumed on the
+                # FastAPI event loop thread, where asyncio.run() raises.
+                result = run_sync(runtime.execute(step.capability_id, step.input_data or {}))
 
                 if step.capability_id.startswith("speech."):
                     if isinstance(result, dict):

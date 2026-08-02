@@ -20,6 +20,7 @@ class EmbeddingService:
         self._ollama_url = ollama_url
         self._ollama_model = ollama_model
         self._cache: dict[str, list[float]] = {}
+        self._degraded = False
 
     def get_dim(self) -> int:
         return self._dim
@@ -34,7 +35,20 @@ class EmbeddingService:
             return self._cache[cache_key]
 
         if self._backend == "ollama":
-            embedding = self._embed_ollama(text)
+            try:
+                embedding = self._embed_ollama(text)
+            except Exception as e:
+                # Ollama unreachable or the model is not pulled. Fall back to
+                # hashing so storage and keyword recall keep working, and say so
+                # once rather than on every call.
+                if not self._degraded:
+                    self._degraded = True
+                    print(
+                        f"[EmbeddingService] Ollama embeddings unavailable "
+                        f"({type(e).__name__}: {e}). Falling back to hash embeddings — "
+                        f"semantic recall will be weak. Run: ollama pull {self._ollama_model}"
+                    )
+                embedding = self._embed_hash(text)
         else:
             embedding = self._embed_hash(text)
 

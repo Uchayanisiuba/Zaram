@@ -16,20 +16,39 @@ class ChatRouter:
         self.event_bus = event_bus
         self.legacy_generator_func = legacy_generator_func
 
-    def route(self, request_text: str, model: str, system_prompt: str = "") -> AsyncGenerator:
+    def route(
+        self,
+        request_text: str,
+        model: str,
+        system_prompt: str = "",
+        session_id: str = "default",
+    ) -> AsyncGenerator:
         """Returns the correct generator based on the feature flag."""
         if USE_NEW_KERNEL:
-            return self._kernel_stream(request_text, model, system_prompt)
+            return self._kernel_stream(request_text, model, system_prompt, session_id)
         else:
             return self._legacy_stream(request_text, model, system_prompt)
 
-    async def _kernel_stream(self, text: str, model: str, system_prompt: str = "") -> AsyncGenerator:
-        """Streams structured StreamEvent lines from the new Execution Engine."""
+    async def _kernel_stream(
+        self,
+        text: str,
+        model: str,
+        system_prompt: str = "",
+        session_id: str = "default",
+    ) -> AsyncGenerator:
+        """Streams structured StreamEvent lines from the new Execution Engine.
+
+        The engine yields plain strings for response tokens and StreamEvent
+        objects for structured output such as provenance; both are forwarded.
+        """
         from core.streaming_events import StreamEvent, EventType
         try:
             yield StreamEvent.start().to_ipc() + "\n"
-            for token in self.execution_engine.execute(text, model, system_prompt):
-                yield StreamEvent.token(token).to_ipc() + "\n"
+            for item in self.execution_engine.execute(text, model, system_prompt, session_id):
+                if isinstance(item, StreamEvent):
+                    yield item.to_ipc() + "\n"
+                else:
+                    yield StreamEvent.token(item).to_ipc() + "\n"
             yield StreamEvent.status("complete").to_ipc() + "\n"
         except Exception as exc:
             yield StreamEvent.error(str(exc)).to_ipc() + "\n"

@@ -190,8 +190,10 @@ class SpeechRuntime(Runtime):
             try:
                 health = connector.health_check() if hasattr(connector, 'health_check') else {}
                 if asyncio.iscoroutine(health):
-                    # This shouldn't happen in sync health_check, but guard anyway
-                    health = asyncio.run(health)
+                    # Reached from FastAPI's /health, where a loop is already
+                    # running and asyncio.run() would raise.
+                    from core.async_bridge import run_sync
+                    health = run_sync(health)
                 connector_health[cid] = health
             except Exception as exc:
                 connector_health[cid] = {"available": False, "error": str(exc)}
