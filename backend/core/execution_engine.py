@@ -94,12 +94,19 @@ class ExecutionEngine:
         """
         logger.debug("Engine: execute prompt='%s...' model=%s", prompt[:50], model)
 
+        # Provenance is emitted from two places — recall, and any search step.
+        # Both can surface the same record, so dedupe across the whole request.
+        seen_sources: set[str] = set()
+
         # --- Recall: what does the Spine already know that bears on this? ---
         recalled = self._recall(prompt, session_id)
         if recalled:
             system_prompt = self._augment_system_prompt(system_prompt, recalled)
             for event in self._provenance_events(recalled):
-                yield event
+                key = event.data.get("url") or event.data.get("title", "")
+                if key and key not in seen_sources:
+                    seen_sources.add(key)
+                    yield event
 
         plan = self._planner.create_plan(prompt)
         plan.state = PlanState.RUNNING
@@ -126,11 +133,15 @@ class ExecutionEngine:
             step_output = ""
             step_failed = False
             step_error: str | None = None
+            # Internal steps gather context for later steps. Their raw output is
+            # not user-facing and must not reach the stream.
+            internal = step.capability_id in self.INTERNAL_CAPABILITIES
 
             try:
                 for token in self._dispatcher.execute_step(step, model, system_prompt):
                     step_output += token
-                    yield token
+                    if not internal:
+                        yield token
 
                 if step_output.strip().startswith("[FALLBACK]") or step_output.strip().startswith("[WARN]"):
                     step_failed = True
@@ -158,6 +169,19 @@ class ExecutionEngine:
                 step.status = "completed"
 
             step_results[step.capability_id] = step_output
+
+            # Fold a successful internal step's findings into the context the
+            # next step sees, and surface its sources as provenance.
+            if internal and not step_failed and step_output.strip():
+                if step.capability_id == "knowledge.search":
+                    sources = self._parse_search_results(step_output)
+                    if sources:
+                        system_prompt = self._augment_with_sources(system_prompt, sources)
+                        for event in self._search_provenance_events(sources):
+                            key = event.data.get("url") or event.data.get("title", "")
+                            if key and key not in seen_sources:
+                                seen_sources.add(key)
+                                yield event
 
             self._publish("execution.step_completed" if not step_failed else "execution.step_failed", {
                 "correlation_id": plan.correlation_id,
@@ -201,6 +225,68 @@ class ExecutionEngine:
 
     MAX_RECALL = 5
     MIN_RECALL_SCORE = 0.25
+
+    #: Capabilities whose output is context for later steps, never shown to the
+    #: user. Their raw payloads (JSON search results, for example) would
+    #: otherwise be streamed into the reply.
+    INTERNAL_CAPABILITIES = frozenset({"knowledge.search"})
+
+    # ------------------------------------------------------------------
+    # Search results as context
+    # ------------------------------------------------------------------
+
+    def _parse_search_results(self, raw: str) -> list[dict[str, Any]]:
+        """Pull the result list out of a knowledge.search payload."""
+        try:
+            parsed = json.loads(raw)
+        except Exception:
+            return []
+        if not isinstance(parsed, dict):
+            return []
+        results = parsed.get("results") or []
+        return [r for r in results if isinstance(r, dict)]
+
+    def _augment_with_sources(self, system_prompt: str, sources: list[dict[str, Any]]) -> str:
+        """Fold search results into the system prompt with citation markers."""
+        lines = [
+            "",
+            "=== SOURCES RETRIEVED FOR THIS QUESTION ===",
+            "",
+        ]
+        for i, source in enumerate(sources, 1):
+            title = (source.get("title") or "").strip()
+            url = (source.get("url") or "").strip()
+            snippet = (source.get("snippet") or "").strip()
+            lines.append(f"[S{i}] {title}" if title else f"[S{i}]")
+            if url:
+                lines.append(f"     {url}")
+            if snippet:
+                lines.append(f"     {snippet}")
+        lines += [
+            "",
+            "INSTRUCTIONS:",
+            "- Answer from these sources where they are relevant, naming them in plain",
+            "  words. Never print the [S1] markers themselves — they are internal",
+            "  labels and mean nothing to the user.",
+            "- Prefer them over your training data where they conflict.",
+            "- If they do not answer the question, say so rather than inventing detail.",
+            "=" * 43,
+            "",
+        ]
+        return (system_prompt or "") + "\n".join(lines)
+
+    def _search_provenance_events(self, sources: list[dict[str, Any]]) -> list[Any]:
+        """Emit one source event per search result, so the UI can show them."""
+        from core.streaming_events import StreamEvent
+
+        events = []
+        for source in sources:
+            events.append(StreamEvent.source(
+                kind=source.get("provider") or "search",
+                url=source.get("url"),
+                title=(source.get("title") or "")[:120],
+            ))
+        return events
 
     def _memory_runtime(self) -> Any | None:
         """Resolve the memory runtime through the capability router.
@@ -257,7 +343,9 @@ class ExecutionEngine:
             "",
             "INSTRUCTIONS:",
             "- Use these memories when they are relevant to the question.",
-            "- When you rely on one, say so naturally (e.g. 'you mentioned earlier that...').",
+            "- When you rely on one, refer to it in plain words, e.g. 'you mentioned",
+            "  earlier that...'. Never print the [M1] markers themselves — they are",
+            "  internal labels and mean nothing to the user.",
             "- If they do not bear on the question, ignore them silently.",
             "- Never invent a memory that is not listed above.",
             "=" * 42,
@@ -272,7 +360,11 @@ class ExecutionEngine:
         events = []
         for result in recalled:
             record = result.record
-            snippet = record.content[:120]
+            # Stored exchanges span lines; collapse them so the title reads as a
+            # single line in the UI.
+            snippet = " ".join(record.content.split())
+            if len(snippet) > 120:
+                snippet = snippet[:117] + "..."
             events.append(StreamEvent.source(
                 kind="memory",
                 url=f"memory:{record.id}",
