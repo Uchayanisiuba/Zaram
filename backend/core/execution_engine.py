@@ -27,9 +27,11 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from collections.abc import Iterator
 from typing import Any
 
+from core.async_bridge import run_sync
 from core.capability_router import CapabilityRouter
 from core.contracts import (
     ExecutionPlan,
@@ -82,13 +84,23 @@ class ExecutionEngine:
         prompt: str,
         model: str = "gemma3:latest",
         system_prompt: str = "",
-    ) -> Iterator[str]:
-        """End-to-end execution: Plan -> Route -> Dispatch -> Stream with graceful degradation.
+        session_id: str = "default",
+    ) -> Iterator[Any]:
+        """End-to-end execution: Recall -> Plan -> Route -> Dispatch -> Stream.
 
-        This is the legacy synchronous path.  It creates a plan,
-        executes each step sequentially, and streams tokens back.
+        Yields plain strings for response tokens, and StreamEvent objects for
+        structured output such as provenance. Callers that only understand
+        strings continue to work unchanged.
         """
         logger.debug("Engine: execute prompt='%s...' model=%s", prompt[:50], model)
+
+        # --- Recall: what does the Spine already know that bears on this? ---
+        recalled = self._recall(prompt, session_id)
+        if recalled:
+            system_prompt = self._augment_system_prompt(system_prompt, recalled)
+            for event in self._provenance_events(recalled):
+                yield event
+
         plan = self._planner.create_plan(prompt)
         plan.state = PlanState.RUNNING
         logger.debug("Engine: plan created with %d steps", len(plan.steps))
@@ -176,8 +188,120 @@ class ExecutionEngine:
             "failed_steps": failed_steps,
         })
 
+        # --- Remember: commit this exchange to the Spine. ---
+        answer = step_results.get("reasoning.generate", "")
+        self._remember(prompt, answer, session_id)
+
         if plan.correlation_id in self._active_plans:
             del self._active_plans[plan.correlation_id]
+
+    # ------------------------------------------------------------------
+    # Recall — the memory loop
+    # ------------------------------------------------------------------
+
+    MAX_RECALL = 5
+    MIN_RECALL_SCORE = 0.25
+
+    def _memory_runtime(self) -> Any | None:
+        """Resolve the memory runtime through the capability router.
+
+        Returns None when no memory runtime is registered, so every call site
+        degrades to the previous no-memory behaviour rather than failing.
+        """
+        try:
+            return self._router.try_resolve("memory.retrieve")
+        except Exception:
+            return None
+
+    def _recall(self, prompt: str, session_id: str) -> list[Any]:
+        """Retrieve prior context relevant to this prompt."""
+        runtime = self._memory_runtime()
+        if runtime is None or not prompt.strip():
+            return []
+        try:
+            results = run_sync(runtime.retrieve(
+                query=prompt,
+                max_results=self.MAX_RECALL,
+                session_id=None,
+            ))
+        except Exception as exc:
+            logger.warning("Engine: recall failed: %s: %s", type(exc).__name__, exc)
+            return []
+
+        kept = [r for r in results if getattr(r, "score", 0.0) >= self.MIN_RECALL_SCORE]
+        logger.info("Engine: recalled %d/%d memories above threshold", len(kept), len(results))
+        self._publish("memory.recalled", {
+            "query": prompt[:100],
+            "candidates": len(results),
+            "used": len(kept),
+        })
+        return kept
+
+    def _augment_system_prompt(self, system_prompt: str, recalled: list[Any]) -> str:
+        """Fold recalled memories into the system prompt, with citation markers.
+
+        Each memory is numbered so the model can cite it, and the instruction
+        block tells it to say when it is drawing on memory.
+        """
+        lines = [
+            "",
+            "=== WHAT YOU REMEMBER ABOUT THIS USER ===",
+            "These are facts from earlier exchanges, retrieved from local memory.",
+            "",
+        ]
+        for i, result in enumerate(recalled, 1):
+            record = result.record
+            when = time.strftime("%Y-%m-%d", time.localtime(record.created_at))
+            lines.append(f"[M{i}] ({when}) {record.content}")
+        lines += [
+            "",
+            "INSTRUCTIONS:",
+            "- Use these memories when they are relevant to the question.",
+            "- When you rely on one, say so naturally (e.g. 'you mentioned earlier that...').",
+            "- If they do not bear on the question, ignore them silently.",
+            "- Never invent a memory that is not listed above.",
+            "=" * 42,
+            "",
+        ]
+        return (system_prompt or "") + "\n".join(lines)
+
+    def _provenance_events(self, recalled: list[Any]) -> list[Any]:
+        """Emit one source event per recalled memory, so the UI can show them."""
+        from core.streaming_events import StreamEvent
+
+        events = []
+        for result in recalled:
+            record = result.record
+            snippet = record.content[:120]
+            events.append(StreamEvent.source(
+                kind="memory",
+                url=f"memory:{record.id}",
+                title=snippet,
+            ))
+        return events
+
+    def _remember(self, prompt: str, answer: str, session_id: str) -> None:
+        """Store this exchange so a later question can recall it."""
+        runtime = self._memory_runtime()
+        if runtime is None:
+            return
+        answer = (answer or "").strip()
+        if not prompt.strip() or not answer or answer.startswith("[FALLBACK]"):
+            return
+        # Imported lazily: core/ does not depend on a runtime at module load.
+        from runtimes.memory.contracts import MemoryType
+
+        try:
+            run_sync(runtime.remember(
+                content=f"User asked: {prompt}\nZaram answered: {answer}",
+                memory_type=MemoryType.CONVERSATION,
+                session_id=session_id,
+                metadata={"prompt": prompt, "answer": answer},
+                tags=["conversation"],
+            ))
+            logger.info("Engine: stored exchange in the Spine (session=%s)", session_id)
+        except Exception as exc:
+            logger.warning("Engine: remember failed: %s: %s", type(exc).__name__, exc)
 
     # ------------------------------------------------------------------
     # Async execution with TaskQueue (new path)

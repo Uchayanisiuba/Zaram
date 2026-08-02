@@ -54,3 +54,10 @@ node_modules
 
 # TypeScript build info
 *.tsbuildinfo
+
+# The Spine — the user's local knowledge base. User data, never committed.
+spine.db
+spine.db-journal
+spine.db-wal
+spine.db-shm
+backend/spine.db*

@@ -33,14 +33,33 @@ class KernelBootstrapper:
         print("[Bootstrapper] Kernel Ready.")
 
     def _init_memory_runtime(self):
+        import os
         from runtimes.memory import create_memory_runtime
 
-        runtime = create_memory_runtime(
-            store_type="memory",
-            index_type="hybrid",
-            embedding_dim=384,
-            embedding_backend="hash",
+        # The Spine lives on disk next to the backend, and survives restarts.
+        # ZARAM_SPINE_PATH overrides the location (used by the desktop host).
+        spine_path = os.getenv(
+            "ZARAM_SPINE_PATH",
+            os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "spine.db"),
         )
+
+        # Real semantic embeddings via Ollama. bge-m3 produces 1024-dim vectors.
+        # Falls back to the hash backend if Ollama or the model is unavailable —
+        # recall still works, but only on keyword overlap.
+        backend = os.getenv("ZARAM_EMBED_BACKEND", "ollama")
+        model = os.getenv("ZARAM_EMBED_MODEL", "bge-m3")
+        dim = int(os.getenv("ZARAM_EMBED_DIM", "1024" if backend == "ollama" else "384"))
+
+        runtime = create_memory_runtime(
+            store_type="sqlite",
+            db_path=spine_path,
+            index_type="hybrid",
+            embedding_dim=dim,
+            embedding_backend=backend,
+            embedding_model=model,
+            event_bus=self.event_bus,
+        )
+        print(f"[Bootstrapper] Spine at {spine_path} (embeddings: {backend}/{model}, dim={dim})")
         return runtime
 
     def _init_knowledge_runtime(self, memory_runtime):

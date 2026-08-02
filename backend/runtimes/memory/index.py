@@ -51,7 +51,17 @@ class VectorMemoryIndex(MemoryIndex):
         results.sort(key=lambda x: x[1], reverse=True)
         return results[: query.max_results]
 
-    async def rebuild(self) -> None:
+    async def rebuild(self, records: list[MemoryRecord] | None = None) -> None:
+        """Rebuild the vector index from ``records``.
+
+        The index lives in memory, so it is empty on every boot. Persisted
+        records are unsearchable until this is called with them.
+        """
+        if records is not None:
+            self._embeddings.clear()
+            for record in records:
+                if record.embedding:
+                    self._embeddings[record.id] = record.embedding
         self._indexed_at = time.time()
 
     async def health_check(self) -> dict[str, Any]:
@@ -112,8 +122,17 @@ class HybridMemoryIndex(MemoryIndex):
         results.sort(key=lambda x: x[1], reverse=True)
         return results[: query.max_results]
 
-    async def rebuild(self) -> None:
-        await self._vector_index.rebuild()
+    async def rebuild(self, records: list[MemoryRecord] | None = None) -> None:
+        """Rebuild both the vector and keyword indexes from ``records``."""
+        await self._vector_index.rebuild(records)
+        if records is not None:
+            self._keyword_index.clear()
+            for record in records:
+                tokens = self._tokenize(record.content)
+                for tag in record.tags:
+                    tokens.add(tag.lower())
+                for token in tokens:
+                    self._keyword_index.setdefault(token, set()).add(record.id)
         self._indexed_at = time.time()
 
     async def health_check(self) -> dict[str, Any]:
@@ -152,8 +171,9 @@ class TemporalMemoryIndex(MemoryIndex):
         results.sort(key=lambda x: x[1], reverse=True)
         return results[: query.max_results]
 
-    async def rebuild(self) -> None:
-        pass
+    async def rebuild(self, records: list[MemoryRecord] | None = None) -> None:
+        if records is not None:
+            self._by_time = {r.id: r.created_at for r in records}
 
     async def health_check(self) -> dict[str, Any]:
         return {"status": "healthy", "indexed_records": len(self._by_time)}
