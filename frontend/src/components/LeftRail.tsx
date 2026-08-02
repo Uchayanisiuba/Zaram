@@ -14,8 +14,8 @@ const NAV_ITEMS: NavItem[] = [
   { id: 'build', icon: <Code2 size={32} />, label: 'Build' },
   { id: 'memory', icon: <Brain size={32} />, label: 'Memory', badge: 3 },
   { id: 'knowledge', icon: <BookOpen size={32} />, label: 'Knowledge' },
-  { id: 'canvas', icon: <LayoutGrid size={32} />, label: 'Canvas' },
   { id: 'plugins', icon: <Puzzle size={32} />, label: 'Plugins', badge: 2 },
+  { id: 'canvas', icon: <LayoutGrid size={32} />, label: 'Canvas' },
 ]
 
 const RECENT_CONTEXTS = [
@@ -44,9 +44,9 @@ export default function LeftRail({ workspace, onNavigate }: LeftRailProps) {
         gap: 8,
         padding: '12px 8px',
         transition: 'width 0.22s cubic-bezier(0.4, 0, 0.2, 1)',
-        background: 'rgba(8,10,14,0.6)',
+        background: 'var(--surface-rail)',
         backdropFilter: 'blur(20px)',
-        borderRight: '1px solid rgba(255,255,255,0.06)',
+        borderRight: '1px solid var(--color-border-subtle)',
         overflow: 'hidden',
         flexShrink: 0,
         zIndex: 30,
@@ -63,20 +63,20 @@ export default function LeftRail({ workspace, onNavigate }: LeftRailProps) {
           background: 'transparent',
           border: 'none',
           cursor: 'pointer',
-          color: '#6b7099',
+          color: 'var(--color-text-muted)',
           whiteSpace: 'nowrap',
           overflow: 'hidden',
           transition: 'background 0.15s',
           width: '100%',
         }}
-        onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.06)'; e.currentTarget.style.color = '#e2e4ee' }}
-        onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = '#6b7099' }}
+        onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-border-subtle)'; e.currentTarget.style.color = 'var(--color-text)' }}
+        onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--color-text-muted)' }}
       >
         <span style={{ flexShrink: 0, display: 'flex', alignItems: 'center' }}><Search size={32} /></span>
-        {expanded && <span style={{ fontSize: 26, fontWeight: 500, opacity: expanded ? 1 : 0, transition: 'opacity 0.15s' }}>Search</span>}
+        {expanded && <span style={{ fontSize: 'var(--text-h1)', fontWeight: 500, opacity: expanded ? 1 : 0, transition: 'opacity 0.15s' }}>Search</span>}
       </button>
 
-      <div style={{ height: 1, background: 'rgba(255,255,255,0.06)', margin: '8px 0' }} />
+      <div style={{ height: 1, background: 'var(--color-border-subtle)', margin: '8px 0' }} />
 
       {/* Nav items */}
       {NAV_ITEMS.map(item => (
@@ -94,7 +94,7 @@ export default function LeftRail({ workspace, onNavigate }: LeftRailProps) {
       {/* Recent context (expanded only) */}
       {expanded && (
         <div style={{ animation: 'fade-in 0.2s ease' }}>
-          <div style={{ fontSize: 20, fontWeight: 600, letterSpacing: '0.08em', color: '#3a3f5c', padding: '4px 8px 8px', textTransform: 'uppercase' }}>
+          <div style={{ fontSize: 'var(--text-h2)', fontWeight: 600, letterSpacing: '0.08em', color: 'var(--color-text-secondary)', padding: '4px 8px 8px', textTransform: 'uppercase' }}>
             Recent
           </div>
           {RECENT_CONTEXTS.map((ctx, i) => (
@@ -109,25 +109,25 @@ export default function LeftRail({ workspace, onNavigate }: LeftRailProps) {
                 background: 'transparent',
                 border: 'none',
                 cursor: 'pointer',
-                color: '#6b7099',
+                color: 'var(--color-text-muted)',
                 width: '100%',
                 textAlign: 'left',
                 transition: 'all 0.15s',
               }}
-              onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.05)' }}
+              onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-glass)' }}
               onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
             >
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12, fontSize: 24, color: '#b0b4cc' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, fontSize: 'var(--text-h1)', color: 'var(--color-text-muted-light)' }}>
                 {ctx.icon}
                 <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 280 }}>{ctx.label}</span>
               </div>
-              <span style={{ fontSize: 20, color: '#3a3f5c', paddingLeft: 36 }}>{ctx.sub}</span>
+              <span style={{ fontSize: 'var(--text-h2)', color: 'var(--color-text-faint)', paddingLeft: 36 }}>{ctx.sub}</span>
             </button>
           ))}
         </div>
       )}
 
-      <div style={{ height: 1, background: 'rgba(255,255,255,0.06)', margin: '8px 0' }} />
+      <div style={{ height: 1, background: 'var(--color-border-subtle)', margin: '8px 0' }} />
 
       {/* Settings */}
       <RailItem
@@ -150,10 +150,10 @@ function RailItem({ item, active, expanded, onClick }: { item: NavItem; active: 
         gap: 20,
         padding: '7px 8px',
         borderRadius: 16,
-        background: active ? 'rgba(99,102,241,0.15)' : 'transparent',
-        border: `1px solid ${active ? 'rgba(99,102,241,0.25)' : 'transparent'}`,
+        background: active ? 'var(--color-indigo-a-15)' : 'transparent',
+        border: `1px solid ${active ? 'var(--color-indigo-a-25)' : 'transparent'}`,
         cursor: 'pointer',
-        color: active ? '#818cf8' : '#6b7099',
+        color: active ? 'var(--color-indigo-light)' : 'var(--color-text-muted)',
         whiteSpace: 'nowrap',
         overflow: 'hidden',
         transition: 'all 0.15s',
@@ -162,29 +162,29 @@ function RailItem({ item, active, expanded, onClick }: { item: NavItem; active: 
       }}
       onMouseEnter={e => {
         if (!active) {
-          e.currentTarget.style.background = 'rgba(255,255,255,0.06)'
-          e.currentTarget.style.color = '#e2e4ee'
+          e.currentTarget.style.background = 'var(--color-border-subtle)'
+          e.currentTarget.style.color = 'var(--color-text)'
         }
       }}
       onMouseLeave={e => {
         if (!active) {
           e.currentTarget.style.background = 'transparent'
-          e.currentTarget.style.color = '#6b7099'
+          e.currentTarget.style.color = 'var(--color-text-muted)'
         }
       }}
     >
       <span style={{ flexShrink: 0, display: 'flex', alignItems: 'center' }}>{item.icon}</span>
       {expanded && (
-        <span style={{ fontSize: 26, fontWeight: 500, flex: 1, textAlign: 'left' }}>
+        <span style={{ fontSize: 'var(--text-h1)', fontWeight: 500, flex: 1, textAlign: 'left' }}>
           {item.label}
         </span>
       )}
       {expanded && item.badge != null && (
         <span style={{
-          fontSize: 20,
+          fontSize: 'var(--text-h2)',
           fontWeight: 700,
-          background: 'rgba(99,102,241,0.3)',
-          color: '#818cf8',
+          background: 'var(--color-indigo-a-30)',
+          color: 'var(--color-indigo-light)',
           borderRadius: 99,
           padding: '1px 6px',
           lineHeight: 1.6,
@@ -198,8 +198,8 @@ function RailItem({ item, active, expanded, onClick }: { item: NavItem; active: 
           width: 12,
           height: 12,
           borderRadius: '50%',
-          background: '#6366f1',
-          boxShadow: '0 0 12px rgba(99,102,241,0.7)',
+          background: 'var(--color-indigo)',
+          boxShadow: '0 0 12px var(--color-indigo-a-70)',
         }} />
       )}
     </button>

@@ -92,7 +92,7 @@ export default function BuildWorkspace() {
         width: 220,
         height: '100%',
         background: 'rgba(8,10,14,0.6)',
-        borderRight: '1px solid rgba(255,255,255,0.06)',
+        borderRight: '1px solid var(--color-border-subtle)',
         display: 'flex',
         flexDirection: 'column',
         flexShrink: 0,
@@ -102,9 +102,9 @@ export default function BuildWorkspace() {
           fontSize: 10,
           fontWeight: 700,
           letterSpacing: '0.08em',
-          color: '#3a3f5c',
+          color: 'var(--color-text-faint)',
           textTransform: 'uppercase',
-          borderBottom: '1px solid rgba(255,255,255,0.04)',
+          borderBottom: '1px solid var(--color-glass)',
         }}>
           Explorer
         </div>
@@ -120,7 +120,7 @@ export default function BuildWorkspace() {
           display: 'flex',
           alignItems: 'center',
           background: 'rgba(8,10,14,0.8)',
-          borderBottom: '1px solid rgba(255,255,255,0.06)',
+          borderBottom: '1px solid var(--color-border-subtle)',
           paddingLeft: 8,
         }}>
           {TABS.map((tab, i) => (
@@ -135,16 +135,16 @@ export default function BuildWorkspace() {
                 borderRadius: 0,
                 background: activeTab === i ? 'rgba(255,255,255,0.05)' : 'transparent',
                 border: 'none',
-                borderBottom: `2px solid ${activeTab === i ? '#6366f1' : 'transparent'}`,
+                borderBottom: `2px solid ${activeTab === i ? 'var(--color-indigo)' : 'transparent'}`,
                 cursor: 'pointer',
-                color: activeTab === i ? '#e2e4ee' : '#6b7099',
+                color: activeTab === i ? 'var(--color-text)' : 'var(--color-text-muted)',
                 fontSize: 12,
-                fontFamily: "'JetBrains Mono', monospace",
+                fontFamily: "var(--font-mono)",
                 transition: 'all 0.15s',
               }}
             >
               {tab.modified && (
-                <Circle size={6} fill="#6366f1" style={{ color: '#6366f1' }} />
+                <Circle size={6} fill="var(--color-indigo)" style={{ color: 'var(--color-indigo)' }} />
               )}
               {tab.name}
             </button>
@@ -157,7 +157,7 @@ export default function BuildWorkspace() {
             background: 'transparent',
             border: 'none',
             cursor: 'pointer',
-            color: '#4a4f6a',
+            color: 'var(--color-text-secondary)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
@@ -175,7 +175,7 @@ export default function BuildWorkspace() {
               flex: 1,
               padding: '16px 0',
               overflowY: 'auto',
-              fontFamily: "'JetBrains Mono', monospace",
+              fontFamily: "var(--font-mono)",
               fontSize: 13,
               lineHeight: 1.7,
             }}
@@ -195,7 +195,7 @@ export default function BuildWorkspace() {
                     : '2px solid transparent',
                 }}
               >
-                <span style={{ color: '#3a3f5c', minWidth: 36, userSelect: 'none', fontSize: 11 }}>
+                <span style={{ color: 'var(--color-text-faint)', minWidth: 36, userSelect: 'none', fontSize: 11 }}>
                   {i + 1}
                 </span>
                 <CodeLine line={line} />
@@ -206,7 +206,7 @@ export default function BuildWorkspace() {
           {/* AI suggestions panel */}
           <div style={{
             width: 240,
-            borderLeft: '1px solid rgba(255,255,255,0.06)',
+            borderLeft: '1px solid var(--color-border-subtle)',
             background: 'rgba(8,10,14,0.5)',
             display: 'flex',
             flexDirection: 'column',
@@ -214,13 +214,13 @@ export default function BuildWorkspace() {
           }}>
             <div style={{
               padding: '12px 14px 10px',
-              borderBottom: '1px solid rgba(255,255,255,0.06)',
+              borderBottom: '1px solid var(--color-border-subtle)',
               display: 'flex',
               alignItems: 'center',
               gap: 6,
             }}>
-              <Sparkles size={12} style={{ color: '#818cf8' }} />
-              <span style={{ fontSize: 11, fontWeight: 600, color: '#818cf8', fontFamily: "'Space Grotesk', sans-serif" }}>
+              <Sparkles size={12} style={{ color: 'var(--color-indigo-light)' }} />
+              <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-indigo-light)', fontFamily: "var(--font-display)" }}>
                 AI Suggestions
               </span>
             </div>
@@ -230,16 +230,16 @@ export default function BuildWorkspace() {
                   padding: '10px 12px',
                   borderRadius: 8,
                   background: 'rgba(255,255,255,0.03)',
-                  border: '1px solid rgba(255,255,255,0.07)',
+                  border: '1px solid var(--color-glass-hover)',
                   cursor: 'pointer',
                   transition: 'all 0.15s',
                 }}
                 onMouseEnter={e => { e.currentTarget.style.background = 'rgba(99,102,241,0.08)'; e.currentTarget.style.borderColor = 'rgba(99,102,241,0.2)' }}
-                onMouseLeave={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.03)'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.07)' }}
+                onMouseLeave={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.03)'; e.currentTarget.style.borderColor = 'var(--color-glass-hover)' }}
                 >
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
                     <SuggestionBadge type={s.type} />
-                    <span style={{ fontSize: 9, color: '#3a3f5c', fontFamily: "'JetBrains Mono', monospace" }}>
+                    <span style={{ fontSize: 9, color: 'var(--color-text-faint)', fontFamily: "var(--font-mono)" }}>
                       L{s.line}
                     </span>
                   </div>
@@ -253,7 +253,7 @@ export default function BuildWorkspace() {
         {/* Terminal drawer */}
         <div style={{
           height: terminalOpen ? 160 : 36,
-          borderTop: '1px solid rgba(255,255,255,0.06)',
+          borderTop: '1px solid var(--color-border-subtle)',
           background: 'rgba(4,6,10,0.9)',
           transition: 'height 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
           flexShrink: 0,
@@ -267,28 +267,28 @@ export default function BuildWorkspace() {
               alignItems: 'center',
               gap: 8,
               padding: '7px 12px',
-              borderBottom: terminalOpen ? '1px solid rgba(255,255,255,0.04)' : 'none',
+              borderBottom: terminalOpen ? '1px solid var(--color-glass)' : 'none',
               cursor: 'pointer',
               flexShrink: 0,
             }}
             onClick={() => setTerminalOpen(o => !o)}
           >
-            <TerminalIcon size={12} style={{ color: '#10b981' }} />
-            <span style={{ fontSize: 11, color: '#6b7099', fontWeight: 500, fontFamily: "'JetBrains Mono', monospace" }}>
+            <TerminalIcon size={12} style={{ color: 'var(--color-emerald)' }} />
+            <span style={{ fontSize: 11, color: 'var(--color-text-muted)', fontWeight: 500, fontFamily: "var(--font-mono)" }}>
               Terminal
             </span>
             <div style={{ marginLeft: 'auto', display: 'flex', gap: 4 }}>
-              <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#f87171' }} />
-              <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#f59e0b' }} />
-              <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#10b981' }} />
+              <div style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--color-red)' }} />
+              <div style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--color-amber)' }} />
+              <div style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--color-emerald)' }} />
             </div>
           </div>
           {terminalOpen && (
-            <div style={{ flex: 1, padding: '8px 16px', fontFamily: "'JetBrains Mono', monospace", fontSize: 12, overflowY: 'auto' }}>
+            <div style={{ flex: 1, padding: '8px 16px', fontFamily: "var(--font-mono)", fontSize: 12, overflowY: 'auto' }}>
               <TermLine prompt="$" cmd="pnpm build" />
-              <TermLine text="  ✓ TypeScript compiled in 0.8s" color="#10b981" />
-              <TermLine text="  ✓ Bundle: 142kb (gzip: 48kb)" color="#10b981" />
-              <TermLine text="  ✓ Memory index updated" color="#10b981" />
+              <TermLine text="  ✓ TypeScript compiled in 0.8s" color="var(--color-emerald)" />
+              <TermLine text="  ✓ Bundle: 142kb (gzip: 48kb)" color="var(--color-emerald)" />
+              <TermLine text="  ✓ Memory index updated" color="var(--color-emerald)" />
               <TermLine prompt="$" cmd="" />
             </div>
           )}
@@ -314,15 +314,15 @@ function TreeNode({ node, depth }: { node: any; depth: number }) {
             background: 'transparent',
             border: 'none',
             cursor: 'pointer',
-            color: '#6b7099',
+            color: 'var(--color-text-muted)',
             fontSize: 12,
             transition: 'all 0.1s',
           }}
-          onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.04)'; e.currentTarget.style.color = '#e2e4ee' }}
-          onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = '#6b7099' }}
+          onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-glass)'; e.currentTarget.style.color = 'var(--color-text)' }}
+          onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--color-text-muted)' }}
         >
           {open ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
-          {open ? <FolderOpen size={13} style={{ color: '#f59e0b' }} /> : <Folder size={13} style={{ color: '#f59e0b' }} />}
+          {open ? <FolderOpen size={13} style={{ color: 'var(--color-amber)' }} /> : <Folder size={13} style={{ color: 'var(--color-amber)' }} />}
           <span>{node.name}</span>
         </button>
         {open && node.children?.map((child: any, i: number) => (
@@ -341,17 +341,17 @@ function TreeNode({ node, depth }: { node: any; depth: number }) {
         width: '100%',
         background: node.active ? 'rgba(99,102,241,0.12)' : 'transparent',
         border: 'none',
-        borderLeft: node.active ? '2px solid #6366f1' : '2px solid transparent',
+        borderLeft: node.active ? '2px solid var(--color-indigo)' : '2px solid transparent',
         cursor: 'pointer',
-        color: node.active ? '#e2e4ee' : '#6b7099',
+        color: node.active ? 'var(--color-text)' : 'var(--color-text-muted)',
         fontSize: 12,
-        fontFamily: "'JetBrains Mono', monospace",
+        fontFamily: "var(--font-mono)",
         transition: 'all 0.1s',
       }}
-      onMouseEnter={e => { if (!node.active) { e.currentTarget.style.background = 'rgba(255,255,255,0.04)'; e.currentTarget.style.color = '#e2e4ee' }}}
-      onMouseLeave={e => { if (!node.active) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = '#6b7099' }}}
+      onMouseEnter={e => { if (!node.active) { e.currentTarget.style.background = 'var(--color-glass)'; e.currentTarget.style.color = 'var(--color-text)' }}}
+      onMouseLeave={e => { if (!node.active) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--color-text-muted)' }}}
     >
-      <File size={12} style={{ color: '#4a4f6a' }} />
+      <File size={12} style={{ color: 'var(--color-text-secondary)' }} />
       {node.name}
     </button>
   )
@@ -366,12 +366,12 @@ function CodeLine({ line }: { line: string }) {
     <span>
       {words.map((word, i) => {
         let color = '#c8ccd8'
-        if (KEYWORDS.includes(word)) color = '#818cf8'
+        if (KEYWORDS.includes(word)) color = 'var(--color-indigo-light)'
         else if (TYPES.includes(word)) color = '#22d3ee'
         else if (word.startsWith("'") || word.startsWith('"') || word.startsWith('`')) color = '#86efac'
         else if (/^\d+/.test(word)) color = '#fb923c'
-        else if (word.startsWith('//')) color = '#4a4f6a'
-        else if (['(', ')', '{', '}', '[', ']'].includes(word)) color = '#e2e4ee'
+        else if (word.startsWith('//')) color = 'var(--color-text-secondary)'
+        else if (['(', ')', '{', '}', '[', ']'].includes(word)) color = 'var(--color-text)'
         return <span key={i} style={{ color }}>{word}</span>
       })}
     </span>
@@ -380,11 +380,11 @@ function CodeLine({ line }: { line: string }) {
 
 function SuggestionBadge({ type }: { type: string }) {
   const colors: Record<string, [string, string]> = {
-    optimize: ['#10b981', 'rgba(16,185,129,0.15)'],
-    refactor: ['#6366f1', 'rgba(99,102,241,0.15)'],
-    docs: ['#f59e0b', 'rgba(245,158,11,0.15)'],
+    optimize: ['var(--color-emerald)', 'rgba(16,185,129,0.15)'],
+    refactor: ['var(--color-indigo)', 'rgba(99,102,241,0.15)'],
+    docs: ['var(--color-amber)', 'rgba(245,158,11,0.15)'],
   }
-  const [color, bg] = colors[type] ?? ['#6b7099', 'rgba(107,112,153,0.1)']
+  const [color, bg] = colors[type] ?? ['var(--color-text-muted)', 'rgba(107,112,153,0.1)']
   return (
     <span style={{
       fontSize: 9,
@@ -404,14 +404,14 @@ function SuggestionBadge({ type }: { type: string }) {
 function TermLine({ prompt, cmd, text, color }: { prompt?: string; cmd?: string; text?: string; color?: string }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8, lineHeight: 1.8 }}>
-      {prompt && <span style={{ color: '#10b981' }}>{prompt}</span>}
+      {prompt && <span style={{ color: 'var(--color-emerald)' }}>{prompt}</span>}
       {cmd != null && (
-        <span style={{ color: '#e2e4ee' }}>
+        <span style={{ color: 'var(--color-text)' }}>
           {cmd}
-          {cmd === '' && <span style={{ animation: 'blink-cursor 1s step-end infinite', color: '#10b981' }}>▋</span>}
+          {cmd === '' && <span style={{ animation: 'blink-cursor 1s step-end infinite', color: 'var(--color-emerald)' }}>▋</span>}
         </span>
       )}
-      {text && <span style={{ color: color ?? '#6b7099' }}>{text}</span>}
+      {text && <span style={{ color: color ?? 'var(--color-text-muted)' }}>{text}</span>}
     </div>
   )
 }

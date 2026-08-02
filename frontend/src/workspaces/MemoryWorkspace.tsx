@@ -74,26 +74,26 @@ export default function MemoryWorkspace() {
       {/* Left sidebar */}
       <div style={{
         width: 240,
-        borderRight: '1px solid rgba(255,255,255,0.06)',
+        borderRight: '1px solid var(--color-border-subtle)',
         display: 'flex',
         flexDirection: 'column',
-        background: 'rgba(8,10,14,0.5)',
+        background: 'var(--surface-sidebar)',
         flexShrink: 0,
       }}>
-        <div style={{ padding: '14px 16px 10px', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'rgba(255,255,255,0.04)', borderRadius: 8, padding: '7px 10px', border: '1px solid rgba(255,255,255,0.07)' }}>
-            <Search size={12} style={{ color: '#6b7099' }} />
-            <span style={{ fontSize: 12, color: '#4a4f6a' }}>Search memory…</span>
+        <div style={{ padding: '14px 16px 10px', borderBottom: '1px solid var(--color-border-subtle)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'var(--color-glass)', borderRadius: 8, padding: '7px 10px', border: '1px solid var(--color-glass-hover)' }}>
+            <Search size={12} style={{ color: 'var(--color-text-muted)' }} />
+            <span style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>Search memory…</span>
           </div>
         </div>
 
         {/* Stats */}
-        <div style={{ padding: '12px 16px', borderBottom: '1px solid rgba(255,255,255,0.06)', display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--color-border-subtle)', display: 'flex', flexDirection: 'column', gap: 8 }}>
           {MEMORY_STATS.map(stat => (
             <div key={stat.label} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-              <span style={{ fontSize: 11, color: '#6b7099' }}>{stat.label}</span>
+              <span style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>{stat.label}</span>
               <div style={{ textAlign: 'right' }}>
-                <div style={{ fontSize: 13, color: '#e2e4ee', fontWeight: 600, fontFamily: "'Space Grotesk', sans-serif" }}>{stat.value}</div>
+                <div style={{ fontSize: 13, color: 'var(--color-text)', fontWeight: 600, fontFamily: "var(--font-display)" }}>{stat.value}</div>
                 <div style={{ fontSize: 10, color: '#10b981' }}>{stat.delta}</div>
               </div>
             </div>
@@ -102,7 +102,7 @@ export default function MemoryWorkspace() {
 
         {/* Filters */}
         <div style={{ padding: '12px 16px 8px' }}>
-          <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', color: '#3a3f5c', marginBottom: 8, textTransform: 'uppercase' }}>
+          <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', color: 'var(--color-text-faint)', marginBottom: 8, textTransform: 'uppercase' }}>
             Node Types
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
@@ -119,7 +119,7 @@ export default function MemoryWorkspace() {
                   background: activeFilter === type ? `${color}15` : 'transparent',
                   border: `1px solid ${activeFilter === type ? `${color}30` : 'transparent'}`,
                   cursor: 'pointer',
-                  color: activeFilter === type ? color : '#6b7099',
+                  color: activeFilter === type ? color : 'var(--color-text-muted)',
                   fontSize: 12,
                   fontWeight: 500,
                   width: '100%',
@@ -141,7 +141,7 @@ export default function MemoryWorkspace() {
         {selectedNode && (
           <div style={{
             padding: 16,
-            borderTop: '1px solid rgba(255,255,255,0.06)',
+            borderTop: '1px solid var(--color-border-subtle)',
             background: 'rgba(99,102,241,0.05)',
           }}>
             <div style={{
@@ -157,7 +157,7 @@ export default function MemoryWorkspace() {
                 background: NODE_COLORS[selectedNode.type],
                 boxShadow: `0 0 6px ${NODE_COLORS[selectedNode.type]}`,
               }} />
-              <span style={{ fontSize: 13, color: '#e2e4ee', fontWeight: 600 }}>{selectedNode.label}</span>
+              <span style={{ fontSize: 13, color: 'var(--color-text)', fontWeight: 600 }}>{selectedNode.label}</span>
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               <Row label="Type" value={selectedNode.type} />
@@ -195,7 +195,7 @@ export default function MemoryWorkspace() {
                 key={i}
                 d={`M ${from.x} ${from.y} Q ${midX} ${midY} ${to.x} ${to.y}`}
                 fill="none"
-                stroke={isActive ? '#6366f1' : 'rgba(255,255,255,0.08)'}
+                stroke={isActive ? '#6366f1' : 'var(--color-border)'}
                 strokeWidth={isActive ? edge.strength * 2 : edge.strength * 1}
                 opacity={isActive ? 0.7 : 0.4}
                 style={{ transition: 'all 0.3s' }}
@@ -248,9 +248,9 @@ export default function MemoryWorkspace() {
                   x={node.x}
                   y={node.y + node.size + 14}
                   textAnchor="middle"
-                  fill={isSelected ? '#e2e4ee' : '#6b7099'}
+                  fill={isSelected ? 'var(--color-text)' : 'var(--color-text-muted)'}
                   fontSize={isSelected ? 12 : 11}
-                  fontFamily="Inter, sans-serif"
+                  fontFamily="var(--font-sans)"
                   fontWeight={isSelected ? 600 : 400}
                   style={{ transition: 'all 0.2s', pointerEvents: 'none' }}
                 >
@@ -275,10 +275,10 @@ export default function MemoryWorkspace() {
               style={{
                 padding: '5px 12px',
                 borderRadius: 6,
-                background: v === 'Graph' ? 'rgba(99,102,241,0.15)' : 'rgba(255,255,255,0.04)',
-                border: `1px solid ${v === 'Graph' ? 'rgba(99,102,241,0.3)' : 'rgba(255,255,255,0.08)'}`,
+                background: v === 'Graph' ? 'rgba(99,102,241,0.15)' : 'var(--color-glass)',
+                border: `1px solid ${v === 'Graph' ? 'var(--color-border-accent)' : 'var(--color-border)'}`,
                 cursor: 'pointer',
-                color: v === 'Graph' ? '#818cf8' : '#6b7099',
+                color: v === 'Graph' ? '#818cf8' : 'var(--color-text-muted)',
                 fontSize: 11,
                 fontWeight: 500,
                 backdropFilter: 'blur(12px)',
@@ -299,7 +299,7 @@ export default function MemoryWorkspace() {
           alignItems: 'center',
           gap: 6,
           fontSize: 11,
-          color: '#3a3f5c',
+          color: 'var(--color-text-faint)',
         }}>
           <Clock size={11} />
           Last synced: 2 minutes ago
@@ -312,7 +312,7 @@ export default function MemoryWorkspace() {
 function Row({ label, value }: { label: string; value: string }) {
   return (
     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-      <span style={{ fontSize: 11, color: '#4a4f6a' }}>{label}</span>
+      <span style={{ fontSize: 11, color: 'var(--color-text-secondary)' }}>{label}</span>
       <span style={{ fontSize: 11, color: '#b0b4cc', fontWeight: 500 }}>{value}</span>
     </div>
   )

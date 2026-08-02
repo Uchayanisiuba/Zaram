@@ -6,6 +6,9 @@ export { useFrameStore } from './frameStore';
 export { useConversationStore } from './conversationStore';
 export type { Message } from './conversationStore';
 
+// === CHAT MODE DOMAIN ===
+export { useChatModeStore } from './chatModeStore';
+
 // === WORKSPACE DOMAIN ===
 export { useWorkspaceStore } from './workspaceStore';
 export { useCameraStore } from './cameraStore';

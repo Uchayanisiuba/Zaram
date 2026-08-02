@@ -57,16 +57,16 @@ export default function KnowledgeWorkspace() {
       {/* Sources list */}
       <div style={{
         width: 640,
-        borderRight: '1px solid rgba(255,255,255,0.06)',
+        borderRight: '1px solid var(--color-border-subtle)',
         display: 'flex',
         flexDirection: 'column',
-        background: 'rgba(8,10,14,0.5)',
+        background: 'var(--surface-sidebar)',
         flexShrink: 0,
       }}>
-        <div style={{ padding: '28px 32px 20px', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 16, background: 'rgba(255,255,255,0.04)', borderRadius: 8, padding: '14px 20px', border: '1px solid rgba(255,255,255,0.07)', marginBottom: 10 }}>
-            <Search size={24} style={{ color: '#6b7099' }} />
-            <span style={{ fontSize: 24, color: '#4a4f6a' }}>Search sources…</span>
+        <div style={{ padding: '28px 32px 20px', borderBottom: '1px solid var(--color-border-subtle)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16, background: 'var(--color-glass)', borderRadius: 8, padding: '14px 20px', border: '1px solid var(--color-glass-hover)', marginBottom: 10 }}>
+            <Search size={24} style={{ color: 'var(--color-text-muted)' }} />
+            <span style={{ fontSize: 24, color: 'var(--color-text-secondary)' }}>Search sources…</span>
           </div>
           <div style={{ display: 'flex', gap: 6 }}>
             {['All', 'Papers', 'Web', 'Docs'].map(f => (
@@ -75,10 +75,10 @@ export default function KnowledgeWorkspace() {
                 style={{
                   padding: '6px 20px',
                   borderRadius: 99,
-                  background: f === 'All' ? 'rgba(99,102,241,0.15)' : 'rgba(255,255,255,0.04)',
-                  border: `1px solid ${f === 'All' ? 'rgba(99,102,241,0.3)' : 'rgba(255,255,255,0.07)'}`,
+                  background: f === 'All' ? 'rgba(99,102,241,0.15)' : 'var(--color-glass)',
+                  border: `1px solid ${f === 'All' ? 'var(--color-border-accent)' : 'var(--color-glass-hover)'}`,
                   cursor: 'pointer',
-                  color: f === 'All' ? '#818cf8' : '#6b7099',
+                  color: f === 'All' ? 'var(--color-indigo-light)' : 'var(--color-text-muted)',
                   fontSize: 22,
                   fontWeight: 500,
                 }}
@@ -97,7 +97,7 @@ export default function KnowledgeWorkspace() {
                  padding: '28px 32px',
                  background: selected === source.id ? 'rgba(99,102,241,0.08)' : 'transparent',
                  borderLeft: `3px solid ${selected === source.id ? source.color : 'transparent'}`,
-                 borderBottom: '1px solid rgba(255,255,255,0.04)',
+                 borderBottom: '1px solid var(--color-glass)',
                  border: 'none',
                  cursor: 'pointer',
                  textAlign: 'left',
@@ -123,10 +123,10 @@ export default function KnowledgeWorkspace() {
                   {TYPE_ICONS[source.type]}
                 </div>
                 <div style={{ flex: 1, overflow: 'hidden' }}>
-                  <div style={{ fontSize: 26, color: selected === source.id ? '#e2e4ee' : '#b0b4cc', fontWeight: 500, marginBottom: 48, lineHeight: 1.3 }}>
+                  <div style={{ fontSize: 26, color: selected === source.id ? 'var(--color-text)' : '#b0b4cc', fontWeight: 500, marginBottom: 48, lineHeight: 1.3 }}>
                     {source.title}
                   </div>
-                  <div style={{ fontSize: 22, color: '#4a4f6a', marginBottom: 6 }}>
+                  <div style={{ fontSize: 22, color: 'var(--color-text-secondary)', marginBottom: 6 }}>
                     {source.author} · {source.date}
                   </div>
                   <RelevanceBar value={source.relevance} color={source.color} />
@@ -157,7 +157,7 @@ export default function KnowledgeWorkspace() {
                 {TYPE_ICONS[selectedSource.type]}
               </div>
               <div>
-                <div style={{ fontSize: 22, color: '#6b7099', marginBottom: 2 }}>
+                <div style={{ fontSize: 22, color: 'var(--color-text-muted)', marginBottom: 2 }}>
                   {selectedSource.author} · {selectedSource.date}
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -186,7 +186,7 @@ export default function KnowledgeWorkspace() {
                 background: 'rgba(255,255,255,0.05)',
                 border: '1px solid rgba(255,255,255,0.1)',
                 cursor: 'pointer',
-                color: '#6b7099',
+                color: 'var(--color-text-muted)',
                 fontSize: 24,
               }}>
                 <ExternalLink size={24} />
@@ -194,10 +194,10 @@ export default function KnowledgeWorkspace() {
               </button>
             </div>
             <h2 style={{
-              fontFamily: "'Space Grotesk', sans-serif",
+              fontFamily: "var(--font-display)",
               fontSize: 22,
               fontWeight: 700,
-              color: '#e2e4ee',
+              color: 'var(--color-text)',
               margin: 0,
               lineHeight: 1.25,
               letterSpacing: '-0.01em',
@@ -230,8 +230,8 @@ export default function KnowledgeWorkspace() {
             marginBottom: 48,
           }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 12 }}>
-              <Sparkles size={26} style={{ color: '#818cf8' }} />
-              <span style={{ fontSize: 24, fontWeight: 600, color: '#818cf8', fontFamily: "'Space Grotesk', sans-serif" }}>
+              <Sparkles size={26} style={{ color: 'var(--color-indigo-light)' }} />
+              <span style={{ fontSize: 24, fontWeight: 600, color: 'var(--color-indigo-light)', fontFamily: "var(--font-display)" }}>
                 AI Summary
               </span>
             </div>
@@ -242,18 +242,18 @@ export default function KnowledgeWorkspace() {
 
           {/* Related concepts */}
           <div style={{ marginBottom: 24 }}>
-            <h3 style={{ fontSize: 26, fontWeight: 600, color: '#6b7099', margin: '0 0 12px', letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+            <h3 style={{ fontSize: 26, fontWeight: 600, color: 'var(--color-text-muted)', margin: '0 0 12px', letterSpacing: '0.04em', textTransform: 'uppercase' }}>
               Related Concepts
             </h3>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {RELATED.map(rel => (
                 <div key={rel.label} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                  <Link size={22} style={{ color: '#4a4f6a' }} />
+                  <Link size={22} style={{ color: 'var(--color-text-secondary)' }} />
                   <span style={{ fontSize: 24, color: '#b0b4cc', flex: 1 }}>{rel.label}</span>
-                  <div style={{ width: 160, height: 2, background: 'rgba(255,255,255,0.06)', borderRadius: 2, overflow: 'hidden' }}>
+                  <div style={{ width: 160, height: 2, background: 'var(--color-border-subtle)', borderRadius: 2, overflow: 'hidden' }}>
                     <div style={{ height: '100%', width: `${rel.strength * 100}%`, background: '#6366f1', borderRadius: 2 }} />
                   </div>
-                  <span style={{ fontSize: 20, color: '#4a4f6a', fontFamily: "'JetBrains Mono', monospace", minWidth: 56 }}>
+                  <span style={{ fontSize: 20, color: 'var(--color-text-secondary)', fontFamily: "var(--font-mono)", minWidth: 56 }}>
                     {Math.round(rel.strength * 100)}%
                   </span>
                 </div>
@@ -269,10 +269,10 @@ export default function KnowledgeWorkspace() {
 function RelevanceBar({ value, color }: { value: number; color: string }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-      <div style={{ flex: 1, height: 2, background: 'rgba(255,255,255,0.06)', borderRadius: 2, overflow: 'hidden' }}>
+      <div style={{ flex: 1, height: 2, background: 'var(--color-border-subtle)', borderRadius: 2, overflow: 'hidden' }}>
         <div style={{ height: '100%', width: `${value * 100}%`, background: color, borderRadius: 2 }} />
       </div>
-      <span style={{ fontSize: 18, color: '#4a4f6a', fontFamily: "'JetBrains Mono', monospace" }}>
+      <span style={{ fontSize: 18, color: 'var(--color-text-secondary)', fontFamily: "var(--font-mono)" }}>
         {Math.round(value * 100)}%
       </span>
     </div>

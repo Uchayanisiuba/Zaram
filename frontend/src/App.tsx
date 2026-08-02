@@ -6,12 +6,14 @@
  * - orbStore, conversationStore manage state
  * - All core/ simulation/frame architecture preserved
  */
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
+import { AnimatePresence } from 'framer-motion';
 import { useRuntimeLoop } from '@/hooks/useRuntimeLoop';
 import TopNav from './components/TopNav';
 import LeftRail from './components/LeftRail';
 import RuntimePanel from './components/RuntimePanel';
 import BottomDock from './components/BottomDock';
+import ChatSurface from './components/chat/ChatSurface';
 import CommandPalette from './components/CommandPalette';
 import Landing from './workspaces/Landing';
 import BuildWorkspace from './workspaces/BuildWorkspace';
@@ -20,6 +22,12 @@ import KnowledgeWorkspace from './workspaces/KnowledgeWorkspace';
 import CanvasWorkspace from './workspaces/CanvasWorkspace';
 import PluginsWorkspace from './workspaces/PluginsWorkspace';
 import SettingsWorkspace from './workspaces/SettingsWorkspace';
+import { useOrbStore } from '@/stores/orbStore';
+import { useChatModeStore } from '@/stores/chatModeStore';
+import { useShellStore } from '@/stores/shellStore';
+import { useShortcuts } from '@/hooks/useShortcuts';
+import { detectPlatform } from '@/runtime/shortcuts/registry';
+import HelpOverlay from '@/components/shortcuts/HelpOverlay';
 
 type WorkspaceId = 'landing' | 'build' | 'memory' | 'knowledge' | 'canvas' | 'plugins' | 'settings';
 
@@ -30,22 +38,23 @@ export default function App() {
   const [workspace, setWorkspace] = useState<WorkspaceId>('landing');
   const [commandOpen, setCommandOpen] = useState(false);
   const [runtimeOpen] = useState(true);
+  const [helpOpen, setHelpOpen] = useState(false);
+  const { chatView, toggleChat, closeChat } = useChatModeStore();
+  const platform = detectPlatform();
 
   const isLanding = workspace === 'landing';
 
-  // ⌘K to open command palette
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
-        e.preventDefault();
-        setCommandOpen((o) => !o);
-      }
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, []);
+  useShortcuts(platform, {
+    navigate: (id) => { setWorkspace(id); setCommandOpen(false); },
+    openCommand: () => setCommandOpen(true),
+    toggleChat: () => useChatModeStore.getState().toggleChat(),
+    toggleDock: () => useShellStore.getState().toggleDock(),
+    setOrb: (state) => useOrbStore.getState().setOrbState(state),
+    toggleHelp: () => setHelpOpen((o) => !o),
+  });
 
   const navigate = (id: WorkspaceId) => {
+    closeChat();
     setWorkspace(id);
     setCommandOpen(false);
   };
@@ -87,7 +96,7 @@ export default function App() {
         >
           {isLanding && (
             <div key="landing" style={{ flex: 1, display: 'flex', animation: 'fade-in 0.25s ease' }}>
-              <Landing onNavigate={(id) => navigate(id as WorkspaceId)} />
+              <Landing onNavigate={(id) => navigate(id as WorkspaceId)} onOrbTap={toggleChat} />
             </div>
           )}
           {workspace === 'build' && (
@@ -131,6 +140,14 @@ export default function App() {
 
       {/* Command palette overlay */}
       {commandOpen && <CommandPalette onClose={() => setCommandOpen(false)} onNavigate={(id) => navigate(id as WorkspaceId)} />}
+
+      {/* Chat surface — slides in from the right over the landing */}
+      <AnimatePresence>
+        {chatView === 'chat' && <ChatSurface />}
+      </AnimatePresence>
+
+      {/* Shortcuts help overlay */}
+      <HelpOverlay open={helpOpen} platform={platform} onClose={() => setHelpOpen(false)} />
     </div>
   );
 }

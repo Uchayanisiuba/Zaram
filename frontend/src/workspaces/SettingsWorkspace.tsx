@@ -29,15 +29,15 @@ export default function SettingsWorkspace() {
       {/* Category sidebar */}
       <div style={{
         width: 260,
-        borderRight: '1px solid rgba(255,255,255,0.06)',
-        background: 'rgba(8,10,14,0.5)',
+        borderRight: '1px solid var(--color-border-subtle)',
+        background: 'var(--surface-sidebar)',
         padding: '20px 12px',
         flexShrink: 0,
         display: 'flex',
         flexDirection: 'column',
         gap: 4,
       }}>
-        <div style={{ fontSize: 13, fontWeight: 700, color: '#e2e4ee', fontFamily: "'Space Grotesk', sans-serif", padding: '0 8px 16px' }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--color-text)', fontFamily: "var(--font-display)", padding: '0 8px 16px' }}>
           Settings
         </div>
         {CATEGORIES.map(cat => (
@@ -53,20 +53,20 @@ export default function SettingsWorkspace() {
               background: active === cat.id ? 'rgba(99,102,241,0.12)' : 'transparent',
               border: `1px solid ${active === cat.id ? 'rgba(99,102,241,0.2)' : 'transparent'}`,
               cursor: 'pointer',
-              color: active === cat.id ? '#818cf8' : '#6b7099',
+              color: active === cat.id ? 'var(--color-indigo-light)' : 'var(--color-text-muted)',
               textAlign: 'left',
               transition: 'all 0.15s',
               width: '100%',
             }}
-            onMouseEnter={e => { if (active !== cat.id) { e.currentTarget.style.background = 'rgba(255,255,255,0.04)'; e.currentTarget.style.color = '#b0b4cc' }}}
-            onMouseLeave={e => { if (active !== cat.id) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = '#6b7099' }}}
+            onMouseEnter={e => { if (active !== cat.id) { e.currentTarget.style.background = 'var(--color-glass)'; e.currentTarget.style.color = '#b0b4cc' }}}
+            onMouseLeave={e => { if (active !== cat.id) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--color-text-muted)' }}}
           >
-            <span style={{ color: active === cat.id ? '#818cf8' : '#4a4f6a' }}>{cat.icon}</span>
+            <span style={{ color: active === cat.id ? 'var(--color-indigo-light)' : 'var(--color-text-secondary)' }}>{cat.icon}</span>
             <div>
               <div style={{ fontSize: 13, fontWeight: 500 }}>{cat.label}</div>
-              <div style={{ fontSize: 11, color: '#4a4f6a', marginTop: 1 }}>{cat.desc}</div>
+              <div style={{ fontSize: 11, color: 'var(--color-text-secondary)', marginTop: 1 }}>{cat.desc}</div>
             </div>
-            {active === cat.id && <ChevronRight size={12} style={{ marginLeft: 'auto', color: '#6366f1' }} />}
+            {active === cat.id && <ChevronRight size={12} style={{ marginLeft: 'auto', color: 'var(--color-indigo)' }} />}
           </button>
         ))}
       </div>
@@ -82,10 +82,10 @@ export default function SettingsWorkspace() {
 function SectionHeader({ title, desc }: { title: string; desc?: string }) {
   return (
     <div style={{ marginBottom: 24 }}>
-      <h2 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 20, fontWeight: 700, color: '#e2e4ee', margin: '0 0 6px', letterSpacing: '-0.01em' }}>
+      <h2 style={{ fontFamily: "var(--font-display)", fontSize: 20, fontWeight: 700, color: 'var(--color-text)', margin: '0 0 6px', letterSpacing: '-0.01em' }}>
         {title}
       </h2>
-      {desc && <p style={{ fontSize: 13, color: '#6b7099', margin: 0 }}>{desc}</p>}
+      {desc && <p style={{ fontSize: 13, color: 'var(--color-text-muted)', margin: 0 }}>{desc}</p>}
     </div>
   )
 }
@@ -96,7 +96,7 @@ function SettingCard({ children }: { children: React.ReactNode }) {
       padding: 20,
       borderRadius: 12,
       background: 'rgba(255,255,255,0.03)',
-      border: '1px solid rgba(255,255,255,0.07)',
+      border: '1px solid var(--color-glass-hover)',
       marginBottom: 12,
       display: 'flex',
       flexDirection: 'column',
@@ -111,8 +111,8 @@ function SettingRow({ label, desc, control }: { label: string; desc?: string; co
   return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
       <div>
-        <div style={{ fontSize: 13, fontWeight: 500, color: '#e2e4ee', marginBottom: desc ? 3 : 0 }}>{label}</div>
-        {desc && <div style={{ fontSize: 11, color: '#6b7099' }}>{desc}</div>}
+        <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--color-text)', marginBottom: desc ? 3 : 0 }}>{label}</div>
+        {desc && <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>{desc}</div>}
       </div>
       {control}
     </div>
@@ -127,7 +127,7 @@ function Toggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void 
         width: 40,
         height: 22,
         borderRadius: 11,
-        background: on ? '#6366f1' : 'rgba(255,255,255,0.1)',
+        background: on ? 'var(--color-indigo)' : 'rgba(255,255,255,0.1)',
         border: `1px solid ${on ? '#4f46e5' : 'rgba(255,255,255,0.15)'}`,
         cursor: 'pointer',
         position: 'relative',
@@ -156,15 +156,15 @@ function Select({ value, options }: { value: string; options: string[] }) {
     <select
       defaultValue={value}
       style={{
-        background: 'rgba(255,255,255,0.06)',
+        background: 'var(--color-border-subtle)',
         border: '1px solid rgba(255,255,255,0.1)',
         borderRadius: 7,
-        color: '#e2e4ee',
+        color: 'var(--color-text)',
         padding: '5px 10px',
         fontSize: 12,
         cursor: 'pointer',
         outline: 'none',
-        fontFamily: "'Inter', sans-serif",
+        fontFamily: "var(--font-sans)",
       }}
     >
       {options.map(o => <option key={o} value={o}>{o}</option>)}
@@ -195,8 +195,8 @@ function AISettings() {
           desc="Controls response creativity (0.0–1.0)"
           control={
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <input type="range" min={0} max={100} defaultValue={70} style={{ width: 100, accentColor: '#6366f1' }} />
-              <span style={{ fontSize: 12, color: '#818cf8', fontFamily: "'JetBrains Mono', monospace", minWidth: 28 }}>0.7</span>
+              <input type="range" min={0} max={100} defaultValue={70} style={{ width: 100, accentColor: 'var(--color-indigo)' }} />
+              <span style={{ fontSize: 12, color: 'var(--color-indigo-light)', fontFamily: "var(--font-mono)", minWidth: 28 }}>0.7</span>
             </div>
           }
         />
@@ -229,8 +229,8 @@ function MemorySettings() {
           desc="Minimum relevance to surface a memory"
           control={
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <input type="range" min={0} max={100} defaultValue={82} style={{ width: 100, accentColor: '#6366f1' }} />
-              <span style={{ fontSize: 12, color: '#818cf8', fontFamily: "'JetBrains Mono', monospace" }}>0.82</span>
+              <input type="range" min={0} max={100} defaultValue={82} style={{ width: 100, accentColor: 'var(--color-indigo)' }} />
+              <span style={{ fontSize: 12, color: 'var(--color-indigo-light)', fontFamily: "var(--font-mono)" }}>0.82</span>
             </div>
           }
         />
@@ -249,8 +249,8 @@ function AppearanceSettings() {
         <SettingRow label="Theme" control={<Select value="Dark (default)" options={['Dark (default)', 'Light', 'System']} />} />
         <SettingRow label="Accent color" control={
           <div style={{ display: 'flex', gap: 6 }}>
-            {['#6366f1', '#06b6d4', '#10b981', '#8b5cf6', '#f59e0b'].map(c => (
-              <div key={c} style={{ width: 20, height: 20, borderRadius: '50%', background: c, cursor: 'pointer', border: c === '#6366f1' ? '2px solid #fff' : '2px solid transparent', boxShadow: c === '#6366f1' ? `0 0 8px ${c}` : 'none' }} />
+            {['var(--color-indigo)', 'var(--color-cyan)', 'var(--color-emerald)', 'var(--color-violet)', 'var(--color-amber)'].map(c => (
+              <div key={c} style={{ width: 20, height: 20, borderRadius: '50%', background: c, cursor: 'pointer', border: c === 'var(--color-indigo)' ? '2px solid #fff' : '2px solid transparent', boxShadow: c === 'var(--color-indigo)' ? `0 0 8px ${c}` : 'none' }} />
             ))}
           </div>
         } />
