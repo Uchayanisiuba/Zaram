@@ -140,16 +140,33 @@ The 13 remaining failures were all present before this session: 11 are the stale
 
 ## Left undone
 
-- **`knowledge.search` output still leaks into the user's reply.** The engine yields
-  every step's output directly to the stream, so a search step's raw JSON appears
-  before the answer. Observed in the acceptance run as
-  `{"results": [], "total_results": 0, ...}` prefixing an otherwise correct reply.
-  A fix was in progress and is not complete.
 - The 11 `_FakeLLM` failures remain. They require normalising the `LLMEngine`
   interface, which is Milestone 1 work.
 - `run_sync` was first written to create a thread pool per call, which made the
   suite far slower. It now uses one long-lived background loop. Anything that calls
   it still blocks the calling thread for the duration.
+- **Memory is retrieved twice per search query** — once by the engine's recall, and
+  again by `MemoryProvider` inside `knowledge.search`. The duplicate provenance
+  output is suppressed by deduplication, but the duplicate work (including a second
+  embedding call to Ollama) still happens. Removing it means changing whether the
+  knowledge runtime includes memory, which touches other callers.
+
+## Follow-up committed after the above (`d5dd510`)
+
+`knowledge.search` raw JSON was streaming to the user before the answer. Fixed by
+adding `INTERNAL_CAPABILITIES` to the engine: steps in that set gather context for
+later steps and are not streamed. Search results are now folded into the system
+prompt with `[S1]` markers and emitted as `StreamEvent.source`.
+
+Two defects that fix exposed, also fixed:
+
+- The model was echoing the internal `[S1]` / `[M1]` citation markers into its
+  prose. Both prompt blocks now say explicitly not to print them.
+- Provenance was duplicated (4 events for 2 records) because memory is consulted
+  twice per search query. Deduplicated per request by URL.
+
+Re-verified on a fresh Spine after a cold restart: correct answer, exactly one
+provenance source, no JSON and no markers in the reply.
 
 ## What I would do next
 
