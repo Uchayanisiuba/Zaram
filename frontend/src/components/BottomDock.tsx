@@ -1,4 +1,4 @@
-import { Brain, BookOpen, Settings, Search, Mic } from 'lucide-react'
+import { Home, Brain, BookOpen, Settings, Search, Mic } from 'lucide-react'
 import { useState } from 'react'
 import { Keycap } from '@/components/shortcuts/Keycap'
 import { NAV_SHORTCUTS, detectPlatform, type Platform, type Shortcut } from '@/runtime/shortcuts/registry'
@@ -6,6 +6,8 @@ import { NAV_SHORTCUTS, detectPlatform, type Platform, type Shortcut } from '@/r
 type WorkspaceId = 'landing' | 'memory' | 'knowledge' | 'settings'
 
 const DOCK_ITEMS = [
+  // Always offer a way back to the landing surface.
+  { id: 'landing' as WorkspaceId, icon: <Home size={32} />, label: 'Home' },
   { id: 'memory' as WorkspaceId, icon: <Brain size={32} />, label: 'Memory' },
   { id: 'knowledge' as WorkspaceId, icon: <BookOpen size={32} />, label: 'Knowledge' },
   { id: 'settings' as WorkspaceId, icon: <Settings size={32} />, label: 'Settings' },

@@ -1,5 +1,12 @@
 import { useState } from 'react'
-import { Brain, BookOpen, Settings, Search, FolderOpen, Database, Clock } from 'lucide-react'
+import { Home, Brain, BookOpen, Settings, Search, FolderOpen, Database, Clock } from 'lucide-react'
+import ResizeHandle from '@/components/common/ResizeHandle'
+import {
+  useLayoutStore,
+  RAIL_MIN,
+  RAIL_MAX,
+  RAIL_COLLAPSED,
+} from '@/stores/layoutStore'
 
 type WorkspaceId = 'landing' | 'memory' | 'knowledge' | 'settings'
 
@@ -12,6 +19,9 @@ interface NavItem {
 
 // Badges removed with the Runtime Panel: they were hardcoded counts, not real ones.
 const NAV_ITEMS: NavItem[] = [
+  // Landing is listed first so there is always a way back to it. Without this
+  // entry, navigating into a workspace was a one-way trip.
+  { id: 'landing', icon: <Home size={32} />, label: 'Home' },
   { id: 'memory', icon: <Brain size={32} />, label: 'Memory' },
   { id: 'knowledge', icon: <BookOpen size={32} />, label: 'Knowledge' },
   { id: 'settings', icon: <Settings size={32} />, label: 'Settings' },
@@ -31,18 +41,31 @@ interface LeftRailProps {
 export default function LeftRail({ workspace, onNavigate }: LeftRailProps) {
   const [expanded, setExpanded] = useState(false)
 
+  const railWidth = useLayoutStore((s) => s.railWidth)
+  const setRailWidth = useLayoutStore((s) => s.setRailWidth)
+  const resetRail = useLayoutStore((s) => s.resetRail)
+  const setResizing = useLayoutStore((s) => s.setResizing)
+  const isResizing = useLayoutStore((s) => s.isResizing)
+
+  // Dragging moves the pointer out of the rail, which would otherwise collapse
+  // it mid-drag. Stay expanded for the duration.
+  const isOpen = expanded || isResizing
+  const currentWidth = isOpen ? railWidth : RAIL_COLLAPSED
+
   return (
+    <>
     <aside
       onMouseEnter={() => setExpanded(true)}
       onMouseLeave={() => setExpanded(false)}
       style={{
-        width: expanded ? 440 : 112,
+        width: currentWidth,
         height: '100%',
         display: 'flex',
         flexDirection: 'column',
         gap: 8,
         padding: '12px 8px',
-        transition: 'width 0.22s cubic-bezier(0.4, 0, 0.2, 1)',
+        // No width transition while dragging, or the edge lags the cursor.
+        transition: isResizing ? 'none' : 'width 0.22s cubic-bezier(0.4, 0, 0.2, 1)',
         background: 'var(--surface-rail)',
         backdropFilter: 'blur(20px)',
         borderRight: '1px solid var(--color-border-subtle)',
@@ -136,6 +159,25 @@ export default function LeftRail({ workspace, onNavigate }: LeftRailProps) {
         onClick={() => onNavigate('settings')}
       />
     </aside>
+
+    {/* Positioned against the viewport rather than the rail: the rail clips its
+        overflow to hide labels while collapsing, which would hide the handle.
+        Only offered while expanded — there is nothing to adjust when collapsed. */}
+    {isOpen && (
+      <ResizeHandle
+        panelSide="left"
+        label="Resize navigation rail"
+        value={railWidth}
+        min={RAIL_MIN}
+        max={RAIL_MAX}
+        onResize={(clientX) => setRailWidth(clientX)}
+        onNudge={(deltaPx) => setRailWidth(railWidth + deltaPx)}
+        onReset={resetRail}
+        onResizingChange={setResizing}
+        style={{ position: 'fixed', left: currentWidth - 4, right: 'auto', top: 0 }}
+      />
+    )}
+    </>
   )
 }
 

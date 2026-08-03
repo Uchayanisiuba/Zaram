@@ -10,12 +10,20 @@
  * unstyled — the point is that provenance arrives and can be shown, not how it
  * looks.
  */
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { motion, type Variants } from 'framer-motion';
 import { Send } from 'lucide-react';
 import { useChatStore } from '@/stores/chatStore';
 import { useOrbStore } from '@/stores';
+import {
+  useLayoutStore,
+  CHAT_MIN,
+  CHAT_MAX,
+  clamp,
+} from '@/stores/layoutStore';
+import ResizeHandle from '@/components/common/ResizeHandle';
 import { useIsReducedMotion } from '@/hooks/useReducedMotion';
+import { useViewport } from '@/hooks/useViewport';
 import type { ChatSource } from '@/services/chatClient';
 
 /** Provenance for one reply. Plain on purpose. */
@@ -51,6 +59,33 @@ export default function ChatSurface() {
   const send = useChatStore((s) => s.send);
 
   const { setOrbState } = useOrbStore((s) => ({ setOrbState: s.setOrbState }));
+
+  const chatFraction = useLayoutStore((s) => s.chatFraction);
+  const setChatFraction = useLayoutStore((s) => s.setChatFraction);
+  const setResizing = useLayoutStore((s) => s.setResizing);
+  const resetChat = useLayoutStore((s) => s.resetChat);
+  const isResizing = useLayoutStore((s) => s.isResizing);
+  const { width: viewportWidth } = useViewport();
+
+  const panelWidth = viewportWidth * chatFraction;
+
+  // The panel is anchored right, so the distance from the pointer to the right
+  // edge of the window is the width the user is asking for.
+  const handleResize = useCallback(
+    (clientX: number) => {
+      setChatFraction((viewportWidth - clientX) / viewportWidth);
+    },
+    [setChatFraction, viewportWidth],
+  );
+
+  const handleNudge = useCallback(
+    (deltaPx: number) => {
+      setChatFraction(
+        clamp(chatFraction + deltaPx / viewportWidth, CHAT_MIN, CHAT_MAX),
+      );
+    },
+    [chatFraction, setChatFraction, viewportWidth],
+  );
 
   const [inputText, setInputText] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
@@ -112,12 +147,31 @@ export default function ChatSurface() {
     <motion.div
       key="chat-surface"
       className="fixed top-0 right-0 h-screen flex flex-col glass-border-indigo"
-      style={{ width: 440, zIndex: 60, backgroundColor: 'var(--color-glass)' }}
+      style={{
+        width: panelWidth,
+        zIndex: 60,
+        backgroundColor: 'var(--color-glass)',
+      }}
       variants={container}
       initial="hidden"
       animate="visible"
       exit="exit"
+      // Width follows the cursor exactly while dragging; springing it would make
+      // the edge lag behind the pointer.
+      transition={isResizing ? { duration: 0 } : undefined}
     >
+      <ResizeHandle
+        panelSide="right"
+        label="Resize conversation panel"
+        value={Math.round(chatFraction * 100)}
+        min={Math.round(CHAT_MIN * 100)}
+        max={Math.round(CHAT_MAX * 100)}
+        onResize={handleResize}
+        onNudge={handleNudge}
+        onReset={resetChat}
+        onResizingChange={setResizing}
+      />
+
       {/* Header */}
       <motion.div
         className="flex items-center gap-3 px-6 py-4 border-b border-white/5"

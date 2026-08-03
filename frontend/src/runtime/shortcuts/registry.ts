@@ -25,6 +25,7 @@ export interface Shortcut {
 }
 
 export const surfaceOrder: WorkspaceId[] = [
+  'landing',
   'memory',
   'knowledge',
   'settings',
