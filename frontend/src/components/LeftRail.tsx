@@ -1,7 +1,7 @@
 import { useState } from 'react'
-import { Code2, Brain, BookOpen, LayoutGrid, Puzzle, Settings, Search, FolderOpen, Database, Clock } from 'lucide-react'
+import { Brain, BookOpen, Settings, Search, FolderOpen, Database, Clock } from 'lucide-react'
 
-type WorkspaceId = 'landing' | 'build' | 'memory' | 'knowledge' | 'canvas' | 'plugins' | 'settings'
+type WorkspaceId = 'landing' | 'memory' | 'knowledge' | 'settings'
 
 interface NavItem {
   id: WorkspaceId
@@ -10,12 +10,11 @@ interface NavItem {
   badge?: number
 }
 
+// Badges removed with the Runtime Panel: they were hardcoded counts, not real ones.
 const NAV_ITEMS: NavItem[] = [
-  { id: 'build', icon: <Code2 size={32} />, label: 'Build' },
-  { id: 'memory', icon: <Brain size={32} />, label: 'Memory', badge: 3 },
+  { id: 'memory', icon: <Brain size={32} />, label: 'Memory' },
   { id: 'knowledge', icon: <BookOpen size={32} />, label: 'Knowledge' },
-  { id: 'plugins', icon: <Puzzle size={32} />, label: 'Plugins', badge: 2 },
-  { id: 'canvas', icon: <LayoutGrid size={32} />, label: 'Canvas' },
+  { id: 'settings', icon: <Settings size={32} />, label: 'Settings' },
 ]
 
 const RECENT_CONTEXTS = [

@@ -1,11 +1,10 @@
 export type Platform = 'mac' | 'win';
+// Build, Canvas and Plugins are out of scope for v1. Their surfaces are preserved
+// in src/legacy/ and are not reachable from the shell.
 export type WorkspaceId =
   | 'landing'
-  | 'build'
   | 'memory'
   | 'knowledge'
-  | 'canvas'
-  | 'plugins'
   | 'settings';
 export type OrbState = 'idle' | 'thinking' | 'speaking' | 'listening';
 
@@ -26,21 +25,15 @@ export interface Shortcut {
 }
 
 export const surfaceOrder: WorkspaceId[] = [
-  'build',
   'memory',
   'knowledge',
-  'plugins',
-  'canvas',
   'settings',
 ];
 
 export const surfaceLabels: Record<WorkspaceId, string> = {
   landing: 'Landing',
-  build: 'Build',
   memory: 'Memory',
   knowledge: 'Knowledge',
-  canvas: 'Canvas',
-  plugins: 'Plugins',
   settings: 'Settings',
 };
 

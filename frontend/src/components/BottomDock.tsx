@@ -1,16 +1,13 @@
-import { Code2, Brain, BookOpen, LayoutGrid, Puzzle, Settings, Search, Mic } from 'lucide-react'
+import { Brain, BookOpen, Settings, Search, Mic } from 'lucide-react'
 import { useState } from 'react'
 import { Keycap } from '@/components/shortcuts/Keycap'
 import { NAV_SHORTCUTS, detectPlatform, type Platform, type Shortcut } from '@/runtime/shortcuts/registry'
 
-type WorkspaceId = 'landing' | 'build' | 'memory' | 'knowledge' | 'canvas' | 'plugins' | 'settings'
+type WorkspaceId = 'landing' | 'memory' | 'knowledge' | 'settings'
 
 const DOCK_ITEMS = [
-  { id: 'build' as WorkspaceId, icon: <Code2 size={32} />, label: 'Build' },
   { id: 'memory' as WorkspaceId, icon: <Brain size={32} />, label: 'Memory' },
   { id: 'knowledge' as WorkspaceId, icon: <BookOpen size={32} />, label: 'Knowledge' },
-  { id: 'plugins' as WorkspaceId, icon: <Puzzle size={32} />, label: 'Plugins' },
-  { id: 'canvas' as WorkspaceId, icon: <LayoutGrid size={32} />, label: 'Canvas' },
   { id: 'settings' as WorkspaceId, icon: <Settings size={32} />, label: 'Settings' },
 ]
 

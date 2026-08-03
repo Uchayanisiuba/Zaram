@@ -1,14 +1,11 @@
 import { useState, useEffect, useRef } from 'react'
-import { Search, Code2, Brain, BookOpen, LayoutGrid, Puzzle, Settings, ArrowRight, Command } from 'lucide-react'
+import { Search, Brain, BookOpen, Settings, ArrowRight, Command } from 'lucide-react'
 
-type WorkspaceId = 'landing' | 'build' | 'memory' | 'knowledge' | 'canvas' | 'plugins' | 'settings'
+type WorkspaceId = 'landing' | 'memory' | 'knowledge' | 'settings'
 
 const COMMANDS = [
-  { id: 'build', icon: <Code2 size={28} />, label: 'Open Build', sub: 'Workspace', ws: 'build' as WorkspaceId },
   { id: 'memory', icon: <Brain size={28} />, label: 'Open Memory', sub: 'Workspace', ws: 'memory' as WorkspaceId },
   { id: 'knowledge', icon: <BookOpen size={28} />, label: 'Open Knowledge', sub: 'Workspace', ws: 'knowledge' as WorkspaceId },
-  { id: 'canvas', icon: <LayoutGrid size={28} />, label: 'Open Canvas', sub: 'Workspace', ws: 'canvas' as WorkspaceId },
-  { id: 'plugins', icon: <Puzzle size={28} />, label: 'Open Plugins', sub: 'Workspace', ws: 'plugins' as WorkspaceId },
   { id: 'settings', icon: <Settings size={28} />, label: 'Open Settings', sub: 'Workspace', ws: 'settings' as WorkspaceId },
 ]
 
