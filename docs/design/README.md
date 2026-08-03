@@ -2,26 +2,19 @@
 
 Screenshots of the interface as built, referenced by `docs/UI-SPEC.md`.
 
-**This directory is currently empty.** The captures were requested but could not
-be produced: the session had no browser automation available and Playwright is
-not installed in the project. Rather than leave a spec that promises images
-which do not exist, the gap is recorded here.
-
-## To fill it
-
-Either drop PNGs in with the names below, or install Playwright and let it
-capture them:
+Regenerate with the backend and dev server both running:
 
 ```bash
-cd frontend
-npm i -D playwright && npx playwright install chromium
+cd frontend && node scripts/capture.mjs
 ```
 
-Both the backend and the dev server must be running, and the URL is
-`http://localhost:5173` — note `localhost`, not `127.0.0.1`. Vite binds to IPv6
-and refuses the loopback address.
+The URL is `http://localhost:5173` — **not** `127.0.0.1`. Vite binds to IPv6 and
+refuses the loopback address.
 
-## Wanted captures
+Captured at 1440×900, 2× device pixel ratio, so the files are large. If the repo
+size becomes a problem, drop `deviceScaleFactor` to 1 in the script.
+
+## Current captures
 
 | File | Shows |
 |---|---|
@@ -30,14 +23,26 @@ and refuses the loopback address.
 | `conversation-open.png` | Chat at 45%, orb shifted left, status label beneath |
 | `conversation-with-sources.png` | A reply with its citations listed |
 | `source-panel-open.png` | A citation opened, orb blurred and receded |
-| `source-panels-cascaded.png` | Two or more panels at their fixed offsets |
-| `source-panel-confirm-delete.png` | "Delete for good?" with "Answers will change" |
 | `workspace-shell.png` | Top bar, rail and dock, with the Orb at working size |
-| `conversation-beside-workspace.png` | Chat at 28% beside a workspace |
-| `orb-warming-up.png` | The cold-start state on a first message |
-| `orb-offline.png` | Backend stopped |
-| `divider-drag.png` | A division mid-drag |
+| `orb-warming-up.png` | Cold-start state on a first message |
+| `orb-offline.png` | Backend unreachable |
 
-`orb-warming-up.png` and `orb-offline.png` are the two worth capturing by hand
-even if the rest are automated: they are the states a user hits when something
-is wrong, and they are the ones least likely to be exercised otherwise.
+## Not yet captured
+
+`source-panel-confirm-delete.png` and `source-panels-cascaded.png` need a
+citation present and the record loaded; the run reaches the panel but the
+confirm state is timing-dependent. `divider-drag.png` and
+`conversation-beside-workspace.png` are not yet scripted.
+
+## Notes for whoever runs this next
+
+Two things the script has to work around, both of which are findings in their
+own right:
+
+- **Every click needs `force: true`.** The orb breathes continuously and the
+  orbital satellites rotate continuously, so Playwright's "wait for the element
+  to be stable" check never succeeds. An interface that never stops moving is
+  an interface that cannot be driven by a test.
+- **`waitUntil: 'networkidle'` hangs on the offline capture**, because the app
+  keeps re-polling the blocked health probe. That capture uses
+  `domcontentloaded`.
