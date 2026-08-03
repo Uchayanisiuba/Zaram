@@ -165,8 +165,21 @@ export default function Landing({ onNavigate, onOrbTap }: LandingProps) {
             }}
             transition={chat || isResizing ? orbTransition : { duration: 0.4 }}
             whileTap={{ scale: zoom * 0.9 }}
+            data-testid="orb-tap"
+            role="button"
+            tabIndex={panelsOpen ? -1 : 0}
+            aria-label="Talk to Zaram"
             style={{ cursor: panelsOpen ? 'default' : 'pointer' }}
             onClick={panelsOpen ? undefined : onOrbTap}
+            onKeyDown={(e) => {
+              // The orb was a clickable div, so it could not be reached or
+              // activated from the keyboard at all.
+              if (panelsOpen) return
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault()
+                onOrbTap?.()
+              }
+            }}
           >
             <div style={{ width: ORB_SIZE, height: ORB_SIZE }}>
               {/* Same orb and same behaviour as the sub-menu — only the
