@@ -188,9 +188,13 @@ export default function Landing({ onNavigate, onOrbTap }: LandingProps) {
           const dispersed = chat
             ? reduced ? { opacity: 0 } : { opacity: 0, scale: 0.4, x: dx, y: dy }
             : reduced ? { opacity: 1 } : { opacity: 1, scale: 1, x: 0, y: 0 }
+          // Leaving is snappier than returning. A dispersal that eases out feels
+          // like lag on a click; arriving back can afford to settle.
           const childTransition = reduced
             ? { duration: 0.18 }
-            : { type: 'spring' as const, stiffness: 240, damping: 26 }
+            : chat
+              ? { type: 'spring' as const, stiffness: 420, damping: 30 }
+              : { type: 'spring' as const, stiffness: 240, damping: 26 }
 
           return (
             <div
@@ -205,7 +209,15 @@ export default function Landing({ onNavigate, onOrbTap }: LandingProps) {
               <motion.div
                 initial={false}
                 animate={dispersed}
-                transition={{ ...childTransition, delay: chat ? 0.06 * (node.angle / 60) : 0 }}
+                // No delay on the way out. The stagger was keyed to each node's
+                // angle, so Knowledge at 330 degrees waited 0.33s before it
+                // began moving — long enough after the click to read as lag.
+                // A short stagger stays on the return, where settling back in
+                // sequence looks deliberate rather than late.
+                transition={{
+                  ...childTransition,
+                  delay: chat ? 0 : 0.03 * (node.angle / 90),
+                }}
               >
                 <motion.button
                   onClick={() => onNavigate(node.id as WorkspaceId)}
