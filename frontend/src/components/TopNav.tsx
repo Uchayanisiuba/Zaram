@@ -62,7 +62,9 @@ export default function TopNav({ workspace, onSearchOpen }: TopNavProps) {
           there is no sync. One indicator reporting real state is worth more
           than three claiming things that are not true. */}
       <div style={{ position: 'absolute', left: '50%', transform: 'translateX(-50%)' }}>
-        <OrbStatus size={40} />
+        {/* 56px: the 88px header leaves room for the orb plus its ring (64px)
+            and the button's padding, without the bar having to grow. */}
+        <OrbStatus size={56} />
       </div>
 
       {/* Right: actions */}
