@@ -1,5 +1,5 @@
 /**
- * LivingOrb — Project B design, Zaram architecture
+ * LivingOrb ï¿½ Project B design, Zaram architecture
  *
  * Globe-based orb with particles and state-driven effects.
  * Driven by orbStore state: idle, listening, thinking, speaking
@@ -34,8 +34,14 @@ interface LivingOrbProps {
   size?: 'xs' | 'sm' | 'md' | 'lg' | 'xl';
   className?: string;
   /** When true, intensifies the existing glow via brightness amplification.
-   *  Derives from existing STATE_CONFIG colors — no new hues introduced. */
+   *  Derives from existing STATE_CONFIG colors â€” no new hues introduced. */
   emphasis?: boolean;
+  /** Exact diameter in pixels, overriding the size preset.
+   *  The presets are fixed (xs 80 â€¦ xl 560), so an orb placed in a container of
+   *  another size overflowed it. Everything inside derives from this number, so
+   *  the orb stays proportional at any diameter rather than being transform
+   *  -scaled, which would blur the glows. */
+  px?: number;
 }
 
 // Per-state visual configs
@@ -86,17 +92,17 @@ const STATE_CONFIG = {
   },
 };
 
-const LivingOrb = ({ size = 'xl', className = '', emphasis = false }: LivingOrbProps) => {
+const LivingOrb = ({ size = 'xl', className = '', emphasis = false, px: pxOverride }: LivingOrbProps) => {
   const { orbState } = useOrbStore();
   const state = orbState as OrbState;
   const cfg = STATE_CONFIG[state];
 
-  /** Amplify existing glow via brightness — no new colors */
+  /** Amplify existing glow via brightness ï¿½ no new colors */
   const orbBrightness = emphasis ? ' brightness(1.4)' : '';
 
   // Map size to pixel dimensions (matching Project A sizes)
   const sizeMap = { xs: 80, sm: 104, md: 192, lg: 320, xl: 560 };
-  const px = sizeMap[size];
+  const px = pxOverride ?? sizeMap[size];
 
   // Component proportions
   const ring1 = Math.round(px * 0.82);
@@ -104,15 +110,18 @@ const LivingOrb = ({ size = 'xl', className = '', emphasis = false }: LivingOrbP
   const corePx = Math.round(px * 0.56);
   const outerGlowOffset = Math.round(px * 0.22);
 
-  const showParticles = size === 'xl' || size === 'lg' || size === 'md';
-  const showRings = size !== 'xs' && size !== 'sm';
+  // Derived from the rendered diameter, not the preset name: with an explicit
+  // px the preset says nothing about how big the orb actually is, and full-size
+  // particles on a 40px orb read as noise.
+  const showParticles = px >= 180;
+  const showRings = px >= 120;
 
   return (
     <div
       className={`relative flex items-center justify-center shrink-0 ${className}`}
       style={{ width: px, height: px }}
     >
-      {/* Outer ambient glow — amplified when emphasis is active */}
+      {/* Outer ambient glow ï¿½ amplified when emphasis is active */}
       <motion.div
         className="absolute rounded-full pointer-events-none"
         style={{
@@ -146,7 +155,7 @@ const LivingOrb = ({ size = 'xl', className = '', emphasis = false }: LivingOrbP
         )}
       </AnimatePresence>
 
-      {/* Energy ring 1 (outer) — STATIC, no rotation */}
+      {/* Energy ring 1 (outer) ï¿½ STATIC, no rotation */}
       {showRings && (
         <motion.div
           className="absolute rounded-full pointer-events-none"
@@ -160,7 +169,7 @@ const LivingOrb = ({ size = 'xl', className = '', emphasis = false }: LivingOrbP
         />
       )}
 
-      {/* Energy ring 2 (inner) — STATIC, no rotation */}
+      {/* Energy ring 2 (inner) ï¿½ STATIC, no rotation */}
       {showRings && (
         <motion.div
           className="absolute rounded-full pointer-events-none"
@@ -204,7 +213,7 @@ const LivingOrb = ({ size = 'xl', className = '', emphasis = false }: LivingOrbP
         )}
       </AnimatePresence>
 
-      {/* Core globe image — drop-shadow amplified when emphasis is active */}
+      {/* Core globe image ï¿½ drop-shadow amplified when emphasis is active */}
       <motion.img
         src={globeImage}
         alt="Living Intelligence Orb"
