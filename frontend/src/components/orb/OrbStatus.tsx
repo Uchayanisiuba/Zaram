@@ -85,7 +85,13 @@ export default function OrbStatus({
         >
           {/* Exact diameter: the presets are fixed, and 'sm' is 104px,
               which overflowed this ring entirely. */}
-          <LivingOrb px={orbSize} />
+          <LivingOrb
+            px={orbSize}
+            // The white core is a fixed 20px, which dominates an orb this size.
+            coreDotScale={0.3}
+            // Deeper breath so the small orb still reads as alive.
+            pulseAmplitude={1.4}
+          />
         </motion.span>
 
         {/* Status ring. The colour is the signal; the orb itself stays neutral

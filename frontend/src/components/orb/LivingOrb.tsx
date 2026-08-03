@@ -36,6 +36,12 @@ interface LivingOrbProps {
   /** When true, intensifies the existing glow via brightness amplification.
    *  Derives from existing STATE_CONFIG colors — no new hues introduced. */
   emphasis?: boolean;
+  /** Scale factor for the inner white pulse dot. It is a fixed 20px, so at
+   *  small diameters it dominates the orb. */
+  coreDotScale?: number;
+  /** Multiplies how far the orb breathes. 1 keeps the per-state default; 1.4
+   *  makes the same motion 40% deeper without changing its rhythm. */
+  pulseAmplitude?: number;
   /** Exact diameter in pixels, overriding the size preset.
    *  The presets are fixed (xs 80 … xl 560), so an orb placed in a container of
    *  another size overflowed it. Everything inside derives from this number, so
@@ -92,7 +98,14 @@ const STATE_CONFIG = {
   },
 };
 
-const LivingOrb = ({ size = 'xl', className = '', emphasis = false, px: pxOverride }: LivingOrbProps) => {
+const LivingOrb = ({
+  size = 'xl',
+  className = '',
+  emphasis = false,
+  px: pxOverride,
+  coreDotScale = 1,
+  pulseAmplitude = 1,
+}: LivingOrbProps) => {
   const { orbState } = useOrbStore();
   const state = orbState as OrbState;
   const cfg = STATE_CONFIG[state];
@@ -116,6 +129,14 @@ const LivingOrb = ({ size = 'xl', className = '', emphasis = false, px: pxOverri
   const showParticles = px >= 180;
   const showRings = px >= 120;
 
+  // Deepen or soften the breath without altering its timing. The per-state
+  // values are deviations from 1, so only the distance from 1 is scaled.
+  const scaleKeyframes = (cfg.scale as number[]).map(
+    (v) => 1 + (v - 1) * pulseAmplitude,
+  );
+
+  const coreDotPx = Math.round(20 * coreDotScale);
+
   return (
     <div
       className={`relative flex items-center justify-center shrink-0 ${className}`}
@@ -129,7 +150,7 @@ const LivingOrb = ({ size = 'xl', className = '', emphasis = false, px: pxOverri
           background: `radial-gradient(circle, ${cfg.glowColor} 0%, ${cfg.glowColor2} 45%, transparent 70%)`,
           filter: `blur(24px)${emphasis ? ' brightness(1.8)' : ''}`,
         }}
-        animate={{ scale: cfg.scale, opacity: state === 'idle' ? [0.7, 1, 0.7] : [0.8, 1, 0.8] }}
+        animate={{ scale: scaleKeyframes, opacity: state === 'idle' ? [0.7, 1, 0.7] : [0.8, 1, 0.8] }}
         transition={{ duration: cfg.scaleDuration, repeat: Infinity, ease: 'easeInOut' }}
       />
 
@@ -219,15 +240,20 @@ const LivingOrb = ({ size = 'xl', className = '', emphasis = false, px: pxOverri
         alt="Living Intelligence Orb"
         className="relative z-10 object-contain pointer-events-none select-none"
         style={{ width: corePx + 40, height: corePx + 40, filter: `${cfg.filter}${orbBrightness}` }}
-        animate={{ scale: cfg.scale }}
+        animate={{ scale: scaleKeyframes }}
         transition={{ duration: cfg.scaleDuration, repeat: Infinity, ease: 'easeInOut' }}
       />
 
-      {/* Inner pulse dot */}
-      {(size === 'xl' || size === 'lg') && (
+      {/* Inner pulse dot. Shown by rendered diameter rather than preset name:
+          it is a fixed size, so on a small orb it reads as a bright blob. */}
+      {px >= 60 && (
         <motion.div
           className="absolute z-20 rounded-full bg-white pointer-events-none"
-          style={{ width: 20, height: 20, boxShadow: '0 0 24px rgba(255,255,255,0.9)' }}
+          style={{
+            width: coreDotPx,
+            height: coreDotPx,
+            boxShadow: `0 0 ${Math.round(24 * coreDotScale)}px rgba(255,255,255,0.9)`,
+          }}
           animate={{ opacity: [0.35, 0.9, 0.35], scale: [0.8, 1.2, 0.8] }}
           transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
         />
