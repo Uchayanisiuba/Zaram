@@ -1,154 +1,118 @@
 /**
- * ChatSurface — glass conversation panel sliding in from the left.
+ * ChatSurface â€” glass conversation panel.
  *
- * Reads messages from the REAL conversation store (useConversationStore).
- * Drives replies through useStreamingText and orb state via useOrbStore.
+ * Temporary. This is a harness proving the transport works, not a designed
+ * surface; it will be replaced when the UI spec lands. Everything meaningful
+ * lives in `stores/chatStore` and `services/chatClient`, both of which survive
+ * that replacement.
+ *
+ * Sources are rendered as a plain list under each assistant reply. Deliberately
+ * unstyled â€” the point is that provenance arrives and can be shown, not how it
+ * looks.
  */
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { motion, type Variants } from 'framer-motion';
 import { Send } from 'lucide-react';
-import { useConversationStore, useOrbStore } from '@/stores';
-import useStreamingText from '@/hooks/useStreamingText';
+import { useChatStore } from '@/stores/chatStore';
+import { useOrbStore } from '@/stores';
 import { useIsReducedMotion } from '@/hooks/useReducedMotion';
+import type { ChatSource } from '@/services/chatClient';
+
+/** Provenance for one reply. Plain on purpose. */
+function SourceList({ sources }: { sources: ChatSource[] }) {
+  if (sources.length === 0) return null;
+  return (
+    <div className="mt-2 pl-3 border-l border-white/10">
+      <p
+        className="text-[10px] uppercase text-slate-500 mb-1"
+        style={{ letterSpacing: '0.06em' }}
+      >
+        {sources.length} source{sources.length === 1 ? '' : 's'}
+      </p>
+      <ul className="flex flex-col gap-1">
+        {sources.map((s, i) => (
+          <li key={s.url ?? i} className="text-[11px] text-slate-400 leading-snug">
+            <span className="text-slate-500">[{s.kind}]</span> {s.title ?? s.url}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
 
 export default function ChatSurface() {
   const reduced = useIsReducedMotion();
 
-  // Select only what we need from the conversation store
-  const { messages, addMessage, inputText, setInputText } = useConversationStore(
-    (s) => ({
-      messages: s.messages,
-      addMessage: s.addMessage,
-      inputText: s.inputText,
-      setInputText: s.setInputText,
-    })
-  );
+  const messages = useChatStore((s) => s.messages);
+  const streamingText = useChatStore((s) => s.streamingText);
+  const streamingSources = useChatStore((s) => s.streamingSources);
+  const isStreaming = useChatStore((s) => s.isStreaming);
+  const connectionError = useChatStore((s) => s.connectionError);
+  const send = useChatStore((s) => s.send);
 
   const { setOrbState } = useOrbStore((s) => ({ setOrbState: s.setOrbState }));
 
-  const { displayedText, isStreaming, startStreaming } = useStreamingText();
-
+  const [inputText, setInputText] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Focus input on mount
   useEffect(() => {
     inputRef.current?.focus();
   }, []);
 
-  // Auto-scroll on new messages or streaming
   useEffect(() => {
     scrollRef.current?.scrollTo({
       top: scrollRef.current.scrollHeight,
       behavior: 'smooth',
     });
-  }, [messages, displayedText]);
+  }, [messages, streamingText]);
 
-  // Cleanup
+  // The Orb reports system state; it does not perform. Thinking while the
+  // request is in flight, idle otherwise.
   useEffect(() => {
-    return () => {
-      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
-    };
-  }, []);
+    setOrbState(isStreaming ? 'thinking' : 'idle');
+  }, [isStreaming, setOrbState]);
 
-  const handleSend = async () => {
-    const trimmed = inputText.trim();
-    if (!trimmed || isStreaming) return;
-
-    const now = new Date();
-
-    // Push user message to the REAL store
-    addMessage({
-      id: `user-${Date.now()}`,
-      text: trimmed,
-      sender: 'user',
-      timestamp: now,
-    });
+  const handleSend = () => {
+    const text = inputText.trim();
+    if (!text || isStreaming) return;
     setInputText('');
-
-    // Orb -> thinking
-    setOrbState('thinking');
-
-    // Brief thinking pause, then stream reply
-    typingTimeoutRef.current = setTimeout(async () => {
-      setOrbState('speaking');
-
-      const reply =
-        "I'm here with you. What would you like to explore together?";
-
-      await startStreaming(reply);
-
-      // Orb -> idle when done streaming
-      setOrbState('idle');
-    }, 400);
+    void send(text);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      void handleSend();
+      handleSend();
     }
   };
 
-  // Motion variants
   const container: Variants = {
-    hidden: reduced
-      ? { opacity: 0 }
-      : { x: '100%', opacity: 0 },
+    hidden: reduced ? { opacity: 0 } : { x: '100%', opacity: 0 },
     visible: {
       x: 0,
       opacity: 1,
-      transition: {
-        type: reduced ? 'tween' : 'spring',
-        duration: reduced ? 0.25 : undefined,
-        stiffness: reduced ? undefined : 260,
-        damping: reduced ? undefined : 30,
-        staggerChildren: 0.06,
-      },
+      transition: reduced
+        ? { duration: 0.2 }
+        : { type: 'spring', stiffness: 200, damping: 26, staggerChildren: 0.05 },
     },
     exit: reduced
-      ? {
-          opacity: 0,
-          transition: {
-            type: 'tween',
-            duration: 0.25,
-            staggerChildren: 0.06,
-          },
-        }
-      : {
-          x: '100%',
-          opacity: 0,
-          transition: {
-            type: 'spring',
-            stiffness: 260,
-            damping: 30,
-            staggerChildren: 0.06,
-          },
-        },
+      ? { opacity: 0, transition: { duration: 0.18 } }
+      : { x: '100%', opacity: 0, transition: { duration: 0.28 } },
   };
 
   const item: Variants = {
-    hidden: {
-      opacity: 0,
-      y: reduced ? 0 : 12,
-    },
-    visible: {
-      opacity: 1,
-      y: 0,
-      transition: { duration: 0.3, ease: 'easeOut' },
-    },
+    hidden: { opacity: 0, y: reduced ? 0 : 8 },
+    visible: { opacity: 1, y: 0 },
   };
+
+  const isEmpty = messages.length === 0 && !streamingText;
 
   return (
     <motion.div
       key="chat-surface"
       className="fixed top-0 right-0 h-screen flex flex-col glass-border-indigo"
-      style={{
-        width: 440,
-        zIndex: 60,
-        backgroundColor: 'var(--color-glass)',
-      }}
+      style={{ width: 440, zIndex: 60, backgroundColor: 'var(--color-glass)' }}
       variants={container}
       initial="hidden"
       animate="visible"
@@ -158,20 +122,14 @@ export default function ChatSurface() {
       <motion.div
         className="flex items-center gap-3 px-6 py-4 border-b border-white/5"
         variants={item}
-        style={{
-          backdropFilter: 'blur(20px) saturate(1.4)',
-        }}
+        style={{ backdropFilter: 'blur(20px) saturate(1.4)' }}
       >
         <motion.div
           className="w-2 h-2 rounded-full"
           style={{
-            background: isStreaming
-              ? 'var(--color-cyan)'
-              : 'var(--color-violet)',
+            background: isStreaming ? 'var(--color-cyan)' : 'var(--color-violet)',
           }}
-          animate={{
-            opacity: isStreaming ? [1, 0.4, 1] : 0.6,
-          }}
+          animate={{ opacity: isStreaming ? [1, 0.4, 1] : 0.6 }}
           transition={{
             duration: isStreaming ? 1.5 : 0,
             repeat: isStreaming ? Infinity : 0,
@@ -181,57 +139,79 @@ export default function ChatSurface() {
         <h2 className="text-sm font-medium text-slate-200">Conversation</h2>
       </motion.div>
 
-      {/* Message list */}
-      <motion.div
-        ref={scrollRef}
-        className="flex-1 overflow-y-auto"
-        variants={item}
-      >
+      {/* Connection failure sits above the transcript: it is about the backend,
+          not about any one reply. */}
+      {connectionError && (
+        <div
+          role="alert"
+          className="px-6 py-3 text-xs leading-relaxed border-b border-white/5"
+          style={{ background: 'rgba(248,113,113,0.08)', color: '#fca5a5' }}
+        >
+          {connectionError}
+        </div>
+      )}
+
+      {/* Transcript */}
+      <motion.div ref={scrollRef} className="flex-1 overflow-y-auto" variants={item}>
         <div className="flex flex-col gap-4 p-6">
-          {messages.length === 0 && !displayedText ? (
+          {isEmpty ? (
             <p
               className="text-xs uppercase text-slate-500"
               style={{ letterSpacing: '0.05em' }}
             >
-              Tap the orb to begin
+              Ask Zaram something
             </p>
           ) : (
             <>
               {messages.map((msg) => (
-                <p
-                  key={msg.id}
-                  className="text-sm leading-relaxed"
-                  style={{
-                    color:
-                      msg.sender === 'user'
-                        ? 'var(--color-text)'
-                        : 'var(--color-cyan)',
-                  }}
-                >
-                  {msg.text}
-                </p>
+                <div key={msg.id}>
+                  <p
+                    className="text-sm leading-relaxed whitespace-pre-wrap"
+                    style={{
+                      color:
+                        msg.role === 'user'
+                          ? 'var(--color-text)'
+                          : 'var(--color-cyan)',
+                    }}
+                  >
+                    {/* Speaker is currently distinguished by colour alone, which
+                        is not accessible. The spec rebuild must fix that. */}
+                    {msg.text}
+                  </p>
+                  {msg.role === 'assistant' && <SourceList sources={msg.sources} />}
+                  {msg.error && (
+                    <p className="mt-1 text-[11px]" style={{ color: '#fca5a5' }}>
+                      {msg.text ? `Interrupted: ${msg.error}` : msg.error}
+                    </p>
+                  )}
+                </div>
               ))}
-              {/* Streaming reply currently being typed */}
-              {isStreaming && displayedText ? (
-                <p
-                  className="text-sm leading-relaxed"
-                  style={{ color: 'var(--color-cyan)' }}
-                >
-                  {displayedText}
-                </p>
-              ) : null}
+
+              {/* In-flight reply. Sources arrive before the tokens, so they are
+                  shown as soon as they land. */}
+              {isStreaming && (
+                <div>
+                  {streamingText && (
+                    <p
+                      className="text-sm leading-relaxed whitespace-pre-wrap"
+                      style={{ color: 'var(--color-cyan)' }}
+                    >
+                      {streamingText}
+                    </p>
+                  )}
+                  <SourceList sources={streamingSources} />
+                </div>
+              )}
             </>
           )}
         </div>
       </motion.div>
 
-      {/* Input bar */}
+      {/* Input */}
       <motion.div
         className="p-4 border-t border-white/5"
         variants={item}
-        style={{
-          backdropFilter: 'blur(20px) saturate(1.4)',
-        }}
+        style={{ backdropFilter: 'blur(20px) saturate(1.4)' }}
       >
         <div className="relative">
           <input
@@ -240,14 +220,15 @@ export default function ChatSurface() {
             value={inputText}
             onChange={(e) => setInputText(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Ask Zaram anything…"
+            placeholder="Ask Zaram anythingâ€¦"
             aria-label="Message Zaram"
             disabled={isStreaming}
             className="w-full px-4 py-3 text-sm bg-[var(--color-glass)] border border-white/5 rounded-xl text-slate-200 placeholder-slate-500 outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-colors"
           />
           <motion.button
-            onClick={() => void handleSend()}
+            onClick={handleSend}
             disabled={isStreaming || !inputText.trim()}
+            aria-label="Send message"
             className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-lg hover:bg-white/5 disabled:opacity-30 transition-colors"
             whileHover={{ scale: 1.05 }}
             whileTap={{ scale: 0.95 }}

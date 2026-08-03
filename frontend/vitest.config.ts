@@ -17,5 +17,8 @@ export default defineConfig({
     environment: 'jsdom',
     include: ['src/**/*.test.{ts,tsx}'],
     setupFiles: ['./src/test-setup.ts'],
+    // The default forks pool fails to start workers on Windows here
+    // ("Timeout waiting for worker to respond"). Threads work.
+    pool: 'threads',
   },
 })
