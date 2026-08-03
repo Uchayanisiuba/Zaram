@@ -17,6 +17,11 @@ import {
   type ChatSource,
   type ChatRequest,
 } from '@/services/chatClient';
+import { useSystemStore } from '@/stores/systemStore';
+
+/** How long a request may produce nothing before we call it a cold start.
+ *  A loaded local model begins emitting well inside this; a cold one does not. */
+const WARMING_AFTER_MS = 2500;
 
 export interface ChatMessage {
   id: string;
@@ -94,6 +99,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const seen = new Set<string>();
     let replyError: string | undefined;
 
+    // A cold local model can take many seconds to load before its first token.
+    // Left unexplained that silence reads as a hang, so it is named instead.
+    const system = useSystemStore.getState();
+    system.setActivity('thinking');
+    let sawFirstToken = false;
+    const warmingTimer = setTimeout(() => {
+      if (!sawFirstToken) useSystemStore.getState().setActivity('warming');
+    }, WARMING_AFTER_MS);
+    const settleActivity = (a: 'idle' | 'thinking') => {
+      clearTimeout(warmingTimer);
+      useSystemStore.getState().setActivity(a);
+    };
+
     try {
       for await (const event of streamChat(
         { text: trimmed, sessionId: get().sessionId, ...opts },
@@ -101,6 +119,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
       )) {
         switch (event.type) {
           case 'token':
+            if (!sawFirstToken) {
+              sawFirstToken = true;
+              // Output has started, so whatever warming was happening is done.
+              settleActivity('thinking');
+            }
             text_ += event.content;
             set({ streamingText: text_ });
             break;
@@ -143,6 +166,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
         replyError = message;
       }
     }
+
+    settleActivity('idle');
 
     // Commit the reply, including a partial or failed one. Dropping text the
     // backend genuinely produced would be worse than showing it labelled.

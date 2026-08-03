@@ -3,6 +3,7 @@ import { motion } from 'framer-motion'
 import { Brain, BookOpen, Settings } from 'lucide-react'
 import LivingOrb from '../components/orb/LivingOrb'
 import OrbStatusLabel from '../components/orb/OrbStatusLabel'
+import OrbHint from '../components/orb/OrbHint'
 import { useChatModeStore } from '@/stores/chatModeStore'
 import { useLayoutStore, orbGeometry } from '@/stores/layoutStore'
 import { useSourceStore } from '@/stores/sourceStore'
@@ -102,6 +103,9 @@ export default function Landing({ onNavigate, onOrbTap }: LandingProps) {
   const ring2Size = ORBIT_RADIUS * 2 + 110
 
   const orbShift = { scale: zoom, x: shiftX, y: 0 }
+  // orbGeometry divides by the container scale for use *inside* the scaled
+  // wrapper. Anything outside it needs the undivided value.
+  const visualShiftX = shiftX * CONTAINER_SCALE
   const orbTransition = isResizing
     ? // Track the divider exactly while it is being dragged; a spring here
       // makes the orb drift behind the panel edge.
@@ -169,16 +173,6 @@ export default function Landing({ onNavigate, onOrbTap }: LandingProps) {
             </div>
           </motion.div>
 
-          {/* What the Orb is reporting, in words. The top bar is hidden here,
-              so without this the landing has no status at all. Rides with the
-              orb so it stays beneath it as the panel is resized. */}
-          <motion.div
-            className="mt-2"
-            animate={{ x: shiftX, opacity: panelsOpen ? 0 : 1 }}
-            transition={chat || isResizing ? orbTransition : { duration: 0.4 }}
-          >
-            <OrbStatusLabel dimmed={panelsOpen} />
-          </motion.div>
         </div>
 
         {/* Orbiting satellite nodes — parent holds the FROZEN orbit (rAF), child
@@ -250,6 +244,37 @@ export default function Landing({ onNavigate, onOrbTap }: LandingProps) {
           )
         })}
       </div>
+
+      {/* Status, in words. Only while the conversation is open: at rest the
+          landing is meant to be quiet, and there is nothing to report until you
+          are about to ask something.
+
+          Rendered outside the scale(1.4) orbital wrapper on purpose — inside it
+          every offset is multiplied, which is what put the text within the ring
+          radius. Anchored low instead, well clear of both rings. */}
+      {chat && (
+        <motion.div
+          className="absolute left-1/2 z-20"
+          style={{ bottom: '8%' }}
+          initial={{ opacity: 0, y: 6 }}
+          animate={{
+            opacity: panelsOpen ? 0 : 1,
+            y: 0,
+            // Outside the scaled container the shift is the real pixel value,
+            // not the pre-divided one the orb uses.
+            x: `calc(-50% + ${visualShiftX}px)`,
+          }}
+          exit={{ opacity: 0 }}
+          transition={isResizing ? { duration: 0 } : { duration: reduced ? 0.15 : 0.35, delay: reduced ? 0 : 0.1 }}
+        >
+          <OrbStatusLabel dimmed={panelsOpen} compact />
+        </motion.div>
+      )}
+
+      {/* First-run instruction, in the same low slot. Shown only before the
+          conversation has ever been opened, so it never competes with the
+          status label above. */}
+      <OrbHint offsetX={visualShiftX} />
     </div>
   )
 }

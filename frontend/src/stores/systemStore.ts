@@ -14,7 +14,7 @@ import { create } from 'zustand';
 const API_BASE = import.meta.env.VITE_ZARAM_API ?? '';
 
 /** What the Orb is currently doing or reporting. */
-export type OrbActivity = 'idle' | 'thinking' | 'speaking' | 'listening';
+export type OrbActivity = 'idle' | 'warming' | 'thinking' | 'speaking' | 'listening';
 
 /** Where work is being routed. Today always 'local' — only Ollama is wired. */
 export type RoutingMode = 'local' | 'cloud' | 'mixed' | 'unknown';
@@ -96,6 +96,16 @@ export function describeSystem(s: {
       label: 'Offline',
       detail: 'Zaram’s engine is not running, so nothing can be answered.',
       tone: 'offline',
+    };
+  }
+  if (s.activity === 'warming') {
+    // Said only after a request has gone several seconds with no output, which
+    // on a local model means it is still being loaded into memory. Without
+    // this the first message of a session looks like a hang.
+    return {
+      label: 'Warming up',
+      detail: 'Starting the local model. The first reply of a session takes longer.',
+      tone: 'busy',
     };
   }
   if (s.activity === 'thinking') {

@@ -21,7 +21,14 @@ const TONE_COLOR: Record<string, string> = {
   busy: 'var(--color-cyan)',
 };
 
-export default function OrbStatusLabel({ dimmed = false }: { dimmed?: boolean }) {
+export default function OrbStatusLabel({
+  dimmed = false,
+  /** Smaller, for use beneath the orb where it must not compete with it. */
+  compact = false,
+}: {
+  dimmed?: boolean;
+  compact?: boolean;
+}) {
   const reduced = useIsReducedMotion();
   const backendOnline = useSystemStore((s) => s.backendOnline);
   const routing = useSystemStore((s) => s.routing);
@@ -44,20 +51,29 @@ export default function OrbStatusLabel({ dimmed = false }: { dimmed?: boolean })
         <motion.span
           aria-hidden
           className="inline-block rounded-full"
-          style={{ width: 6, height: 6, background: accent, boxShadow: `0 0 8px ${accent}` }}
+          style={{
+            width: compact ? 5 : 6,
+            height: compact ? 5 : 6,
+            background: accent,
+            boxShadow: `0 0 8px ${accent}`,
+          }}
           animate={
-            reduced || activity !== 'thinking' ? {} : { opacity: [1, 0.35, 1] }
+            reduced || (activity !== 'thinking' && activity !== 'warming')
+              ? {}
+              : { opacity: [1, 0.35, 1] }
           }
           transition={{ duration: 1.4, repeat: Infinity, ease: 'easeInOut' }}
         />
         <span
-          className="text-[13px] font-medium tracking-wide"
+          className={`${compact ? 'text-[11px]' : 'text-[13px]'} font-medium tracking-wide`}
           style={{ color: accent, fontFamily: 'var(--font-display)' }}
         >
           {label}
         </span>
       </span>
-      <span className="text-[11px] text-slate-500 max-w-[16rem] text-center leading-snug">
+      <span
+        className={`${compact ? 'text-[10px] max-w-[15rem]' : 'text-[11px] max-w-[16rem]'} text-slate-500 text-center leading-snug`}
+      >
         {detail}
       </span>
     </motion.div>
