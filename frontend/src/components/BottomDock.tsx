@@ -1,16 +1,25 @@
-import { Home, Brain, BookOpen, Settings, Search, Mic } from 'lucide-react'
+import { Home, Brain, BookOpen, Settings, Search } from 'lucide-react'
 import { useState } from 'react'
-import { Keycap } from '@/components/shortcuts/Keycap'
-import { NAV_SHORTCUTS, detectPlatform, type Platform, type Shortcut } from '@/runtime/shortcuts/registry'
+import { NAV_SHORTCUTS, chordTokens, detectPlatform, type Platform, type Shortcut } from '@/runtime/shortcuts/registry'
+
+/** Tooltip text: the label plus its shortcut, since the dock is now too short
+ *  to show a keycap without covering the icon. */
+function shortcutLabel(label: string, shortcut?: Shortcut, platform?: Platform) {
+  if (!shortcut || !platform) return label
+  return `${label} (${chordTokens(shortcut, platform)})`
+}
 
 type WorkspaceId = 'landing' | 'memory' | 'knowledge' | 'settings'
 
+// Icons and labels mirror the landing page's orbital nodes exactly, so the same
+// destination looks the same wherever it is reached from.
+// Landing: Memory = Brain, Knowledge = BookOpen, Settings = Settings.
 const DOCK_ITEMS = [
   // Always offer a way back to the landing surface.
-  { id: 'landing' as WorkspaceId, icon: <Home size={32} />, label: 'Home' },
-  { id: 'memory' as WorkspaceId, icon: <Brain size={32} />, label: 'Memory' },
-  { id: 'knowledge' as WorkspaceId, icon: <BookOpen size={32} />, label: 'Knowledge' },
-  { id: 'settings' as WorkspaceId, icon: <Settings size={32} />, label: 'Settings' },
+  { id: 'landing' as WorkspaceId, icon: <Home size={22} />, label: 'Home' },
+  { id: 'memory' as WorkspaceId, icon: <Brain size={22} />, label: 'Memory' },
+  { id: 'knowledge' as WorkspaceId, icon: <BookOpen size={22} />, label: 'Knowledge' },
+  { id: 'settings' as WorkspaceId, icon: <Settings size={22} />, label: 'Settings' },
 ]
 
 interface BottomDockProps {
@@ -35,21 +44,21 @@ export default function BottomDock({ workspace, onNavigate, onSearch }: BottomDo
           display: 'flex',
           alignItems: 'center',
           gap: 4,
-          padding: '6px 8px',
+          padding: '4px 8px',
           borderRadius: 16,
           boxShadow: '0 16px 80px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.06)',
         }}
       >
         {/* Search */}
         <DockButton
-          icon={<Search size={32} />}
+          icon={<Search size={22} />}
           label="Search"
           active={false}
           onClick={onSearch}
           accent
         />
 
-        <div style={{ width: 1, height: 48, background: 'var(--color-glass-hover)', margin: '0 8px' }} />
+        <div style={{ width: 1, height: 32, background: 'var(--color-glass-hover)', margin: '0 6px' }} />
 
         {DOCK_ITEMS.map(item => {
           const sc = NAV_SHORTCUTS.find((n) => n.action.type === 'navigate' && n.action.target === item.id)
@@ -65,16 +74,6 @@ export default function BottomDock({ workspace, onNavigate, onSearch }: BottomDo
             />
           )
         })}
-
-        <div style={{ width: 1, height: 48, background: 'var(--color-glass-hover)', margin: '0 8px' }} />
-
-        {/* Voice */}
-        <DockButton
-          icon={<Mic size={32} />}
-          label="Voice"
-          active={false}
-          onClick={() => {}}
-        />
       </div>
     </div>
   )
@@ -100,12 +99,12 @@ function DockButton({
   return (
     <button
       onClick={onClick}
-      title={label}
+      title={shortcutLabel(label, shortcut, platform)}
       style={{
         position: 'relative',
-        width: 80,
-        height: 80,
-        borderRadius: 20,
+        width: 52,
+        height: 52,
+        borderRadius: 14,
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
@@ -141,20 +140,15 @@ function DockButton({
       {active && (
         <div style={{
           position: 'absolute',
-          bottom: -16,
+          bottom: -10,
           left: '50%',
           transform: 'translateX(-50%)',
-          width: 6,
-          height: 6,
+          width: 5,
+          height: 5,
           borderRadius: '50%',
           background: 'var(--color-indigo)',
           boxShadow: '0 0 12px var(--color-indigo-a-70)',
         }} />
-      )}
-      {shortcut && platform && (
-        <span style={{ position: 'absolute', right: 6, bottom: 6 }}>
-          <Keycap shortcut={shortcut} platform={platform} size="sm" />
-        </span>
       )}
     </button>
   )
