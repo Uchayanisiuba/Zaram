@@ -44,7 +44,11 @@ class TestNoDuplicateSearch:
         assert len(plan.steps) == 1
         assert plan.steps[0].capability_id == "reasoning.generate"
 
-    def test_planner_includes_search_when_no_marker(self):
+    def test_planner_includes_search_when_no_marker(self, monkeypatch):
+        # Web search is off by default; this test is about search *routing*, so
+        # it states that precondition explicitly. See the sequencing commitments
+        # in CLAUDE.md and test_outbound_query_invariant.py.
+        monkeypatch.setenv("ZARAM_WEB_SEARCH", "1")
         planner = IntentPlanner()
         prompt = "What is the latest Unreal Engine version?"
         plan = planner.create_plan(prompt)

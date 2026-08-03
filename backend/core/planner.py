@@ -12,6 +12,7 @@ Intent flow:
 from __future__ import annotations
 
 import logging
+import os
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -26,6 +27,19 @@ from core.contracts import (
 from core.query_classifier import SEARCH_MARKER, needs_search
 
 logger = logging.getLogger(__name__)
+
+
+def web_search_enabled() -> bool:
+    """Whether a request may reach the public internet.
+
+    Default deny (rule 5). Web search stays off until the egress log and
+    per-source policy exist — see the sequencing commitments in CLAUDE.md.
+    Until then nothing the user can type causes a byte to leave the machine:
+    inference is Ollama on localhost and the Spine is a local file.
+
+    Read at call time rather than import time so tests can toggle it.
+    """
+    return os.getenv("ZARAM_WEB_SEARCH", "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 class IntentType(Enum):
@@ -99,8 +113,13 @@ class IntentRouter:
         prompt_lower = search_prompt.lower().strip()
         signals: list[IntentSignal] = []
 
-        # Check for search requirement
-        search_required = needs_search(prompt)
+        # Check for search requirement. Gated: the classifier may want search,
+        # but nothing leaves the machine until the egress log and per-source
+        # policy exist. See web_search_enabled() and CLAUDE.md.
+        search_wanted = needs_search(prompt)
+        search_required = search_wanted and web_search_enabled()
+        if search_wanted and not search_required:
+            logger.debug("Planner: search suppressed — web search is off by policy")
         signals.append(IntentSignal(
             name="search_required",
             weight=0.8,

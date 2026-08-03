@@ -75,6 +75,34 @@ building it.
   vocabulary, output templates). Do not build a pack *system* until two packs exist
   and have been built by hand.
 
+## Sequencing commitments
+
+These orderings are decided. Do not reorder them for convenience.
+
+**Egress log → per-source policy → web search as its first governed source.**
+
+Web search does not return until the first two exist. The discovery runtime, its
+providers and its 111 tests are built and are deliberately unreachable from the chat
+path until then. Rule 3 is the reason: you cannot retroactively log what has already
+left the machine.
+
+Corollaries, all binding:
+
+- **Nothing derived from the Spine may appear in an outbound query.** Today this holds
+  structurally — the planner passes the raw user prompt as the search query, and
+  recalled memories only reach `system_prompt`, which search never reads. That is luck,
+  not design. `backend/tests/test_outbound_query_invariant.py` makes it deliberate.
+  The obvious future improvement — having a model rewrite the question into a better
+  search query — would break it silently.
+- **The egress log records the literal outbound text**, not merely that a request
+  occurred. What left matters more than that something left.
+- **Retention ships with the egress log, not after it.** A log of query text is a
+  permanent record of private questions, which is its own privacy problem. The
+  retention control belongs in the Settings privacy pane from the first version.
+- **Confirm-before-send is a headline feature, not an option.** A dialog showing the
+  literal text about to leave, with send and cancel, is the demonstrable form of the
+  entire product claim. Build it as the primary path.
+
 ## UI/UX principles
 
 - Calm over delight. Motion has a budget. Ship a quiet mode from the start.

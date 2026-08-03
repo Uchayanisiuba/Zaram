@@ -8,6 +8,21 @@ from core.planner import IntentPlanner, IntentRouter, IntentType, IntentClassifi
 from core.contracts import ExecutionPlan, PlanState, ExecutionStep
 
 
+@pytest.fixture
+def web_search_on(monkeypatch):
+    """Enable web search for tests that exercise search routing.
+
+    Search is off by default — see ``web_search_enabled`` and the sequencing
+    commitments in CLAUDE.md. Tests that assert search *planning* still need to
+    verify that routing works, so they state that precondition explicitly rather
+    than depending on a default that is deliberately deny.
+
+    That web search is off by default is asserted in
+    ``test_outbound_query_invariant.py``, not here.
+    """
+    monkeypatch.setenv("ZARAM_WEB_SEARCH", "1")
+
+
 class TestIntentRouter:
     def setup_method(self):
         self.router = IntentRouter()
@@ -18,7 +33,7 @@ class TestIntentRouter:
         assert result.confidence > 0.5
         assert "reasoning.generate" in result.capabilities
 
-    def test_classify_search(self):
+    def test_classify_search(self, web_search_on):
         result = self.router.classify("What is the latest AI news today?")
         assert result.intent_type == IntentType.MULTI_STEP
         assert result.requires_search is True
@@ -41,7 +56,7 @@ class TestIntentRouter:
         result = self.router.classify("Run git status")
         assert result.intent_type == IntentType.TOOL
 
-    def test_classify_multi_step(self):
+    def test_classify_multi_step(self, web_search_on):
         result = self.router.classify("What is the latest Unreal Engine version?")
         assert result.intent_type == IntentType.MULTI_STEP
         assert result.requires_search is True
@@ -68,7 +83,7 @@ class TestIntentPlanner:
         assert len(plan.steps) == 1
         assert plan.steps[0].capability_id == "reasoning.generate"
 
-    def test_create_plan_search(self):
+    def test_create_plan_search(self, web_search_on):
         plan = self.planner.create_plan("What is the latest AI news today?")
         assert len(plan.steps) == 2
         assert plan.steps[0].capability_id == "knowledge.search"
@@ -92,7 +107,7 @@ class TestIntentPlanner:
         assert plan.correlation_id is not None
         assert len(plan.correlation_id) > 0
 
-    def test_classify_intent(self):
+    def test_classify_intent(self, web_search_on):
         classification = self.planner.classify_intent("What is the weather today?")
         assert classification.intent_type == IntentType.MULTI_STEP
         assert classification.requires_search is True
