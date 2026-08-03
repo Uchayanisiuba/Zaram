@@ -70,9 +70,14 @@ it.
 ## Before building on anything
 
 Much of this repo is written, tested, and not wired into the running product. Verify
-current state rather than trusting documentation. As of 2 August 2026 the frontend makes
-no network calls, only four runtimes boot, one model provider is wired, the Spine is
-in-RAM, and 16 backend tests fail.
+current state rather than trusting documentation. As of 3 August 2026:
+
+Working — do not "fix" these: the recall loop runs end to end, the Spine persists to
+SQLite with Ollama `bge-m3` embeddings, and recalled memories emit provenance events.
+
+Not connected: the frontend makes no network calls and has nowhere to display the
+provenance the backend now emits; only four runtimes boot; one model provider is wired;
+there is no egress log. 13 backend tests fail, 11 of them a stale test double.
 
 When a plan and the codebase disagree, the codebase wins — say so rather than building
 against a stale assumption.
