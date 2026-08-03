@@ -14,7 +14,7 @@ describe('BackendService', () => {
     const service = new BackendService()
     const status = service.getStatus()
     expect(status.host).toBe('127.0.0.1')
-    expect(status.port).toBe(8000)
+    expect(status.port).toBe(8420)
     expect(status.running).toBe(false)
   })
 

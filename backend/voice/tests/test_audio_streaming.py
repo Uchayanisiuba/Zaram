@@ -234,10 +234,10 @@ def test_audio_event_from_result(tmp_path):
         path=str(tmp_path / "audio_cache" / "abc.wav"),
         audio_id="a1",
     )
-    event = audio_event_from_result(result, base_url="http://127.0.0.1:8000")
+    event = audio_event_from_result(result, base_url="http://127.0.0.1:8420")
     assert event["type"] == "audio"
     assert event["audio_id"] == "a1"
-    assert event["url"] == "http://127.0.0.1:8000/audio/abc.wav"
+    assert event["url"] == "http://127.0.0.1:8420/audio/abc.wav"
     assert event["sequence"] == 0 and event["final"] is True
 
 

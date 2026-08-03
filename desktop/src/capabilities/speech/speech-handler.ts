@@ -32,7 +32,7 @@ async function streamVoiceSynthesis(
   return new Promise((resolve, reject) => {
     const req = require('http').request({
       hostname: '127.0.0.1',
-      port: 8000,
+      port: 8420,
       path: '/voice/stream',
       method: 'POST',
       headers: {

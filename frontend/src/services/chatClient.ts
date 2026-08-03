@@ -28,7 +28,7 @@
  */
 
 /** Where the backend lives. Empty string means same-origin, which in development
- *  is the Vite proxy in `vite.config.js` forwarding `/chat` to 127.0.0.1:8000.
+ *  is the Vite proxy in `vite.config.js` forwarding `/chat` to 127.0.0.1:8420.
  *  Packaged builds can point this at the bundled backend. */
 const API_BASE = import.meta.env.VITE_ZARAM_API ?? '';
 
@@ -101,7 +101,7 @@ export async function* streamChat(
     if (isAbort(err)) return;
     // fetch only rejects for network-level failures: backend down, DNS, refused.
     throw new ChatTransportError(
-      'Could not reach the Zaram backend. Is it running on port 8000?',
+      'Could not reach the Zaram backend. Is it running on port 8420?',
       err,
     );
   }
@@ -125,7 +125,7 @@ export async function* streamChat(
       !detail.trim() && [500, 502, 503, 504].includes(response.status);
     if (looksLikeDeadUpstream) {
       throw new ChatTransportError(
-        'Could not reach the Zaram backend. Is it running on port 8000?',
+        'Could not reach the Zaram backend. Is it running on port 8420?',
       );
     }
 

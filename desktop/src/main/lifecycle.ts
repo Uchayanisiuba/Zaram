@@ -41,7 +41,7 @@ export class AppLifecycle {
       const backendStatus = this.backendService.getStatus()
       const backendUrl = backendStatus.running
         ? `http://${backendStatus.host}:${backendStatus.port}`
-        : `http://127.0.0.1:8000`
+        : `http://127.0.0.1:8420`
       const result = bootstrapPresence({ backendUrl })
       this.container = result.container
       this.presenceKernel = result.buildKernel()
