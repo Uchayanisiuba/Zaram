@@ -53,9 +53,12 @@ export default function OrbStatus({ size = 56 }: { size?: number }) {
       title={`${label} — ${detail}`}
       className="group relative flex items-center gap-2.5 rounded-full pl-1 pr-3 py-1 transition-colors hover:bg-white/5 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-indigo)]"
     >
-      <span className="relative inline-flex" style={{ width: size, height: size }}>
+      <span
+        className="relative inline-flex items-center justify-center"
+        style={{ width: size + 8, height: size + 8 }}
+      >
         <motion.span
-          className="absolute inset-0"
+          className="absolute inset-1 flex items-center justify-center"
           animate={
             reduced
               ? {}
@@ -69,7 +72,9 @@ export default function OrbStatus({ size = 56 }: { size?: number }) {
               : { duration: busy ? 1.6 : 5, repeat: Infinity, ease: 'easeInOut' }
           }
         >
-          <LivingOrb size="sm" />
+          {/* Exact diameter: the presets are fixed, and 'sm' is 104px,
+              which overflowed this ring entirely. */}
+          <LivingOrb px={size} />
         </motion.span>
 
         {/* Status ring. The colour is the signal; the orb itself stays neutral

@@ -2,9 +2,11 @@ import { useState, useEffect, useRef } from 'react'
 import { motion } from 'framer-motion'
 import { Brain, BookOpen, Settings } from 'lucide-react'
 import LivingOrb from '../components/orb/LivingOrb'
+import OrbStatusLabel from '../components/orb/OrbStatusLabel'
 import { useChatModeStore } from '@/stores/chatModeStore'
 import { useLayoutStore, orbGeometry } from '@/stores/layoutStore'
 import { useSourceStore } from '@/stores/sourceStore'
+import { useSystemStore } from '@/stores/systemStore'
 import { useIsReducedMotion } from '@/hooks/useReducedMotion'
 import { useViewport } from '@/hooks/useViewport'
 
@@ -43,6 +45,10 @@ export default function Landing({ onNavigate, onOrbTap }: LandingProps) {
   // blurred and dimmed — so the panel reads as being in front of it rather than
   // competing with it. It returns when the last panel closes.
   const panelsOpen = useSourceStore((s) => s.open.length > 0)
+  // The top bar is hidden on this surface, so the landing starts the poll
+  // itself rather than depending on a component that is not mounted.
+  const startPolling = useSystemStore((s) => s.startPolling)
+  useEffect(() => startPolling(), [startPolling])
   const { width: viewportWidth } = useViewport()
   const { shiftX, zoom } = orbGeometry({
     viewportWidth,
@@ -161,6 +167,17 @@ export default function Landing({ onNavigate, onOrbTap }: LandingProps) {
             <div style={{ width: ORB_SIZE, height: ORB_SIZE }}>
               <LivingOrb size="lg" emphasis />
             </div>
+          </motion.div>
+
+          {/* What the Orb is reporting, in words. The top bar is hidden here,
+              so without this the landing has no status at all. Rides with the
+              orb so it stays beneath it as the panel is resized. */}
+          <motion.div
+            className="mt-2"
+            animate={{ x: shiftX, opacity: panelsOpen ? 0 : 1 }}
+            transition={chat || isResizing ? orbTransition : { duration: 0.4 }}
+          >
+            <OrbStatusLabel dimmed={panelsOpen} />
           </motion.div>
         </div>
 

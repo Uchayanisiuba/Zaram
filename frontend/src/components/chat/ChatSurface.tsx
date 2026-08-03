@@ -16,6 +16,7 @@ import { Send } from 'lucide-react';
 import { useChatStore } from '@/stores/chatStore';
 import { useSourceStore } from '@/stores/sourceStore';
 import { useOrbStore } from '@/stores';
+import { useSystemStore } from '@/stores/systemStore';
 import {
   useLayoutStore,
   CHAT_MIN,
@@ -92,6 +93,7 @@ export default function ChatSurface() {
   const send = useChatStore((s) => s.send);
 
   const { setOrbState } = useOrbStore((s) => ({ setOrbState: s.setOrbState }));
+  const setActivity = useSystemStore((s) => s.setActivity);
 
   // On a working surface the conversation is an assistant beside your work and
   // takes less width than on the landing, where it is the main event. Each
@@ -155,8 +157,11 @@ export default function ChatSurface() {
   // The Orb reports system state; it does not perform. Thinking while the
   // request is in flight, idle otherwise.
   useEffect(() => {
+    // Both orbs read the same activity, so the small one in the top bar and the
+    // large one on the landing can never disagree about what is happening.
     setOrbState(isStreaming ? 'thinking' : 'idle');
-  }, [isStreaming, setOrbState]);
+    setActivity(isStreaming ? 'thinking' : 'idle');
+  }, [isStreaming, setOrbState, setActivity]);
 
   const handleSend = () => {
     const text = inputText.trim();
