@@ -1,4 +1,5 @@
-import { Search, Wifi, Zap, Bell, User, ChevronRight } from 'lucide-react'
+import { Search, Bell, User, ChevronRight } from 'lucide-react'
+import OrbStatus from '@/components/orb/OrbStatus'
 
 type WorkspaceId = 'landing' | 'memory' | 'knowledge' | 'settings'
 
@@ -55,11 +56,13 @@ export default function TopNav({ workspace, onSearchOpen }: TopNavProps) {
         )}
       </div>
 
-      {/* Center: status indicators */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 64, position: 'absolute', left: '50%', transform: 'translateX(-50%)' }}>
-        <StatusPill icon={<span style={{ width: 10, height: 10, borderRadius: '50%', background: 'var(--color-emerald)', display: 'inline-block', boxShadow: '0 0 6px var(--color-emerald)' }} />} label="Local" />
-        <StatusPill icon={<Zap size={20} />} label="Claude 3.5" accent />
-        <StatusPill icon={<Wifi size={20} />} label="Synced" />
+      {/* Centre: the Orb, at working size.
+          It replaced three hardcoded pills — "Local", "Claude 3.5" and
+          "Synced". None reflected anything: no cloud provider is wired and
+          there is no sync. One indicator reporting real state is worth more
+          than three claiming things that are not true. */}
+      <div style={{ position: 'absolute', left: '50%', transform: 'translateX(-50%)' }}>
+        <OrbStatus size={40} />
       </div>
 
       {/* Right: actions */}
@@ -105,26 +108,6 @@ export default function TopNav({ workspace, onSearchOpen }: TopNavProps) {
         </NavIcon>
       </div>
     </header>
-  )
-}
-
-function StatusPill({ icon, label, accent = false }: { icon: React.ReactNode; label: string; accent?: boolean }) {
-  return (
-    <div style={{
-      display: 'flex',
-      alignItems: 'center',
-      gap: 10,
-      padding: '3px 8px',
-      borderRadius: 99,
-      background: accent ? 'var(--color-indigo-a-12)' : 'var(--color-glass)',
-      border: `1px solid ${accent ? 'var(--color-indigo-a-20)' : 'var(--color-border-subtle)'}`,
-      fontSize: 'var(--text-h2)',
-      color: accent ? 'var(--color-indigo-light)' : 'var(--color-text-muted)',
-      fontWeight: 500,
-    }}>
-      {icon}
-      {label}
-    </div>
   )
 }
 

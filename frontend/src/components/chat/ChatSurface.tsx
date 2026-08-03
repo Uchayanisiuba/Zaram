@@ -14,6 +14,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { motion, type Variants } from 'framer-motion';
 import { Send } from 'lucide-react';
 import { useChatStore } from '@/stores/chatStore';
+import { useSourceStore } from '@/stores/sourceStore';
 import { useOrbStore } from '@/stores';
 import {
   useLayoutStore,
@@ -21,28 +22,60 @@ import {
   CHAT_MAX,
   clamp,
 } from '@/stores/layoutStore';
+import { useChatModeStore } from '@/stores/chatModeStore';
 import ResizeHandle from '@/components/common/ResizeHandle';
 import { useIsReducedMotion } from '@/hooks/useReducedMotion';
 import { useViewport } from '@/hooks/useViewport';
 import type { ChatSource } from '@/services/chatClient';
 
-/** Provenance for one reply. Plain on purpose. */
-function SourceList({ sources }: { sources: ChatSource[] }) {
+/** Strip internal citation markers ([M1], [S2]) from displayed text.
+ *  They ground the model's answer but mean nothing to the user. Applied to
+ *  accumulated text rather than individual tokens, because a marker is often
+ *  split across several tokens as it streams. */
+const stripMarkers = (t: string) => t.replace(/\s*\[[MS]\d+\]/g, '');
+
+/** Provenance for one reply. Each citation opens its source. */
+function SourceList({
+  sources,
+  deleted,
+  onOpen,
+}: {
+  sources: ChatSource[];
+  deleted: Set<string>;
+  onOpen: (url: string, el: HTMLElement) => void;
+}) {
   if (sources.length === 0) return null;
   return (
     <div className="mt-2 pl-3 border-l border-white/10">
       <p
         className="text-[10px] uppercase text-slate-500 mb-1"
-        style={{ letterSpacing: '0.06em' }}
+        style={{ letterSpacing: '0.06em', fontFamily: 'var(--font-display)' }}
       >
         {sources.length} source{sources.length === 1 ? '' : 's'}
       </p>
       <ul className="flex flex-col gap-1">
-        {sources.map((s, i) => (
-          <li key={s.url ?? i} className="text-[11px] text-slate-400 leading-snug">
-            <span className="text-slate-500">[{s.kind}]</span> {s.title ?? s.url}
-          </li>
-        ))}
+        {sources.map((s, i) => {
+          const gone = s.url != null && deleted.has(s.url);
+          return (
+            <li key={s.url ?? i}>
+              <button
+                type="button"
+                disabled={gone || !s.url}
+                onClick={(e) => s.url && onOpen(s.url, e.currentTarget)}
+                className="text-left text-[11px] leading-snug transition-colors disabled:cursor-default rounded px-1 -mx-1 py-0.5 enabled:hover:bg-white/5 enabled:hover:text-slate-200"
+                style={{
+                  color: gone ? 'var(--color-text-faint)' : 'var(--color-text-muted)',
+                  textDecoration: gone ? 'line-through' : 'none',
+                }}
+                title={gone ? 'Forgotten' : 'Open this source'}
+              >
+                <span className="text-slate-500">[{s.kind}]</span>{' '}
+                {s.title ?? s.url}
+                {gone && <span className="ml-1 text-slate-600">— forgotten</span>}
+              </button>
+            </li>
+          );
+        })}
       </ul>
     </div>
   );
@@ -60,10 +93,21 @@ export default function ChatSurface() {
 
   const { setOrbState } = useOrbStore((s) => ({ setOrbState: s.setOrbState }));
 
-  const chatFraction = useLayoutStore((s) => s.chatFraction);
-  const setChatFraction = useLayoutStore((s) => s.setChatFraction);
+  // On a working surface the conversation is an assistant beside your work and
+  // takes less width than on the landing, where it is the main event. Each
+  // context keeps its own remembered size.
+  const context = useChatModeStore((s) => s.context);
+  const landingFraction = useLayoutStore((s) => s.chatFraction);
+  const workspaceFraction = useLayoutStore((s) => s.chatFractionWorkspace);
+  const chatFraction = context === 'workspace' ? workspaceFraction : landingFraction;
+  const setFraction = useLayoutStore((s) => s.setChatFraction);
+  const setChatFraction = useCallback(
+    (f: number) => setFraction(f, context),
+    [setFraction, context],
+  );
   const setResizing = useLayoutStore((s) => s.setResizing);
-  const resetChat = useLayoutStore((s) => s.resetChat);
+  const resetChatFor = useLayoutStore((s) => s.resetChat);
+  const resetChat = useCallback(() => resetChatFor(context), [resetChatFor, context]);
   const isResizing = useLayoutStore((s) => s.isResizing);
   const { width: viewportWidth } = useViewport();
 
@@ -90,6 +134,12 @@ export default function ChatSurface() {
   const [inputText, setInputText] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  // Panels live in the orb region and the orb has to react to them, so this is
+  // app-level state rather than local. Forgotten sources stay listed but struck
+  // through, so a deletion is visibly confirmed rather than silently vanishing.
+  const openSourcePanel = useSourceStore((s) => s.openSource);
+  const deletedUrls = useSourceStore((s) => s.forgotten);
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -230,9 +280,15 @@ export default function ChatSurface() {
                   >
                     {/* Speaker is currently distinguished by colour alone, which
                         is not accessible. The spec rebuild must fix that. */}
-                    {msg.text}
+                    {stripMarkers(msg.text)}
                   </p>
-                  {msg.role === 'assistant' && <SourceList sources={msg.sources} />}
+                  {msg.role === 'assistant' && (
+                    <SourceList
+                      sources={msg.sources}
+                      deleted={deletedUrls}
+                      onOpen={openSourcePanel}
+                    />
+                  )}
                   {msg.error && (
                     <p className="mt-1 text-[11px]" style={{ color: '#fca5a5' }}>
                       {msg.text ? `Interrupted: ${msg.error}` : msg.error}
@@ -250,10 +306,14 @@ export default function ChatSurface() {
                       className="text-sm leading-relaxed whitespace-pre-wrap"
                       style={{ color: 'var(--color-cyan)' }}
                     >
-                      {streamingText}
+                      {stripMarkers(streamingText)}
                     </p>
                   )}
-                  <SourceList sources={streamingSources} />
+                  <SourceList
+                    sources={streamingSources}
+                    deleted={deletedUrls}
+                    onOpen={openSourcePanel}
+                  />
                 </div>
               )}
             </>

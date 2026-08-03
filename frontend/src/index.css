@@ -75,9 +75,14 @@
   --color-border-subtle-2: rgba(255,255,255,0.07);
   --color-border-glass-strong: rgba(255,255,255,0.1);
   --color-glass-mid: rgba(255,255,255,0.05);
-  --surface-panel: rgba(13,15,22,0.7);
-  --surface-sidebar: rgba(8,10,14,0.5);
-  --surface-rail: rgba(8,10,14,0.65);
+  /* Shell surfaces. Project B's idiom is a translucent white film over the page
+     rather than an opaque dark fill — that is what makes the landing read as
+     glass. These were dark fills, which is why the workspaces felt like a
+     different application from the landing. Blur is applied by .glass /
+     .glass-strong; these are only the tint. */
+  --surface-panel: rgba(255,255,255,0.04);
+  --surface-sidebar: rgba(255,255,255,0.025);
+  --surface-rail: rgba(255,255,255,0.03);
   --color-indigo-a-06: rgba(99,102,241,0.06);
   --color-indigo-a-10: rgba(99,102,241,0.10);
   --color-indigo-a-12: rgba(99,102,241,0.12);
@@ -274,10 +279,38 @@ body {
 }
 
 .glass-strong {
-  background: rgba(13, 15, 22, 0.85);
+  /* Was an 85% opaque dark fill, which read as a solid card rather than glass.
+     A heavier blur with a light film gives depth while still letting the
+     background through, which is the Project B look. */
+  background: rgba(255, 255, 255, 0.06);
   backdrop-filter: blur(40px) saturate(1.6);
   -webkit-backdrop-filter: blur(40px) saturate(1.6);
   border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* ─── Shared page backdrop ───────────────────────────────────────────
+   The landing painted its own gradient and grid while the workspaces sat on a
+   flat colour, so glass had nothing to refract and looked grey. Both now share
+   one ground. */
+
+.zaram-backdrop {
+  position: relative;
+  background:
+    radial-gradient(ellipse at 25% 15%, rgba(99, 102, 241, 0.08) 0%, transparent 52%),
+    radial-gradient(ellipse at 75% 85%, rgba(168, 85, 247, 0.06) 0%, transparent 52%),
+    var(--color-base);
+}
+
+.zaram-backdrop::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.04;
+  background-image:
+    linear-gradient(rgba(99, 102, 241, 0.6) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(99, 102, 241, 0.6) 1px, transparent 1px);
+  background-size: 56px 56px;
 }
 
 .glass-border-indigo {

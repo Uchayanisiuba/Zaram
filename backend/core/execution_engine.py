@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 from collections.abc import Iterator
 from typing import Any
@@ -109,6 +110,7 @@ class ExecutionEngine:
                     yield event
 
         plan = self._planner.create_plan(prompt)
+        plan = self._drop_unavailable_steps(plan)
         plan.state = PlanState.RUNNING
         logger.debug("Engine: plan created with %d steps", len(plan.steps))
 
@@ -234,6 +236,45 @@ class ExecutionEngine:
     # ------------------------------------------------------------------
     # Search results as context
     # ------------------------------------------------------------------
+
+    def _drop_unavailable_steps(self, plan: ExecutionPlan) -> ExecutionPlan:
+        """Remove steps whose capability has no registered runtime.
+
+        The classifier routes on keywords, so an ordinary question can be sent
+        to a capability whose runtime is dormant — "what is my secret codeword?"
+        matched the tool keywords and planned `tool.terminal`. Only four
+        runtimes boot, so that produced a raw
+        `[FALLBACK] tool.terminal unavailable: ...` in place of an answer.
+
+        Planning against what is actually registered means a misroute degrades
+        to a normal reply instead of showing the user an internal error.
+        """
+        available: list[ExecutionStep] = []
+        for step in plan.steps:
+            try:
+                self._router.resolve(step.capability_id)
+            except Exception:
+                logger.info(
+                    "Engine: dropping step %s — no runtime registered for it",
+                    step.capability_id,
+                )
+                continue
+            available.append(step)
+
+        if not available:
+            # Never return an empty plan: answering normally is always better
+            # than answering not at all.
+            logger.info("Engine: no planned capability was available; answering directly")
+            available = [
+                ExecutionStep(
+                    capability_id="reasoning.generate",
+                    input_data={"prompt": plan.original_prompt},
+                    depends_on=[],
+                )
+            ]
+
+        plan.steps = available
+        return plan
 
     def _parse_search_results(self, raw: str) -> list[dict[str, Any]]:
         """Pull the result list out of a knowledge.search payload."""
@@ -372,12 +413,26 @@ class ExecutionEngine:
             ))
         return events
 
+    #: Internal citation markers. The model is told not to print them but does
+    #: anyway, so they are stripped rather than merely discouraged.
+    _MARKER_RE = re.compile(r"\s*\[[MS]\d+\]")
+
+    @classmethod
+    def strip_markers(cls, text: str) -> str:
+        """Remove [M1]/[S2] citation markers from user-facing text.
+
+        They exist so the model can ground its answer in a specific chunk. They
+        mean nothing to the user, and storing them would carry the noise into
+        every future recall of this exchange.
+        """
+        return cls._MARKER_RE.sub("", text or "")
+
     def _remember(self, prompt: str, answer: str, session_id: str) -> None:
         """Store this exchange so a later question can recall it."""
         runtime = self._memory_runtime()
         if runtime is None:
             return
-        answer = (answer or "").strip()
+        answer = self.strip_markers(answer or "").strip()
         if not prompt.strip() or not answer or answer.startswith("[FALLBACK]"):
             return
         # Imported lazily: core/ does not depend on a runtime at module load.

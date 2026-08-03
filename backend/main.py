@@ -164,12 +164,39 @@ async def health():
     except Exception:
         speech_health = {}
     
+    # What the Orb reports. This is the product claim made continuously visible,
+    # so it must describe what is actually true rather than what is intended.
+    from core.planner import web_search_enabled
+
+    inference_providers = []
+    try:
+        for cap in capabilities:
+            if cap == "reasoning.generate":
+                # Only the local engine is wired today. When a cloud engine is
+                # added this must list it, or the Orb will under-report egress.
+                inference_providers.append({"id": "ollama", "locality": "local"})
+    except Exception:
+        pass
+
+    search_on = web_search_enabled()
+    can_egress = search_on
+    routing = {
+        # "local" while every path stays on this machine. Becomes "cloud" or
+        # "mixed" once a remote provider is wired and selected.
+        "mode": "local",
+        "providers": inference_providers,
+        "web_search": "enabled" if search_on else "disabled",
+        # The honest summary: is there any route off this machine at all?
+        "can_leave_device": can_egress,
+    }
+
     return {
         "status": "ok",
         "kernel": "online" if chat_router is not None else "offline",
         "capabilities": capabilities,
         "knowledge_providers": provider_health,
         "speech": speech_health,
+        "routing": routing,
     }
 
 
@@ -252,6 +279,54 @@ async def knowledge_search(request: KnowledgeRequest):
     print(f"[STAGE-7][Python] POST /knowledge/search received: query='{request.query[:50]}...' persona={request.persona}")
     from knowledge.knowledge_service import search_knowledge
     return search_knowledge(request.query, request.persona)
+
+
+@app.get("/memory/{record_id}")
+async def get_memory(record_id: str):
+    """Fetch one stored fact, so a citation can be inspected.
+
+    Rule 2 says every recalled fact carries provenance. A citation the user
+    cannot open is only half of that — this is what makes it inspectable.
+    """
+    if not kernel.memory_runtime:
+        raise HTTPException(status_code=503, detail="Memory runtime not available")
+
+    record = await kernel.memory_runtime.get_record(record_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="No such memory")
+
+    return {
+        "id": record.id,
+        "content": record.content,
+        "memory_type": getattr(record.memory_type, "value", str(record.memory_type)),
+        "created_at": record.created_at,
+        "last_accessed": record.last_accessed,
+        "access_count": record.access_count,
+        "importance": record.importance,
+        "source": record.source,
+        "tags": list(record.tags or []),
+        "session_id": record.session_id,
+        "metadata": dict(record.metadata or {}),
+    }
+
+
+@app.delete("/memory/{record_id}")
+async def delete_memory(record_id: str):
+    """Forget one stored fact.
+
+    Rule 4: the user can delete any stored fact, and the affected answers must
+    change. Removal is from the Spine itself, so the next question genuinely
+    cannot recall it — this is not a display filter.
+    """
+    if not kernel.memory_runtime:
+        raise HTTPException(status_code=503, detail="Memory runtime not available")
+
+    deleted = await kernel.memory_runtime.forget(record_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="No such memory")
+
+    print(f"[Memory] Forgot record {record_id}")
+    return {"deleted": True, "id": record_id}
 
 
 AUDIO_CACHE_DIR = os.path.abspath("audio_cache")
