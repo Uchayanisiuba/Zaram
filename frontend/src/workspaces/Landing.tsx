@@ -3,7 +3,9 @@ import { motion } from 'framer-motion'
 import { Brain, BookOpen, Settings } from 'lucide-react'
 import LivingOrb from '../components/orb/LivingOrb'
 import { useChatModeStore } from '@/stores/chatModeStore'
+import { useLayoutStore, orbGeometry } from '@/stores/layoutStore'
 import { useIsReducedMotion } from '@/hooks/useReducedMotion'
+import { useViewport } from '@/hooks/useViewport'
 
 type WorkspaceId = 'memory' | 'knowledge' | 'settings'
 
@@ -22,15 +24,28 @@ interface LandingProps {
 
 const ORB_SIZE = 320
 const ORBIT_RADIUS = 240
-// Orb zooms ~1.4x and glides into the open space left of the chat panel.
-const ORB_ZOOM = 1.4
-const ORB_SHIFT = -160
+/** The orbital system is rendered inside this scale, so any transform applied
+ *  within it is multiplied by the same factor. See orbGeometry(). */
+const CONTAINER_SCALE = 1.4
 
 export default function Landing({ onNavigate, onOrbTap }: LandingProps) {
   const [_, setHovered] = useState<string | null>(null)
   const reduced = useIsReducedMotion()
   const { chatView, closeChat } = useChatModeStore()
   const chat = chatView === 'chat'
+
+  // The orb's position and size are derived from the conversation panel's
+  // width, so dragging the panel moves the orb with it.
+  const chatFraction = useLayoutStore((s) => s.chatFraction)
+  const isResizing = useLayoutStore((s) => s.isResizing)
+  const { width: viewportWidth } = useViewport()
+  const { shiftX, zoom } = orbGeometry({
+    viewportWidth,
+    chatFraction,
+    chatOpen: chat,
+    orbSize: ORB_SIZE,
+    containerScale: CONTAINER_SCALE,
+  })
 
   // --- Orbital rAF: gated to 'landing' so the orbit FREEZES during chat.
   // Continuity refs ensure the loop resumes from the frozen angle (no jump to 0).
@@ -75,10 +90,14 @@ export default function Landing({ onNavigate, onOrbTap }: LandingProps) {
   const ring1Size = ORBIT_RADIUS * 2 + 60
   const ring2Size = ORBIT_RADIUS * 2 + 110
 
-  const orbShift = chat ? { scale: ORB_ZOOM, x: ORB_SHIFT, y: 0 } : { scale: 1, x: 0, y: 0 }
-  const orbTransition = chat
-    ? reduced ? { type: 'tween' as const, duration: 0.22 } : { type: 'spring' as const, stiffness: 200, damping: 24 }
-    : { type: 'tween' as const, duration: 0.35 }
+  const orbShift = { scale: zoom, x: shiftX, y: 0 }
+  const orbTransition = isResizing
+    ? // Track the divider exactly while it is being dragged; a spring here
+      // makes the orb drift behind the panel edge.
+      { duration: 0 }
+    : chat
+      ? reduced ? { type: 'tween' as const, duration: 0.22 } : { type: 'spring' as const, stiffness: 200, damping: 24 }
+      : { type: 'tween' as const, duration: 0.35 }
 
   return (
     <div
@@ -133,8 +152,8 @@ export default function Landing({ onNavigate, onOrbTap }: LandingProps) {
           <motion.div
             initial={{ opacity: 0, scale: 0.9 }}
             animate={{ opacity: 1, ...orbShift }}
-            transition={chat ? orbTransition : { duration: 0.4 }}
-            whileTap={{ scale: chat ? ORB_ZOOM * 0.9 : 0.9 }}
+            transition={chat || isResizing ? orbTransition : { duration: 0.4 }}
+            whileTap={{ scale: zoom * 0.9 }}
             style={{ cursor: 'pointer' }}
             onClick={onOrbTap}
           >

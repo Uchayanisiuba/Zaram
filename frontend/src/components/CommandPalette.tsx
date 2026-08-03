@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef } from 'react'
-import { Search, Brain, BookOpen, Settings, ArrowRight, Command } from 'lucide-react'
+import { Search, Home, Brain, BookOpen, Settings, ArrowRight, Command } from 'lucide-react'
 
 type WorkspaceId = 'landing' | 'memory' | 'knowledge' | 'settings'
 
 const COMMANDS = [
+  { id: 'landing', icon: <Home size={28} />, label: 'Go Home', sub: 'Landing', ws: 'landing' as WorkspaceId },
   { id: 'memory', icon: <Brain size={28} />, label: 'Open Memory', sub: 'Workspace', ws: 'memory' as WorkspaceId },
   { id: 'knowledge', icon: <BookOpen size={28} />, label: 'Open Knowledge', sub: 'Workspace', ws: 'knowledge' as WorkspaceId },
   { id: 'settings', icon: <Settings size={28} />, label: 'Open Settings', sub: 'Workspace', ws: 'settings' as WorkspaceId },
