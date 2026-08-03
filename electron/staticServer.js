@@ -3,6 +3,7 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const { Readable } = require('stream');
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -56,19 +57,39 @@ async function proxy(req, res, baseUrl, fetchImpl) {
     res.statusCode = upstream.status;
     upstream.headers.forEach((v, k) => {
       const lk = k.toLowerCase();
+      // Hop-by-hop headers belong to the upstream connection, not this one.
       if (lk === 'transfer-encoding' || lk === 'connection') return;
+      // Content-Length would be wrong for a streamed body and truncates it.
+      if (lk === 'content-length') return;
       res.setHeader(k, v);
     });
-    if (upstream.body) {
-      upstream.body.pipe(res);
+
+    if (!upstream.body) {
+      res.end();
+      return;
+    }
+
+    // `fetch` returns a *web* ReadableStream, which has no .pipe(). Calling it
+    // threw, the catch below turned that into a 502, and every proxied request
+    // in a packaged build failed with "Backend unreachable". Convert first.
+    //
+    // Piping rather than buffering also matters for its own reason: /chat
+    // streams tokens as they are generated, and reading the body to completion
+    // before responding would hold the whole reply until the model finished.
+    Readable.fromWeb(upstream.body).pipe(res);
+  } catch (err) {
+    console.error('[StaticServer] Proxy error:', err);
+    // Headers may already be on the wire for a streamed response; writing a
+    // status at that point throws and masks the real error.
+    if (!res.headersSent) {
+      res.statusCode = 502;
+      res.end('Backend unreachable');
     } else {
       res.end();
     }
-  } catch (err) {
-    console.error('[StaticServer] Proxy error:', err);
-    res.statusCode = 502;
-    res.end('Backend unreachable');
   } finally {
+    // Only guards establishing the connection. Once the body is piping the
+    // timer must not fire, or a long generation would be cut off mid-reply.
     clearTimeout(timer);
   }
 }
