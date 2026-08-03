@@ -62,6 +62,7 @@ function createConfig(options) {
         '/knowledge',
         '/voice',
         '/health',
+        '/memory',
       ],
     },
     window: {

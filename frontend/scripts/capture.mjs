@@ -18,7 +18,11 @@ const APP = 'http://localhost:5173';
 
 const shots = [];
 const shot = async (page, name, note) => {
-  await page.screenshot({ path: path.join(OUT, `${name}.png`) });
+  // timeout: the page pulls three fonts from fonts.googleapis.com, and
+  // Playwright waits for webfonts before capturing. That request is also
+  // unlogged egress on every launch — bundling the fonts locally would fix
+  // both problems.
+  await page.screenshot({ path: path.join(OUT, `${name}.png`), timeout: 15000 });
   shots.push(`${name}.png — ${note}`);
   console.log(`  captured ${name}.png`);
 };
@@ -30,6 +34,14 @@ const freshContext = async (browser) => {
     viewport: { width: 1440, height: 900 },
     deviceScaleFactor: 2,
   });
+  // index.css pulls three fonts from fonts.googleapis.com. Playwright blocks on
+  // webfonts before capturing, and that request does not resolve here — which
+  // is also what a packaged app would face offline. Blocked so the page falls
+  // back immediately. Bundling the fonts locally would fix the capture, the
+  // offline case, and the unlogged egress on every launch.
+  await ctx.route('**fonts.googleapis.com**', (r) => r.abort());
+  await ctx.route('**fonts.gstatic.com**', (r) => r.abort());
+
   await ctx.addInitScript(() => {
     try {
       localStorage.clear();
@@ -49,7 +61,9 @@ const main = async () => {
   // --- Landing, first run -------------------------------------------------
   let ctx = await freshContext(browser);
   let page = await ctx.newPage();
-  await page.goto(APP, { waitUntil: 'networkidle' });
+  // Not networkidle: the app polls /health on a timer, so the network never
+  // goes quiet.
+  await page.goto(APP, { waitUntil: 'domcontentloaded' });
   await page.waitForTimeout(1200);
   await shot(page, 'landing-at-rest', 'Orbital landing, quiet, no status label');
 

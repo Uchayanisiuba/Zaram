@@ -274,6 +274,21 @@ export default function ChatSurface() {
             <>
               {messages.map((msg) => (
                 <div key={msg.id}>
+                  {/* Speaker is named, not just coloured. Colour alone fails
+                      colourblind users and is invisible to a screen reader,
+                      which would otherwise read one unbroken wall of text. */}
+                  <p
+                    className="text-[10px] uppercase tracking-wider mb-1"
+                    style={{
+                      color:
+                        msg.role === 'user'
+                          ? 'var(--color-text-muted)'
+                          : 'var(--color-cyan)',
+                      fontFamily: 'var(--font-display)',
+                    }}
+                  >
+                    {msg.role === 'user' ? 'You' : 'Zaram'}
+                  </p>
                   <p
                     className="text-sm leading-relaxed whitespace-pre-wrap"
                     style={{
@@ -281,10 +296,15 @@ export default function ChatSurface() {
                         msg.role === 'user'
                           ? 'var(--color-text)'
                           : 'var(--color-cyan)',
+                      // A second, non-colour cue: the assistant's replies are
+                      // indented behind a rule.
+                      borderLeft:
+                        msg.role === 'assistant'
+                          ? '2px solid var(--color-cyan-light)'
+                          : undefined,
+                      paddingLeft: msg.role === 'assistant' ? 10 : undefined,
                     }}
                   >
-                    {/* Speaker is currently distinguished by colour alone, which
-                        is not accessible. The spec rebuild must fix that. */}
                     {stripMarkers(msg.text)}
                   </p>
                   {msg.role === 'assistant' && (
@@ -307,12 +327,27 @@ export default function ChatSurface() {
               {isStreaming && (
                 <div>
                   {streamingText && (
-                    <p
-                      className="text-sm leading-relaxed whitespace-pre-wrap"
-                      style={{ color: 'var(--color-cyan)' }}
-                    >
-                      {stripMarkers(streamingText)}
-                    </p>
+                    <>
+                      <p
+                        className="text-[10px] uppercase tracking-wider mb-1"
+                        style={{
+                          color: 'var(--color-cyan)',
+                          fontFamily: 'var(--font-display)',
+                        }}
+                      >
+                        Zaram
+                      </p>
+                      <p
+                        className="text-sm leading-relaxed whitespace-pre-wrap"
+                        style={{
+                          color: 'var(--color-cyan)',
+                          borderLeft: '2px solid var(--color-cyan-light)',
+                          paddingLeft: 10,
+                        }}
+                      >
+                        {stripMarkers(streamingText)}
+                      </p>
+                    </>
                   )}
                   <SourceList
                     sources={streamingSources}

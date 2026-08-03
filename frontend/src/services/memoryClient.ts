@@ -38,6 +38,54 @@ async function failure(res: Response, fallback: string): Promise<Error> {
   return new Error(`${fallback} (${res.status})${detail ? `: ${detail}` : ''}`);
 }
 
+export interface MemoryListing {
+  total: number;
+  offset: number;
+  limit: number;
+  records: MemoryRecord[];
+}
+
+export interface MemoryStats {
+  total_records: number;
+  by_type: Record<string, number>;
+  sessions: number;
+  newest_at: number | null;
+  storage_bytes: number;
+  /** Null until the egress log exists. Null is not zero: an absent measurement
+   *  must never be displayed as a measured zero. */
+  bytes_left_device_today: number | null;
+}
+
+export async function fetchMemoryList(
+  opts: { limit?: number; offset?: number; q?: string } = {},
+  signal?: AbortSignal,
+): Promise<MemoryListing> {
+  const params = new URLSearchParams();
+  if (opts.limit != null) params.set('limit', String(opts.limit));
+  if (opts.offset != null) params.set('offset', String(opts.offset));
+  if (opts.q) params.set('q', opts.q);
+
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}/memory?${params}`, { signal });
+  } catch {
+    throw new Error('Could not reach the Zaram backend.');
+  }
+  if (!res.ok) throw await failure(res, 'Could not load memory');
+  return (await res.json()) as MemoryListing;
+}
+
+export async function fetchMemoryStats(signal?: AbortSignal): Promise<MemoryStats> {
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}/memory/stats`, { signal });
+  } catch {
+    throw new Error('Could not reach the Zaram backend.');
+  }
+  if (!res.ok) throw await failure(res, 'Could not load memory stats');
+  return (await res.json()) as MemoryStats;
+}
+
 export async function fetchMemory(
   id: string,
   signal?: AbortSignal,
