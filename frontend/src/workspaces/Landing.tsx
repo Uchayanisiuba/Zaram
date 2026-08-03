@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { motion } from 'framer-motion'
 import { Brain, BookOpen, Settings } from 'lucide-react'
-import LivingOrb from '../components/orb/LivingOrb'
+import LivingOrb, { ORB_BEHAVIOUR } from '../components/orb/LivingOrb'
 import OrbStatusLabel from '../components/orb/OrbStatusLabel'
 import OrbHint from '../components/orb/OrbHint'
 import { useChatModeStore } from '@/stores/chatModeStore'
@@ -169,7 +169,9 @@ export default function Landing({ onNavigate, onOrbTap }: LandingProps) {
             onClick={panelsOpen ? undefined : onOrbTap}
           >
             <div style={{ width: ORB_SIZE, height: ORB_SIZE }}>
-              <LivingOrb size="lg" emphasis />
+              {/* Same orb and same behaviour as the sub-menu — only the
+                  diameter differs. See ORB_BEHAVIOUR. */}
+              <LivingOrb px={ORB_SIZE} {...ORB_BEHAVIOUR} />
             </div>
           </motion.div>
 

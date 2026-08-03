@@ -17,7 +17,7 @@
  */
 import { useEffect } from 'react';
 import { motion } from 'framer-motion';
-import LivingOrb from './LivingOrb';
+import LivingOrb, { ORB_BEHAVIOUR } from './LivingOrb';
 import { useSystemStore, describeSystem } from '@/stores/systemStore';
 import { useChatModeStore } from '@/stores/chatModeStore';
 import { useIsReducedMotion } from '@/hooks/useReducedMotion';
@@ -83,13 +83,11 @@ export default function OrbStatus({
               : { duration: busy ? 1.6 : 5, repeat: Infinity, ease: 'easeInOut' }
           }
         >
-          {/* Exact diameter: the presets are fixed, and 'sm' is 104px,
-              which overflowed this ring entirely. */}
-          <LivingOrb
-            px={orbSize}
-            // Deeper breath so the small orb still reads as alive.
-            pulseAmplitude={1.4}
-          />
+          {/* Same orb and same behaviour as the landing — only the diameter
+              differs. See ORB_BEHAVIOUR.
+              An exact px is required because the size presets are fixed and
+              'sm' is 104px, which overflowed this ring entirely. */}
+          <LivingOrb px={orbSize} {...ORB_BEHAVIOUR} />
         </motion.span>
 
         {/* Status ring. The colour is the signal; the orb itself stays neutral

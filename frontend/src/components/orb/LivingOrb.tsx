@@ -30,6 +30,27 @@ const WAVE_HEIGHTS = [28, 44, 60, 72, 60, 44, 28];
 
 export type OrbState = 'idle' | 'listening' | 'thinking' | 'speaking';
 
+/**
+ * The single definition of how the orb behaves.
+ *
+ * There is one orb in Zaram. It appears on the landing, over the conversation,
+ * and in the sub-menu bar, and in each place it must look and behave
+ * identically — only its diameter changes. Spreading these values across call
+ * sites is how the landing ended up breathing differently from the sub-menu.
+ *
+ * Pass this at every call site and vary nothing but `px`.
+ *
+ * Only one instance is ever mounted: the landing renders when the landing is
+ * shown and the sub-menu bar renders when it is not, so the animations never
+ * run twice.
+ */
+export const ORB_BEHAVIOUR = {
+  emphasis: true,
+  /** Deeper than the per-state default, so it reads as alive at any size. */
+  pulseAmplitude: 1.4,
+  coreDotScale: 1,
+} as const;
+
 interface LivingOrbProps {
   size?: 'xs' | 'sm' | 'md' | 'lg' | 'xl';
   className?: string;
