@@ -4,6 +4,7 @@ import { Brain, BookOpen, Settings } from 'lucide-react'
 import LivingOrb from '../components/orb/LivingOrb'
 import { useChatModeStore } from '@/stores/chatModeStore'
 import { useLayoutStore, orbGeometry } from '@/stores/layoutStore'
+import { useSourceStore } from '@/stores/sourceStore'
 import { useIsReducedMotion } from '@/hooks/useReducedMotion'
 import { useViewport } from '@/hooks/useViewport'
 
@@ -38,6 +39,10 @@ export default function Landing({ onNavigate, onOrbTap }: LandingProps) {
   // width, so dragging the panel moves the orb with it.
   const chatFraction = useLayoutStore((s) => s.chatFraction)
   const isResizing = useLayoutStore((s) => s.isResizing)
+  // Source panels open in the orb's space. While any is open the orb recedes —
+  // blurred and dimmed — so the panel reads as being in front of it rather than
+  // competing with it. It returns when the last panel closes.
+  const panelsOpen = useSourceStore((s) => s.open.length > 0)
   const { width: viewportWidth } = useViewport()
   const { shiftX, zoom } = orbGeometry({
     viewportWidth,
@@ -102,20 +107,11 @@ export default function Landing({ onNavigate, onOrbTap }: LandingProps) {
   return (
     <div
       className="h-screen overflow-hidden text-slate-100 flex items-center justify-center w-full flex-1"
-      style={{
-        background: 'radial-gradient(ellipse at 25% 15%, rgba(99,102,241,0.08) 0%, transparent 52%), radial-gradient(ellipse at 75% 85%, rgba(168,85,247,0.06) 0%, transparent 52%), #08080f',
-        fontFamily: "'Space Grotesk', 'Inter', sans-serif",
-      }}
+      // Gradient and grid now come from .zaram-backdrop on the app shell, so
+      // the landing and the workspaces share one ground instead of the landing
+      // painting its own.
+      style={{ fontFamily: 'var(--font-display), var(--font-sans), sans-serif' }}
     >
-      {/* Subtle grid background */}
-      <div
-        className="absolute inset-0 opacity-[0.04] pointer-events-none"
-        style={{
-          backgroundImage: 'linear-gradient(rgba(99,102,241,0.6) 1px, transparent 1px), linear-gradient(90deg, rgba(99,102,241,0.6) 1px, transparent 1px)',
-          backgroundSize: '56px 56px',
-        }}
-      />
-
       {/* Orbital system — keeps the same shell; only the orbital motion is gated. */}
       <div
         className="relative w-full h-full flex items-center justify-center"
@@ -151,11 +147,16 @@ export default function Landing({ onNavigate, onOrbTap }: LandingProps) {
         <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-10 flex flex-col items-center">
           <motion.div
             initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, ...orbShift }}
+            animate={{
+              opacity: panelsOpen ? 0.35 : 1,
+              filter: panelsOpen ? 'blur(8px)' : 'blur(0px)',
+              ...orbShift,
+              scale: orbShift.scale * (panelsOpen ? 0.96 : 1),
+            }}
             transition={chat || isResizing ? orbTransition : { duration: 0.4 }}
             whileTap={{ scale: zoom * 0.9 }}
-            style={{ cursor: 'pointer' }}
-            onClick={onOrbTap}
+            style={{ cursor: panelsOpen ? 'default' : 'pointer' }}
+            onClick={panelsOpen ? undefined : onOrbTap}
           >
             <div style={{ width: ORB_SIZE, height: ORB_SIZE }}>
               <LivingOrb size="lg" emphasis />

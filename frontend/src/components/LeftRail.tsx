@@ -67,7 +67,10 @@ export default function LeftRail({ workspace, onNavigate }: LeftRailProps) {
         // No width transition while dragging, or the edge lags the cursor.
         transition: isResizing ? 'none' : 'width 0.22s cubic-bezier(0.4, 0, 0.2, 1)',
         background: 'var(--surface-rail)',
-        backdropFilter: 'blur(20px)',
+        // Saturation matches .glass so the rail reads the same as the dock and
+        // the conversation panel rather than slightly flatter.
+        backdropFilter: 'blur(20px) saturate(1.4)',
+        WebkitBackdropFilter: 'blur(20px) saturate(1.4)',
         borderRight: '1px solid var(--color-border-subtle)',
         overflow: 'hidden',
         flexShrink: 0,

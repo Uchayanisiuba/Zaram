@@ -13,6 +13,7 @@ import TopNav from './components/TopNav';
 import LeftRail from './components/LeftRail';
 import BottomDock from './components/BottomDock';
 import ChatSurface from './components/chat/ChatSurface';
+import SourcePanelLayer from './components/chat/SourcePanelLayer';
 import CommandPalette from './components/CommandPalette';
 import Landing from './workspaces/Landing';
 import MemoryWorkspace from './workspaces/MemoryWorkspace';
@@ -54,15 +55,18 @@ export default function App() {
     closeChat();
     setWorkspace(id);
     setCommandOpen(false);
+    // The conversation takes less width beside work than it does on the
+    // landing, where it is the main event.
+    useChatModeStore.getState().setContext(id === 'landing' ? 'landing' : 'workspace');
   };
 
   return (
     <div
+      className="zaram-backdrop"
       style={{
         height: '100vh',
         display: 'flex',
         flexDirection: 'column',
-        background: '#080a0e',
         overflow: 'hidden',
       }}
     >
@@ -88,7 +92,9 @@ export default function App() {
             display: 'flex',
             overflow: 'hidden',
             position: 'relative',
-            background: isLanding ? '#080a0e' : '#080a0e',
+            // Transparent so the shell's shared backdrop shows through and the
+            // glass surfaces have something to refract.
+            background: 'transparent',
           }}
         >
           {isLanding && (
@@ -124,6 +130,9 @@ export default function App() {
       <AnimatePresence>
         {chatView === 'chat' && <ChatSurface />}
       </AnimatePresence>
+
+      {/* Source panels — over the orb region, beside the conversation. */}
+      <SourcePanelLayer />
 
       {/* Shortcuts help overlay */}
       <HelpOverlay open={helpOpen} platform={platform} onClose={() => setHelpOpen(false)} />
