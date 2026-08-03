@@ -55,7 +55,7 @@ class SpeechRuntime(Runtime):
         self,
         event_bus: EventBus,
         audio_dir: str = "audio_cache",
-        base_url: str = "http://127.0.0.1:8000",
+        base_url: str = "http://127.0.0.1:8420",
     ):
         self._event_bus = event_bus
         self._state = RuntimeState.UNINITIALIZED

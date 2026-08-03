@@ -146,7 +146,7 @@ async function bootstrap() {
     appPath: resourcesPath,
     userDataPath: app.getPath('userData'),
     resourcesPath,
-    backendPort: Number(process.env.ZARAM_BACKEND_PORT) || 8000,
+    backendPort: Number(process.env.ZARAM_BACKEND_PORT) || 8420,
     rendererDevPort: 5173,
     staticPort: Number(process.env.ZARAM_STATIC_PORT) || 5180,
   });

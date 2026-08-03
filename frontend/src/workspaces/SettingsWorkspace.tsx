@@ -147,7 +147,7 @@ export default function SettingsWorkspace() {
             label="Engine"
             value={backendOnline ? 'running' : 'offline'}
             state={backendOnline ? 'good' : 'absent'}
-            detail={backendOnline ? undefined : 'Zaram’s backend is not reachable on port 8000.'}
+            detail={backendOnline ? undefined : 'Zaram’s backend is not reachable on port 8420.'}
           />
           {providers.length > 0 ? (
             providers.map((p) => (

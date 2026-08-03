@@ -106,7 +106,7 @@ async def test_audio_event_emitted(tmp_path: Path):
     audio_events = [e for e in events if e["type"] == "audio"]
     assert audio_events, "expected at least one audio event"
     ev = audio_events[0]
-    assert ev["url"].startswith("http://127.0.0.1:8000/audio/")
+    assert ev["url"].startswith("http://127.0.0.1:8420/audio/")
     assert ev["url"].endswith(".wav")
     assert ev["voice"] == "af_heart"
     assert pipeline.calls  # synthesis actually ran through the provider

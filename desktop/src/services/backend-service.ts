@@ -22,7 +22,7 @@ export interface BackendStatus {
   error?: string
 }
 
-const DEFAULT_BACKEND_PORT = 8000
+const DEFAULT_BACKEND_PORT = 8420
 const DEFAULT_HEALTH_CHECK_INTERVAL = 5000
 const DEFAULT_BACKEND_SCRIPT = path.join(__dirname, '..', '..', '..', '..', 'backend', 'main.py')
 const VENV_PYTHON = path.join(__dirname, '..', '..', '..', '..', 'backend', 'venv', 'Scripts', 'python.exe')

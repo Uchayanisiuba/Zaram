@@ -24,7 +24,7 @@ export function handleSearch(ctx: KnowledgeHandlerContext): ExecutionHandler {
     ctx.recordOperation('knowledge.search')
     
     try {
-      const response = await fetch(`http://127.0.0.1:8000/knowledge/search`, {
+      const response = await fetch(`http://127.0.0.1:8420/knowledge/search`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ query, persona }),
