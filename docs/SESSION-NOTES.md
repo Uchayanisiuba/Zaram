@@ -168,6 +168,62 @@ Two defects that fix exposed, also fixed:
 Re-verified on a fresh Spine after a cold restart: correct answer, exactly one
 provenance source, no JSON and no markers in the reply.
 
+## Provenance made structural (`3982ae9`)
+
+The search-leak fix was instance-specific. The underlying property is structural:
+anything reaching a reply without an attached source is a provenance violation, and it
+recurs every time a new feature injects context.
+
+Findings:
+
+- **There is no single point where context is assembled.** `system_prompt` is a bare
+  `str` threaded through `main.py` → `ChatRouter` → `ExecutionEngine` →
+  `ExecutionDispatcher` → `ModelsService` → engine, and mutated by string
+  concatenation wherever something needs adding. Injection sites: the persona prompt
+  (`main.py:194`, untagged), recall (`execution_engine.py:104`, `[M1..]`), and search
+  results (`execution_engine.py:179`, `[S1..]`). Because the type is `str`, origin
+  tagging cannot be enforced — there is nothing to enforce it on.
+- Making it enforceable means replacing the `str` with a `PromptContext` carrying
+  tagged chunks, rendered to a string once at the dispatcher/service boundary. Not
+  built. Estimated ~120 new lines, signature changes in 5 files, ~15 call sites.
+
+`backend/tests/test_provenance_invariant.py` added — 8 tests asserting the invariant
+rather than any specific injection site: every citation marker in the injected context
+must be matched by a source event. Also covers deduplication, no markers when nothing
+is recalled, the engine running without a memory runtime, internal payloads never
+reaching the reply, and the exchange being stored.
+
+The tests were verified to be capable of failing: suppressing recall's provenance
+emission while keeping its context injection turned 8 passed into 2 failed.
+
+## Other findings recorded this session
+
+- **`docs/UI-SPEC.md` does not exist and never has.** Confirmed via
+  `git log --all --diff-filter=A`; it was not removed by the documentation sweep.
+- **Commit `5727f0b` "Project B landing shell" is current work, not a leftover.**
+  "Project B" is the Figma export in `figma-assets/project B/` that the present
+  landing shell and ChatSurface were built from. Nothing to remove — though the shell
+  it produced is organised around six orbital workspaces, four of which are cut.
+- **The conversation is a route, not a persistent shell.** There is no router;
+  navigation is `useState<WorkspaceId>` in `App.tsx`, and `navigate()` explicitly
+  calls `closeChat()`. Messages and input survive (zustand), but `displayedText`,
+  `isStreaming` and `typingTimeoutRef` are component-local, so **navigating away
+  mid-reply cancels the reply**. Converting to a persistent shell is roughly a day and
+  nothing depends on the current routing.
+- **The frontend has nowhere to display provenance.** The backend now emits
+  `StreamEvent.source`; no frontend component can render a citation. This gap opened
+  today.
+- Agent config files (`.kilocode/instructions.md`, `.continue/rules.md`,
+  `.trae/rules/zaram.md`, `.trae/context/CONTEXT.md`) were corrected — after Milestone
+  0 they still stated the Spine was in-RAM and that 16 tests failed, which would have
+  led another agent to "fix" work already done.
+- An earlier claim that `runtimes/memory/embeddings.py` is an egress site was wrong.
+  It calls Ollama on `localhost` — local inference, not egress. Corrected in the two
+  config files that carried it.
+- Removed 35 stale non-markdown context artifacts from `.trae/context/`
+  (`Infinite Canvas.tsx`, `IOrbRuntime.ts`, `Future Plugin Support.txt`, …), all
+  describing the retired architecture. All were tracked in git and are recoverable.
+
 ## What I would do next
 
 1. Finish suppressing internal step output from the user stream, so search results

@@ -42,9 +42,19 @@ requires something out of scope, stop and say so.
 ## Before you build on anything
 
 Much of this repo is written, tested, and not connected to the running product. Verify
-rather than assume. As of 2 August 2026: the frontend makes no network calls at all;
-only four runtimes boot; one model provider is wired; the Spine is in-RAM and does not
-persist; 16 backend tests fail.
+rather than assume. As of 3 August 2026:
+
+Working — do not "fix" these: the recall loop runs end to end (the Spine persists to
+SQLite at `backend/spine.db` with Ollama `bge-m3` embeddings, and recalled memories
+emit provenance events); `POST /chat` works against local Ollama.
+
+Not connected: the frontend makes no network calls at all and has nowhere to display
+provenance; only four runtimes boot; one model provider is wired and there is no cloud
+path; there is no egress log. 13 backend tests fail, 11 of them a stale test double
+rather than broken product code.
+
+Anything you inject into a model's context must also emit a `StreamEvent.source`.
+`backend/tests/test_provenance_invariant.py` enforces this.
 
 ## Quality
 

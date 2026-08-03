@@ -12,19 +12,31 @@ Nothing in this file overrides `CLAUDE.md`. Where they disagree, `CLAUDE.md` win
 
 The repo contains a large amount of code that is built, tested, and **not connected to
 the running product**. Do not assume a subsystem is live because it exists and has
-passing tests. Verified state as of 2 August 2026:
+passing tests. Verified state as of 3 August 2026:
+
+**Working — do not "fix" these:**
+
+- **The recall loop works end to end.** The Spine persists to SQLite at
+  `backend/spine.db` with Ollama `bge-m3` embeddings, the index rebuilds from the
+  store on boot, `ExecutionEngine` retrieves before planning and stores after
+  answering, and each recalled memory emits a `StreamEvent.source`. Verified across a
+  process restart.
+- **`POST /chat` works** against local Ollama through the kernel.
+- **13 backend tests fail**, 11 of them a stale `_FakeLLM.stream_response` signature
+  (it takes 2 args; production passes 3). The streaming pipeline itself is not broken.
+
+**Not connected:**
 
 - **The frontend makes zero network calls.** It does not talk to the backend at all.
   Chat replies are a hardcoded string; the memory graph is fabricated sample data.
+  It also has nowhere to display the provenance the backend now emits.
 - **Only four runtimes boot** (`backend/core/bootstrapper.py`): memory, knowledge,
   models, speech. Agent, artifacts, capability, filesystem, intent, internet,
   reliability, tool, discovery and presence are reachable **only from their own tests**.
 - **One model provider is wired.** `models_runtime.py` imports `OllamaEngine` and
-  nothing else. Multi-provider code lives in `backend/garage/` and does not boot.
-- **The Spine does not persist.** The bootstrapper requests `store_type="memory"`
-  (in-RAM). `SQLiteMemoryStore` exists in `backend/runtimes/memory/store.py` and is
-  not selected. Embeddings are `hash`-based, not semantic.
-- **16 backend tests fail**, 11 of them the streaming conversation pipeline.
+  nothing else. `backend/garage/` discovers OpenAI-compatible providers but has no
+  inference method, so there is no cloud path at all.
+- **There is no egress log.** Rule 3 is currently unimplemented.
 
 If a task depends on any of the above, verify the current state yourself before
 building on it. Report what you find rather than assuming the docs are current.
@@ -51,11 +63,17 @@ log and see what left.
 - **Runtimes never import each other.** Communicate via the `EventBus` in
   `backend/core/event_bus.py`. Capability calls go through the registry and execution
   engine — that single mediated path is what makes permissions and audit enforceable.
-- **Egress belongs behind one chokepoint.** Network calls currently originate
-  independently from `knowledge/providers/*`, `runtimes/internet/*` and
-  `runtimes/memory/embeddings.py`. Do not add a new independent egress site. Route new
+- **Egress belongs behind one chokepoint.** Outbound calls that leave the machine
+  originate independently from `knowledge/providers/*` (Wikipedia, GitHub, DuckDuckGo,
+  RSS) and `runtimes/internet/*`. Do not add a new independent egress site. Route new
   outbound traffic through a single gate so per-source consent and the egress log stay
-  mechanically true.
+  mechanically true. (`runtimes/memory/embeddings.py` calls Ollama on `localhost` —
+  local inference, not egress.)
+- **Context assembly has no single point.** `system_prompt` is a bare `str` threaded
+  through five layers and concatenated wherever something needs adding. Anything you
+  inject into it must also emit a `StreamEvent.source`, or you have put an
+  unattributable claim in front of the user. `backend/tests/test_provenance_invariant.py`
+  asserts this and will fail if you skip it.
 - **Every recalled fact carries provenance.** An answer that cites nothing is a bug,
   not a missing feature.
 - **Do not build a memory engine from scratch.** Evaluate Letta or an equivalent first.
@@ -87,7 +105,8 @@ Run before finishing. These commands are verified working:
 cd frontend && npx tsc --noEmit
 
 # Backend tests. Skip the discovery folder: those 111 tests call the live
-# DuckDuckGo API and take ~91 minutes. Without them the suite runs in ~3 min.
+# DuckDuckGo API and take ~91 minutes. Without them: 568 pass, 13 fail, ~60s.
+# Do not let the failure count rise above 13.
 ./.venv/Scripts/python.exe -m pytest backend/tests --ignore=backend/tests/discovery -q
 ```
 
@@ -101,12 +120,12 @@ Known gate problems — fix them if a task touches them, do not work around them
 ## Security
 
 Zaram's pitch is that it makes tool use safe for people who cannot audit it. That
-raises the bar on our own code, and the repo is currently open to a real
-**path traversal** in `backend/main.py` (`/audio/{filename}` joins user input to a
-path with no sanitisation). The test written to catch it is failing.
+raises the bar on our own code.
 
 - Validate and reject any user-controlled path segment. Never `os.path.join` a request
   value onto a directory without normalising and confirming containment.
+  `/audio/{filename}` in `backend/main.py` is the worked example — basename-only plus a
+  `commonpath` containment check. It was a live path traversal until 3 August 2026.
 - No `eval`, `exec`, `shell=True`, or `pickle.loads` on external input.
 - Never claim absolute security in code comments, UI copy, or commit messages. State
   what is verifiable: inference ran locally, index is on disk, egress is logged.
