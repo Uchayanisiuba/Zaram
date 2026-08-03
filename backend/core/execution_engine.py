@@ -214,9 +214,9 @@ class ExecutionEngine:
             "failed_steps": failed_steps,
         })
 
-        # --- Remember: commit this exchange to the Spine. ---
+        # --- Remember: commit what the user told us to the Spine. ---
         answer = step_results.get("reasoning.generate", "")
-        self._remember(prompt, answer, session_id)
+        self._remember(prompt, answer, session_id, recalled)
 
         if plan.correlation_id in self._active_plans:
             del self._active_plans[plan.correlation_id]
@@ -417,6 +417,40 @@ class ExecutionEngine:
     #: anyway, so they are stripped rather than merely discouraged.
     _MARKER_RE = re.compile(r"\s*\[[MS]\d+\]")
 
+    #: Openings that mark a message as a question rather than a statement.
+    #: A question adds nothing to the Spine; a statement might.
+    _QUESTION_OPENERS = (
+        "what", "when", "where", "who", "why", "how", "which", "whose",
+        "is ", "are ", "was ", "were ", "do ", "does ", "did ", "can ",
+        "could ", "will ", "would ", "should ", "tell me", "show me",
+        "list ", "explain",
+    )
+
+    def _carries_new_information(self, prompt: str) -> bool:
+        """Whether a message tells us something, as opposed to asking."""
+        text = prompt.strip().lower()
+        if text.endswith("?"):
+            return False
+        return not text.startswith(self._QUESTION_OPENERS)
+
+    def _already_known(self, runtime: Any, prompt: str) -> bool:
+        """True when the Spine already holds this almost word for word.
+
+        Cheap and deliberately conservative: only a near-exact match counts, so
+        a genuinely new fact is never silently dropped.
+        """
+        try:
+            results = run_sync(runtime.retrieve(query=prompt, max_results=3))
+        except Exception:
+            return False
+
+        target = " ".join(prompt.lower().split())
+        for result in results or []:
+            existing = " ".join((result.record.content or "").lower().split())
+            if existing == target:
+                return True
+        return False
+
     @classmethod
     def strip_markers(cls, text: str) -> str:
         """Remove [M1]/[S2] citation markers from user-facing text.
@@ -427,20 +461,49 @@ class ExecutionEngine:
         """
         return cls._MARKER_RE.sub("", text or "")
 
-    def _remember(self, prompt: str, answer: str, session_id: str) -> None:
-        """Store this exchange so a later question can recall it."""
+    def _remember(self, prompt: str, answer: str, session_id: str, recalled: list[Any] | None = None) -> None:
+        """Store what the user told us, so a later question can recall it.
+
+        Stores the user's own words, not the exchange. Storing
+        "User asked: X / Zaram answered: Y" caused three visible problems:
+
+        - Citations showed a transcript of how something was learned rather
+          than the thing itself.
+        - Every answer that used a memory got stored containing that memory, so
+          Zaram ended up quoting its own previous replies back to the user.
+        - Asking the same question twice produced two near-identical records,
+          and both were then cited.
+
+        A fact is what the user said. The answer is kept in metadata for
+        context, but it is not the thing being remembered.
+        """
         runtime = self._memory_runtime()
         if runtime is None:
             return
         answer = self.strip_markers(answer or "").strip()
-        if not prompt.strip() or not answer or answer.startswith("[FALLBACK]"):
+        prompt = (prompt or "").strip()
+        if not prompt or not answer or answer.startswith("[FALLBACK]"):
             return
+
+        # A question that was answered purely from recall carries no new
+        # information. Storing it would grow the Spine with restatements of
+        # what it already knows, which is what produced the duplicate
+        # citations.
+        if recalled and not self._carries_new_information(prompt):
+            logger.debug("Engine: not storing — question added no new information")
+            return
+
         # Imported lazily: core/ does not depend on a runtime at module load.
         from runtimes.memory.contracts import MemoryType
 
+        # Do not store something the Spine already holds almost verbatim.
+        if self._already_known(runtime, prompt):
+            logger.debug("Engine: not storing — near-identical record exists")
+            return
+
         try:
             run_sync(runtime.remember(
-                content=f"User asked: {prompt}\nZaram answered: {answer}",
+                content=prompt,
                 memory_type=MemoryType.CONVERSATION,
                 session_id=session_id,
                 metadata={"prompt": prompt, "answer": answer},

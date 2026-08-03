@@ -281,6 +281,73 @@ async def knowledge_search(request: KnowledgeRequest):
     return search_knowledge(request.query, request.persona)
 
 
+@app.get("/memory")
+async def list_memory(limit: int = 200, offset: int = 0, q: str = ""):
+    """Everything in the Spine, newest first.
+
+    Backs the Memory surface. Returns what is actually stored — if the Spine
+    holds four records, this returns four records. There is no sample data
+    anywhere behind this endpoint.
+    """
+    if not kernel.memory_runtime:
+        raise HTTPException(status_code=503, detail="Memory runtime not available")
+
+    records = await kernel.memory_runtime._store.all_records()
+    records.sort(key=lambda r: r.created_at, reverse=True)
+
+    if q:
+        needle = q.lower()
+        records = [r for r in records if needle in (r.content or "").lower()]
+
+    total = len(records)
+    page = records[offset : offset + limit]
+
+    return {
+        "total": total,
+        "offset": offset,
+        "limit": limit,
+        "records": [
+            {
+                "id": r.id,
+                "content": r.content,
+                "memory_type": getattr(r.memory_type, "value", str(r.memory_type)),
+                "created_at": r.created_at,
+                "last_accessed": r.last_accessed,
+                "access_count": r.access_count,
+                "importance": r.importance,
+                "source": r.source,
+                "tags": list(r.tags or []),
+                "session_id": r.session_id,
+            }
+            for r in page
+        ],
+    }
+
+
+@app.get("/memory/stats")
+async def memory_stats():
+    """Counts for the Memory surface. Every number is measured, none estimated."""
+    if not kernel.memory_runtime:
+        raise HTTPException(status_code=503, detail="Memory runtime not available")
+
+    stats = await kernel.memory_runtime._store.stats()
+    records = await kernel.memory_runtime._store.all_records()
+
+    sessions = {r.session_id for r in records if r.session_id}
+    newest = max((r.created_at for r in records), default=None)
+
+    return {
+        "total_records": stats.total_records,
+        "by_type": dict(stats.by_type or {}),
+        "sessions": len(sessions),
+        "newest_at": newest,
+        "storage_bytes": stats.storage_size_bytes,
+        # There is no egress log yet, so this is not reported as zero — an
+        # absent measurement must not read as a measured zero.
+        "bytes_left_device_today": None,
+    }
+
+
 @app.get("/memory/{record_id}")
 async def get_memory(record_id: str):
     """Fetch one stored fact, so a citation can be inspected.
