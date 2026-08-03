@@ -29,7 +29,18 @@ const TONE_COLOR: Record<string, string> = {
   busy: 'var(--color-cyan)',
 };
 
-export default function OrbStatus({ size = 56 }: { size?: number }) {
+export default function OrbStatus({
+  /** Diameter of the status ring. */
+  ringSize = 48,
+  /** Diameter of the orb itself. Independent of the ring: the orb's visible
+   *  core is only ~56% of its rendered size, so matching the two makes the orb
+   *  look far smaller than its container. Letting it exceed the ring puts the
+   *  glow around the ring rather than inside it. */
+  orbSize = 84,
+}: {
+  ringSize?: number;
+  orbSize?: number;
+}) {
   const reduced = useIsReducedMotion();
   const backendOnline = useSystemStore((s) => s.backendOnline);
   const routing = useSystemStore((s) => s.routing);
@@ -55,10 +66,10 @@ export default function OrbStatus({ size = 56 }: { size?: number }) {
     >
       <span
         className="relative inline-flex items-center justify-center"
-        style={{ width: size + 8, height: size + 8 }}
+        style={{ width: ringSize, height: ringSize, overflow: 'visible' }}
       >
         <motion.span
-          className="absolute inset-1 flex items-center justify-center"
+          className="absolute flex items-center justify-center pointer-events-none"
           animate={
             reduced
               ? {}
@@ -74,7 +85,7 @@ export default function OrbStatus({ size = 56 }: { size?: number }) {
         >
           {/* Exact diameter: the presets are fixed, and 'sm' is 104px,
               which overflowed this ring entirely. */}
-          <LivingOrb px={size} />
+          <LivingOrb px={orbSize} />
         </motion.span>
 
         {/* Status ring. The colour is the signal; the orb itself stays neutral

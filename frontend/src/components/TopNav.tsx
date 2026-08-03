@@ -62,9 +62,11 @@ export default function TopNav({ workspace, onSearchOpen }: TopNavProps) {
           there is no sync. One indicator reporting real state is worth more
           than three claiming things that are not true. */}
       <div style={{ position: 'absolute', left: '50%', transform: 'translateX(-50%)' }}>
-        {/* 56px: the 88px header leaves room for the orb plus its ring (64px)
-            and the button's padding, without the bar having to grow. */}
-        <OrbStatus size={56} />
+        {/* Ring 48px (1.2x the original 40). Orb 84px (1.5x its previous 56),
+            so it reads as the orb with a ring around it rather than a ring with
+            a small orb inside. The orb's glow extends past the ring, which is
+            why the container does not clip. */}
+        <OrbStatus ringSize={48} orbSize={84} />
       </div>
 
       {/* Right: actions */}
