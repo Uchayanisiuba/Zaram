@@ -1,14 +1,11 @@
 import { Search, Wifi, Zap, Bell, User, ChevronRight } from 'lucide-react'
 
-type WorkspaceId = 'landing' | 'build' | 'memory' | 'knowledge' | 'canvas' | 'plugins' | 'settings'
+type WorkspaceId = 'landing' | 'memory' | 'knowledge' | 'settings'
 
 const WORKSPACE_LABELS: Record<WorkspaceId, string> = {
   landing: 'Zaram',
-  build: 'Build',
   memory: 'Memory',
   knowledge: 'Knowledge',
-  canvas: 'Canvas',
-  plugins: 'Plugins',
   settings: 'Settings',
 }
 

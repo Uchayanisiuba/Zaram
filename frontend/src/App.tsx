@@ -11,16 +11,12 @@ import { AnimatePresence } from 'framer-motion';
 import { useRuntimeLoop } from '@/hooks/useRuntimeLoop';
 import TopNav from './components/TopNav';
 import LeftRail from './components/LeftRail';
-import RuntimePanel from './components/RuntimePanel';
 import BottomDock from './components/BottomDock';
 import ChatSurface from './components/chat/ChatSurface';
 import CommandPalette from './components/CommandPalette';
 import Landing from './workspaces/Landing';
-import BuildWorkspace from './workspaces/BuildWorkspace';
 import MemoryWorkspace from './workspaces/MemoryWorkspace';
 import KnowledgeWorkspace from './workspaces/KnowledgeWorkspace';
-import CanvasWorkspace from './workspaces/CanvasWorkspace';
-import PluginsWorkspace from './workspaces/PluginsWorkspace';
 import SettingsWorkspace from './workspaces/SettingsWorkspace';
 import { useOrbStore } from '@/stores/orbStore';
 import { useChatModeStore } from '@/stores/chatModeStore';
@@ -29,7 +25,9 @@ import { useShortcuts } from '@/hooks/useShortcuts';
 import { detectPlatform } from '@/runtime/shortcuts/registry';
 import HelpOverlay from '@/components/shortcuts/HelpOverlay';
 
-type WorkspaceId = 'landing' | 'build' | 'memory' | 'knowledge' | 'canvas' | 'plugins' | 'settings';
+// Build, Canvas and Plugins are out of scope for v1. Their surfaces are preserved
+// in src/legacy/ and are not reachable from the shell.
+type WorkspaceId = 'landing' | 'memory' | 'knowledge' | 'settings';
 
 export default function App() {
   // Start Zaram's core runtime loop (FrameState pipeline)
@@ -37,7 +35,6 @@ export default function App() {
 
   const [workspace, setWorkspace] = useState<WorkspaceId>('landing');
   const [commandOpen, setCommandOpen] = useState(false);
-  const [runtimeOpen] = useState(true);
   const [helpOpen, setHelpOpen] = useState(false);
   const { chatView, toggleChat, closeChat } = useChatModeStore();
   const platform = detectPlatform();
@@ -99,11 +96,6 @@ export default function App() {
               <Landing onNavigate={(id) => navigate(id as WorkspaceId)} onOrbTap={toggleChat} />
             </div>
           )}
-          {workspace === 'build' && (
-            <div key="build" style={{ flex: 1, display: 'flex', animation: 'fade-in 0.25s ease' }}>
-              <BuildWorkspace />
-            </div>
-          )}
           {workspace === 'memory' && (
             <div key="memory" style={{ flex: 1, display: 'flex', animation: 'fade-in 0.25s ease' }}>
               <MemoryWorkspace />
@@ -114,25 +106,12 @@ export default function App() {
               <KnowledgeWorkspace />
             </div>
           )}
-          {workspace === 'canvas' && (
-            <div key="canvas" style={{ flex: 1, display: 'flex', animation: 'fade-in 0.25s ease' }}>
-              <CanvasWorkspace />
-            </div>
-          )}
-          {workspace === 'plugins' && (
-            <div key="plugins" style={{ flex: 1, display: 'flex', animation: 'fade-in 0.25s ease' }}>
-              <PluginsWorkspace />
-            </div>
-          )}
           {workspace === 'settings' && (
             <div key="settings" style={{ flex: 1, display: 'flex', animation: 'fade-in 0.25s ease' }}>
               <SettingsWorkspace />
             </div>
           )}
         </main>
-
-        {/* Runtime panel — hidden on landing */}
-        {!isLanding && runtimeOpen && <RuntimePanel />}
       </div>
 
       {/* Bottom dock — hidden on landing */}

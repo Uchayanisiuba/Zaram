@@ -1,18 +1,17 @@
 import { useState, useEffect, useRef } from 'react'
 import { motion } from 'framer-motion'
-import { Code2, Brain, BookOpen, LayoutGrid, Puzzle, Settings } from 'lucide-react'
+import { Brain, BookOpen, Settings } from 'lucide-react'
 import LivingOrb from '../components/orb/LivingOrb'
 import { useChatModeStore } from '@/stores/chatModeStore'
 import { useIsReducedMotion } from '@/hooks/useReducedMotion'
 
-type WorkspaceId = 'build' | 'memory' | 'knowledge' | 'canvas' | 'plugins' | 'settings'
+type WorkspaceId = 'memory' | 'knowledge' | 'settings'
 
+// Build, Canvas and Plugins are out of scope for v1 and no longer appear here.
+// Their surfaces are preserved in src/legacy/.
 const ORBITAL_NODES = [
-  { id: 'build',     label: 'Build',     icon: <Code2 size={24} />,  color: '#818cf8', angle: 270 },
   { id: 'memory',    label: 'Memory',    icon: <Brain size={24} />,    color: '#c084fc', angle: 210 },
   { id: 'knowledge', label: 'Knowledge', icon: <BookOpen size={24} />, color: '#22d3ee', angle: 330 },
-  { id: 'plugins',   label: 'Plugins',   icon: <Puzzle size={24} />,   color: '#fbbf24', angle: 150 },
-  { id: 'canvas',    label: 'Canvas',    icon: <LayoutGrid size={24} />, color: '#34d399', angle: 30 },
   { id: 'settings',  label: 'Settings',  icon: <Settings size={24} />,  color: '#94a3b8', angle: 90 },
 ]
 
