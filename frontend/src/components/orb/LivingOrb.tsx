@@ -36,8 +36,8 @@ interface LivingOrbProps {
   /** When true, intensifies the existing glow via brightness amplification.
    *  Derives from existing STATE_CONFIG colors — no new hues introduced. */
   emphasis?: boolean;
-  /** Scale factor for the inner white pulse dot. It is a fixed 20px, so at
-   *  small diameters it dominates the orb. */
+  /** Multiplier on the inner white pulse dot, which is otherwise sized as a
+   *  fixed ratio of the rendered globe. */
   coreDotScale?: number;
   /** Multiplies how far the orb breathes. 1 keeps the per-state default; 1.4
    *  makes the same motion 40% deeper without changing its rhythm. */
@@ -135,7 +135,12 @@ const LivingOrb = ({
     (v) => 1 + (v - 1) * pulseAmplitude,
   );
 
-  const coreDotPx = Math.round(20 * coreDotScale);
+  // The dot was a fixed 20px while the globe scaled with px, so its visual
+  // weight drifted: 9.1% of the globe at lg, 5.7% at xl, 6.9% in the sub-menu.
+  // Deriving it from the rendered globe keeps one ratio at every size.
+  const visibleGlobePx = corePx + 40;
+  const CORE_DOT_RATIO = 0.069;
+  const coreDotPx = Math.max(3, Math.round(visibleGlobePx * CORE_DOT_RATIO * coreDotScale));
 
   return (
     <div
@@ -252,7 +257,9 @@ const LivingOrb = ({
           style={{
             width: coreDotPx,
             height: coreDotPx,
-            boxShadow: `0 0 ${Math.round(24 * coreDotScale)}px rgba(255,255,255,0.9)`,
+            // Glow scales with the dot, or it stays a soft blob around a small
+            // hard edge.
+            boxShadow: `0 0 ${Math.max(4, Math.round(coreDotPx * 1.2))}px rgba(255,255,255,0.9)`,
           }}
           animate={{ opacity: [0.35, 0.9, 0.35], scale: [0.8, 1.2, 0.8] }}
           transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}

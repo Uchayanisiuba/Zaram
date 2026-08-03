@@ -87,8 +87,6 @@ export default function OrbStatus({
               which overflowed this ring entirely. */}
           <LivingOrb
             px={orbSize}
-            // The white core is a fixed 20px, which dominates an orb this size.
-            coreDotScale={0.3}
             // Deeper breath so the small orb still reads as alive.
             pulseAmplitude={1.4}
           />
