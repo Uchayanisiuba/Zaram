@@ -254,7 +254,9 @@ class GitHubConnector(InternetConnector):
             headers["Authorization"] = f"token {self._token}"
 
         try:
-            async with aiohttp.ClientSession(headers=headers) as session:
+            from core.egress.aio import gated_session
+
+            async with gated_session(headers=headers, source="internet.github") as session:
                 url = "https://api.github.com/search/repositories"
                 params = {"q": query, "per_page": max_results, "sort": "stars", "order": "desc"}
                 async with session.get(url, params=params) as resp:

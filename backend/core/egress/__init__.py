@@ -13,6 +13,7 @@ remember.
 from .gate import EgressDenied, EgressGate, EgressRequest, is_local
 from .log import EgressEntry, EgressLog, TamperDetected
 from .policy import DEFAULT_DECISION, Decision, EgressPolicy, Mode
+from .runtime import default_log_path, default_policy_path, get_gate, set_gate
 
 __all__ = [
     "EgressGate",
@@ -26,4 +27,8 @@ __all__ = [
     "Mode",
     "Decision",
     "DEFAULT_DECISION",
+    "get_gate",
+    "set_gate",
+    "default_log_path",
+    "default_policy_path",
 ]

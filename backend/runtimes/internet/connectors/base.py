@@ -135,8 +135,9 @@ class WikipediaConnector(BaseInternetConnector):
 
     async def _get_session(self):
         if self._session is None:
-            import aiohttp
-            self._session = aiohttp.ClientSession()
+            from core.egress.aio import gated_session
+
+            self._session = gated_session(source="internet.wikipedia")
         return self._session
 
     async def search(self, query: SearchQuery) -> list[SearchResult]:
@@ -186,12 +187,13 @@ class GitHubConnector(BaseInternetConnector):
         results = []
 
         try:
-            import aiohttp
+            from core.egress.aio import gated_session
+
             headers = {"Accept": "application/vnd.github.v3+json"}
             if self._token:
                 headers["Authorization"] = f"token {self._token}"
 
-            async with aiohttp.ClientSession(headers=headers) as session:
+            async with gated_session(headers=headers, source="internet.github") as session:
                 url = "https://api.github.com/search/repositories"
                 params = {"q": query.query, "per_page": query.max_results}
 
@@ -229,10 +231,11 @@ class RSSConnector(BaseInternetConnector):
         results = []
 
         try:
-            import aiohttp
             import feedparser
 
-            async with aiohttp.ClientSession() as session:
+            from core.egress.aio import gated_session
+
+            async with gated_session(source="internet.rss") as session:
                 async with session.get(self._feed_url) as resp:
                     content = await resp.text()
 

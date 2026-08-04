@@ -1,10 +1,13 @@
 # backend/knowledge/providers/wikipedia_provider.py
 from __future__ import annotations
 
+import json
 import re
 import urllib.parse
-import urllib.request
 from typing import Any
+
+from core.egress import EgressDenied, get_gate
+
 from ..protocol import KnowledgeResult, ResultType
 from .base import BaseKnowledgeProvider, SearchMixin
 
@@ -22,11 +25,16 @@ class WikipediaProvider(BaseKnowledgeProvider):
             f"?action=query&list=search&srsearch={urllib.parse.quote(query)}"
             f"&format=json&srlimit={max_results}"
         )
+        # Through the gate, never directly. The query string is the user's
+        # question, so this is exactly the outbound text Rule 3 exists to record.
         try:
-            req = urllib.request.Request(url, headers={"User-Agent": "Zaram/1.0"})
-            with urllib.request.urlopen(req, timeout=10) as r:
-                data = __import__("json").loads(r.read())
+            data = json.loads(get_gate().request(url, timeout=10, source="wikipedia"))
             self._last_error = None
+        except EgressDenied as e:
+            # Not a provider failure — the user's policy said no. Kept distinct
+            # so the health view does not report a working provider as degraded.
+            self._last_error = str(e)
+            return []
         except Exception as e:
             self._last_error = str(e)
             return []

@@ -11,10 +11,9 @@ OpenAI wire format, and it never hardcodes a model name.
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any, Dict, List, Optional
-
-import requests
 
 from ..contracts import (
     CapabilityLocality,
@@ -86,14 +85,24 @@ class OpenAICompatibleAdapter:
 
     # --- internals ---
     def _get(self, path: str, *, timeout: float) -> Optional[Dict[str, Any]]:
+        # Through the gate. This discoverer is the one that genuinely cuts both
+        # ways: pointed at LM Studio it is loopback and passes through unlogged,
+        # pointed at api.openai.com it is egress carrying a bearer token. The
+        # gate decides from the URL, so neither case depends on the caller
+        # remembering which it is.
+        from core.egress import get_gate
+
         headers = {}
         if self._api_key:
             headers["Authorization"] = f"Bearer {self._api_key}"
-        response = requests.get(
-            f"{self.base_url}{path}", timeout=timeout, headers=headers
+        return json.loads(
+            get_gate().request(
+                f"{self.base_url}{path}",
+                timeout=timeout,
+                headers=headers,
+                source="garage.openai_compat",
+            )
         )
-        response.raise_for_status()
-        return response.json()
 
     def _to_model(self, model_id: str, entry: Dict[str, Any]) -> ModelInfo:
         # OpenAI's /v1/models exposes only an id + ownership; deeper metadata

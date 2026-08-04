@@ -610,9 +610,28 @@ def test_ollama_adapter_unavailable_returns_empty():
         assert asyncio.run(_run()) == []
 
 
+class _FakeGate:
+    """Stands in for the egress gate.
+
+    The adapter no longer owns an HTTP client — it asks ``core.egress`` to make
+    the request, so that a base URL pointed at api.openai.com is governed and
+    logged rather than dialled directly. That moved the seam these tests mock:
+    patching ``requests.get`` now patches nothing, and the adapter reaches for
+    the network for real.
+    """
+
+    def __init__(self, payload: Dict[str, Any]) -> None:
+        self._payload = payload
+        self.calls: list[str] = []
+
+    def request(self, url: str, **kwargs: Any) -> bytes:
+        self.calls.append(url)
+        return json.dumps(self._payload).encode()
+
+
 def test_openai_compatible_adapter_discovers():
     payload = {"data": [{"id": "local-model-1", "owned_by": "lmstudio"}]}
-    with patch("requests.get", return_value=_FakeResponse(payload)):
+    with patch("core.egress.get_gate", return_value=_FakeGate(payload)):
         adapter = OpenAICompatibleAdapter(provider_id="openai_compatible")
 
         async def _run():
@@ -629,7 +648,7 @@ def test_openai_compatible_adapter_discovers():
 
 def test_openai_compatible_cloud_locality():
     payload = {"data": [{"id": "gpt-x"}]}
-    with patch("requests.get", return_value=_FakeResponse(payload)):
+    with patch("core.egress.get_gate", return_value=_FakeGate(payload)):
         adapter = OpenAICompatibleAdapter(
             provider_id="openai_cloud", kind=ProviderKind.CLOUD_API
         )

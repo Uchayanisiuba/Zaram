@@ -1,10 +1,13 @@
 # backend/knowledge/providers/github_provider.py
 from __future__ import annotations
 
+import json
 import time
 import urllib.parse
-import urllib.request
 from typing import Any
+
+from core.egress import EgressDenied, get_gate
+
 from ..protocol import KnowledgeResult, ResultType
 from .base import BaseKnowledgeProvider, SearchMixin
 
@@ -19,11 +22,15 @@ class GitHubProvider(BaseKnowledgeProvider):
     def search(self, query: str, max_results: int = 5) -> list[KnowledgeResult]:
         results = []
         url = f"https://api.github.com/search/repositories?q={urllib.parse.quote(query)}&sort=updated&per_page={max_results}"
+        # Through the gate, never directly. The query string carries whatever
+        # the user asked, which is the outbound text Rule 3 exists to record.
         try:
-            req = urllib.request.Request(url, headers={"User-Agent": "Zaram/1.0"})
-            with urllib.request.urlopen(req, timeout=10) as r:
-                data = __import__("json").loads(r.read())
+            data = json.loads(get_gate().request(url, timeout=10, source="github"))
             self._last_error = None
+        except EgressDenied as e:
+            # The user's policy refused this. Distinct from a provider fault.
+            self._last_error = str(e)
+            return []
         except Exception as e:
             self._last_error = str(e)
             return []
