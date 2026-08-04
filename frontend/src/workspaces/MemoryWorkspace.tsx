@@ -1,26 +1,42 @@
 /**
- * Memory — what Zaram actually knows.
+ * Memory — what Zaram actually knows, and how to change it.
  *
  * This screen previously showed a fabricated knowledge graph: 1,847 nodes, 284
- * conversations, "+23 today", a "last synced" time, and invented entities
- * including a person who does not exist. The Spine held about twenty records.
- * Every number and every node was made up.
+ * conversations, "+23 today", and invented entities including a person who does
+ * not exist. The Spine held about twenty records. Every number was made up.
  *
- * It now reports the Spine. If there are four records it shows four records,
- * and if there are none it says so and explains how to add one. Nothing here is
- * estimated, and a measurement that does not exist is shown as unknown rather
- * than as zero.
+ * It now reports the Spine, and — the point of this pass — lets the user change
+ * it. Rule 4 says a stored fact can be corrected and the affected answers must
+ * change. A screen that could only display would make that a promise; the
+ * Correct, Forget and Pin controls make it a thing the user can do.
  *
- * This is not yet the Memory screen in docs/UI-SPEC.md — no view toggle, filter
- * chips or recall weighting, because the data model has no recallCount or
- * supersededBy to drive them. It is the honest version of what can be shown
- * today.
+ * Correction produces supersession, never deletion. The old fact stays here,
+ * struck through and dated, marked as something the user corrected. It is
+ * excluded from recall but never hidden — a correction you cannot see is
+ * indistinguishable from a deletion, and the visible one is the trust artifact.
+ * A system that shows you where it was wrong is one you will believe when it
+ * says it is right.
  */
-import { useCallback, useEffect, useState } from 'react';
-import { Brain, Search, RefreshCw, AlertCircle } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  Brain,
+  Search,
+  RefreshCw,
+  AlertCircle,
+  Pin,
+  PinOff,
+  Pencil,
+  Trash2,
+  CornerDownRight,
+  X,
+  Check,
+} from 'lucide-react';
+import {
+  correctMemory,
+  deleteMemory,
   fetchMemoryList,
   fetchMemoryStats,
+  pinMemory,
   type MemoryRecord,
   type MemoryStats,
 } from '@/services/memoryClient';
@@ -33,6 +49,20 @@ const relative = (seconds: number) => {
   if (delta < 86400) return `${Math.floor(delta / 3600)} hr ago`;
   return new Date(seconds * 1000).toLocaleDateString();
 };
+
+const shortDate = (seconds: number) =>
+  new Date(seconds * 1000).toLocaleDateString(undefined, {
+    day: 'numeric',
+    month: 'short',
+  });
+
+const bytes = (n: number) => {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} kB`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
+};
+
+type Filter = 'all' | 'pinned' | 'corrected';
 
 function Metric({ label, value, note }: { label: string; value: string; note?: string }) {
   return (
@@ -52,12 +82,47 @@ function Metric({ label, value, note }: { label: string; value: string; note?: s
   );
 }
 
+function Chip({
+  label,
+  count,
+  active,
+  onClick,
+}: {
+  label: string;
+  count: number;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className="flex items-center gap-1.5 rounded-full px-3 py-1 text-[11px] transition-colors hover:bg-white/5"
+      style={{
+        border: `1px solid ${active ? 'var(--color-border)' : 'var(--color-border-subtle)'}`,
+        background: active ? 'rgba(255,255,255,0.08)' : 'transparent',
+        color: active ? 'var(--color-text)' : 'var(--color-text-muted)',
+      }}
+    >
+      {label}
+      {/* A live count, not a static label. An empty filter should say so
+          before the user clicks it and finds nothing. */}
+      <span style={{ fontFamily: 'var(--font-mono)', opacity: 0.6 }}>{count}</span>
+    </button>
+  );
+}
+
 export default function MemoryWorkspace() {
   const [records, setRecords] = useState<MemoryRecord[]>([]);
   const [stats, setStats] = useState<MemoryStats | null>(null);
   const [query, setQuery] = useState('');
+  const [filter, setFilter] = useState<Filter>('all');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const [editing, setEditing] = useState<string | null>(null);
+  const [draft, setDraft] = useState('');
+  const [confirmForget, setConfirmForget] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
 
   const openSource = useSourceStore((s) => s.openSource);
   const forgotten = useSourceStore((s) => s.forgotten);
@@ -86,11 +151,58 @@ export default function MemoryWorkspace() {
     return () => clearTimeout(t);
   }, [query, load]);
 
-  const visible = records.filter((r) => !forgotten.has(`memory:${r.id}`));
+  const present = useMemo(
+    () => records.filter((r) => !forgotten.has(`memory:${r.id}`)),
+    [records, forgotten],
+  );
+
+  const counts = useMemo(
+    () => ({
+      all: present.length,
+      pinned: present.filter((r) => r.pinned).length,
+      corrected: present.filter((r) => r.superseded_by).length,
+    }),
+    [present],
+  );
+
+  const visible = useMemo(() => {
+    if (filter === 'pinned') return present.filter((r) => r.pinned);
+    if (filter === 'corrected') return present.filter((r) => r.superseded_by);
+    return present;
+  }, [present, filter]);
+
+  /** The replacement for a superseded fact, so the old one can point at it. */
+  const replacementOf = useCallback(
+    (id: string | null | undefined) => records.find((r) => r.id === id) ?? null,
+    [records],
+  );
+
+  const act = async (fn: () => Promise<unknown>) => {
+    setBusy(true);
+    setError(null);
+    try {
+      await fn();
+      await load(query);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'That did not work.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const submitCorrection = (id: string) => {
+    const text = draft.trim();
+    if (!text) return;
+    void act(async () => {
+      await correctMemory(id, text);
+      setEditing(null);
+      setDraft('');
+      setExpanded(null);
+    });
+  };
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
-      {/* Header */}
       <div className="px-8 pt-6 pb-4 flex items-center gap-3">
         <Brain size={20} style={{ color: 'var(--color-indigo-light)' }} />
         <h1
@@ -109,26 +221,26 @@ export default function MemoryWorkspace() {
         </button>
       </div>
 
-      {/* Measured counts only */}
+      {/* Measured counts only. */}
       <div className="px-8 flex gap-3">
         <Metric label="Facts stored" value={stats ? String(stats.total_records) : '—'} />
         <Metric label="Sessions" value={stats ? String(stats.sessions) : '—'} />
         <Metric
           label="Left device today"
-          // Null is not zero. There is no egress log yet, so this is unknown,
-          // and claiming zero would be a privacy assurance we cannot support.
+          // Now measured from the egress log. Null still means unknown rather
+          // than zero — an absent measurement must never read as a measured
+          // zero on a privacy claim.
           value={
             stats?.bytes_left_device_today == null
               ? 'unknown'
-              : String(stats.bytes_left_device_today)
+              : bytes(stats.bytes_left_device_today)
           }
-          note={stats?.bytes_left_device_today == null ? 'no egress log yet' : undefined}
+          note={stats?.bytes_left_device_today == null ? 'egress log unreachable' : undefined}
         />
       </div>
 
-      {/* Search */}
-      <div className="px-8 pt-5 pb-3">
-        <div className="relative">
+      <div className="px-8 pt-5 pb-3 flex items-center gap-3 flex-wrap">
+        <div className="relative flex-1 min-w-[240px]">
           <Search
             size={14}
             className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none"
@@ -146,14 +258,16 @@ export default function MemoryWorkspace() {
             }}
           />
         </div>
+        <Chip label="All" count={counts.all} active={filter === 'all'} onClick={() => setFilter('all')} />
+        <Chip label="Pinned" count={counts.pinned} active={filter === 'pinned'} onClick={() => setFilter('pinned')} />
+        <Chip label="Corrected" count={counts.corrected} active={filter === 'corrected'} onClick={() => setFilter('corrected')} />
       </div>
 
-      {/* Records */}
       <div className="flex-1 overflow-y-auto px-8 pb-8">
         {error && (
           <div
             role="alert"
-            className="flex items-start gap-2 rounded-lg px-4 py-3 text-xs"
+            className="flex items-start gap-2 rounded-lg px-4 py-3 text-xs mb-3"
             style={{ background: 'rgba(248,113,113,0.08)', color: '#fca5a5' }}
           >
             <AlertCircle size={14} className="mt-0.5 shrink-0" />
@@ -162,48 +276,253 @@ export default function MemoryWorkspace() {
         )}
 
         {!error && !loading && visible.length === 0 && (
-          // Every list needs a way out, not a dead end.
           <div className="py-16 text-center">
             <p className="text-sm text-slate-400">
-              {query ? 'Nothing matches that.' : 'Zaram has not learned anything yet.'}
+              {query
+                ? 'Nothing matches that.'
+                : filter === 'pinned'
+                  ? 'Nothing is pinned.'
+                  : filter === 'corrected'
+                    ? 'Nothing has been corrected.'
+                    : 'Zaram has not learned anything yet.'}
             </p>
             <p className="mt-1 text-xs text-slate-500">
               {query
                 ? 'Try a different word, or clear the search.'
-                : 'Open the conversation and tell it something — it will appear here.'}
+                : filter !== 'all'
+                  ? 'Switch back to All to see everything stored.'
+                  : 'Open the conversation and tell it something — it will appear here.'}
             </p>
           </div>
         )}
 
         {visible.length > 0 && (
-          <>
-            <div className="mb-2 text-[10px] uppercase tracking-wider text-slate-500">
-              {query
-                ? `${visible.length} of ${stats?.total_records ?? '?'} match`
-                : `${visible.length} shown`}
-            </div>
-            <ul className="flex flex-col gap-1.5">
-              {visible.map((r) => (
-                <li key={r.id}>
+          <ul className="flex flex-col gap-1.5">
+            {visible.map((r) => {
+              const superseded = Boolean(r.superseded_by);
+              const isOpen = expanded === r.id;
+              const replacement = replacementOf(r.superseded_by);
+
+              return (
+                <li
+                  key={r.id}
+                  className="rounded-lg transition-colors"
+                  style={{
+                    border: `1px solid ${isOpen ? 'var(--color-border)' : 'var(--color-border-subtle)'}`,
+                    background: isOpen ? 'rgba(255,255,255,0.03)' : 'transparent',
+                    // A superseded fact recedes but is never hidden.
+                    opacity: superseded ? 0.55 : 1,
+                  }}
+                >
                   <button
-                    onClick={(e) => openSource(`memory:${r.id}`, e.currentTarget)}
-                    className="w-full text-left rounded-lg px-4 py-3 transition-colors hover:bg-white/5"
-                    style={{ border: '1px solid var(--color-border-subtle)' }}
+                    onClick={() => setExpanded(isOpen ? null : r.id)}
+                    className="w-full text-left px-4 py-3"
                   >
-                    <p className="text-sm leading-snug" style={{ color: 'var(--color-text)' }}>
-                      {r.content}
-                    </p>
+                    <div className="flex items-start gap-2">
+                      {r.pinned && (
+                        <Pin
+                          size={12}
+                          className="mt-1 shrink-0"
+                          style={{ color: 'var(--color-amber, #fbbf24)' }}
+                          aria-label="Pinned"
+                        />
+                      )}
+                      <p
+                        className="text-sm leading-snug flex-1"
+                        style={{
+                          color: 'var(--color-text)',
+                          textDecoration: superseded ? 'line-through' : undefined,
+                        }}
+                      >
+                        {r.content}
+                      </p>
+                    </div>
+
                     <p
                       className="mt-1.5 text-[10px] text-slate-500"
                       style={{ fontFamily: 'var(--font-mono)' }}
                     >
-                      {r.memory_type} · {relative(r.created_at)} · recalled {r.access_count}×
+                      {superseded && r.superseded_at ? (
+                        <span style={{ color: 'var(--color-amber, #fbbf24)' }}>
+                          superseded {shortDate(r.superseded_at)} · you corrected this
+                        </span>
+                      ) : (
+                        <>
+                          {r.source} · {relative(r.created_at)} · recalled {r.access_count}×
+                        </>
+                      )}
                     </p>
+
+                    {superseded && replacement && (
+                      <p className="mt-1 flex items-start gap-1.5 text-[11px] text-slate-400">
+                        <CornerDownRight size={11} className="mt-0.5 shrink-0" />
+                        <span>{replacement.content}</span>
+                      </p>
+                    )}
                   </button>
+
+                  {isOpen && (
+                    <div
+                      className="px-4 pb-3 pt-1"
+                      style={{ borderTop: '1px solid var(--color-border-subtle)' }}
+                    >
+                      {/* Why it is here, in plain language rather than a score. */}
+                      <p className="text-[11px] leading-relaxed text-slate-400 mb-3">
+                        {superseded ? (
+                          <>
+                            You corrected this on{' '}
+                            {r.superseded_at ? shortDate(r.superseded_at) : 'an earlier date'}. It
+                            is kept so you can see what changed, and is never used to answer
+                            anything.
+                          </>
+                        ) : (
+                          <>
+                            Learned {relative(r.created_at)} from {r.source}, and used in{' '}
+                            {r.access_count} {r.access_count === 1 ? 'answer' : 'answers'} since.
+                            {r.pinned && ' Pinned, so recall prefers it over more recent facts.'}
+                          </>
+                        )}
+                      </p>
+
+                      {editing === r.id ? (
+                        <div>
+                          <textarea
+                            value={draft}
+                            onChange={(e) => setDraft(e.target.value)}
+                            rows={3}
+                            autoFocus
+                            aria-label="Corrected fact"
+                            className="w-full rounded-lg px-3 py-2 text-sm outline-none"
+                            style={{
+                              background: 'var(--color-glass)',
+                              border: '1px solid var(--color-border)',
+                              color: 'var(--color-text)',
+                            }}
+                          />
+                          <p className="mt-1.5 text-[10px] text-slate-500">
+                            The original is kept and struck through. Answers that relied on it
+                            will change.
+                          </p>
+                          <div className="mt-2 flex gap-2">
+                            <button
+                              disabled={busy || !draft.trim()}
+                              onClick={() => submitCorrection(r.id)}
+                              className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] transition-colors disabled:opacity-40"
+                              style={{
+                                border: '1px solid var(--color-border)',
+                                background: 'rgba(255,255,255,0.08)',
+                                color: 'var(--color-text)',
+                              }}
+                            >
+                              <Check size={12} />
+                              Save correction
+                            </button>
+                            <button
+                              onClick={() => {
+                                setEditing(null);
+                                setDraft('');
+                              }}
+                              className="rounded-lg px-3 py-1.5 text-[11px] text-slate-400 hover:bg-white/5 transition-colors"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      ) : confirmForget === r.id ? (
+                        <div>
+                          <p className="text-[11px] text-slate-300 mb-2">
+                            Delete this for good? Unlike correcting, this leaves no record that
+                            Zaram ever knew it.
+                          </p>
+                          <div className="flex gap-2">
+                            <button
+                              disabled={busy}
+                              onClick={() =>
+                                void act(async () => {
+                                  await deleteMemory(r.id);
+                                  setConfirmForget(null);
+                                  setExpanded(null);
+                                })
+                              }
+                              className="rounded-lg px-3 py-1.5 text-[11px] transition-colors disabled:opacity-40"
+                              style={{
+                                border: '1px solid rgba(248,113,113,0.4)',
+                                color: 'rgb(248,113,113)',
+                              }}
+                            >
+                              Delete for good
+                            </button>
+                            <button
+                              onClick={() => setConfirmForget(null)}
+                              className="rounded-lg px-3 py-1.5 text-[11px] text-slate-400 hover:bg-white/5 transition-colors"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex gap-2 flex-wrap">
+                          {/* A superseded fact cannot be corrected again — the
+                              chain would fork — so it only offers deletion. */}
+                          {!superseded && (
+                            <>
+                              <button
+                                disabled={busy}
+                                onClick={() => {
+                                  setEditing(r.id);
+                                  setDraft(r.content);
+                                }}
+                                className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] text-slate-300 hover:bg-white/5 transition-colors disabled:opacity-40"
+                                style={{ border: '1px solid var(--color-border-subtle)' }}
+                              >
+                                <Pencil size={12} />
+                                Correct
+                              </button>
+                              <button
+                                disabled={busy}
+                                onClick={() => void act(() => pinMemory(r.id, !r.pinned))}
+                                className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] text-slate-300 hover:bg-white/5 transition-colors disabled:opacity-40"
+                                style={{ border: '1px solid var(--color-border-subtle)' }}
+                              >
+                                {r.pinned ? <PinOff size={12} /> : <Pin size={12} />}
+                                {r.pinned ? 'Unpin' : 'Pin'}
+                              </button>
+                            </>
+                          )}
+                          <button
+                            disabled={busy}
+                            onClick={() => setConfirmForget(r.id)}
+                            className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] transition-colors disabled:opacity-40 hover:bg-white/5"
+                            style={{
+                              border: '1px solid var(--color-border-subtle)',
+                              color: 'rgb(248,113,113)',
+                            }}
+                          >
+                            <Trash2 size={12} />
+                            Forget
+                          </button>
+                          <div className="flex-1" />
+                          <button
+                            onClick={(e) => openSource(`memory:${r.id}`, e.currentTarget)}
+                            className="rounded-lg px-3 py-1.5 text-[11px] text-slate-400 hover:bg-white/5 transition-colors"
+                          >
+                            Open source
+                          </button>
+                          <button
+                            onClick={() => setExpanded(null)}
+                            aria-label="Collapse"
+                            className="p-1.5 rounded-lg text-slate-500 hover:bg-white/5 transition-colors"
+                          >
+                            <X size={12} />
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </li>
-              ))}
-            </ul>
-          </>
+              );
+            })}
+          </ul>
         )}
       </div>
     </div>

@@ -315,7 +315,11 @@ async def list_memory(limit: int = 200, offset: int = 0, q: str = ""):
     if not kernel.memory_runtime:
         raise HTTPException(status_code=503, detail="Memory runtime not available")
 
-    records = await kernel.memory_runtime._store.all_records()
+    # include_superseded: corrected facts are excluded from *recall* but must
+    # still appear here. Showing the user where Zaram was wrong, struck through
+    # and dated, is the point of supersession — a correction they cannot see is
+    # indistinguishable from a deletion.
+    records = await kernel.memory_runtime._store.all_records(include_superseded=True)
     records.sort(key=lambda r: r.created_at, reverse=True)
 
     if q:
@@ -341,6 +345,12 @@ async def list_memory(limit: int = 200, offset: int = 0, q: str = ""):
                 "source": r.source,
                 "tags": list(r.tags or []),
                 "session_id": r.session_id,
+                "superseded_by": r.superseded_by,
+                "superseded_at": r.superseded_at,
+                "pinned": r.pinned,
+                # Set when this record replaced another, so the surface can link
+                # a correction back to what it corrected.
+                "corrects": (r.metadata or {}).get("corrects"),
             }
             for r in page
         ],
