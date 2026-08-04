@@ -62,6 +62,46 @@ class ProviderKind(Enum):
             return cls.LOCAL_LLM
 
 
+class DataPolicy(Enum):
+    """What happens to a prompt sent to this model.
+
+    Three values, and no fourth — see CLAUDE.md. This is the one fact a user
+    must see *before* choosing a model rather than after: size and speed are
+    recoverable mistakes, sending a confidential document to a provider that
+    trains on it is not.
+
+    Unknown is deliberately *not* a member here. A model whose policy nobody
+    established is represented by ``ModelInfo.data_policy is None``, which is
+    the absence of an answer rather than a fourth kind of answer. The
+    distinction matters: an enum member would eventually get a label in a
+    picker and start looking like a choice.
+    """
+
+    #: Local inference. Nothing is sent.
+    NEVER_LEAVES_DEVICE = "never_leaves_device"
+    #: The provider logs prompts and may train on them. Every free tier is this.
+    LOGGED_AND_TRAINED_ON = "logged_and_trained_on"
+    #: The user's own key, and the provider's terms exclude training on API data.
+    YOUR_KEY_NO_TRAINING = "your_key_no_training"
+
+    @classmethod
+    def from_value(cls, value: Optional[str]) -> Optional["DataPolicy"]:
+        """Coerce a string, or ``None`` when there is nothing to coerce.
+
+        Note what this deliberately does *not* do: fall back to a member. Every
+        other ``from_value`` in this module picks a safe-looking default, which
+        is right for a category or a health status and wrong here — an
+        unparseable policy string is an unanswered question, and answering it
+        with ``NEVER_LEAVES_DEVICE`` would state a guarantee no one verified.
+        """
+        if not value:
+            return None
+        try:
+            return cls(str(value).lower())
+        except ValueError:
+            return None
+
+
 class HealthStatus(Enum):
     """Aggregated health of a provider layer component."""
 
@@ -107,7 +147,41 @@ class ModelInfo:
     available: bool = False
     health_status: HealthStatus = HealthStatus.UNKNOWN
     endpoint: Optional[str] = None
+    #: What the provider does with prompts, or ``None`` when unestablished.
+    #:
+    #: There is no default policy on purpose. ``NEVER_LEAVES_DEVICE`` would be
+    #: the comfortable choice and it is the dangerous one: every adapter that
+    #: forgot to set the field would ship a privacy guarantee nobody checked,
+    #: which is the same failure as ``vram_bytes`` defaulting to 0 — a value
+    #: standing in for the absence of one, except the damage here is a leaked
+    #: document rather than a bad recommendation. Defaulting the other way
+    #: (``LOGGED_AND_TRAINED_ON``) is safe but false for local models, and
+    #: would make Ollama unselectable by the rule below.
+    #:
+    #: So: unknown, until an adapter says otherwise, and unknown is not
+    #: offered by default.
+    data_policy: Optional["DataPolicy"] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def data_policy_known(self) -> bool:
+        """Whether anyone has established what this provider does with prompts."""
+        return self.data_policy is not None
+
+    @property
+    def selectable_by_default(self) -> bool:
+        """Whether Zaram may route to this model without the user choosing it.
+
+        Two ways to fail. ``LOGGED_AND_TRAINED_ON`` may only ever be picked
+        deliberately by someone who has seen the label — free is not a good
+        enough reason to make that choice on a user's behalf. And an
+        unestablished policy is not a quiet yes: if we cannot say what happens
+        to the prompt, we do not send it anywhere on our own initiative.
+        """
+        return self.data_policy in (
+            DataPolicy.NEVER_LEAVES_DEVICE,
+            DataPolicy.YOUR_KEY_NO_TRAINING,
+        )
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -130,6 +204,11 @@ class ModelInfo:
             "available": self.available,
             "health_status": self.health_status.value,
             "endpoint": self.endpoint,
+            # Serialises as null, never as a policy. The UI must render this as
+            # "unknown" and must not offer the model as a default.
+            "data_policy": self.data_policy.value if self.data_policy else None,
+            "data_policy_known": self.data_policy_known,
+            "selectable_by_default": self.selectable_by_default,
             "metadata": dict(self.metadata),
         }
 
@@ -155,6 +234,7 @@ class ModelInfo:
             available=bool(data.get("available", False)),
             health_status=HealthStatus.from_value(data.get("health_status")),
             endpoint=data.get("endpoint"),
+            data_policy=DataPolicy.from_value(data.get("data_policy")),
             metadata=dict(data.get("metadata", {})),
         )
 
