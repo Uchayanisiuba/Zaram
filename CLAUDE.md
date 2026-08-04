@@ -21,8 +21,8 @@ Use these terms only. Never substitute alternatives.
 - **Orb** — the system-state indicator. Not a mascot, not a launcher.
 - **Workspace** — an MCP-backed tool surface (post-v1)
 
-Do not use: "faculty", "nursery", "aperture", "synapse web", "AI operating system".
-These are retired.
+Do not use: "faculty", "nursery", "aperture", "synapse web", "AI operating system",
+"garage". These are retired. The provider layer is `backend/providers/`.
 
 ## Immutable rules
 
@@ -31,6 +31,9 @@ These are retired.
 2. **Every recalled fact carries provenance.** An answer that cites nothing is a bug.
 3. **Every byte that leaves is logged.** The egress log is append-only and
    tamper-evident. Build it into the core, never as a later add-on.
+   This rule is only true because of the no-remote-assets rule below — the gate
+   cannot see browser-originated requests, so the ban is what keeps Rule 3 from
+   being a claim the software cannot keep.
 4. **The user can correct or delete any stored fact**, and the affected answers must
    change. This loop is the product.
 5. **Nothing leaves the device without an explicit, per-item policy.** Default deny.
@@ -74,6 +77,52 @@ building it.
 - **Domain-specific logic stays in a separate layer** from the engine (parsers,
   vocabulary, output templates). Do not build a pack *system* until two packs exist
   and have been built by hand.
+- **`backend/providers/` is the provider layer. Connect it, do not duplicate it.**
+  It was written, tested, and never wired up — which is how a second, simpler
+  provider path grew beside it (`models_runtime.py` importing `OllamaEngine`
+  directly). One of those has to go, and it is the shortcut.
+
+  Routing, model residency, first-run hardware detection and the Models pane all
+  consume this layer. `models_runtime.py` goes through it rather than importing
+  an engine directly.
+
+  It is named `providers/`, not `garage/`. "Garage" is not canonical vocabulary
+  and never was; the rename is part of connecting it.
+
+- **The egress gate covers Python-originated requests only.** Browser-originated
+  requests bypass it entirely and *cannot be logged* — CSS `@import`, `<img
+  src>`, `<script src>`, renderer `fetch`, iframes, webviews, and anything a
+  stylesheet pulls in. No gate written in the backend can see them.
+
+  Therefore: **no remote asset URLs anywhere in frontend code.** Fonts, icons,
+  images, scripts and styles all ship in the bundle. A source scan enforces this
+  alongside `backend/tests/test_egress_chokepoint.py`; the two together are what
+  make Rule 3 true rather than aspirational.
+
+  This is not hypothetical. `index.css` pulled three fonts from Google on every
+  launch, before any UI rendered and before any consent existed, and no amount of
+  work on the gate would ever have recorded it.
+
+- **Hardware detection returns unknown, never a wrong number.** If VRAM cannot be
+  determined — Metal, DirectML, no GPU, a driver that will not answer — the
+  answer is `unknown`, not `0`. Do not report a GPU as available while its
+  capacity is undetermined.
+
+  A recommendation built on a false zero is worse than no recommendation: the
+  user is told a model will not fit when it would, or the tier logic silently
+  picks the smallest option and the product looks weak on capable hardware.
+  Absent measurements never render as measured zeros — the same rule the egress
+  log follows for `bytes_left_device_today`.
+
+- **TTS is Kokoro-82M** (Apache 2.0), CPU-capable, the default and only shipped
+  implementation. The binding constraint is that speech synthesis must not compete
+  with local inference for VRAM, and must work on Macs and AMD. Better-sounding
+  models exist — Fish Audio S2, Chatterbox, Qwen3-TTS — and every one fails on
+  licence, VRAM, or platform coverage. Keep TTS behind an interface so the choice is
+  replaceable, not embedded.
+
+  This records *which* engine, not *when*. Voice remains out of scope for v1 — see
+  the scope list above — and this decision does not license building it.
 
 ## Sequencing commitments
 
@@ -106,8 +155,19 @@ Corollaries, all binding:
 ## UI/UX principles
 
 - Calm over delight. Motion has a budget. Ship a quiet mode from the start.
-- The Orb shows system state (idle / thinking / routing to cloud / local only).
-  It does not perform.
+- The Orb shows system state. It does not perform. States are
+  **idle / warming / thinking / swapping / speaking / listening**, plus the
+  routing it reports (local only / can send / cloud enabled).
+- **`swapping` is a required state, not a nicety.** When a route needs a model
+  that will not fit alongside what is resident, Ollama unloads one and loads
+  another, and the user waits with no explanation. An unload/reload that is not
+  visible reads as a broken product — the same request that was fast a minute
+  ago now hangs, and nothing on screen accounts for it. Any route that forces a
+  swap must say so before it happens.
+- The Orb must not describe a capability the system does not have. "Cloud
+  enabled" means a cloud model can answer questions; it is not the same claim as
+  "some route off this machine exists", and collapsing the two put a false
+  status on the one indicator whose whole job is to be trusted.
 - Density beats animation on any surface used daily.
 - The target user is not technical. No model filenames, quantization settings, or
   context-length sliders in the primary path. Put them behind an advanced view.
