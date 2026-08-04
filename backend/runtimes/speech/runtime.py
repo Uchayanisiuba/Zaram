@@ -160,13 +160,17 @@ class SpeechRuntime(Runtime):
         self._state = RuntimeState.STOPPING
         logger.info("Speech Runtime shutting down...")
 
-        # Unsubscribe from executive events
-        if self._unsubscribe_executive_speak:
-            self._unsubscribe_executive_speak()
-        if self._unsubscribe_executive_pause:
-            self._unsubscribe_executive_pause()
-        if self._unsubscribe_executive_stop:
-            self._unsubscribe_executive_stop()
+        # Unsubscribe from executive events. These are tokens, not callables —
+        # calling them raised TypeError on every kernel shutdown, which left the
+        # rest of this method unreachable and the Spine's SQLite connection
+        # closed by process exit rather than by us.
+        for token in (
+            self._unsubscribe_executive_speak,
+            self._unsubscribe_executive_pause,
+            self._unsubscribe_executive_stop,
+        ):
+            if token:
+                self._event_bus.unsubscribe(token)
 
         # Stop all active syntheses
         for request_id in list(self._active_syntheses.keys()):

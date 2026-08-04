@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import time
 import uuid
 from typing import Any
 from collections import defaultdict
+from contextlib import closing
+
+logger = logging.getLogger(__name__)
 
 from .contracts import (
     MemoryRecord,
@@ -177,7 +181,7 @@ class SQLiteMemoryStore(MemoryStore):
     def _init_db(self) -> None:
         import sqlite3
 
-        with sqlite3.connect(self.db_path) as conn:
+        with closing(sqlite3.connect(self.db_path)) as conn, conn:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS memories (
                     id TEXT PRIMARY KEY,
@@ -221,7 +225,7 @@ class SQLiteMemoryStore(MemoryStore):
     async def put(self, record: MemoryRecord) -> str:
         import sqlite3
 
-        with sqlite3.connect(self.db_path) as conn:
+        with closing(sqlite3.connect(self.db_path)) as conn, conn:
             conn.execute(
                 """
                 INSERT OR REPLACE INTO memories
@@ -255,7 +259,7 @@ class SQLiteMemoryStore(MemoryStore):
     async def get(self, record_id: str) -> MemoryRecord | None:
         import sqlite3
 
-        with sqlite3.connect(self.db_path) as conn:
+        with closing(sqlite3.connect(self.db_path)) as conn, conn:
             conn.row_factory = sqlite3.Row
             row = conn.execute("SELECT * FROM memories WHERE id = ?", (record_id,)).fetchone()
             if not row:
@@ -265,7 +269,7 @@ class SQLiteMemoryStore(MemoryStore):
     async def delete(self, record_id: str) -> bool:
         import sqlite3
 
-        with sqlite3.connect(self.db_path) as conn:
+        with closing(sqlite3.connect(self.db_path)) as conn, conn:
             cursor = conn.execute("DELETE FROM memories WHERE id = ?", (record_id,))
             return cursor.rowcount > 0
 
@@ -306,7 +310,7 @@ class SQLiteMemoryStore(MemoryStore):
 
         where_sql = "WHERE " + " AND ".join(where_clauses) if where_clauses else ""
 
-        with sqlite3.connect(self.db_path) as conn:
+        with closing(sqlite3.connect(self.db_path)) as conn, conn:
             conn.row_factory = sqlite3.Row
             # Pinned first: the user said these matter, which outranks recency.
             rows = conn.execute(
@@ -328,7 +332,7 @@ class SQLiteMemoryStore(MemoryStore):
         sql = "SELECT * FROM memories"
         if not include_superseded:
             sql += " WHERE superseded_by IS NULL"
-        with sqlite3.connect(self.db_path) as conn:
+        with closing(sqlite3.connect(self.db_path)) as conn, conn:
             conn.row_factory = sqlite3.Row
             rows = conn.execute(sql).fetchall()
             return [self._row_to_record(r) for r in rows]
@@ -336,7 +340,7 @@ class SQLiteMemoryStore(MemoryStore):
     async def stats(self) -> MemoryStats:
         import sqlite3
 
-        with sqlite3.connect(self.db_path) as conn:
+        with closing(sqlite3.connect(self.db_path)) as conn, conn:
             conn.row_factory = sqlite3.Row
             total = conn.execute("SELECT COUNT(*) as c FROM memories").fetchone()["c"]
             by_type = {}
@@ -356,11 +360,32 @@ class SQLiteMemoryStore(MemoryStore):
         import sqlite3
 
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with closing(sqlite3.connect(self.db_path)) as conn, conn:
                 conn.execute("SELECT 1")
             return {"status": "healthy", "db_path": self.db_path}
         except Exception as e:
             return {"status": "unavailable", "error": str(e)}
+
+    def close(self) -> None:
+        """Fold the write-ahead log back into the database file.
+
+        Called on shutdown so the Spine is left as one consistent file rather
+        than a file plus a WAL that the next process has to recover. SQLite
+        recovers from an orphaned WAL correctly, so this is not about
+        correctness — it is about not treating "crashed on exit, recovered on
+        boot" as the normal path, because that is the state in which a real
+        corruption would go unnoticed.
+
+        Best-effort by design: a checkpoint failure must never be the reason
+        shutdown does not finish.
+        """
+        import sqlite3
+
+        try:
+            with closing(sqlite3.connect(self.db_path)) as conn:
+                conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("Spine WAL checkpoint failed on shutdown: %s", exc)
 
     def _row_to_record(self, row: "sqlite3.Row") -> MemoryRecord:
         import json
