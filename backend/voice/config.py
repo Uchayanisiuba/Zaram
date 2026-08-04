@@ -52,7 +52,14 @@ class KokoroConfig:
     device: Optional[str] = None
     load_model_eagerly: bool = False
     run_synthesis_probe: bool = False
-    voice_discovery_enabled: bool = True
+    #: Off by default. Discovery lists the voice files in a HuggingFace repo,
+    #: which contacts huggingface.co — and it ran on every launch, before any
+    #: egress policy existed and without appearing in any log. Rule 5's default
+    #: deny applies to Zaram's own startup traffic exactly as it does to a
+    #: search provider's. Voice is out of scope for v1 in any case; anyone who
+    #: wants discovery back can set ZARAM_VOICE_DISCOVERY=1 and will then be
+    #: making that choice deliberately.
+    voice_discovery_enabled: bool = False
 
     def resolved_cache_directory(self) -> str:
         return _resolve_cache_dir(self.cache_directory)

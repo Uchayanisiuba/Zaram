@@ -30,6 +30,7 @@ export default defineConfig({
       '/voice': { target: BACKEND, changeOrigin: true },
       '/health': { target: BACKEND, changeOrigin: true },
       '/memory': { target: BACKEND, changeOrigin: true },
+      '/egress': { target: BACKEND, changeOrigin: true },
       '/artifacts': { target: BACKEND, changeOrigin: true },
     },
   },

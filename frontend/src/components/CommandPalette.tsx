@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { Search, Home, Brain, BookOpen, Settings, ArrowRight, Command } from 'lucide-react'
 
-type WorkspaceId = 'landing' | 'memory' | 'knowledge' | 'settings'
+import type { WorkspaceId } from '@/runtime/shortcuts/registry'
 
 const COMMANDS = [
   { id: 'landing', icon: <Home size={28} />, label: 'Go Home', sub: 'Landing', ws: 'landing' as WorkspaceId },

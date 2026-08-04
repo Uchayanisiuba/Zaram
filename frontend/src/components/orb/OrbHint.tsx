@@ -64,7 +64,7 @@ export default function OrbHint({ offsetX = 0 }: { offsetX?: number }) {
             x: { duration: 0.3 },
           }}
         >
-          Tap the orb to talk to Zaram
+          Click the orb to begin
         </motion.p>
       )}
     </AnimatePresence>

@@ -2,6 +2,7 @@
 import asyncio
 import json
 import os
+import time
 from typing import Any, Dict
 
 from fastapi import FastAPI, HTTPException
@@ -179,7 +180,28 @@ async def health():
         pass
 
     search_on = web_search_enabled()
-    can_egress = search_on
+
+    # Whether anything *can* leave is now a fact about the policy, not a guess.
+    # A destination with no rule is denied, so an empty policy means no route
+    # off this machine exists at all — which is the honest thing for the Orb to
+    # report, and it is now measured rather than inferred from a feature flag.
+    egress_summary = {"allowed_hosts": 0, "entries": 0, "bytes_today": 0}
+    try:
+        from core.egress import Mode, get_gate
+
+        gate = get_gate()
+        rules = gate.policy.rules()
+        egress_summary = {
+            "allowed_hosts": sum(
+                1 for m in rules.values() if m in (Mode.ALLOW.value, Mode.ASK.value)
+            ),
+            "entries": gate.log.count(),
+            "bytes_today": gate.log.bytes_since(time.time() - 86400),
+        }
+    except Exception:
+        pass
+
+    can_egress = egress_summary["allowed_hosts"] > 0 or search_on
     routing = {
         # "local" while every path stays on this machine. Becomes "cloud" or
         # "mixed" once a remote provider is wired and selected.
@@ -188,6 +210,7 @@ async def health():
         "web_search": "enabled" if search_on else "disabled",
         # The honest summary: is there any route off this machine at all?
         "can_leave_device": can_egress,
+        "egress": egress_summary,
     }
 
     return {
@@ -342,9 +365,189 @@ async def memory_stats():
         "sessions": len(sessions),
         "newest_at": newest,
         "storage_bytes": stats.storage_size_bytes,
-        # There is no egress log yet, so this is not reported as zero — an
-        # absent measurement must not read as a measured zero.
-        "bytes_left_device_today": None,
+        # Measured from the egress log. A real zero now means zero — before the
+        # log existed this returned null, because an absent measurement must
+        # never read as a measured zero on a privacy claim.
+        "bytes_left_device_today": _egress_bytes_today(),
+    }
+
+
+def _egress_bytes_today() -> int | None:
+    """Bytes that left in the last 24 hours, or None if the log is unreachable."""
+    try:
+        from core.egress import get_gate
+
+        return get_gate().log.bytes_since(time.time() - 86400)
+    except Exception:
+        return None
+
+
+# --------------------------------------------------------------------------- #
+# Egress — what left this machine.
+#
+# Rule 3 says every byte that leaves is logged. A log nobody can read satisfies
+# the letter of that and none of the point, so these endpoints exist to make it
+# legible: what left, when, to whom, whether the record has been tampered with,
+# and which destinations are permitted at all.
+# --------------------------------------------------------------------------- #
+
+
+@app.get("/egress")
+async def egress_log(limit: int = 100, offset: int = 0):
+    """The log itself, newest first.
+
+    ``literal_text`` is the point of this endpoint. Showing that a request went
+    to wikipedia.org tells the user almost nothing; showing the exact query
+    string that left is the thing they cannot get anywhere else.
+    """
+    from core.egress import get_gate
+
+    gate = get_gate()
+    limit = max(1, min(limit, 500))
+    entries = gate.log.entries(limit=limit, offset=max(0, offset))
+
+    return {
+        "total": gate.log.count(),
+        "entries": [
+            {
+                "id": e.id,
+                "at": e.at,
+                "kind": e.kind,
+                "host": e.host,
+                "method": e.method,
+                "url": e.url,
+                "body": e.body,
+                "literal_text": e.url if not e.body else f"{e.url}\n\n{e.body}",
+                "bytes": e.byte_count,
+                "decision": e.decision,
+                "reason": e.reason,
+                "source": e.source,
+                "meta": e.meta,
+            }
+            for e in entries
+        ],
+    }
+
+
+@app.get("/egress/verify")
+async def egress_verify():
+    """Check the hash chain.
+
+    Reports what the check actually proves. The chain detects alteration by
+    anything that did not go through the log's own append path; it does not
+    prevent someone with write access from rebuilding it. Saying otherwise in
+    the interface would be the kind of absolute security claim the contract
+    forbids, so the wording here is what the UI should show.
+    """
+    from core.egress import TamperDetected, get_gate
+
+    gate = get_gate()
+    try:
+        gate.log.verify()
+        return {
+            "intact": True,
+            "entries": gate.log.count(),
+            "detail": "Every entry still matches its hash and the chain is unbroken.",
+            "caveat": (
+                "This detects changes made outside Zaram — an edit, a deletion, "
+                "a reordering, or file corruption. It cannot stop someone with "
+                "access to this machine from rebuilding the record."
+            ),
+        }
+    except TamperDetected as exc:
+        return {
+            "intact": False,
+            "entries": gate.log.count(),
+            "at_row": exc.at_row,
+            "entry_id": exc.entry_id,
+            "detail": str(exc),
+        }
+
+
+@app.get("/egress/policy")
+async def egress_policy():
+    """Per-source rules, and every host ever contacted.
+
+    Returns hosts seen but unruled as well, so the privacy pane can offer a
+    decision about a destination the user has actually encountered rather than
+    asking them to type hostnames from memory.
+    """
+    from core.egress import get_gate
+
+    gate = get_gate()
+    rules = gate.policy.rules()
+    seen = list(gate.log.hosts())
+
+    return {
+        "default": "deny",
+        "rules": rules,
+        "hosts_seen": seen,
+        "hosts_without_a_rule": [h for h in seen if h not in rules and h != "-"],
+    }
+
+
+class EgressPolicyUpdate(BaseModel):
+    host: str
+    #: "allow", "ask" or "deny". Anything else is rejected.
+    mode: str
+
+
+@app.put("/egress/policy")
+async def set_egress_policy(update: EgressPolicyUpdate):
+    """Set one host's rule. Rule 5's 'explicit, per-item policy' in practice."""
+    from core.egress import Mode, get_gate
+
+    host = (update.host or "").strip().lower()
+    if not host:
+        raise HTTPException(status_code=400, detail="A host is required")
+    try:
+        mode = Mode(update.mode)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=f"mode must be one of: {', '.join(m.value for m in Mode)}",
+        )
+
+    get_gate().policy.set(host, mode)
+    return {"host": host, "mode": mode.value}
+
+
+@app.delete("/egress/policy/{host}")
+async def forget_egress_policy(host: str):
+    """Remove a rule. The host reverts to the default, which is deny."""
+    from core.egress import get_gate
+
+    get_gate().policy.forget(host)
+    return {"host": host.lower(), "mode": "deny", "reverted_to_default": True}
+
+
+class EgressRetentionUpdate(BaseModel):
+    #: Days to keep. 0 means keep everything.
+    days: int
+
+
+@app.post("/egress/retention")
+async def apply_egress_retention(update: EgressRetentionUpdate):
+    """Prune the log, and record that the pruning happened.
+
+    The contract requires retention to ship *with* the log rather than after it:
+    a permanent record of every private question is itself a privacy problem.
+    """
+    from core.egress import get_gate
+
+    if update.days < 0:
+        raise HTTPException(status_code=400, detail="days cannot be negative")
+
+    gate = get_gate()
+    removed = gate.log.apply_retention(max_age_days=update.days or None)
+    return {
+        "removed": removed,
+        "remaining": gate.log.count(),
+        "days": update.days,
+        "note": (
+            "Pruning is itself recorded, so the log can always show that entries "
+            "were removed even though it can no longer show what they were."
+        ),
     }
 
 
