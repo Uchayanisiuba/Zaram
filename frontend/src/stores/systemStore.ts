@@ -112,10 +112,28 @@ export function describeSystem(s: {
     const where = s.routing?.mode === 'local' ? 'on this machine' : 'remotely';
     return { label: 'Thinking', detail: `Working ${where}.`, tone: 'busy' };
   }
-  if (s.routing?.canLeaveDevice) {
+  // Two different claims, previously collapsed into one. "Cloud enabled" says
+  // a cloud model is answering your questions. `canLeaveDevice` only says some
+  // route off the machine exists — allowing a single search host used to flip
+  // the Orb to "Cloud enabled" while every answer was still generated locally.
+  // On the one indicator whose entire job is to be trusted, that is the worst
+  // thing to be wrong about.
+  const cloudInference = (s.routing?.providers ?? []).some(
+    (p) => p.locality && p.locality !== 'local',
+  );
+
+  if (cloudInference) {
     return {
       label: 'Cloud enabled',
-      detail: 'Some requests can leave this machine. Check the egress log.',
+      detail: 'A cloud model can answer your questions. Check Activity for what left.',
+      tone: 'cloud',
+    };
+  }
+  if (s.routing?.canLeaveDevice) {
+    return {
+      label: 'Local · can send',
+      detail:
+        'Answers are generated on this machine. Something else is allowed to send — see Activity.',
       tone: 'cloud',
     };
   }
