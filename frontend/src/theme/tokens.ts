@@ -66,9 +66,12 @@ export const colors = {
 // =================================================================================================
 export const typography = {
   fontFamily: {
-    display: ["'Space Grotesk'", "'Inter'", 'ui-sans-serif', 'system-ui', 'sans-serif'],
-    sans: ["'Inter'", 'ui-sans-serif', 'system-ui', 'sans-serif'],
-    mono: ["'JetBrains Mono'", 'ui-monospace', 'monospace'],
+    // "… Variable" first — that is the family @fontsource-variable registers.
+    // The bare names stay behind it for machines with the static family
+    // installed. See the note in index.css about why these ship in the bundle.
+    display: ["'Space Grotesk Variable'", "'Space Grotesk'", "'Inter Variable'", 'ui-sans-serif', 'system-ui', 'sans-serif'],
+    sans: ["'Inter Variable'", "'Inter'", 'ui-sans-serif', 'system-ui', 'sans-serif'],
+    mono: ["'JetBrains Mono Variable'", "'JetBrains Mono'", 'ui-monospace', 'monospace'],
   },
   fontSize: {
     xs:   '0.75rem',
