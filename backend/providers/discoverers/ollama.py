@@ -24,6 +24,7 @@ from ..contracts import (
     ModelInfo,
     ProviderKind,
     ProviderSummary,
+    specialisation_from_name,
 )
 
 logger = logging.getLogger(__name__)
@@ -142,6 +143,7 @@ class OllamaAdapter:
             # the guarantee is structural rather than contractual: there is no
             # provider to trust, because inference never leaves the device.
             data_policy=DataPolicy.NEVER_LEAVES_DEVICE,
+            specialisation=specialisation_from_name(name),
             metadata={
                 "parameter_size": parameter_size,
                 "family": details.get("family"),

@@ -102,6 +102,38 @@ class DataPolicy(Enum):
             return None
 
 
+#: Name fragments that mark a model as tuned for one job rather than for talking.
+#:
+#: Matched against the model's name, which is the only signal any provider
+#: exposes for this — Ollama's ``/api/show`` reports capabilities and families,
+#: neither of which distinguishes a coding fine-tune from its base model.
+#:
+#: These are task markers, not model identities. The provider layer still never
+#: hardcodes a model name: "coder" matches qwen2.5-coder, deepseek-coder and
+#: whatever ships next year without any of them being listed. Add markers here,
+#: never model names.
+TASK_MARKERS: Dict[str, tuple[str, ...]] = {
+    "code": ("coder", "code"),
+    "math": ("math",),
+    "moderation": ("guard", "shield", "moderation"),
+}
+
+
+def specialisation_from_name(name: str) -> Optional[str]:
+    """The task a model is tuned for, or ``None`` when it is general-purpose.
+
+    Deliberately conservative: an unrecognised name is general, because the
+    cost of the two mistakes is asymmetric. Calling a general model specialised
+    removes a good default for no reason; calling a specialised model general
+    is how a coding fine-tune ends up answering everything.
+    """
+    lowered = name.lower()
+    for task, markers in TASK_MARKERS.items():
+        if any(marker in lowered for marker in markers):
+            return task
+    return None
+
+
 class HealthStatus(Enum):
     """Aggregated health of a provider layer component."""
 
@@ -161,7 +193,20 @@ class ModelInfo:
     #: So: unknown, until an adapter says otherwise, and unknown is not
     #: offered by default.
     data_policy: Optional["DataPolicy"] = None
+    #: The task this model is tuned for ("code", "math", ...), or ``None`` for a
+    #: general-purpose model. Set by the adapter at discovery time.
+    specialisation: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def is_general_purpose(self) -> bool:
+        """Whether this model is a reasonable answer to an arbitrary question.
+
+        A coding fine-tune is not a worse model than its base — it is a
+        different one, and picking it for general chat is a category error that
+        shows up as oddly-shaped answers rather than as an obvious failure.
+        """
+        return self.specialisation is None
 
     @property
     def data_policy_known(self) -> bool:
@@ -209,6 +254,8 @@ class ModelInfo:
             "data_policy": self.data_policy.value if self.data_policy else None,
             "data_policy_known": self.data_policy_known,
             "selectable_by_default": self.selectable_by_default,
+            "specialisation": self.specialisation,
+            "is_general_purpose": self.is_general_purpose,
             "metadata": dict(self.metadata),
         }
 
@@ -235,6 +282,7 @@ class ModelInfo:
             health_status=HealthStatus.from_value(data.get("health_status")),
             endpoint=data.get("endpoint"),
             data_policy=DataPolicy.from_value(data.get("data_policy")),
+            specialisation=data.get("specialisation"),
             metadata=dict(data.get("metadata", {})),
         )
 

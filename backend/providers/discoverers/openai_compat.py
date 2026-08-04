@@ -24,6 +24,7 @@ from ..contracts import (
     ModelInfo,
     ProviderKind,
     ProviderSummary,
+    specialisation_from_name,
 )
 
 logger = logging.getLogger(__name__)
@@ -155,6 +156,7 @@ class OpenAICompatibleAdapter:
             health_status=HealthStatus.HEALTHY,
             endpoint=self.base_url,
             data_policy=self._data_policy,
+            specialisation=specialisation_from_name(name),
             metadata={"owned_by": owned_by, "raw_id": model_id},
         )
 

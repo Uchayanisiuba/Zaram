@@ -29,6 +29,19 @@ from .scanner import ProviderScanner
 
 logger = logging.getLogger(__name__)
 
+#: Fraction of VRAM held back from the residency budget.
+#:
+#: Weights are not the whole cost — the KV cache grows with context length and
+#: concurrency, and the display server wants a slice on a desktop GPU. A model
+#: sized to exactly the free VRAM will fit at load and thrash a few thousand
+#: tokens into a conversation, which is worse than not choosing it, because the
+#: failure arrives later and looks like the product being slow.
+#:
+#: This number is a judgement, not a measurement, and it is the weakest part of
+#: the heuristic. The honest fix is to compute the reserve from the model's own
+#: context length; until someone measures it, this stays deliberately generous.
+_KV_CACHE_RESERVE_FRACTION = 0.20
+
 
 class ProviderManager:
     """Discovers and serves Zaram's AI resources."""
@@ -101,6 +114,53 @@ class ProviderManager:
     def get_model(self, model_id: str) -> Optional[ModelInfo]:
         return self.catalog.get(model_id)
 
+    def embedding_footprint_bytes(self) -> int:
+        """What the embedding model claims, since it is resident continuously.
+
+        Recall runs on every exchange, so the embedder is not an occasional
+        tenant of VRAM — it is a permanent one. A chat model chosen as though it
+        had the whole card to itself will evict it on the first message and get
+        evicted back on the next recall, which is the swap this budget exists to
+        prevent.
+
+        Read from the catalog rather than from configuration: whichever
+        embedding model discovery actually found is the one that will be
+        resident, and the provider layer must not hardcode its name.
+        """
+        embedders = self.list_models(
+            category=ModelCategory.EMBEDDING, available_only=True
+        )
+        return max((m.size_bytes or 0 for m in embedders), default=0)
+
+    def resident_budget_bytes(self) -> Optional[int]:
+        """VRAM a chat model may claim alongside the embedder, or ``None``.
+
+        ``None`` means residency cannot be planned — no accelerator, or one
+        whose capacity we cannot read (Metal, DirectML). It is not a budget of
+        zero, and callers must not treat it as one: on those machines the fit
+        test is skipped rather than failed, because inventing a number here is
+        the false-zero bug that ``HardwareProfile.vram_known`` exists to stop.
+        """
+        hardware = self.hardware_profile()
+        if not hardware.vram_known:
+            return None
+
+        vram = hardware.vram_bytes or 0
+        reserve = int(vram * _KV_CACHE_RESERVE_FRACTION)
+        return max(vram - self.embedding_footprint_bytes() - reserve, 0)
+
+    def model_fits_resident(self, model: ModelInfo) -> Optional[bool]:
+        """Whether ``model`` can be co-resident with the embedder.
+
+        Three answers, and the third matters: ``True``, ``False``, and ``None``
+        for "cannot be determined" — either the budget is unknown or the model
+        does not report a size. ``None`` is never promoted to ``True``.
+        """
+        budget = self.resident_budget_bytes()
+        if budget is None or model.size_bytes is None:
+            return None
+        return model.size_bytes <= budget
+
     def select_default_model(
         self, *, category: ModelCategory = ModelCategory.LLM
     ) -> Optional[ModelInfo]:
@@ -111,46 +171,76 @@ class ProviderManager:
         the user never consented to is a Rule 5 violation that looks like a
         working feature.
 
-        Eligibility is ``ModelInfo.selectable_by_default`` and nothing else, so
-        the rule lives with the field it depends on: a model whose data policy
-        is unknown or ``LOGGED_AND_TRAINED_ON`` is not offered here, however
-        capable or convenient it is.
+        Three criteria, in this order, because that is the order in which
+        getting it wrong hurts:
+
+        1. **Does it fit alongside the embedding model.** A model that forces a
+           swap is never the default, even when it is the largest thing
+           installed — the cost lands on every single exchange, and it is the
+           kind of slowness users attribute to the product rather than to a
+           setting. This is a hard gate, not a preference.
+        2. **Is it general-purpose.** A coding fine-tune answering general
+           questions is a category error that shows up as oddly-shaped answers
+           rather than as an obvious failure, so it is harder to diagnose than
+           it looks.
+        3. **Size**, last, as a rough stand-in for capability. It is the axis
+           that matters least and the only one that is easy to measure, which is
+           precisely why it used to be the only one considered.
+
+        Size-first selection is what picked a 9 GB coding model on a 12 GB card
+        for general chat: largest wins, and both of the criteria that should
+        have vetoed it were absent.
         """
         candidates = [
             m
             for m in self.list_models(category=category, available_only=True)
             if m.selectable_by_default
         ]
+
+        # Hard gate. `None` (unknown fit) survives it — an unmeasurable machine
+        # must not be left with no default at all — but ranks below a model we
+        # positively know fits, so "we could not check" never outranks "it fits".
+        candidates = [m for m in candidates if self.model_fits_resident(m) is not False]
         if not candidates:
             return None
 
-        # Local first — Rule 1 means we never route to paid inference on our own
-        # initiative — then largest, as a stand-in for most capable. Ties break
-        # on id so boot is deterministic rather than dict-ordered.
         def rank(model: ModelInfo) -> tuple:
+            fits = self.model_fits_resident(model)
             return (
+                0 if fits is True else 1,
+                0 if model.is_general_purpose else 1,
                 0 if model.locality is CapabilityLocality.LOCAL else 1,
                 -(model.size_bytes or 0),
-                model.id,
+                model.id,  # deterministic across equal candidates
             )
 
         return sorted(candidates, key=rank)[0]
 
     def rejected_default_candidates(
         self, *, category: ModelCategory = ModelCategory.LLM
-    ) -> List[ModelInfo]:
-        """Available models excluded from auto-selection, for explaining why.
+    ) -> List[tuple[ModelInfo, str]]:
+        """Available models excluded from auto-selection, each with the reason.
 
         "Show routing decisions in plain language" needs the models that were
-        *not* picked as much as the one that was — a user with three cloud
-        models installed and no default deserves to be told it was the data
-        policy, not a bug.
+        *not* picked as much as the one that was, and needs to distinguish the
+        reasons: a user told "no default model" deserves to know whether that
+        was their data policy or their VRAM, since only one of those is
+        something they can act on.
         """
-        return [
-            m
-            for m in self.list_models(category=category, available_only=True)
-            if not m.selectable_by_default
-        ]
+        rejected: List[tuple[ModelInfo, str]] = []
+        for model in self.list_models(category=category, available_only=True):
+            if not model.selectable_by_default:
+                reason = (
+                    "data policy is unknown"
+                    if not model.data_policy_known
+                    else "provider logs and trains on prompts"
+                )
+                rejected.append((model, reason))
+            elif self.model_fits_resident(model) is False:
+                rejected.append(
+                    (model, "does not fit alongside the embedding model")
+                )
+        return rejected
 
     # --- provider read API ---
     def list_providers(self) -> List[Dict[str, Any]]:
