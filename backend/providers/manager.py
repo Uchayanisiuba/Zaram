@@ -101,6 +101,57 @@ class ProviderManager:
     def get_model(self, model_id: str) -> Optional[ModelInfo]:
         return self.catalog.get(model_id)
 
+    def select_default_model(
+        self, *, category: ModelCategory = ModelCategory.LLM
+    ) -> Optional[ModelInfo]:
+        """The model Zaram may route to without the user having chosen one.
+
+        Returns ``None`` rather than a fallback when nothing qualifies. A
+        caller with no model is a caller that says so; a caller handed a model
+        the user never consented to is a Rule 5 violation that looks like a
+        working feature.
+
+        Eligibility is ``ModelInfo.selectable_by_default`` and nothing else, so
+        the rule lives with the field it depends on: a model whose data policy
+        is unknown or ``LOGGED_AND_TRAINED_ON`` is not offered here, however
+        capable or convenient it is.
+        """
+        candidates = [
+            m
+            for m in self.list_models(category=category, available_only=True)
+            if m.selectable_by_default
+        ]
+        if not candidates:
+            return None
+
+        # Local first — Rule 1 means we never route to paid inference on our own
+        # initiative — then largest, as a stand-in for most capable. Ties break
+        # on id so boot is deterministic rather than dict-ordered.
+        def rank(model: ModelInfo) -> tuple:
+            return (
+                0 if model.locality is CapabilityLocality.LOCAL else 1,
+                -(model.size_bytes or 0),
+                model.id,
+            )
+
+        return sorted(candidates, key=rank)[0]
+
+    def rejected_default_candidates(
+        self, *, category: ModelCategory = ModelCategory.LLM
+    ) -> List[ModelInfo]:
+        """Available models excluded from auto-selection, for explaining why.
+
+        "Show routing decisions in plain language" needs the models that were
+        *not* picked as much as the one that was — a user with three cloud
+        models installed and no default deserves to be told it was the data
+        policy, not a bug.
+        """
+        return [
+            m
+            for m in self.list_models(category=category, available_only=True)
+            if not m.selectable_by_default
+        ]
+
     # --- provider read API ---
     def list_providers(self) -> List[Dict[str, Any]]:
         specs: List[Dict[str, Any]] = []

@@ -142,9 +142,23 @@ class KernelBootstrapper:
         self.registry.register(self.memory_runtime)
         register_runtime_for_health(self.memory_runtime)
 
+        # --- Provider layer ---
+        # Registered before the models runtime because that runtime asks it
+        # which model may be used by default. Registering providers does no
+        # network I/O; the scan happens on demand.
+        from providers.runtime import ProvidersRuntime
+        self.providers_runtime = ProvidersRuntime(self.event_bus)
+        self.registry.register(self.providers_runtime)
+        await self.providers_runtime.initialize()
+        register_runtime_for_health(self.providers_runtime)
+
         # --- Models Runtime ---
         from runtimes.models.models_runtime import ModelsRuntime
-        models_runtime = ModelsRuntime(self.event_bus, self.knowledge_runtime)
+        models_runtime = ModelsRuntime(
+            self.event_bus,
+            self.knowledge_runtime,
+            provider_manager=self.providers_runtime.manager,
+        )
         self.registry.register(models_runtime)
         await models_runtime.initialize()
         register_runtime_for_health(models_runtime)
