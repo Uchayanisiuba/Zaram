@@ -204,6 +204,13 @@ Corollaries, all binding:
   that demos.
 - When a plan and the codebase disagree, the codebase wins — say so rather than
   building against a stale assumption.
+- **When a fix removes something, test that the replacement works — not just that
+  the original is gone.** A test asserting the bad thing stopped passes just as
+  happily when the good thing stopped too. Removing a remote font and asserting no
+  request to fonts.googleapis.com says nothing about whether "Inter Variable" now
+  renders; both a working self-hosted font and no font at all satisfy it. Assert on
+  the outcome you wanted, and make the assertion fail on purpose once before
+  trusting it.
 - **A test whose scope is configured somewhere is two things to check.** Confirm
   what actually runs, not what appears to. `testpaths` hid 158 tests for months
   while every suite count reported here was quoted with confidence.
