@@ -14,9 +14,11 @@ from __future__ import annotations
 import json
 import logging
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlparse
 
 from ..contracts import (
     CapabilityLocality,
+    DataPolicy,
     HealthStatus,
     ModelCategory,
     ModelInfo,
@@ -30,6 +32,31 @@ DEFAULT_BASE_URL = "http://127.0.0.1:1234"
 LM_STUDIO_BASE_URL = "http://127.0.0.1:1234"
 OPENAI_BASE_URL = "https://api.openai.com"
 
+_LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1", "[::1]", "0.0.0.0"}
+
+
+def _policy_for(base_url: str) -> Optional[DataPolicy]:
+    """Infer a data policy from the URL, or decline to.
+
+    This adapter is the one that genuinely cuts both ways — the same class is
+    LM Studio on loopback and api.openai.com behind a bearer token — so the
+    policy is read from the destination rather than from whichever caller
+    remembered to pass it. Same reasoning as ``_get`` deferring to the egress
+    gate a few lines down.
+
+    Loopback is the only case that can be inferred, and only because it is
+    structural: a request to 127.0.0.1 cannot leave. Everything else returns
+    ``None``. That is not a gap to fill in later with a sensible guess — the
+    terms under which a remote provider handles prompts are not derivable from
+    its hostname, and a wrong guess here is a privacy claim the user acts on.
+    Whoever registers a cloud provider passes ``data_policy`` explicitly.
+    """
+    host = urlparse(base_url).hostname
+    if host and host.lower() in _LOOPBACK_HOSTS:
+        return DataPolicy.NEVER_LEAVES_DEVICE
+    return None
+
+
 class OpenAICompatibleAdapter:
     """Discovers models from any OpenAI-compatible ``/v1/models`` endpoint."""
 
@@ -40,11 +67,13 @@ class OpenAICompatibleAdapter:
         base_url: str = DEFAULT_BASE_URL,
         kind: ProviderKind = ProviderKind.LOCAL_AI_SERVER,
         api_key: Optional[str] = None,
+        data_policy: Optional[DataPolicy] = None,
     ) -> None:
         self.provider_id = provider_id
         self.kind = kind
         self.base_url = base_url.rstrip("/")
         self._api_key = api_key
+        self._data_policy = data_policy if data_policy is not None else _policy_for(base_url)
 
     # --- ModelProviderAdapter surface ---
     async def discover_models(self, *, timeout: float = 2.0) -> List[ModelInfo]:
@@ -125,6 +154,7 @@ class OpenAICompatibleAdapter:
             available=True,
             health_status=HealthStatus.HEALTHY,
             endpoint=self.base_url,
+            data_policy=self._data_policy,
             metadata={"owned_by": owned_by, "raw_id": model_id},
         )
 

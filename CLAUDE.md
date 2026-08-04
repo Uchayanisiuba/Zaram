@@ -109,6 +109,16 @@ building it.
   has no commercial incentive to — the free tier exists because the user brings
   their own inference, not because we route them somewhere that pays in data.
 
+  **There is no default policy, and unknown is not a fourth value.** A model
+  nobody annotated has `data_policy = None`, and `selectable_by_default` is
+  false for it. Defaulting the field to `never_leaves_device` is the tempting
+  mistake: every adapter that forgot to set it would ship a privacy guarantee
+  nobody verified — the same failure as `vram_bytes` defaulting to 0, except a
+  false zero produced a bad recommendation and a false guarantee produces a
+  leaked document. Policy is inferred only where it is structural (a loopback
+  URL cannot leave the machine); for anything remote, whoever registers the
+  provider states its terms or the model is not offered.
+
 - **The egress gate covers Python-originated requests only.** Browser-originated
   requests bypass it entirely and *cannot be logged* — CSS `@import`, `<img
   src>`, `<script src>`, renderer `fetch`, iframes, webviews, and anything a

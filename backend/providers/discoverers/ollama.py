@@ -18,6 +18,7 @@ import requests
 
 from ..contracts import (
     CapabilityLocality,
+    DataPolicy,
     HealthStatus,
     ModelCategory,
     ModelInfo,
@@ -137,6 +138,10 @@ class OllamaAdapter:
             available=True,
             health_status=HealthStatus.HEALTHY,
             endpoint=self.base_url,
+            # Ollama runs on the user's own machine. This is the one case where
+            # the guarantee is structural rather than contractual: there is no
+            # provider to trust, because inference never leaves the device.
+            data_policy=DataPolicy.NEVER_LEAVES_DEVICE,
             metadata={
                 "parameter_size": parameter_size,
                 "family": details.get("family"),
