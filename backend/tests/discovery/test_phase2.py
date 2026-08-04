@@ -504,12 +504,17 @@ class TestAdaptiveRanker:
 # ---------------------------------------------------------------------------
 
 class TestOfflineDiscovery:
-    def test_offline_empty_cache(self):
+    async def test_offline_empty_cache(self):
+        # Was sync, driving the coroutine with `asyncio.get_event_loop()
+        # .run_until_complete(...)`. That borrows whatever loop happens to be
+        # current, so it passed only while some earlier test left one behind, and
+        # raised "no current event loop" as soon as widening `testpaths` let other
+        # suites run first. `asyncio_mode = "auto"` gives an async test its own loop.
         cache = type("FakeCache", (), {"get": lambda self, key, ttl=900: None})()
         offline = OfflineDiscovery(cache)
-        result = asyncio.get_event_loop().run_until_complete(offline.discover_offline(
+        result = await offline.discover_offline(
             DiscoveryRequest(query="test"), DiscoveryContext(request=DiscoveryRequest(query="test"))
-        ))
+        )
         assert result == []
 
 
