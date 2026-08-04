@@ -14,9 +14,11 @@ const WORKSPACE_LABELS: Record<WorkspaceId, string> = {
 interface TopNavProps {
   workspace: WorkspaceId
   onSearchOpen: () => void
+  /** Leave the workspace and open the conversation at full size. */
+  onOpenConversation: () => void
 }
 
-export default function TopNav({ workspace, onSearchOpen }: TopNavProps) {
+export default function TopNav({ workspace, onSearchOpen, onOpenConversation }: TopNavProps) {
   const isLanding = workspace === 'landing'
 
   return (
@@ -67,7 +69,7 @@ export default function TopNav({ workspace, onSearchOpen }: TopNavProps) {
             so it reads as the orb with a ring around it rather than a ring with
             a small orb inside. The orb's glow extends past the ring, which is
             why the container does not clip. */}
-        <OrbStatus ringSize={48} orbSize={84} />
+        <OrbStatus ringSize={48} orbSize={84} onOpen={onOpenConversation} />
       </div>
 
       {/* Right: actions */}
