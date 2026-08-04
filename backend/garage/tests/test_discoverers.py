@@ -8,6 +8,7 @@ adapters use temp or fake sources.
 
 from __future__ import annotations
 
+import json
 from typing import Any, Dict
 
 from garage.contracts import (
@@ -102,10 +103,26 @@ async def test_ollama_adapter_handles_failure(monkeypatch):
 OPENAI_MODELS = {"data": [{"id": "gpt-4o", "owned_by": "openai"}]}
 
 
+class _FakeGate:
+    """Stands in for the egress gate.
+
+    The adapter no longer owns an HTTP client — it asks ``core.egress`` to make
+    the request, so a base URL pointed at api.openai.com is governed and logged
+    rather than dialled directly. Patching ``requests`` now patches nothing and
+    the adapter reaches the real network.
+    """
+
+    def __init__(self, routes: Dict[str, Any]) -> None:
+        self._routes = routes
+
+    def request(self, url: str, **_kw: Any) -> bytes:
+        return json.dumps(self._routes[url]).encode()
+
+
 async def test_openai_compatible_adapter(monkeypatch):
     base = "http://127.0.0.1:1234"
-    fake = _FakeRequests({f"{base}/v1/models": OPENAI_MODELS})
-    monkeypatch.setattr(oc_mod, "requests", fake)
+    fake = _FakeGate({f"{base}/v1/models": OPENAI_MODELS})
+    monkeypatch.setattr("core.egress.get_gate", lambda: fake)
 
     adapter = OpenAICompatibleAdapter(provider_id="openai_compatible", base_url=base)
     models = await adapter.discover_models(timeout=1.0)
@@ -117,8 +134,8 @@ async def test_openai_compatible_adapter(monkeypatch):
 
 
 async def test_openai_adapter_cloud_locality(monkeypatch):
-    fake = _FakeRequests({"https://api.openai.com/v1/models": OPENAI_MODELS})
-    monkeypatch.setattr(oc_mod, "requests", fake)
+    fake = _FakeGate({"https://api.openai.com/v1/models": OPENAI_MODELS})
+    monkeypatch.setattr("core.egress.get_gate", lambda: fake)
     adapter = OpenAICompatibleAdapter(
         provider_id="openai_cloud", base_url="https://api.openai.com", kind=ProviderKind.CLOUD_API
     )
