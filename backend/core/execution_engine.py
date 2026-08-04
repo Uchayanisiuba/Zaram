@@ -449,12 +449,80 @@ class ExecutionEngine:
         "list ", "explain",
     )
 
+    #: Instructions. "Write any simple python code" is not a fact about the
+    #: user, but it is not a question either, so the question test alone let it
+    #: into the Spine — where it sat looking like something Zaram had learned.
+    _INSTRUCTION_OPENERS = (
+        "write ", "make ", "create ", "generate ", "draft ", "build ",
+        "give me", "summarise", "summarize", "translate ", "rewrite ",
+        "fix ", "debug ", "refactor ", "convert ", "help me", "find ",
+        "search ", "look up", "open ", "run ", "add ", "remove ", "delete ",
+        "compare ", "analyse ", "analyze ", "review ", "check ", "let's",
+        "lets ", "please ",
+    )
+
+    #: Openers that mean "remember this", which override the instruction test —
+    #: "remember: the launch is 9 September" begins like an instruction and is
+    #: precisely the thing we most want to store.
+    _MEMORY_OPENERS = ("remember", "note that", "keep in mind", "don't forget", "dont forget")
+
+    #: Pleasantries. Short, contentless, and they accumulate.
+    _PLEASANTRIES = {
+        "hi", "hello", "hey", "yo", "thanks", "thank you", "ta", "cheers",
+        "ok", "okay", "k", "sure", "yes", "no", "yep", "nope", "good morning",
+        "good afternoon", "good evening", "goodbye", "bye", "night",
+        "test", "testing", "ping",
+    }
+
     def _carries_new_information(self, prompt: str) -> bool:
-        """Whether a message tells us something, as opposed to asking."""
-        text = prompt.strip().lower()
+        """Whether a message tells us something, as opposed to asking for something.
+
+        **This is a heuristic patching a structural problem, not a fix.**
+
+        There is no session/memory split. Every accepted prompt lands in the one
+        `memories` table as `MemoryType.CONVERSATION` — `SEMANTIC`, `EPISODIC`
+        and `WORKING` are defined in the contracts and used nowhere. The data
+        model anticipated the distinction; the engine collapsed it. So this
+        function is a guess at the door about what deserves to be in a knowledge
+        base, and every wrong guess is a permanent record until a human notices
+        it in the Memory list and deletes it by hand.
+
+        The structural fix is that conversation turns go somewhere ephemeral
+        that recall never reads, and the Spine holds only facts — entered by an
+        explicit "remember this" or extracted from a turn. Then a wrong guess
+        costs a missing fact rather than a polluted Spine, and this function
+        stops being load-bearing.
+
+        Until then: the Spine holds what the user told Zaram, and everything
+        else — questions, instructions, greetings — is traffic. Storing traffic
+        has a specific visible cost: it comes back later as a citation, so Zaram
+        appears to cite the user's own words as a source.
+
+        Conservative in one direction only. A missed fact is recoverable — the
+        user can say it again.
+        """
+        text = " ".join((prompt or "").strip().lower().split())
+        if not text:
+            return False
+
+        # "Remember: ..." wins over everything below it.
+        if text.startswith(self._MEMORY_OPENERS):
+            return True
+
         if text.endswith("?"):
             return False
-        return not text.startswith(self._QUESTION_OPENERS)
+        if text.startswith(self._QUESTION_OPENERS):
+            return False
+        if text.startswith(self._INSTRUCTION_OPENERS):
+            return False
+
+        stripped = text.rstrip(".!,")
+        if stripped in self._PLEASANTRIES:
+            return False
+
+        # Too short to be a fact worth keeping. Three words is enough for
+        # "deadline is Friday" and excludes most stray input.
+        return len(stripped.split()) >= 3
 
     def _already_known(self, runtime: Any, prompt: str) -> bool:
         """True when the Spine already holds this almost word for word.
