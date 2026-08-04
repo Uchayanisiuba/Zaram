@@ -49,6 +49,23 @@ class MemoryRecord:
     user_id: str | None = None
     importance: float = 0.5
     source: str = "user"
+    #: Id of the fact that replaced this one, or None while it still stands.
+    #:
+    #: Rule 4 says the user can *correct* a fact and the affected answers must
+    #: change. Correction was previously only expressible as deletion, which
+    #: throws away the more interesting half of the record: that Zaram had it
+    #: wrong, and that the user said so. A superseded fact stays in the store,
+    #: is excluded from recall, and remains visible in the interface struck
+    #: through. A system that shows you where it was wrong is one you can
+    #: believe when it says it is right.
+    superseded_by: str | None = None
+    superseded_at: float | None = None
+    #: Pinned facts are never decayed and are preferred during recall.
+    pinned: bool = False
+
+    @property
+    def is_superseded(self) -> bool:
+        return self.superseded_by is not None
 
 
 @dataclass(frozen=True)

@@ -103,15 +103,23 @@ class InMemoryMemoryStore(MemoryStore):
             for mt in query.memory_types:
                 candidate_ids.extend(self._by_type.get(mt, []))
 
+        # Kept identical to the SQLite store's behaviour on purpose. Two stores
+        # that disagree about whether a corrected fact can be recalled would
+        # make Rule 4 depend on which backend happened to be configured.
+        include_superseded = bool(query.filters.get("include_superseded"))
+        filters = {k: v for k, v in query.filters.items() if k != "include_superseded"}
+
         for rid in candidate_ids:
             record = self._records.get(rid)
             if not record:
                 continue
+            if record.is_superseded and not include_superseded:
+                continue
             if query.min_importance and record.importance < query.min_importance:
                 continue
-            if query.filters:
+            if filters:
                 match = True
-                for k, v in query.filters.items():
+                for k, v in filters.items():
                     if record.metadata.get(k) != v:
                         match = False
                         break
@@ -122,11 +130,19 @@ class InMemoryMemoryStore(MemoryStore):
                     continue
             candidates.append(record)
 
+        # Pinned first: the user said these matter, which outranks recency.
+        candidates.sort(key=lambda r: (not r.pinned, -r.created_at))
         return candidates
 
-    async def all_records(self) -> list[MemoryRecord]:
-        """Every record in the store. Used to rebuild the index on boot."""
-        return list(self._records.values())
+    async def all_records(self, include_superseded: bool = False) -> list[MemoryRecord]:
+        """Every live record. Used to rebuild the index on boot.
+
+        Superseded facts are excluded by default so a restart does not silently
+        undo every correction the user has made.
+        """
+        return [
+            r for r in self._records.values() if include_superseded or not r.is_superseded
+        ]
 
     async def stats(self) -> MemoryStats:
         by_type = defaultdict(int)
@@ -185,6 +201,23 @@ class SQLiteMemoryStore(MemoryStore):
             conn.execute("CREATE INDEX IF NOT EXISTS idx_type ON memories(memory_type)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_created ON memories(created_at)")
 
+            # Supersession, added after the first Spines were already on disk.
+            # ALTER TABLE ADD COLUMN rather than a recreate, so an existing
+            # Spine keeps every fact it holds — this is the user's data, and a
+            # migration that drops it to simplify our code is not a trade we get
+            # to make. Guarded per column so the migration is idempotent.
+            existing = {r[1] for r in conn.execute("PRAGMA table_info(memories)")}
+            for column, ddl in (
+                ("superseded_by", "ALTER TABLE memories ADD COLUMN superseded_by TEXT"),
+                ("superseded_at", "ALTER TABLE memories ADD COLUMN superseded_at REAL"),
+                ("pinned", "ALTER TABLE memories ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0"),
+            ):
+                if column not in existing:
+                    conn.execute(ddl)
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_superseded ON memories(superseded_by)"
+            )
+
     async def put(self, record: MemoryRecord) -> str:
         import sqlite3
 
@@ -193,8 +226,9 @@ class SQLiteMemoryStore(MemoryStore):
                 """
                 INSERT OR REPLACE INTO memories
                 (id, content, memory_type, metadata, embedding, created_at, updated_at,
-                 access_count, last_accessed, tags, session_id, user_id, importance, source)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 access_count, last_accessed, tags, session_id, user_id, importance, source,
+                 superseded_by, superseded_at, pinned)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
                 (
                     record.id,
@@ -211,6 +245,9 @@ class SQLiteMemoryStore(MemoryStore):
                     record.user_id,
                     record.importance,
                     record.source,
+                    record.superseded_by,
+                    record.superseded_at,
+                    1 if record.pinned else 0,
                 ),
             )
         return record.id
@@ -259,23 +296,41 @@ class SQLiteMemoryStore(MemoryStore):
             where_clauses.append("created_at BETWEEN ? AND ?")
             params.extend(query.time_range)
 
+        # Superseded facts never come back from a query. This is the half of
+        # Rule 4 that makes correction mean anything: if the old fact could
+        # still be recalled, the user would correct it and watch the answer stay
+        # the same. `include_superseded` in filters opts back in, which only the
+        # Memory surface does — to show the struck-through record.
+        if not query.filters.get("include_superseded"):
+            where_clauses.append("superseded_by IS NULL")
+
         where_sql = "WHERE " + " AND ".join(where_clauses) if where_clauses else ""
 
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
+            # Pinned first: the user said these matter, which outranks recency.
             rows = conn.execute(
-                f"SELECT * FROM memories {where_sql} ORDER BY created_at DESC LIMIT ?",
+                f"SELECT * FROM memories {where_sql} "
+                f"ORDER BY pinned DESC, created_at DESC LIMIT ?",
                 (*params, query.max_results),
             ).fetchall()
             return [self._row_to_record(r) for r in rows]
 
-    async def all_records(self) -> list[MemoryRecord]:
-        """Every record in the store. Used to rebuild the index on boot."""
+    async def all_records(self, include_superseded: bool = False) -> list[MemoryRecord]:
+        """Every live record. Used to rebuild the index on boot.
+
+        Superseded facts are excluded by default so they do not re-enter the
+        vector index at startup, which would silently undo every correction the
+        user has made the next time the process restarts.
+        """
         import sqlite3
 
+        sql = "SELECT * FROM memories"
+        if not include_superseded:
+            sql += " WHERE superseded_by IS NULL"
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
-            rows = conn.execute("SELECT * FROM memories").fetchall()
+            rows = conn.execute(sql).fetchall()
             return [self._row_to_record(r) for r in rows]
 
     async def stats(self) -> MemoryStats:
@@ -325,6 +380,12 @@ class SQLiteMemoryStore(MemoryStore):
             user_id=row["user_id"],
             importance=row["importance"],
             source=row["source"],
+            # `in row.keys()` rather than a bare lookup: a Spine written before
+            # the supersession migration has rows without these columns, and
+            # sqlite3.Row raises on a missing key rather than returning None.
+            superseded_by=row["superseded_by"] if "superseded_by" in row.keys() else None,
+            superseded_at=row["superseded_at"] if "superseded_at" in row.keys() else None,
+            pinned=bool(row["pinned"]) if "pinned" in row.keys() else False,
         )
 
 
