@@ -38,11 +38,15 @@ class GitHubProvider(BaseDiscoveryProvider):
             f"?q={urllib.parse.quote(request.query)}"
             f"&sort=updated&per_page={max_results}"
         )
+        # Through the gate. See the note in the Wikipedia provider: discovery
+        # stays unreachable from chat until policy exists, and this is the path
+        # it will use when it becomes reachable.
         try:
-            req = urllib.request.Request(url, headers={"User-Agent": "Zaram/1.0"})
-            with urllib.request.urlopen(req, timeout=10) as r:
-                import json
-                data = json.loads(r.read())
+            import json
+
+            from core.egress import get_gate
+
+            data = json.loads(get_gate().request(url, timeout=10, source="discovery.github"))
             self._last_error = None
             self._record_success()
         except Exception as exc:

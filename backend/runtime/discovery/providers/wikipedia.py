@@ -40,11 +40,15 @@ class WikipediaProvider(BaseDiscoveryProvider):
             f"?action=query&list=search&srsearch={urllib.parse.quote(query)}"
             f"&format=json&srlimit={max_results}"
         )
+        # Through the gate. The discovery runtime is deliberately unreachable
+        # from the chat path until the egress log and per-source policy exist —
+        # this is what it will be reachable *through* when that changes.
         try:
-            req = urllib.request.Request(url, headers={"User-Agent": "Zaram/1.0"})
-            with urllib.request.urlopen(req, timeout=10) as r:
-                import json
-                data = json.loads(r.read())
+            import json
+
+            from core.egress import get_gate
+
+            data = json.loads(get_gate().request(url, timeout=10, source="discovery.wikipedia"))
             self._last_error = None
             self._record_success()
         except Exception as exc:

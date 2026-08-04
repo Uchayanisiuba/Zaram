@@ -207,6 +207,35 @@ class EgressGate:
         self._record(req, "allowed", decision.reason)
         return req
 
+    def resolve(
+        self,
+        url: str,
+        *,
+        params: dict[str, Any] | None = None,
+        method: str = "GET",
+        body: str | None = None,
+        source: str = "unknown",
+    ) -> str:
+        """Fold ``params`` into the URL, check it, and return the final URL.
+
+        For async call sites, which have their own client and only need the
+        verdict. They must then send *this* URL rather than passing ``params``
+        separately — otherwise the client assembles a different URL from the one
+        that was checked and logged, and the log would record a request that
+        never happened alongside one that did.
+
+        Raises :class:`EgressDenied` if it may not go. Returns the URL unchanged
+        for loopback destinations, which need no decision.
+        """
+        final = url
+        if params:
+            encoded = urllib.parse.urlencode(
+                {k: v for k, v in params.items() if v is not None}
+            )
+            final = f"{url}{'&' if urllib.parse.urlparse(url).query else '?'}{encoded}"
+        self.check(final, method=method, body=body, source=source)
+        return final
+
     def _record(self, req: EgressRequest, decision: str, reason: str):
         return self._log.append(
             host=req.host,
