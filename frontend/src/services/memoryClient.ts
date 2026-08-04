@@ -20,6 +20,15 @@ export interface MemoryRecord {
   tags: string[];
   session_id: string | null;
   metadata: Record<string, unknown>;
+  /** Id of the fact that replaced this one. Null while it still stands.
+   *  A superseded fact is excluded from recall but stays on this screen,
+   *  struck through — a correction the user cannot see is indistinguishable
+   *  from a deletion, and the visible correction is the trust artifact. */
+  superseded_by?: string | null;
+  superseded_at?: number | null;
+  pinned?: boolean;
+  /** Set when this record replaced another. The inverse of superseded_by. */
+  corrects?: string | null;
 }
 
 /** Shared failure handling. The dev proxy answers 500 with an empty body when
@@ -98,6 +107,63 @@ export async function fetchMemory(
   }
   if (!res.ok) throw await failure(res, 'Could not load this source');
   return (await res.json()) as MemoryRecord;
+}
+
+export interface CorrectionResult {
+  superseded_id: string;
+  replacement_id: string;
+  note: string;
+}
+
+/**
+ * Correct a fact. Rule 4, in the form that keeps the record.
+ *
+ * Not an edit: the original is kept and marked superseded, and a new record
+ * takes its place. Answers that depended on the old one change, because it is
+ * dropped from the index — but the user can still see that Zaram had it wrong
+ * and that they said so.
+ */
+export async function correctMemory(
+  id: string,
+  content: string,
+  signal?: AbortSignal,
+): Promise<CorrectionResult> {
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}/memory/${encodeURIComponent(id)}/correct`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content }),
+      signal,
+    });
+  } catch {
+    throw new Error('Could not reach the Zaram backend.');
+  }
+  if (res.status === 409) {
+    throw new Error('That fact has already been corrected.');
+  }
+  if (!res.ok) throw await failure(res, 'Could not correct this fact');
+  return (await res.json()) as CorrectionResult;
+}
+
+/** Pin a fact so recall prefers it over merely-recent ones. */
+export async function pinMemory(
+  id: string,
+  pinned: boolean,
+  signal?: AbortSignal,
+): Promise<void> {
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}/memory/${encodeURIComponent(id)}/pin`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pinned }),
+      signal,
+    });
+  } catch {
+    throw new Error('Could not reach the Zaram backend.');
+  }
+  if (!res.ok) throw await failure(res, 'Could not pin this fact');
 }
 
 export async function deleteMemory(id: string, signal?: AbortSignal): Promise<void> {
