@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import time
 from collections.abc import Iterator
@@ -226,7 +227,29 @@ class ExecutionEngine:
     # ------------------------------------------------------------------
 
     MAX_RECALL = 5
-    MIN_RECALL_SCORE = 0.25
+
+    #: Below this, a memory is not relevant enough to inject or to cite.
+    #:
+    #: Measured, not guessed. With bge-m3 embeddings and two facts in the Spine:
+    #:
+    #:     "When is the launch?"                      0.546, 0.515   related
+    #:     "Where is the rehearsal being held?"       0.491, 0.436   related
+    #:     "who won the 2026 world cup"               0.362, 0.355   unrelated
+    #:     "What can you do"                          0.339, 0.327   unrelated
+    #:     "write me a python function to sort a list" 0.332, 0.317  unrelated
+    #:
+    #: The old value of 0.25 sat below every one of those, so *every* question
+    #: recalled *every* memory and cited it. That is worse than not citing at
+    #: all: a citation the answer did not use is a false claim of provenance,
+    #: and it teaches the user that the citations mean nothing. Rule 2 is about
+    #: answers carrying their sources, which only works if the converse holds.
+    #:
+    #: bge-m3 puts any two English sentences around 0.3 even when they share no
+    #: subject, so the usable signal starts well above zero. 0.42 sits in the
+    #: gap measured above. Re-measure if the embedding model changes — this
+    #: number is not transferable between models, which is why the backend can
+    #: override it.
+    MIN_RECALL_SCORE = float(os.getenv("ZARAM_MIN_RECALL_SCORE", "0.42"))
 
     #: Capabilities whose output is context for later steps, never shown to the
     #: user. Their raw payloads (JSON search results, for example) would
@@ -485,12 +508,22 @@ class ExecutionEngine:
         if not prompt or not answer or answer.startswith("[FALLBACK]"):
             return
 
-        # A question that was answered purely from recall carries no new
-        # information. Storing it would grow the Spine with restatements of
-        # what it already knows, which is what produced the duplicate
-        # citations.
-        if recalled and not self._carries_new_information(prompt):
-            logger.debug("Engine: not storing — question added no new information")
+        # Questions are not facts, and are never stored.
+        #
+        # This used to read `if recalled and not ...`, so the guard only ran
+        # when something had been recalled. That held while the recall threshold
+        # was loose enough that every prompt recalled something — and broke the
+        # moment the threshold was tightened, because a question that now
+        # correctly recalls nothing skipped the check and was stored as a fact.
+        #
+        # The visible symptom: asking "who won the 2026 world cup" stored the
+        # question, and the next similar question cited it. Zaram was citing the
+        # user's own words back at them as though they were a source.
+        #
+        # Whether a prompt is a question does not depend on what recall
+        # returned, so neither does this.
+        if not self._carries_new_information(prompt):
+            logger.debug("Engine: not storing — the prompt is a question, not a fact")
             return
 
         # Imported lazily: core/ does not depend on a runtime at module load.

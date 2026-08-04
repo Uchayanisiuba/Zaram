@@ -37,9 +37,17 @@ export default function OrbStatus({
    *  look far smaller than its container. Letting it exceed the ring puts the
    *  glow around the ring rather than inside it. */
   orbSize = 84,
+  /** What clicking does. Supplied by the shell, which is the only thing that
+   *  can leave the current workspace.
+   *
+   *  Without it this falls back to toggling a chat column in place — the older
+   *  behaviour, kept only so the component still works if rendered somewhere
+   *  that cannot navigate. */
+  onOpen,
 }: {
   ringSize?: number;
   orbSize?: number;
+  onOpen?: () => void;
 }) {
   const reduced = useIsReducedMotion();
   const backendOnline = useSystemStore((s) => s.backendOnline);
@@ -58,9 +66,9 @@ export default function OrbStatus({
   return (
     <button
       type="button"
-      onClick={toggleChat}
-      aria-label={`${label}. ${detail} ${chatOpen ? 'Close' : 'Open'} conversation.`}
-      aria-pressed={chatOpen}
+      onClick={onOpen ?? toggleChat}
+      aria-label={`${label}. ${detail} Open conversation.`}
+      aria-pressed={onOpen ? undefined : chatOpen}
       title={`${label} — ${detail}`}
       className="group relative flex items-center gap-2.5 rounded-full pl-1 pr-3 py-1 transition-colors hover:bg-white/5 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-indigo)]"
     >
@@ -110,8 +118,11 @@ export default function OrbStatus({
         >
           {label}
         </span>
+        {/* Always "Ask Zaram" when the orb navigates: from a workspace it is a
+            way out, never a toggle, so offering "Close chat" would describe
+            something it no longer does. */}
         <span className="text-[9px] text-slate-500">
-          {chatOpen ? 'Close chat' : 'Ask Zaram'}
+          {!onOpen && chatOpen ? 'Close chat' : 'Ask Zaram'}
         </span>
       </span>
     </button>

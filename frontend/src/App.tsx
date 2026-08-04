@@ -61,6 +61,22 @@ export default function App() {
     useChatModeStore.getState().setContext(id === 'landing' ? 'landing' : 'workspace');
   };
 
+  /** The Orb, from anywhere, goes to the conversation.
+   *
+   *  It used to slide a narrow chat column in beside whatever workspace you
+   *  were on, which made the same gesture produce two different things
+   *  depending on where you stood — a small orb and a cramped column here, the
+   *  full conversation there. The Orb is one object with one meaning, so it now
+   *  does one thing: return to the conversation as it appears from the landing,
+   *  full size. Workspaces are somewhere you go and come back from. */
+  const openConversation = () => {
+    setWorkspace('landing');
+    setCommandOpen(false);
+    const chat = useChatModeStore.getState();
+    chat.setContext('landing');
+    chat.openChat();
+  };
+
   return (
     <div
       className="zaram-backdrop"
@@ -72,7 +88,13 @@ export default function App() {
       }}
     >
       {/* Top navigation bar — hidden on landing */}
-      {!isLanding && <TopNav workspace={workspace} onSearchOpen={() => setCommandOpen(true)} />}
+      {!isLanding && (
+        <TopNav
+          workspace={workspace}
+          onSearchOpen={() => setCommandOpen(true)}
+          onOpenConversation={openConversation}
+        />
+      )}
 
       {/* Body: left rail + workspace + runtime panel */}
       <div
