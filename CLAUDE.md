@@ -204,6 +204,9 @@ Corollaries, all binding:
   that demos.
 - When a plan and the codebase disagree, the codebase wins — say so rather than
   building against a stale assumption.
+- **A test whose scope is configured somewhere is two things to check.** Confirm
+  what actually runs, not what appears to. `testpaths` hid 158 tests for months
+  while every suite count reported here was quoted with confidence.
 
 ## Current milestone
 

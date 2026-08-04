@@ -24,6 +24,39 @@ ignore_missing_imports = true
 exclude = ["venv", "node_modules", "frontend"]
 
 [tool.pytest.ini_options]
-testpaths = ["backend/tests"]
+# Collect the whole backend, not a hand-listed set of directories. An allow-list
+# silently hides any test dir nobody remembered to add: `backend/tests` alone left
+# garage, media, voice and presence uncollected, so every suite count quoted before
+# 2026-08-04 was wrong. Excluding is safe (a stale exclusion collects extra tests);
+# including is not (a missing entry hides them).
+testpaths = ["backend"]
+norecursedirs = [
+    "venv",
+    ".venv",
+    "node_modules",
+    "__pycache__",
+    "*.egg-info",
+    # Runtime scratch dirs — data, never tests.
+    "audio",
+    "audio_cache",
+    "audio_clips",
+    "audio_output",
+    "image_output",
+    "temp",
+    "uploads",
+]
+# Manual smoke scripts from early kernel work: `asyncio.run(main())` at import time,
+# no test functions, and test_kernel.py does not currently parse. They match test_*.py
+# by accident. Delete or rename these to manual_*.py and drop these lines.
+# Two test files may share a basename. Under the default "prepend" import mode
+# they may not: `providers/tests/test_manager.py` and `media/tests/test_manager.py`
+# both become the top-level module `test_manager` and the second one collected
+# fails with "import file mismatch". That is a packaging accident, not a naming
+# rule worth obeying, and it only appeared once collection widened past one
+# directory. importlib mode derives the module name from the full path.
+addopts = """-v --tb=short --import-mode=importlib
+    --ignore=backend/test_kernel.py
+    --ignore=backend/test_models_runtime.py
+    --ignore=backend/test_execution_engine.py
+    --ignore=backend/core/test_execution_engine.py"""
 asyncio_mode = "auto"
-addopts = "-v --tb=short"
