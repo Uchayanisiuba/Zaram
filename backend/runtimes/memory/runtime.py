@@ -205,6 +205,84 @@ class MemoryRuntimeImpl(MemoryRuntime):
         finally:
             self._stats["total_latency_ms"] += (time.time() - start) * 1000
 
+    async def correct(self, record_id: str, corrected_content: str) -> dict[str, Any]:
+        """Replace a fact with a corrected one, keeping the original visible.
+
+        Rule 4 in full. Deletion was only ever half of it: removing a wrong fact
+        stops it being recalled but throws away the record that Zaram had it
+        wrong and the user said so. That record is the trust artifact — a system
+        that shows you where it was mistaken is one you can believe when it says
+        it is right.
+
+        So this writes a *new* record and marks the old one superseded. The old
+        fact stays on disk, is dropped from the vector index so it can never be
+        recalled again, and remains visible in the Memory surface struck through.
+
+        Returns both ids, so the caller can show what replaced what.
+        """
+        original = await self._store.get(record_id)
+        if original is None:
+            raise KeyError(record_id)
+        if original.is_superseded:
+            raise ValueError(
+                f"{record_id} was already corrected on "
+                f"{time.strftime('%d %b %Y', time.localtime(original.superseded_at or 0))}"
+            )
+
+        replacement = MemoryRecord(
+            content=corrected_content,
+            memory_type=original.memory_type,
+            # The chain is kept in metadata so a corrected fact can be traced
+            # back through however many corrections preceded it.
+            metadata={**original.metadata, "corrects": record_id},
+            embedding=self._embedder.embed(corrected_content) if corrected_content else None,
+            session_id=original.session_id,
+            user_id=original.user_id,
+            tags=list(original.tags),
+            importance=original.importance,
+            source=original.source,
+            pinned=original.pinned,
+        )
+        new_id = await self._store.put(replacement)
+        await self._index.add(replacement)
+
+        superseded = MemoryRecord(
+            **{
+                **original.__dict__,
+                "superseded_by": new_id,
+                "superseded_at": time.time(),
+                "updated_at": time.time(),
+            }
+        )
+        await self._store.put(superseded)
+
+        # Out of the index, not merely flagged. A fact that stays indexed can
+        # still be returned by a vector search regardless of what the store
+        # thinks, and the correction would appear to do nothing.
+        try:
+            await self._index.remove(record_id)
+        except Exception as exc:  # noqa: BLE001 - index kinds vary
+            print(f"[MemoryRuntime] Could not drop {record_id} from the index: {exc}")
+
+        if self._event_bus:
+            self._event_bus.publish(ZaramEvent(
+                source_runtime="memory",
+                event_type="memory.corrected",
+                priority="normal",
+                data={"superseded_id": record_id, "replacement_id": new_id},
+            ))
+        return {"superseded_id": record_id, "replacement_id": new_id}
+
+    async def set_pinned(self, record_id: str, pinned: bool) -> bool:
+        """Pin or unpin a fact. Pinned facts outrank recency during recall."""
+        record = await self._store.get(record_id)
+        if record is None:
+            return False
+        await self._store.put(
+            MemoryRecord(**{**record.__dict__, "pinned": pinned, "updated_at": time.time()})
+        )
+        return True
+
     async def retrieve(
         self,
         query: str,

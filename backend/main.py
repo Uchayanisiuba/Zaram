@@ -580,6 +580,58 @@ async def get_memory(record_id: str):
     }
 
 
+class MemoryCorrection(BaseModel):
+    content: str
+
+
+@app.post("/memory/{record_id}/correct")
+async def correct_memory(record_id: str, body: MemoryCorrection):
+    """Correct a fact. The original is kept, struck through, and never recalled.
+
+    Rule 4 says the user can correct any stored fact and the affected answers
+    must change. Deletion only ever satisfied half of that: it stops the wrong
+    fact being recalled, but discards the record that Zaram had it wrong and the
+    user said so. That record is the point — a system that shows you where it
+    was mistaken is one you can believe when it says it is right.
+    """
+    if not kernel.memory_runtime:
+        raise HTTPException(status_code=503, detail="Memory runtime not available")
+
+    corrected = (body.content or "").strip()
+    if not corrected:
+        raise HTTPException(status_code=400, detail="A correction cannot be empty")
+
+    try:
+        result = await kernel.memory_runtime.correct(record_id, corrected)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="No such memory")
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+
+    return {
+        **result,
+        "note": (
+            "The original is kept and shown struck through. It is excluded from "
+            "recall, so answers that depended on it will change."
+        ),
+    }
+
+
+class MemoryPin(BaseModel):
+    pinned: bool
+
+
+@app.post("/memory/{record_id}/pin")
+async def pin_memory(record_id: str, body: MemoryPin):
+    """Pin a fact so recall prefers it over merely-recent ones."""
+    if not kernel.memory_runtime:
+        raise HTTPException(status_code=503, detail="Memory runtime not available")
+
+    if not await kernel.memory_runtime.set_pinned(record_id, body.pinned):
+        raise HTTPException(status_code=404, detail="No such memory")
+    return {"id": record_id, "pinned": body.pinned}
+
+
 @app.delete("/memory/{record_id}")
 async def delete_memory(record_id: str):
     """Forget one stored fact.
