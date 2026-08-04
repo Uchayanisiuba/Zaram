@@ -1,4 +1,4 @@
-"""No outbound HTTP anywhere except the gate.
+﻿"""No outbound HTTP anywhere except the gate.
 
 This is the test that keeps Rule 3 true tomorrow. ``test_egress_gate.py`` proves
 the gate behaves correctly; this one proves the gate is the *only* way out, by
@@ -7,7 +7,7 @@ reading the source and failing when a module opens its own socket.
 Why a source scan rather than a runtime check: the failure being guarded against
 is somebody adding a tenth call site six months from now, in a module nobody
 thought to cover. A runtime test only sees code it executes. A source scan sees
-code that merely exists, which is the point — this must fail in CI on the commit
+code that merely exists, which is the point â€” this must fail in CI on the commit
 that introduces the bypass, not in production when the path is first taken.
 
 Adding a module to ``LOCAL_ONLY`` is deliberately awkward. It should require
@@ -77,12 +77,10 @@ NETWORK_LIBRARY_EXEMPT = {
     "runtimes/internet/connectors.py": "dormant: internet runtime does not boot",
     "runtimes/internet/connectors/base.py": "dormant: internet runtime does not boot",
     "runtime/discovery/providers/duckduckgo.py": "dormant: discovery is unreachable from chat",
-    "implementations/kokoro_tts.py": "dormant: voice is out of scope for v1",
-    "interfaces/implementation/kokoro_tts.py": "dormant: voice is out of scope for v1",
     "runtimes/speech/connectors/kokoro.py": "dormant: voice is out of scope for v1",
     # Voice discovery used to contact huggingface.co on every launch. It is
     # exempted here only because `voice_discovery_enabled` now defaults to
-    # False — see the guard test below, which fails if that default flips back.
+    # False â€” see the guard test below, which fails if that default flips back.
     "voice/providers/kokoro.py": "voice discovery is off by default; model load is lazy",
     "voice/providers/__init__.py": "re-export only; the provider itself is exempted above",
 }
@@ -179,7 +177,7 @@ class TestNothingBypassesTheGate:
 
         If this fails, the fix is not to add the module to LOCAL_ONLY. It is to
         route the request through ``EgressGate``. LOCAL_ONLY is for destinations
-        that provably cannot leave the machine — loopback, and nothing else.
+        that provably cannot leave the machine â€” loopback, and nothing else.
         """
         offenders: list[str] = []
 
@@ -188,7 +186,7 @@ class TestNothingBypassesTheGate:
             if rel in LOCAL_ONLY:
                 continue
             for lineno, expr in _outbound_calls_in(path):
-                offenders.append(f"  {rel}:{lineno} — {expr}(…)")
+                offenders.append(f"  {rel}:{lineno} â€” {expr}(â€¦)")
 
         assert not offenders, (
             "These modules open outbound connections without going through "
@@ -199,11 +197,37 @@ class TestNothingBypassesTheGate:
               "machine."
         )
 
+    def test_no_exemption_outlives_the_file_it_excuses(self):
+        """An exemption for a file that no longer exists is a hole waiting to open.
+
+        Both lists are keyed by path. When a module is deleted or moved, its
+        entry stays behind and keeps matching nothing â€” until somebody recreates
+        that path, at which point it silently inherits a waiver nobody granted
+        it. The deletion of the two orphaned Kokoro copies is what surfaced this:
+        removing the files left two entries here that no test would have flagged.
+        """
+        stale = [
+            f"  {rel} ({listname})"
+            for listname, entries in (
+                ("LOCAL_ONLY", LOCAL_ONLY),
+                ("NETWORK_LIBRARY_EXEMPT", NETWORK_LIBRARY_EXEMPT),
+            )
+            for rel in entries
+            if not (BACKEND / rel).exists()
+        ]
+
+        assert not stale, (
+            "These exemptions name files that do not exist:\n\n"
+            + "\n".join(sorted(stale))
+            + "\n\nDelete the entry. Leaving it means a future file at the same "
+              "path is exempted by accident."
+        )
+
     def test_no_unexpected_module_imports_a_network_library(self):
         """The hole the AST scan cannot see.
 
         A library that makes its own HTTP requests leaves no syntax for the scan
-        above to match — ``list_repo_files(repo_id)`` looks like any other call.
+        above to match â€” ``list_repo_files(repo_id)`` looks like any other call.
         This catches them by import instead.
         """
         offenders: list[str] = []
@@ -213,14 +237,14 @@ class TestNothingBypassesTheGate:
             if rel in NETWORK_LIBRARY_EXEMPT:
                 continue
             for lineno, lib in _network_imports_in(path):
-                offenders.append(f"  {rel}:{lineno} — {lib} ({NETWORK_LIBRARIES[lib]})")
+                offenders.append(f"  {rel}:{lineno} â€” {lib} ({NETWORK_LIBRARIES[lib]})")
 
         assert not offenders, (
             "These modules import a library that makes its own network requests, "
             "which the gate cannot see or log:\n\n"
             + "\n".join(sorted(offenders))
-            + "\n\nEither route the traffic through EgressGate, or — if the code "
-              "is dormant — add it to NETWORK_LIBRARY_EXEMPT with the reason."
+            + "\n\nEither route the traffic through EgressGate, or â€” if the code "
+              "is dormant â€” add it to NETWORK_LIBRARY_EXEMPT with the reason."
         )
 
     def test_network_library_exemptions_are_not_reachable_at_boot(self):
@@ -246,7 +270,7 @@ class TestNothingBypassesTheGate:
 
         Kokoro voice discovery lists a HuggingFace repo, which contacts
         huggingface.co. It defaulted to on, so every launch made an unlogged
-        outbound request before any policy had been consulted — found only
+        outbound request before any policy had been consulted â€” found only
         because the connection timed out and left a line in the startup log.
 
         The exemption above is conditional on this default. If it flips back,
@@ -272,7 +296,7 @@ class TestNothingBypassesTheGate:
         """Every exemption must be justified by the code, not by the comment.
 
         Checks that the module contains no remote-looking URL literal. Not
-        exhaustive — a URL assembled at runtime would slip past — but it does
+        exhaustive â€” a URL assembled at runtime would slip past â€” but it does
         catch the realistic regression, which is somebody adding a cloud
         endpoint to a module that was exempted while it was local.
         """

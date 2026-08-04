@@ -15,6 +15,29 @@ Design notes
 * **Future-proof streaming.** ``stream_audio`` already yields
   :class:`AudioChunk` objects so real-time PCM emission (Unreal lip-sync, low
   latency SSE) can be added later without touching the ``VoiceManager`` API.
+
+Which Kokoro is this?
+---------------------
+**This module is the keeper.** Four copies of Kokoro existed. Two were orphans
+with no importer and were deleted on 2026-08-04:
+``implementations/kokoro_tts.py`` and ``interfaces/implementation/kokoro_tts.py``.
+
+One copy remains besides this one: ``runtimes/speech/connectors/kokoro.py``,
+reached via ``runtimes/speech/connectors/__init__.py`` and ``base.py``. It is
+**pending, not kept.** Collapsing it into this provider means rewiring the speech
+runtime, and voice is out of scope for v1 (see CLAUDE.md), so the rewiring waits
+until voice returns to scope. Do not add features to the connector in the
+meantime — anything it grows has to be ported here later.
+
+Two loose ends the deletion left, both for whoever does that rewiring:
+
+* ``services/speech_manager.py`` still does ``from implementations.kokoro_tts
+  import KokoroTTS``, which no longer resolves. Nothing imports ``SpeechManager``,
+  so nothing breaks today, but the module is dead and should go with the connector.
+* ``voice/tests/test_kokoro_provider.py`` has five failures against this file
+  (voice discovery returns an empty set, so the invalid-voice fallback never
+  fires). They were invisible until ``testpaths`` was widened and are unrelated
+  to the deletions. Fix them as part of reconnecting voice, not before.
 """
 
 from __future__ import annotations
