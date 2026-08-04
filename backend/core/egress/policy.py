@@ -1,0 +1,135 @@
+"""Per-source egress policy. Default deny.
+
+Rule 5 of the project contract: *nothing leaves the device without an explicit,
+per-item policy. Default deny.* This module holds those decisions.
+
+A policy is keyed by **host**, not by feature. "Wikipedia may be searched" is a
+statement the user can understand and audit; "the discovery runtime is enabled"
+is not, because it does not say where anything goes. Keying on host also means a
+new provider pointed at an already-approved host inherits the existing decision
+rather than silently acquiring a new one — and a new provider pointed somewhere
+new is denied until the user says otherwise, which is the behaviour Rule 5 asks
+for.
+
+Three modes:
+
+``DENY``
+    Nothing goes. This is what an unknown host gets.
+``ASK``
+    The user is shown the literal text about to leave and chooses. The contract
+    calls confirm-before-send "a headline feature, not an option", so this is
+    the mode a host should normally be promoted *to* when first approved.
+``ALLOW``
+    Goes without asking. Still logged — Rule 3 is not conditional on Rule 5.
+
+Loopback is not covered here at all. A request to 127.0.0.1 never leaves the
+machine, so it is not egress and there is nothing for a policy to govern. The
+gate classifies that before it consults policy.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import threading
+from dataclasses import dataclass
+from enum import Enum
+
+
+class Mode(str, Enum):
+    DENY = "deny"
+    ASK = "ask"
+    ALLOW = "allow"
+
+
+@dataclass(frozen=True)
+class Decision:
+    mode: Mode
+    #: Plain-language reason, shown to the user and written to the log. The
+    #: contract asks for routing decisions in plain language; this is that.
+    reason: str
+
+
+#: What an unknown host gets. Named rather than inlined so the default is
+#: greppable and a change to it is visible in a diff.
+DEFAULT_DECISION = Decision(
+    Mode.DENY,
+    "no policy exists for this destination, and the default is to refuse",
+)
+
+
+class EgressPolicy:
+    """Host → mode, persisted as JSON next to the egress log.
+
+    JSON rather than SQLite because this file is something a user might
+    reasonably want to read, diff or check into their own backup. It is small,
+    it is theirs, and its legibility is worth more than query performance on a
+    table that will hold tens of rows.
+    """
+
+    def __init__(self, path: str):
+        self._path = path
+        self._lock = threading.Lock()
+        self._rules: dict[str, Mode] = {}
+        self._load()
+
+    def _load(self) -> None:
+        if not os.path.exists(self._path):
+            return
+        try:
+            with open(self._path, "r", encoding="utf-8") as f:
+                raw = json.load(f)
+            self._rules = {
+                host: Mode(mode)
+                for host, mode in (raw.get("hosts") or {}).items()
+                if mode in {m.value for m in Mode}
+            }
+        except Exception:
+            # A corrupt policy file must not fail open. Falling back to an empty
+            # rule set means every host is unknown, and every unknown host is
+            # denied — the safe direction to fail in.
+            self._rules = {}
+
+    def _save(self) -> None:
+        tmp = self._path + ".tmp"
+        parent = os.path.dirname(os.path.abspath(self._path))
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(
+                {"hosts": {h: m.value for h, m in sorted(self._rules.items())}},
+                f,
+                indent=2,
+            )
+        os.replace(tmp, self._path)
+
+    # ------------------------------------------------------------------ read
+
+    def decide(self, host: str) -> Decision:
+        """What should happen to a request addressed to ``host``."""
+        mode = self._rules.get(host.lower())
+        if mode is None:
+            return DEFAULT_DECISION
+        if mode is Mode.ALLOW:
+            return Decision(Mode.ALLOW, f"you allowed requests to {host}")
+        if mode is Mode.ASK:
+            return Decision(Mode.ASK, f"you asked to confirm each request to {host}")
+        return Decision(Mode.DENY, f"you blocked requests to {host}")
+
+    def rules(self) -> dict[str, str]:
+        """Every rule, for the privacy pane."""
+        with self._lock:
+            return {h: m.value for h, m in sorted(self._rules.items())}
+
+    # ----------------------------------------------------------------- write
+
+    def set(self, host: str, mode: Mode | str) -> None:
+        with self._lock:
+            self._rules[host.lower()] = Mode(mode)
+            self._save()
+
+    def forget(self, host: str) -> None:
+        """Remove a rule. The host reverts to the default, which is deny."""
+        with self._lock:
+            self._rules.pop(host.lower(), None)
+            self._save()
