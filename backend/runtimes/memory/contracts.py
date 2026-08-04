@@ -23,6 +23,11 @@ class MemoryStatus(str, Enum):
     INITIALIZING = "initializing"
     READY = "ready"
     DISABLED = "disabled"
+    # The memory runtime's shutdown() assigned these and they did not exist, so
+    # every kernel shutdown raised AttributeError here. It was invisible because
+    # the speech runtime raised first and shutdown never got this far.
+    STOPPING = "stopping"
+    STOPPED = "stopped"
 
 
 class RetrievalStrategy(str, Enum):

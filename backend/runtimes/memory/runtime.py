@@ -106,6 +106,16 @@ class MemoryRuntimeImpl(MemoryRuntime):
 
     async def shutdown(self) -> None:
         self._state = MemoryStatus.STOPPING
+        # Leave the Spine as one consistent file. Nothing closed the store
+        # before, because this method never ran to completion: MemoryStatus had
+        # no STOPPING member and the assignment above raised AttributeError on
+        # every shutdown, behind the speech runtime raising first.
+        close = getattr(self._store, "close", None)
+        if callable(close):
+            try:
+                close()
+            except Exception as exc:  # pragma: no cover - defensive
+                print(f"[MemoryRuntime] Store close failed: {exc}")
         self._state = MemoryStatus.STOPPED
 
     def get_runtime_id(self) -> str:
