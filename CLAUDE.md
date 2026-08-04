@@ -4,241 +4,351 @@ The memory and control layer for people who use more than one AI.
 
 Zaram sits between the user and whatever models they use — cloud or local. Everything
 flows into one knowledge base on their machine. Any model can recall it. The user sees
-what was recalled, can correct it, and controls what leaves the device.
+what was recalled, can correct it, controls what leaves the device, and can put the
+result to work through tools.
 
-Full rationale: `docs/VISION.md` (read it before proposing product changes — it is
-deliberately not auto-imported).
+Full rationale: `docs/VISION.md`. Interface: `docs/UI-SPEC.md`. Read both before
+proposing product changes; neither is auto-imported.
 
 ## Canonical vocabulary
 
-Use these terms only. Never substitute alternatives.
+Use these terms only.
 
 - **Spine** — the local knowledge base (index + embeddings + provenance records)
 - **Recall** — retrieving prior context into a new exchange
-- **Provenance** — the link from a recalled fact to its source
+- **Provenance** — the link from a recalled fact or generated claim to its source
 - **Routing** — deciding local vs cloud for a given request
-- **Egress log** — the record of what left the machine, when, to which provider
+- **Egress log** — the append-only record of what left the machine
 - **Orb** — the system-state indicator. Not a mascot, not a launcher.
-- **Workspace** — an MCP-backed tool surface (post-v1)
+- **Tool** — an MCP server Zaram can call
 
-Do not use: "faculty", "nursery", "aperture", "synapse web", "AI operating system",
-"garage". These are retired. The provider layer is `backend/providers/`.
+Retired, do not use: "faculty", "nursery", "aperture", "synapse web",
+"AI operating system", "workspace" (as a top-level surface).
+
+## Navigation — four surfaces plus Settings
+
+**Work · Memory · Knowledge · Activity**, with Settings bottom-anchored. Sources live
+inside Knowledge. Tools are configured inside Settings.
+
+**Work is where output lives** — documents, spreadsheets, charts the user made, each
+with the conversation that produced it and its sources. It exists because a navigation
+made only of Memory, Knowledge and Activity is entirely about the system and contains
+nothing the user made. Nobody pays for a memory browser. Memory matters because it is
+memory *of work*.
+
+The test for any future surface: **does it hold something real?** Work holds files.
+Canvas and Plugins held nothing, which is why they were cut.
+
+Conversation is **not** a rail item. It is the shell — the landing state, entered by
+the orb, animated aside when a surface opens. But the return path must be visible and
+one click: the orb reverses the animation, and the persistent bar's topic line is
+clickable. Never let the animation be the only route back.
+
+**Tools never get menu items.** They are actions inside the conversation. This is what
+lets capability grow without the navigation growing. Adding a fourth top-level surface
+requires a reason that survives "why is this not part of Conversation?"
+
+Generated files appear as cards in the conversation and land in the output directory.
+There is no Files surface — that duplicates the operating system.
 
 ## Immutable rules
 
 1. **Never buy inference.** The user brings their own key or their own model. No
-   feature may require Zaram to pay per token. This is why the free tier can exist.
+   feature may require Zaram to pay per token.
 2. **Every recalled fact carries provenance.** An answer that cites nothing is a bug.
-3. **Every byte that leaves is logged.** The egress log is append-only and
-   tamper-evident. Build it into the core, never as a later add-on.
-   This rule is only true because of the no-remote-assets rule below — the gate
-   cannot see browser-originated requests, so the ban is what keeps Rule 3 from
-   being a claim the software cannot keep.
-4. **The user can correct or delete any stored fact**, and the affected answers must
-   change. This loop is the product.
-5. **Nothing leaves the device without an explicit, per-item policy.** Default deny.
+   This extends to generated documents: claims trace to their source.
+3. **Every byte that leaves is logged** — including bytes sent by tools, not only by
+   chat. The egress log is append-only and tamper-evident, built into the core.
+4. **The user can correct or delete any stored fact**, and affected answers change.
+5. **Nothing leaves the device without an explicit per-item policy.** Default deny.
 6. **Tools confirm before acting.** Autonomy is granted by the user, never a default.
-7. **The Spine is exportable in an open format.** No lock-in, ever.
+7. **The Spine is exportable in an open format.** No lock-in.
+7b. **Every fact carries its origin: user document, conversation, or Zaram-generated.**
+   Generated artifacts are indexed by default — the protection against Zaram citing its
+   own restatements is origin tagging, not exclusion. Recall deprioritises generated
+   content where a user source says the same thing, and recall explanations name the
+   origin: "from a proposal Zaram generated in April" reads differently from "from your
+   client brief". A "Don't remember this" override exists on file cards; it is an
+   override, never a gate.
+7d. **Conversation is ephemeral; entering the Spine is a decision the system makes,
+   not the user.** Session state and long-term memory are separate stores. Working
+   state, clarifications and false starts stay in the session. Conflating the two is
+   what produces duplicate citations and Zaram quoting its own replies.
+7i. **Every fact carries a scope: `global` or `project:<id>`.** Global is about the
+   user — preferences, working style, how they like things written. Project is about
+   the work — decisions, constraints, client feedback. Default to the current project;
+   promote to global on evidence, not at capture time: a fact recalled across three
+   different projects is probably about the person, and that is the moment to ask.
+   Scope is one field on one store, not two stores — facts move, recall needs both at
+   once, and the correction loop must stay uniform. It is also the multiplayer
+   boundary: project memory is shareable, global memory never is.
+7e. **Never ask the user a question the system can answer from behaviour.** A prompt at
+   creation time asks someone to predict the future; recall count measures what
+   actually happened. Facts enter provisionally, become durable through use, and decay
+   if never recalled. The user is not asked to decide at creation — only to correct
+   afterwards.
+7g. **No network call occurs before the user has consented to one** — not for model
+   recommendations, not for telemetry, not for update checks. Refreshing anything from
+   the network is an explicit action, gated and logged like any other egress.
+7h. **Offer at the moment of doubt; never make the user choose in advance.** Always-on
+   dual answers, always-on search prompts and always-on briefs tax every interaction to
+   serve a minority of them. Contextual offers cost nothing when unneeded.
+7f. **Do not build a feedback mechanism whose action has no purpose other than giving
+   feedback.** Thumbs on replies conflate "the fact was wrong", "the tone was wrong"
+   and "you misunderstood me" into one uninterpretable click. Correction is the
+   feedback mechanism: specific, deliberate, and already visible in the product.
+7c. **No ingestion path may route documents off-device**, regardless of quality gains.
+   Managed parsing APIs are prohibited. This is the exact trade the product refuses.
+8. **Nothing derived from the Spine may appear in an outbound query.** Enforced by
+   test, not by convention.
 
-## Scope for v1 — do not exceed
+## Tool risk tiers
+
+Every tool falls into exactly one tier. The tier determines what must exist before it
+ships. This is the organising principle for the whole tool layer.
+
+| Tier | Does | Requires |
+|---|---|---|
+| **Generative** | Creates new artifacts only | Nothing. Ships in v1. |
+| **Mutative** | Changes existing state | Undo, confirm, sandbox |
+| **Egressive** | Sends data off-device | Egress log, per-source policy |
+
+A cloud model performing a file edit is **both** mutative and egressive and needs both
+gates. The two consents are separate: permitting cloud models does not permit
+mutation, and permitting file edits does not permit cloud.
+
+**Generative safety is structural, not promised.** Generated files go to a dedicated
+output directory, never overwrite silently, and the write path has no delete or
+overwrite capability at all. A filename collision increments or asks.
+
+## Scope for v1
 
 In scope:
-
 - Ingest a folder into the Spine
 - Chat routed to at least two providers (one cloud, one local)
-- Recall across providers, with visible provenance
-- Correct/delete a fact and see answers change
-- Egress log, viewable
-- Privacy policy per source
+- Recall across providers with visible provenance
+- Correct or delete a fact and see answers change
+- Egress log, viewable, recording chat and tool activity
+- Per-source privacy policy
+- **Generative tools**: .docx, .pdf, .md, .xlsx, and charts from the user's own data,
+  with provenance carried into the output
+- **Read-only Unreal MCP**: inspect scene, list actors, report on materials and
+  lighting. No writes.
 
-Explicitly out of scope until v1 ships and is tested with real users:
+Out of scope until v1 ships and is tested with real users:
+- Any mutative tool (file edits, VS Code, Blender writes, Unreal writes)
+- Web search — see sequencing below
+- Agents, extensions marketplace, updates feed, voice, multi-user, sharing
+- Image generation (competes with local inference for VRAM, not grounded in user data)
 
-- Agents / agent constellations
-- Code studio or IDE integration
-- Extensions marketplace
-- Updates feed
-- Voice
-- Document generation
-- Multi-user, permissions, sync
-- Any additional workspace
+## Sequencing
 
-If a task would add something from the out-of-scope list, stop and say so rather than
-building it.
+**Egress log → per-source policy → web search as its first governed source.**
+Search does not return before those two exist. Bytes cannot be logged retroactively.
+
+**Tools: generative → read-only inspection → scoped writes.**
+Priority order for integrations: documents (v1), Unreal read-only (v1),
+Unreal scoped writes, Blender, VS Code. Everything else waits for a user to ask.
+
+Do not integrate an application because it is testable. Each integration is a
+permanent maintenance obligation that breaks on every host-app update.
+
+## Dependency stack
+
+Licence-checked. **No AGPL anywhere** — it would force the whole product under AGPL and
+break the open-core model. Verify the licence of every new dependency before it lands.
+
+| Purpose | Choice | Licence |
+|---|---|---|
+| Ingestion / parsing | Docling (+ Granite-Docling-258M) | MIT / Apache 2.0 |
+| Word | python-docx | MIT |
+| Excel | openpyxl | MIT |
+| PDF | WeasyPrint (HTML-first) or ReportLab | BSD |
+| Charts | matplotlib | permissive |
+| Diagrams | Mermaid | MIT |
+| Local inference | Ollama | MIT |
+| Vector store | LanceDB or sqlite-vec | Apache 2.0 |
+| Memory engine (if used) | Letta | Apache 2.0 |
+| Provider routing | LiteLLM | MIT |
+| Text to speech | Kokoro-82M | Apache 2.0 |
+
+Do **not** embed an office editor. OnlyOffice is AGPL and is a separate service;
+LibreOffice headless is a several-hundred-megabyte dependency. Zaram generates
+documents; users edit them in whatever they already use. Different problems.
+
+Pandoc is GPL — acceptable as an optional external binary, not as a core dependency.
+
+**TTS is Kokoro-82M and only Kokoro.** The binding constraint is that speech synthesis
+must not compete with local inference for VRAM, and must work on Macs and AMD. Kokoro
+runs on CPU under 2.5GB, Apache 2.0, 54 voices. Better-sounding models exist — Fish
+Audio S2 (non-commercial weights, paid cloud API for the good version), Chatterbox
+(gaming GPU, English only), Qwen3-TTS (6GB+ NVIDIA only) — and every one fails on
+licence, VRAM, or platform coverage. Keep TTS behind an interface so the choice is
+replaceable rather than embedded.
+
+**Agents get no menu item.** An icon whose only function is to prompt setup is an
+advertisement in the navigation. Agents are actions inside the conversation, configured
+under Settings alongside Tools. Discoverability comes from a contextual offer at the
+first moment a local answer is weak.
+
+**Do not adopt an agent framework.** ADK, LangGraph, CrewAI, the OpenAI and Claude
+Agent SDKs all ship their own memory and session abstraction, and memory is the
+product. Provider-coupled frameworks are excluded on principle — neutrality across
+models is the moat. Frameworks may be mined for *patterns* and evaluated as
+*components*, never adopted as architecture.
+
+**Do not send anything to a cloud observability service.** LangSmith and equivalents
+trace prompts, tool calls and full input/output to a third party. Same prohibited class
+as cloud parsing APIs.
+
+**A pack is data and adapters, never navigation.** A vertical adds four things:
+parsers, tools, output templates, and routing exemplars. It adds no screens. Projects
+have a type, chosen once at creation, and that choice activates the pack. This is what
+lets capability grow while the navigation stays at four items.
+
+**Build two packs by hand before building the pack system.** The abstraction cannot be
+designed from imagination — only from two real examples and the friction between them.
+
+**Integrations must pass five tests**, and only two verticals pass for v1:
+1. Zaram drives an app the user already has, rather than shipping model weights
+2. It does not compete with local inference for VRAM — *or it routes to cloud, see below*
+3. The licence is permissive. GPL means separate process only; AGPL is excluded
+4. Memory across sessions genuinely improves it — long projects, not one-shot tasks
+5. The maintainer can test the output and judge whether it is good
+
+**v1 verticals: documents and 3D (Unreal, Blender).** Deferred: data/BI (DuckDB plus
+text-to-SQL) is the leading third. Rejected: medical (regulated, credentials),
+protein/science (cannot evaluate output), trading (copyleft tooling, memory adds little
+to a bot). "We could integrate it" and "we can maintain it part-time" are different
+lists, and the second is two long.
+
+**VRAM limits route a task; they do not reject a vertical.** Where a task exceeds local
+capacity, Zaram names the constraint, recommends models from the dated manifest with
+their data policy, and carries project context into the cloud request — showing the
+user exactly what leaves before it does. Video and image generation are deferred on
+maintenance grounds, not because they are cloud-only.
+
+**Take the commodity layer, spend the time on what only Zaram can do.** Orchestration,
+provider adapters and document parsing are commodity and improve every quarter. Egress
+logging, the correction loop, user-facing provenance and packaging are not. Every hour
+spent rebuilding the former is an hour not spent on the latter.
 
 ## Technical decisions
 
-- **MCP is the tool protocol.** Never invent a plugin or shim format. Tools are MCP
-  servers, curated and permission-scoped.
-- **Do not build a memory engine from scratch.** Evaluate Letta (open source,
-  self-hostable) or an equivalent before writing retrieval internals. Benchmark
-  against LoCoMo / LongMemEval rather than by feel.
-- **No reranker in the recall path.** It was recommended and is withdrawn: it was
-  proposed on the general reputation of cross-encoder reranking, not on any
-  measurement of Zaram's own recall being wrong in the way a reranker fixes. It
-  costs a second model, load time and per-query latency on the one path the user
-  feels most, in exchange for an unmeasured gain — and it would land before there
-  is a benchmark that could tell whether it helped or hurt.
-
-  Revisit only with a number: run the recall path against LoCoMo / LongMemEval,
-  establish where bi-encoder retrieval actually fails, and add a reranker if that
-  measurement says so. Same rule as the line above — benchmark rather than by feel,
-  which applies to what we add as much as to what we replace.
+- **MCP is the tool protocol.** Never invent a plugin or shim format.
+- **Backend port is 8420, not 8000.** Unreal Engine 5.8's first-party MCP plugin
+  binds `127.0.0.1:8000` inside the editor process and auto-starts. Port 8000 will
+  collide for any user running both.
+- **Frontend calls the backend directly over HTTP**, not through Electron IPC.
+  Streaming through `ipcMain.handle` makes a real abort hard, and direct fetch keeps a
+  browser surface possible. Base URL in an env var.
+- **Do not build a memory engine from scratch.** Evaluate Letta or equivalent.
+  Benchmark against LoCoMo / LongMemEval, not by feel.
 - **Design the Spine as federatable from day one** — tenancy seams present even
-  though multi-user ships later. Retrofitting is a rewrite.
-- **Domain-specific logic stays in a separate layer** from the engine (parsers,
-  vocabulary, output templates). Do not build a pack *system* until two packs exist
-  and have been built by hand.
-- **`backend/providers/` is the provider layer. Connect it, do not duplicate it.**
-  Connected on 2026-08-04: renamed from `garage/`, registered in the
-  bootstrapper, and `models_runtime.py` now asks it which model to run instead
-  of constructing `OllamaEngine()` with a hardcoded `gemma3:latest`. That
-  shortcut is gone; do not let another one grow.
+  though multi-user ships later.
+- **Domain-specific logic stays in a separate layer** from the engine. Do not build a
+  pack *system* until two packs exist and have been built by hand.
 
-  Routing, model residency, first-run hardware detection and the Models pane all
-  consume this layer. Nothing else may import a concrete engine to reach a model.
+## UI principles
 
-  The runtime degrades rather than blocks: no provider layer, an unreachable
-  one, or no eligible model all leave the engine on its own default and log why.
-  Boot does not depend on a network scan.
-
-- **Model metadata carries a data policy, alongside size and capabilities.**
-  Three values, and no fourth:
-
-  - `never_leaves_device` — local inference. Nothing is sent.
-  - `logged_and_trained_on` — the provider logs prompts and may train on them.
-    Every free tier is this.
-  - `your_key_no_training` — the user's own key, and the provider's terms
-    exclude training on API data.
-
-  This is the one fact a user must see *before* choosing a model, not after.
-  Size and speed are recoverable mistakes; sending a confidential document to a
-  provider that trains on it is not. A model picker that shows parameter counts
-  and hides this is optimising for the wrong decision.
-
-  **Never default to a `logged_and_trained_on` model.** It may only ever be
-  selected deliberately, by a user who has seen the label. Free is not a good
-  enough reason to make that choice on someone's behalf, and Rule 1 means Zaram
-  has no commercial incentive to — the free tier exists because the user brings
-  their own inference, not because we route them somewhere that pays in data.
-
-  **There is no default policy, and unknown is not a fourth value.** A model
-  nobody annotated has `data_policy = None`, and `selectable_by_default` is
-  false for it. Defaulting the field to `never_leaves_device` is the tempting
-  mistake: every adapter that forgot to set it would ship a privacy guarantee
-  nobody verified — the same failure as `vram_bytes` defaulting to 0, except a
-  false zero produced a bad recommendation and a false guarantee produces a
-  leaked document. Policy is inferred only where it is structural (a loopback
-  URL cannot leave the machine); for anything remote, whoever registers the
-  provider states its terms or the model is not offered.
-
-- **The egress gate covers Python-originated requests only.** Browser-originated
-  requests bypass it entirely and *cannot be logged* — CSS `@import`, `<img
-  src>`, `<script src>`, renderer `fetch`, iframes, webviews, and anything a
-  stylesheet pulls in. No gate written in the backend can see them.
-
-  Therefore: **no remote asset URLs anywhere in frontend code.** Fonts, icons,
-  images, scripts and styles all ship in the bundle. A source scan enforces this
-  alongside `backend/tests/test_egress_chokepoint.py`; the two together are what
-  make Rule 3 true rather than aspirational.
-
-  This is not hypothetical. `index.css` pulled three fonts from Google on every
-  launch, before any UI rendered and before any consent existed, and no amount of
-  work on the gate would ever have recorded it.
-
-- **Hardware detection returns unknown, never a wrong number.** If VRAM cannot be
-  determined — Metal, DirectML, no GPU, a driver that will not answer — the
-  answer is `unknown`, not `0`. Do not report a GPU as available while its
-  capacity is undetermined.
-
-  A recommendation built on a false zero is worse than no recommendation: the
-  user is told a model will not fit when it would, or the tier logic silently
-  picks the smallest option and the product looks weak on capable hardware.
-  Absent measurements never render as measured zeros — the same rule the egress
-  log follows for `bytes_left_device_today`.
-
-- **TTS is Kokoro-82M** (Apache 2.0), CPU-capable, the default and only shipped
-  implementation. The binding constraint is that speech synthesis must not compete
-  with local inference for VRAM, and must work on Macs and AMD. Better-sounding
-  models exist — Fish Audio S2, Chatterbox, Qwen3-TTS — and every one fails on
-  licence, VRAM, or platform coverage. Keep TTS behind an interface so the choice is
-  replaceable, not embedded.
-
-  This records *which* engine, not *when*. Voice remains out of scope for v1 — see
-  the scope list above — and this decision does not license building it.
-
-## Sequencing commitments
-
-These orderings are decided. Do not reorder them for convenience.
-
-**Egress log → per-source policy → web search as its first governed source.**
-
-Web search does not return until the first two exist. The discovery runtime, its
-providers and its 111 tests are built and are deliberately unreachable from the chat
-path until then. Rule 3 is the reason: you cannot retroactively log what has already
-left the machine.
-
-Corollaries, all binding:
-
-- **Nothing derived from the Spine may appear in an outbound query.** Today this holds
-  structurally — the planner passes the raw user prompt as the search query, and
-  recalled memories only reach `system_prompt`, which search never reads. That is luck,
-  not design. `backend/tests/test_outbound_query_invariant.py` makes it deliberate.
-  The obvious future improvement — having a model rewrite the question into a better
-  search query — would break it silently.
-- **The egress log records the literal outbound text**, not merely that a request
-  occurred. What left matters more than that something left.
-- **Retention ships with the egress log, not after it.** A log of query text is a
-  permanent record of private questions, which is its own privacy problem. The
-  retention control belongs in the Settings privacy pane from the first version.
-- **Confirm-before-send is a headline feature, not an option.** A dialog showing the
-  literal text about to leave, with send and cancel, is the demonstrable form of the
-  entire product claim. Build it as the primary path.
-
-## UI/UX principles
-
-- Calm over delight. Motion has a budget. Ship a quiet mode from the start.
-- The Orb shows system state. It does not perform. States are
-  **idle / warming / thinking / swapping / speaking / listening**, plus the
-  routing it reports (local only / can send / cloud enabled).
-- **`swapping` is a required state, not a nicety.** When a route needs a model
-  that will not fit alongside what is resident, Ollama unloads one and loads
-  another, and the user waits with no explanation. An unload/reload that is not
-  visible reads as a broken product — the same request that was fast a minute
-  ago now hangs, and nothing on screen accounts for it. Any route that forces a
-  swap must say so before it happens.
-- The Orb must not describe a capability the system does not have. "Cloud
-  enabled" means a cloud model can answer questions; it is not the same claim as
-  "some route off this machine exists", and collapsing the two put a false
-  status on the one indicator whose whole job is to be trusted.
+- Calm over delight. Motion has a budget. Quiet mode from the start.
+- The Orb shows system state (idle / thinking / local / cloud). It does not perform.
 - Density beats animation on any surface used daily.
 - The target user is not technical. No model filenames, quantization settings, or
-  context-length sliders in the primary path. Put them behind an advanced view.
-- Show routing decisions in plain language: what handled this, and why.
-- Never claim absolute security ("perfectly sealed", "zero leakage"). State what is
-  verifiable: inference ran locally, index is on disk, egress is logged.
+  context-length sliders in the primary path.
+- Show routing decisions in plain language.
+- Never claim absolute security. State what is verifiable: inference ran locally,
+  index is on disk, egress is logged.
+- **Never render invented values.** A status indicator over hardcoded data is worse
+  than no indicator. If a field can only say one thing today, it says one thing today.
+- **Disabled capabilities are visible, not silent.** If a question would have used
+  search and search is off, say so rather than answering quietly without it.
 
 ## Working agreement
 
-- Read before you write. Verify assumptions against the actual code, not the docs.
-- Verify by seeing it work — run it, look at it in the browser. Do not report
-  progress that has not been observed.
-- One honest entrance at a time. Prefer a narrow thing that works over a broad thing
-  that demos.
-- When a plan and the codebase disagree, the codebase wins — say so rather than
-  building against a stale assumption.
-- **When a fix removes something, test that the replacement works — not just that
-  the original is gone.** A test asserting the bad thing stopped passes just as
-  happily when the good thing stopped too. Removing a remote font and asserting no
-  request to fonts.googleapis.com says nothing about whether "Inter Variable" now
-  renders; both a working self-hosted font and no font at all satisfy it. Assert on
-  the outcome you wanted, and make the assertion fail on purpose once before
-  trusting it.
-- **A test whose scope is configured somewhere is two things to check.** Confirm
-  what actually runs, not what appears to. `testpaths` hid 158 tests for months
-  while every suite count reported here was quoted with confidence.
+- Read before you write. Verify against the code, not the docs.
+- Verify by seeing it work. Do not report progress that has not been observed.
+- Wire one surface to real data, then make it beautiful. The reverse produces
+  interfaces that look finished and do nothing.
+- When a plan and the codebase disagree, the codebase wins — say so.
+
+## Patterns worth borrowing (not adopting)
+
+- **Session / memory split** — two stores, not one. See rule 7d.
+- **Artifact service** — generated files saved explicitly, versioned, addressed by
+  name. Maps onto the no-silent-overwrite and no-auto-index rules.
+- **Before/after tool callbacks** — the interception point that can block or rewrite a
+  call. This is where the risk-tier gate lives. The tier taxonomy is ours and is
+  better, because it is about consequence rather than lifecycle.
+
+## Models and routing
+
+**Route with embeddings, not a generative model.** Task classification is a similarity
+problem: embed the query, compare against task exemplars, take the nearest. `bge-m3` is
+already resident for the Spine, so this costs ~10-30ms and zero extra VRAM, and it is
+deterministic — misrouting is reproducible and fixable. A small generative model is the
+fallback only if embeddings prove insufficient. Exemplars are user-editable.
+
+**Routing must be legible.** Every reply names the model that answered and why
+("routed to qwen2.5-coder — coding task"), with a per-message override available inline.
+Same posture as memory correction, applied to routing.
+
+**Model residency is a hardware-grading problem.** On 12GB with embeddings and reranker
+resident (~1.8GB), roughly 9GB remains. Some model pairs are co-resident; others force
+an unload/reload costing seconds. Settings must show which is which, and a route that
+requires a swap must be visible in the orb's state. An invisible swap reads as a broken
+product.
+
+**Three tiers of control**, so a non-technical user never sees the third:
+1. Default — Zaram picks, one local and one cloud, auto-routed
+2. Preference — *Prefer local · Auto · Prefer cloud*, one control, plain language
+3. Per-task assignment — chat, coding, vision, long-document — behind Advanced
+
+Conversation mode persists until changed, overridable per message. Do not classify with
+a model call before every reply.
+
+## First run
+
+1. Detect VRAM, RAM, and installed Ollama models. **No questions yet.**
+2. One question: what will you mostly use this for? Seeds routing exemplars.
+3. Show what was found. Primary action is **"start with what you have."**
+4. Cloud keys optional, framed as optional: "Everything works without this."
+5. Point at one folder, index, reach a cited answer.
+
+**Never block on a download.** A user on metered data asked to pull 7GB before their
+first answer closes the app. If a download is needed, start with the smallest capable
+model and fetch better in the background.
+
+**Model recommendations ship as a dated local manifest** — JSON in the bundle, grouped
+by VRAM tier, with a visible `generated` date. Never fail closed: a missing or corrupt
+manifest falls back to whatever is installed. Detection (hardware, installed models) is
+separate from recommendation (names, sizes) — the first never goes stale.
+
+Re-runnable from Settings as **re-scan**, not as a replayed wizard: it re-detects and
+shows a diff, changing nothing without confirmation. A model assigned to a task that is
+no longer installed is detected at startup, not at re-scan.
+
+## Generation pipeline
+
+**HTML is the source of truth for every generated document.** Generate HTML, then
+convert: WeasyPrint to PDF, a second export to .docx. This gives one pipeline instead
+of four, and makes preview trivially faithful — the preview *is* the HTML that
+produced the file, so what the user sees is what downloads.
+
+Preview support ships in order: PDF in v1 (native, high fidelity, already generated);
+a lightweight HTML render for .docx and .xlsx in v1.5, clearly labelled as approximate;
+PowerPoint and high-fidelity Office later, only if asked. Everything without a preview
+offers download and open-in-default-app.
 
 ## Current milestone
 
-Ship the recall demo: ask model A something, ask model B about it later, get a cited
-answer, delete the fact, watch the answer change, open the egress log and see what
-left. Everything else waits.
+The recall demo, end to end: ask model A something, ask model B about it later, get a
+cited answer, delete the fact, watch the answer change, open the log and see what left.
+Then generative documents on top of it.
+
+## The actual blocker
+
+**A stranger cannot install this.** Capability is not what stands between the current
+state and a 15-person retention test — packaging is. An installer and a guided first
+run are a milestone, not an afterthought, and no amount of additional capability
+substitutes for them.
