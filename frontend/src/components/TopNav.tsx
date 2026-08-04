@@ -1,4 +1,4 @@
-import { Search, Bell, User, ChevronRight } from 'lucide-react'
+import { Search, ChevronRight } from 'lucide-react'
 import OrbStatus from '@/components/orb/OrbStatus'
 
 import type { WorkspaceId } from '@/runtime/shortcuts/registry'
@@ -72,55 +72,41 @@ export default function TopNav({ workspace, onSearchOpen, onOpenConversation }: 
         <OrbStatus ringSize={48} orbSize={84} onOpen={onOpenConversation} />
       </div>
 
-      {/* Right: actions */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 64, minWidth: 200, justifyContent: 'flex-end' }}>
-        <button
-          onClick={onSearchOpen}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 64,
-            background: 'var(--color-glass-mid)',
-            border: '1px solid var(--color-border)',
-            borderRadius: 12,
-            padding: '4px 10px',
-            cursor: 'pointer',
-            color: 'var(--color-text-muted)',
-            fontSize: 'var(--text-h1)',
-            transition: 'all 0.15s',
-          }}
-          onMouseEnter={e => (e.currentTarget.style.background = 'var(--color-border-glass-strong)')}
-          onMouseLeave={e => (e.currentTarget.style.background = 'var(--color-glass-mid)')}
-        >
-          <Search size={22} />
-          <span>Search</span>
-          <span style={{ fontSize: 'var(--text-h2)', opacity: 0.5, fontFamily: 'var(--font-mono)' }}>⌘K</span>
-        </button>
+      {/* Right: actions.
+          The wide Search button is gone — it was the third way to reach the
+          same command palette, after the left rail's search and ⌘K, and its
+          64px internal gap made it wider than the breadcrumb it sat opposite. */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 20, minWidth: 200, justifyContent: 'flex-end' }}>
+        <NavIcon onClick={onSearchOpen} label="Search (⌘K)">
+          <Search size={24} />
+        </NavIcon>
 
-        <NavIcon>
-          <Bell size={26} />
-        </NavIcon>
-        <NavIcon>
-          <div style={{
-            width: 44,
-            height: 44,
-            borderRadius: '50%',
-            background: 'linear-gradient(135deg, var(--color-indigo), var(--color-cyan-light))',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}>
-             <User size={22} style={{ color: 'var(--color-text)' }} />
-          </div>
-        </NavIcon>
+        {/* The notification bell and the account avatar are gone. Neither did
+            anything: there are no notifications, and there are no accounts —
+            Zaram is single-user and local. A control that looks live and does
+            nothing is a worse lie than an empty screen, and on a product whose
+            whole claim is that the interface tells you the truth about the
+            system, it is the wrong thing to be wrong about. */}
       </div>
     </header>
   )
 }
 
-function NavIcon({ children }: { children: React.ReactNode }) {
+function NavIcon({
+  children,
+  onClick,
+  label,
+}: {
+  children: React.ReactNode
+  onClick?: () => void
+  label?: string
+}) {
   return (
-    <button style={{
+    <button
+      onClick={onClick}
+      aria-label={label}
+      title={label}
+      style={{
       width: 56,
       height: 56,
       borderRadius: 12,

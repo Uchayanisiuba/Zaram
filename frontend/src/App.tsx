@@ -11,7 +11,6 @@ import { AnimatePresence } from 'framer-motion';
 import { useRuntimeLoop } from '@/hooks/useRuntimeLoop';
 import TopNav from './components/TopNav';
 import LeftRail from './components/LeftRail';
-import BottomDock from './components/BottomDock';
 import ChatSurface from './components/chat/ChatSurface';
 import SourcePanelLayer from './components/chat/SourcePanelLayer';
 import CommandPalette from './components/CommandPalette';
@@ -149,7 +148,10 @@ export default function App() {
       </div>
 
       {/* Bottom dock — hidden on landing */}
-      {!isLanding && <BottomDock workspace={workspace} onNavigate={navigate} onSearch={() => setCommandOpen(true)} />}
+      {/* The floating dock is gone. It duplicated the left rail exactly — the
+          same four destinations, twice on screen — and floated over content,
+          which is how it ended up covering Activity's retention controls. One
+          navigation surface. */}
 
       {/* Command palette overlay */}
       {commandOpen && <CommandPalette onClose={() => setCommandOpen(false)} onNavigate={(id) => navigate(id as WorkspaceId)} />}
