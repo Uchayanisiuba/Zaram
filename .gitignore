@@ -5,32 +5,38 @@ __pycache__/
 *.so
 .Python
 venv/
+.venv/
 ENV/
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
 *.egg-info/
-.installed.cfg
 *.egg
+.installed.cfg
+# Anchored to the repo root on purpose. Unanchored `lib/`, `build/` and `dist/`
+# are Python packaging patterns that also swallow real frontend source —
+# `frontend/src/lib/utils.ts` was ignored-but-tracked because of exactly that.
+/build/
+/dist/
+/develop-eggs/
+/downloads/
+/eggs/
+/.eggs/
+/lib/
+/lib64/
+/parts/
+/sdist/
+/var/
+/wheels/
 
-# Testing & Linting
+# Testing & linting caches
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
 .coverage
 htmlcov/
 
-# IDE
-.vscode/
+# IDE — personal settings stay local, but settings.json is shared project
+# config (it keeps Pylance out of frontend/ and the venvs) so it is committed.
+.vscode/*
+!.vscode/settings.json
 .idea/
 *.swp
 *.swo
@@ -39,20 +45,18 @@ htmlcov/
 .DS_Store
 Thumbs.db
 
-# Environment
+# Environment — never commit keys
 .env
-.env.local
+.env.*
+!.env.example
 
-# Node / Frontend
-frontend/node_modules/
+# Node
+node_modules/
 frontend/dist/
 frontend/.vite/
-node_modules
-
-# Virtual environment (dot-prefixed)
-.venv/
-
-# TypeScript build info
+desktop/dist/
+packages/*/dist/
+dist-electron/
 *.tsbuildinfo
 
 # The Spine — the user's local knowledge base. User data, never committed.
@@ -61,3 +65,31 @@ spine.db-journal
 spine.db-wal
 spine.db-shm
 backend/spine.db*
+
+# Generated audio. Produced by the speech runtime at runtime, not source.
+backend/audio/
+backend/audio_clips/
+backend/audio_output/
+
+# Uploads — whatever the user dropped in. Never ours to commit.
+uploads/
+
+# AI tool scratch space. Session artefacts, vendored skill bundles and
+# worktrees, none of which are Zaram source.
+.playwright-mcp/
+.kilo/skills/
+.kilo/worktrees/
+
+# Ad-hoc captures and command output. Screenshots that are part of the
+# design record live in docs/design/ and are committed deliberately.
+/*.png
+/*.log
+/*.jpg
+tsc_out*
+lint_out*
+zaram-current-state*
+frontend/screenshot*.png
+
+# Retired surface, kept on disk only. The name uses vocabulary CLAUDE.md
+# retired; nothing in it is referenced by the build.
+zaram-ai-operating-system-ui/

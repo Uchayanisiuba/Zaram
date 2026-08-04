@@ -25,16 +25,34 @@ not developers building products.
 
 ## Status
 
-**Pre-v1. Not usable yet.** The repository contains substantial working backend code and
-a clean frontend, but they are not yet connected to each other. Do not expect a running
-product from a clone.
+**Pre-v1.** It runs from source, on one machine, against a local model. There is no
+installer yet, so do not expect a working product from a clone alone.
+
+What has been observed working, rather than merely written:
+
+- The recall loop, end to end. The Spine persists to SQLite with Ollama `bge-m3`
+  embeddings, the index rebuilds on boot, and a fact stored in one session is recalled
+  in the next — verified across a process restart.
+- Every recalled fact arrives with provenance the interface displays and can open.
+- Deleting a fact changes the answers that depended on it.
+- The frontend talks to the backend over NDJSON streaming on port 8420.
+
+What is not built:
+
+- **No egress log**, so no cloud provider is wired and web search is switched off.
+  Rule 3 says the log comes first; that ordering is deliberate and is why the
+  discovery runtime sits unreachable behind it.
+- One provider only — local Ollama. The second, cloud provider is the next milestone.
+- No folder ingest.
+- Packaging is unproven.
 
 Current milestone — the recall demo:
 
 > Ask model A something. Ask model B about it later. Get a cited answer. Delete the
 > fact. Watch the answer change. Open the egress log and see what left.
 
-Everything else waits until that works.
+Four of those six steps work today. The two involving a second model and the egress log
+do not. Everything outside this list waits.
 
 ## v1 scope
 
