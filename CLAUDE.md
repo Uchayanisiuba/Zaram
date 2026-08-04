@@ -72,6 +72,17 @@ building it.
 - **Do not build a memory engine from scratch.** Evaluate Letta (open source,
   self-hostable) or an equivalent before writing retrieval internals. Benchmark
   against LoCoMo / LongMemEval rather than by feel.
+- **No reranker in the recall path.** It was recommended and is withdrawn: it was
+  proposed on the general reputation of cross-encoder reranking, not on any
+  measurement of Zaram's own recall being wrong in the way a reranker fixes. It
+  costs a second model, load time and per-query latency on the one path the user
+  feels most, in exchange for an unmeasured gain — and it would land before there
+  is a benchmark that could tell whether it helped or hurt.
+
+  Revisit only with a number: run the recall path against LoCoMo / LongMemEval,
+  establish where bi-encoder retrieval actually fails, and add a reranker if that
+  measurement says so. Same rule as the line above — benchmark rather than by feel,
+  which applies to what we add as much as to what we replace.
 - **Design the Spine as federatable from day one** — tenancy seams present even
   though multi-user ships later. Retrofitting is a rewrite.
 - **Domain-specific logic stays in a separate layer** from the engine (parsers,
