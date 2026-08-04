@@ -1,4 +1,4 @@
-import { Home, Brain, BookOpen, Settings, Search } from 'lucide-react'
+import { Home, Brain, BookOpen, ShieldCheck, Settings, Search } from 'lucide-react'
 import { useState } from 'react'
 import { NAV_SHORTCUTS, chordTokens, detectPlatform, type Platform, type Shortcut } from '@/runtime/shortcuts/registry'
 
@@ -9,7 +9,7 @@ function shortcutLabel(label: string, shortcut?: Shortcut, platform?: Platform) 
   return `${label} (${chordTokens(shortcut, platform)})`
 }
 
-type WorkspaceId = 'landing' | 'memory' | 'knowledge' | 'settings'
+import type { WorkspaceId } from '@/runtime/shortcuts/registry'
 
 // Icons and labels mirror the landing page's orbital nodes exactly, so the same
 // destination looks the same wherever it is reached from.
@@ -19,6 +19,7 @@ const DOCK_ITEMS = [
   { id: 'landing' as WorkspaceId, icon: <Home size={22} />, label: 'Home' },
   { id: 'memory' as WorkspaceId, icon: <Brain size={22} />, label: 'Memory' },
   { id: 'knowledge' as WorkspaceId, icon: <BookOpen size={22} />, label: 'Knowledge' },
+  { id: 'activity' as WorkspaceId, icon: <ShieldCheck size={22} />, label: 'Activity' },
   { id: 'settings' as WorkspaceId, icon: <Settings size={22} />, label: 'Settings' },
 ]
 

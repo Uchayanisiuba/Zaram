@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { motion } from 'framer-motion'
-import { Brain, BookOpen, Settings } from 'lucide-react'
+import { Brain, BookOpen, Settings, ShieldCheck } from 'lucide-react'
 import LivingOrb, { ORB_BEHAVIOUR } from '../components/orb/LivingOrb'
 import OrbStatusLabel from '../components/orb/OrbStatusLabel'
 import OrbHint from '../components/orb/OrbHint'
@@ -11,14 +11,23 @@ import { useSystemStore } from '@/stores/systemStore'
 import { useIsReducedMotion } from '@/hooks/useReducedMotion'
 import { useViewport } from '@/hooks/useViewport'
 
-type WorkspaceId = 'memory' | 'knowledge' | 'settings'
+import type { WorkspaceId } from '@/runtime/shortcuts/registry'
 
 // Build, Canvas and Plugins are out of scope for v1 and no longer appear here.
 // Their surfaces are preserved in src/legacy/.
+//
+// Four nodes, each answering a different question the user actually has:
+// Memory — what do you know about me? Knowledge — what have you read?
+// Activity — what did you send? Settings — how do you behave?
+//
+// Re-spaced from 120 to 90 degrees apart when Activity joined. Its shield is
+// the only icon that is not about content: Activity is evidence rather than
+// exploration, and someone arriving there is checking, not browsing.
 const ORBITAL_NODES = [
-  { id: 'memory',    label: 'Memory',    icon: <Brain size={24} />,    color: '#c084fc', angle: 210 },
-  { id: 'knowledge', label: 'Knowledge', icon: <BookOpen size={24} />, color: '#22d3ee', angle: 330 },
-  { id: 'settings',  label: 'Settings',  icon: <Settings size={24} />,  color: '#94a3b8', angle: 90 },
+  { id: 'memory',    label: 'Memory',    icon: <Brain size={24} />,       color: '#c084fc', angle: 225 },
+  { id: 'knowledge', label: 'Knowledge', icon: <BookOpen size={24} />,    color: '#22d3ee', angle: 315 },
+  { id: 'activity',  label: 'Activity',  icon: <ShieldCheck size={24} />, color: '#34d399', angle: 45 },
+  { id: 'settings',  label: 'Settings',  icon: <Settings size={24} />,    color: '#94a3b8', angle: 135 },
 ]
 
 interface LandingProps {

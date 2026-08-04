@@ -1,12 +1,13 @@
 import { Search, Bell, User, ChevronRight } from 'lucide-react'
 import OrbStatus from '@/components/orb/OrbStatus'
 
-type WorkspaceId = 'landing' | 'memory' | 'knowledge' | 'settings'
+import type { WorkspaceId } from '@/runtime/shortcuts/registry'
 
 const WORKSPACE_LABELS: Record<WorkspaceId, string> = {
   landing: 'Zaram',
   memory: 'Memory',
   knowledge: 'Knowledge',
+  activity: 'Activity',
   settings: 'Settings',
 }
 

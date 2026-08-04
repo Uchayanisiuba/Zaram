@@ -1,10 +1,14 @@
 export type Platform = 'mac' | 'win';
 // Build, Canvas and Plugins are out of scope for v1. Their surfaces are preserved
 // in src/legacy/ and are not reachable from the shell.
+// The canonical list. It was previously redeclared, identically, in App,
+// TopNav, LeftRail, BottomDock, CommandPalette and Landing — so adding Activity
+// broke in four places at once. Import it from here rather than restating it.
 export type WorkspaceId =
   | 'landing'
   | 'memory'
   | 'knowledge'
+  | 'activity'
   | 'settings';
 export type OrbState = 'idle' | 'thinking' | 'speaking' | 'listening';
 
@@ -28,6 +32,7 @@ export const surfaceOrder: WorkspaceId[] = [
   'landing',
   'memory',
   'knowledge',
+  'activity',
   'settings',
 ];
 
@@ -35,6 +40,7 @@ export const surfaceLabels: Record<WorkspaceId, string> = {
   landing: 'Landing',
   memory: 'Memory',
   knowledge: 'Knowledge',
+  activity: 'Activity',
   settings: 'Settings',
 };
 

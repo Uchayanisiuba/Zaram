@@ -13,9 +13,56 @@ class KernelBootstrapper:
         self.knowledge_runtime = None
         self.speech_runtime = None
         self.memory_runtime = None
+        self.egress_gate = None
+
+    def _init_egress_gate(self):
+        """Install the process egress gate, and apply retention on the way up.
+
+        Retention runs at boot rather than on a timer because the log only
+        grows when the machine is awake and using it; a pass per launch keeps
+        the window honest without a background thread whose failure would be
+        silent. ``ZARAM_EGRESS_RETENTION_DAYS`` of 0 means keep everything,
+        which is a choice the user can make in the privacy pane but is not the
+        default — a permanent record of every question asked is its own problem.
+        """
+        import os
+
+        from .egress import (
+            EgressGate,
+            EgressLog,
+            EgressPolicy,
+            default_log_path,
+            default_policy_path,
+            set_gate,
+        )
+
+        log = EgressLog(default_log_path())
+        policy = EgressPolicy(default_policy_path())
+        gate = EgressGate(log, policy)
+        set_gate(gate)
+
+        days = int(os.getenv("ZARAM_EGRESS_RETENTION_DAYS", "30"))
+        pruned = log.apply_retention(max_age_days=days if days > 0 else None)
+
+        rules = policy.rules()
+        print(
+            f"[Bootstrapper] Egress gate ready — {log.count()} entries, "
+            f"{len(rules)} host polic{'y' if len(rules) == 1 else 'ies'}, "
+            f"retention {days or 'off'}"
+            + (f", pruned {pruned}" if pruned else "")
+        )
+        if not rules:
+            print("[Bootstrapper] No egress policy set. Every destination is denied.")
+        return gate
 
     async def boot(self):
         print("[Bootstrapper] Initializing Zaram Kernel...")
+
+        # 0. The egress gate, before anything that could make a request.
+        #    Deliberately first: a runtime that reached the network during its
+        #    own initialisation would otherwise do so before the log existed,
+        #    and Rule 3 cannot be applied retroactively.
+        self.egress_gate = self._init_egress_gate()
 
         # 1. Initialize Memory Runtime first (other runtimes depend on it)
         self.memory_runtime = self._init_memory_runtime()

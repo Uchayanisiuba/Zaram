@@ -46,6 +46,47 @@ LOCAL_ONLY = {
 #: Directories that are not shipped product code.
 SKIP_DIRS = {"tests", "venv", ".venv", "__pycache__", "templates", "node_modules"}
 
+#: Libraries that make HTTP requests *inside themselves*.
+#:
+#: The AST scan below catches a module calling ``urllib`` or ``aiohttp``
+#: directly. It cannot see a module calling ``list_repo_files()``, which looks
+#: like an ordinary function call and contacts huggingface.co. That gap was not
+#: hypothetical: voice discovery was reaching HuggingFace on every single boot,
+#: unlogged, and the only reason anyone noticed was a timeout in the startup log.
+#:
+#: So these are tracked by import. A module that imports one of them can leave
+#: the machine without any of the syntax this file otherwise looks for.
+NETWORK_LIBRARIES = {
+    "huggingface_hub": "contacts huggingface.co to list or download repo files",
+    "kokoro": "KPipeline downloads model weights from HuggingFace on first use",
+    "duckduckgo_search": "queries the live DuckDuckGo API",
+    "ddgs": "queries the live DuckDuckGo API",
+    "openai": "contacts the OpenAI API",
+    "anthropic": "contacts the Anthropic API",
+}
+
+#: Modules permitted to import a network library, each with the reason.
+#:
+#: Everything here is dormant: voice, the discovery runtime and the internet
+#: runtime are all out of scope for v1 and unreachable from the chat path. They
+#: are listed rather than fixed because deleting them is a separate decision.
+#: What must stay true is that nothing *reachable* acquires an entry here.
+NETWORK_LIBRARY_EXEMPT = {
+    "knowledge/providers/duckduckgo_provider.py": "dormant: web search is off until policy exists",
+    "runtimes/internet/runtime.py": "dormant: internet runtime does not boot",
+    "runtimes/internet/connectors.py": "dormant: internet runtime does not boot",
+    "runtimes/internet/connectors/base.py": "dormant: internet runtime does not boot",
+    "runtime/discovery/providers/duckduckgo.py": "dormant: discovery is unreachable from chat",
+    "implementations/kokoro_tts.py": "dormant: voice is out of scope for v1",
+    "interfaces/implementation/kokoro_tts.py": "dormant: voice is out of scope for v1",
+    "runtimes/speech/connectors/kokoro.py": "dormant: voice is out of scope for v1",
+    # Voice discovery used to contact huggingface.co on every launch. It is
+    # exempted here only because `voice_discovery_enabled` now defaults to
+    # False — see the guard test below, which fails if that default flips back.
+    "voice/providers/kokoro.py": "voice discovery is off by default; model load is lazy",
+    "voice/providers/__init__.py": "re-export only; the provider itself is exempted above",
+}
+
 #: Calls that open a connection to somewhere.
 OUTBOUND_CALLS = {
     ("urllib", "request", "urlopen"),
@@ -85,6 +126,27 @@ def _product_files() -> list[Path]:
             continue
         files.append(p)
     return files
+
+
+def _network_imports_in(path: Path) -> list[tuple[int, str]]:
+    """Every import of a library that makes its own requests, as (line, library)."""
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    except (SyntaxError, UnicodeDecodeError):
+        return []
+
+    found = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                root = alias.name.split(".")[0]
+                if root in NETWORK_LIBRARIES:
+                    found.append((node.lineno, root))
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            root = node.module.split(".")[0]
+            if root in NETWORK_LIBRARIES:
+                found.append((node.lineno, root))
+    return found
 
 
 def _outbound_calls_in(path: Path) -> list[tuple[int, str]]:
@@ -135,6 +197,66 @@ class TestNothingBypassesTheGate:
             + "\n\nRoute them through `core.egress.EgressGate`. Only add to "
               "LOCAL_ONLY if the destination is loopback and cannot leave the "
               "machine."
+        )
+
+    def test_no_unexpected_module_imports_a_network_library(self):
+        """The hole the AST scan cannot see.
+
+        A library that makes its own HTTP requests leaves no syntax for the scan
+        above to match — ``list_repo_files(repo_id)`` looks like any other call.
+        This catches them by import instead.
+        """
+        offenders: list[str] = []
+
+        for path in _product_files():
+            rel = path.relative_to(BACKEND).as_posix()
+            if rel in NETWORK_LIBRARY_EXEMPT:
+                continue
+            for lineno, lib in _network_imports_in(path):
+                offenders.append(f"  {rel}:{lineno} — {lib} ({NETWORK_LIBRARIES[lib]})")
+
+        assert not offenders, (
+            "These modules import a library that makes its own network requests, "
+            "which the gate cannot see or log:\n\n"
+            + "\n".join(sorted(offenders))
+            + "\n\nEither route the traffic through EgressGate, or — if the code "
+              "is dormant — add it to NETWORK_LIBRARY_EXEMPT with the reason."
+        )
+
+    def test_network_library_exemptions_are_not_reachable_at_boot(self):
+        """An exemption is only acceptable while the code never runs.
+
+        Every entry in NETWORK_LIBRARY_EXEMPT is justified by being dormant. If
+        one of them is imported by the bootstrapper's live path, the
+        justification has expired and the traffic is real.
+        """
+        boot = (BACKEND / "core" / "bootstrapper.py").read_text(encoding="utf-8")
+        reachable = [
+            rel
+            for rel in NETWORK_LIBRARY_EXEMPT
+            if rel.replace("/", ".")[:-3] in boot
+        ]
+        assert not reachable, (
+            "These are exempted from the network-library check on the grounds "
+            f"that they are dormant, but the bootstrapper imports them: {reachable}"
+        )
+
+    def test_voice_discovery_stays_off_by_default(self):
+        """The specific regression that was live until this test existed.
+
+        Kokoro voice discovery lists a HuggingFace repo, which contacts
+        huggingface.co. It defaulted to on, so every launch made an unlogged
+        outbound request before any policy had been consulted — found only
+        because the connection timed out and left a line in the startup log.
+
+        The exemption above is conditional on this default. If it flips back,
+        the exemption becomes false and this fails.
+        """
+        from voice.config import KokoroConfig
+
+        assert KokoroConfig.voice_discovery_enabled is False, (
+            "Voice discovery contacts huggingface.co at startup. It must stay "
+            "off by default, or Zaram makes an unlogged request on every launch."
         )
 
     def test_local_only_entries_still_exist(self):

@@ -18,6 +18,7 @@ import CommandPalette from './components/CommandPalette';
 import Landing from './workspaces/Landing';
 import MemoryWorkspace from './workspaces/MemoryWorkspace';
 import KnowledgeWorkspace from './workspaces/KnowledgeWorkspace';
+import ActivityWorkspace from './workspaces/ActivityWorkspace';
 import SettingsWorkspace from './workspaces/SettingsWorkspace';
 import { useOrbStore } from '@/stores/orbStore';
 import { useChatModeStore } from '@/stores/chatModeStore';
@@ -28,7 +29,7 @@ import HelpOverlay from '@/components/shortcuts/HelpOverlay';
 
 // Build, Canvas and Plugins are out of scope for v1. Their surfaces are preserved
 // in src/legacy/ and are not reachable from the shell.
-type WorkspaceId = 'landing' | 'memory' | 'knowledge' | 'settings';
+import type { WorkspaceId } from '@/runtime/shortcuts/registry';
 
 export default function App() {
   // Start Zaram's core runtime loop (FrameState pipeline)
@@ -110,6 +111,11 @@ export default function App() {
           {workspace === 'knowledge' && (
             <div key="knowledge" style={{ flex: 1, display: 'flex', animation: 'fade-in 0.25s ease' }}>
               <KnowledgeWorkspace />
+            </div>
+          )}
+          {workspace === 'activity' && (
+            <div key="activity" style={{ flex: 1, display: 'flex', animation: 'fade-in 0.25s ease' }}>
+              <ActivityWorkspace />
             </div>
           )}
           {workspace === 'settings' && (

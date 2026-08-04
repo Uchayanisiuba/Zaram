@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Home, Brain, BookOpen, Settings, Search, FolderOpen, Database, Clock } from 'lucide-react'
+import { Home, Brain, BookOpen, ShieldCheck, Settings, Search, FolderOpen, Database, Clock } from 'lucide-react'
 import ResizeHandle from '@/components/common/ResizeHandle'
 import {
   useLayoutStore,
@@ -8,7 +8,7 @@ import {
   RAIL_COLLAPSED,
 } from '@/stores/layoutStore'
 
-type WorkspaceId = 'landing' | 'memory' | 'knowledge' | 'settings'
+import type { WorkspaceId } from '@/runtime/shortcuts/registry'
 
 interface NavItem {
   id: WorkspaceId
@@ -24,6 +24,9 @@ const NAV_ITEMS: NavItem[] = [
   { id: 'landing', icon: <Home size={32} />, label: 'Home' },
   { id: 'memory', icon: <Brain size={32} />, label: 'Memory' },
   { id: 'knowledge', icon: <BookOpen size={32} />, label: 'Knowledge' },
+  // Activity is evidence rather than content, which is why its icon is the odd
+  // one out. Ordered next to Settings because both are about behaviour.
+  { id: 'activity', icon: <ShieldCheck size={32} />, label: 'Activity' },
   { id: 'settings', icon: <Settings size={32} />, label: 'Settings' },
 ]
 
