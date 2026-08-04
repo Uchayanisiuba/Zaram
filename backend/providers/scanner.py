@@ -1,7 +1,7 @@
-"""Discovery scanner for the AI Garage (v0.6.0).
+"""Discovery scanner for the provider layer (v0.6.0).
 
-:class:`GarageScanner` is the *engine* that performs discovery. It reads the
-sources configured in :class:`~garage.registry.GarageRegistry` and runs
+:class:`ProviderScanner` is the *engine* that performs discovery. It reads the
+sources configured in :class:`~providers.registry.ProviderRegistry` and runs
 each one in isolation: a single failing provider (e.g. Ollama offline)
 never breaks the rest of the scan. The scanner holds no persistent state —
 it returns fresh results that the manager stores.
@@ -18,7 +18,7 @@ from .discoverers.voices import VoiceRegistryAdapter
 logger = logging.getLogger(__name__)
 
 
-class GarageScanner:
+class ProviderScanner:
     """Runs discovery against every configured source."""
 
     def __init__(self, registry: Any) -> None:

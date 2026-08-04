@@ -1,16 +1,16 @@
-"""Registry tests for the AI Garage (offline)."""
+"""Registry tests for the provider layer (offline)."""
 
 from __future__ import annotations
 
 import pytest
 
-from garage.contracts import ProviderKind
-from garage.registry import GarageRegistry
-from garage.tests.conftest import FakeModelProvider
+from providers.contracts import ProviderKind
+from providers.registry import ProviderRegistry
+from providers.tests.conftest import FakeModelProvider
 
 
 def test_register_and_lookup():
-    reg = GarageRegistry()
+    reg = ProviderRegistry()
     p = FakeModelProvider("x", [])
     reg.register_model_provider(p)
     assert reg.is_registered("x")
@@ -19,14 +19,14 @@ def test_register_and_lookup():
 
 
 def test_duplicate_provider_rejected():
-    reg = GarageRegistry()
+    reg = ProviderRegistry()
     reg.register_model_provider(FakeModelProvider("x", []))
     with pytest.raises(ValueError):
         reg.register_model_provider(FakeModelProvider("x", []))
 
 
 def test_provider_without_id_rejected():
-    reg = GarageRegistry()
+    reg = ProviderRegistry()
 
     class NoId:
         pass
@@ -36,14 +36,14 @@ def test_provider_without_id_rejected():
 
 
 def test_remove_provider():
-    reg = GarageRegistry()
+    reg = ProviderRegistry()
     reg.register_model_provider(FakeModelProvider("x", []))
     assert reg.remove_model_provider("x") is True
     assert reg.remove_model_provider("x") is False
 
 
 def test_injected_sources_get_set():
-    reg = GarageRegistry()
+    reg = ProviderRegistry()
     reg.set_voice_source("vs")
     assert reg.get_voice_source() == "vs"
     reg.set_runtime_source("rs")
@@ -55,7 +55,7 @@ def test_injected_sources_get_set():
 
 
 def test_provider_specs():
-    reg = GarageRegistry()
+    reg = ProviderRegistry()
     reg.register_model_provider(
         FakeModelProvider("x", [], kind=ProviderKind.CLOUD_API)
     )

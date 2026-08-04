@@ -1,11 +1,11 @@
-"""OpenAI-compatible discovery adapter for the AI Garage (v0.6.0).
+"""OpenAI-compatible discovery adapter for the provider layer (v0.6.0).
 
 Many local AI servers (LM Studio, Ollama's OpenAI mode, LocalAI, ...) and
 cloud endpoints expose the OpenAI ``/v1/models`` contract. This single
 adapter covers all of them; the only difference is the base URL. LM Studio
 is therefore just this adapter pointed at its default local port.
 
-Like every Garage discoverer, this module is the *only* place that knows the
+Like every provider discoverer, this module is the *only* place that knows the
 OpenAI wire format, and it never hardcodes a model name.
 """
 
@@ -29,7 +29,6 @@ logger = logging.getLogger(__name__)
 DEFAULT_BASE_URL = "http://127.0.0.1:1234"
 LM_STUDIO_BASE_URL = "http://127.0.0.1:1234"
 OPENAI_BASE_URL = "https://api.openai.com"
-
 
 class OpenAICompatibleAdapter:
     """Discovers models from any OpenAI-compatible ``/v1/models`` endpoint."""
@@ -100,7 +99,7 @@ class OpenAICompatibleAdapter:
                 f"{self.base_url}{path}",
                 timeout=timeout,
                 headers=headers,
-                source="garage.openai_compat",
+                source="providers.openai_compat",
             )
         )
 

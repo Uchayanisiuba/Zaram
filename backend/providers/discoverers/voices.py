@@ -1,6 +1,6 @@
-"""Voice source adapter for the AI Garage (v0.6.0).
+"""Voice source adapter for the provider layer (v0.6.0).
 
-The Garage discovers installed voices through an injected source, never by
+The provider layer discovers installed voices through an injected source, never by
 importing the Voice Runtime. In production the Voice Runtime's manager (which
 exposes ``available_voices()``) is injected; tests use the static source.
 """

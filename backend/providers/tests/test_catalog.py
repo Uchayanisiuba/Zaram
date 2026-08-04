@@ -1,15 +1,15 @@
-"""Model catalog tests for the AI Garage (offline)."""
+"""Model catalog tests for the provider layer (offline)."""
 
 from __future__ import annotations
 
-from garage.contracts import (
+from providers.contracts import (
     CapabilityLocality,
     ModelCategory,
     ModelInfo,
     ProviderKind,
 )
-from garage.model_catalog import GarageModelCatalog
-from garage.tests.conftest import make_model
+from providers.model_catalog import ModelCatalog
+from providers.tests.conftest import make_model
 
 
 def _model(id: str, **kw) -> ModelInfo:
@@ -17,7 +17,7 @@ def _model(id: str, **kw) -> ModelInfo:
 
 
 def test_upsert_and_get():
-    cat = GarageModelCatalog()
+    cat = ModelCatalog()
     m = _model("p1:a")
     cat.upsert(m)
     assert cat.count() == 1
@@ -26,7 +26,7 @@ def test_upsert_and_get():
 
 
 def test_filter_by_category():
-    cat = GarageModelCatalog()
+    cat = ModelCatalog()
     cat.upsert_all([
         _model("p1:llm", category=ModelCategory.LLM),
         _model("p1:vision", category=ModelCategory.VISION),
@@ -37,7 +37,7 @@ def test_filter_by_category():
 
 
 def test_filter_by_capability_and_locality():
-    cat = GarageModelCatalog()
+    cat = ModelCatalog()
     cat.upsert_all([
         _model("p1:tools", capabilities={"tools"}),
         _model("p1:vision", capabilities={"vision"}),
@@ -49,7 +49,7 @@ def test_filter_by_capability_and_locality():
 
 
 def test_filter_available_only_and_provider():
-    cat = GarageModelCatalog()
+    cat = ModelCatalog()
     cat.upsert_all([
         _model("p1:a", available=True),
         _model("p1:b", available=False),
@@ -61,7 +61,7 @@ def test_filter_available_only_and_provider():
 
 
 def test_by_category_counts_and_remove_clear():
-    cat = GarageModelCatalog()
+    cat = ModelCatalog()
     cat.upsert_all([
         _model("p1:a", category=ModelCategory.LLM),
         _model("p1:b", category=ModelCategory.LLM),

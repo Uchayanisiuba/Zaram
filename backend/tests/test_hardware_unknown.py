@@ -19,8 +19,8 @@ from __future__ import annotations
 
 import pytest
 
-from garage.contracts import HardwareProfile
-from garage.discoverers.hardware import HardwareProfiler
+from providers.contracts import HardwareProfile
+from providers.discoverers.hardware import HardwareProfiler
 
 
 class TestVramIsNeverAFalseZero:

@@ -1,10 +1,10 @@
-# backend/tests/test_garage.py
-"""Offline test suite for the Zaram AI Garage foundation (v0.6.0).
+# backend/tests/test_providers.py
+"""Offline test suite for the Zaram provider layer (v0.6.0).
 
 Every test here runs without any network access. Model providers and the
 voice / runtime / personality / hardware sources are replaced with in-process
 fakes, and the Ollama / OpenAI-compatible adapters are exercised against
-patched HTTP responses. No model name is hardcoded anywhere in the Garage,
+patched HTTP responses. No model name is hardcoded anywhere in the provider layer,
 and these tests assert that the discovery results are inferred entirely from
 the (mocked) provider payloads.
 """
@@ -26,7 +26,7 @@ from fastapi.testclient import TestClient
 
 from core.contracts import Capability, CapabilityLocality, RuntimeState
 
-from garage.contracts import (
+from providers.contracts import (
     HealthStatus,
     HardwareProfile,
     ModelCategory,
@@ -36,13 +36,13 @@ from garage.contracts import (
     RuntimeInfo,
     VoiceInfo,
 )
-from garage.manager import GarageManager
-from garage.model_catalog import GarageModelCatalog
-from garage.registry import GarageRegistry
-from garage.runtime import GarageRuntime, RUNTIME_ID, RUNTIME_VERSION
-from garage.scanner import GarageScanner
-from garage.health import GarageHealthAggregator
-from garage.discoverers import (
+from providers.manager import ProviderManager
+from providers.model_catalog import ModelCatalog
+from providers.registry import ProviderRegistry
+from providers.runtime import ProvidersRuntime, RUNTIME_ID, RUNTIME_VERSION
+from providers.scanner import ProviderScanner
+from providers.health import ProviderHealthAggregator
+from providers.discoverers import (
     LMStudioAdapter,
     OpenAICompatibleAdapter,
     OllamaAdapter,
@@ -52,7 +52,7 @@ from garage.discoverers import (
     StaticVoiceSource,
     VoiceRegistryAdapter,
 )
-from garage import api as garage_api
+from providers import api as providers_api
 
 
 # --------------------------------------------------------------------------- #
@@ -118,10 +118,10 @@ class FakeRuntimeRegistry:
 
     def __init__(self, capabilities=None, health=None) -> None:
         self._capabilities = capabilities or [
-            Capability(id="garage.discover", runtime_id="garage", version="0.6.0"),
+            Capability(id="providers.discover", runtime_id="providers", version="0.6.0"),
             Capability(id="models.generate", runtime_id="models", version="1.0.0"),
         ]
-        self._health = health or {"garage": "ready", "models": "ready"}
+        self._health = health or {"providers": "ready", "models": "ready"}
 
     def list_capabilities(self):
         return self._capabilities
@@ -238,7 +238,7 @@ def test_provider_summary_to_dict():
 # Model catalog tests
 # --------------------------------------------------------------------------- #
 def test_catalog_upsert_and_counts():
-    cat = GarageModelCatalog()
+    cat = ModelCatalog()
     assert cat.count() == 0
     cat.upsert(make_sample_model())
     cat.upsert(make_sample_model(name="other"))
@@ -248,7 +248,7 @@ def test_catalog_upsert_and_counts():
 
 
 def test_catalog_upsert_replaces_by_id():
-    cat = GarageModelCatalog()
+    cat = ModelCatalog()
     cat.upsert(make_sample_model())
     updated = make_sample_model()
     updated.available = False
@@ -258,7 +258,7 @@ def test_catalog_upsert_replaces_by_id():
 
 
 def test_catalog_filter_by_category_capability_locality_provider():
-    cat = GarageModelCatalog()
+    cat = ModelCatalog()
     m1 = make_sample_model(name="a")
     m2 = make_sample_model(name="b", provider="lm_studio")
     m2.category = ModelCategory.EMBEDDING
@@ -277,7 +277,7 @@ def test_catalog_filter_by_category_capability_locality_provider():
 
 
 def test_catalog_by_category_counts():
-    cat = GarageModelCatalog()
+    cat = ModelCatalog()
     cat.upsert(make_sample_model())
     emb = make_sample_model(name="e")
     emb.category = ModelCategory.EMBEDDING
@@ -291,7 +291,7 @@ def test_catalog_by_category_counts():
 # Registry tests
 # --------------------------------------------------------------------------- #
 def test_registry_model_provider_lifecycle():
-    reg = GarageRegistry()
+    reg = ProviderRegistry()
     assert reg.count_model_providers() == 0
     reg.register_model_provider(FakeModelProvider("ollama"))
     assert reg.is_registered("ollama")
@@ -302,7 +302,7 @@ def test_registry_model_provider_lifecycle():
 
 
 def test_registry_rejects_duplicate_and_missing_id():
-    reg = GarageRegistry()
+    reg = ProviderRegistry()
     reg.register_model_provider(FakeModelProvider("ollama"))
     try:
         reg.register_model_provider(FakeModelProvider("ollama"))
@@ -319,7 +319,7 @@ def test_registry_rejects_duplicate_and_missing_id():
 
 
 def test_registry_injected_sources():
-    reg = GarageRegistry()
+    reg = ProviderRegistry()
     reg.set_voice_source(FakeVoiceSource({}))
     reg.set_runtime_source(RegistryRuntimeSource(FakeRuntimeRegistry()))
     reg.set_personality_source(StaticPersonalitySource([]))
@@ -331,7 +331,7 @@ def test_registry_injected_sources():
 
 
 def test_registry_provider_specs():
-    reg = GarageRegistry()
+    reg = ProviderRegistry()
     reg.register_model_provider(FakeModelProvider("ollama", ProviderKind.LOCAL_LLM))
     specs = reg.provider_specs()
     assert len(specs) == 1
@@ -341,8 +341,8 @@ def test_registry_provider_specs():
 # --------------------------------------------------------------------------- #
 # Scanner + manager integration (fully offline via fakes)
 # --------------------------------------------------------------------------- #
-def _build_manager() -> GarageManager:
-    reg = GarageRegistry()
+def _build_manager() -> ProviderManager:
+    reg = ProviderRegistry()
     reg.register_model_provider(
         FakeModelProvider("ollama", ProviderKind.LOCAL_LLM, [make_sample_model()])
     )
@@ -359,8 +359,8 @@ def _build_manager() -> GarageManager:
         StaticPersonalitySource([{"id": "default", "name": "Default"}])
     )
     reg.set_hardware_profiler(FakeHardwareProfiler())
-    scanner = GarageScanner(reg)
-    return GarageManager(reg, scanner)
+    scanner = ProviderScanner(reg)
+    return ProviderManager(reg, scanner)
 
 
 def test_manager_refresh_discovers_everything():
@@ -374,7 +374,7 @@ def test_manager_refresh_discovers_everything():
 
     assert manager.catalog.count() == 1
     assert len(manager.list_voices()) == 1
-    assert len(manager.list_runtimes()) == 2  # garage + models
+    assert len(manager.list_runtimes()) == 2  # providers + models
     assert len(manager.list_personalities()) == 1
     assert manager.hardware_profile().cpu_model == "Fake CPU"
     assert manager._scanned is True
@@ -405,14 +405,14 @@ def test_manager_ensure_scanned_is_lazy_and_idempotent():
 
 
 def test_scanner_isolates_provider_failure():
-    reg = GarageRegistry()
+    reg = ProviderRegistry()
     reg.register_model_provider(
         FakeModelProvider("good", models=[make_sample_model(provider="good", name="m")])
     )
     reg.register_model_provider(FakeModelProvider("bad", health_error="boom"))
 
     async def _run():
-        return await GarageScanner(reg).scan_models(timeout=1.0)
+        return await ProviderScanner(reg).scan_models(timeout=1.0)
 
     models = asyncio.run(_run())
     # The failing provider must not break the healthy one.
@@ -421,11 +421,11 @@ def test_scanner_isolates_provider_failure():
 
 
 def test_scanner_voices_via_available_voices_manager():
-    reg = GarageRegistry()
+    reg = ProviderRegistry()
     reg.set_voice_source(
         FakeVoiceManager({"vm1": {"display_name": "VM One", "provider": "kokoro"}})
     )
-    scanner = GarageScanner(reg)
+    scanner = ProviderScanner(reg)
 
     async def _run():
         return await scanner.scan_voices()
@@ -436,29 +436,29 @@ def test_scanner_voices_via_available_voices_manager():
 
 
 def test_scanner_runtimes_via_kernel_registry():
-    reg = GarageRegistry()
+    reg = ProviderRegistry()
     reg.set_runtime_source(RegistryRuntimeSource(FakeRuntimeRegistry()))
-    runtimes = GarageScanner(reg).scan_runtimes()
+    runtimes = ProviderScanner(reg).scan_runtimes()
     ids = {r.runtime_id for r in runtimes}
-    assert ids == {"garage", "models"}
+    assert ids == {"providers", "models"}
     ready = {r.runtime_id for r in runtimes if r.healthy}
-    assert ready == {"garage", "models"}
+    assert ready == {"providers", "models"}
 
 
 def test_scanner_hardware_fallback_when_missing():
-    reg = GarageRegistry()  # no profiler
-    hp = GarageScanner(reg).profile_hardware()
+    reg = ProviderRegistry()  # no profiler
+    hp = ProviderScanner(reg).profile_hardware()
     assert isinstance(hp, HardwareProfile)
     assert hp.cpu_model == "unknown"
 
 
 def test_scanner_health_per_provider():
-    reg = GarageRegistry()
+    reg = ProviderRegistry()
     reg.register_model_provider(FakeModelProvider("ollama", available=True))
     reg.register_model_provider(FakeModelProvider("down", health_error="x"))
 
     async def _run():
-        return await GarageScanner(reg).health()
+        return await ProviderScanner(reg).health()
 
     health = asyncio.run(_run())
     assert health["providers"]["ollama"]["available"] is True
@@ -469,7 +469,7 @@ def test_scanner_health_per_provider():
 # Health aggregation
 # --------------------------------------------------------------------------- #
 def test_health_aggregator_no_providers_is_unknown():
-    agg = GarageHealthAggregator()
+    agg = ProviderHealthAggregator()
     h = agg.aggregate(
         runtime_status="ready",
         provider_specs=[],
@@ -486,7 +486,7 @@ def test_health_aggregator_no_providers_is_unknown():
 
 
 def test_health_aggregator_healthy_when_available():
-    agg = GarageHealthAggregator()
+    agg = ProviderHealthAggregator()
     h = agg.aggregate(
         runtime_status="ready",
         provider_specs=[{"id": "ollama", "available": True}],
@@ -504,7 +504,7 @@ def test_health_aggregator_healthy_when_available():
 
 
 def test_health_aggregator_degraded_when_none_available():
-    agg = GarageHealthAggregator()
+    agg = ProviderHealthAggregator()
     h = agg.aggregate(
         runtime_status="ready",
         provider_specs=[{"id": "ollama", "available": False}],
@@ -524,7 +524,7 @@ def test_manager_health_report_shape():
     manager = _build_manager()
     asyncio.run(manager.refresh(timeout=1.0))
     report = manager.health_report()
-    assert report["runtime_id"] == "garage"
+    assert report["runtime_id"] == "providers"
     assert report["model_count"] == 1
     assert report["voice_count"] == 1
     assert report["runtime_count"] == 2
@@ -696,7 +696,7 @@ def test_voice_registry_adapter_to_voice_infos():
 # Hardware profiler (real, but dependency-tolerant and offline)
 # --------------------------------------------------------------------------- #
 def test_hardware_profiler_returns_profile():
-    from garage.discoverers.hardware import HardwareProfiler
+    from providers.discoverers.hardware import HardwareProfiler
 
     profile = HardwareProfiler().profile()
     assert isinstance(profile, HardwareProfile)
@@ -706,15 +706,15 @@ def test_hardware_profiler_returns_profile():
 
 
 # --------------------------------------------------------------------------- #
-# GarageRuntime lifecycle (default providers replaced with fakes, offline)
+# ProvidersRuntime lifecycle (default providers replaced with fakes, offline)
 # --------------------------------------------------------------------------- #
-def test_garage_runtime_initialize_registers_providers(monkeypatch):
+def test_providers_runtime_initialize_registers_providers(monkeypatch):
     fake_ollama = FakeModelProvider("ollama", models=[make_sample_model()])
     fake_lm = FakeModelProvider("lm_studio")
-    monkeypatch.setattr("garage.runtime.OllamaAdapter", lambda *a, **k: fake_ollama)
-    monkeypatch.setattr("garage.runtime.LMStudioAdapter", lambda *a, **k: fake_lm)
+    monkeypatch.setattr("providers.runtime.OllamaAdapter", lambda *a, **k: fake_ollama)
+    monkeypatch.setattr("providers.runtime.LMStudioAdapter", lambda *a, **k: fake_lm)
 
-    runtime = GarageRuntime()
+    runtime = ProvidersRuntime()
     assert runtime.get_runtime_id() == RUNTIME_ID
     assert runtime.get_version() == RUNTIME_VERSION
 
@@ -730,10 +730,10 @@ def test_garage_runtime_initialize_registers_providers(monkeypatch):
     asyncio.run(runtime.shutdown())
 
 
-def test_garage_runtime_health_delegates_to_manager():
+def test_providers_runtime_health_delegates_to_manager():
     manager = _build_manager()
     asyncio.run(manager.refresh(timeout=1.0))
-    runtime = GarageRuntime(manager=manager)
+    runtime = ProvidersRuntime(manager=manager)
     report = asyncio.run(runtime.health())
     assert report["model_count"] == 1
 
@@ -741,39 +741,39 @@ def test_garage_runtime_health_delegates_to_manager():
 # --------------------------------------------------------------------------- #
 # Read-only API (isolated app, no kernel/voice/media boot)
 # --------------------------------------------------------------------------- #
-def _make_garage_app() -> FastAPI:
+def _make_providers_app() -> FastAPI:
     app = FastAPI()
-    app.include_router(garage_api.router)
+    app.include_router(providers_api.router)
     return app
 
 
 def test_api_returns_503_before_runtime_attached():
-    garage_api.set_garage_runtime(None)
-    client = TestClient(_make_garage_app())
-    resp = client.get("/garage/models")
+    providers_api.set_providers_runtime(None)
+    client = TestClient(_make_providers_app())
+    resp = client.get("/providers/models")
     assert resp.status_code == 503
 
 
 def test_api_endpoints_serve_discovered_resources():
     manager = _build_manager()
     asyncio.run(manager.refresh(timeout=1.0))
-    runtime = GarageRuntime(manager=manager)
-    garage_api.set_garage_runtime(runtime)
+    runtime = ProvidersRuntime(manager=manager)
+    providers_api.set_providers_runtime(runtime)
 
-    client = TestClient(_make_garage_app())
-    models = client.get("/garage/models").json()
-    providers = client.get("/garage/providers").json()
-    voices = client.get("/garage/voices").json()
-    runtimes = client.get("/garage/runtimes").json()
-    personalities = client.get("/garage/personalities").json()
-    hardware = client.get("/garage/hardware").json()
-    health = client.get("/garage/health").json()
+    client = TestClient(_make_providers_app())
+    models = client.get("/providers/models").json()
+    providers = client.get("/providers/sources").json()
+    voices = client.get("/providers/voices").json()
+    runtimes = client.get("/providers/runtimes").json()
+    personalities = client.get("/providers/personalities").json()
+    hardware = client.get("/providers/hardware").json()
+    health = client.get("/providers/health").json()
 
     assert isinstance(models, list) and len(models) == 1
     assert models[0]["id"] == "ollama:llama3:latest"
     assert {p["id"] for p in providers} == {"ollama", "lm_studio"}
     assert len(voices) == 1
-    assert {r["runtime_id"] for r in runtimes} == {"garage", "models"}
+    assert {r["runtime_id"] for r in runtimes} == {"providers", "models"}
     assert personalities[0]["id"] == "default"
     assert hardware["cpu_model"] == "Fake CPU"
     assert health["model_count"] == 1
@@ -782,11 +782,11 @@ def test_api_endpoints_serve_discovered_resources():
 def test_api_single_model_lookup_and_404():
     manager = _build_manager()
     asyncio.run(manager.refresh(timeout=1.0))
-    garage_api.set_garage_runtime(GarageRuntime(manager=manager))
+    providers_api.set_providers_runtime(ProvidersRuntime(manager=manager))
 
-    client = TestClient(_make_garage_app())
-    ok = client.get("/garage/models/ollama:llama3:latest")
+    client = TestClient(_make_providers_app())
+    ok = client.get("/providers/models/ollama:llama3:latest")
     assert ok.status_code == 200
     assert ok.json()["display_name"] == "llama3:latest"
-    missing = client.get("/garage/models/nope")
+    missing = client.get("/providers/models/nope")
     assert missing.status_code == 404

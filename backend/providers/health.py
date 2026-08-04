@@ -1,7 +1,7 @@
-"""Health aggregation for the AI Garage (v0.6.0).
+"""Health aggregation for the provider layer (v0.6.0).
 
-Centralizes the shape of the Garage health report so it is defined in exactly
-one place. :class:`GarageHealthAggregator` turns raw manager/registry
+Centralizes the shape of the provider layer health report so it is defined in exactly
+one place. :class:`ProviderHealthAggregator` turns raw manager/registry
 snapshots into the structured report the API and runtime expose.
 """
 
@@ -15,10 +15,10 @@ from .contracts import HealthStatus
 
 
 @dataclass
-class GarageHealth:
-    """Snapshot of the AI Garage's overall health."""
+class ProviderHealth:
+    """Snapshot of the provider layer's overall health."""
 
-    runtime_id: str = "garage"
+    runtime_id: str = "providers"
     runtime_status: str = "unknown"
     health_status: HealthStatus = HealthStatus.UNKNOWN
     registered_services: int = 0
@@ -54,10 +54,10 @@ class GarageHealth:
         }
 
 
-class GarageHealthAggregator:
-    """Builds :class:`GarageHealth` from raw Garage snapshots."""
+class ProviderHealthAggregator:
+    """Builds :class:`ProviderHealth` from raw provider layer snapshots."""
 
-    def __init__(self, runtime_id: str = "garage") -> None:
+    def __init__(self, runtime_id: str = "providers") -> None:
         self._runtime_id = runtime_id
 
     def aggregate(
@@ -73,7 +73,7 @@ class GarageHealthAggregator:
         personality_count: int,
         categories: List[str],
         hardware: Dict[str, Any],
-    ) -> GarageHealth:
+    ) -> ProviderHealth:
         available_services = sum(
             1 for spec in provider_specs if spec.get("available")
         )
@@ -86,7 +86,7 @@ class GarageHealthAggregator:
         else:
             status = HealthStatus.DEGRADED
 
-        return GarageHealth(
+        return ProviderHealth(
             runtime_id=self._runtime_id,
             runtime_status=runtime_status,
             health_status=status,

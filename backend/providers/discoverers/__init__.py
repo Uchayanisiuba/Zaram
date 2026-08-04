@@ -1,4 +1,4 @@
-"""AI Garage discoverers package (v0.6.0)."""
+"""Provider discoverers package (v0.6.0)."""
 
 from __future__ import annotations
 

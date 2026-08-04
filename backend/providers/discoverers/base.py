@@ -1,10 +1,10 @@
-"""Discovery adapter protocols for the AI Garage (v0.6.0).
+"""Discovery adapter protocols for the provider layer (v0.6.0).
 
 Each source of AI resources is abstracted behind a Protocol. Concrete
 adapters (Ollama, LM Studio, file-based personalities, Kernel registry,
-...) implement these interfaces. The Garage never references a concrete
+...) implement these interfaces. The provider layer never references a concrete
 engine outside its own adapter, so new providers plug in without touching
-:class:`~garage.manager.GarageManager` or the runtime.
+:class:`~providers.manager.ProviderManager` or the runtime.
 """
 
 from __future__ import annotations

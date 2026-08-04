@@ -1,7 +1,7 @@
-"""Personality source adapter for the AI Garage (v0.6.0).
+"""Personality source adapter for the provider layer (v0.6.0).
 
 Personalities are installed profiles (identity, voice mapping, ...). The
-Garage reads them from an injected source — by default a JSON file such as
+The provider layer reads them from an injected source — by default a JSON file such as
 ``characters.json`` — and never couples to a specific file layout.
 """
 
@@ -20,7 +20,7 @@ class PersonalitiesFileAdapter:
 
     The file is expected to be a mapping of ``personality_id -> profile``
     (matching ``characters.json``). Each profile is returned with its ``id``
-    injected so the Garage can key on it.
+    injected so the provider layer can key on it.
     """
 
     def __init__(self, path: str) -> None:

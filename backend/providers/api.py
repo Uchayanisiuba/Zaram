@@ -1,11 +1,11 @@
-"""Read-only HTTP API for the AI Garage (v0.6.0).
+"""Read-only HTTP API for the provider layer (v0.6.0).
 
-Exposes the Garage's discovery results as read-only endpoints. Every handler
-delegates to :class:`~garage.manager.GarageManager` — there is no
+Exposes the provider layer's discovery results as read-only endpoints. Every handler
+delegates to :class:`~providers.manager.ProviderManager` — there is no
 discovery logic here, and no download / mutation surface (out of scope).
 
-The Garage Runtime is attached by the application bootstrap via
-:func:`set_garage_runtime`; until then the endpoints respond 503 so the
+The Provider Runtime is attached by the application bootstrap via
+:func:`set_providers_runtime`; until then the endpoints respond 503 so the
 rest of the app is unaffected during early boot.
 """
 
@@ -16,26 +16,26 @@ from typing import Any, List, Optional
 
 from fastapi import APIRouter, HTTPException
 
-from .manager import GarageManager
-from .runtime import GarageRuntime
+from .manager import ProviderManager
+from .runtime import ProvidersRuntime
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/garage", tags=["garage"])
+router = APIRouter(prefix="/providers", tags=["providers"])
 
-_GARAGE_RUNTIME: Optional[GarageRuntime] = None
-
-
-def set_garage_runtime(runtime: GarageRuntime) -> None:
-    """Attach the live Garage Runtime (called from the app lifespan)."""
-    global _GARAGE_RUNTIME
-    _GARAGE_RUNTIME = runtime
+_PROVIDERS_RUNTIME: Optional[ProvidersRuntime] = None
 
 
-def _manager() -> GarageManager:
-    if _GARAGE_RUNTIME is None:
-        raise HTTPException(status_code=503, detail="AI Garage not initialized")
-    return _GARAGE_RUNTIME.manager
+def set_providers_runtime(runtime: ProvidersRuntime) -> None:
+    """Attach the live Provider Runtime (called from the app lifespan)."""
+    global _PROVIDERS_RUNTIME
+    _PROVIDERS_RUNTIME = runtime
+
+
+def _manager() -> ProviderManager:
+    if _PROVIDERS_RUNTIME is None:
+        raise HTTPException(status_code=503, detail="provider layer not initialized")
+    return _PROVIDERS_RUNTIME.manager
 
 
 @router.get("/models")
@@ -55,8 +55,13 @@ async def get_model(model_id: str) -> dict:
     return model.to_dict()
 
 
-@router.get("/providers")
+@router.get("/sources")
 async def list_providers() -> List[dict]:
+    """The provider *sources* (Ollama, an OpenAI-compatible server), not models.
+
+    Named ``/sources`` rather than ``/providers`` only because the router prefix
+    is already ``/providers`` and ``/providers/providers`` reads as a mistake.
+    """
     manager = _manager()
     await manager.ensure_scanned()
     return manager.list_providers()

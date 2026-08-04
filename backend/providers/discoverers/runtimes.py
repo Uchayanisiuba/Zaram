@@ -1,6 +1,6 @@
-"""Runtime source adapter for the AI Garage (v0.6.0).
+"""Runtime source adapter for the provider layer (v0.6.0).
 
-The Garage learns which Zaram runtimes are installed by reading the Kernel
+The provider layer learns which Zaram runtimes are installed by reading the Kernel
 RuntimeRegistry through its public surface (``list_capabilities`` and
 ``get_system_health``). It never imports a concrete runtime.
 """

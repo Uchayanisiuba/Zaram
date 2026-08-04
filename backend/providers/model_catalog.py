@@ -1,9 +1,9 @@
-"""Generic internal model catalog for the AI Garage (v0.6.0).
+"""Generic internal model catalog for the provider layer (v0.6.0).
 
-:class:`GarageModelCatalog` is the single in-memory store of every model
+:class:`ModelCatalog` is the single in-memory store of every model
 discovered across all providers. It is modality-agnostic and knows nothing
 about Ollama, LM Studio, or any cloud API — it only stores
-:class:`~garage.contracts.ModelInfo` records.
+:class:`~providers.contracts.ModelInfo` records.
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ from .contracts import (
 logger = logging.getLogger(__name__)
 
 
-class GarageModelCatalog:
+class ModelCatalog:
     """Stores and queries discovered :class:`ModelInfo` records by id."""
 
     def __init__(self) -> None:
