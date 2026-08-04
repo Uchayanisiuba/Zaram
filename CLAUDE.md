@@ -89,6 +89,26 @@ building it.
   It is named `providers/`, not `garage/`. "Garage" is not canonical vocabulary
   and never was; the rename is part of connecting it.
 
+- **Model metadata carries a data policy, alongside size and capabilities.**
+  Three values, and no fourth:
+
+  - `never_leaves_device` — local inference. Nothing is sent.
+  - `logged_and_trained_on` — the provider logs prompts and may train on them.
+    Every free tier is this.
+  - `your_key_no_training` — the user's own key, and the provider's terms
+    exclude training on API data.
+
+  This is the one fact a user must see *before* choosing a model, not after.
+  Size and speed are recoverable mistakes; sending a confidential document to a
+  provider that trains on it is not. A model picker that shows parameter counts
+  and hides this is optimising for the wrong decision.
+
+  **Never default to a `logged_and_trained_on` model.** It may only ever be
+  selected deliberately, by a user who has seen the label. Free is not a good
+  enough reason to make that choice on someone's behalf, and Rule 1 means Zaram
+  has no commercial incentive to — the free tier exists because the user brings
+  their own inference, not because we route them somewhere that pays in data.
+
 - **The egress gate covers Python-originated requests only.** Browser-originated
   requests bypass it entirely and *cannot be logged* — CSS `@import`, `<img
   src>`, `<script src>`, renderer `fetch`, iframes, webviews, and anything a
