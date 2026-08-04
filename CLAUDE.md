@@ -78,16 +78,17 @@ building it.
   vocabulary, output templates). Do not build a pack *system* until two packs exist
   and have been built by hand.
 - **`backend/providers/` is the provider layer. Connect it, do not duplicate it.**
-  It was written, tested, and never wired up — which is how a second, simpler
-  provider path grew beside it (`models_runtime.py` importing `OllamaEngine`
-  directly). One of those has to go, and it is the shortcut.
+  Connected on 2026-08-04: renamed from `garage/`, registered in the
+  bootstrapper, and `models_runtime.py` now asks it which model to run instead
+  of constructing `OllamaEngine()` with a hardcoded `gemma3:latest`. That
+  shortcut is gone; do not let another one grow.
 
   Routing, model residency, first-run hardware detection and the Models pane all
-  consume this layer. `models_runtime.py` goes through it rather than importing
-  an engine directly.
+  consume this layer. Nothing else may import a concrete engine to reach a model.
 
-  It is named `providers/`, not `garage/`. "Garage" is not canonical vocabulary
-  and never was; the rename is part of connecting it.
+  The runtime degrades rather than blocks: no provider layer, an unreachable
+  one, or no eligible model all leave the engine on its own default and log why.
+  Boot does not depend on a network scan.
 
 - **Model metadata carries a data policy, alongside size and capabilities.**
   Three values, and no fourth:
