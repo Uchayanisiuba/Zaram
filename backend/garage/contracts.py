@@ -205,14 +205,29 @@ class RuntimeInfo:
 
 @dataclass
 class HardwareProfile:
-    """A point-in-time snapshot of the host machine's AI-relevant hardware."""
+    """A point-in-time snapshot of the host machine's AI-relevant hardware.
+
+    Unknown is a value here, not a zero. ``vram_bytes`` was an ``int`` defaulting
+    to ``0``, and the only implementation that could fill it read
+    ``torch.cuda.get_device_properties`` — so every Mac and every AMD card
+    reported "GPU available, 0 bytes of VRAM". A recommendation built on that
+    false zero is worse than no recommendation: it tells the user a model will
+    not fit when it would, and makes the product look weak on exactly the
+    hardware that runs it best.
+    """
 
     cpu_model: str = "unknown"
     cpu_count: int = 0
     total_ram_bytes: int = 0
+    #: True only when an accelerator is present *and* its capacity is known, so
+    #: that residency can actually be planned against it. An accelerator we
+    #: cannot measure is reported through ``metal_available`` /
+    #: ``directml_available`` below rather than as a capacity we do not have.
     gpu_available: bool = False
     gpu_name: str = "unknown"
-    vram_bytes: int = 0
+    #: Bytes of VRAM, or ``None`` when it cannot be determined. Never 0 as a
+    #: stand-in for unknown — 0 is a measurement, and this is the absence of one.
+    vram_bytes: Optional[int] = None
     os_name: str = "unknown"
     os_version: str = "unknown"
     storage_total_bytes: int = 0
@@ -222,14 +237,37 @@ class HardwareProfile:
     directml_available: bool = False
     timestamp: float = field(default_factory=time.time)
 
+    @property
+    def vram_known(self) -> bool:
+        """Whether residency can be planned at all.
+
+        Anything sizing a model against this machine must check here first. A
+        caller that treats ``vram_bytes or 0`` as a number has reintroduced the
+        bug this field exists to prevent.
+        """
+        return self.vram_bytes is not None
+
+    @property
+    def accelerator_present(self) -> bool:
+        """An accelerator exists, whether or not we can measure it.
+
+        Distinct from ``gpu_available``: a Mac has a real GPU that Zaram cannot
+        size. Saying "no GPU" there would be its own false statement, so the two
+        questions are kept separate — is there one, and can we plan against it.
+        """
+        return self.cuda_available or self.metal_available or self.directml_available
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "cpu_model": self.cpu_model,
             "cpu_count": self.cpu_count,
             "total_ram_bytes": self.total_ram_bytes,
             "gpu_available": self.gpu_available,
+            "accelerator_present": self.accelerator_present,
             "gpu_name": self.gpu_name,
+            # Serialises as null, never 0. The UI must render this as "unknown".
             "vram_bytes": self.vram_bytes,
+            "vram_known": self.vram_known,
             "os_name": self.os_name,
             "os_version": self.os_version,
             "storage_total_bytes": self.storage_total_bytes,
