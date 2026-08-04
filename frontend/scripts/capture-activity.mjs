@@ -20,8 +20,9 @@ const main = async () => {
     viewport: { width: 1440, height: 900 },
     deviceScaleFactor: 2,
   });
-  // index.css pulls fonts from Google. Blocked so the capture does not hang on
-  // webfonts — and so this script does not itself make an unlogged request.
+  // Fonts now ship in the bundle, so these should never fire. Kept as a
+  // regression guard: if a remote font reference ever comes back, the capture
+  // silently stops depending on the network rather than quietly restoring it.
   await ctx.route('**fonts.googleapis.com**', (r) => r.abort());
   await ctx.route('**fonts.gstatic.com**', (r) => r.abort());
   await ctx.addInitScript(() => {

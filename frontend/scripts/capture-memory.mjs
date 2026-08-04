@@ -23,8 +23,8 @@ const main = async () => {
     viewport: { width: 1440, height: 900 },
     deviceScaleFactor: 2,
   });
-  // Blocked so the capture does not hang on webfonts, and so this script does
-  // not itself make an unlogged outbound request.
+  // Fonts now ship in the bundle, so these should never fire. Kept as a
+  // regression guard.
   await ctx.route('**fonts.googleapis.com**', (r) => r.abort());
   await ctx.route('**fonts.gstatic.com**', (r) => r.abort());
   await ctx.addInitScript(() => {

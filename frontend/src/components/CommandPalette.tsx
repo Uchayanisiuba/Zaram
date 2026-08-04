@@ -97,7 +97,7 @@ export default function CommandPalette({ onClose, onNavigate }: CommandPalettePr
               outline: 'none',
               color: '#e2e4ee',
               fontSize: 30,
-              fontFamily: "'Inter', sans-serif",
+              fontFamily: 'var(--font-sans)',
               caretColor: '#6366f1',
             }}
           />
@@ -108,7 +108,7 @@ export default function CommandPalette({ onClose, onNavigate }: CommandPalettePr
             background: 'rgba(255,255,255,0.06)',
             border: '1px solid rgba(255,255,255,0.1)',
             color: '#6b7099',
-            fontFamily: "'JetBrains Mono', monospace",
+            fontFamily: 'var(--font-mono)',
           }}>ESC</kbd>
         </div>
 

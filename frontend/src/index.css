@@ -1,6 +1,21 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
-@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap');
-@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap');
+/* Fonts ship in the bundle. Never from a CDN.
+ *
+ * These three were `@import url('https://fonts.googleapis.com/...')`, which
+ * fired on every launch — before any UI rendered, before any consent existed,
+ * and completely outside the egress gate. The gate is written in Python and
+ * cannot see a request the browser makes on behalf of a stylesheet, so no
+ * amount of work on it would ever have recorded these. That is why the rule in
+ * CLAUDE.md bans remote asset URLs outright rather than trying to log them.
+ *
+ * It also broke the product offline, which is a poor look for something whose
+ * claim is that it works without the network.
+ *
+ * Variable fonts: one file per family covers every weight the design uses
+ * (Inter 300–700, Space Grotesk 400–700, JetBrains Mono 400–500), so this is
+ * fewer bytes than the five static files it replaces. */
+@import '@fontsource-variable/inter';
+@import '@fontsource-variable/space-grotesk';
+@import '@fontsource-variable/jetbrains-mono';
 
 @tailwind base;
 @tailwind components;
@@ -8,10 +23,15 @@
 
 /* Project A theme - color system */
 :root {
-  --font-sans: 'Inter', system-ui, sans-serif;
+  /* "… Variable" first: that is what @fontsource-variable registers. The bare
+     names are kept behind it so a machine with the static family installed
+     still matches, and the system stack is the final fallback. Without the
+     Variable names the bundled fonts would never be used and everything would
+     quietly render in system-ui. */
+  --font-sans: 'Inter Variable', 'Inter', system-ui, sans-serif;
   --font-body: var(--font-sans);
-  --font-display: 'Space Grotesk', sans-serif;
-  --font-mono: 'JetBrains Mono', monospace;
+  --font-display: 'Space Grotesk Variable', 'Space Grotesk', sans-serif;
+  --font-mono: 'JetBrains Mono Variable', 'JetBrains Mono', monospace;
   --font-size: 14px;
 
   --text-caption: 0.6875rem; /* 11px — caption mono, uppercase */
