@@ -1,6 +1,6 @@
-"""Provider/discoverer registry for the AI Garage (v0.6.0).
+"""Provider/discoverer registry for the provider layer (v0.6.0).
 
-The :class:`GarageRegistry` is the *configuration* of what the Garage scans.
+The :class:`ProviderRegistry` is the *configuration* of what the provider layer scans.
 It holds the registered model providers and the injected voice / runtime /
 personality / hardware sources. Adding a new provider never touches the
 manager or the scanner — callers just ``register_model_provider``.
@@ -16,8 +16,8 @@ from .contracts import ProviderKind, ProviderSummary
 logger = logging.getLogger(__name__)
 
 
-class GarageRegistry:
-    """In-memory registry of Garage discovery sources."""
+class ProviderRegistry:
+    """In-memory registry of provider discovery sources."""
 
     def __init__(self) -> None:
         # provider_id -> ModelProviderAdapter
@@ -35,12 +35,12 @@ class GarageRegistry:
         if provider_id in self._model_providers:
             raise ValueError(f"Model provider '{provider_id}' is already registered")
         self._model_providers[provider_id] = provider
-        logger.info("Registered Garage model provider '%s'", provider_id)
+        logger.info("Registered model provider '%s'", provider_id)
 
     def remove_model_provider(self, provider_id: str) -> bool:
         removed = self._model_providers.pop(provider_id, None) is not None
         if removed:
-            logger.info("Removed Garage model provider '%s'", provider_id)
+            logger.info("Removed model provider '%s'", provider_id)
         return removed
 
     def get_model_provider(self, provider_id: str) -> Any:
@@ -94,10 +94,10 @@ class GarageRegistry:
 
     def capabilities(self) -> List[str]:
         return [
-            "garage.discover_models",
-            "garage.discover_voices",
-            "garage.discover_runtimes",
-            "garage.profile_hardware",
+            "providers.discover_models",
+            "providers.discover_voices",
+            "providers.discover_runtimes",
+            "providers.profile_hardware",
         ]
 
     def registered_provider_kinds(self) -> Dict[str, str]:

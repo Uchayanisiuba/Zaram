@@ -1,8 +1,8 @@
-"""Contract tests for the AI Garage (offline)."""
+"""Contract tests for the provider layer (offline)."""
 
 from __future__ import annotations
 
-from garage.contracts import (
+from providers.contracts import (
     CapabilityLocality,
     HardwareProfile,
     HealthStatus,

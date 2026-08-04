@@ -1,6 +1,6 @@
-"""Shared offline fakes and fixtures for AI Garage tests (v0.6.0).
+"""Shared offline fakes and fixtures for provider layer tests (v0.6.0).
 
-Every fake mirrors a real adapter/source interface so the Garage can be
+Every fake mirrors a real adapter/source interface so the provider layer can be
 exercised end-to-end with zero network and zero external dependencies.
 """
 
@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional
 
 import pytest
 
-from garage.contracts import (
+from providers.contracts import (
     CapabilityLocality,
     HardwareProfile,
     HealthStatus,
@@ -20,10 +20,10 @@ from garage.contracts import (
     RuntimeInfo,
     VoiceInfo,
 )
-from garage.manager import GarageManager
-from garage.registry import GarageRegistry
-from garage.runtime import GarageRuntime
-from garage.scanner import GarageScanner
+from providers.manager import ProviderManager
+from providers.registry import ProviderRegistry
+from providers.runtime import ProvidersRuntime
+from providers.scanner import ProviderScanner
 
 
 def make_model(
@@ -174,8 +174,8 @@ def sample_models() -> List[ModelInfo]:
 
 
 @pytest.fixture
-def registry(sample_models) -> GarageRegistry:
-    reg = GarageRegistry()
+def registry(sample_models) -> ProviderRegistry:
+    reg = ProviderRegistry()
     reg.register_model_provider(
         FakeModelProvider("p1", [m for m in sample_models if m.provider == "p1"])
     )
@@ -203,15 +203,15 @@ def registry(sample_models) -> GarageRegistry:
 
 
 @pytest.fixture
-def manager(registry) -> GarageManager:
-    scanner = GarageScanner(registry)
-    return GarageManager(registry, scanner)
+def manager(registry) -> ProviderManager:
+    scanner = ProviderScanner(registry)
+    return ProviderManager(registry, scanner)
 
 
 @pytest.fixture
-def runtime(registry, manager) -> GarageRuntime:
-    scanner = GarageScanner(registry)
-    return GarageRuntime(
+def runtime(registry, manager) -> ProvidersRuntime:
+    scanner = ProviderScanner(registry)
+    return ProvidersRuntime(
         event_bus=None,
         registry=registry,
         scanner=scanner,

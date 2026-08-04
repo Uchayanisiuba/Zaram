@@ -1,13 +1,13 @@
-"""Health aggregation tests for the AI Garage (offline)."""
+"""Health aggregation tests for the provider layer (offline)."""
 
 from __future__ import annotations
 
-from garage.contracts import HealthStatus
-from garage.health import GarageHealth, GarageHealthAggregator
+from providers.contracts import HealthStatus
+from providers.health import ProviderHealth, ProviderHealthAggregator
 
 
 def _aggregate(provider_specs):
-    return GarageHealthAggregator().aggregate(
+    return ProviderHealthAggregator().aggregate(
         runtime_status="ready",
         provider_specs=provider_specs,
         scanner_health={"providers": {}},
@@ -38,8 +38,8 @@ def test_aggregate_degraded_when_none_available():
     assert h.health_status is HealthStatus.DEGRADED
 
 
-def test_garage_health_to_dict_shape():
-    h = GarageHealth()
+def test_provider_health_to_dict_shape():
+    h = ProviderHealth()
     d = h.to_dict()
     for key in (
         "runtime_id",

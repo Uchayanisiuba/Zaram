@@ -1,6 +1,6 @@
-"""Orchestration manager for the AI Garage (v0.6.0).
+"""Orchestration manager for the provider layer (v0.6.0).
 
-:class:`GarageManager` is the single control point the API and runtime talk
+:class:`ProviderManager` is the single control point the API and runtime talk
 to. It owns the model catalog and the caches of voices / runtimes /
 personalities / hardware, drives discovery through the scanner, and exposes
 pure, offline, read-only accessors. It never imports a concrete engine.
@@ -22,31 +22,31 @@ from .contracts import (
     RuntimeInfo,
     VoiceInfo,
 )
-from .health import GarageHealth, GarageHealthAggregator
-from .model_catalog import GarageModelCatalog
-from .registry import GarageRegistry
-from .scanner import GarageScanner
+from .health import ProviderHealth, ProviderHealthAggregator
+from .model_catalog import ModelCatalog
+from .registry import ProviderRegistry
+from .scanner import ProviderScanner
 
 logger = logging.getLogger(__name__)
 
 
-class GarageManager:
+class ProviderManager:
     """Discovers and serves Zaram's AI resources."""
 
     def __init__(
         self,
-        registry: Optional[GarageRegistry] = None,
-        scanner: Optional[GarageScanner] = None,
+        registry: Optional[ProviderRegistry] = None,
+        scanner: Optional[ProviderScanner] = None,
         *,
         event_bus: Optional[EventBus] = None,
-        aggregator: Optional[GarageHealthAggregator] = None,
+        aggregator: Optional[ProviderHealthAggregator] = None,
     ) -> None:
-        self.registry = registry or GarageRegistry()
-        self.scanner = scanner or GarageScanner(self.registry)
+        self.registry = registry or ProviderRegistry()
+        self.scanner = scanner or ProviderScanner(self.registry)
         self._event_bus = event_bus
-        self._aggregator = aggregator or GarageHealthAggregator()
+        self._aggregator = aggregator or ProviderHealthAggregator()
 
-        self.catalog = GarageModelCatalog()
+        self.catalog = ModelCatalog()
         self._voices: List[VoiceInfo] = []
         self._runtimes: List[RuntimeInfo] = []
         self._personalities: List[Dict[str, Any]] = []
@@ -68,7 +68,7 @@ class GarageManager:
         self._scanned = True
         self._publish_scanned()
         logger.info(
-            "Garage scan complete: %d models, %d voices, %d runtimes, %d personalities",
+            "Provider scan complete: %d models, %d voices, %d runtimes, %d personalities",
             self.catalog.count(),
             len(self._voices),
             len(self._runtimes),
@@ -160,8 +160,8 @@ class GarageManager:
 
             self._event_bus.publish(
                 ZaramEvent(
-                    source_runtime="garage",
-                    event_type="garage.scanned",
+                    source_runtime="providers",
+                    event_type="providers.scanned",
                     data={
                         "models": self.catalog.count(),
                         "voices": len(self._voices),

@@ -1,4 +1,4 @@
-"""Discoverer adapter tests for the AI Garage (offline).
+"""Discoverer adapter tests for the provider layer (offline).
 
 The Ollama and OpenAI-compatible adapters are exercised against in-memory
 fakes for ``requests`` — no network is touched. The hardware profiler
@@ -11,17 +11,17 @@ from __future__ import annotations
 import json
 from typing import Any, Dict
 
-from garage.contracts import (
+from providers.contracts import (
     ModelCategory,
     ProviderKind,
     RuntimeInfo,
 )
-from garage.discoverers import ollama as ollama_mod
-from garage.discoverers import openai_compat as oc_mod
-from garage.discoverers.ollama import OllamaAdapter
-from garage.discoverers.openai_compat import LMStudioAdapter, OpenAICompatibleAdapter
-from garage.discoverers.personalities import PersonalitiesFileAdapter
-from garage.discoverers.runtimes import RegistryRuntimeSource
+from providers.discoverers import ollama as ollama_mod
+from providers.discoverers import openai_compat as oc_mod
+from providers.discoverers.ollama import OllamaAdapter
+from providers.discoverers.openai_compat import LMStudioAdapter, OpenAICompatibleAdapter
+from providers.discoverers.personalities import PersonalitiesFileAdapter
+from providers.discoverers.runtimes import RegistryRuntimeSource
 
 
 class _Resp:

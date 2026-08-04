@@ -1,6 +1,6 @@
-"""AI Garage Runtime (v0.6.0).
+"""Provider Runtime (v0.6.0).
 
-The Garage Runtime is Zaram's control center for AI resources. It registers
+The Provider Runtime is Zaram's control center for AI resources. It registers
 with the Kernel exactly like the other runtimes (Voice, Media, Models), owns
 no concrete engine, and wires in the default model providers at startup.
 
@@ -10,7 +10,7 @@ runtime or the manager.
 Relationship::
 
     Kernel
-      └── Garage Runtime   (discovers + catalogs AI resources)
+      └── Provider Runtime   (discovers + catalogs AI resources)
             ├── Ollama adapter        (local LLMs)
             ├── LM Studio adapter     (local AI server)
             ├── OpenAI-compatible    (local/cloud, if configured)
@@ -40,32 +40,32 @@ from .discoverers import (
     OllamaAdapter,
     OpenAICompatibleAdapter,
 )
-from .manager import GarageManager
-from .registry import GarageRegistry
-from .scanner import GarageScanner
+from .manager import ProviderManager
+from .registry import ProviderRegistry
+from .scanner import ProviderScanner
 
 logger = logging.getLogger(__name__)
 
-RUNTIME_ID = "garage"
+RUNTIME_ID = "providers"
 RUNTIME_VERSION = "0.6.0"
 
 
-class GarageRuntime:
+class ProvidersRuntime:
     """Kernel-facing runtime that discovers and catalogs AI resources."""
 
     def __init__(
         self,
         event_bus: Optional[EventBus] = None,
         *,
-        registry: Optional[GarageRegistry] = None,
-        scanner: Optional[GarageScanner] = None,
-        manager: Optional[GarageManager] = None,
+        registry: Optional[ProviderRegistry] = None,
+        scanner: Optional[ProviderScanner] = None,
+        manager: Optional[ProviderManager] = None,
         hardware_profiler: Optional[Any] = None,
     ) -> None:
         self._event_bus = event_bus
-        self.registry = registry or GarageRegistry()
-        self.scanner = scanner or GarageScanner(self.registry)
-        self.manager = manager or GarageManager(
+        self.registry = registry or ProviderRegistry()
+        self.scanner = scanner or ProviderScanner(self.registry)
+        self.manager = manager or ProviderManager(
             self.registry, self.scanner, event_bus=event_bus
         )
         if hardware_profiler is not None:
@@ -85,8 +85,8 @@ class GarageRuntime:
             version=RUNTIME_VERSION,
             priority="normal",
             capabilities=[
-                Capability(id="garage.discover", runtime_id=RUNTIME_ID),
-                Capability(id="garage.profile", runtime_id=RUNTIME_ID),
+                Capability(id="providers.discover", runtime_id=RUNTIME_ID),
+                Capability(id="providers.profile", runtime_id=RUNTIME_ID),
             ],
             dependencies=["event_bus"],
             auto_start=True,
@@ -97,7 +97,7 @@ class GarageRuntime:
 
     async def initialize(self) -> None:
         self._state = RuntimeState.INITIALIZING
-        logger.info("AI Garage initializing")
+        logger.info("provider layer initializing")
 
         # Register the default model providers. Network scanning happens only on
         # demand (refresh), never at boot, so startup stays offline and fast.
@@ -115,11 +115,11 @@ class GarageRuntime:
                 data={"runtime_id": RUNTIME_ID},
             )
         )
-        logger.info("AI Garage ready")
+        logger.info("provider layer ready")
 
     async def shutdown(self) -> None:
         self._state = RuntimeState.STOPPING
-        logger.info("AI Garage stopping")
+        logger.info("provider layer stopping")
         self._state = RuntimeState.STOPPED
 
     def health_check(self) -> Dict[str, Any]:
@@ -142,9 +142,9 @@ class GarageRuntime:
         for provider in (OllamaAdapter(), LMStudioAdapter()):
             self._safe_register(provider)
 
-        endpoint = os.getenv("GARAGE_OPENAI_ENDPOINT")
+        endpoint = os.getenv("ZARAM_OPENAI_ENDPOINT")
         if endpoint:
-            api_key = os.getenv("GARAGE_OPENAI_KEY")
+            api_key = os.getenv("ZARAM_OPENAI_KEY")
             self._safe_register(
                 OpenAICompatibleAdapter(
                     provider_id="openai_cloud",

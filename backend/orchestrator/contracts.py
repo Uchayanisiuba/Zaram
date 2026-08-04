@@ -4,9 +4,9 @@ The Orchestrator is the *decision* layer of Zaram. It never executes models and
 never contains provider-specific logic. Every type here is provider-agnostic:
 no model name, no Ollama/OpenAI/LM Studio/Cloud concept appears anywhere.
 
-The Orchestrator consumes discovered models exclusively from the AI Garage
-(via the :class:`ModelSource` protocol, satisfied by ``GarageManager``). The
-data shape for a model is :class:`garage.contracts.ModelInfo`; this module adds
+The Orchestrator consumes discovered models exclusively from the provider layer
+(via the :class:`ModelSource` protocol, satisfied by ``ProviderManager``). The
+data shape for a model is :class:`providers.contracts.ModelInfo`; this module adds
 the orchestration-specific request/plan/decision shapes on top of it.
 """
 
@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional, Set
 
-from garage.contracts import (
+from providers.contracts import (
     CapabilityLocality,
     HealthStatus,
     ModelCategory,
@@ -134,7 +134,7 @@ class CapabilityScore:
 class ModelProfile:
     """A model enriched with derived capability scores and resource estimates.
 
-    Built from a :class:`garage.contracts.ModelInfo`; never references a name.
+    Built from a :class:`providers.contracts.ModelInfo`; never references a name.
     """
 
     model: ModelInfo

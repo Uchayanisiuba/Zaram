@@ -119,7 +119,7 @@ class TestRendererIsolation:
         runtime_dirs = [
             Path(__file__).resolve().parent.parent.parent.parent / "voice",
             Path(__file__).resolve().parent.parent.parent.parent / "media",
-            Path(__file__).resolve().parent.parent.parent.parent / "garage",
+            Path(__file__).resolve().parent.parent.parent.parent / "providers",
             Path(__file__).resolve().parent.parent.parent.parent / "runtimes",
             Path(__file__).resolve().parent.parent.parent.parent / "core",
         ]

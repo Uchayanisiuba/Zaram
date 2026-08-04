@@ -1,12 +1,12 @@
-"""Hardware profiling for the AI Garage (v0.6.0).
+"""Hardware profiling for the provider layer (v0.6.0).
 
-Produces a provider-independent :class:`~garage.contracts.HardwareProfile`
+Produces a provider-independent :class:`~providers.contracts.HardwareProfile`
 of the host machine: CPU, RAM, GPU/VRAM, OS, storage, and the
 availability of the major local-acceleration stacks (CUDA, Metal, DirectML).
 
 All introspection is best-effort and dependency-tolerant: if a library is
 missing or raises, the corresponding field degrades to ``False`` / ``0``
-rather than crashing the Garage.
+rather than crashing the provider layer.
 """
 
 from __future__ import annotations

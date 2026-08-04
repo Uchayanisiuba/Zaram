@@ -1,4 +1,4 @@
-"""Runtime tests for the AI Garage (offline)."""
+"""Runtime tests for the provider layer (offline)."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from core.capability_router import CapabilityRouter
 from core.event_bus import EventBus
 from core.registry import RuntimeRegistry
 
-from garage.runtime import RUNTIME_ID, RUNTIME_VERSION, GarageRuntime
+from providers.runtime import RUNTIME_ID, RUNTIME_VERSION, ProvidersRuntime
 
 
 def test_runtime_identity(runtime):
@@ -17,7 +17,7 @@ def test_runtime_identity(runtime):
 
 def test_metadata_advertises_capabilities(runtime):
     meta = runtime.get_metadata()
-    assert {c.id for c in meta.capabilities} == {"garage.discover", "garage.profile"}
+    assert {c.id for c in meta.capabilities} == {"providers.discover", "providers.profile"}
     assert meta.runtime_id == RUNTIME_ID
 
 
@@ -44,19 +44,19 @@ async def test_runtime_async_health(runtime):
 
 
 def test_runtime_di_injects_registry():
-    from garage.registry import GarageRegistry
+    from providers.registry import ProviderRegistry
 
-    reg = GarageRegistry()
-    rt = GarageRuntime(event_bus=None, registry=reg)
+    reg = ProviderRegistry()
+    rt = ProvidersRuntime(event_bus=None, registry=reg)
     assert rt.registry is reg
 
 
 async def test_runtime_registers_with_kernel():
     bus = EventBus()
     reg = RuntimeRegistry(bus)
-    rt = GarageRuntime(bus)
+    rt = ProvidersRuntime(bus)
     reg.register(rt)  # must not raise
     assert reg.get_runtime(rt.get_runtime_id()) is rt
 
     router = CapabilityRouter(reg)
-    assert router.resolve("garage.discover") is rt
+    assert router.resolve("providers.discover") is rt

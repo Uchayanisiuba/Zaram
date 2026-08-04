@@ -1,8 +1,8 @@
-"""Manager tests for the AI Garage (offline)."""
+"""Manager tests for the provider layer (offline)."""
 
 from __future__ import annotations
 
-from garage.contracts import CapabilityLocality, ModelCategory
+from providers.contracts import CapabilityLocality, ModelCategory
 
 
 async def test_refresh_populates_all(manager):
@@ -61,4 +61,4 @@ async def test_refresh_publishes_event(manager):
         manager.registry, manager.scanner, event_bus=_Bus()
     )
     await mgr.refresh(timeout=1.0)
-    assert any(e.event_type == "garage.scanned" for e in events)
+    assert any(e.event_type == "providers.scanned" for e in events)

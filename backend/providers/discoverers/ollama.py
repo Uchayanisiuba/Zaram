@@ -1,11 +1,11 @@
-"""Ollama discovery adapter for the AI Garage (v0.6.0).
+"""Ollama discovery adapter for the provider layer (v0.6.0).
 
-This is the *only* module in the Garage that knows about Ollama. It queries
+This is the *only* module in the provider layer that knows about Ollama. It queries
 the Ollama REST API and translates responses into provider-independent
-:class:`~garage.contracts.ModelInfo` records. No model name is hardcoded;
+:class:`~providers.contracts.ModelInfo` records. No model name is hardcoded;
 everything is learned from ``/api/tags`` and ``/api/show``.
 
-All network access is failure-safe and timeout-bounded so the Garage never
+All network access is failure-safe and timeout-bounded so the provider layer never
 blocks or crashes when Ollama is not installed.
 """
 

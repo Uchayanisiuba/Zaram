@@ -1,13 +1,13 @@
-"""Shared contracts for the Zaram AI Garage (v0.6.0).
+"""Shared contracts for the Zaram provider layer (v0.6.0).
 
-The AI Garage is Zaram's control center for AI resources. It discovers and
+The provider layer is Zaram's control center for AI resources. It discovers and
 tracks *every* AI capability available to the system — local LLMs, local AI
 servers, installed voices, installed personalities, active runtimes, and
 (future) skills and plugins.
 
 This module defines only the generic, provider-independent data shapes. No
 concrete engine (Ollama, LM Studio, Kokoro, ...) is referenced here; those
-live exclusively inside their own discoverers. The Garage never hardcodes a
+live exclusively inside their own discoverers. The provider layer never hardcodes a
 model name — every field is learned at discovery time.
 """
 
@@ -63,7 +63,7 @@ class ProviderKind(Enum):
 
 
 class HealthStatus(Enum):
-    """Aggregated health of a Garage component."""
+    """Aggregated health of a provider layer component."""
 
     UNKNOWN = "unknown"
     HEALTHY = "healthy"
@@ -85,7 +85,7 @@ class ModelInfo:
     """The generic internal representation of one discovered model.
 
     Every field is optional or inferred. No model name is hardcoded anywhere
-    in the Garage — adapters populate these from provider responses.
+    in the provider layer — adapters populate these from provider responses.
     """
 
     id: str
@@ -314,7 +314,7 @@ def locality_from_value(value: Optional[str]) -> CapabilityLocality:
     """Coerce a string to :class:`CapabilityLocality` (falls back to LOCAL).
 
     The core enum intentionally exposes no ``from_value`` helper, so the
-    Garage provides its own conversion here.
+    The provider layer provides its own conversion here.
     """
     if not value:
         return CapabilityLocality.LOCAL
@@ -324,7 +324,7 @@ def locality_from_value(value: Optional[str]) -> CapabilityLocality:
         return CapabilityLocality.LOCAL
 
 
-def new_id(prefix: str = "garage") -> str:
+def new_id(prefix: str = "provider") -> str:
     """Generate a prefixed unique identifier."""
     return f"{prefix}_{uuid.uuid4().hex[:12]}"
 
