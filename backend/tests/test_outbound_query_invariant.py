@@ -64,7 +64,7 @@ class _RecordingService:
     def __init__(self):
         self.seen_system_prompts: list[str] = []
 
-    def generate_response(self, prompt: str, system_prompt: str = ""):
+    def generate_response(self, prompt: str, system_prompt: str = "", model=None):
         self.seen_system_prompts.append(system_prompt)
         yield "answered"
 

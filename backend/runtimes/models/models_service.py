@@ -9,10 +9,19 @@ class ModelsService:
         self.engine = engine
         self._knowledge_runtime = knowledge_runtime
 
-    def generate_response(self, user_text: str, system_prompt: str = "") -> Iterator[str]:
-        """Orchestrates the prompt generation."""
+    def generate_response(
+        self, user_text: str, system_prompt: str = "", model: str | None = None
+    ) -> Iterator[str]:
+        """Orchestrates the prompt generation.
+
+        ``model`` selects which model answers. It used to be absent here, so the
+        engine always fell back to its own default and the caller's choice was
+        silently discarded — a request naming a model that does not exist got a
+        normal answer from a different one. ``None`` still means "engine
+        default", which is now the provider layer's vetted selection.
+        """
         full_prompt = f"{user_text}"
-        for chunk in self.engine.stream_response(full_prompt, system_prompt):
+        for chunk in self.engine.stream_response(full_prompt, system_prompt, model):
             parsed = self._parse_sse(chunk)
             if parsed and parsed.get("type") == "token":
                 yield parsed.get("content", "")

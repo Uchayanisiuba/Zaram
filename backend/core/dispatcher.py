@@ -110,8 +110,11 @@ class ExecutionDispatcher:
                 elif hasattr(service, "generate_response"):
                     prompt = step.input_data.get("prompt", "")
                     logger.debug("Dispatcher: calling generate_response prompt='%s...' model=%s", prompt[:50], model)
+                    # `model` was logged here and then not passed, so every
+                    # request answered with the engine default whatever it asked
+                    # for. The log made it look plumbed.
                     yield from self._execute_with_fallback(
-                        lambda: service.generate_response(prompt, system_prompt),
+                        lambda: service.generate_response(prompt, system_prompt, model),
                         step.capability_id,
                         prompt[:100] if prompt else "empty",
                         "response generation",
@@ -168,7 +171,7 @@ class ExecutionDispatcher:
                 return list(service.search_knowledge(query, persona))
             elif hasattr(service, "generate_response"):
                 prompt = step.input_data.get("prompt", "")
-                return list(service.generate_response(prompt, system_prompt))
+                return list(service.generate_response(prompt, system_prompt, model))
 
         return {"error": f"No handler for capability {step.capability_id}"}
 
@@ -188,7 +191,7 @@ class ExecutionDispatcher:
             service = runtime.get_service()
             if hasattr(service, "generate_response"):
                 prompt = step.input_data.get("prompt", "")
-                for token in service.generate_response(prompt, system_prompt):
+                for token in service.generate_response(prompt, system_prompt, model):
                     context.check_cancellation()
                     yield token
                 return
