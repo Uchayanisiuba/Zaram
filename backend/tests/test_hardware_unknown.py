@@ -23,11 +23,25 @@ from providers.contracts import HardwareProfile
 from providers.discoverers.hardware import HardwareProfiler
 
 
+def _no_probe_succeeds(monkeypatch, profiler):
+    """Every capacity probe comes back empty.
+
+    Faked at the probe, not at `_cuda_available`. Those flags used to be
+    independent readings of torch; now `_cuda_available` is *derived from* the
+    probe result, so patching it says nothing about what `_vram_bytes` returns.
+    A test that fakes the wrong side of a dependency asserts nothing — these
+    three failed the moment the detection was rewritten, which is the only
+    reason the inversion was noticed.
+    """
+    monkeypatch.setattr(profiler, "_probe_nvidia_smi", lambda: None)
+    monkeypatch.setattr(profiler, "_probe_windows_registry", lambda: None)
+
+
 class TestVramIsNeverAFalseZero:
     def test_unknown_is_none_not_zero(self, monkeypatch):
         """The whole rule, in one assertion."""
         profiler = HardwareProfiler()
-        monkeypatch.setattr(profiler, "_cuda_available", lambda: False)
+        _no_probe_succeeds(monkeypatch, profiler)
         monkeypatch.setattr(profiler, "_metal_available", lambda: True)
 
         assert profiler._vram_bytes() is None, (
@@ -37,7 +51,7 @@ class TestVramIsNeverAFalseZero:
 
     def test_directml_reports_unknown(self, monkeypatch):
         profiler = HardwareProfiler()
-        monkeypatch.setattr(profiler, "_cuda_available", lambda: False)
+        _no_probe_succeeds(monkeypatch, profiler)
         monkeypatch.setattr(profiler, "_metal_available", lambda: False)
         monkeypatch.setattr(profiler, "_directml_available", lambda: True)
 
@@ -45,9 +59,23 @@ class TestVramIsNeverAFalseZero:
 
     def test_no_accelerator_reports_unknown(self, monkeypatch):
         profiler = HardwareProfiler()
-        monkeypatch.setattr(profiler, "_cuda_available", lambda: False)
+        _no_probe_succeeds(monkeypatch, profiler)
         monkeypatch.setattr(profiler, "_metal_available", lambda: False)
         monkeypatch.setattr(profiler, "_directml_available", lambda: False)
+
+        assert profiler._vram_bytes() is None
+
+    def test_a_probe_reporting_zero_is_rejected_not_believed(self, monkeypatch):
+        """A driver that answers 0 is malfunctioning, not describing a card.
+
+        Believing it would produce "GPU available, 0 bytes" — the exact
+        sentence this module exists to never say.
+        """
+        profiler = HardwareProfiler()
+        monkeypatch.setattr(
+            profiler, "_run", staticmethod(lambda cmd: "0, NVIDIA GeForce RTX 3060")
+        )
+        monkeypatch.setattr(profiler, "_probe_windows_registry", lambda: None)
 
         assert profiler._vram_bytes() is None
 
