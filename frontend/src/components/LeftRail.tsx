@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Home, Brain, BookOpen, ShieldCheck, Settings, Search, FolderOpen, Database, Clock } from 'lucide-react'
+import { Home, Brain, BookOpen, FileText, ShieldCheck, Settings, Search, FolderOpen, Database, Clock } from 'lucide-react'
 import ResizeHandle from '@/components/common/ResizeHandle'
 import {
   useLayoutStore,
@@ -8,6 +8,7 @@ import {
   RAIL_COLLAPSED,
 } from '@/stores/layoutStore'
 
+import { surfaceOrder, surfaceLabels } from '@/runtime/shortcuts/registry'
 import type { WorkspaceId } from '@/runtime/shortcuts/registry'
 
 interface NavItem {
@@ -18,17 +19,31 @@ interface NavItem {
 }
 
 // Badges removed with the Runtime Panel: they were hardcoded counts, not real ones.
-const NAV_ITEMS: NavItem[] = [
+//
+// Icons only. The list itself and its order come from the registry, and this
+// being a `Record<WorkspaceId, …>` means adding a node fails to compile here
+// until it is given one — which is how a node stops going missing from a
+// navigation surface without anyone noticing.
+const NAV_ICONS: Record<WorkspaceId, React.ReactNode> = {
   // Landing is listed first so there is always a way back to it. Without this
   // entry, navigating into a workspace was a one-way trip.
-  { id: 'landing', icon: <Home size={32} />, label: 'Home' },
-  { id: 'memory', icon: <Brain size={32} />, label: 'Memory' },
-  { id: 'knowledge', icon: <BookOpen size={32} />, label: 'Knowledge' },
+  landing: <Home size={32} />,
+  work: <FileText size={32} />,
+  memory: <Brain size={32} />,
+  knowledge: <BookOpen size={32} />,
   // Activity is evidence rather than content, which is why its icon is the odd
   // one out. Ordered next to Settings because both are about behaviour.
-  { id: 'activity', icon: <ShieldCheck size={32} />, label: 'Activity' },
-  { id: 'settings', icon: <Settings size={32} />, label: 'Settings' },
-]
+  activity: <ShieldCheck size={32} />,
+  settings: <Settings size={32} />,
+}
+
+const NAV_LABELS: Partial<Record<WorkspaceId, string>> = { landing: 'Home' }
+
+const NAV_ITEMS: NavItem[] = surfaceOrder.map((id) => ({
+  id,
+  icon: NAV_ICONS[id],
+  label: NAV_LABELS[id] ?? surfaceLabels[id],
+}))
 
 const RECENT_CONTEXTS = [
   { icon: <FolderOpen size={24} />, label: 'zaram-core v0.4.2', sub: '2 min ago' },

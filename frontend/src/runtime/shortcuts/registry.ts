@@ -6,6 +6,7 @@ export type Platform = 'mac' | 'win';
 // broke in four places at once. Import it from here rather than restating it.
 export type WorkspaceId =
   | 'landing'
+  | 'work'
   | 'memory'
   | 'knowledge'
   | 'activity'
@@ -30,6 +31,7 @@ export interface Shortcut {
 
 export const surfaceOrder: WorkspaceId[] = [
   'landing',
+  'work',
   'memory',
   'knowledge',
   'activity',
@@ -38,11 +40,29 @@ export const surfaceOrder: WorkspaceId[] = [
 
 export const surfaceLabels: Record<WorkspaceId, string> = {
   landing: 'Landing',
+  work: 'Work',
   memory: 'Memory',
   knowledge: 'Knowledge',
   activity: 'Activity',
   settings: 'Settings',
 };
+
+/** The five nodes of the orbit, in order. Landing is the shell, not a node.
+ *
+ *  Consumers that render navigation derive their list from this, and key their
+ *  icons off `Record<WorkspaceId, …>` so the compiler names every file that
+ *  needs updating when a node is added. The comment above about Activity
+ *  breaking four places was written and then not acted on: TopNav, LeftRail and
+ *  CommandPalette each restated the list anyway, and CommandPalette silently
+ *  lost Activity as a result — it was unreachable from ⌘K until Work was added
+ *  and the restatements were removed. */
+export const orbitOrder: Exclude<WorkspaceId, 'landing'>[] = [
+  'work',
+  'memory',
+  'knowledge',
+  'activity',
+  'settings',
+];
 
 export const NAV_SHORTCUTS: Shortcut[] = surfaceOrder.map((id, i) => ({
   id: `nav.${id}`,

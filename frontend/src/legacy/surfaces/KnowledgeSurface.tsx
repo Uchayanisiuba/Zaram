@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import SurfaceBody from './SurfaceBody';
-import SurfaceToolbar from './SurfaceToolbar';
+import SurfaceBody from '@/components/surfaces/SurfaceBody';
+import SurfaceToolbar from '@/components/surfaces/SurfaceToolbar';
 import useStreamingText from '@/hooks/useStreamingText';
 import { useOrbStore } from '@/stores/orbStore';
 import { useMemoryStore } from '@/stores/memoryStore';

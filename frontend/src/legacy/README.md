@@ -12,6 +12,10 @@ once, later, with more information.
 | `BuildWorkspace.tsx` | Code studio surface | Code studio / IDE integration is out of scope |
 | `CanvasWorkspace.tsx` | Infinite canvas surface | Additional workspaces are out of scope |
 | `PluginsWorkspace.tsx` | Extensions browser | The extensions marketplace is out of scope |
+| `surfaces/*.tsx` (16) | The retired six-workspace shell | Agent, Browser, Build, Calendar, Code, Context, Create, Document, ImageGeneration, Project, Research, RuntimeMonitor, and duplicate Knowledge/Memory/Settings surfaces |
+| `panels/ChatInterface.tsx` | Chat panel | Only importer was `WorkspaceSurface`; the two referenced each other and nothing else |
+| `shell/BottomCommandDock.tsx` | Floating dock | Duplicated the left rail exactly and floated over content |
+| `shell/LeftContextRail.tsx` | Second rail | Superseded by `components/LeftRail.tsx` |
 
 ## Rules
 
@@ -22,6 +26,17 @@ once, later, with more information.
   refactor, delete them rather than repairing them — they are not part of the product.
 
 ## Provenance
+
+The 19 files under `surfaces/`, `panels/` and `shell/` were moved here on
+5 August 2026, when Work joined the orbit. They were already unreachable: the
+production bundle was byte-identical before and after the move — same size, same
+content hash — which is the proof they were never linked rather than an argument
+that they should not be.
+
+Three files stayed behind in `components/surfaces/`: `SurfaceBody`,
+`SurfaceHeader` and `SurfaceToolbar` are shared layout primitives that the live
+workspaces still use. Files moved here import them by `@/` path rather than
+relatively, because the move changed their depth.
 
 Moved out of `src/workspaces/` on 3 August 2026, along with the deletion of
 `RuntimePanel.tsx` (which displayed fabricated telemetry under a "LIVE" badge) and the

@@ -1,5 +1,5 @@
 import { useMemoryStore, MemoryNodeType } from '@/stores/memoryStore';
-import SurfaceBody from './SurfaceBody';
+import SurfaceBody from '@/components/surfaces/SurfaceBody';
 import { motion, AnimatePresence } from 'framer-motion';
 import { glass } from '@/theme/glass';
 
