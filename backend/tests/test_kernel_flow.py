@@ -21,7 +21,7 @@ from core.execution_engine import ExecutionEngine
 
 
 class _FakeService:
-    def generate_response(self, user_text, personality_context=""):
+    def generate_response(self, user_text, personality_context="", model=None):
         yield "hello "
         yield "world"
 
