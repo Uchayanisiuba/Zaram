@@ -1,14 +1,14 @@
 import { Search, ChevronRight } from 'lucide-react'
 import OrbStatus from '@/components/orb/OrbStatus'
 
+import { surfaceLabels } from '@/runtime/shortcuts/registry'
 import type { WorkspaceId } from '@/runtime/shortcuts/registry'
 
+// Titles come from the registry; only the landing differs, where the product
+// name reads better than the surface name.
 const WORKSPACE_LABELS: Record<WorkspaceId, string> = {
+  ...surfaceLabels,
   landing: 'Zaram',
-  memory: 'Memory',
-  knowledge: 'Knowledge',
-  activity: 'Activity',
-  settings: 'Settings',
 }
 
 interface TopNavProps {

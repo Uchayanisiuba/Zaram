@@ -18,7 +18,7 @@ import {
 } from 'lucide-react';
 import { useOrbStore, useConversationStore } from '@/stores';
 import LivingOrb from '@/components/orb/LivingOrb';
-import ChatInterface from '@/components/panels/ChatInterface';
+import ChatInterface from '@/legacy/panels/ChatInterface';
 
 // ── Orbital node configuration ───────────────────────────────────────────────
 const ORBITAL_NODES = [

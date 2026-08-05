@@ -1,4 +1,4 @@
-import SurfaceBody from './SurfaceBody';
+import SurfaceBody from '@/components/surfaces/SurfaceBody';
 
 const CreateSurface = () => {
   return (

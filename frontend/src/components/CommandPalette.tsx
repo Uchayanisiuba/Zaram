@@ -1,14 +1,29 @@
 import { useState, useEffect, useRef } from 'react'
-import { Search, Home, Brain, BookOpen, Settings, ArrowRight, Command } from 'lucide-react'
+import { Search, Home, Brain, BookOpen, FileText, ShieldCheck, Settings, ArrowRight, Command } from 'lucide-react'
 
+import { surfaceOrder, surfaceLabels } from '@/runtime/shortcuts/registry'
 import type { WorkspaceId } from '@/runtime/shortcuts/registry'
 
-const COMMANDS = [
-  { id: 'landing', icon: <Home size={28} />, label: 'Go Home', sub: 'Landing', ws: 'landing' as WorkspaceId },
-  { id: 'memory', icon: <Brain size={28} />, label: 'Open Memory', sub: 'Workspace', ws: 'memory' as WorkspaceId },
-  { id: 'knowledge', icon: <BookOpen size={28} />, label: 'Open Knowledge', sub: 'Workspace', ws: 'knowledge' as WorkspaceId },
-  { id: 'settings', icon: <Settings size={28} />, label: 'Open Settings', sub: 'Workspace', ws: 'settings' as WorkspaceId },
-]
+// Keyed by WorkspaceId so a new node cannot be added without giving it an entry
+// here. This list used to be written out by hand and had silently lost
+// Activity — it was in the rail and the orbit but not reachable from ⌘K, which
+// is the one route a keyboard user has.
+const COMMAND_ICONS: Record<WorkspaceId, React.ReactNode> = {
+  landing: <Home size={28} />,
+  work: <FileText size={28} />,
+  memory: <Brain size={28} />,
+  knowledge: <BookOpen size={28} />,
+  activity: <ShieldCheck size={28} />,
+  settings: <Settings size={28} />,
+}
+
+const COMMANDS = surfaceOrder.map((id) => ({
+  id,
+  icon: COMMAND_ICONS[id],
+  label: id === 'landing' ? 'Go Home' : `Open ${surfaceLabels[id]}`,
+  sub: id === 'landing' ? 'Landing' : 'Workspace',
+  ws: id,
+}))
 
 const AI_SUGGESTIONS = [
   'Summarize active context',

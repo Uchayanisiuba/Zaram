@@ -15,6 +15,7 @@ import ChatSurface from './components/chat/ChatSurface';
 import SourcePanelLayer from './components/chat/SourcePanelLayer';
 import CommandPalette from './components/CommandPalette';
 import Landing from './workspaces/Landing';
+import WorkWorkspace from './workspaces/WorkWorkspace';
 import MemoryWorkspace from './workspaces/MemoryWorkspace';
 import KnowledgeWorkspace from './workspaces/KnowledgeWorkspace';
 import ActivityWorkspace from './workspaces/ActivityWorkspace';
@@ -122,6 +123,11 @@ export default function App() {
           {isLanding && (
             <div key="landing" style={{ flex: 1, display: 'flex', animation: 'fade-in 0.25s ease' }}>
               <Landing onNavigate={(id) => navigate(id as WorkspaceId)} onOrbTap={toggleChat} />
+            </div>
+          )}
+          {workspace === 'work' && (
+            <div key="work" style={{ flex: 1, display: 'flex', animation: 'fade-in 0.25s ease' }}>
+              <WorkWorkspace />
             </div>
           )}
           {workspace === 'memory' && (

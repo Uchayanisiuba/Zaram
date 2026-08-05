@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { motion } from 'framer-motion'
-import { Brain, BookOpen, Settings, ShieldCheck } from 'lucide-react'
+import { Brain, BookOpen, FileText, Settings, ShieldCheck } from 'lucide-react'
 import LivingOrb, { ORB_BEHAVIOUR } from '../components/orb/LivingOrb'
 import OrbStatusLabel from '../components/orb/OrbStatusLabel'
 import OrbHint from '../components/orb/OrbHint'
@@ -16,19 +16,37 @@ import type { WorkspaceId } from '@/runtime/shortcuts/registry'
 // Build, Canvas and Plugins are out of scope for v1 and no longer appear here.
 // Their surfaces are preserved in src/legacy/.
 //
-// Four nodes, each answering a different question the user actually has:
-// Memory — what do you know about me? Knowledge — what have you read?
-// Activity — what did you send? Settings — how do you behave?
+// Five nodes, each answering a different question the user actually has:
+// Work — what have I got out of this? Memory — what do you know about me?
+// Knowledge — what have you read? Activity — what did you send?
+// Settings — how do you behave?
 //
-// Re-spaced from 120 to 90 degrees apart when Activity joined. Its shield is
-// the only icon that is not about content: Activity is evidence rather than
-// exploration, and someone arriving there is checking, not browsing.
+// Re-spaced 120 → 90 → 72 degrees as Activity and then Work joined. Five is the
+// count; a sixth needs a reason that survives "why is this not part of
+// Conversation?".
+//
+// Work is first because it is the only node holding something the user made.
+// The other four are all about the system, which is the argument for its
+// existence: nobody pays for a memory browser.
+//
+// Two icons are deliberately the odd ones out. Activity's shield is evidence
+// rather than exploration — someone arriving there is checking, not browsing.
+// Work's document is an artifact rather than a view of one.
+const ORBIT_START_ANGLE = 198
+const ORBIT_STEP = 72
+
 const ORBITAL_NODES = [
-  { id: 'memory',    label: 'Memory',    icon: <Brain size={24} />,       color: '#c084fc', angle: 225 },
-  { id: 'knowledge', label: 'Knowledge', icon: <BookOpen size={24} />,    color: '#22d3ee', angle: 315 },
-  { id: 'activity',  label: 'Activity',  icon: <ShieldCheck size={24} />, color: '#34d399', angle: 45 },
-  { id: 'settings',  label: 'Settings',  icon: <Settings size={24} />,    color: '#94a3b8', angle: 135 },
-]
+  { id: 'work',      label: 'Work',      icon: <FileText size={24} />,    color: '#e5a44c' },
+  { id: 'memory',    label: 'Memory',    icon: <Brain size={24} />,       color: '#c084fc' },
+  { id: 'knowledge', label: 'Knowledge', icon: <BookOpen size={24} />,    color: '#22d3ee' },
+  { id: 'activity',  label: 'Activity',  icon: <ShieldCheck size={24} />, color: '#34d399' },
+  { id: 'settings',  label: 'Settings',  icon: <Settings size={24} />,    color: '#94a3b8' },
+].map((node, i) => ({
+  // Derived rather than written out, so the spacing cannot drift out of step
+  // with the count the next time a node is added or removed.
+  ...node,
+  angle: (ORBIT_START_ANGLE + i * ORBIT_STEP) % 360,
+}))
 
 interface LandingProps {
   onNavigate: (id: WorkspaceId) => void

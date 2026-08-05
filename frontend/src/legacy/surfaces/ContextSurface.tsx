@@ -3,9 +3,9 @@ import { useSurfaceStore } from '@/stores/surfaceStore';
 import { glass } from '@/theme/glass';
 import { radius } from '@/theme/radius';
 import { springPreset } from '@/motion/spring';
-import SurfaceHeader from './SurfaceHeader';
-import SurfaceToolbar from './SurfaceToolbar';
-import SurfaceBody from './SurfaceBody';
+import SurfaceHeader from '@/components/surfaces/SurfaceHeader';
+import SurfaceToolbar from '@/components/surfaces/SurfaceToolbar';
+import SurfaceBody from '@/components/surfaces/SurfaceBody';
 
 interface ContextSurfaceProps {
   id: string;
