@@ -7,7 +7,6 @@ import OrbHint from '../components/orb/OrbHint'
 import { useChatModeStore } from '@/stores/chatModeStore'
 import { useLayoutStore, orbGeometry } from '@/stores/layoutStore'
 import { useSourceStore } from '@/stores/sourceStore'
-import { useSystemStore } from '@/stores/systemStore'
 import { useIsReducedMotion } from '@/hooks/useReducedMotion'
 import { useViewport } from '@/hooks/useViewport'
 
@@ -73,10 +72,10 @@ export default function Landing({ onNavigate, onOrbTap }: LandingProps) {
   // blurred and dimmed — so the panel reads as being in front of it rather than
   // competing with it. It returns when the last panel closes.
   const panelsOpen = useSourceStore((s) => s.open.length > 0)
-  // The top bar is hidden on this surface, so the landing starts the poll
-  // itself rather than depending on a component that is not mounted.
-  const startPolling = useSystemStore((s) => s.startPolling)
-  useEffect(() => startPolling(), [startPolling])
+  // The health poll used to start here, because the top bar is hidden on this
+  // surface and nothing else was mounted to own it. The persistent bar is
+  // mounted on every surface including this one, so it owns the poll now — two
+  // callers would mean two intervals.
   const { width: viewportWidth } = useViewport()
   const { shiftX, zoom } = orbGeometry({
     viewportWidth,
