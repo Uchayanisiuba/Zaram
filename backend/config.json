@@ -1,5 +1,4 @@
 {
-  "WHISPER_MODEL": "base",
   "OLLAMA_HOST": "http://localhost:11434",
   "CHAT_MODEL": "qwen3",
   "VISION_MODEL": "gemma3",

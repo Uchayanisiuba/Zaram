@@ -16,9 +16,12 @@ if not exist .venv (
     py -3.11 -m venv .venv
     echo [Zaram] Installing dependencies ^(first run only^)...
     .venv\Scripts\python.exe -m pip install -r backend\requirements.txt
-    REM spaCy's model is not a PyPI package. It is fetched through spaCy's own
-    REM downloader rather than pinned in requirements.txt as a GitHub URL,
-    REM because that URL fails the whole install when the connection drops.
+    REM spaCy's English model is not a PyPI package, and it is not optional:
+    REM Kokoro reaches spaCy through misaki for grapheme-to-phoneme, and without
+    REM the model speech fails at synthesis time rather than at install time.
+    REM Fetched through spaCy's downloader rather than pinned in
+    REM requirements.txt as a GitHub URL, because that URL fails the whole
+    REM install when the connection drops.
     .venv\Scripts\python.exe -m spacy download en_core_web_sm
 )
 
