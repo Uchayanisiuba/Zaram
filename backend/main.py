@@ -169,13 +169,26 @@ async def health():
     # so it must describe what is actually true rather than what is intended.
     from core.planner import web_search_enabled
 
+    # Which model is actually answering. The models runtime knows, because the
+    # provider layer chose it at boot; nothing downstream could see it, so the
+    # interface had no way to name the model without inventing one. Stays None
+    # when unknown rather than falling back to a plausible-looking default —
+    # the persistent bar omits the segment rather than claiming a model.
+    active_model = None
+    try:
+        active_model = kernel.registry.get_runtime("models").health_check().get("model")
+    except Exception:
+        active_model = None
+
     inference_providers = []
     try:
         for cap in capabilities:
             if cap == "reasoning.generate":
                 # Only the local engine is wired today. When a cloud engine is
                 # added this must list it, or the Orb will under-report egress.
-                inference_providers.append({"id": "ollama", "locality": "local"})
+                inference_providers.append(
+                    {"id": "ollama", "locality": "local", "model": active_model}
+                )
     except Exception:
         pass
 

@@ -18,6 +18,7 @@ import {
   type ChatRequest,
 } from '@/services/chatClient';
 import { useSystemStore } from '@/stores/systemStore';
+import { useSessionStatusStore } from '@/stores/sessionStatusStore';
 
 /** How long a request may produce nothing before we call it a cold start.
  *  A loaded local model begins emitting well inside this; a cold one does not. */
@@ -91,6 +92,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
       isStreaming: true,
       connectionError: null,
     }));
+
+    // The persistent bar names the conversation and reports what went into the
+    // reply. The topic is the first thing the user said, because that is the
+    // only description of the conversation that exists without asking a model
+    // for one. Recall count resets to null — "not known yet" — rather than to
+    // 0, which would claim nothing was recalled before anything was tried.
+    const status = useSessionStatusStore.getState();
+    if (!status.topic) status.setTopic(trimmed);
+    status.setRecallCount(null);
 
     // Accumulated locally as well as in the store: on failure we still need the
     // partial text, and reading it back out of the store mid-teardown is racy.
@@ -168,6 +178,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
 
     settleActivity('idle');
+
+    // Set once the exchange is over, so the bar reports what this reply
+    // actually drew on rather than counting up during the stream. Zero is a
+    // real answer and is stated as one — "no facts recalled" is information,
+    // and a bar that goes quiet instead would read as a missing feature.
+    useSessionStatusStore.getState().setRecallCount(sources.length);
 
     // Commit the reply, including a partial or failed one. Dropping text the
     // backend genuinely produced would be worse than showing it labelled.

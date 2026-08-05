@@ -11,6 +11,8 @@
  */
 import { create } from 'zustand';
 
+import { useSessionStatusStore } from './sessionStatusStore';
+
 const API_BASE = import.meta.env.VITE_ZARAM_API ?? '';
 
 /** What the Orb is currently doing or reporting. */
@@ -21,7 +23,7 @@ export type RoutingMode = 'local' | 'cloud' | 'mixed' | 'unknown';
 
 export interface RoutingState {
   mode: RoutingMode;
-  providers: { id: string; locality: string }[];
+  providers: { id: string; locality: string; model?: string | null }[];
   webSearch: 'enabled' | 'disabled' | 'unknown';
   /** Whether any route off this machine exists at all. */
   canLeaveDevice: boolean;
@@ -60,14 +62,25 @@ export const useSystemStore = create<SystemState>((set, get) => ({
       }
       const data = await res.json();
       const r = data?.routing ?? {};
+      const providers = Array.isArray(r.providers) ? r.providers : [];
       set({
         backendOnline: data?.kernel === 'online',
         routing: {
           mode: (r.mode as RoutingMode) ?? 'unknown',
-          providers: Array.isArray(r.providers) ? r.providers : [],
+          providers,
           webSearch: r.web_search ?? 'unknown',
           canLeaveDevice: Boolean(r.can_leave_device),
         },
+      });
+
+      // The persistent bar needs the model and where it runs. Taken from the
+      // inference provider rather than from routing.mode, because mode
+      // describes the machine's overall posture and this must describe the
+      // thing that actually answers. Null when the backend does not name one.
+      const inference = providers[0];
+      useSessionStatusStore.getState().applyHealth({
+        model: inference?.model ?? null,
+        locality: inference?.locality === 'local' ? 'local' : inference?.locality ? 'cloud' : null,
       });
     } catch {
       // Unreachable is a real state and must be shown, not hidden behind the

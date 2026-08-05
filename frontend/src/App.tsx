@@ -14,6 +14,7 @@ import LeftRail from './components/LeftRail';
 import ChatSurface from './components/chat/ChatSurface';
 import SourcePanelLayer from './components/chat/SourcePanelLayer';
 import CommandPalette from './components/CommandPalette';
+import PersistentBar from './components/shell/PersistentBar';
 import Landing from './workspaces/Landing';
 import WorkWorkspace from './workspaces/WorkWorkspace';
 import MemoryWorkspace from './workspaces/MemoryWorkspace';
@@ -153,11 +154,18 @@ export default function App() {
         </main>
       </div>
 
-      {/* Bottom dock — hidden on landing */}
-      {/* The floating dock is gone. It duplicated the left rail exactly — the
-          same four destinations, twice on screen — and floated over content,
-          which is how it ended up covering Activity's retention controls. One
-          navigation surface. */}
+      {/* The persistent bar. Always visible, every surface including the
+          landing — it is the shell's one permanent fixture.
+
+          The floating dock that used to sit here is gone and is not what this
+          is. That duplicated the left rail exactly, the same destinations twice
+          on screen, and floated over content. This navigates nowhere except
+          back to the conversation, and reports what is answering while it does.
+
+          It is also the third route back, and the only one that names its
+          destination: the orb returns silently, Escape returns only from the
+          landing, and neither tells you what you are returning to. */}
+      <PersistentBar onReturnToConversation={openConversation} />
 
       {/* Command palette overlay */}
       {commandOpen && <CommandPalette onClose={() => setCommandOpen(false)} onNavigate={(id) => navigate(id as WorkspaceId)} />}
