@@ -67,7 +67,8 @@ when a smaller one fits, and the log says why. Non-CUDA paths still report
 Calendar, Project, Research, ImageGeneration. That is the six-workspace shell against
 a four-item spec.
 
-**Acceptance:** the rail renders Work · Memory · Knowledge · Activity plus Settings.
+**Acceptance:** the orbit carries five nodes — Work · Memory · Knowledge · Activity ·
+Settings. Currently three; Work and Activity are the additions.
 Everything else moved to `legacy/`, unlinked, bundle size drops.
 
 ### M7 — Ingest
@@ -94,7 +95,42 @@ a global preference surfaces in both; the Memory filter shows
 guessing at scope for everything already stored. It is also the multiplayer boundary,
 so the permission model comes free.
 
-### M9 — Generative documents and the Work surface
+### M9 — The business base layer and the Work surface
+
+The universal job: invoice → receipts → expenses → how is the business doing.
+Native, no external app, no VRAM. Records and drafts only — never filings, never tax
+liability, never the system of record.
+
+**Acceptance:** create an invoice for a client Zaram has seen before and watch it fill
+in the rate, terms and line items from memory without being told. Photograph a receipt,
+have it extracted and categorised. Ask "how did last month compare" and get an answer
+with the figures traced to their source.
+
+That last part is the whole thesis on the most boring possible task, which is exactly
+where it convinces.
+
+### M9a — Obligation extraction
+
+The keystone. Documents contain dates and commitments; today they live in a PDF in a
+folder because nobody types them into a calendar. Extract them, surface them before
+they lapse.
+
+Payment terms from an invoice. Milestones from a contract. Deliverables from a brief.
+Expiry on a quote.
+
+**Every obligation shows its source clause and is correctable. Never silently create a
+commitment** — a missed deadline is worse than no reminder, because trust does not
+recover.
+
+**Acceptance:** generate an invoice with 30-day terms, and on day 31 Zaram says the
+payment is late, shows the clause it read that from, and has the follow-up drafted.
+Then correct a wrongly-extracted date and watch the reminder move.
+
+This is what gives the product a reason to speak first, which is the difference between
+a tool someone remembers to open and one that earns its place. It is also the sentence
+that makes the pitch fundable — see `docs/PITCH.md`.
+
+### M9b — Generative documents
 HTML is the source of truth. Generate HTML, convert: WeasyPrint to PDF, second export
 to .docx. python-docx, openpyxl, matplotlib, Mermaid.
 
@@ -105,6 +141,22 @@ structural, not promised.
 **Acceptance:** ask a question, say "write that up as a proposal", get a .docx where
 claims link back to the source paragraph they came from. The file appears as a card in
 the conversation and in Work, with the conversation that produced it.
+
+### M9c — Read-only MCP: Unreal and Blender
+
+Epic ships a first-party MCP plugin in UE 5.8; mature Blender servers exist. Read-only
+means inspect, list, report — no writes, so no undo, sandbox or rollback is needed.
+That is why it ships in v1 and scoped writes do not.
+
+**Note the port collision:** Epic's plugin binds `127.0.0.1:8000` inside the editor and
+auto-starts. The backend must be on 8420.
+
+**Acceptance:** with a real project open, ask *"what did we change about the lighting
+after the client review, and does the current scene match?"* — and get an answer that
+draws on both the live scene and the Spine. Inspection alone is thin; inspection plus
+memory is the demo nothing else can produce.
+
+Test against copied projects only.
 
 ### M10 — Confirm-before-send, editable
 The dialog shows the literal outbound text, the destination and the reason. Recalled
@@ -136,6 +188,13 @@ Ten programmers, one segment. Onboard individually, watch them use it, do not he
 tier. 2–4 — the job is wrong, interview those users. 0–1 — the thesis is wrong,
 learned in six weeks rather than two years.
 
+**And two questions asked of every participant at intake**, because the answers are the
+missing line in `docs/PITCH.md`: how many hours did you spend on admin last month, and
+what are you owed right now that is past due. After sixty days those become *"users
+recovered £X they would have chased late, and cut Y hours a month"* — the one sentence
+that is worth more than the rest of the pitch combined, and the only one that cannot be
+written in advance.
+
 Closing question, instead of "would you pay for this":
 **"If I turned this off tomorrow, what would you do?"**
 
@@ -143,8 +202,9 @@ Closing question, instead of "would you pay for this":
 
 ## After the alpha
 
-Unreal read-only inspection. Then scoped Unreal writes with dry-run and undo. Then
-Blender. Then the document editor (TipTap over HTML) and Univer for sheets and slides.
+Scoped MCP writes with dry-run and undo — Unreal is the highest-stakes integration
+there is, so the safety layer arrives before the first write. Then the document editor
+(TipTap over HTML) and Univer for sheets and slides.
 Then the pack abstraction — extracted from two hand-built packs, never designed ahead
 of them.
 

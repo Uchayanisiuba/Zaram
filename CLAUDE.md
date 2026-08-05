@@ -2,13 +2,21 @@
 
 The memory and control layer for people who use more than one AI.
 
-Zaram sits between the user and whatever models they use — cloud or local. Everything
-flows into one knowledge base on their machine. Any model can recall it. The user sees
-what was recalled, can correct it, controls what leaves the device, and can put the
-result to work through tools.
+Zaram reads what the user produces and receives, remembers what they owe and what
+they're owed, and acts before it's late.
 
-Full rationale: `docs/VISION.md`. Interface: `docs/UI-SPEC.md`. Read both before
-proposing product changes; neither is auto-imported.
+Everything flows into one knowledge base on their machine. Any model can recall it. The
+user sees what was recalled, can correct it, controls what leaves the device, and puts
+the result to work through tools.
+
+**The product is horizontal; the wedge is not.** Obligation extraction works identically
+for a contractor's quote expiry, a landlord's lease renewal and a researcher's grant
+deadline. We start with freelancers and one-person businesses because that is where it
+can be proven fastest.
+
+Full rationale: `docs/VISION.md`. Interface: `docs/UI-SPEC.md`. Sequence and
+acceptance criteria: `docs/MILESTONES.md`. External framing: `docs/PITCH.md`. Read
+before proposing product changes; none are auto-imported.
 
 ## Canonical vocabulary
 
@@ -25,10 +33,14 @@ Use these terms only.
 Retired, do not use: "faculty", "nursery", "aperture", "synapse web",
 "AI operating system", "workspace" (as a top-level surface).
 
-## Navigation — four surfaces plus Settings
+## Navigation — five nodes
 
-**Work · Memory · Knowledge · Activity**, with Settings bottom-anchored. Sources live
-inside Knowledge. Tools are configured inside Settings.
+**Work · Memory · Knowledge · Activity · Settings**, as five nodes orbiting the Living
+Orb on the landing state. Sources live inside Knowledge. Tools are configured inside
+Settings.
+
+Five is the count. Adding a sixth requires a reason that survives "why is this not part
+of Conversation?" — the retired design had six and four of them held nothing.
 
 **Work is where output lives** — documents, spreadsheets, charts the user made, each
 with the conversation that produced it and its sources. It exists because a navigation
@@ -39,7 +51,7 @@ memory *of work*.
 The test for any future surface: **does it hold something real?** Work holds files.
 Canvas and Plugins held nothing, which is why they were cut.
 
-Conversation is **not** a rail item. It is the shell — the landing state, entered by
+Conversation is **not** a node. It is the shell — the landing state, entered by
 the orb, animated aside when a surface opens. But the return path must be visible and
 one click: the orb reverses the animation, and the persistent bar's topic line is
 clickable. Never let the animation be the only route back.
@@ -130,10 +142,27 @@ In scope:
 - Correct or delete a fact and see answers change
 - Egress log, viewable, recording chat and tool activity
 - Per-source privacy policy
+- **The business base layer**: invoices, quotes, receipt capture and extraction,
+  expense categorisation, a monthly picture of the business. Native, no external app,
+  no VRAM. This is the universal job — the same for a photographer in Lagos and a
+  consultant in Berlin — and it is the best showcase for memory, because Zaram already
+  knows the client's rate, their terms, and that they pay late.
+  **Records and drafts, not filings and advice.** Generate the invoice, track the
+  expense, show the trend. Never compute tax liability, never be the system of record,
+  never file anything.
 - **Generative tools**: .docx, .pdf, .md, .xlsx, and charts from the user's own data,
   with provenance carried into the output
-- **Read-only Unreal MCP**: inspect scene, list actors, report on materials and
-  lighting. No writes.
+- **Read-only MCP for Unreal and Blender**: inspect the scene, list actors, report on
+  materials and lighting. No writes. Read-only needs no undo, no sandbox and no
+  rollback, which is why it ships in v1 while scoped writes do not.
+- **The pack catalogue**, with unavailable packs shown greyed out and honestly graded
+  against the user's hardware, licence and installed apps.
+- **Obligation extraction**: dates and commitments pulled from documents the user
+  produces or receives — payment terms, milestones, deliverables, expiries — surfaced
+  before they lapse. **Every obligation shows its source clause and is correctable.
+  Never silently create a commitment**; a missed deadline is worse than no reminder,
+  because trust does not recover. Zaram surfaces obligations in context and drafts the
+  response — it is not a calendar and must not become one.
 
 Out of scope until v1 ships and is tested with real users:
 - Any mutative tool (file edits, VS Code, Blender writes, Unreal writes)
@@ -204,7 +233,7 @@ as cloud parsing APIs.
 **A pack is data and adapters, never navigation.** A vertical adds four things:
 parsers, tools, output templates, and routing exemplars. It adds no screens. Projects
 have a type, chosen once at creation, and that choice activates the pack. This is what
-lets capability grow while the navigation stays at four items.
+lets capability grow while the navigation stays at five nodes.
 
 **Build two packs by hand before building the pack system.** The abstraction cannot be
 designed from imagination — only from two real examples and the friction between them.
@@ -215,6 +244,16 @@ designed from imagination — only from two real examples and the friction betwe
 3. The licence is permissive. GPL means separate process only; AGPL is excluded
 4. Memory across sessions genuinely improves it — long projects, not one-shot tasks
 5. The maintainer can test the output and judge whether it is good
+
+**Will not build, ever, and not as a pack:**
+- **Medical diagnosis.** Software that suggests diagnoses is regulated as a medical
+  device in most jurisdictions. Medical *documents* — transcription, letters — are a
+  different and defensible thing. Diagnosis is not.
+- **Trading signals or financial advice.** Regulated, and indistinguishable in
+  marketing from the operators that saturate the space. A trade journal is fine.
+- **Legal advice.** Same class.
+
+These are recorded so they do not return as reasonable-sounding suggestions later.
 
 **v1 verticals: documents and 3D (Unreal, Blender).** Deferred: data/BI (DuckDB plus
 text-to-SQL) is the leading third. Rejected: medical (regulated, credentials),

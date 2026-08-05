@@ -52,7 +52,7 @@ surfaces stay opaque. This is what separates a sophisticated dark UI from a
 gimmicky one, and it keeps blur off scrolling regions on a machine that is
 also running local inference.
 
-**Translucent** (24px blur, 72% opacity, 0.5px top edge highlight): left rail,
+**Translucent** (24px blur, 72% opacity, 0.5px top edge highlight): navigation chrome,
 top toolbar, persistent bottom bar, popovers, command palette, detail panel.
 
 **Opaque** (no blur, no translucency): message thread, memory list rows,
@@ -60,8 +60,8 @@ activity table, cards, metric tiles.
 
 ### Navigation
 
-**Left rail** — 64px collapsed (icons), 220px expanded. Glass.
-**Four items: Work · Memory · Knowledge · Activity**, with Settings bottom-anchored.
+**The orbit** — five nodes revolving around the Living Orb on the landing state:
+**Work · Memory · Knowledge · Activity · Settings**.
 
 **Work** holds what the user made — documents, spreadsheets, charts — each with the
 conversation that produced it and its sources. Same layout across project types;
@@ -71,7 +71,7 @@ made.
 Sources live inside Knowledge. Active item takes a cyan left indicator bar and
 raised background, not a filled pill.
 
-Conversation is not a rail item — it is the shell. It is the landing state,
+Conversation is not a node — it is the shell. It is the landing state,
 entered by tapping the orb, and animates aside when a surface opens. **The
 return path must be visible and one click**: the orb reverses the animation, and
 the persistent bar's topic line is clickable. Escape also returns. Never let the
@@ -81,7 +81,7 @@ live conversation will reload the app.
 The conversation stays **mounted** while a surface is open. Hidden, not
 unmounted. A reply in flight survives the trip.
 
-Tools never appear in the rail. They are actions inside the conversation,
+Tools never appear in the orbit. They are actions inside the conversation,
 configured under Settings. This is what lets capability grow without the
 navigation growing. Generated files appear as cards in the conversation and land
 in the output directory — there is no Files surface.
@@ -232,7 +232,7 @@ Top to bottom:
   "limit to this project"
 - Filter chips: all / local only / corrected / pinned, plus a right-aligned
   live count in mono (`12 of 1,247`) that updates on every change
-- Left rail of sources: dot + name + count, click to filter
+- Sources column: dot + name + count, click to filter
 - The list. Row = source dot, fact in sentence case, mono meta line
   `filename · date · recalled 41×`. Pin icon when pinned.
 
