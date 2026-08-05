@@ -12,6 +12,7 @@ Intent flow:
 from __future__ import annotations
 
 import logging
+import re
 import os
 import time
 import uuid
@@ -98,11 +99,52 @@ class IntentRouter:
         "tool.terminal": IntentType.TOOL,
     }
 
-    # Keywords for intent detection
+    # Keywords for intent detection.
+    #
+    # Matched on word boundaries, never as substrings — see `_matches` below.
+    # These sets were previously tested with `kw in prompt_lower`, which routed
+    # "invoice" to speech because it contains "voice", "essay" to speech because
+    # it contains "say", "profile" to filesystem via "file", and "research" to
+    # filesystem via "search". Every invoice prompt in the business layer went
+    # to text-to-speech.
     _VISION_KEYWORDS = {"image", "photo", "picture", "screenshot", "see", "look", "visual"}
-    _SPEECH_KEYWORDS = {"speak", "say", "voice", "audio", "talk", "pronounce", "read aloud"}
+    _SPEECH_KEYWORDS = {"speak", "say", "voice", "audio", "talk", "pronounce", "read aloud",
+                        "out loud", "aloud"}
     _FILESYSTEM_KEYWORDS = {"file", "open", "read", "search", "find", "directory", "folder"}
     _TOOL_KEYWORDS = {"git", "commit", "push", "code", "terminal", "run", "execute"}
+
+    #: Compiled word-boundary matchers, keyed by the keyword set itself.
+    #:
+    #: Keyed by content, not by ``id()``. An id-keyed cache looked fine and was
+    #: wrong: a caller passing a set literal gets a temporary object whose id is
+    #: reused after collection, so a later call with different keywords silently
+    #: received the earlier compiled pattern. Caught by a test asserting
+    #: "(voice)" matches "voice", which returned nothing.
+    _MATCHERS: dict[frozenset, "re.Pattern[str]"] = {}
+
+    @classmethod
+    def _matcher(cls, keywords: frozenset | set) -> "re.Pattern[str]":
+        key = frozenset(keywords)
+        cached = cls._MATCHERS.get(key)
+        if cached is None:
+            # Longest first so "read aloud" wins over "read" when both could match.
+            alternation = "|".join(
+                re.escape(kw) for kw in sorted(keywords, key=len, reverse=True)
+            )
+            cached = re.compile(rf"\b(?:{alternation})\b", re.IGNORECASE)
+            cls._MATCHERS[key] = cached
+        return cached
+
+    @classmethod
+    def _matches(cls, prompt_lower: str, keywords: set) -> list[str]:
+        """Keywords present as whole words, in the order they appear.
+
+        Whole words, because a keyword list is a list of words the user typed —
+        not of letter sequences that happen to occur inside longer ones. The
+        substring version had no way to distinguish "voice" the request from
+        "invoice" the noun.
+        """
+        return cls._matcher(keywords).findall(prompt_lower)
 
     def classify(self, prompt: str) -> IntentClassification:
         """Classify a user prompt into an intent."""
@@ -128,39 +170,43 @@ class IntentRouter:
         ))
 
         # Check for vision keywords
-        vision_matched = any(kw in prompt_lower for kw in self._VISION_KEYWORDS)
+        vision_hits = self._matches(prompt_lower, self._VISION_KEYWORDS)
+        vision_matched = bool(vision_hits)
         signals.append(IntentSignal(
             name="vision_keywords",
             weight=0.6,
             matched=vision_matched,
-            detail=f"Vision keywords found: {[kw for kw in self._VISION_KEYWORDS if kw in prompt_lower]}",
+            detail=f"Vision keywords found: {vision_hits}",
         ))
 
         # Check for speech keywords
-        speech_matched = any(kw in prompt_lower for kw in self._SPEECH_KEYWORDS)
+        speech_hits = self._matches(prompt_lower, self._SPEECH_KEYWORDS)
+        speech_matched = bool(speech_hits)
         signals.append(IntentSignal(
             name="speech_keywords",
             weight=0.5,
             matched=speech_matched,
-            detail=f"Speech keywords found: {[kw for kw in self._SPEECH_KEYWORDS if kw in prompt_lower]}",
+            detail=f"Speech keywords found: {speech_hits}",
         ))
 
         # Check for filesystem keywords
-        fs_matched = any(kw in prompt_lower for kw in self._FILESYSTEM_KEYWORDS)
+        fs_hits = self._matches(prompt_lower, self._FILESYSTEM_KEYWORDS)
+        fs_matched = bool(fs_hits)
         signals.append(IntentSignal(
             name="filesystem_keywords",
             weight=0.4,
             matched=fs_matched,
-            detail=f"Filesystem keywords found: {[kw for kw in self._FILESYSTEM_KEYWORDS if kw in prompt_lower]}",
+            detail=f"Filesystem keywords found: {fs_hits}",
         ))
 
         # Check for tool keywords
-        tool_matched = any(kw in prompt_lower for kw in self._TOOL_KEYWORDS)
+        tool_hits = self._matches(prompt_lower, self._TOOL_KEYWORDS)
+        tool_matched = bool(tool_hits)
         signals.append(IntentSignal(
             name="tool_keywords",
             weight=0.4,
             matched=tool_matched,
-            detail=f"Tool keywords found: {[kw for kw in self._TOOL_KEYWORDS if kw in prompt_lower]}",
+            detail=f"Tool keywords found: {tool_hits}",
         ))
 
         # Determine intent type based on signals
