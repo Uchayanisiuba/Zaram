@@ -69,14 +69,14 @@ export default function PersistentBar(_props: PersistentBarProps) {
           color: '#6B7280',
           letterSpacing: '0.01em',
           userSelect: 'none',
-          // Arcade attract loop. Suppressed under reduced motion, where the
-          // line simply sits at its bright end — the instruction still reads,
-          // it just stops waving.
-          opacity: reduced ? 0.72 : undefined,
-          animation: reduced ? undefined : 'attract-blink 2.4s ease-in-out infinite',
+          // Arcade attract loop, slowed to a breath. Suppressed under reduced
+          // motion, where the line sits at its bright end — the instruction
+          // still reads, it just stops moving.
+          opacity: reduced ? 0.78 : undefined,
+          animation: reduced ? undefined : 'attract-blink 4.2s ease-in-out infinite',
         }}
       >
-        Click orb to begin
+        Click Orb to Chat
       </span>
     </footer>
   );
