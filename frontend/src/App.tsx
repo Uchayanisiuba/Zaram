@@ -128,7 +128,7 @@ export default function App() {
           )}
           {workspace === 'work' && (
             <div key="work" style={{ flex: 1, display: 'flex', animation: 'fade-in 0.25s ease' }}>
-              <WorkWorkspace />
+              <WorkWorkspace onOpenConversation={openConversation} />
             </div>
           )}
           {workspace === 'memory' && (
