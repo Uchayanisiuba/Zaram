@@ -27,7 +27,7 @@ format → format.
 from __future__ import annotations
 
 import html as html_escape
-from typing import Iterable, List, Optional, Sequence
+from typing import Iterable, List, Sequence
 
 from .contracts import ArtifactSource, Claim
 
@@ -38,6 +38,16 @@ SOURCE_ATTR = "data-zaram-source"
 
 def _esc(text: str) -> str:
     return html_escape.escape(text, quote=True)
+
+
+def claim_entry_id(claim_id: str) -> str:
+    """The id of a claim's entry in the Sources section.
+
+    Exists so an exporter can turn "this sentence" into a link to "the source
+    paragraph it came from" without inventing a naming scheme of its own, and so
+    the preview's anchors and the .docx's bookmarks address the same thing.
+    """
+    return f"claim-{claim_id}"
 
 
 def claim_span(claim: Claim) -> str:
@@ -114,7 +124,7 @@ def _sources_section(
         items.append(f"<li><strong>{label}</strong><br><code>{ref}</code></li>")
 
     claim_rows = "".join(
-        f"<li><em>“{_esc(c.excerpt)}”</em><br>"
+        f'<li id="{claim_entry_id(c.id)}"><em>“{_esc(c.excerpt)}”</em><br>'
         f"<code>{_esc(c.source_id)}</code>"
         + (f"<br>{_esc(c.source_excerpt)}" if c.source_excerpt else "")
         + "</li>"
@@ -127,6 +137,108 @@ def _sources_section(
         f"<ul>{''.join(items)}</ul>"
         + (f"<h2>Claims</h2><ul>{claim_rows}</ul>" if claim_rows else "")
         + "</section>"
+    )
+
+
+def render_spreadsheet(
+    *,
+    title: str,
+    header: Sequence[str],
+    rows: Iterable[Sequence[object]],
+    caption: str = "",
+    sources: Sequence[ArtifactSource] = (),
+    claims: Sequence[Claim] = (),
+) -> str:
+    """A tabular artifact, as HTML.
+
+    A spreadsheet goes through HTML like everything else, for one reason that is
+    not consistency for its own sake: the preview. A user who is shown their
+    numbers before the .xlsx is written is being shown the same table the
+    exporter reads, not a second rendering that can disagree with it.
+
+    ``<th>`` for the header row is load-bearing, not styling — the reader
+    distinguishes a header from a data row by the tag, and the exporter freezes
+    and filters on it.
+    """
+    head = "".join(f"<th>{_esc(str(cell))}</th>" for cell in header)
+    body = "".join(
+        "<tr>" + "".join(f"<td>{_esc(str(cell))}</td>" for cell in row) + "</tr>"
+        for row in rows
+    )
+
+    table = (
+        "<table>"
+        + (f"<caption>{_esc(caption)}</caption>" if caption else "")
+        + (f"<thead><tr>{head}</tr></thead>" if head else "")
+        + f"<tbody>{body}</tbody></table>"
+    )
+
+    return "\n".join(
+        [
+            "<!DOCTYPE html>",
+            '<html lang="en"><head><meta charset="utf-8">',
+            f"<title>{_esc(title)}</title>",
+            f"<style>{_STYLE}{_TABLE_STYLE}</style>",
+            "</head><body>",
+            f"<h1>{_esc(title)}</h1>",
+            table,
+            _sources_section(sources, claims),
+            "</body></html>",
+        ]
+    )
+
+
+def render_chart(
+    *,
+    title: str,
+    png: bytes,
+    header: Sequence[str] = (),
+    rows: Iterable[Sequence[object]] = (),
+    sources: Sequence[ArtifactSource] = (),
+    claims: Sequence[Claim] = (),
+) -> str:
+    """A chart, as HTML: the image, and the numbers behind it.
+
+    The image is embedded as a data URI. Not for tidiness — a remote asset is
+    forbidden, and a relative path to a sibling file breaks the moment the HTML
+    is previewed from memory rather than from disk, which is how the preview
+    works.
+
+    The data table below the image is deliberate. A chart is a claim about
+    numbers, and a chart whose numbers cannot be read is the least defensible
+    thing this product can emit. The table is what makes the picture checkable.
+    """
+    import base64
+
+    encoded = base64.b64encode(png).decode("ascii")
+    data_table = ""
+    if header:
+        data_table = (
+            "<table><thead><tr>"
+            + "".join(f"<th>{_esc(str(c))}</th>" for c in header)
+            + "</tr></thead><tbody>"
+            + "".join(
+                "<tr>"
+                + "".join(f"<td>{_esc(str(cell))}</td>" for cell in row)
+                + "</tr>"
+                for row in rows
+            )
+            + "</tbody></table>"
+        )
+
+    return "\n".join(
+        [
+            "<!DOCTYPE html>",
+            '<html lang="en"><head><meta charset="utf-8">',
+            f"<title>{_esc(title)}</title>",
+            f"<style>{_STYLE}{_TABLE_STYLE}</style>",
+            "</head><body>",
+            f"<h1>{_esc(title)}</h1>",
+            f'<img alt="{_esc(title)}" src="data:image/png;base64,{encoded}">',
+            data_table,
+            _sources_section(sources, claims),
+            "</body></html>",
+        ]
     )
 
 
@@ -168,4 +280,12 @@ _STYLE = (
     "font-size:.85em;color:#444}"
     ".sources code{font-size:.9em;color:#777}"
     f"span[{SOURCE_ATTR}]{{border-bottom:1px dotted #999}}"
+)
+
+_TABLE_STYLE = (
+    "table{border-collapse:collapse;width:100%;font:13px/1.5 system-ui,sans-serif}"
+    "caption{text-align:left;padding-bottom:.6em;color:#555}"
+    "th,td{border:1px solid #ddd;padding:.4em .6em;text-align:left}"
+    "th{background:#f5f5f5;font-weight:600}"
+    "img{max-width:100%;height:auto;margin:1em 0}"
 )
