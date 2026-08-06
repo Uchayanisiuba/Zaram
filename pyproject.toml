@@ -4,6 +4,21 @@ version = "0.1.0"
 description = "The memory and control layer for people who use more than one AI"
 requires-python = ">=3.11"
 
+# Voice is an optional extra, not part of the base install.
+#
+# Kokoro drags torch, transformers and the spaCy stack — roughly 830 MB, most of
+# the installed backend — for a feature that is out of scope for v1. The chat
+# path imports none of it, and the provider already degrades cleanly when the
+# import fails, so making it optional costs nothing but packaging metadata.
+#
+# The pinned set lives in backend/requirements-voice.txt. It is not duplicated
+# here, because two hand-maintained lists of the same 47 packages would drift.
+#
+#     pip install -r backend/requirements-voice.txt
+#     python -m spacy download en_core_web_sm
+[project.optional-dependencies]
+voice = []
+
 [tool.ruff]
 line-length = 100
 target-version = "py311"

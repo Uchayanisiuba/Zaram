@@ -187,6 +187,15 @@ permanent maintenance obligation that breaks on every host-app update.
 Licence-checked. **No AGPL anywhere** — it would force the whole product under AGPL and
 break the open-core model. Verify the licence of every new dependency before it lands.
 
+**Verify a dependency is unused by removing it and running the suite, never by
+metadata alone.** `pip show` reports an empty `Required-by` for packages that are
+genuinely required: misaki reaches spaCy at runtime without declaring it, so a
+reverse-dependency check said spaCy had no dependents, and removing it broke speech
+with `No module named 'spacy'` at synthesis time. An audit built on metadata will
+confidently recommend deleting something load-bearing. Removal plus a green suite is
+the only evidence that counts, and the suite has to actually cover the feature —
+which is the second half of the same trap.
+
 | Purpose | Choice | Licence |
 |---|---|---|
 | Ingestion / parsing | Docling (+ Granite-Docling-258M) | MIT / Apache 2.0 |
@@ -281,6 +290,23 @@ spent rebuilding the former is an hour not spent on the latter.
 - **Frontend calls the backend directly over HTTP**, not through Electron IPC.
   Streaming through `ipcMain.handle` makes a real abort hard, and direct fetch keeps a
   browser surface possible. Base URL in an env var.
+- **Hardware detection returns unknown, never a wrong number.** `vram_bytes` is a
+  number or `None`; 0 is a measurement meaning "a GPU with no memory", which is not
+  a machine that exists, and anything sizing a model against it concludes nothing
+  fits. Metal and DirectML report `None` — Apple shares one pool with the CPU, and
+  quoting system RAM would overstate what a model can claim.
+
+  Read it from the driver, not from a framework. `torch.cuda.get_device_properties`
+  made a 528MB dependency the only route to the card's capacity, and it does not
+  exist in a packaged build — so VRAM was `None` for every user and the residency
+  fit gate never ran, while its tests passed against pinned profiles. nvidia-smi
+  ships with the driver; Windows records a 64-bit figure in the registry.
+
+  **Never use `Win32_VideoController.AdapterRAM`.** It is a uint32 and saturates
+  at 4GB, reporting 4294967295 for a 12GB card. It is the obvious source and it is
+  a trap: taking it would have replaced a wrong `None` with a confident wrong
+  number, which is the worse failure — a caller can check for `None`.
+
 - **Do not build a memory engine from scratch.** Evaluate Letta or equivalent.
   Benchmark against LoCoMo / LongMemEval, not by feel.
 - **Design the Spine as federatable from day one** — tenancy seams present even

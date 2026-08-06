@@ -13,7 +13,7 @@
  * each capability lands.
  */
 import { useEffect } from 'react';
-import { Shield, Cpu, RefreshCw, Check, Minus } from 'lucide-react';
+import { Volume2, Shield, Cpu, RefreshCw, Check, Minus } from 'lucide-react';
 import { useSystemStore } from '@/stores/systemStore';
 
 function Row({
@@ -54,7 +54,15 @@ function Row({
           </span>
         </div>
         {detail && (
-          <p className="mt-1 text-[11px] text-slate-500 leading-relaxed">{detail}</p>
+          // pre-wrap so a detail can carry an indented command block. Without
+          // it the install instructions collapse onto one line and stop being
+          // copyable as a command.
+          <p
+            className="mt-1 text-[11px] text-slate-500 leading-relaxed"
+            style={{ whiteSpace: 'pre-wrap' }}
+          >
+            {detail}
+          </p>
         )}
       </div>
     </div>
@@ -84,6 +92,7 @@ function Section({ title, icon, children }: { title: string; icon: React.ReactNo
 export default function SettingsWorkspace() {
   const backendOnline = useSystemStore((s) => s.backendOnline);
   const routing = useSystemStore((s) => s.routing);
+  const speech = useSystemStore((s) => s.speech);
   const refresh = useSystemStore((s) => s.refresh);
   const startPolling = useSystemStore((s) => s.startPolling);
 
@@ -139,6 +148,36 @@ export default function SettingsWorkspace() {
             value="not built"
             state="absent"
             detail="Will cut all outbound traffic in one action. Nothing to cut today."
+          />
+        </Section>
+
+        <Section title="Speech" icon={<Volume2 size={14} style={{ color: 'var(--color-indigo-light)' }} />}>
+          {/* Not installed is the ordinary state of a base install, not a
+              fault — so it says which, and says how to change it. A greyed
+              control with no explanation leaves the user unable to tell
+              "broken" from "unfinished" from "not installed", and the usual
+              conclusion is that the product is broken. */}
+          <Row
+            label="Speech synthesis"
+            value={
+              speech === null
+                ? 'unknown'
+                : speech === 'available'
+                  ? 'available'
+                  : 'not installed'
+            }
+            state={speech === 'available' ? 'good' : speech === null ? 'neutral' : 'absent'}
+            detail={
+              speech === null
+                ? 'Waiting for the backend to report.'
+                : speech === 'available'
+                  ? 'Kokoro is installed and runs on the CPU, so it does not compete with the local model for VRAM.'
+                  : 'Voice ships as an optional extra because it pulls roughly 830 MB — torch, ' +
+                    'transformers and the spaCy stack — for a feature that is out of scope for v1. ' +
+                    'Chat is unaffected. To enable it, install the extra and restart Zaram:\n\n' +
+                    '    pip install -r backend/requirements-voice.txt\n' +
+                    '    python -m spacy download en_core_web_sm'
+            }
           />
         </Section>
 
