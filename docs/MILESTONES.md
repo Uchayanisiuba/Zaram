@@ -5,6 +5,60 @@ something that passes. "Tests green" is not done; "I ran it and watched X happen
 
 Read with `CLAUDE.md` (the contract) and `docs/UI-SPEC.md` (the interface).
 
+**This file is the handoff.** A new session should be able to read it and know
+where the work stands without being told. Keep the Current state block below
+accurate — it is the first thing anyone reads.
+
+---
+
+## Current state — 6 August 2026
+
+**Suite:** 1033 collected · 1006 passed · **27 failed** on a full dev install.
+On a base install (no voice extra): 951 passed · **13 failed** · 52 skipped, in
+~20s. The 27 are pre-existing and listed under Known broken.
+
+**Base install: 267 MB.** Down from 1,436 MB. Voice is an optional 905 MB extra.
+
+**In flight: M9b, first half committed.** `backend/artifacts/` has the model, the
+write path and the HTML layer. Exporters are not written — see the milestone.
+
+**Last commits:** artifacts write path → Work surface → dependency removals →
+packaging split → VRAM detection → shell/orbit work.
+
+### Decisions taken that are not yet obvious from the code
+
+- **An externally edited file returns as a new artifact**, origin
+  `user_document`, never as an update to the generated one. We cannot verify
+  which claims survived a Word edit, and letting unverified text inherit
+  citations is the product failing in miniature. **The UI must say this** when
+  it happens — silent lossiness is the same class of problem as silent
+  ingestion failure. Not yet built.
+- **`Artifact.indexed` defaults to `False`**, against rule 7b's default-on. The
+  deprioritisation that makes default-on safe needs origin *on facts*, which
+  lands with M8. Until then, not indexing is safer than indexing unranked.
+  **Flip it in the M8 commit.** This is a known, time-boxed gap.
+- **Collisions increment by default** (`proposal-2.docx`); asking is the escape
+  hatch when the bounded retry exhausts.
+- **`Claim.source_revision` and `verified_at` exist and are unused.** Staleness
+  detection is not built; the fields are there so adding it later does not mean
+  migrating every artifact.
+
+### Open questions
+
+- **Dev tooling still ships in the base install** — mypy, ruff, pytest,
+  pip-licenses, wheel. Probably 30–40 MB. Same split-verify-measure method as
+  the voice extra. Belongs in the packaging spike.
+- **WeasyPrint on Windows needs native GTK libraries**, which is a packaging
+  decision rather than a `pip install`. Blocks PDF export. openpyxl and
+  matplotlib are simply not installed yet.
+- **Code signing** is the long-lead packaging item. Windows business
+  verification as a Nigerian sole trader needs investigating now, in parallel.
+  Unsigned costs Zaram more than a typical app: SmartScreen's warning appears on
+  a product whose entire claim is trustworthiness.
+- **Routing is keyword-based, not embedding-based.** CLAUDE.md specifies
+  embeddings. It degrades on phrasing rather than meaning.
+- **`speech.tts` is reachable from the chat path** while voice is out of scope.
+
 ---
 
 ## Done
@@ -13,209 +67,187 @@ Read with `CLAUDE.md` (the contract) and `docs/UI-SPEC.md` (the interface).
 Spine on SQLite with `bge-m3` embeddings. Facts stored, retrieved, injected with
 citation markers, provenance events emitted.
 
-**Verified:** a fact stored by `gemma3` in one session was recalled correctly by
-`llama3.2` in a separate session, with provenance. No model could have known it.
+**Verified:** a fact stored in one session was recalled in a separate session
+with provenance.
 
 ### M1 — Egress log ✅
-Append-only hash-chained log in its own database. Per-host policy, default deny.
-All outbound calls routed through one gate. `test_egress_chokepoint.py` fails the
-build on any direct HTTP call outside `core/egress/`.
-
-**Verified:** the guard catches a reintroduced direct call and a stale exemption.
+Append-only hash-chained log, per-host policy, default deny, all outbound calls
+through one gate. `test_egress_chokepoint.py` fails the build on any direct HTTP
+call outside `core/egress/`, and on a stale exemption naming a deleted file.
 
 ### M2 — Provider layer ✅
 `backend/providers/` connected, renamed from `garage/`. Model metadata carries a
 data policy with no default value — unknown is `None`, never a guarantee.
-`select_default_model()` refuses rather than choosing something unlabelled.
+`select_default_model()` refuses rather than choosing something unlabelled, and
+reports *why* each candidate was refused.
 
-**Verified:** booted against real Ollama, 10 models discovered and labelled,
-default selected, `ModelsRuntime` reports it.
+**Verified:** booted against real Ollama, 10 models discovered and labelled.
 
-### M3 — Frontend integration ✅ (built, unverified)
-`chatClient.ts` does `POST /chat`, parses NDJSON, handles JSON split across chunks
-and multi-byte characters split mid-character. `ChatSurface` renders sources live
-and settled. `SourcePanel` exists. `memoryClient` and `egressClient` wired.
+### M3 — Frontend integration ✅
+`chatClient.ts` does `POST /chat`, parses NDJSON, handles JSON split across
+chunks and multi-byte characters split mid-character.
 
-**Not yet verified by running it.** That is M4.
+### M4 — Verify the integration ✅ (partly)
+Verified at transport level against a live backend. Found and fixed two real
+bugs:
+
+- **`invoice` contains `voice`** — keyword matching was substring-based, so every
+  invoice request routed to text-to-speech and returned a fallback with no model
+  call. Also `essay`→`say`, `profile`→`file`, `research`→`search`. Now matched on
+  word boundaries.
+- **The requested model was logged and then discarded.** `/chat` accepted a
+  model, the dispatcher logged it on the line above the call that did not pass
+  it, and the engine always used its own default.
+
+**Not done:** no UI walkthrough. The Playwright browser install failed on this
+connection, so the interface has never been driven. Whether **stop** actually
+aborts a request is still unverified.
+
+### M5 — VRAM detection ✅
+`_vram_bytes` read `torch.cuda.get_device_properties`, which does not exist in a
+packaged build — so VRAM was `None` for every user and the residency fit gate
+never ran, while its tests passed against pinned profiles. Now nvidia-smi, with
+the Windows registry for AMD/Intel. **Never `Win32_VideoController.AdapterRAM`**:
+uint32, saturates at 4 GB, reports 4294967295 for a 12 GB card.
+
+**Verified on the dev machine:** RTX 3060, 12 GB detected, a 9 GB model refused
+when a 5 GB one fits, with the reason logged.
+
+### M6 — Shell cleanup ✅
+Orbit carries five nodes: Work · Memory · Knowledge · Activity · Settings.
+19 unreachable files moved to `legacy/`. **Bundle unchanged — byte-identical,
+same content hash** — which is the proof they were never linked. The win was
+repo clarity, not size.
+
+Found on the way: the surface list was restated by hand in TopNav, LeftRail and
+CommandPalette, and the palette had silently lost Activity. All three now derive
+from `surfaceOrder` with `Record<WorkspaceId, …>` icon maps, so the compiler
+names every file needing an entry.
+
+### Packaging ✅ (the big one)
+**1,436 MB → 267 MB base**, an 81% reduction, and the single most consequential
+thing done for the alpha — the difference between an installer someone on
+metered data will download and one they won't.
+
+- Voice is an optional 905 MB extra. Voice tests skip with the install command in
+  the reason rather than failing.
+- `soundfile` was imported at module scope in the Kokoro provider, so the
+  graceful-degradation path could never run — the module died three lines into
+  its own imports. Now lazy.
+- Removed `diffusers`, `openai-whisper`, `edge-tts`, `onnxruntime`, `accelerate`,
+  then `scipy`, `numba`, `llvmlite`, `tiktoken`.
+- **spaCy was nearly removed by mistake.** `pip show` reported no dependents
+  because misaki reaches it at runtime without declaring it. Removing it broke
+  speech. **Verify by removal and a green suite, never by metadata.**
+
+### Session 1–2 — Orbit and Work ✅
+Work added as the fifth node. The Work surface built against clearly-labelled
+sample data: 20 artifacts, two projects, filter by project and type, detail panel
+from the right with preview, sources and a link back to the conversation.
+Download is inert and says why — a working button emitting a plausible invoice
+from invented data is worse than no button, because the file outlives the screen
+that explained it.
+
+The landing hint ("Click Orb to Chat") replaced the persistent bar. **Two things
+went with it:** the clickable topic line was the third route back and the only
+one that named its destination, and the `local · model · N facts recalled` line
+is no longer visible. `sessionStatusStore` still tracks all of it.
 
 ---
 
 ## Next
 
-### M4 — Verify the integration
-Not build — verify. Run the UI against a live backend and report findings.
+### M9b — Generative documents (in flight)
+**Committed:** the artifact model, the write path, the HTML layer.
 
-**Acceptance:** a screen recording or a written walkthrough showing: ask a question,
-see a cited answer, click a citation, open the source, correct a fact, watch the
-answer change, open Activity and see what left.
+The write path is a property of the code, not a convention: `open(path, "xb")`
+is create-or-fail atomically, there is no function named for deletion, and
+`test_artifact_write_path.py` scans the module's source so the build fails on the
+commit that introduces the capability rather than at runtime after a file is
+gone. Path confinement gets eight traversal payloads — the *model* proposes
+filenames, so `../../.ssh/config` is an input to assume.
 
-**Report specifically on:** how stream events arrive and parse, what happens when the
-backend is unreachable, what happens on an error mid-stream, and whether stop
-actually aborts the request rather than hiding the stream.
+**Remaining:** the exporters. python-docx and jinja2 are installed; openpyxl,
+matplotlib and WeasyPrint are not, and WeasyPrint needs native GTK on Windows.
 
-### M5 — VRAM detection
-`_vram_bytes()` reads only through `torch.cuda`, so on this machine VRAM is unknown,
-the residency budget is `None`, and the fit gate is skipped. The unit tests pin a
-fake profile, so they pass while the real path stays inert.
+**Acceptance:** ask a question, say "write that up as a proposal", get a .docx
+where claims link back to the source paragraph they came from. The file appears
+as a card in the conversation and as a row in Work.
 
-**Acceptance:** on the dev machine, `select_default_model()` refuses a 9GB model
-when a smaller one fits, and the log says why. Non-CUDA paths still report
-`unknown`, never a false number.
+### Session 4 — Wire Work to real artifacts
+Replace `frontend/src/data/sampleArtifacts.ts` with real records. The `Artifact`
+shape there is a first draft of the backend model; divergence is a bug in the
+sample. Delete the sample module in the same commit.
 
-### M6 — Shell cleanup
-19 frontend surfaces exist; most are retired names — Agent, Browser, Build, Code,
-Calendar, Project, Research, ImageGeneration. That is the six-workspace shell against
-a four-item spec.
+**Acceptance:** generate something and find it in both the conversation and Work.
 
-**Acceptance:** the orbit carries five nodes — Work · Memory · Knowledge · Activity ·
-Settings. Currently three; Work and Activity are the additions.
-Everything else moved to `legacy/`, unlinked, bundle size drops.
+### Session 5 — Settings → Tools, the pack catalogue
+Each pack shows risk tier (generative / mutative / egressive), data policy, and
+honest grading against this machine — greyed out where unavailable, with the
+reason stated. Only packs that exist or are genuinely next; a catalogue of forty
+things we will never build is a promise accumulating.
 
 ### M7 — Ingest
-The one v1 scope item with nothing built. Docling for parsing. Folder in, facts out.
+**The one v1 scope item with nothing built.** Docling. Folder in, facts out.
 
-**Acceptance:** point Zaram at a real messy folder — scanned PDFs, .docx, .xlsx —
-and ask a question answered from it, with a citation to the right file.
-
-**Failures must be loud.** A file that produced nothing appears in Knowledge with a
-reason and a retry, and is mentioned in the conversation the first time it matters:
-*"I couldn't read scan-04.pdf — it's an image with no text layer."* Silent ingestion
-failure is the most likely reason a user concludes the product doesn't know their
-material and leaves.
+**Failures must be loud.** A file that produced nothing appears in Knowledge with
+a reason and a retry, and is mentioned in the conversation the first time it
+matters. Silent ingestion failure is the most likely reason a user concludes the
+product doesn't know their material and leaves.
 
 ### M8 — Memory scope
-Every fact carries `global` or `project:<id>`. Default to current project. Promote to
-global on evidence — a fact recalled across three projects prompts once.
-
-**Acceptance:** two projects exist; a fact from one does not surface in the other;
-a global preference surfaces in both; the Memory filter shows
-*This project · All projects · About me*.
+Every fact carries `global` or `project:<id>`, **and `origin`** — the two land
+together because they add fields to the same rows and doing them separately means
+two migrations. **Flip `Artifact.indexed` to `True` here.**
 
 **Do this before the alpha.** Retrofitting scope onto facts that lack it means
-guessing at scope for everything already stored. It is also the multiplayer boundary,
-so the permission model comes free.
+guessing for everything already stored. It is also the multiplayer boundary.
 
-### M9 — The business base layer and the Work surface
-
+### M9 / M9a — The business layer and obligation extraction
 The universal job: invoice → receipts → expenses → how is the business doing.
-Native, no external app, no VRAM. Records and drafts only — never filings, never tax
-liability, never the system of record.
+Then the keystone: dates and commitments pulled from documents, surfaced before
+they lapse, **every obligation showing its source clause and correctable**.
 
-**Acceptance:** create an invoice for a client Zaram has seen before and watch it fill
-in the rate, terms and line items from memory without being told. Photograph a receipt,
-have it extracted and categorised. Ask "how did last month compare" and get an answer
-with the figures traced to their source.
-
-That last part is the whole thesis on the most boring possible task, which is exactly
-where it convinces.
-
-### M9a — Obligation extraction
-
-The keystone. Documents contain dates and commitments; today they live in a PDF in a
-folder because nobody types them into a calendar. Extract them, surface them before
-they lapse.
-
-Payment terms from an invoice. Milestones from a contract. Deliverables from a brief.
-Expiry on a quote.
-
-**Every obligation shows its source clause and is correctable. Never silently create a
-commitment** — a missed deadline is worse than no reminder, because trust does not
-recover.
-
-**Acceptance:** generate an invoice with 30-day terms, and on day 31 Zaram says the
-payment is late, shows the clause it read that from, and has the follow-up drafted.
-Then correct a wrongly-extracted date and watch the reminder move.
-
-This is what gives the product a reason to speak first, which is the difference between
-a tool someone remembers to open and one that earns its place. It is also the sentence
-that makes the pitch fundable — see `docs/PITCH.md`.
-
-### M9b — Generative documents
-HTML is the source of truth. Generate HTML, convert: WeasyPrint to PDF, second export
-to .docx. python-docx, openpyxl, matplotlib, Mermaid.
-
-Generated files go to a dedicated output directory. The write path has **no delete or
-overwrite capability at all** — a name collision increments or asks. Safety is
-structural, not promised.
-
-**Acceptance:** ask a question, say "write that up as a proposal", get a .docx where
-claims link back to the source paragraph they came from. The file appears as a card in
-the conversation and in Work, with the conversation that produced it.
+**Acceptance:** generate an invoice with 30-day terms; on day 31 Zaram says the
+payment is late, shows the clause it read that from, and has the follow-up
+drafted. Correct a wrongly-extracted date and watch the reminder move.
 
 ### M9c — Read-only MCP: Unreal and Blender
-
-Epic ships a first-party MCP plugin in UE 5.8; mature Blender servers exist. Read-only
-means inspect, list, report — no writes, so no undo, sandbox or rollback is needed.
-That is why it ships in v1 and scoped writes do not.
-
-**Note the port collision:** Epic's plugin binds `127.0.0.1:8000` inside the editor and
-auto-starts. The backend must be on 8420.
-
-**Acceptance:** with a real project open, ask *"what did we change about the lighting
-after the client review, and does the current scene match?"* — and get an answer that
-draws on both the live scene and the Spine. Inspection alone is thin; inspection plus
-memory is the demo nothing else can produce.
-
-Test against copied projects only.
+Inspect, list, report. No writes, so no undo or sandbox needed — which is why it
+ships in v1 and scoped writes do not. **Epic's plugin binds `127.0.0.1:8000`, so
+the backend must stay on 8420.**
 
 ### M10 — Confirm-before-send, editable
-The dialog shows the literal outbound text, the destination and the reason. Recalled
-facts are removable chips, editable inline, with edits written through as
-supersessions. The user can add context retrieval missed. The outbound text updates
-live as they edit.
-
-**Acceptance:** trigger a cloud call, see exactly what will leave, correct a wrong
-fact in the dialog, watch the outbound text change, send, and find the correction
-persisted in Memory afterwards.
-
-This is a learning mechanism as much as a safety control — it is the one moment where
-correcting a fact has an immediate payoff, which is why it is where the Spine actually
-becomes accurate.
+The dialog shows the literal outbound text, the destination and the reason.
+Recalled facts are removable chips, editable inline, edits written through as
+supersessions.
 
 ### M11 — Packaging
-**The real blocker.** A stranger cannot install this. Every feature added before this
-widens the gap between what the product does and what anyone can experience.
-`electron-builder.yml` exists — check its state before assuming greenfield.
+**The real blocker.** A stranger cannot install this. See Open questions above —
+code signing has the longest lead time and cannot be compressed later.
 
-**Acceptance:** a Windows machine that has never seen the repo runs one installer and
-reaches a cited answer from its own files in under ten minutes. Detect existing Ollama
-models rather than asking for a download. Never block on a 7GB pull.
+**Acceptance:** a Windows machine that has never seen the repo runs one installer
+and reaches a cited answer from its own files in under ten minutes.
 
 ### M12 — Alpha
-Ten programmers, one segment. Onboard individually, watch them use it, do not help.
+Ten to fifteen people, one segment. Onboard individually, watch, do not help.
+Ask at intake: hours spent on admin last month, and what is past due — those
+answers become the missing line in `docs/PITCH.md`.
 
-**Acceptance:** the day-30 number. 5+ of 15 still using it weekly — build the paid
-tier. 2–4 — the job is wrong, interview those users. 0–1 — the thesis is wrong,
-learned in six weeks rather than two years.
-
-**And two questions asked of every participant at intake**, because the answers are the
-missing line in `docs/PITCH.md`: how many hours did you spend on admin last month, and
-what are you owed right now that is past due. After sixty days those become *"users
-recovered £X they would have chased late, and cut Y hours a month"* — the one sentence
-that is worth more than the rest of the pitch combined, and the only one that cannot be
-written in advance.
-
-Closing question, instead of "would you pay for this":
-**"If I turned this off tomorrow, what would you do?"**
-
----
-
-## After the alpha
-
-Scoped MCP writes with dry-run and undo — Unreal is the highest-stakes integration
-there is, so the safety layer arrives before the first write. Then the document editor
-(TipTap over HTML) and Univer for sheets and slides.
-Then the pack abstraction — extracted from two hand-built packs, never designed ahead
-of them.
-
-Web search returns only after per-source consent exists. Sequence is fixed: egress log
-→ per-source policy → search as its first governed source.
+**Acceptance:** the day-30 number. 5+ of 15 weekly → build the paid tier.
+2–4 → the job is wrong. 0–1 → the thesis is wrong, learned in six weeks.
 
 ---
 
 ## Known broken
 
-27 failing tests, unchanged and pre-existing: 13 in `test_streaming_conversation`,
-`test_alpha10c_acceptance`, `test_kernel_flow`; 14 in voice. Voice is out of scope.
-Record any change to that number — a stable failure count everyone stops looking at is
-how a real regression hides.
+**27 failing tests**, unchanged and pre-existing:
+
+- 13 in `test_streaming_conversation`, `test_alpha10c_acceptance`, `test_kernel_flow`
+- 14 in voice — these skip on a base install, so CI sees 13
+
+Record any change to that number. A stable failure count everyone stops looking
+at is how a real regression hides.
+
+Also broken, found and not fixed: `services/speech_manager.py` imports a module
+that was deleted. Nothing imports `SpeechManager`, so nothing breaks today.
