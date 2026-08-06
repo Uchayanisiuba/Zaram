@@ -33,7 +33,6 @@ import os
 import re
 import unicodedata
 from pathlib import Path
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
