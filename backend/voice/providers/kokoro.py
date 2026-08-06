@@ -50,7 +50,6 @@ from dataclasses import dataclass, field
 from typing import Any, AsyncIterator, Callable, Dict, List, Optional, Protocol
 
 import numpy as np
-import soundfile as sf
 
 from voice.config import KokoroConfig
 from voice.exceptions import ProviderUnavailableError
@@ -225,6 +224,14 @@ class KokoroProvider(VoiceProvider):
         return self._pipeline
 
     def _to_wav_bytes(self, audio: Any, sample_rate: int) -> bytes:
+        # Imported here, not at module scope. soundfile ships with the voice
+        # extra, and a top-level import made this whole module unimportable on a
+        # base install — which meant the provider could not even be constructed
+        # to report itself unavailable. The lazy `import kokoro` further down was
+        # written to degrade gracefully and never got the chance, because the
+        # module died three lines into its own imports.
+        import soundfile as sf
+
         buffer = io.BytesIO()
         sf.write(buffer, audio, sample_rate, format="WAV")
         return buffer.getvalue()

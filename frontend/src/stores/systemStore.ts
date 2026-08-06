@@ -29,10 +29,21 @@ export interface RoutingState {
   canLeaveDevice: boolean;
 }
 
+/** Whether speech synthesis can actually run.
+ *
+ *  Voice ships as an optional extra — Kokoro pulls torch, transformers and the
+ *  spaCy stack, roughly 830 MB — so "unavailable" is the expected state on a
+ *  base install rather than a fault. It still has to be *said*: a control that
+ *  is greyed out with no explanation is the silent-failure pattern, and the
+ *  user has no way to know whether it is broken, unfinished, or simply not
+ *  installed. Null means the backend has not reported yet. */
+export type SpeechAvailability = 'available' | 'not-installed' | null;
+
 interface SystemState {
   backendOnline: boolean;
   /** Null until the first successful poll — distinct from "known offline". */
   routing: RoutingState | null;
+  speech: SpeechAvailability;
   activity: OrbActivity;
   /** Timestamp of the last confirmed egress, for the Orb's pulse. Nothing can
    *  leave today, so this stays null until web search is governed and enabled. */
@@ -47,6 +58,7 @@ interface SystemState {
 export const useSystemStore = create<SystemState>((set, get) => ({
   backendOnline: false,
   routing: null,
+  speech: null,
   activity: 'idle',
   lastEgressAt: null,
 
@@ -63,8 +75,14 @@ export const useSystemStore = create<SystemState>((set, get) => ({
       const data = await res.json();
       const r = data?.routing ?? {};
       const providers = Array.isArray(r.providers) ? r.providers : [];
+      // The active connector reports whether it could import Kokoro at all.
+      // Absent or unavailable means the voice extra is not installed, which is
+      // the ordinary state of a base install and must be explained rather than
+      // shown as a dead control.
+      const connector = data?.speech?.active_connector_health;
       set({
         backendOnline: data?.kernel === 'online',
+        speech: connector?.available ? 'available' : 'not-installed',
         routing: {
           mode: (r.mode as RoutingMode) ?? 'unknown',
           providers,
