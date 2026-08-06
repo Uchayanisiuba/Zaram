@@ -25,6 +25,7 @@
 import { useEffect } from 'react';
 
 import { useSystemStore } from '@/stores/systemStore';
+import { useIsReducedMotion } from '@/hooks/useReducedMotion';
 
 interface PersistentBarProps {
   /** Leave whatever surface is open and return to the conversation. Retained
@@ -33,6 +34,8 @@ interface PersistentBarProps {
 }
 
 export default function PersistentBar(_props: PersistentBarProps) {
+  const reduced = useIsReducedMotion();
+
   // Still the only component mounted on every surface, so it keeps ownership of
   // the health poll. The bar's chrome is gone; the polling it was doing is not
   // decoration — Settings and the orb both read what it fetches.
@@ -61,13 +64,16 @@ export default function PersistentBar(_props: PersistentBarProps) {
     >
       <span
         style={{
-          // Same face and colour as the status line's "engine not running",
-          // at three times its 11px.
-          font: '400 33px/1.3 var(--font-mono, ui-monospace, "JetBrains Mono", monospace)',
+          // Same face and colour as the status line's "engine not running".
+          font: '400 18px/1.3 var(--font-mono, ui-monospace, "JetBrains Mono", monospace)',
           color: '#6B7280',
-          opacity: 0.7,
           letterSpacing: '0.01em',
           userSelect: 'none',
+          // Arcade attract loop. Suppressed under reduced motion, where the
+          // line simply sits at its bright end — the instruction still reads,
+          // it just stops waving.
+          opacity: reduced ? 0.72 : undefined,
+          animation: reduced ? undefined : 'attract-blink 2.4s ease-in-out infinite',
         }}
       >
         Click orb to begin
