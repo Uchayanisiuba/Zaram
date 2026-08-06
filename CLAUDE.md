@@ -18,6 +18,12 @@ Full rationale: `docs/VISION.md`. Interface: `docs/UI-SPEC.md`. Sequence and
 acceptance criteria: `docs/MILESTONES.md`. External framing: `docs/PITCH.md`. Read
 before proposing product changes; none are auto-imported.
 
+**Starting a session: read `docs/MILESTONES.md` first.** Its Current state block
+is the handoff — what is done, what is in flight, which decisions are already
+taken, and which gaps are deliberate and time-boxed. It is maintained for that
+purpose; if it disagrees with this file about *status*, it is more recent. This
+file remains the authority on the rules.
+
 ## Canonical vocabulary
 
 Use these terms only.
