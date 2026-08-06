@@ -209,23 +209,21 @@
   to { opacity: 1; }
 }
 
-/* The attract loop on "Click orb to begin".
+/* The attract loop on "Click Orb to Chat".
  *
- * The arcade "PRESS START" idea: the line dwells bright, drops, dwells dim, and
- * comes back. Dwelling at each end is what makes it read as a deliberate signal
- * rather than a fade — a pure sine pulse looks like a loading state, and the
- * point here is to gesture at an action.
+ * The arcade "PRESS START" idea, but breathing rather than blinking. It began
+ * as a dwell-at-each-end blink, which read as too insistent; there is no dwell
+ * now, so every frame is in motion and the line simply rises and falls.
  *
- * Softened from a hard on/off blink because this sits under a live interface
- * rather than an idle cabinet, and a square blink at the bottom of every screen
- * is the kind of motion that becomes irritating by the fiftieth time.
+ * Two endpoints and a symmetric ease is what makes it smooth — any intermediate
+ * hold reintroduces the step that made it feel like flashing rather than
+ * breathing. Slow enough that it never competes with the orb for attention.
  *
- * The only continuous animation outside the orb. Justified as an entry
- * affordance, and it stops the moment there is a conversation to return to. */
+ * The only continuous animation outside the orb, which the motion budget
+ * otherwise rules out. Justified as the entry affordance on an idle landing. */
 @keyframes attract-blink {
-  0%, 38%   { opacity: 0.72; }
-  50%, 88%  { opacity: 0.14; }
-  100%      { opacity: 0.72; }
+  0%, 100% { opacity: 0.78; }
+  50%      { opacity: 0.14; }
 }
 
 /* ─── Base ───────────────────────────────────────────────────────── */
