@@ -13,17 +13,34 @@ accurate — it is the first thing anyone reads.
 
 ## Current state — 6 August 2026
 
-**Suite:** 1033 collected · 1006 passed · **27 failed** on a full dev install.
-On a base install (no voice extra): 951 passed · **13 failed** · 52 skipped, in
-~20s. The 27 are pre-existing and listed under Known broken.
+**Suite:** 1128 collected · 1101 passed · **27 failed** on a full dev install,
+in ~2m. The 27 are unchanged and pre-existing — listed under Known broken.
+The base-install figures are stale: the 95 new artifact tests should all pass
+there too, since their dependencies are in the base requirements, but that has
+not been measured. Previously: 951 passed · 13 failed · 52 skipped.
 
-**Base install: 267 MB.** Down from 1,436 MB. Voice is an optional 905 MB extra.
+**Base install: ~317 MB.** 267 MB plus a *measured* 50 MB for the exporters
+(matplotlib 31, fonttools 16, openpyxl and the rest 3). Voice remains an
+optional 905 MB extra. If that 50 MB has to come back, the split is charts-only
+— .docx, .md and .xlsx together are 2 MB, and matplotlib is the whole cost.
 
-**In flight: M9b, first half committed.** `backend/artifacts/` has the model, the
-write path and the HTML layer. Exporters are not written — see the milestone.
+**In flight: M9b and Session 4, both uncommitted at time of writing.**
+`backend/artifacts/` now has the model, the write path, the HTML layer,
+`export/` (Markdown, .docx, .xlsx, PNG), `records.py` (SQLite) and
+`service.py`. `main.py` serves `/artifacts`. Work reads real records and
+`sampleArtifacts.ts` is deleted. **PDF is the only exporter not working**, and
+it is blocked on packaging rather than on code — see Open questions.
+
+**Verified against a live server**, not just tests: three artifacts generated
+over HTTP, listed, previewed and downloaded through the Vite dev proxy on the
+same path the browser uses.
+
+**Not done: nothing generates from chat.** Saying "write that up as a proposal"
+does not reach any of this. See M9b remaining.
 
 **Last commits:** artifacts write path → Work surface → dependency removals →
-packaging split → VRAM detection → shell/orbit work.
+packaging split → VRAM detection → shell/orbit work. The exporters, records,
+service, routes and Work rewiring are **not yet committed**.
 
 ### Decisions taken that are not yet obvious from the code
 
@@ -42,15 +59,67 @@ packaging split → VRAM detection → shell/orbit work.
 - **`Claim.source_revision` and `verified_at` exist and are unused.** Staleness
   detection is not built; the fields are there so adding it later does not mean
   migrating every artifact.
+- **Claims reach Word as bookmarks, not as attributes.** `data-zaram-claim`
+  does not survive export — Word discards unknown markup — so each claim is a
+  real internal hyperlink to a real bookmark on its Sources entry. Clicking a
+  sentence in Word jumps to the source, with Zaram not running. The
+  machine-readable mapping stays on `Artifact.claims`, independently. Word
+  drops a bookmark whose name has a hyphen or exceeds 40 characters *silently*,
+  rendering every link as dead text, so `_bookmark_name` is asserted by test
+  rather than trusted.
+- **The .xlsx exporter refuses to guess.** "₦425,000" becomes the number
+  425000; "50%" and "2026-07-02" stay text. 50% is 0.5 to Excel and 50 to a
+  naive strip, and writing the wrong one into a cell that feeds a formula is
+  the failure the module exists to prevent. Text is visibly unfinished; a wrong
+  number is invisibly wrong.
+- **Charts always ship their data table, and it cannot be turned off.** Three
+  of the eight categorical slots fall below 3:1 contrast on white, which
+  obligates relief. The table is that relief, so the picture is never the only
+  copy of the numbers. A ninth series is refused rather than given an invented
+  hue.
+- **Unavailability is a return value, not an exception.** `export.formats()`
+  lists every format with whether it runs here and why not. An `ImportError`
+  surfaced as "PDF failed" tells a user nothing actionable and reads as a bug
+  in Zaram rather than a missing system library.
+- **Two artifact stores, on purpose.** `store.py` holds files and cannot unmake
+  them; `records.py` holds records and has no general `update` and no `delete`
+  — one named method for the one field the user controls
+  (`set_remember_override`). The module this replaced had an `update()` that
+  `setattr`'d anything passed to it. A second mutation has to be a second named
+  method, which is a conversation rather than a keyword argument nobody
+  reviews.
+- **The file is written before the record, always.** The reverse ordering makes
+  Work show a row for a document that does not exist. This ordering, on
+  failure, leaves a file the user has and Work has not listed — under-claiming,
+  which is visible and recoverable. Over-claiming is neither.
+- **`remember_override` is three-valued.** `None` (undecided, a default may
+  still apply), `True`, `False` (a refusal, which a default may not override).
+- **Work shows project *ids*, not names.** There is no project-name store, and
+  turning `harbour` into "Harbour Lane Studio" would be a value nobody entered.
+  The sample data had names because it was invented.
+- **The preview is an iframe of the stored HTML**, sandboxed with no
+  permissions. HTML is the source of truth, so the preview *is* what the file
+  was rendered from — not a second rendering that can disagree with it.
 
 ### Open questions
 
 - **Dev tooling still ships in the base install** — mypy, ruff, pytest,
   pip-licenses, wheel. Probably 30–40 MB. Same split-verify-measure method as
   the voice extra. Belongs in the packaging spike.
+- **Jinja2 is declared in the *voice* extra and used by nothing.** An earlier
+  version of this file listed it as available for M9b; it is not on a base
+  install. Nothing needs it — the HTML layer builds strings directly — so the
+  question is whether it is a real transitive dependency of the voice stack or
+  a leftover. Removal plus a green suite is the only way to find out.
 - **WeasyPrint on Windows needs native GTK libraries**, which is a packaging
-  decision rather than a `pip install`. Blocks PDF export. openpyxl and
-  matplotlib are simply not installed yet.
+  decision rather than a `pip install`. This is the only part of M9b not
+  working. The exporter is written and the format reports itself unavailable
+  with the reason and a per-platform remedy, so the gap is visible rather than
+  silent — but a Windows user cannot produce a PDF until the installer carries
+  the MSYS2 GTK runtime. **Decide this in the packaging spike, not before**:
+  the alternative is ReportLab, which would mean a second document pipeline
+  and breaks "HTML is the source of truth". Markdown and .docx work on every
+  machine, so nobody is blocked from getting a file out meanwhile.
 - **Code signing** is the long-lead packaging item. Windows business
   verification as a Nigerian sole trader needs investigating now, in parallel.
   Unsigned costs Zaram more than a typical app: SmartScreen's warning appears on
@@ -153,12 +222,37 @@ went with it:** the clickable topic line was the third route back and the only
 one that named its destination, and the `local · model · N facts recalled` line
 is no longer visible. `sessionStatusStore` still tracks all of it.
 
+### Session 4 — Work reads real artifacts ✅
+`sampleArtifacts.ts` is deleted. Work fetches from `/artifacts` through
+`services/artifactsClient.ts`, with loading, error-with-retry and a truthful
+empty state. The detail panel previews the stored HTML in a sandboxed iframe,
+lists claims with their source excerpts, and downloads the real file.
+
+The sample's shape had drifted from the backend model — `projectId` against
+`project_id`, a nested `conversation` object against two flat fields, and a
+`previewText` with nothing behind it. The model won, and the client uses its
+field names directly rather than mapping, because a mapping layer is a second
+vocabulary and a place for the two to disagree quietly.
+
+**Download is real now.** It was inert and said why, because a working button
+over invented data emits a file that outlives the screen explaining it. The
+button now also distinguishes "no file" from "the file is not where it was
+written" — the record can outlive the file, and 410 is a different problem from
+404.
+
+**Verified end to end against a live backend**, through the Vite dev proxy on
+the browser's own path: generate → list → preview HTML with claim anchors →
+download 37 kB of .docx with the right content type. Not driven in a browser —
+Playwright is still unavailable here.
+
 ---
 
 ## Next
 
 ### M9b — Generative documents (in flight)
-**Committed:** the artifact model, the write path, the HTML layer.
+**Committed:** the artifact model, the write path, the HTML layer, and the
+exporters — Markdown, .docx, .xlsx and PNG, verified end to end against real
+output. 58 tests in `test_artifact_exporters.py`.
 
 The write path is a property of the code, not a convention: `open(path, "xb")`
 is create-or-fail atomically, there is no function named for deletion, and
@@ -167,19 +261,32 @@ commit that introduces the capability rather than at runtime after a file is
 gone. Path confinement gets eight traversal payloads — the *model* proposes
 filenames, so `../../.ssh/config` is an input to assume.
 
-**Remaining:** the exporters. python-docx and jinja2 are installed; openpyxl,
-matplotlib and WeasyPrint are not, and WeasyPrint needs native GTK on Windows.
+**That guarantee now has a second gate.** The exporters return bytes and never
+touch the filesystem; `ArtifactStore` stays the only writer. A source scan over
+`artifacts/export/` enforces it, so adding a sixth format cannot quietly route
+around the store. It matches *calls* rather than names, because `workbook.save`
+and `write_pdf` both write to memory.
+
+**Remaining:** PDF, blocked on GTK packaging (see Open questions), and the
+**conversation half** — nothing generates from chat.
 
 **Acceptance:** ask a question, say "write that up as a proposal", get a .docx
 where claims link back to the source paragraph they came from. The file appears
 as a card in the conversation and as a row in Work.
 
-### Session 4 — Wire Work to real artifacts
-Replace `frontend/src/data/sampleArtifacts.ts` with real records. The `Artifact`
-shape there is a first draft of the backend model; divergence is a bug in the
-sample. Delete the sample module in the same commit.
+**Verified:** a proposal with recalled claims exported to .docx, both claim
+hyperlinks resolving to bookmarks present in `word/document.xml`; and the same
+document generated over HTTP, listed and downloaded through the dev proxy. The
+document half and the Work half both hold.
 
-**Acceptance:** generate something and find it in both the conversation and Work.
+**The gap, precisely.** `POST /artifacts/generate` is the seam and it works —
+it is what a capability would call. What does not exist is the capability: chat
+goes through `CapabilityRouter` / `IntentBasedRouter.INTENT_MAP`, and producing
+a document from natural language means registering a runtime there, adding an
+intent, and emitting a file-card event on the stream. Deliberately not
+half-wired this session. Note also that routing is keyword-based, so
+`INTENT_MAP` will match "proposal" by word rather than by meaning until
+embeddings land.
 
 ### Session 5 — Settings → Tools, the pack catalogue
 Each pack shows risk tier (generative / mutative / egressive), data policy, and
