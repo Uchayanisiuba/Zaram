@@ -13,6 +13,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { motion, type Variants } from 'framer-motion';
 import { Send } from 'lucide-react';
+import ArtifactCard from '@/components/ArtifactCard';
 import { useChatStore } from '@/stores/chatStore';
 import { useSourceStore } from '@/stores/sourceStore';
 import { useOrbStore } from '@/stores';
@@ -88,6 +89,7 @@ export default function ChatSurface() {
   const messages = useChatStore((s) => s.messages);
   const streamingText = useChatStore((s) => s.streamingText);
   const streamingSources = useChatStore((s) => s.streamingSources);
+  const streamingArtifacts = useChatStore((s) => s.streamingArtifacts);
   const isStreaming = useChatStore((s) => s.isStreaming);
   const connectionError = useChatStore((s) => s.connectionError);
   const send = useChatStore((s) => s.send);
@@ -314,6 +316,11 @@ export default function ChatSurface() {
                       onOpen={openSourcePanel}
                     />
                   )}
+                  {/* Files made by this reply. CLAUDE.md: generated files
+                      appear as cards in the conversation. */}
+                  {msg.artifacts?.map((artifact) => (
+                    <ArtifactCard key={artifact.id} artifact={artifact} />
+                  ))}
                   {msg.error && (
                     <p className="mt-1 text-[11px]" style={{ color: '#fca5a5' }}>
                       {msg.text ? `Interrupted: ${msg.error}` : msg.error}
@@ -354,6 +361,9 @@ export default function ChatSurface() {
                     deleted={deletedUrls}
                     onOpen={openSourcePanel}
                   />
+                  {streamingArtifacts.map((artifact) => (
+                    <ArtifactCard key={artifact.id} artifact={artifact} />
+                  ))}
                 </div>
               )}
             </>

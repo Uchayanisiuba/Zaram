@@ -13,6 +13,8 @@ class KernelBootstrapper:
         self.knowledge_runtime = None
         self.speech_runtime = None
         self.memory_runtime = None
+        self.documents_runtime = None
+        self.semantic_router = None
         self.egress_gate = None
 
     def _init_egress_gate(self):
@@ -75,9 +77,39 @@ class KernelBootstrapper:
         await self._register_runtimes()
 
         # 4. Initialize Core Services
-        self.execution_engine = ExecutionEngine(self.registry, self.event_bus)
+        #
+        # Routing by embeddings rather than keywords (CLAUDE.md). It reuses the
+        # Spine's embedder — bge-m3 is already resident, so this costs no extra
+        # VRAM — and falls back to the keyword router when the embedder is not
+        # running semantically, which is what happens if Ollama is unreachable.
+        self.semantic_router = self._init_semantic_router()
+        self.execution_engine = ExecutionEngine(
+            self.registry, self.event_bus, semantic_router=self.semantic_router
+        )
 
         print("[Bootstrapper] Kernel Ready.")
+
+    def _init_semantic_router(self):
+        """Build the intent router, or None if the Spine has no embedder.
+
+        Never fatal. A kernel that refuses to boot because routing could not be
+        built would trade a duller classifier for no product at all.
+        """
+        try:
+            from core.retrieval import SemanticIndex, SemanticIntentRouter
+
+            embedder = getattr(self.memory_runtime, "_embedder", None)
+            if embedder is None:
+                print("[Bootstrapper] No embedder; routing stays keyword-based.")
+                return None
+
+            router = SemanticIntentRouter(SemanticIndex(embedder))
+            mode = "semantic" if router.is_semantic() else "keyword fallback"
+            print(f"[Bootstrapper] Intent routing: {mode}")
+            return router
+        except Exception as error:
+            print(f"[Bootstrapper] Semantic routing unavailable ({error}); using keywords.")
+            return None
 
     def _init_memory_runtime(self):
         import os
@@ -169,6 +201,25 @@ class KernelBootstrapper:
         self.registry.register(self.speech_runtime)
         await self.speech_runtime.initialize()
         register_runtime_for_health(self.speech_runtime)
+
+        # --- Documents Runtime ---
+        # Generative tier: creates new artifacts and changes nothing existing,
+        # so it needs no undo, sandbox or confirmation and ships in v1. The
+        # safety is structural and lives in ArtifactStore, not here.
+        from artifacts.records import ArtifactRecords, default_db_path
+        from artifacts.service import ArtifactService
+        from artifacts.store import ArtifactStore, default_output_root
+        from runtimes.documents.runtime import DocumentsRuntime
+
+        self.documents_runtime = DocumentsRuntime(
+            ArtifactService(
+                ArtifactRecords(default_db_path()), ArtifactStore(default_output_root())
+            ),
+            self.event_bus,
+        )
+        self.registry.register(self.documents_runtime)
+        await self.documents_runtime.initialize()
+        register_runtime_for_health(self.documents_runtime)
 
     async def shutdown(self):
         print("[Bootstrapper] Shutting down Zaram Kernel...")

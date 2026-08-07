@@ -30,6 +30,8 @@
 /** Where the backend lives. Empty string means same-origin, which in development
  *  is the Vite proxy in `vite.config.js` forwarding `/chat` to 127.0.0.1:8420.
  *  Packaged builds can point this at the bundled backend. */
+import type { Artifact } from './artifactsClient';
+
 const API_BASE = import.meta.env.VITE_ZARAM_API ?? '';
 
 export interface ChatSource {
@@ -44,6 +46,9 @@ export interface ChatSource {
 export type ChatEvent =
   | { type: 'token'; content: string }
   | { type: 'source'; source: ChatSource }
+  /** A file Zaram made. The same record Work draws a row from, so the card in
+   *  the conversation and the row in Work cannot disagree about what exists. */
+  | { type: 'artifact'; artifact: Artifact & { download_url: string } }
   | { type: 'status'; state: string }
   | { type: 'error'; message: string }
   | { type: 'done' };
@@ -232,6 +237,21 @@ function parseLine(line: string): ChatEvent | null {
           title: data.title == null ? null : String(data.title),
         },
       };
+
+    case 'artifact': {
+      // The backend sends the whole artifact record. Trusted for shape, not
+      // for existence: `exists` comes from the backend having stat'd the file,
+      // and the card reads it rather than assuming a written file is there.
+      const artifact = data as unknown as Artifact & { download_url?: string };
+      if (!artifact.id || !artifact.filename) return null;
+      return {
+        type: 'artifact',
+        artifact: {
+          ...artifact,
+          download_url: artifact.download_url ?? `/artifacts/${artifact.id}/download`,
+        },
+      };
+    }
 
     case 'status':
       return { type: 'status', state: String(data.state ?? '') };

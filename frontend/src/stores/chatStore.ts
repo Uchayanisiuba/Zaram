@@ -17,6 +17,7 @@ import {
   type ChatSource,
   type ChatRequest,
 } from '@/services/chatClient';
+import type { Artifact } from '@/services/artifactsClient';
 import { useSystemStore } from '@/stores/systemStore';
 import { useSessionStatusStore } from '@/stores/sessionStatusStore';
 
@@ -32,6 +33,10 @@ export interface ChatMessage {
    *  Empty means the model answered from its own knowledge, which is a
    *  meaningful state and must not be confused with "sources not loaded". */
   sources: ChatSource[];
+  /** Files made during this reply, shown as cards beneath it. Usually empty:
+   *  most replies produce no file, and an empty array is the ordinary case
+   *  rather than a missing one. */
+  artifacts: Artifact[];
   timestamp: number;
   /** Set when this reply failed or was cut short. Any text already received is
    *  kept — a partial answer is still worth showing, provided it is labelled. */
@@ -44,6 +49,9 @@ interface ChatState {
   streamingText: string;
   /** Sources for the in-flight reply. They arrive before the tokens do. */
   streamingSources: ChatSource[];
+  /** Files made during the in-flight reply. Arrive after the tokens, since a
+   *  document is written from the answer rather than alongside it. */
+  streamingArtifacts: Artifact[];
   isStreaming: boolean;
   /** Connection-level failure, as opposed to a failure within one reply. */
   connectionError: string | null;
@@ -65,6 +73,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   messages: [],
   streamingText: '',
   streamingSources: [],
+  streamingArtifacts: [],
   isStreaming: false,
   connectionError: null,
   sessionId: `session-${newId()}`,
@@ -84,6 +93,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           role: 'user',
           text: trimmed,
           sources: [],
+          artifacts: [],
           timestamp: Date.now(),
         },
       ],
@@ -106,6 +116,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     // partial text, and reading it back out of the store mid-teardown is racy.
     let text_ = '';
     const sources: ChatSource[] = [];
+    const artifacts: Artifact[] = [];
     const seen = new Set<string>();
     let replyError: string | undefined;
 
@@ -150,6 +161,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
             break;
           }
 
+          case 'artifact': {
+            // A file was written. It appears under the reply that produced it
+            // and, from the same record, as a row in Work.
+            artifacts.push(event.artifact);
+            set({ streamingArtifacts: [...artifacts] });
+            break;
+          }
+
           case 'error':
             // Reported by the backend. Keep whatever text arrived first.
             replyError = event.message;
@@ -189,7 +208,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     // backend genuinely produced would be worse than showing it labelled.
     set((s) => ({
       messages:
-        text_ || replyError
+        text_ || replyError || artifacts.length
           ? [
               ...s.messages,
               {
@@ -197,6 +216,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 role: 'assistant',
                 text: text_,
                 sources,
+                artifacts,
                 timestamp: Date.now(),
                 error: replyError,
               },
@@ -204,6 +224,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           : s.messages,
       streamingText: '',
       streamingSources: [],
+      streamingArtifacts: [],
       isStreaming: false,
     }));
 
@@ -223,6 +244,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       messages: [],
       streamingText: '',
       streamingSources: [],
+      streamingArtifacts: [],
       isStreaming: false,
       connectionError: null,
       sessionId: `session-${newId()}`,

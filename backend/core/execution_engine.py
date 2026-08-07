@@ -41,10 +41,11 @@ from core.contracts import (
     PlanState,
     TaskPriority,
 )
-from core.dispatcher import ExecutionDispatcher
+from core.dispatcher import ARTIFACT_MARKER, ExecutionDispatcher
 from core.event_bus import EventBus, ZaramEvent
 from core.execution_context import ExecutionContext
-from core.planner import IntentClassification, IntentPlanner
+from core.planner import IntentClassification, IntentPlanner, IntentType
+from core.streaming_events import StreamEvent
 from core.registry import RuntimeRegistry
 from core.scheduler import RuntimeScheduler
 from core.task_queue import TaskQueue
@@ -67,15 +68,21 @@ class ExecutionEngine:
         event_bus: EventBus,
         task_queue: TaskQueue | None = None,
         scheduler: RuntimeScheduler | None = None,
+        semantic_router: Any | None = None,
     ) -> None:
         self._registry = registry
         self._event_bus = event_bus
-        self._planner = IntentPlanner()
+        # None is the ordinary case in tests and any caller that has no
+        # embedder; the planner falls back to keyword classification.
+        self._planner = IntentPlanner(semantic_router=semantic_router)
         self._router = CapabilityRouter(registry)
         self._dispatcher = ExecutionDispatcher(self._router)
         self._task_queue = task_queue
         self._scheduler = scheduler
         self._active_plans: dict[str, ExecutionPlan] = {}
+        #: Ephemeral session state, per rule 7d — never written to the Spine.
+        #: session_id → recent (prompt, answer) pairs.
+        self._session_turns: dict[str, list[tuple[str, str]]] = {}
 
     # ------------------------------------------------------------------
     # Legacy synchronous execution (backward compatible)
@@ -110,6 +117,21 @@ class ExecutionEngine:
                     seen_sources.add(key)
                     yield event
 
+        # "Write that up as a proposal" is a *referential* request: the thing to
+        # write up is the previous turn, and nothing in those five words is
+        # semantically near it. Similarity recall therefore returns nothing
+        # useful and the model fills the gap by inventing — one run produced a
+        # confident document about a "Project Phoenix" that had never been
+        # mentioned, with the real client's name and day rate nowhere in it.
+        # That is the worst possible failure for a tool whose output the user
+        # forwards to a client.
+        #
+        # So a document request carries the recent exchange explicitly. Recall
+        # answers "what is relevant to these words"; this answers "what is
+        # 'that'", and those are different questions.
+        if self._is_document_request(prompt):
+            system_prompt = self._augment_with_recent_turns(system_prompt, session_id)
+
         plan = self._planner.create_plan(prompt)
         plan = self._drop_unavailable_steps(plan)
         plan.state = PlanState.RUNNING
@@ -140,10 +162,35 @@ class ExecutionEngine:
             # not user-facing and must not reach the stream.
             internal = step.capability_id in self.INTERNAL_CAPABILITIES
 
+            # A document step writes up the answer the previous step produced.
+            # The planner could not know that text, so it left a hole; filling
+            # it here is what makes "write that up" mean *that*, rather than
+            # re-answering the question into a file.
+            if step.capability_id.startswith("document.") and not (
+                step.input_data or {}
+            ).get("answer"):
+                step.input_data = dict(step.input_data or {})
+                step.input_data["answer"] = step_results.get("reasoning.generate", "")
+                step.input_data.setdefault("session_id", session_id)
+
             try:
                 for token in self._dispatcher.execute_step(step, model, system_prompt):
                     step_output += token
-                    if not internal:
+                    if internal:
+                        continue
+                    if token.startswith(ARTIFACT_MARKER):
+                        # Becomes a card, never text. Reaching the user as a
+                        # raw marker would be a visible bug, so a malformed
+                        # payload is dropped with a log rather than printed.
+                        try:
+                            yield StreamEvent.artifact(
+                                json.loads(token[len(ARTIFACT_MARKER):].strip())
+                            )
+                        except json.JSONDecodeError:
+                            logger.exception(
+                                "Document step emitted an unparseable artifact marker"
+                            )
+                    else:
                         yield token
 
                 if step_output.strip().startswith("[FALLBACK]") or step_output.strip().startswith("[WARN]"):
@@ -218,6 +265,9 @@ class ExecutionEngine:
         # --- Remember: commit what the user told us to the Spine. ---
         answer = step_results.get("reasoning.generate", "")
         self._remember(prompt, answer, session_id, recalled)
+        # Ephemeral, and separate from the Spine write above. This is what a
+        # later "write that up" resolves against.
+        self._record_exchange(session_id, prompt, answer)
 
         if plan.correlation_id in self._active_plans:
             del self._active_plans[plan.correlation_id]
@@ -227,6 +277,9 @@ class ExecutionEngine:
     # ------------------------------------------------------------------
 
     MAX_RECALL = 5
+
+    #: How many turns of ephemeral session state to keep, per session.
+    MAX_SESSION_TURNS = 8
 
     #: Below this, a memory is not relevant enough to inject or to cite.
     #:
@@ -386,6 +439,74 @@ class ExecutionEngine:
             "used": len(kept),
         })
         return kept
+
+    def _is_document_request(self, prompt: str) -> bool:
+        """Whether this plan will write a file.
+
+        Asked of the classifier rather than pattern-matched here, so the
+        embedding router and this stay in agreement — a second, cruder test
+        would drift from the first the moment an exemplar changed.
+        """
+        try:
+            return (
+                self._planner.classify_intent(prompt).intent_type
+                is IntentType.DOCUMENT
+            )
+        except Exception:
+            return False
+
+    def _record_exchange(self, session_id: str, prompt: str, answer: str) -> None:
+        """Keep the last few turns of this session, in memory only.
+
+        Rule 7d: conversation is ephemeral, and entering the Spine is a
+        decision the system makes. Working state, clarifications and false
+        starts stay in the session — so this is a bounded in-process buffer,
+        not a write to the Spine, and it dies with the process.
+
+        `_remember` deliberately stores the user's *words as a fact* and not
+        the exchange, for reasons written out in its own docstring: storing the
+        exchange made Zaram quote its own replies back. That is the right
+        behaviour for long-term memory and it leaves nothing that can answer
+        "what does 'that' refer to". This buffer answers exactly that and
+        nothing else.
+        """
+        prompt, answer = (prompt or "").strip(), (answer or "").strip()
+        if not prompt or not answer:
+            return
+
+        turns = self._session_turns.setdefault(session_id, [])
+        turns.append((prompt, answer))
+        # Bounded: a long conversation must not grow the process without limit,
+        # and only the recent turns are what "that" can plausibly mean.
+        del turns[:-self.MAX_SESSION_TURNS]
+
+    def _augment_with_recent_turns(
+        self, system_prompt: str, session_id: str, limit: int = 3
+    ) -> str:
+        """Put the last few turns in front of the model, verbatim.
+
+        Verbatim rather than summarised: a summary is another generation, and
+        writing the document from a summary of the answer rather than the
+        answer loses exactly the specifics — figures, names, terms — that make
+        it worth having. The observed failure was a document about a "Project
+        Phoenix" that was never mentioned, written confidently, with the real
+        client's name and day rate nowhere in it.
+
+        Silent when there is nothing: a first-turn document request has no
+        "that" to resolve, and the model writing from the request alone is a
+        weaker document rather than no document.
+        """
+        turns = self._session_turns.get(session_id, [])[-limit:]
+        if not turns:
+            return system_prompt
+
+        lines = ["", "The conversation so far. The document is about this:"]
+        for prompt, answer in turns:
+            lines.append(f"User: {prompt}")
+            lines.append(f"You answered: {answer}")
+
+        logger.info("Engine: gave the document step %d prior turns", len(turns))
+        return system_prompt + "\n".join(lines)
 
     def _augment_system_prompt(self, system_prompt: str, recalled: list[Any]) -> str:
         """Fold recalled memories into the system prompt, with citation markers.
