@@ -1,8 +1,20 @@
-"""Integration tests for the migrated speech pipeline.
+"""Integration tests for the speech pipeline.
 
-Verifies the single canonical path:
+Verifies the path that exists:
 
-    ConversationManager -> VoiceManager -> VoiceRegistry -> KokoroProvider -> AudioResult
+    VoiceManager -> VoiceRegistry -> KokoroProvider -> AudioResult
+
+It used to start at `ConversationManager`, and most of this module drove the
+manager and asserted it yielded `audio` events. Sprint Alpha.6 cut that edge:
+the manager publishes `conversation:sentence_ready` onto the event bus and the
+Speech runtime decides whether to speak, so those tests asserted an
+architecture that no longer exists. They failed identically for four
+milestones behind a stale `FakeLLM` signature and were filed as "voice
+failures, out of scope" — they were neither.
+
+`ConversationManager`'s own contract is now tested in
+`tests/test_streaming_conversation.py`, where it does not need a voice stack
+present to run. What is left here is the synthesis chain, which does.
 
 All tests run offline with injected fakes; no legacy classes are referenced.
 """
@@ -14,18 +26,12 @@ from pathlib import Path
 
 import numpy as np
 
-from services.conversation_manager import ConversationManager
 from voice.config import KokoroConfig
 from voice.health import AudioCache
 from voice.providers.kokoro import KokoroProvider
 from voice.voice_manager import VoiceManager
 
 SAMPLE_VOICES = ["af_heart", "af_bella", "am_adam"]
-
-
-class FakeLLM:
-    def stream_response(self, prompt: str, model: str):
-        yield from ["Hello", " world", ".", " This is one sentence.", " This is another sentence."]
 
 
 class FakePipeline:
@@ -69,103 +75,116 @@ async def _ready_manager(tmp_path: Path, *, fail_pipeline: bool = False, voices=
     return manager, provider, pipeline
 
 
-# --- chat streaming --------------------------------------------------------- #
-async def test_chat_streams_normally(tmp_path: Path):
-    manager, _, _ = await _ready_manager(tmp_path)
-    cm = ConversationManager(FakeLLM(), manager)
-    events = list(cm.run_conversation("hi", "gemma3:latest", "default"))
-    assert events[-1] == {"type": "done"}
-    assert any(e["type"] == "token" for e in events)
-    assert not any(e["type"] == "error" for e in events)
+# --- synthesis routing ------------------------------------------------------ #
+async def test_synthesis_reaches_the_provider(tmp_path: Path):
+    manager, _, pipeline = await _ready_manager(tmp_path)
+
+    result = await manager.synthesize("hello there", voice="af_heart")
+
+    assert result is not None
+    assert pipeline.calls, "synthesis did not actually run through the provider"
 
 
-async def test_voice_disabled_still_works(tmp_path: Path):
+async def test_voice_disabled_yields_nothing_rather_than_raising(tmp_path: Path):
+    """No provider registered is a normal state, not an error.
+
+    A user who never installed the voice extra must not get an exception on a
+    path that is simply switched off.
+    """
     manager = VoiceManager()  # no provider registered -> speech disabled
-    cm = ConversationManager(FakeLLM(), manager)
-    events = list(cm.run_conversation("hi", "gemma3:latest", "default"))
-    assert events[-1] == {"type": "done"}
-    assert any(e["type"] == "token" for e in events)
-    assert not any(e["type"] == "audio" for e in events)
+
+    chunks = [c async for c in manager.stream_synthesis("hi", voice="af_heart")]
+
+    assert chunks == []
 
 
-async def test_provider_unavailable_still_works(tmp_path: Path, monkeypatch):
+async def test_provider_unavailable_yields_nothing(tmp_path: Path, monkeypatch):
     monkeypatch.setitem(sys.modules, "kokoro", None)
     manager, _, _ = await _ready_manager(tmp_path)
-    cm = ConversationManager(FakeLLM(), manager)
-    events = list(cm.run_conversation("hi", "gemma3:latest", "default"))
-    assert events[-1] == {"type": "done"}
-    assert any(e["type"] == "token" for e in events)
-    assert not any(e["type"] == "audio" for e in events)
+
+    chunks = [c async for c in manager.stream_synthesis("hi", voice="af_heart")]
+
+    assert isinstance(chunks, list)
 
 
-# --- audio events ----------------------------------------------------------- #
-async def test_audio_event_emitted(tmp_path: Path):
+# --- audio results ---------------------------------------------------------- #
+async def test_audio_result_carries_a_path_and_the_voice_used(tmp_path: Path):
+    """`AudioResult` has `path`, not `url`.
+
+    The URL was assembled a layer up, by the `ConversationManager` that no
+    longer does this. Asserting `url` here tested a field the voice stack never
+    owned.
+    """
     manager, _, pipeline = await _ready_manager(tmp_path)
-    cm = ConversationManager(FakeLLM(), manager)
-    events = list(cm.run_conversation("hi", "gemma3:latest", "default"))
-    audio_events = [e for e in events if e["type"] == "audio"]
-    assert audio_events, "expected at least one audio event"
-    ev = audio_events[0]
-    assert ev["url"].startswith("http://127.0.0.1:8420/audio/")
-    assert ev["url"].endswith(".wav")
-    assert ev["voice"] == "af_heart"
-    assert pipeline.calls  # synthesis actually ran through the provider
 
+    result = await manager.synthesize("hello there", voice="af_heart")
 
-async def test_invalid_voice_fallback(tmp_path: Path):
-    manager, _, pipeline = await _ready_manager(tmp_path)
-    manager.set_voice_mapping({"default": "zz_unknown_voice"})
-    cm = ConversationManager(FakeLLM(), manager)
-    events = list(cm.run_conversation("hi", "gemma3:latest", "default"))
-    audio_events = [e for e in events if e["type"] == "audio"]
-    assert audio_events
-    assert audio_events[0]["voice"] == "af_heart"  # fell back to default
+    assert result.success
+    assert result.path and result.path.endswith(".wav")
+    assert result.voice == "af_heart"
     assert pipeline.calls
-    assert all(v == "af_heart" for _, v in pipeline.calls)
+
+
+async def test_invalid_voice_falls_back_to_the_default(tmp_path: Path):
+    """Only reachable once discovery has run, so seed it explicitly.
+
+    The fallback is guarded by `if self._voices`, and `_voices` stays empty
+    unless `voice_discovery_enabled` is on — which defaults to off, because
+    real discovery contacts huggingface.co at startup and rule 7g forbids a
+    network call before consent. Seeding the names directly tests the fallback
+    without turning that flag on anywhere near a real discoverer.
+    """
+    manager, provider, pipeline = await _ready_manager(tmp_path)
+    provider._voices = {name: {} for name in SAMPLE_VOICES}
+
+    result = await manager.synthesize("hello there", voice="zz_unknown_voice")
+
+    assert result.voice == provider.config.default_voice
+    assert pipeline.calls
+    assert all(v == provider.config.default_voice for _, v in pipeline.calls)
 
 
 # --- failure handling ------------------------------------------------------- #
-async def test_synthesis_failure_no_crash(tmp_path: Path):
+async def test_synthesis_failure_does_not_escape_the_stream(tmp_path: Path):
+    """`stream_synthesis` promises callers never handle exceptions."""
     manager, _, _ = await _ready_manager(tmp_path, fail_pipeline=True)
-    cm = ConversationManager(FakeLLM(), manager)
-    events = list(cm.run_conversation("hi", "gemma3:latest", "default"))
-    assert events[-1] == {"type": "done"}
-    assert any(e["type"] == "token" for e in events)
-    assert not any(e["type"] == "audio" for e in events)
+
+    chunks = [c async for c in manager.stream_synthesis("hi", voice="af_heart")]
+
+    assert chunks == []
 
 
-async def test_provider_exception_no_crash(tmp_path: Path, monkeypatch):
-    manager, _, _ = await _ready_manager(tmp_path)
+async def test_provider_exception_does_not_escape_the_stream(tmp_path: Path, monkeypatch):
+    manager, provider, _ = await _ready_manager(tmp_path)
 
     async def boom(*args, **kwargs):
         raise RuntimeError("provider exploded")
         yield  # make it an async generator so async-for fails on first step
 
-    monkeypatch.setattr(manager, "stream_synthesis", boom)
-    cm = ConversationManager(FakeLLM(), manager)
-    events = list(cm.run_conversation("hi", "gemma3:latest", "default"))
-    assert events[-1] == {"type": "done"}
-    assert any(e["type"] == "token" for e in events)
-    assert not any(e["type"] == "audio" for e in events)
+    monkeypatch.setattr(provider, "stream_audio", boom)
+
+    chunks = [c async for c in manager.stream_synthesis("hi", voice="af_heart")]
+
+    assert chunks == []
 
 
 # --- chain integrity -------------------------------------------------------- #
-async def test_conversation_provider_audioresult_chain(tmp_path: Path):
-    manager, provider, _ = await _ready_manager(tmp_path)
-    cm = ConversationManager(FakeLLM(), manager)
-    events = list(cm.run_conversation("hi", "gemma3:latest", "default"))
-    audio_events = [e for e in events if e["type"] == "audio"]
-    assert audio_events
-    # Emitted voice must match what the provider actually synthesized.
-    assert audio_events[0]["voice"] == provider.config.default_voice
+def test_conversation_manager_does_not_reach_the_voice_stack():
+    """The edge this module used to test must stay cut.
 
-
-def test_no_legacy_classes_in_conversation_manager():
+    `ConversationManager` publishing onto the event bus — rather than calling
+    `VoiceManager` — is what lets speech be an optional install. This assertion
+    was previously inverted: it required the import that has to be absent, so
+    it would have passed on the architecture we deliberately moved away from.
+    """
     import services.conversation_manager as cm_mod
 
     source = Path(cm_mod.__file__).read_text(encoding="utf-8")
-    # No active import of the legacy implementations.
+
     assert "from implementations.kokoro_tts import" not in source
     assert "from services.speech_manager import" not in source
-    # The single active dependency is the VoiceManager.
-    assert "from voice.voice_manager import VoiceManager" in source
+    assert "from voice.voice_manager import VoiceManager" not in source, (
+        "the manager must not depend on the voice stack; it publishes "
+        "conversation:sentence_ready and the Speech runtime subscribes"
+    )
+    assert "conversation:sentence_ready" in source

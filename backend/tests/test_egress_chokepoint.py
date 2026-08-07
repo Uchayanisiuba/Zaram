@@ -37,7 +37,6 @@ GATE_MODULES = {
 #: entries under thousands of local calls.
 LOCAL_ONLY = {
     "implementations/ollama_llm.py": "Ollama on localhost:11434",
-    "interfaces/implementation/ollama_llm.py": "Ollama on localhost:11434",
     "runtimes/models/engines/ollama_engine.py": "Ollama on localhost:11434",
     "runtimes/memory/embeddings.py": "Ollama bge-m3 on localhost:11434",
     "providers/discoverers/ollama.py": "Ollama on localhost:11434",

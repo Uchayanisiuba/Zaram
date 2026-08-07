@@ -131,24 +131,37 @@ class TestPromptFormatting:
 
 
 class TestEndToEndSearch:
-    def test_chat_endpoint_triggers_single_search(self):
-        from main import app
+    """`/chat` must not search on its own initiative.
+
+    This asserted the opposite — that a search-shaped question triggered
+    exactly one call to `knowledge_service.search_knowledge` from the endpoint.
+    Two things have since made that wrong rather than merely stale:
+
+    1. Search moved out of `main.py` into the planner, behind `chat_router`.
+       The test mocks `chat_router`, so the path it was watching cannot run at
+       all and the call count could only ever be zero.
+    2. Web search became default-deny (rule 5, and the sequencing commitment
+       that the egress log and per-source policy come first). A test demanding
+       that a question reach the internet now asserts a rule violation.
+
+    So it is inverted: the contract worth holding is that nothing leaves.
+    """
+
+    def test_chat_does_not_search_when_web_search_is_off(self, monkeypatch):
         from fastapi.testclient import TestClient
 
-        client = TestClient(app)
-
-        fake_results = [
-            {"title": "UE5.5 Released", "url": "https://unrealengine.com", "snippet": "Unreal Engine 5.5 is now available.", "published": "2026-07-22"},
-        ]
-        fake_search = FakeKnowledgeSearch(fake_results)
-
         import main as main_module
-        original_search = main_module._format_search_results
+        from main import app
 
-        def fake_search_knowledge(query, persona="zaram_prime"):
-            return fake_search.search_knowledge(query, persona)
+        monkeypatch.delenv("ZARAM_WEB_SEARCH", raising=False)
 
-        with patch("knowledge.knowledge_service.search_knowledge", fake_search_knowledge):
+        client = TestClient(app)
+        fake_search = FakeKnowledgeSearch([
+            {"title": "UE5.5 Released", "url": "https://unrealengine.com",
+             "snippet": "Unreal Engine 5.5 is now available.", "published": "2026-07-22"},
+        ])
+
+        with patch("knowledge.knowledge_service.search_knowledge", fake_search.search_knowledge):
             with patch.object(main_module, "chat_router") as mock_router:
                 async def fake_stream(text, model, system_prompt):
                     yield "data: {\"type\": \"token\", \"content\": \"test\"}\n\n"
@@ -162,5 +175,25 @@ class TestEndToEndSearch:
                     "persona": "zaram_prime",
                 })
 
-                assert fake_search.call_count == 1
-                assert response.status_code == 200
+        assert response.status_code == 200
+        assert fake_search.call_count == 0, (
+            "a search-shaped question reached the network with web search off"
+        )
+
+    def test_the_planner_wants_search_but_the_gate_refuses(self, monkeypatch):
+        """Distinguishes 'not wanted' from 'wanted and denied'.
+
+        Without this the test above passes just as happily on a build where
+        search classification is broken, which would hide the gate rather than
+        prove it.
+        """
+        from core.planner import web_search_enabled
+
+        question = "What is the latest Unreal Engine version?"
+
+        monkeypatch.delenv("ZARAM_WEB_SEARCH", raising=False)
+        assert needs_search(question), "the classifier should want search here"
+        assert web_search_enabled() is False
+
+        monkeypatch.setenv("ZARAM_WEB_SEARCH", "1")
+        assert web_search_enabled() is True

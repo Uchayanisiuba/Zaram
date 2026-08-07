@@ -21,15 +21,14 @@ class ModelsService:
         default", which is now the provider layer's vetted selection.
         """
         full_prompt = f"{user_text}"
-        for chunk in self.engine.stream_response(full_prompt, system_prompt, model):
-            parsed = self._parse_sse(chunk)
-            if parsed and parsed.get("type") == "token":
-                yield parsed.get("content", "")
-            elif parsed and parsed.get("type") == "error":
-                yield f"[ERROR] {parsed.get('content', '')}"
-        return
+        # The engine yields plain text tokens (`LLMEngine`), errors included as
+        # a chunk prefixed with ERROR_PREFIX. This used to parse SSE frames the
+        # engine had just built, so both sides had to agree on a wire format
+        # that never went over a wire.
+        yield from self.engine.stream_response(full_prompt, system_prompt, model)
 
     def _parse_sse(self, chunk: str) -> dict | None:
+        """Parse one SSE frame. Only the vision path still speaks SSE."""
         import json
         trimmed = chunk.strip()
         if not trimmed.startswith("data:"):
