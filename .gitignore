@@ -77,6 +77,17 @@ backend/egress.db*
 egress-policy.json
 backend/egress-policy.json
 
+# Artifact records, and the files they describe. Both are the user's own work —
+# their invoices, proposals and client spreadsheets. The database holds the
+# provenance and the full HTML of every document generated, which makes it as
+# private as the Spine, and the output directory holds the documents themselves.
+artifacts.db
+artifacts.db-journal
+artifacts.db-wal
+artifacts.db-shm
+backend/artifacts.db*
+backend/generated/
+
 # Generated audio. Produced by the speech runtime at runtime, not source.
 backend/audio/
 backend/audio_clips/

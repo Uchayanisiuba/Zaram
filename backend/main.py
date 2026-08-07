@@ -674,6 +674,300 @@ async def delete_memory(record_id: str):
     return {"deleted": True, "id": record_id}
 
 
+# --- ARTIFACTS -------------------------------------------------------------
+#
+# Backs the Work surface and the in-conversation file cards. Both read the same
+# records, because they are the same thing shown twice — Work is "everything I
+# made", a file card is "the thing I just made", and letting them diverge is how
+# a document appears in one and not the other.
+
+from artifacts import export as artifact_export  # noqa: E402
+from artifacts.records import ArtifactRecords, default_db_path  # noqa: E402
+from artifacts.service import ArtifactService  # noqa: E402
+from artifacts.store import ArtifactStore, default_output_root  # noqa: E402
+
+artifact_service = ArtifactService(
+    ArtifactRecords(default_db_path()),
+    ArtifactStore(default_output_root()),
+)
+
+
+def _artifact_json(artifact, *, include_html: bool = False) -> Dict[str, Any]:
+    """One artifact, shaped for the frontend.
+
+    `html` is omitted by default. It is the re-export source and can be large,
+    and a list of twenty documents would carry twenty full documents to draw
+    twenty rows.
+    """
+    payload = artifact.to_dict()
+    payload["exists"] = bool(artifact.path) and os.path.isfile(artifact.path)
+    if include_html:
+        payload["html"] = artifact.html
+    return payload
+
+
+@app.get("/artifacts")
+async def list_artifacts(
+    project_id: str = "",
+    kind: str = "",
+    conversation_id: str = "",
+    limit: int = 200,
+    offset: int = 0,
+):
+    """Everything the user has made, newest first.
+
+    Returns what is actually stored. If nothing has been generated this returns
+    an empty list, and Work says so — there is no sample data behind this
+    endpoint, and the module that used to provide some is gone.
+    """
+    artifacts = artifact_service.records.list(
+        project_id=project_id or None,
+        kind=kind or None,
+        conversation_id=conversation_id or None,
+        limit=limit,
+        offset=offset,
+    )
+    return {
+        "total": artifact_service.records.count(
+            project_id=project_id or None, kind=kind or None
+        ),
+        "offset": offset,
+        "limit": limit,
+        "artifacts": [_artifact_json(a) for a in artifacts],
+    }
+
+
+# Declared before `/artifacts/{artifact_id}`: FastAPI matches in declaration
+# order, so a static segment registered after a path parameter is unreachable —
+# "projects" would be read as an artifact id and 404.
+@app.get("/artifacts/projects")
+async def list_artifact_projects():
+    """Projects that actually hold artifacts, with counts.
+
+    Derived from the artifacts themselves rather than stored separately, so Work
+    cannot offer a filter that leads to an empty list.
+    """
+    return {"projects": artifact_service.records.projects()}
+
+
+@app.get("/artifacts/formats")
+async def list_artifact_formats():
+    """Which export formats work on this machine, and why the others do not.
+
+    CLAUDE.md: disabled capabilities are visible, not silent. PDF is expected to
+    be unavailable on Windows until the installer carries the GTK runtime, and
+    the UI is meant to show that reason rather than hide the option.
+    """
+    return {
+        "formats": [
+            {
+                "extension": extension,
+                "label": artifact_export.get(extension).label,
+                "available": availability.ok,
+                "reason": availability.reason,
+                "remedy": availability.remedy,
+            }
+            for extension, availability in artifact_export.formats()
+        ]
+    }
+
+
+@app.get("/artifacts/{artifact_id}")
+async def get_artifact(artifact_id: str, include_html: bool = False):
+    artifact = artifact_service.records.get(artifact_id)
+    if artifact is None:
+        raise HTTPException(status_code=404, detail="No such artifact")
+
+    return _artifact_json(artifact, include_html=include_html)
+
+
+@app.get("/artifacts/{artifact_id}/download")
+async def download_artifact(artifact_id: str):
+    """The file itself.
+
+    The path comes from the record, not from the request, so there is nothing
+    user-controlled in it — but it is still checked for containment before being
+    served. The store confines every write to the output root; this asserts the
+    same thing on the way out, because a record written by an older build is an
+    input this endpoint does not control.
+    """
+    artifact = artifact_service.records.get(artifact_id)
+    if artifact is None:
+        raise HTTPException(status_code=404, detail="No such artifact")
+    if not artifact.path:
+        raise HTTPException(status_code=404, detail="No file was written")
+
+    resolved = os.path.abspath(artifact.path)
+    root = os.path.abspath(str(artifact_service.store.root))
+    if os.path.commonpath([resolved, root]) != root:
+        raise HTTPException(status_code=403, detail="Outside the output directory")
+    if not os.path.isfile(resolved):
+        # The record exists and the file does not. Say which, rather than a bare
+        # 404 that reads as "no such document" — the user may have moved it, and
+        # that is a different problem from Zaram having lost it.
+        raise HTTPException(
+            status_code=410,
+            detail="The record is here but the file is not at the path it was written to",
+        )
+
+    exporter_media = {
+        e: artifact_export.get(e).media_type for e in artifact_export.EXPORTERS
+    }
+    extension = os.path.splitext(resolved)[1].lstrip(".").lower()
+
+    return FileResponse(
+        resolved,
+        media_type=exporter_media.get(extension, "application/octet-stream"),
+        filename=artifact.filename,
+    )
+
+
+class GenerateClaim(BaseModel):
+    id: str
+    source_id: str
+    excerpt: str
+    source_excerpt: str = ""
+    source_revision: str | None = None
+
+
+class GenerateSource(BaseModel):
+    kind: str
+    url: str | None = None
+    title: str | None = None
+
+
+class GenerateBody(BaseModel):
+    title: str
+    #: Prose. A string is a plain paragraph; an object with a matching claim id
+    #: is a sentence traceable to a fact and gets an anchor in the output.
+    blocks: list[Any] = []
+    kind: str = "document"
+    fmt: str | None = None
+    filename: str = ""
+    project_id: str = ""
+    conversation_id: str = ""
+    conversation_title: str = ""
+    sources: list[GenerateSource] = []
+    claims: list[GenerateClaim] = []
+    # Spreadsheet only.
+    header: list[str] = []
+    rows: list[list[Any]] = []
+    caption: str = ""
+
+
+@app.post("/artifacts/generate")
+async def generate_artifact(body: GenerateBody):
+    """Make a document, spreadsheet or chart, and record it.
+
+    The seam between "a model produced some prose" and "the user has a file".
+    Generative tier: it creates new artifacts and changes nothing that already
+    exists, so it needs no undo, no sandbox and no confirmation — the safety is
+    structural. Files land in one output directory, the write path cannot
+    overwrite or delete, and a name collision increments.
+
+    Not yet reachable from natural language. Saying "write that up as a
+    proposal" in chat does not trigger this — that needs a capability registered
+    with the router, which is separate work. This endpoint is the thing that
+    capability will call.
+    """
+    from artifacts.contracts import ArtifactKind, ArtifactSource, Claim
+
+    try:
+        kind = ArtifactKind(body.kind)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown kind {body.kind!r}; use one of "
+            f"{[k.value for k in ArtifactKind]}",
+        ) from None
+
+    if body.fmt:
+        try:
+            availability = artifact_export.get(body.fmt).availability()
+        except KeyError:
+            raise HTTPException(
+                status_code=400, detail=f"No exporter for {body.fmt!r}"
+            ) from None
+        if not availability.ok:
+            # 503, not 500: the request is fine and the machine cannot serve it.
+            # The reason and the remedy go back so the UI can say which.
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "reason": availability.reason,
+                    "remedy": availability.remedy,
+                },
+            )
+
+    sources = [ArtifactSource(**s.model_dump()) for s in body.sources]
+    claims = [Claim(**c.model_dump()) for c in body.claims]
+    by_id = {c.id: c for c in claims}
+
+    common = dict(
+        title=body.title,
+        filename=body.filename,
+        project_id=body.project_id,
+        conversation_id=body.conversation_id,
+        conversation_title=body.conversation_title,
+        sources=sources,
+        claims=claims,
+    )
+
+    try:
+        if kind == ArtifactKind.SPREADSHEET:
+            artifact = artifact_service.create_spreadsheet(
+                header=body.header, rows=body.rows, caption=body.caption,
+                fmt=body.fmt, **common
+            )
+        else:
+            # A block naming a claim becomes that claim, so the anchor and the
+            # Sources entry agree. A block naming one that was not supplied is
+            # rejected rather than silently written as plain prose — an
+            # unanchored sentence that was meant to be cited is the failure the
+            # whole provenance chain exists to prevent.
+            blocks: list[Any] = []
+            for block in body.blocks:
+                if isinstance(block, dict):
+                    claim_id = block.get("claim_id") or block.get("id")
+                    if claim_id not in by_id:
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"block cites claim {claim_id!r}, which is not in claims",
+                        )
+                    blocks.append(by_id[claim_id])
+                else:
+                    blocks.append(str(block))
+
+            artifact = artifact_service.create_document(
+                blocks=blocks, kind=kind, fmt=body.fmt, **common
+            )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    print(f"[Artifacts] Wrote {artifact.filename} ({artifact.size_bytes} bytes)")
+    return _artifact_json(artifact)
+
+
+class RememberBody(BaseModel):
+    remember: bool | None = None
+
+
+@app.post("/artifacts/{artifact_id}/remember")
+async def set_artifact_remember(artifact_id: str, body: RememberBody):
+    """The "Don't remember this" override on a file card.
+
+    `null` clears the override rather than setting it to false: "I have not
+    decided" and "no" are different answers, and only the first is allowed to be
+    changed later by a default.
+    """
+    if not artifact_service.records.set_remember_override(artifact_id, body.remember):
+        raise HTTPException(status_code=404, detail="No such artifact")
+
+    return {"id": artifact_id, "remember_override": body.remember}
+
+
 AUDIO_CACHE_DIR = os.path.abspath("audio_cache")
 
 
