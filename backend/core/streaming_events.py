@@ -31,6 +31,9 @@ class EventType(str, Enum):
     PLAN_COMPLETE = "plan_complete"
     RETRY = "retry"
     CANCEL = "cancel"
+    #: A file Zaram made. Rendered as a card in the conversation and, from the
+    #: same record, as a row in Work.
+    ARTIFACT = "artifact"
 
 
 @dataclass
@@ -86,6 +89,21 @@ class StreamEvent:
                 "url": url,
                 "title": title,
             },
+            correlation_id=correlation_id,
+        )
+
+    @staticmethod
+    def artifact(record: dict, correlation_id: str = "") -> StreamEvent:
+        """A generated file, as a card in the conversation.
+
+        Carries the whole artifact record rather than a URL, because the card
+        shows what Work shows — filename, kind, sources, claims — and a card
+        that had to fetch each of those would render empty first and then
+        rearrange itself under the user.
+        """
+        return StreamEvent(
+            type=EventType.ARTIFACT,
+            data=record,
             correlation_id=correlation_id,
         )
 

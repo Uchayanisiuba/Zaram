@@ -43,6 +43,31 @@ def web_search_enabled() -> bool:
     return os.getenv("ZARAM_WEB_SEARCH", "").strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _document_body_prompt(request: str) -> str:
+    """Turn "write that up as a proposal" into an instruction that writes it.
+
+    Passing the user's words straight to the model produces a reply *about* the
+    request rather than the document: asked to "write that up as a proposal"
+    with no further framing, a local model answered by describing its own
+    operating protocol, and that text became the file. The request is an
+    instruction to Zaram; the model needs the instruction Zaram derives from it.
+
+    Deliberately not a persona or a template. The model already has the
+    conversation and whatever recall injected; this only says what shape the
+    output must take and what must not be in it. A preamble like "Here is your
+    proposal:" is not a formatting nuisance — it becomes the document's first
+    paragraph and, through `_title_from`, its filename.
+    """
+    return (
+        f"The user asked: {request}\n\n"
+        "Write the document itself, based on what we have discussed. "
+        "Output only the body text, as plain paragraphs separated by blank "
+        "lines. Do not add a preamble, do not explain what you are about to "
+        "write, and do not describe yourself. Start with the document's title "
+        "on its own line."
+    )
+
+
 class IntentType(Enum):
     """High-level intent categories used for routing and planning."""
     CONVERSATION = "conversation"
@@ -52,6 +77,8 @@ class IntentType(Enum):
     FILESYSTEM = "filesystem"
     TOOL = "tool"
     MULTI_STEP = "multi_step"
+    #: "Write that up as a proposal." Produces a file, generative tier.
+    DOCUMENT = "document"
     UNKNOWN = "unknown"
 
 
@@ -146,8 +173,30 @@ class IntentRouter:
         """
         return cls._matcher(keywords).findall(prompt_lower)
 
+    def __init__(self, event_bus: Any | None = None, semantic_router: Any | None = None) -> None:
+        """`semantic_router` is optional so every existing caller still works.
+
+        CLAUDE.md routes with embeddings; this class was keyword-based. Rather
+        than replacing it, embeddings run *first* and keywords remain the
+        fallback — because the embedder degrades to a hash backend when Ollama
+        is unreachable, and a keyword router is predictable where similarity
+        over hash vectors is arbitrary. Deleting the keywords would have made
+        an Ollama outage into a broken product rather than a duller one.
+        """
+        self._event_bus = event_bus
+        self._semantic = semantic_router
+
     def classify(self, prompt: str) -> IntentClassification:
-        """Classify a user prompt into an intent."""
+        """Classify a user prompt into an intent.
+
+        Embeddings first, keywords second. The semantic router returns None
+        when it is not confident or not running semantically, which is a
+        deliberate handback rather than a failure — see `core.retrieval.router`.
+        """
+        semantic = self._classify_semantically(prompt)
+        if semantic is not None:
+            return semantic
+
         # Strip search marker so keyword matching doesn't pick up "search" from the marker
         search_prompt = prompt
         if SEARCH_MARKER in prompt:
@@ -248,6 +297,80 @@ class IntentRouter:
             },
         )
 
+    #: Intent name from the exemplar set → the capabilities that serve it.
+    #: The exemplar file is data a user may edit, so a name that no longer maps
+    #: to anything must not take the request down — see the `.get` below.
+    _SEMANTIC_CAPABILITIES: dict[str, list[str]] = {
+        "document": ["document.generate"],
+        "vision": ["vision.analyze"],
+        "speech": ["speech.tts"],
+        "filesystem": ["filesystem.search"],
+        "tool": ["tool.terminal"],
+        "search": ["knowledge.search", "reasoning.generate"],
+        "conversation": ["reasoning.generate"],
+    }
+
+    def _classify_semantically(self, prompt: str) -> IntentClassification | None:
+        """Route by similarity to task exemplars, or hand back to keywords.
+
+        Returns None for every case the caller should handle the old way: no
+        router configured, the embedder not running semantically, nothing above
+        the floor, or two intents too close to separate. That is a handback,
+        not an error — see `core.retrieval.router`.
+        """
+        if self._semantic is None:
+            return None
+
+        try:
+            decision = self._semantic.route(prompt)
+        except Exception:
+            # Routing must never be the thing that fails a request. A broken
+            # index means duller classification, not no answer.
+            logger.exception("Semantic routing failed; falling back to keywords")
+            return None
+
+        if decision is None:
+            return None
+
+        try:
+            intent_type = IntentType(decision.intent)
+        except ValueError:
+            logger.warning(
+                "Exemplars name intent %r, which is not an IntentType", decision.intent
+            )
+            return None
+
+        capabilities = self._SEMANTIC_CAPABILITIES.get(
+            decision.intent, ["reasoning.generate"]
+        )
+
+        # Search stays gated the same way it is for the keyword path: the
+        # classifier may want it, and nothing leaves the machine until the
+        # per-source policy exists. Routing more accurately must not become a
+        # route around rule 5.
+        requires_search = decision.intent == "search" and web_search_enabled()
+        if decision.intent == "search" and not requires_search:
+            capabilities = ["reasoning.generate"]
+
+        return IntentClassification(
+            intent_type=intent_type,
+            confidence=decision.confidence,
+            capabilities=capabilities,
+            requires_search=requires_search,
+            requires_vision=decision.intent == "vision",
+            requires_speech=decision.intent == "speech",
+            metadata={
+                "router": "semantic",
+                # The legible half. CLAUDE.md: show routing decisions in plain
+                # language, with the evidence behind them.
+                "reason": decision.reason,
+                "exemplar": decision.exemplar,
+                "runner_up": decision.runner_up,
+                "runner_up_score": decision.runner_up_score,
+                "scores": decision.scores,
+            },
+        )
+
     def get_capability_for_intent(self, intent: IntentType) -> str:
         """Return the primary capability for an intent type."""
         mapping = {
@@ -270,8 +393,12 @@ class IntentPlanner:
     an execution plan that the scheduler can dispatch.
     """
 
-    def __init__(self, router: IntentRouter | None = None) -> None:
-        self._router = router or IntentRouter()
+    def __init__(
+        self,
+        router: IntentRouter | None = None,
+        semantic_router: Any | None = None,
+    ) -> None:
+        self._router = router or IntentRouter(semantic_router=semantic_router)
 
     def classify_intent(self, prompt: str) -> IntentClassification:
         """Classify a user prompt into an intent."""
@@ -284,7 +411,31 @@ class IntentPlanner:
 
         plan_steps: list[ExecutionStep] = []
 
-        if classification.requires_search:
+        if classification.intent_type is IntentType.DOCUMENT:
+            # Two steps, in this order, because the document is made *from the
+            # answer* rather than from the request. Generating straight from
+            # the prompt would write up the user's own question.
+            #
+            # `answer` is left empty because the planner cannot know it yet;
+            # the engine fills it from the first step's output. The empty
+            # string is the signal that there is something to fill.
+            plan_steps = [
+                ExecutionStep(
+                    capability_id="reasoning.generate",
+                    input_data={"prompt": _document_body_prompt(prompt)},
+                    depends_on=[],
+                ),
+                ExecutionStep(
+                    # The *user's* words, not the rewritten instruction: the
+                    # runtime reads them to decide whether "spreadsheet" or
+                    # "invoice" was asked for, and the instruction below would
+                    # match none of them.
+                    capability_id="document.generate",
+                    input_data={"prompt": prompt, "answer": ""},
+                    depends_on=[0],
+                ),
+            ]
+        elif classification.requires_search:
             plan_steps = [
                 ExecutionStep(
                     capability_id="knowledge.search",

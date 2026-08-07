@@ -23,6 +23,11 @@ from core.capability_router import CapabilityRouter
 from core.contracts import ExecutionStep
 from core.execution_context import ExecutionContext
 
+#: Prefix for the one marker line a document step emits. Defined here and
+#: imported by the engine so the producer and the consumer cannot drift — a
+#: marker that only one side knows about is a marker rendered to the user.
+ARTIFACT_MARKER = "[ARTIFACT]"
+
 logger = logging.getLogger(__name__)
 
 
@@ -80,6 +85,24 @@ class ExecutionDispatcher:
                             yield f"[OK] {step.capability_id} completed\n"
                     else:
                         yield f"[OK] {step.capability_id} completed\n"
+                elif step.capability_id.startswith("document."):
+                    # The artifact record travels as one marker line, which the
+                    # engine turns into a StreamEvent. Same shape as `[AUDIO]`
+                    # above, and for the same reason: this generator is typed
+                    # as yielding strings and several callers rely on that.
+                    #
+                    # The engine converts it before anything user-facing, so
+                    # the marker never reaches a screen. If it ever does, that
+                    # is a missing branch in the engine, not cosmetic.
+                    if isinstance(result, dict) and result.get("success") and result.get("artifact"):
+                        yield ARTIFACT_MARKER + json.dumps(result["artifact"]) + "\n"
+                    else:
+                        error = (
+                            result.get("error", "unknown")
+                            if isinstance(result, dict)
+                            else "unknown"
+                        )
+                        yield f"[FALLBACK] {step.capability_id} failed: {error}\n"
                 elif isinstance(result, dict) and "error" in result:
                     yield f"[FALLBACK] {step.capability_id} failed: {result['error']}\n"
                 else:

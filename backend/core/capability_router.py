@@ -40,6 +40,10 @@ class IntentBasedRouter:
         "agent": ["agent.execute"],
         "vision": ["vision.analyze"],
         "speech": ["speech.tts", "speech.stream"],
+        #: Generative tier. No fallback to reasoning.generate: if the documents
+        #: runtime is not registered, the honest outcome is a stated failure,
+        #: not a chat reply where the user expected a file.
+        "document": ["document.generate"],
     }
 
     @classmethod

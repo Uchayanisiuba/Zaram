@@ -13,7 +13,7 @@ accurate — it is the first thing anyone reads.
 
 ## Current state — 6 August 2026
 
-**Suite:** 1128 collected · 1101 passed · **27 failed** on a full dev install,
+**Suite:** 1161 collected · 1134 passed · **27 failed** on a full dev install,
 in ~2m. The 27 are unchanged and pre-existing — listed under Known broken.
 The base-install figures are stale: the 95 new artifact tests should all pass
 there too, since their dependencies are in the base requirements, but that has
@@ -24,7 +24,7 @@ not been measured. Previously: 951 passed · 13 failed · 52 skipped.
 optional 905 MB extra. If that 50 MB has to come back, the split is charts-only
 — .docx, .md and .xlsx together are 2 MB, and matplotlib is the whole cost.
 
-**In flight: M9b and Session 4, both uncommitted at time of writing.**
+**M9b and Session 4 are committed.**
 `backend/artifacts/` now has the model, the write path, the HTML layer,
 `export/` (Markdown, .docx, .xlsx, PNG), `records.py` (SQLite) and
 `service.py`. `main.py` serves `/artifacts`. Work reads real records and
@@ -35,12 +35,17 @@ it is blocked on packaging rather than on code — see Open questions.
 over HTTP, listed, previewed and downloaded through the Vite dev proxy on the
 same path the browser uses.
 
-**Not done: nothing generates from chat.** Saying "write that up as a proposal"
-does not reach any of this. See M9b remaining.
+**Generation is reachable from chat.** "Write that up as a proposal" routes to
+`document.generate`, writes a .docx grounded in the conversation, and returns
+it as a card in the transcript and a row in Work. M9b's acceptance criterion
+is met.
 
-**Last commits:** artifacts write path → Work surface → dependency removals →
-packaging split → VRAM detection → shell/orbit work. The exporters, records,
-service, routes and Work rewiring are **not yet committed**.
+**Routing is embedding-based.** `core/retrieval/` embeds the query with bge-m3
+and compares against task exemplars. Keywords remain the fallback.
+
+**Last commits:** semantic routing + chat-reachable generation → Work reads
+real artifacts → the exporters → artifacts write path → Work surface →
+dependency removals → packaging split → VRAM detection.
 
 ### Decisions taken that are not yet obvious from the code
 
@@ -101,6 +106,55 @@ service, routes and Work rewiring are **not yet committed**.
   permissions. HTML is the source of truth, so the preview *is* what the file
   was rendered from — not a second rendering that can disagree with it.
 
+### Routing and generation
+
+`core/retrieval/` is **one index with two decision rules**, built that way so
+MCP tool selection lands on it rather than beside it. Routing needs a decision
+(one winner, above a floor, with the margin over the runner-up as confidence);
+tool selection needs a shortlist (top-k, no floor). `search()` ranks and stops;
+both rules sit on top as thin functions.
+
+For MCP, what already holds: namespaces with independent drop/re-register (a
+server disconnects, its tools stop being offered), a content-hash embedding
+cache (a reconnect re-registering 200 unchanged descriptions costs nothing),
+and a dimension lock (cosine across two embedders is meaningless, not weaker,
+so the index refuses). **What must never change: a retrieval score authorises
+nothing.** A tool description is third-party text and can be written to sit
+near every query; retrieval produces a shortlist, the model chooses, the risk
+tier gate still runs.
+
+**Keywords remain the fallback and should stay.** The embedder degrades to a
+hash backend when Ollama is unreachable, and similarity over hash vectors is
+arbitrary rather than merely worse. The router reports that and hands back.
+
+Four bugs stood between "every piece works" and "the feature works", and all
+four were only visible end to end:
+
+1. **The reasoning step got the literal prompt.** Asked to "write that up as a
+   proposal" with no framing, the model described its own operating protocol
+   and that text became the file. The planner now derives a writing
+   instruction; the *user's* words still reach the runtime, which reads them
+   for "spreadsheet" or "invoice".
+2. **Recall could not resolve "that".** Similarity against five referential
+   words retrieves nothing, and the model invented a whole client — one run
+   produced a confident document about a "Project Phoenix" with the real
+   client's name and day rate nowhere in it. Fixed with an **ephemeral session
+   buffer on the engine** (rule 7d: session state and the Spine are separate
+   stores). `_remember` deliberately stores the user's words as a fact and not
+   the exchange, which is right for memory and leaves nothing that can answer
+   "what is 'that'".
+3. **The card lacked `exists`.** The `/artifacts` listing had it and the card
+   did not, so a card for a file written a second earlier said "file not found
+   where it was written".
+4. **The title printed two or three times**, and Markdown `**` reached the
+   .docx as literal asterisks.
+
+**Charts from chat are refused, deliberately.** A chart is a claim about
+numbers and the runtime has prose; inventing figures to plot would be worse
+than refusing, and quietly returning a document nobody asked for would be too.
+The refusal names what is missing and offers what works. A real chart path
+arrives with the business layer, where figures come from invoices.
+
 ### Open questions
 
 - **Dev tooling still ships in the base install** — mypy, ruff, pytest,
@@ -124,8 +178,6 @@ service, routes and Work rewiring are **not yet committed**.
   verification as a Nigerian sole trader needs investigating now, in parallel.
   Unsigned costs Zaram more than a typical app: SmartScreen's warning appears on
   a product whose entire claim is trustworthiness.
-- **Routing is keyword-based, not embedding-based.** CLAUDE.md specifies
-  embeddings. It degrades on phrasing rather than meaning.
 - **`speech.tts` is reachable from the chat path** while voice is out of scope.
 
 ---
@@ -249,7 +301,11 @@ Playwright is still unavailable here.
 
 ## Next
 
-### M9b — Generative documents (in flight)
+### M9b — Generative documents ✅
+Reachable from chat as of this commit. See "Routing and generation" below for
+the four bugs that stood between the pieces working and the feature working.
+
+### M9b — the pieces (kept for the reasoning)
 **Committed:** the artifact model, the write path, the HTML layer, and the
 exporters — Markdown, .docx, .xlsx and PNG, verified end to end against real
 output. 58 tests in `test_artifact_exporters.py`.
