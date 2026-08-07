@@ -8,29 +8,33 @@
  * Which is why every row carries the conversation that produced it. Strip that
  * and this is a file browser, and the operating system already ships one.
  *
- * ⚠️ The data here is SAMPLE data — see `@/data/sampleArtifacts`. Nothing is
- * generated yet, so this surface is designed against invented artifacts and says
- * so on screen. Session 4 replaces the import with real ones; the shape of what
- * it reads should not need to change.
+ * Reads real artifacts from the backend. The sample module this used to import
+ * is deleted — if nothing has been generated, this surface says so and shows
+ * how to make something, which is a truthful empty state rather than a
+ * convincing populated lie.
  */
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  AlertCircle,
   BarChart3,
   Download,
   FileSpreadsheet,
   FileText,
   MessageSquare,
+  Quote,
   Receipt,
+  RefreshCw,
   X,
 } from 'lucide-react';
 
 import {
   KIND_LABELS,
-  SAMPLE_ARTIFACTS,
-  SAMPLE_PROJECTS,
+  downloadUrl,
+  getArtifact,
+  listArtifacts,
   type Artifact,
   type ArtifactKind,
-} from '@/data/sampleArtifacts';
+} from '@/services/artifactsClient';
 
 const KIND_ICON: Record<ArtifactKind, React.ReactNode> = {
   invoice: <Receipt size={16} />,
@@ -62,6 +66,10 @@ const bytes = (n: number) => {
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} kB`;
   return `${(n / 1024 / 1024).toFixed(1)} MB`;
 };
+
+/** The project id as stored. Not prettified — a slug turned into a title is a
+ *  value nobody entered, and this surface does not invent any. */
+const projectLabel = (id: string) => id || 'No project';
 
 function Chip({
   label,
@@ -97,26 +105,52 @@ interface WorkWorkspaceProps {
 }
 
 export default function WorkWorkspace({ onOpenConversation }: WorkWorkspaceProps) {
+  const [artifacts, setArtifacts] = useState<Artifact[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [project, setProject] = useState<string>('all');
   const [kind, setKind] = useState<ArtifactKind | 'all'>('all');
   const [selected, setSelected] = useState<Artifact | null>(null);
 
-  const projectName = (id: string) =>
-    SAMPLE_PROJECTS.find((p) => p.id === id)?.name ?? id;
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      // Everything, then filtered here. The backend supports filters, but the
+      // chips have to show counts for options the current filter excludes, and
+      // one request beats a request per chip.
+      const listing = await listArtifacts();
+      setArtifacts(listing.artifacts);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not load your work');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const projects = useMemo(() => {
+    const seen = new Map<string, number>();
+    for (const a of artifacts) {
+      if (a.project_id) seen.set(a.project_id, (seen.get(a.project_id) ?? 0) + 1);
+    }
+    return [...seen.entries()].map(([id, count]) => ({ id, count }));
+  }, [artifacts]);
 
   const byProject = useMemo(
     () =>
-      project === 'all'
-        ? SAMPLE_ARTIFACTS
-        : SAMPLE_ARTIFACTS.filter((a) => a.projectId === project),
-    [project],
+      project === 'all' ? artifacts : artifacts.filter((a) => a.project_id === project),
+    [artifacts, project],
   );
 
   const visible = useMemo(
     () =>
       (kind === 'all' ? byProject : byProject.filter((a) => a.kind === kind))
         .slice()
-        .sort((a, b) => b.createdAt - a.createdAt),
+        .sort((a, b) => b.created_at - a.created_at),
     [byProject, kind],
   );
 
@@ -137,39 +171,57 @@ export default function WorkWorkspace({ onOpenConversation }: WorkWorkspaceProps
               className="text-xs"
               style={{ fontFamily: 'var(--font-mono)', color: 'var(--color-text-muted)' }}
             >
-              {visible.length} of {SAMPLE_ARTIFACTS.length}
+              {loading ? 'loading…' : `${visible.length} of ${artifacts.length}`}
             </span>
+            <button
+              onClick={() => void load()}
+              disabled={loading}
+              aria-label="Refresh"
+              className="ml-auto p-1 rounded-md text-slate-500 hover:text-slate-200 hover:bg-white/5 transition-colors disabled:opacity-40"
+            >
+              <RefreshCw size={13} className={loading ? 'animate-spin' : undefined} />
+            </button>
           </div>
 
-          {/* The surface says what it is. Without this line the screen is a
-              convincing lie — twenty plausible filenames with real-looking
-              dates, none of which exist. */}
-          <div
-            className="mt-3 rounded-lg px-3 py-2 text-[11px] leading-relaxed"
-            style={{
-              border: '1px solid var(--color-border-subtle)',
-              background: 'var(--color-glass)',
-              color: 'var(--color-text-muted)',
-            }}
-          >
-            <strong style={{ color: 'var(--color-amber)' }}>Sample data.</strong>{' '}
-            Nothing here was generated and no file exists on disk. This surface is
-            designed against invented artifacts until the generative pipeline
-            fills it.
-          </div>
+          {error && (
+            <div
+              className="mt-3 flex items-start gap-2 rounded-lg px-3 py-2 text-[11px] leading-relaxed"
+              style={{
+                border: '1px solid var(--color-border-subtle)',
+                background: 'var(--color-glass)',
+                color: 'var(--color-text-muted)',
+              }}
+            >
+              <AlertCircle
+                size={13}
+                className="mt-0.5 shrink-0"
+                style={{ color: 'var(--color-amber)' }}
+              />
+              <span>
+                {error}{' '}
+                <button
+                  onClick={() => void load()}
+                  className="underline underline-offset-2"
+                  style={{ color: 'var(--color-text)' }}
+                >
+                  Try again
+                </button>
+              </span>
+            </div>
+          )}
 
           <div className="mt-4 flex flex-wrap gap-1.5">
             <Chip
               label="All projects"
-              count={SAMPLE_ARTIFACTS.length}
+              count={artifacts.length}
               active={project === 'all'}
               onClick={() => setProject('all')}
             />
-            {SAMPLE_PROJECTS.map((p) => (
+            {projects.map((p) => (
               <Chip
                 key={p.id}
-                label={p.name}
-                count={SAMPLE_ARTIFACTS.filter((a) => a.projectId === p.id).length}
+                label={projectLabel(p.id)}
+                count={p.count}
                 active={project === p.id}
                 onClick={() => setProject(p.id)}
               />
@@ -196,9 +248,11 @@ export default function WorkWorkspace({ onOpenConversation }: WorkWorkspaceProps
         </div>
 
         <div className="flex-1 overflow-y-auto px-8 pb-8">
-          {visible.length === 0 ? (
+          {loading && artifacts.length === 0 ? (
+            <LoadingState />
+          ) : visible.length === 0 ? (
             <EmptyState
-              filtered={SAMPLE_ARTIFACTS.length > 0}
+              filtered={artifacts.length > 0}
               onClear={() => {
                 setProject('all');
                 setKind('all');
@@ -239,7 +293,9 @@ export default function WorkWorkspace({ onOpenConversation }: WorkWorkspaceProps
                       style={{ color: 'var(--color-text-secondary)' }}
                     >
                       <MessageSquare size={10} className="shrink-0" />
-                      <span className="truncate">{a.conversation.title}</span>
+                      <span className="truncate">
+                        {a.conversation_title || 'No conversation recorded'}
+                      </span>
                     </span>
                   </span>
 
@@ -247,9 +303,9 @@ export default function WorkWorkspace({ onOpenConversation }: WorkWorkspaceProps
                     className="shrink-0 text-[11px] text-right"
                     style={{ fontFamily: 'var(--font-mono)', color: 'var(--color-text-muted)' }}
                   >
-                    <span className="block">{projectName(a.projectId)}</span>
+                    <span className="block">{projectLabel(a.project_id)}</span>
                     <span className="block" style={{ color: 'var(--color-text-secondary)' }}>
-                      {relative(a.createdAt)}
+                      {relative(a.created_at)}
                     </span>
                   </span>
                 </button>
@@ -261,12 +317,25 @@ export default function WorkWorkspace({ onOpenConversation }: WorkWorkspaceProps
 
       {selected && (
         <DetailPanel
+          key={selected.id}
           artifact={selected}
-          projectName={projectName(selected.projectId)}
           onClose={() => setSelected(null)}
           onOpenConversation={onOpenConversation}
         />
       )}
+    </div>
+  );
+}
+
+function LoadingState() {
+  return (
+    <div className="flex items-center justify-center py-20">
+      <span
+        className="text-[11px]"
+        style={{ fontFamily: 'var(--font-mono)', color: 'var(--color-text-faint)' }}
+      >
+        Reading what you have made…
+      </span>
     </div>
   );
 }
@@ -337,15 +406,37 @@ function EmptyState({ filtered, onClear }: { filtered: boolean; onClear: () => v
  */
 function DetailPanel({
   artifact,
-  projectName,
   onClose,
   onOpenConversation,
 }: {
   artifact: Artifact;
-  projectName: string;
   onClose: () => void;
   onOpenConversation?: () => void;
 }) {
+  const [full, setFull] = useState<Artifact | null>(null);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    // The list omits `html` — it is the re-export source and can be large, and
+    // twenty documents fetched to draw twenty rows is waste. Fetch it when a
+    // row is actually opened.
+    getArtifact(artifact.id, true)
+      .then((a) => {
+        if (!cancelled) setFull(a);
+      })
+      .catch((e) => {
+        if (!cancelled) {
+          setPreviewError(e instanceof Error ? e.message : 'Preview unavailable');
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [artifact.id]);
+
+  const claims = full?.claims ?? artifact.claims;
+
   return (
     <aside
       className="flex flex-col overflow-hidden"
@@ -374,7 +465,8 @@ function DetailPanel({
             className="mt-1 text-[11px]"
             style={{ fontFamily: 'var(--font-mono)', color: 'var(--color-text-muted)' }}
           >
-            {projectName} · {relative(artifact.createdAt)} · {bytes(artifact.sizeBytes)}
+            {projectLabel(artifact.project_id)} · {relative(artifact.created_at)} ·{' '}
+            {bytes(artifact.size_bytes)}
           </div>
         </div>
         <button
@@ -389,20 +481,89 @@ function DetailPanel({
       <div className="flex-1 overflow-y-auto px-5 py-4 space-y-5">
         <section>
           <SectionLabel>Preview</SectionLabel>
-          {/* Opaque, per UI-SPEC — the document does not sit on glass. */}
-          <pre
-            className="rounded-lg p-4 text-[11px] leading-relaxed overflow-x-auto"
-            style={{
-              background: 'var(--color-surface)',
-              border: '1px solid var(--color-border-subtle)',
-              color: 'var(--color-text-muted-light)',
-              fontFamily: 'var(--font-mono)',
-              whiteSpace: 'pre-wrap',
-            }}
-          >
-            {artifact.previewText}
-          </pre>
+          {/* The preview *is* the HTML the file was rendered from, so what is
+              shown here is what downloads. Sandboxed with no permissions: the
+              markup is ours, but the prose inside it was written by a model,
+              and defence in depth costs nothing here. */}
+          {previewError ? (
+            <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
+              {previewError}
+            </p>
+          ) : full ? (
+            <iframe
+              title={`Preview of ${artifact.filename}`}
+              srcDoc={full.html}
+              sandbox=""
+              className="w-full rounded-lg"
+              style={{
+                height: 320,
+                border: '1px solid var(--color-border-subtle)',
+                background: '#fff',
+              }}
+            />
+          ) : (
+            <div
+              className="rounded-lg px-4 py-6 text-[11px]"
+              style={{
+                background: 'var(--color-surface)',
+                border: '1px solid var(--color-border-subtle)',
+                color: 'var(--color-text-faint)',
+                fontFamily: 'var(--font-mono)',
+              }}
+            >
+              Loading preview…
+            </div>
+          )}
         </section>
+
+        {claims.length > 0 && (
+          <section>
+            <SectionLabel>Claims</SectionLabel>
+            {/* What makes a generated document defensible rather than merely
+                attributed: which sentence came from which fact. */}
+            <ul className="space-y-1.5">
+              {claims.map((c) => (
+                <li
+                  key={c.id}
+                  className="rounded-lg px-3 py-2 text-[11px]"
+                  style={{
+                    background: 'var(--color-glass)',
+                    border: '1px solid var(--color-border-subtle)',
+                    color: 'var(--color-text-muted-light)',
+                  }}
+                >
+                  <span className="flex items-start gap-2">
+                    <Quote
+                      size={11}
+                      className="mt-0.5 shrink-0"
+                      style={{ color: 'var(--color-cyan-light)' }}
+                    />
+                    <span className="min-w-0">
+                      <span className="block">{c.excerpt}</span>
+                      {c.source_excerpt && (
+                        <span
+                          className="mt-1 block"
+                          style={{ color: 'var(--color-text-secondary)' }}
+                        >
+                          {c.source_excerpt}
+                        </span>
+                      )}
+                      <span
+                        className="mt-1 block truncate"
+                        style={{
+                          fontFamily: 'var(--font-mono)',
+                          color: 'var(--color-text-faint)',
+                        }}
+                      >
+                        {c.source_id}
+                      </span>
+                    </span>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
 
         <section>
           <SectionLabel>Sources</SectionLabel>
@@ -414,9 +575,9 @@ function DetailPanel({
             </p>
           ) : (
             <ul className="space-y-1.5">
-              {artifact.sources.map((s) => (
+              {artifact.sources.map((s, index) => (
                 <li
-                  key={s.url ?? s.title ?? Math.random()}
+                  key={`${s.kind}-${s.url ?? s.title ?? index}`}
                   className="flex items-start gap-2 rounded-lg px-3 py-2 text-[11px]"
                   style={{
                     background: 'var(--color-glass)',
@@ -450,7 +611,12 @@ function DetailPanel({
       >
         <button
           onClick={onOpenConversation}
-          disabled={!onOpenConversation}
+          disabled={!onOpenConversation || !artifact.conversation_id}
+          title={
+            artifact.conversation_id
+              ? undefined
+              : 'No conversation was recorded for this artifact'
+          }
           className="w-full flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-xs transition-colors hover:bg-white/5 disabled:opacity-40"
           style={{ border: '1px solid var(--color-border)', color: 'var(--color-text)' }}
         >
@@ -458,22 +624,33 @@ function DetailPanel({
           Open the conversation that made this
         </button>
 
-        {/* Inert, and says why. A download button on sample data that produced
-            a plausible-looking invoice would be precisely the fabrication the
-            "never render invented values" rule exists to prevent — worse than
-            the button not being here, because the file would look real. */}
-        <button
-          disabled
-          title="Sample data — there is no file to download"
-          className="w-full flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-xs disabled:cursor-not-allowed"
-          style={{
-            border: '1px solid var(--color-border-subtle)',
-            color: 'var(--color-text-faint)',
-          }}
-        >
-          <Download size={13} />
-          Download — no file, this is sample data
-        </button>
+        {/* Real, because there is a real file. When the record outlives the
+            file — the user moved it — the button says so rather than offering a
+            download that fails. */}
+        {artifact.exists ? (
+          <a
+            href={downloadUrl(artifact.id)}
+            download={artifact.filename}
+            className="w-full flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-xs transition-colors hover:bg-white/5"
+            style={{ border: '1px solid var(--color-border)', color: 'var(--color-text)' }}
+          >
+            <Download size={13} />
+            Download {artifact.filename.split('.').pop()?.toUpperCase()}
+          </a>
+        ) : (
+          <button
+            disabled
+            title="The record is here but the file is not at the path it was written to"
+            className="w-full flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-xs disabled:cursor-not-allowed"
+            style={{
+              border: '1px solid var(--color-border-subtle)',
+              color: 'var(--color-text-faint)',
+            }}
+          >
+            <Download size={13} />
+            File not found where it was written
+          </button>
+        )}
       </div>
     </aside>
   );
