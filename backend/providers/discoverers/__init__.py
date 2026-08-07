@@ -12,12 +12,14 @@ from .base import (
 from .hardware import HardwareProfiler as HardwareProfilerImpl
 from .ollama import OllamaAdapter
 from .openai_compat import LMStudioAdapter, OpenAICompatibleAdapter
+from .openrouter import OpenRouterAdapter
 from .personalities import PersonalitiesFileAdapter, StaticPersonalitySource
 from .runtimes import RegistryRuntimeSource
 from .voices import StaticVoiceSource, VoiceRegistryAdapter
 
 __all__ = [
     "ModelProviderAdapter",
+    "OpenRouterAdapter",
     "VoiceSourceAdapter",
     "RuntimeSourceAdapter",
     "PersonalitySourceAdapter",

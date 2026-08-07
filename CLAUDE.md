@@ -119,6 +119,22 @@ There is no Files surface — that duplicates the operating system.
    Managed parsing APIs are prohibited. This is the exact trade the product refuses.
 8. **Nothing derived from the Spine may appear in an outbound query.** Enforced by
    test, not by convention.
+9. **Generation must fail rather than invent.** When recall cannot resolve what the
+   user is referring to, say so and ask. A document produced from unresolved context
+   is confident, plausible and wrong — and unlike a chat reply, it leaves the
+   building. A wrong reply is corrected in the next turn; a wrong document is sent
+   to a client.
+
+   This is not hypothetical. "Write that up as a proposal" is *referential*, and
+   similarity recall over five referential words retrieves nothing: the model filled
+   the gap with a whole invented client — a confident proposal for a "Project
+   Phoenix" nobody had mentioned, with the real client's name and day rate absent.
+   Every individual component was working.
+
+   Carrying the recent exchange forward fixes the referential case. It does not fix
+   every case, so **the refusal path exists alongside it and is not optional**.
+   Generation is the one place where the product's ordinary failure mode does its
+   most damage, so it is the one place that must rather stop than guess.
 
 ## Tool risk tiers
 
@@ -138,6 +154,17 @@ mutation, and permitting file edits does not permit cloud.
 **Generative safety is structural, not promised.** Generated files go to a dedicated
 output directory, never overwrite silently, and the write path has no delete or
 overwrite capability at all. A filename collision increments or asks.
+
+**A retrieval score authorises nothing.** Retrieval produces a shortlist; the model
+chooses; the tier gate above still runs. Never let a similarity score stand in for a
+permission check.
+
+A tool description is **third-party text**. An MCP server author — sloppy or hostile —
+can write a description that sits near every query, and ranking is not a security
+boundary. If retrieval ever gates permission rather than ordering candidates, a
+badly-written tool description becomes privilege escalation. Same rule for a document
+excerpt or a search result: relevance is not consent, and nothing retrieved may widen
+what a tool is allowed to do.
 
 ## Scope for v1
 

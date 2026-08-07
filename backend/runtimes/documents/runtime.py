@@ -154,6 +154,11 @@ class DocumentsRuntime(Runtime):
                 ),
             }
 
+        # Rule 9: generation must fail rather than invent.
+        unresolved = _unresolved_reference(prompt, body, input_data)
+        if unresolved:
+            return {"success": False, "error": unresolved}
+
         kind = _kind_from(prompt)
 
         # A chart is a claim about numbers, and this runtime has prose. There
@@ -232,6 +237,67 @@ def _kind_from(prompt: str) -> ArtifactKind:
         if any(word in lowered for word in words):
             return kind
     return ArtifactKind.DOCUMENT
+
+
+#: A request that points at something rather than describing it. These are the
+#: prompts that carry no content of their own, so a document made from one is a
+#: document made from whatever the model happened to have.
+_REFERENTIAL = re.compile(
+    r"\b(that|this|those|these|it|the above|what we (just )?(said|discussed))\b",
+    re.IGNORECASE,
+)
+
+#: Below this the "answer" is too thin to be a document about anything. A model
+#: that had no context often produces a short, fluent, entirely invented opener.
+_MIN_BODY_WORDS = 12
+
+
+def _unresolved_reference(
+    prompt: str, body: str, input_data: Dict[str, Any]
+) -> Optional[str]:
+    """Refuse when the request points at something we cannot show we resolved.
+
+    Rule 9. "Write that up as a proposal" carries no content: everything the
+    document will say has to come from context. When that context is missing,
+    the model does not fail — it writes something fluent about a client that
+    does not exist, and the user forwards it.
+
+    The check is deliberately narrow, and only fires when **both** hold: the
+    request is referential, and the engine did not supply resolved context.
+    A request that describes its own subject ("draft an invoice for the
+    Northwind job at 85,000 a day") is not referential and never reaches here.
+
+    Why not check whether the body "looks invented" — because that cannot be
+    done. Invented text is fluent by construction; that is the whole problem.
+    What *is* checkable is whether anything was resolved to write from, so that
+    is what this asks.
+    """
+    if not _REFERENTIAL.search(prompt):
+        return None
+
+    # The engine sets this when it put prior turns in front of the model.
+    # Present means "that" had something to refer to.
+    if input_data.get("context_resolved"):
+        return None
+
+    if len(body.split()) >= _MIN_BODY_WORDS:
+        # Something substantial was generated and the engine did not claim to
+        # have resolved context. Not proof of invention, but not proof against
+        # it either — and a rule that only fires when it is certain would never
+        # fire. Naming what is missing costs one exchange; the alternative cost
+        # the user their credibility with a client.
+        return (
+            "I'd be guessing. You asked me to write up something we discussed, "
+            "but I couldn't find that conversation to work from — so anything I "
+            "produced would be invented and would look convincing. Tell me what "
+            "the document should cover, or ask the question again in this "
+            "session and then say \"write that up\"."
+        )
+
+    return (
+        "There isn't enough here to make a document from. Tell me what it "
+        "should say, or ask the question first and then say \"write that up\"."
+    )
 
 
 def _plain(text: str) -> str:

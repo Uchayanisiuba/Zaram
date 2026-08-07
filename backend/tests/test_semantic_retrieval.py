@@ -323,7 +323,14 @@ class TestTheDocumentsRuntime:
         """
         result = self._run(
             runtime,
-            {"prompt": "write that up as a proposal", "answer": "The terms are 30 days."},
+            {
+                "prompt": "write that up as a proposal",
+                "answer": "The terms are 30 days.",
+                # Referential prompt, so rule 9 requires the engine to say it
+                # resolved the reference. This test is about what gets written,
+                # not about the refusal.
+                "context_resolved": True,
+            },
         )
 
         assert result["success"]
@@ -334,10 +341,66 @@ class TestTheDocumentsRuntime:
     def test_the_card_says_whether_the_file_is_there(self, runtime):
         """`exists` was missing here while the /artifacts listing had it, so a
         card for a file written a second earlier said "file not found"."""
-        result = self._run(runtime, {"prompt": "write it up", "answer": "Body."})
+        result = self._run(
+            runtime,
+            {"prompt": "write it up", "answer": "Body.", "context_resolved": True},
+        )
 
         assert result["artifact"]["exists"] is True
         assert result["artifact"]["download_url"].endswith("/download")
+
+    def test_a_referential_request_with_no_resolved_context_is_refused(self, runtime):
+        """Rule 9: generation must fail rather than invent.
+
+        This is the Project Phoenix case, reproduced. "Write that up" carries no
+        content of its own, so with nothing resolved the model wrote a fluent,
+        confident proposal for a client that had never been mentioned. Every
+        component was working. A wrong chat reply is corrected next turn; a
+        wrong document is sent to a client.
+        """
+        result = self._run(
+            runtime,
+            {
+                "prompt": "write that up as a proposal",
+                "answer": (
+                    "Project Phoenix: Optimized Resource Allocation Strategy. This "
+                    "proposal outlines a revised strategy designed to maximise "
+                    "operational efficiency across the current infrastructure."
+                ),
+                "context_resolved": False,
+            },
+        )
+
+        assert not result["success"]
+        assert "guessing" in result["error"]
+
+    def test_the_same_request_succeeds_once_context_is_resolved(self, runtime):
+        """The refusal must not be a blanket ban on referential phrasing — that
+        would break the feature it exists to protect."""
+        result = self._run(
+            runtime,
+            {
+                "prompt": "write that up as a proposal",
+                "answer": "Northwind pay on 30-day terms and their rate is 85,000.",
+                "context_resolved": True,
+            },
+        )
+
+        assert result["success"]
+
+    def test_a_self_describing_request_needs_no_context(self, runtime):
+        """"Draft an invoice for the Northwind job at 85,000 a day" contains its
+        own subject. Refusing it would be the rule misfiring."""
+        result = self._run(
+            runtime,
+            {
+                "prompt": "draft an invoice for the Northwind job at 85,000 a day",
+                "answer": "Invoice for Northwind Studios. Day rate 85,000 naira, "
+                "payable within 30 days of issue.",
+            },
+        )
+
+        assert result["success"]
 
     def test_nothing_to_write_up_is_refused_with_a_reason(self, runtime):
         result = self._run(runtime, {"prompt": "write that up", "answer": ""})
@@ -390,6 +453,7 @@ class TestTheDocumentsRuntime:
             {
                 "prompt": "write it up",
                 "answer": "Northwind pay on 30-day terms.",
+                "context_resolved": True,
                 "claims": [
                     {
                         "id": "c1",
