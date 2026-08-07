@@ -141,18 +141,19 @@ def test_main_module_imports_cleanly():
     assert "/audio/{filename}" in paths
 
 
-class _FakeLLM:
-    def stream_response(self, prompt, model):
-        for token in ["Hello", " world", ".", " This is one sentence.", " This is another."]:
-            yield token
-
-
 def test_legacy_conversation_terminates_without_tts():
-    """Conversation must complete cleanly when speech is unavailable."""
-    from services.conversation_manager import ConversationManager
-    from voice.voice_manager import VoiceManager
+    """Conversation must complete cleanly when speech is unavailable.
 
-    manager = ConversationManager(_FakeLLM(), VoiceManager())
+    The second argument is the event bus. It used to be a `VoiceManager`, back
+    when the manager drove TTS directly; nobody updated the call when Sprint
+    Alpha.6 moved that behind the bus, and the stale `FakeLLM` signature meant
+    this failed before it ever got far enough to notice.
+    """
+    from core.event_bus import EventBus
+    from services.conversation_manager import ConversationManager
+    from tests.llm_doubles import FakeLLM
+
+    manager = ConversationManager(FakeLLM(), EventBus())
     events = list(manager.run_conversation("hi", "gemma3:latest", "default"))
 
     assert events, "conversation produced no events"

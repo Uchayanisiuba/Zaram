@@ -33,7 +33,9 @@ class ConversationManager:
 
         def llm_and_planner_worker():
             try:
-                for token in self.llm.stream_response(prompt, model, system_prompt):
+                # Argument order is `LLMEngine`'s, not this call site's history:
+                # (prompt, system_prompt, model).
+                for token in self.llm.stream_response(prompt, system_prompt, model):
                     out_queue.put({'type': 'token', 'content': token})
                     sentence_event = planner.process_token(token)
                     if sentence_event:

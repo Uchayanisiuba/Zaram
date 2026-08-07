@@ -30,6 +30,7 @@ import logging
 import os
 import re
 import time
+from collections import OrderedDict
 from collections.abc import Iterator
 from typing import Any
 
@@ -81,8 +82,9 @@ class ExecutionEngine:
         self._scheduler = scheduler
         self._active_plans: dict[str, ExecutionPlan] = {}
         #: Ephemeral session state, per rule 7d — never written to the Spine.
-        #: session_id → recent (prompt, answer) pairs.
-        self._session_turns: dict[str, list[tuple[str, str]]] = {}
+        #: session_id → recent (prompt, answer) pairs, LRU-capped at
+        #: MAX_SESSIONS. Ordered because eviction order is the point.
+        self._session_turns: OrderedDict[str, list[tuple[str, str]]] = OrderedDict()
 
     # ------------------------------------------------------------------
     # Legacy synchronous execution (backward compatible)
@@ -290,6 +292,15 @@ class ExecutionEngine:
     #: How many turns of ephemeral session state to keep, per session.
     MAX_SESSION_TURNS = 8
 
+    #: How many sessions to keep state for at once, evicted least-recently-used.
+    #:
+    #: The frontend mints a session id per page load, so without this the map
+    #: grows for the life of the process and nothing is ever removed — each
+    #: dead session pinning up to MAX_SESSION_TURNS prompt/answer pairs.
+    #: 64 is generous for one person on one machine and still bounds the
+    #: worst case at a few hundred KB.
+    MAX_SESSIONS = 64
+
     #: Below this, a memory is not relevant enough to inject or to cite.
     #:
     #: Measured, not guessed. With bge-m3 embeddings and two facts in the Spine:
@@ -488,6 +499,18 @@ class ExecutionEngine:
         # Bounded: a long conversation must not grow the process without limit,
         # and only the recent turns are what "that" can plausibly mean.
         del turns[:-self.MAX_SESSION_TURNS]
+
+        # Bounded in the other direction too. Capping turns *per session* bounds
+        # nothing on its own: the frontend mints a session id per page load, so
+        # a day of reloads leaves a map of dead sessions, each holding up to
+        # MAX_SESSION_TURNS prompt/answer pairs and none of them reachable
+        # again. Least-recently-*used*, not least-recently-created: a long
+        # conversation left open in one tab must not be evicted by a burst of
+        # reloads in another.
+        self._session_turns.move_to_end(session_id)
+        while len(self._session_turns) > self.MAX_SESSIONS:
+            evicted, _ = self._session_turns.popitem(last=False)
+            logger.debug("Engine: evicted session state for %s", evicted)
 
     def _augment_with_recent_turns(
         self, system_prompt: str, session_id: str, limit: int = 3

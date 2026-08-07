@@ -13,6 +13,9 @@ from pydantic import BaseModel
 # --- KERNEL IMPORTS (Strict Boundary) ---
 from core.bootstrapper import KernelBootstrapper
 from core.chat_router import ChatRouter
+# `_format_search_results` has referenced this without importing it: a
+# NameError latent only because web search is off by default.
+from core.query_classifier import SEARCH_MARKER
 
 # --- LEGACY IMPORTS (Isolated for Fallback) ---
 from implementations.ollama_llm import OllamaLLM
