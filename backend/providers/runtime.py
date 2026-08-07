@@ -39,6 +39,7 @@ from .discoverers import (
     LMStudioAdapter,
     OllamaAdapter,
     OpenAICompatibleAdapter,
+    OpenRouterAdapter,
 )
 from .manager import ProviderManager
 from .registry import ProviderRegistry
@@ -139,7 +140,13 @@ class ProvidersRuntime:
 
     # --- default provider wiring ---
     def _register_default_providers(self) -> None:
-        for provider in (OllamaAdapter(), LMStudioAdapter()):
+        # OpenRouter only when a key exists. Registering it keyless would
+        # discover a catalogue of models that cannot be called — a list of
+        # things Zaram appears to offer and does not. Its models carry
+        # data_policy None (unknown) except the free tier, so none of them is
+        # selectable by default and rule 5 is unaffected by its presence.
+        cloud = (OpenRouterAdapter(),) if os.getenv("OPENROUTER_API_KEY") else ()
+        for provider in (OllamaAdapter(), LMStudioAdapter(), *cloud):
             self._safe_register(provider)
 
         endpoint = os.getenv("ZARAM_OPENAI_ENDPOINT")

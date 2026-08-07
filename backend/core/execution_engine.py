@@ -129,8 +129,16 @@ class ExecutionEngine:
         # So a document request carries the recent exchange explicitly. Recall
         # answers "what is relevant to these words"; this answers "what is
         # 'that'", and those are different questions.
+        #
+        # `context_resolved` is the honest half: it says whether there was
+        # anything to resolve "that" against. The documents runtime refuses when
+        # a referential request arrives without it (rule 9), so this flag must
+        # be set from what actually happened rather than from having tried.
+        context_resolved = False
         if self._is_document_request(prompt):
-            system_prompt = self._augment_with_recent_turns(system_prompt, session_id)
+            system_prompt, context_resolved = self._augment_with_recent_turns(
+                system_prompt, session_id
+            )
 
         plan = self._planner.create_plan(prompt)
         plan = self._drop_unavailable_steps(plan)
@@ -172,6 +180,7 @@ class ExecutionEngine:
                 step.input_data = dict(step.input_data or {})
                 step.input_data["answer"] = step_results.get("reasoning.generate", "")
                 step.input_data.setdefault("session_id", session_id)
+                step.input_data["context_resolved"] = context_resolved
 
             try:
                 for token in self._dispatcher.execute_step(step, model, system_prompt):
@@ -482,7 +491,7 @@ class ExecutionEngine:
 
     def _augment_with_recent_turns(
         self, system_prompt: str, session_id: str, limit: int = 3
-    ) -> str:
+    ) -> tuple[str, bool]:
         """Put the last few turns in front of the model, verbatim.
 
         Verbatim rather than summarised: a summary is another generation, and
@@ -498,7 +507,11 @@ class ExecutionEngine:
         """
         turns = self._session_turns.get(session_id, [])[-limit:]
         if not turns:
-            return system_prompt
+            # Returning False rather than quietly carrying on is the whole
+            # point: the runtime refuses on this, and a flag set optimistically
+            # would restore exactly the invented-client failure.
+            logger.info("Engine: no prior turns to resolve a document request against")
+            return system_prompt, False
 
         lines = ["", "The conversation so far. The document is about this:"]
         for prompt, answer in turns:
@@ -506,7 +519,7 @@ class ExecutionEngine:
             lines.append(f"You answered: {answer}")
 
         logger.info("Engine: gave the document step %d prior turns", len(turns))
-        return system_prompt + "\n".join(lines)
+        return system_prompt + "\n".join(lines), True
 
     def _augment_system_prompt(self, system_prompt: str, recalled: list[Any]) -> str:
         """Fold recalled memories into the system prompt, with citation markers.

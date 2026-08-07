@@ -13,7 +13,7 @@ accurate — it is the first thing anyone reads.
 
 ## Current state — 6 August 2026
 
-**Suite:** 1161 collected · 1134 passed · **27 failed** on a full dev install,
+**Suite:** 1179 collected · 1152 passed · **27 failed** on a full dev install,
 in ~2m. The 27 are unchanged and pre-existing — listed under Known broken.
 The base-install figures are stale: the 95 new artifact tests should all pass
 there too, since their dependencies are in the base requirements, but that has
@@ -154,6 +154,30 @@ numbers and the runtime has prose; inventing figures to plot would be worse
 than refusing, and quietly returning a document nobody asked for would be too.
 The refusal names what is missing and offers what works. A real chart path
 arrives with the business layer, where figures come from invoices.
+
+### Providers and data policy
+
+**OpenRouter is registered only when `OPENROUTER_API_KEY` is set**, and its
+models carry `data_policy=None` — unknown — except the `:free` tier, which is
+stated as `LOGGED_AND_TRAINED_ON`. Nothing it returns is
+`selectable_by_default`, so Zaram never routes there on its own initiative.
+
+This came out of an audit that proposed registering OpenRouter with
+`YOUR_KEY_NO_TRAINING`. That one line would have made every model it returns
+auto-selectable, **including the free tier that is free precisely because
+prompts are logged** — a privacy guarantee displayed over the opposite
+behaviour. `test_openrouter_policy.py` asserts the *absence* of that claim so
+it cannot come back quietly.
+
+The asymmetry worth remembering: **we can sometimes prove a model logs; we can
+never prove one does not.** Free tier is stated, everything else is None.
+
+**`backend/config.json` is deleted.** Nothing read it — not the backend, not
+the frontend, not Electron. It declared `ENABLE_WEB_SEARCH: true` beside a
+product whose default is deny, plus model names and a `SYSTEM_PROMPT`
+instructing the model to cite web URLs. All inert, all misleading to the next
+reader. Web search is gated by `ZARAM_WEB_SEARCH` in the environment, read at
+call time by `planner.web_search_enabled()`.
 
 ### Open questions
 
