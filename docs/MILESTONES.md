@@ -11,13 +11,17 @@ accurate — it is the first thing anyone reads.
 
 ---
 
-## Current state — 6 August 2026
+## Current state — 7 August 2026
 
 **Suite:** 1179 collected · 1152 passed · **27 failed** on a full dev install,
 in ~2m. The 27 are unchanged and pre-existing — listed under Known broken.
 The base-install figures are stale: the 95 new artifact tests should all pass
 there too, since their dependencies are in the base requirements, but that has
 not been measured. Previously: 951 passed · 13 failed · 52 skipped.
+
+**Start with "Do these first" below.** Three cheap findings from the last
+session that are worth more than the next feature, one of which unblocks the
+cloud engine.
 
 **Base install: ~317 MB.** 267 MB plus a *measured* 50 MB for the exporters
 (matplotlib 31, fonttools 16, openpyxl and the rest 3). Voice remains an
@@ -46,6 +50,71 @@ and compares against task exemplars. Keywords remain the fallback.
 **Last commits:** semantic routing + chat-reachable generation → Work reads
 real artifacts → the exporters → artifacts write path → Work surface →
 dependency removals → packaging split → VRAM detection.
+
+### Do these first — half a day, and one of them is a prerequisite
+
+**1. The 13 "pre-existing" core failures are one stale test double.**
+
+```
+FakeLLM.stream_response() takes 3 positional arguments but 4 were given
+```
+
+`FakeLLM` in `tests/test_streaming_conversation.py:32` is `(self, prompt,
+model)`. The real `implementations/ollama_llm.py` is `(self, prompt, model,
+system_prompt)`. When M4 fixed "the requested model was logged and then
+discarded" and started threading arguments through, the fake was not updated.
+
+So **13 tests covering streaming conversation — the most-used path in the
+product — have been dead since then**, and the count was normalised as
+"pre-existing, unchanged". This file's own warning came true. Fixing the fake
+restores coverage of the core path and is roughly twenty minutes.
+
+The 14 voice failures are genuinely out of scope. Do not conflate them; that
+conflation is what made 27 read as weather.
+
+**2. There are four `stream_response` signatures. Unify before the cloud engine.**
+
+| Location | Signature |
+|---|---|
+| `implementations/ollama_llm.py` | `(prompt, model, system_prompt)` |
+| `interfaces/llm_engine.py` | `(prompt, model)` |
+| `interfaces/implementation/ollama_llm.py` | `(prompt, model)` |
+| `runtimes/models/engines/ollama_engine.py` | `(prompt, context, model)` |
+
+No single LLM interface, so drift in one place fails nowhere else — which is
+*why* finding 1 stayed invisible. `base_engine.py` should be the one contract;
+`interfaces/` looks like dead legacy. **Do this before writing
+`OpenAICompatibleEngine`**, or the cloud path inherits the same invisibility
+and there will be five signatures.
+
+**3. Recall is unmeasured, and it is the entire moat.**
+
+- `MIN_RECALL_SCORE = 0.42` (`execution_engine.py:314`) was chosen by feel.
+  CLAUDE.md says benchmark against LoCoMo / LongMemEval, not by feel.
+- **`bge-reranker-v2-m3` is installed in Ollama and referenced nowhere in the
+  code.** CLAUDE.md's residency arithmetic budgets ~1.8 GB for "embeddings and
+  reranker resident". Either wire it or drop it from the math.
+- There is no eval harness of any kind.
+
+If recall is mediocre the alpha fails and the day-30 number will not say why —
+users report "it didn't feel like it knew me", which cannot be debugged after
+the fact. **Build the harness alongside M7**: ingest is what finally puts real
+documents in the Spine, so it is both the first moment an eval is possible and
+the moment it becomes necessary. Retrofitting cases later means writing them
+against whatever happens to be indexed.
+
+**4. Test the seams, not just the components.**
+
+Every real bug found in the last session — the invented client, the missing
+`exists` field, the `[ARTIFACT]` marker leak, the tripled title, an Excel
+auto-filter spanning one row — passed unit tests and was caught by driving the
+live kernel. The suite tests components well and seams not at all. Three or
+four acceptance tests that boot the real kernel would have caught all five.
+Same instinct as `test_egress_chokepoint`, applied to behaviour.
+
+**5. A leak introduced last session.** `ExecutionEngine._session_turns` caps
+turns per session at 8 but never evicts sessions, and the frontend mints a new
+session id per page load. Wants an LRU cap.
 
 ### Decisions taken that are not yet obvious from the code
 
@@ -323,6 +392,62 @@ Playwright is still unavailable here.
 
 ---
 
+## The agreed path to alpha
+
+Decided 7 August 2026, after an audit of what actually stands between here and
+a 15-person retention test.
+
+**Do these first (above) → M7 → M8 → M9/M9a → cloud engine + M10 as one unit →
+M11 + first run → M12.**
+
+**Cut from the alpha path**, not from the product: **M9c** (Unreal/Blender is a
+different wedge on a different day, orthogonal to freelancers) and **Session 5**
+(CLAUDE.md: build two packs by hand before building the pack system — a
+catalogue with no packs is a promise accumulating). Both stay in this file
+below; neither is next.
+
+**Local *and* cloud, decided deliberately.** An earlier proposal to make the
+alpha local-only was overruled: both capabilities ship. That keeps M10 in
+scope and adds one thing that is missing entirely — see below.
+
+**Cloud is not just a provider setting. `OpenAICompatibleEngine` does not
+exist.** `runtimes/models/engines/` holds `base_engine.py` and
+`ollama_engine.py` and nothing else. The provider layer *discovers*
+OpenAI-compatible endpoints and OpenRouter, but nothing can generate through
+them, so the v1 scope line "chat routed to at least two providers (one cloud,
+one local)" is **not met**. Two local models satisfies the recall demo; it does
+not satisfy that line.
+
+**M10 ships in the same commit as the cloud engine, not after it.** Rule 8 is
+narrower than it looks: `test_outbound_query_invariant.py` enforces that Spine
+content never reaches a *search query*, because recalled facts live in
+`system_prompt` and the search path never reads it. But `system_prompt` is
+exactly what a generation call sends. Today it only reaches `OllamaEngine` on
+localhost, so it is not egress. **The moment a cloud engine exists,
+`system_prompt` becomes egress and it contains Spine content by design.**
+CLAUDE.md intends that — "carries project context into the cloud request" —
+immediately followed by "showing the user exactly what leaves before it does".
+So M10 is the enforcement point for the only path that sends memory
+off-device, not a dialog bolted on later. Cloud generation without it is rule 5
+with the safety removed. It needs a test in the same shape as the existing
+invariant: recalled facts reaching a cloud engine must pass the gate *and* the
+confirmation, structurally.
+
+**Cloud lands after the wedge, not before it.** M10's dialog shows recalled
+facts as removable chips, and that can only be tested honestly against a Spine
+with real material in it. Built before M7 and M9, it is built against an empty
+store and the interaction problems surface during the alpha.
+
+**Start now, in parallel, because it is not coding work:** Windows code
+signing and the Nigerian sole-trader business verification. Longest lead time
+of anything here and it cannot be compressed later.
+
+**Worth one afternoon, soon:** actually run the recall demo end to end and
+record it — ask model A, ask model B later, get a cited answer, delete the
+fact, watch the answer change, open the log. Every piece exists and it has
+never been demonstrated. It is the closest-to-done, least-verified asset in the
+repo, and a break in it should be found before M7 buries it under new code.
+
 ## Next
 
 ### M9b — Generative documents ✅
@@ -374,13 +499,34 @@ honest grading against this machine — greyed out where unavailable, with the
 reason stated. Only packs that exist or are genuinely next; a catalogue of forty
 things we will never build is a promise accumulating.
 
-### M7 — Ingest
+### M7 — Ingest  ← NEXT
 **The one v1 scope item with nothing built.** Docling. Folder in, facts out.
+Verified: no `docling` reference anywhere in the backend, no ingest function.
 
-**Failures must be loud.** A file that produced nothing appears in Knowledge with
-a reason and a retry, and is mentioned in the conversation the first time it
-matters. Silent ingestion failure is the most likely reason a user concludes the
-product doesn't know their material and leaves.
+**Failures must be loud.** A file that produced nothing appears in Knowledge
+with a reason and a retry, and is mentioned in the conversation the first time
+it matters. Silent ingestion failure is the most likely reason a user concludes
+the product doesn't know their material and leaves.
+
+**"Extracted almost nothing" is a failure, not a success.** A scanned PDF that
+yields three garbled words will silently degrade every answer that touches it,
+and it is *worse* than a hard failure because nothing signals it. The quality
+floor sits beside the error path: a file that parsed cleanly but produced
+almost no text lands in Knowledge with a reason and a retry, exactly like one
+that could not be opened. Decide the floor from measurement (characters per
+page, or extracted length against file size), not from a guessed constant, and
+record how it was chosen.
+
+**Rule 7c: no ingestion path may route documents off-device.** Managed parsing
+APIs are prohibited. This is the exact trade the product refuses.
+
+**Build the recall eval harness here** — see "Do these first" item 3. Ingest is
+what puts real documents in the Spine, so it is the first moment an eval is
+possible and the moment it becomes necessary.
+
+**Acceptance:** point at a folder, watch it index, ask a question, get a cited
+answer from a real document. Then point at a folder containing a scanned PDF
+and watch Knowledge say which file gave nothing back and why.
 
 ### M8 — Memory scope
 Every fact carries `global` or `project:<id>`, **and `origin`** — the two land
@@ -409,6 +555,83 @@ The dialog shows the literal outbound text, the destination and the reason.
 Recalled facts are removable chips, editable inline, edits written through as
 supersessions.
 
+### Queued — the citation UI
+**Requested 7 August 2026. Not started. Order is fixed and each step stops for
+review.**
+
+Read `CLAUDE.md` and `docs/UI-SPEC.md` first. This **adds a section to the
+spec, shows it, and only then implements it**.
+
+**The core idea.** Zaram's sources come in three kinds and no competitor has to
+make this distinction:
+
+- `memory` — a fact from the Spine. Nothing left the device.
+- `document` — a passage from an indexed file. Nothing left the device.
+- `web` — bytes left, and there is an egress log entry for it.
+
+The citation UI has to make that visible, because a citation that tells you
+whether an answer cost you privacy is the product's thesis at the sentence
+level.
+
+**Not everything gets cited.** Web sources are *always* cited regardless of how
+central the claim was — not for attribution, but because bytes left the machine
+and anything involving egress is always visible. Local sources are cited only
+when they carry the answer; the test is whether the claim would be different
+without that source. Use a second, higher relevance threshold than the one that
+decides injection — the retrieval score already exists, this is a separate cut
+on the same number. Division of labour: **chips for what mattered, the recall
+strip for what was used, the panel for everything.**
+
+**Inline chips.** Small pill, kind icon and a number: document icon, memory
+diamond, globe. **Colour encodes egress, not category** — the same cyan and
+violet the orb uses for local versus cloud. Cyan for anything that stayed,
+violet for anything that left. One meaning reused, so it needs no legend.
+**Never render a chip that isn't clickable**: citing without linking fails the
+verification task, and for this product a decorative citation is worse than
+none.
+
+**Summary line.** Below the reply, collapsed by default. Leads with the split —
+"2 sources · 1 sent to the web" — because that is what someone wants at a
+glance. Single-source answers skip the panel entirely and put the card inline;
+a panel for one citation is overkill.
+
+**The panel.** Right side, same anchor and pattern as fact detail — one
+pattern, not two. Escape closes. Grouped by egress with a mono heading per
+group: *nothing left this device* / *1,204 bytes left this device*. Numbering
+matches the inline chips exactly so a chip maps to its card instantly.
+
+Per kind:
+- **document** — filename, the passage quoted with a left border, page and
+  index date, open-document action.
+- **memory** — the fact, its source and date, recall count, and correct /
+  forget inline. This is the fastest correction path in the product and it sits
+  exactly where the user is already checking.
+- **web** — title, excerpt, domain, when it was sent and to whom, and a link to
+  its row in Activity. **That link is the citation and the egress log being the
+  same object viewed twice, and it is the thing nobody else can build.**
+
+Below the cited sources, a quieter section listing what was recalled but not
+cited — so nothing is hidden, it is just not interrupting the prose.
+
+**The empty state is not optional.** When nothing from the user's material
+contributed, say so: *"Answered from the model's own knowledge — nothing from
+your files."* It is a claim about absence, which the user cannot infer from
+missing chips — missing chips could equally mean we didn't bother. A visible
+no-sources state is more trustworthy than confident prose with hidden
+provenance.
+
+**Backend first.** Check whether `StreamEvent.source` already carries kind,
+excerpt and egress reference. It currently carries only `kind`, `url`, `title`
+— so this is the first change. The frontend cannot render what isn't sent, and
+inventing a kind client-side would be the fabrication rule all over again.
+
+**Order — stop after each:**
+1. Write the spec section, stop, show it
+2. Backend: source events carry kind, excerpt, egress reference, relevance score
+3. Chips and the summary line
+4. The panel
+5. The empty state
+
 ### M11 — Packaging
 **The real blocker.** A stranger cannot install this. See Open questions above —
 code signing has the longest lead time and cannot be compressed later.
@@ -428,13 +651,18 @@ answers become the missing line in `docs/PITCH.md`.
 
 ## Known broken
 
-**27 failing tests**, unchanged and pre-existing:
+**27 failing tests**, and the 13 are no longer a mystery:
 
-- 13 in `test_streaming_conversation`, `test_alpha10c_acceptance`, `test_kernel_flow`
-- 14 in voice — these skip on a base install, so CI sees 13
+- **13** in `test_streaming_conversation`, `test_alpha10c_acceptance`,
+  `test_kernel_flow` — **root cause found 7 Aug 2026: one stale test double.**
+  `FakeLLM.stream_response()` is `(prompt, model)`; the real one takes
+  `system_prompt` too. See "Do these first" item 1. These tests have not been
+  meaningfully running since M4, which means streaming conversation — the
+  most-used path in the product — is effectively uncovered.
+- **14** in voice — out of scope, and these skip on a base install.
 
 Record any change to that number. A stable failure count everyone stops looking
-at is how a real regression hides.
+at is how a real regression hides — which is exactly what happened here.
 
 Also broken, found and not fixed: `services/speech_manager.py` imports a module
 that was deleted. Nothing imports `SpeechManager`, so nothing breaks today.
