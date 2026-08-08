@@ -13,10 +13,19 @@ accurate — it is the first thing anyone reads.
 
 ## Current state — 8 August 2026
 
-**Suite: 0 failures.** 1152/27 → 1263/0 on a full dev install. The 27 were not
-one thing; see "What the 27 actually were". Run pytest **from the repo root** —
-the `--ignore` lines in `pyproject.toml` are rootdir-relative, and running it
-from `backend/` aborts collection on a truncated `test_kernel.py`.
+**Suite: 0 failures.** 1152/27 → **1308/0** on a full dev install, ~1m45s.
+The 27 were four unrelated bugs; the taxonomy and the method for classifying
+future ones are in `docs/KNOWN-FAILURES.md`. Run pytest **from the repo root**.
+
+**The frontend has been driven.** M4's UI acceptance, outstanding for four
+milestones, is met — see M4 below. Four defects came out of it that no unit
+test had, including the citation threshold being compared against the wrong
+number for the entire life of the product.
+
+**The reranker question is answered and written up**: `docs/RERANKER.md`, with
+measured VRAM and install costs. Short version — the Ollama route is verified
+broken *and* evicts the working set, and CLAUDE.md's residency arithmetic is
+wrong in both directions.
 
 **M7 is done and driven for real.** `backend/ingest/` — parser interface, light
 parsers, quality floor, loud failures. Verified against a real folder: an
@@ -60,6 +69,55 @@ and compares against task exemplars. Keywords remain the fallback.
 **Last commits:** semantic routing + chat-reachable generation → Work reads
 real artifacts → the exporters → artifacts write path → Work surface →
 dependency removals → packaging split → VRAM detection.
+
+### The citation threshold was never applied to a similarity
+
+The biggest single defect this session, found by driving the browser and seeing
+a reply cite **five** memories — including a deploy target and an unrelated
+client — for a statement the user had just made.
+
+`MemoryRankerImpl.rank()` **overwrote** `result.score` with a blend:
+
+```
+0.35 semantic + 0.20 importance + 0.15 recency
++ 0.10 access + 0.10 keyword + 0.10 session_match
+```
+
+`ExecutionEngine` then compared that to `MIN_RECALL_SCORE = 0.42`, a threshold
+measured and documented as a **cosine similarity** floor. Similarity carried a
+weight of 0.35, so a fact with a true cosine of 0.20 could clear the floor on
+recency and session membership alone. Every reply in the product has been
+citing on that number.
+
+`MemoryResult` now carries **two** numbers, because they answer two questions:
+
+- `relevance` — similarity as retrieval produced it. What the citation floor is
+  compared against.
+- `score` — the ranking blend. Ordering only.
+
+CLAUDE.md already draws this line for tools: *"retrieval produces a shortlist;
+the model chooses; a retrieval score authorises nothing."* Citation is the same
+shape — rank on whatever is useful, but decide **whether to cite** on relevance
+alone.
+
+The index was also made to return a similarity rather than a blend: keyword
+overlap decides *membership* of the candidate set, and `MemoryRankerImpl`
+already weights it at 0.10 for ordering, so adding it to the score double-counted
+it and made the number something other than the cosine the floor was measured
+against.
+
+**Measured effect: the eval margin went from +0.080 to +0.147** — related
+bottoming out at 0.517, unrelated topping out at 0.369, floor 0.42 in the gap.
+Those are now raw bge-m3 cosines, which means the distribution recorded in
+`MIN_RECALL_SCORE`'s docstring in April describes reality for the first time.
+Verified live: the unrelated deploy-target fact is no longer cited.
+
+**Still open, and known:** a reply about a day rate still cites five memories,
+now all genuinely about day rates and payment terms (0.50–0.61). That is
+cited-versus-*used*, which the queued citation-UI brief already anticipates —
+"local sources are cited only when they carry the answer… use a second, higher
+relevance threshold than the one that decides injection". It is a separate cut
+on the same number and it is not built.
 
 ### What the recall eval found — read this one
 
@@ -343,8 +401,52 @@ reports *why* each candidate was refused.
 `chatClient.ts` does `POST /chat`, parses NDJSON, handles JSON split across
 chunks and multi-byte characters split mid-character.
 
-### M4 — Verify the integration ✅ (partly)
-Verified at transport level against a live backend. Found and fixed two real
+### M4 — Verify the integration ✅ (the UI half, finally)
+**Driven in a real browser, 8 August 2026.** Outstanding for four milestones
+because the Playwright browser install kept failing here. The MCP server wants a
+chromium build that will not download on this connection; the package already in
+`frontend/node_modules` has one, so `frontend/scripts/drive-*.mjs` uses that
+with an explicit `executablePath`. Re-runnable.
+
+**The recall demo works end to end, watched:** state a fact → ask about it →
+cited answer carrying the right figure → click a citation → a panel showing the
+fact, when it was stored, how often recalled, and Forget → correct it in Memory
+→ the old value stays struck through as *"superseded Aug 8 · you corrected
+this"* → ask again → **the answer changes to the corrected figure and no longer
+mentions the old one** → Activity shows real bytes, blocked count and an
+unbroken hash chain.
+
+Four defects came out of driving it, none of which any unit test had:
+
+1. **`access_count` was never incremented on the store the product runs.**
+   Every fact read "Recalled 0×" forever. `InMemoryMemoryStore` incremented as
+   a side effect of `get`; `SQLiteMemoryStore` had no equivalent — two
+   implementations of one contract, drifted. Rule 7e's whole
+   promotion-through-use mechanism is that integer, and `decay.py` forgets
+   anything never accessed after 30 days, so the Spine looked entirely unused.
+   Fixed as an explicit `record_access` on the protocol: **reading a fact is
+   not recalling it**, or browsing Memory would make everything look
+   load-bearing.
+2. **The citation threshold was applied to the ranking blend, not to
+   relevance.** See below — the largest of the four.
+3. **Collapsed left-rail buttons had no accessible name.** The label renders
+   only when the rail is expanded, so the navigation announced itself as five
+   anonymous buttons and "Knowledge" was unreachable to anything finding
+   controls by name. Now `aria-label` + `title` + `aria-current` always.
+4. **A 404 on every page load.** Unidentified, one request, harmless-looking.
+   Left as a thread to pull.
+
+**Corrected on the way:** the orb does *not* vanish inside a workspace and the
+return path is not broken. The route back is `OrbStatus` in the header, labelled
+"Ask Zaram", `aria-label` ending "Open conversation." An earlier reading of this
+session looked for the landing orb's `data-testid` and wrongly concluded there
+were zero routes back.
+
+**Not done:** stop/abort mid-reply is still unverified.
+
+---
+
+Earlier, at transport level against a live backend. Found and fixed two real
 bugs:
 
 - **`invoice` contains `voice`** — keyword matching was substring-based, so every
@@ -578,10 +680,39 @@ only place the two populations separate, and it **warns rather than rejects**:
 sparse content is still indexed, because rejecting it would make the floor a
 second, quieter way to lose a file.
 
-**Not built:** the Knowledge surface does not yet show any of this. The service
-returns per-file outcomes with reasons, remedies and progress callbacks — the
-data is there and nothing renders it. That is the next piece, and it is what
-makes the failures actually loud rather than merely recorded.
+**The Knowledge surface renders it, and this was verified in a browser.**
+`ingest/records.py` persists sources and per-file outcomes; `/ingest` streams
+one event per file as it is read; Knowledge lists folders with counts, a
+per-source `local_only` policy toggle (rule 5, default deny), a Needs-attention
+section carrying each reason and remedy, and a retry on every problem.
+
+Driven end to end with Playwright against a real folder:
+
+> **m7folder** — 3 indexed · 2 need attention · Local only
+> **NEEDS ATTENTION · 2**
+> `locked-exam.docx` — Couldn't read — *Password-protected or a legacy .doc
+> renamed .docx.* — Retry
+> `NDA WOTG Uche.pdf` — Almost nothing — *2 pages produced only 1 character
+> (0.5 per page). It is probably a scan with a little text on top.* —
+> *Reading scans needs OCR: pip install zaram[ingest] (321 MB, one time).* — Retry
+
+**And it reaches the conversation.** A new `notice` stream event carries one
+sentence into the transcript after the answer:
+
+> *"2 files in m7folder didn't give me much to work with — locked-exam.docx
+> among them. Password-protected or a legacy .doc renamed .docx. They're listed
+> under Knowledge if you want to look."* → **Open Sources**
+
+Once per scan, verified: it did not reappear on the next question. After the
+answer, not before it — the user asked something, and interrupting with
+housekeeping first is how a warning gets trained away. Rendered as a distinct
+card, never as reply text: attributing it to the model would be putting words
+in its mouth.
+
+Progress is per file rather than a percentage, and it is real — `/ingest`
+yields from a generator as each file completes. An earlier draft collected
+every outcome and replayed them down the stream, which is a progress bar that
+is always finished before it is shown.
 
 **Failures must be loud.** A file that produced nothing appears in Knowledge
 with a reason and a retry, and is mentioned in the conversation the first time

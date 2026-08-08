@@ -34,6 +34,14 @@ class EventType(str, Enum):
     #: A file Zaram made. Rendered as a card in the conversation and, from the
     #: same record, as a row in Work.
     ARTIFACT = "artifact"
+    #: Something the user needs to know that is not part of the answer.
+    #:
+    #: Distinct from TOKEN because it must not be mistaken for the model
+    #: speaking, and distinct from ERROR because nothing failed in this
+    #: exchange. The first use is ingest: a file that gave nothing back has to
+    #: be *mentioned in the conversation the first time it matters*, since
+    #: Knowledge showing it only helps someone who opens Knowledge.
+    NOTICE = "notice"
 
 
 @dataclass
@@ -104,6 +112,21 @@ class StreamEvent:
         return StreamEvent(
             type=EventType.ARTIFACT,
             data=record,
+            correlation_id=correlation_id,
+        )
+
+    @staticmethod
+    def notice(content: str, kind: str = "", action: str = "", correlation_id: str = "") -> StreamEvent:
+        """Something the user should know, alongside the answer.
+
+        `action` names where to go about it — "knowledge" — so the surface can
+        offer a route rather than leaving the user to find it. Rendered
+        distinctly from the reply: attributing this to the model would be
+        putting words in its mouth.
+        """
+        return StreamEvent(
+            type=EventType.NOTICE,
+            data={"content": content, "kind": kind, "action": action},
             correlation_id=correlation_id,
         )
 

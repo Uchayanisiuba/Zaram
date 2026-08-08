@@ -29,15 +29,17 @@ runtime, and voice is out of scope for v1 (see CLAUDE.md), so the rewiring waits
 until voice returns to scope. Do not add features to the connector in the
 meantime — anything it grows has to be ported here later.
 
-Two loose ends the deletion left, both for whoever does that rewiring:
+Both loose ends the deletion left are now closed:
 
-* ``services/speech_manager.py`` still does ``from implementations.kokoro_tts
-  import KokoroTTS``, which no longer resolves. Nothing imports ``SpeechManager``,
-  so nothing breaks today, but the module is dead and should go with the connector.
-* ``voice/tests/test_kokoro_provider.py`` has five failures against this file
-  (voice discovery returns an empty set, so the invalid-voice fallback never
-  fires). They were invisible until ``testpaths`` was widened and are unrelated
-  to the deletions. Fix them as part of reconnecting voice, not before.
+* ``services/speech_manager.py`` did ``from implementations.kokoro_tts import
+  KokoroTTS``, which stopped resolving. Nothing imported ``SpeechManager``, so
+  the module was unimportable dead code and is deleted.
+* ``voice/tests/test_kokoro_provider.py`` had five failures against this file,
+  filed as "voice, out of scope". They were nothing of the kind: discovery
+  returns an empty set because ``voice_discovery_enabled`` defaults to
+  **off** — real discovery contacts huggingface.co at startup and rule 7g
+  forbids that before consent — and the tests were never updated. They now
+  enable it explicitly against a fake discoverer, so they reach no network.
 """
 
 from __future__ import annotations

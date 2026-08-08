@@ -206,6 +206,13 @@ function RailItem({ item, active, expanded, onClick }: { item: NavItem; active: 
   return (
     <button
       onClick={onClick}
+      // Named whether or not the label is drawn. Collapsed, this button
+      // contained an icon and nothing else — no text, no title, no label — so
+      // the whole navigation announced itself as five anonymous buttons, and
+      // "Knowledge" was unreachable to anything that finds controls by name.
+      aria-label={item.label}
+      aria-current={active ? 'page' : undefined}
+      title={item.label}
       style={{
         display: 'flex',
         alignItems: 'center',

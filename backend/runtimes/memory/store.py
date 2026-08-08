@@ -69,18 +69,34 @@ class InMemoryMemoryStore(MemoryStore):
         return record.id
 
     async def get(self, record_id: str) -> MemoryRecord | None:
+        """Read one record. Reading is not recalling — see `record_access`."""
+        return self._records.get(record_id)
+
+    async def record_access(self, record_id: str) -> None:
+        """Count one *recall* of this fact.
+
+        Separate from `get` on purpose. Rule 7e makes this number load-bearing:
+        facts enter provisionally, become durable through use, and decay if
+        never recalled, and `decay.py` forgets anything with `access_count == 0`
+        after 30 days. A count that also went up when the Memory surface merely
+        listed a fact would make browsing look like use.
+
+        It used to be a side effect of `get` here and *nowhere at all* in
+        `SQLiteMemoryStore`, which is the store the product actually runs. So
+        every fact read "Recalled 0 times" forever, promotion-through-use could
+        never happen, and every fact was permanently a decay candidate.
+        """
         record = self._records.get(record_id)
-        if record:
-            updated = MemoryRecord(
-                **{
-                    **record.__dict__,
-                    "access_count": record.access_count + 1,
-                    "last_accessed": time.time(),
-                }
-            )
-            self._records[record_id] = updated
-            return updated
-        return None
+        if record is None:
+            return
+        self._records[record_id] = MemoryRecord(
+            **{
+                **record.__dict__,
+                "access_count": record.access_count + 1,
+                "last_accessed": time.time(),
+            }
+        )
+        self._save()
 
     async def delete(self, record_id: str) -> bool:
         if record_id in self._records:
@@ -265,6 +281,25 @@ class SQLiteMemoryStore(MemoryStore):
             if not row:
                 return None
             return self._row_to_record(row)
+
+    async def record_access(self, record_id: str) -> None:
+        """Count one recall. This store had no equivalent at all.
+
+        `InMemoryMemoryStore` incremented as a side effect of `get`; this one
+        did nothing, and this is the store the product runs. Every fact
+        therefore read "Recalled 0 times" in the Memory surface no matter how
+        often it was cited, and `decay.py` — which forgets anything never
+        accessed after 30 days — saw a Spine in which nothing had ever been
+        used.
+        """
+        import sqlite3
+
+        with closing(sqlite3.connect(self.db_path)) as conn, conn:
+            conn.execute(
+                "UPDATE memories SET access_count = access_count + 1, last_accessed = ?"
+                " WHERE id = ?",
+                (time.time(), record_id),
+            )
 
     async def delete(self, record_id: str) -> bool:
         import sqlite3

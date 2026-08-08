@@ -54,6 +54,22 @@ from core.task_queue import TaskQueue
 logger = logging.getLogger(__name__)
 
 
+def _relevance_of(result: Any) -> float:
+    """How well a recalled memory bears on the question, 0..1.
+
+    `MemoryResult` carries two numbers and only one of them answers this.
+    `score` is the ranking blend used for ordering; `relevance` is the
+    similarity retrieval produced. Falls back to `score` for any result type
+    that has no `relevance` — several tests use plain stand-ins — so the
+    tightening applies where the real field exists and changes nothing where
+    it does not.
+    """
+    relevance = getattr(result, "relevance", None)
+    if relevance is None:
+        relevance = getattr(result, "score", 0.0)
+    return float(relevance or 0.0)
+
+
 class ExecutionEngine:
     """The operational core of Zaram. Orchestrates the lifecycle of a user request.
 
@@ -85,6 +101,28 @@ class ExecutionEngine:
         #: session_id → recent (prompt, answer) pairs, LRU-capped at
         #: MAX_SESSIONS. Ordered because eviction order is the point.
         self._session_turns: OrderedDict[str, list[tuple[str, str]]] = OrderedDict()
+        #: Returns one sentence to say in the transcript, or None. Injected so
+        #: `core/` keeps no dependency on `ingest/`; `main.py` supplies it.
+        self._notice_source: Any | None = None
+
+    def set_notice_source(self, source: Any | None) -> None:
+        """Provide a callable returning a one-off notice, or None.
+
+        Ingest is the first caller: a file that gave nothing back must be
+        mentioned in the conversation the first time it matters, because
+        Knowledge showing it only helps someone who opens Knowledge.
+        """
+        self._notice_source = source
+
+    def _pending_notice(self) -> str | None:
+        if self._notice_source is None:
+            return None
+        try:
+            return self._notice_source()
+        except Exception:
+            # A notice is never worth costing the user their answer.
+            logger.warning("Engine: notice source failed", exc_info=True)
+            return None
 
     # ------------------------------------------------------------------
     # Legacy synchronous execution (backward compatible)
@@ -280,6 +318,16 @@ class ExecutionEngine:
         # later "write that up" resolves against.
         self._record_exchange(session_id, prompt, answer)
 
+        # --- Say what could not be read, once. ---
+        #
+        # After the answer, not before it: the user asked a question and the
+        # answer is what they are waiting for. Interrupting with housekeeping
+        # first is how a warning gets trained away. Once per scan, never per
+        # reply, for the same reason.
+        notice = self._pending_notice()
+        if notice:
+            yield StreamEvent.notice(notice, kind="ingest", action="knowledge")
+
         if plan.correlation_id in self._active_plans:
             del self._active_plans[plan.correlation_id]
 
@@ -451,7 +499,15 @@ class ExecutionEngine:
             logger.warning("Engine: recall failed: %s: %s", type(exc).__name__, exc)
             return []
 
-        kept = [r for r in results if getattr(r, "score", 0.0) >= self.MIN_RECALL_SCORE]
+        # Thresholded on `relevance`, not `score`. `score` is the ranking
+        # blend — importance, recency, access count, session membership — and
+        # comparing it to a floor measured as a cosine similarity meant an
+        # unrelated fact could be cited on recency alone. Ordering and
+        # permission are different questions; this one is about relevance.
+        kept = [
+            r for r in results
+            if _relevance_of(r) >= self.MIN_RECALL_SCORE
+        ]
         logger.info("Engine: recalled %d/%d memories above threshold", len(kept), len(results))
         self._publish("memory.recalled", {
             "query": prompt[:100],

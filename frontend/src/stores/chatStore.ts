@@ -37,10 +37,22 @@ export interface ChatMessage {
    *  most replies produce no file, and an empty array is the ordinary case
    *  rather than a missing one. */
   artifacts: Artifact[];
+  /** Things Zaram needs to say that are not part of the answer — the first is
+   *  a file ingest could not read. Kept off `text` deliberately: rendering it
+   *  as the reply would attribute it to the model, and it is not something the
+   *  model said. */
+  notices: ChatNotice[];
   timestamp: number;
   /** Set when this reply failed or was cut short. Any text already received is
    *  kept — a partial answer is still worth showing, provided it is labelled. */
   error?: string;
+}
+
+export interface ChatNotice {
+  content: string;
+  kind: string;
+  /** Where to go about it, e.g. "knowledge". Empty when there is nowhere. */
+  action: string;
 }
 
 interface ChatState {
@@ -52,6 +64,8 @@ interface ChatState {
   /** Files made during the in-flight reply. Arrive after the tokens, since a
    *  document is written from the answer rather than alongside it. */
   streamingArtifacts: Artifact[];
+  /** Notices for the in-flight reply. Arrive last, after the answer. */
+  streamingNotices: ChatNotice[];
   isStreaming: boolean;
   /** Connection-level failure, as opposed to a failure within one reply. */
   connectionError: string | null;
@@ -74,6 +88,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   streamingText: '',
   streamingSources: [],
   streamingArtifacts: [],
+  streamingNotices: [],
   isStreaming: false,
   connectionError: null,
   sessionId: `session-${newId()}`,
@@ -94,6 +109,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           text: trimmed,
           sources: [],
           artifacts: [],
+          notices: [],
           timestamp: Date.now(),
         },
       ],
@@ -117,6 +133,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     let text_ = '';
     const sources: ChatSource[] = [];
     const artifacts: Artifact[] = [];
+    const notices: ChatNotice[] = [];
     const seen = new Set<string>();
     let replyError: string | undefined;
 
@@ -169,6 +186,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
             break;
           }
 
+          case 'notice': {
+            // Something worth saying that the model did not say. It arrives
+            // after the answer, which is where it is shown.
+            notices.push({
+              content: event.content,
+              kind: event.kind,
+              action: event.action,
+            });
+            set({ streamingNotices: [...notices] });
+            break;
+          }
+
           case 'error':
             // Reported by the backend. Keep whatever text arrived first.
             replyError = event.message;
@@ -208,7 +237,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     // backend genuinely produced would be worse than showing it labelled.
     set((s) => ({
       messages:
-        text_ || replyError || artifacts.length
+        text_ || replyError || artifacts.length || notices.length
           ? [
               ...s.messages,
               {
@@ -217,6 +246,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 text: text_,
                 sources,
                 artifacts,
+                notices,
                 timestamp: Date.now(),
                 error: replyError,
               },
@@ -225,6 +255,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       streamingText: '',
       streamingSources: [],
       streamingArtifacts: [],
+      streamingNotices: [],
       isStreaming: false,
     }));
 
@@ -234,7 +265,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
   cancel: () => {
     inFlight?.abort();
     inFlight = null;
-    set({ isStreaming: false, streamingText: '', streamingSources: [] });
+    set({
+      isStreaming: false,
+      streamingText: '',
+      streamingSources: [],
+      streamingNotices: [],
+    });
   },
 
   clear: () => {
@@ -245,6 +281,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       streamingText: '',
       streamingSources: [],
       streamingArtifacts: [],
+      streamingNotices: [],
       isStreaming: false,
       connectionError: null,
       sessionId: `session-${newId()}`,

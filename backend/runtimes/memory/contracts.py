@@ -89,10 +89,41 @@ class MemoryQuery:
 
 @dataclass
 class MemoryResult:
+    """One retrieved memory, with **two** numbers that are not interchangeable.
+
+    `relevance` answers "does this bear on the question" and is the similarity
+    retrieval produced. `score` answers "show this one first" and blends in
+    importance, recency, how often the fact has been used, and whether it
+    belongs to this session.
+
+    They were one field. `MemoryRanker.rank()` overwrote `score` with the blend
+    — in which similarity carries a weight of 0.35 — and `ExecutionEngine` then
+    compared the result to `MIN_RECALL_SCORE`, a threshold measured and
+    documented as a *cosine* floor. So a completely unrelated fact could clear
+    it on recency and session membership alone, which is exactly what a reply
+    citing five unrelated memories for a statement the user had just made
+    turned out to be.
+
+    Ordering and permission are different questions. CLAUDE.md already says so
+    for tools — "retrieval produces a shortlist; the model chooses; a retrieval
+    score authorises nothing" — and citation is the same shape: rank on
+    whatever is useful, but decide *whether to cite* on relevance alone.
+    """
+
     record: MemoryRecord
+    #: Ranking score. Ordering only. Never compare this to a relevance floor.
     score: float
+    #: Similarity as retrieval produced it, before any ranking blend. This is
+    #: what a citation threshold is applied to.
+    relevance: float | None = None
     match_reason: str = ""
     rank: int = 0
+
+    def __post_init__(self) -> None:
+        # A result built without one keeps them equal, so every existing caller
+        # behaves as before until the ranker separates them.
+        if self.relevance is None:
+            self.relevance = self.score
 
 
 @dataclass
@@ -107,6 +138,12 @@ class MemoryStats:
 class MemoryStore(Protocol):
     async def put(self, record: MemoryRecord) -> str: ...
     async def get(self, record_id: str) -> MemoryRecord | None: ...
+    #: Count one *recall*. Reading a record is not recalling it — the Memory
+    #: surface listing a fact must not make it look load-bearing. Part of the
+    #: contract because the two implementations disagreed about it silently:
+    #: one incremented inside `get`, the other did nothing, and the one that
+    #: did nothing is the one the product runs.
+    async def record_access(self, record_id: str) -> None: ...
     async def delete(self, record_id: str) -> bool: ...
     async def query(self, query: MemoryQuery) -> list[MemoryRecord]: ...
     async def all_records(self) -> list[MemoryRecord]: ...

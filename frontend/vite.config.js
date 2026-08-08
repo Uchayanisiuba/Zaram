@@ -32,6 +32,7 @@ export default defineConfig({
       '/memory': { target: BACKEND, changeOrigin: true },
       '/egress': { target: BACKEND, changeOrigin: true },
       '/artifacts': { target: BACKEND, changeOrigin: true },
+      '/ingest': { target: BACKEND, changeOrigin: true },
     },
   },
 });

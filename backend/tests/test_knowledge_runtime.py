@@ -587,12 +587,40 @@ class TestKnowledgeAPI:
         assert len(ranked) == 2
         assert ranked[0].result.title == "A"
 
-    def test_invalidate(self):
+    def test_invalidate_removes_the_object_chunks(self):
+        """Asserts the invalidation, which this did not.
+
+        It stored an object, called `invalidate`, and ended. A no-op
+        implementation would have passed it, which makes it worse than no test:
+        it reports coverage of the delete path while checking nothing about it.
+        """
         runtime = KnowledgeRuntime()
         from knowledge.protocol import KnowledgeObject
-        obj = KnowledgeObject(id="obj-1", content="invalidate me")
-        runtime.store(obj)
+
+        # Long enough to chunk. The original used "invalidate me", which
+        # produces no chunks at all — so it invalidated an object that had
+        # nothing stored against it, and would have passed on an empty store.
+        runtime.store(KnowledgeObject(
+            id="obj-1",
+            content="The Harbour Lane day rate is 425,000 naira with payment due in 14 days.",
+        ))
+        runtime.store(KnowledgeObject(
+            id="obj-2",
+            content="The Century invoice is 250,000 naira with payment due in 30 days.",
+        ))
+
+        before = list(runtime._vector_store._chunks.values())
+        assert any(c.metadata.get("object_id") == "obj-1" for c in before), (
+            "nothing was stored, so invalidating proves nothing"
+        )
+
         runtime.invalidate("obj-1")
+
+        after = list(runtime._vector_store._chunks.values())
+        assert not any(c.metadata.get("object_id") == "obj-1" for c in after)
+        assert any(c.metadata.get("object_id") == "obj-2" for c in after), (
+            "invalidating one object must not take the others with it"
+        )
 
     def test_search_semantic(self):
         runtime = KnowledgeRuntime()
