@@ -11,17 +11,27 @@ accurate — it is the first thing anyone reads.
 
 ---
 
-## Current state — 7 August 2026
+## Current state — 8 August 2026
 
-**Suite:** 1179 collected · 1152 passed · **27 failed** on a full dev install,
-in ~2m. The 27 are unchanged and pre-existing — listed under Known broken.
-The base-install figures are stale: the 95 new artifact tests should all pass
-there too, since their dependencies are in the base requirements, but that has
-not been measured. Previously: 951 passed · 13 failed · 52 skipped.
+**Suite: 0 failures.** 1152/27 → 1263/0 on a full dev install. The 27 were not
+one thing; see "What the 27 actually were". Run pytest **from the repo root** —
+the `--ignore` lines in `pyproject.toml` are rootdir-relative, and running it
+from `backend/` aborts collection on a truncated `test_kernel.py`.
 
-**Start with "Do these first" below.** Three cheap findings from the last
-session that are worth more than the next feature, one of which unblocks the
-cloud engine.
+**M7 is done and driven for real.** `backend/ingest/` — parser interface, light
+parsers, quality floor, loud failures. Verified against a real folder: an
+invoice indexed, an image-only scan reported with its reason and the OCR
+remedy, an encrypted .docx reported as password-protected, then a cited recall
+naming the source document.
+
+**Recall was broken and is now measured.** The eval harness found, on its first
+run, that hybrid retrieval was ranking on stopword overlap — an unrelated
+question outscored a genuinely relevant document. Fixed in three places. See
+"What the recall eval found" — this is the most consequential thing in this
+entry.
+
+**Docling is now an optional extra**, decided by measuring 1,080 real files.
+CLAUDE.md's dependency table is updated; the reasoning is recorded there.
 
 **Base install: ~317 MB.** 267 MB plus a *measured* 50 MB for the exporters
 (matplotlib 31, fonttools 16, openpyxl and the rest 3). Voice remains an
@@ -51,70 +61,92 @@ and compares against task exemplars. Keywords remain the fallback.
 real artifacts → the exporters → artifacts write path → Work surface →
 dependency removals → packaging split → VRAM detection.
 
-### Do these first — half a day, and one of them is a prerequisite
+### What the recall eval found — read this one
 
-**1. The 13 "pre-existing" core failures are one stale test double.**
+**Hybrid retrieval was ranking on stopword overlap.** Recall is the moat, it
+had never been measured end to end, and the eval failed within minutes of
+existing. Three bugs, in three different places, all pointing the same way:
 
-```
-FakeLLM.stream_response() takes 3 positional arguments but 4 were given
-```
+1. **`HybridMemoryRetriever` ran keyword search *beside* vector search in
+   HYBRID mode and kept whichever scored higher** (`retrieval.py`). Keyword
+   scoring split on whitespace with no stopword filter, so *"What is the
+   capital of France?"* overlapped a Harbour Lane project brief on `is`, `the`
+   and `of` — three of six terms, a score of 0.5 — while the true cosine
+   similarity was **0.226**. The max won. An unrelated document was cited with
+   a number that looked like a similarity and was not.
+2. **`HybridMemoryIndex` blended `0.7 * vector + 0.3 * keyword`**, which capped
+   any document matching on meaning alone at 0.7 of its true score. A genuinely
+   relevant note scoring **0.599** under bge-m3 arrived as **0.407** and was
+   dropped by the 0.42 floor. Keyword now *boosts* into the headroom above the
+   semantic score and can never dilute it.
+3. **Stopwords scored at all**, in both places, with two hand-maintained
+   tokenizers that disagreed — `France?` was a term and `is` was a good one.
+   One shared `content_tokens()` now.
 
-`FakeLLM` in `tests/test_streaming_conversation.py:32` is `(self, prompt,
-model)`. The real `implementations/ollama_llm.py` is `(self, prompt, model,
-system_prompt)`. When M4 fixed "the requested model was logged and then
-discarded" and started threading arguments through, the fake was not updated.
+**Before: the populations were inverted** — genuinely related documents bottomed
+out at 0.407 while unrelated ones reached 0.493, a margin of **−0.086**. No
+threshold could separate them, so no value of `MIN_RECALL_SCORE` was correct.
+**After: +0.080**, related min 0.469 against unrelated max 0.389, with 0.42
+sitting in the gap. `test_recall_eval.py` prints that margin on every run, so a
+narrowing one is visible before a user feels it.
 
-So **13 tests covering streaming conversation — the most-used path in the
-product — have been dead since then**, and the count was normalised as
-"pre-existing, unchanged". This file's own warning came true. Fixing the fake
-restores coverage of the core path and is roughly twenty minutes.
+**`MIN_RECALL_SCORE = 0.42` was not "chosen by feel"** — that claim was wrong.
+It was measured, with the distribution recorded in its docstring and asserted by
+`test_recall_relevance.py`. What was wrong is subtler and worse: it was measured
+*through* the distortion above, on a two-fact Spine. It held there and collapsed
+at five documents. It is now validated against real embeddings on a deliberately
+confusable corpus.
 
-The 14 voice failures are genuinely out of scope. Do not conflate them; that
-conflation is what made 27 read as weather.
+**`bge-reranker-v2-m3` cannot be wired through Ollama.** Both `/api/embed` and
+`/api/generate` terminate llama-server with a stack-buffer overrun
+(`0xc0000409`). It is not merely unreferenced — it is unusable by this route, so
+CLAUDE.md's ~1.8 GB "embeddings and reranker resident" arithmetic is fiction
+until a different route exists. Decide it deliberately; do not assume the model
+being pulled means it works.
 
-**2. There are four `stream_response` signatures. Unify before the cloud engine.**
+### What the 27 actually were — the count was four separate bugs
 
-| Location | Signature |
-|---|---|
-| `implementations/ollama_llm.py` | `(prompt, model, system_prompt)` |
-| `interfaces/llm_engine.py` | `(prompt, model)` |
-| `interfaces/implementation/ollama_llm.py` | `(prompt, model)` |
-| `runtimes/models/engines/ollama_engine.py` | `(prompt, context, model)` |
+The previous entry said "13 = one stale test double, 14 = voice, out of scope".
+Both halves were wrong, and the second was the more misleading.
 
-No single LLM interface, so drift in one place fails nowhere else — which is
-*why* finding 1 stayed invisible. `base_engine.py` should be the one contract;
-`interfaces/` looks like dead legacy. **Do this before writing
-`OpenAICompatibleEngine`**, or the cloud path inherits the same invisibility
-and there will be five signatures.
+- **The stale `FakeLLM` was real but was only the top layer.** Fixing the
+  signature moved the failure one level down: `test_streaming_conversation` and
+  the voice integration module were written against a `ConversationManager`
+  that took a `VoiceManager` and yielded `audio` events. Sprint Alpha.6
+  replaced that with the event bus. **Half those tests could never have passed
+  again**, whatever was done to the fake. They now test what the manager
+  actually promises; the audio assertions went back to the voice stack.
+- **The 14 "voice, out of scope" failures were not voice.** Five were
+  `test_kokoro_provider` asserting that discovery populates `_voices`, which
+  stopped happening when `voice_discovery_enabled` was deliberately defaulted
+  **off** — real discovery contacts huggingface.co at startup and rule 7g
+  forbids that before consent. Nine more were the ConversationManager problem
+  above. "Out of scope" was the label that stopped anyone reading them.
+- **Two were a live NameError.** `main.py` used `SEARCH_MARKER` without
+  importing it — a real crash on the web-search path, latent only because
+  search is default-deny.
+- **One asserted a rule violation.** `test_alpha10c_acceptance` required
+  `/chat` to trigger a search; search has since moved behind `chat_router` and
+  become default-deny, so the test demanded that a question reach the internet.
 
-**3. Recall is unmeasured, and it is the entire moat.**
+The lesson is the one this file already recorded and then fell for anyway: a
+stable failure count everyone stops looking at is how a real regression hides.
+The specific trap was the *taxonomy* — "13 core, 14 voice" made 27 feel
+understood. Nobody had run them individually.
 
-- `MIN_RECALL_SCORE = 0.42` (`execution_engine.py:314`) was chosen by feel.
-  CLAUDE.md says benchmark against LoCoMo / LongMemEval, not by feel.
-- **`bge-reranker-v2-m3` is installed in Ollama and referenced nowhere in the
-  code.** CLAUDE.md's residency arithmetic budgets ~1.8 GB for "embeddings and
-  reranker resident". Either wire it or drop it from the math.
-- There is no eval harness of any kind.
+### Still open from the last audit
 
-If recall is mediocre the alpha fails and the day-30 number will not say why —
-users report "it didn't feel like it knew me", which cannot be debugged after
-the fact. **Build the harness alongside M7**: ingest is what finally puts real
-documents in the Spine, so it is both the first moment an eval is possible and
-the moment it becomes necessary. Retrofitting cases later means writing them
-against whatever happens to be indexed.
+**Test the seams, not just the components.** Unchanged and still true. Every
+real bug found by driving the live kernel passed unit tests. `test_ingest.py`
+and `test_recall_eval.py` are the first two acceptance-shaped tests; the
+end-to-end recall demo still has no test that boots the real kernel.
 
-**4. Test the seams, not just the components.**
-
-Every real bug found in the last session — the invented client, the missing
-`exists` field, the `[ARTIFACT]` marker leak, the tripled title, an Excel
-auto-filter spanning one row — passed unit tests and was caught by driving the
-live kernel. The suite tests components well and seams not at all. Three or
-four acceptance tests that boot the real kernel would have caught all five.
-Same instinct as `test_egress_chokepoint`, applied to behaviour.
-
-**5. A leak introduced last session.** `ExecutionEngine._session_turns` caps
-turns per session at 8 but never evicts sessions, and the frontend mints a new
-session id per page load. Wants an LRU cap.
+**`--ignore` in `pyproject.toml` is rootdir-relative.** Running pytest from
+`backend/` aborts the whole suite on `test_kernel.py`, which is committed
+truncated mid-expression (ends at line 18, `SyntaxError: '(' was never
+closed`). It is a manual smoke script from early kernel work, not a test.
+Delete it or rename it `manual_*.py` — the ignore line is a workaround for a
+file nobody wants.
 
 ### Decisions taken that are not yet obvious from the code
 
@@ -250,6 +282,16 @@ call time by `planner.web_search_enabled()`.
 
 ### Open questions
 
+- **How does recall behave as the Spine grows?** The eval runs on five
+  documents. The failure mode it exposed — an unrelated document creeping over
+  the floor — gets *more* likely with more material, because the maximum
+  unrelated score is a maximum over a larger set. A fixed threshold may not
+  survive a thousand documents even now that the scoring is honest. Measuring
+  that needs the eval run at 10, 100 and 1,000 documents and the margin
+  plotted; the harness already prints the number. **This is the argument for a
+  reranker**, and the reranker route through Ollama is broken — so the answer
+  is probably a cross-encoder loaded directly, which changes the residency
+  arithmetic. Do not defer this past M8.
 - **Dev tooling still ships in the base install** — mypy, ruff, pytest,
   pip-licenses, wheel. Probably 30–40 MB. Same split-verify-measure method as
   the voice extra. Belongs in the packaging spike.
@@ -397,8 +439,13 @@ Playwright is still unavailable here.
 Decided 7 August 2026, after an audit of what actually stands between here and
 a 15-person retention test.
 
-**Do these first (above) → M7 → M8 → M9/M9a → cloud engine + M10 as one unit →
-M11 + first run → M12.**
+**~~Do these first~~ ✅ → ~~M7~~ ✅ → M8 → M9/M9a → cloud engine + M10 as one
+unit → M11 + first run → M12.**
+
+**Next, and it is small: render the ingest outcomes in Knowledge.** M7's service
+returns a reason, a remedy and a progress callback per file, and nothing draws
+them. Until that lands the failures are recorded rather than loud, which is the
+half of M7 that actually protects the user.
 
 **Cut from the alpha path**, not from the product: **M9c** (Unreal/Blender is a
 different wedge on a different day, orthogonal to freelancers) and **Session 5**
@@ -499,9 +546,42 @@ honest grading against this machine — greyed out where unavailable, with the
 reason stated. Only packs that exist or are genuinely next; a catalogue of forty
 things we will never build is a promise accumulating.
 
-### M7 — Ingest  ← NEXT
-**The one v1 scope item with nothing built.** Docling. Folder in, facts out.
-Verified: no `docling` reference anywhere in the backend, no ingest function.
+### M7 — Ingest ✅
+`backend/ingest/` — a parser interface, four light parsers, a measured quality
+floor, and an outcome for every file rather than only the ones that worked.
+
+**Verified against a real folder**, not just tests: an invoice indexed and
+recalled by a question about its day rate (0.492, cited by filename); an
+image-only scan reported as *"2 pages produced only 1 character (0.5 per page).
+It is probably a scan with a little text on top"* with the OCR remedy and its
+size; an encrypted `.docx` reported as password-protected **without** falsely
+offering OCR, since no parser opens those.
+
+**Docling is an optional extra, decided by measurement.** It costs 321 MB of
+wheels (torch, opencv, transformers, rapidocr, scipy) against a 267 MB base —
+more than doubling the installer that the packaging milestone cut by 81%.
+Probed against 1,080 real files: the light parsers read **50 of 54 PDFs**; the
+four they cannot are image-only scans. `docling-slim` alone is a mirage — 40 MB
+that parses nothing, because every format backend lives in the `standard` extra
+that pulls torch.
+
+`PyPDF2` was in `requirements.txt` and imported by nothing; replaced by `pypdf`
+(0.4 MB), verified by removal plus a green suite rather than by metadata.
+
+**The quality floor is measured, and the interesting half is where it *isn't*
+set.** Zero characters is unambiguous — four files, all image-only scans, no
+false positive possible. The band above zero is not: of twelve PDFs under 200
+chars/page, those between 98 and 190 are *legitimately sparse* — a pitch deck
+at 98.6, a cast sheet at 186.8. A floor at 200 looks reasonable and would tell
+a user their own pitch deck was unreadable. The floor is **50 chars/page**, the
+only place the two populations separate, and it **warns rather than rejects**:
+sparse content is still indexed, because rejecting it would make the floor a
+second, quieter way to lose a file.
+
+**Not built:** the Knowledge surface does not yet show any of this. The service
+returns per-file outcomes with reasons, remedies and progress callbacks — the
+data is there and nothing renders it. That is the next piece, and it is what
+makes the failures actually loud rather than merely recorded.
 
 **Failures must be loud.** A file that produced nothing appears in Knowledge
 with a reason and a retry, and is mentioned in the conversation the first time
@@ -526,7 +606,8 @@ possible and the moment it becomes necessary.
 
 **Acceptance:** point at a folder, watch it index, ask a question, get a cited
 answer from a real document. Then point at a folder containing a scanned PDF
-and watch Knowledge say which file gave nothing back and why.
+and watch Knowledge say which file gave nothing back and why. **Met at the
+service level; the Knowledge half is not rendered yet.**
 
 ### M8 — Memory scope
 Every fact carries `global` or `project:<id>`, **and `origin`** — the two land
@@ -651,18 +732,26 @@ answers become the missing line in `docs/PITCH.md`.
 
 ## Known broken
 
-**27 failing tests**, and the 13 are no longer a mystery:
+**Nothing.** 1263 tests, 0 failures, ~2m from the repo root on a full dev
+install. The 27 are gone and the section explaining what they actually were is
+above, under "What the 27 actually were".
 
-- **13** in `test_streaming_conversation`, `test_alpha10c_acceptance`,
-  `test_kernel_flow` — **root cause found 7 Aug 2026: one stale test double.**
-  `FakeLLM.stream_response()` is `(prompt, model)`; the real one takes
-  `system_prompt` too. See "Do these first" item 1. These tests have not been
-  meaningfully running since M4, which means streaming conversation — the
-  most-used path in the product — is effectively uncovered.
-- **14** in voice — out of scope, and these skip on a base install.
+Record any change to that number — but the sharper lesson from clearing them is
+about *taxonomy*, not counting. "13 core, 14 voice" made 27 feel understood and
+that is why nobody ran them individually for four milestones. A failure grouped
+under a plausible label is more dangerous than an unexplained one.
 
-Record any change to that number. A stable failure count everyone stops looking
-at is how a real regression hides — which is exactly what happened here.
+Two of the new tests need a live dependency and skip loudly without it:
+`test_recall_eval.py` needs Ollama with `bge-m3` on loopback, because
+similarity over the hash fallback is arbitrary rather than merely worse and a
+green run against it would be a lie.
 
-Also broken, found and not fixed: `services/speech_manager.py` imports a module
-that was deleted. Nothing imports `SpeechManager`, so nothing breaks today.
+Still broken, found and not fixed:
+
+- `services/speech_manager.py` imports a module that was deleted. Nothing
+  imports `SpeechManager`, so nothing breaks today.
+- `backend/test_kernel.py` is committed truncated mid-expression and is only
+  survivable because `pyproject.toml` ignores it by path. See "Still open from
+  the last audit".
+- `bge-reranker-v2-m3` crashes llama-server through Ollama. See "What the
+  recall eval found".

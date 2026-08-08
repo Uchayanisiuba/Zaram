@@ -16,8 +16,22 @@ requires-python = ">=3.11"
 #
 #     pip install -r backend/requirements-voice.txt
 #     python -m spacy download en_core_web_sm
+#
+# Ingest OCR is an optional extra for the same reason, decided by measurement.
+#
+# Docling pulls 321 MB of wheels — torch, torchvision, opencv, transformers,
+# scipy, rapidocr — against a 267 MB base. Probed against 1,080 real files on a
+# working machine, the dependency-light parsers (pypdf, python-docx, openpyxl)
+# read 50 of 54 PDFs; the four they cannot are image-only scans. So Docling buys
+# a real but narrow capability at more than double the installer, and M11's
+# acceptance is a stranger reaching a cited answer in under ten minutes.
+#
+# The gap is never silent: a scan lands in Knowledge with its reason and this
+# command, with the size stated. See backend/ingest/quality.py for the
+# measurement and CLAUDE.md's dependency table for the decision.
 [project.optional-dependencies]
 voice = []
+ingest = ["docling>=2.118.1"]
 
 [tool.ruff]
 line-length = 100
