@@ -446,6 +446,153 @@ local inference and GPU budget is not free.
 
 ---
 
+## Citations
+
+Zaram's sources come in three kinds and no competitor has to make this
+distinction. That is the whole reason this screen is worth designing carefully
+rather than adopting the footnote pattern everyone else uses.
+
+| kind | means | did bytes leave? |
+|---|---|---|
+| `memory` | a fact from the Spine | no |
+| `document` | a passage from an indexed file | no |
+| `web` | a search result | **yes**, and there is an egress log entry |
+
+**A citation that tells you whether an answer cost you privacy is the product's
+thesis at the sentence level.** Everything below follows from that one idea.
+
+### What gets cited, and what does not
+
+Not everything. An answer wearing nine citations has taught the user that
+citations are decoration, and after that the real ones cannot help.
+
+- **Web sources are always cited**, regardless of how central the claim was.
+  Not for attribution — because bytes left the machine, and anything involving
+  egress is always visible. This is not a relevance judgement and must not be
+  thresholded.
+- **Local sources are cited only when they carry the answer.** The test is
+  whether the claim would be different without that source.
+
+That second rule needs a number, and the number already exists.
+`MIN_RECALL_SCORE` decides what is *injected* into the model's context. Citation
+needs a **second, higher cut on the same `relevance` field** —
+`MIN_CITATION_SCORE` — because "worth giving the model" and "worth telling the
+user about" are different questions. Injecting five facts and citing the two
+that mattered is the correct behaviour, not a compromise.
+
+> **Measured, and this is why the second cut is needed.** Driving the interface
+> at 1,000 documents produced a reply citing five memories for a question about
+> a day rate — all genuinely about day rates and payment terms, relevance
+> 0.50–0.61, and only the top one used. Nothing was wrong with retrieval. The
+> gap is between *recalled* and *used*.
+
+**Never threshold on `score`.** `score` is the ranking blend — importance,
+recency, access count, session membership. `relevance` is the similarity. The
+two were one field, and comparing the blend to a similarity floor let a fact
+with a true cosine of 0.20 be cited on recency alone.
+
+### Division of labour
+
+Three surfaces, three questions, and they must not be collapsed:
+
+- **Inline chips** — what mattered. Attached to the prose.
+- **The summary line** — the egress split, at a glance.
+- **The panel** — everything, including what was recalled and *not* cited.
+
+### Inline chips
+
+A small pill: kind icon and a number. Document icon, memory diamond, globe.
+
+**Colour encodes egress, not category.** Cyan for anything that stayed, violet
+for anything that left — the same two colours the orb uses for local versus
+cloud. One meaning reused, so it needs no legend. A user who has learned what
+violet means on the orb already knows what it means on a citation.
+
+**Never render a chip that is not clickable.** Citing without linking fails the
+only task a citation exists for — checking it — and for this product a
+decorative citation is worse than none.
+
+Numbering matches the panel exactly.
+
+### Summary line
+
+Below the reply, collapsed by default. It leads with the split:
+
+> **2 sources · 1 sent to the web**
+
+That ordering is deliberate: the egress count is what someone wants at a glance,
+and burying it after a total makes it look like an afterthought.
+
+A single-source answer skips the panel entirely and puts the card inline. A
+panel for one citation is overkill and trains the user to ignore the affordance.
+
+### The panel
+
+Right side, same anchor and animation as fact detail — **one pattern, not two**.
+Escape closes.
+
+Grouped by egress, with a mono heading per group:
+
+```
+nothing left this device
+1,204 bytes left this device
+```
+
+Bytes, not "1 source". The egress log counts bytes and so does this; two
+different units for the same fact is how a number stops being checkable.
+
+Per kind:
+
+- **document** — filename, the passage quoted with a left border, page number
+  and index date, and an open-document action.
+- **memory** — the fact, its source and date, recall count, and **correct /
+  forget inline**. This is the fastest correction path in the product and it
+  sits exactly where the user is already checking. Correction here supersedes,
+  never deletes, exactly as it does in Memory.
+- **web** — title, excerpt, domain, when it was sent and to whom, and **a link
+  to its row in Activity**. That link is the citation and the egress log being
+  the same object viewed twice, and it is the thing nobody else can build.
+
+Below the cited sources, a quieter section: **what was recalled but not cited**.
+Nothing is hidden — it is simply not interrupting the prose. This is where the
+gap between `MIN_RECALL_SCORE` and `MIN_CITATION_SCORE` becomes visible and
+therefore arguable.
+
+### The empty state is not optional
+
+When nothing from the user's material contributed:
+
+> *Answered from the model's own knowledge — nothing from your files.*
+
+This is a claim about **absence**, which the user cannot infer from missing
+chips: missing chips could equally mean we did not bother. A visible no-sources
+state is more trustworthy than confident prose with hidden provenance, and it is
+the same instinct as `export.formats()` reporting why a format is unavailable
+rather than silently omitting it.
+
+### Origin, once it has somewhere to show
+
+Facts carry `origin` — `user_document`, `conversation`, `generated`. Recall
+already deprioritises Zaram's own restatements in the ordering. The panel should
+eventually say which it is, because *"from a proposal Zaram generated in April"*
+reads very differently from *"from your client brief"*. **Not in the first
+pass** — chips, summary, panel and empty state first.
+
+### Build order — stop after each
+
+The backend step is first because the frontend cannot render what is not sent,
+and inventing a kind client-side would be the fabrication rule all over again.
+
+1. **This spec section.** Stop, review. ← *you are here*
+2. **Backend.** `StreamEvent.source` carries `kind`, `url`, `title` and nothing
+   else. It needs `excerpt`, `relevance`, an egress reference for web sources,
+   and a stable citation number. Add `MIN_CITATION_SCORE`.
+3. **Chips and the summary line.**
+4. **The panel.**
+5. **The empty state.**
+
+---
+
 ## Rules everywhere
 
 - Every list has a designed empty state with a recovery action. Never a dead end.
