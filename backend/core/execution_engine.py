@@ -335,7 +335,21 @@ class ExecutionEngine:
     # Recall — the memory loop
     # ------------------------------------------------------------------
 
+    #: How many recalled facts reach the model and the citation list.
     MAX_RECALL = 5
+
+    #: How many candidates to retrieve before the floor and the cut.
+    #:
+    #: Measured at 1,000 documents: the right answer to one eval question sat
+    #: at rank 7 with relevance 0.517 — above the 0.42 floor, outside a top-5.
+    #: Near-identical invoices crowd a small shortlist long before they defeat
+    #: the threshold, so the fix is depth, not a better score.
+    #:
+    #: 25 is five times the shortlist, which covered every displacement seen at
+    #: 1,000 documents with room to spare. Retrieval is a linear scan either
+    #: way; the only extra cost is carrying twenty more rows a few
+    #: milliseconds further.
+    RECALL_CANDIDATES = 25
 
     #: How many turns of ephemeral session state to keep, per session.
     MAX_SESSION_TURNS = 8
@@ -485,14 +499,29 @@ class ExecutionEngine:
             return None
 
     def _recall(self, prompt: str, session_id: str) -> list[Any]:
-        """Retrieve prior context relevant to this prompt."""
+        """Retrieve prior context relevant to this prompt.
+
+        Retrieves `RECALL_CANDIDATES` and cuts to `MAX_RECALL` after the floor,
+        rather than asking for five and hoping the right one is in them.
+
+        Measured, at 1,000 documents: the relevance floor held — margin +0.179,
+        zero false citations — but the answer to *"How long is the title
+        sequence?"* sat at **rank 7 with relevance 0.517**, comfortably above
+        the 0.42 floor and outside a top-5 shortlist. Crowded out by
+        near-identical invoices, not scored badly.
+
+        That distinction decided the reranker question. A scoring failure is
+        what a cross-encoder is for; a depth failure is fixed by asking for more
+        candidates, which costs one wider SQL read and no VRAM. See
+        `test_recall_at_scale.py` and `docs/RERANKER.md`.
+        """
         runtime = self._memory_runtime()
         if runtime is None or not prompt.strip():
             return []
         try:
             results = run_sync(runtime.retrieve(
                 query=prompt,
-                max_results=self.MAX_RECALL,
+                max_results=self.RECALL_CANDIDATES,
                 session_id=None,
             ))
         except Exception as exc:
@@ -507,7 +536,7 @@ class ExecutionEngine:
         kept = [
             r for r in results
             if _relevance_of(r) >= self.MIN_RECALL_SCORE
-        ]
+        ][: self.MAX_RECALL]
         logger.info("Engine: recalled %d/%d memories above threshold", len(kept), len(results))
         self._publish("memory.recalled", {
             "query": prompt[:100],

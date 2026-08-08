@@ -12,13 +12,31 @@ from contextlib import closing
 logger = logging.getLogger(__name__)
 
 from .contracts import (
+    GLOBAL_SCOPE,
     MemoryRecord,
     MemoryQuery,
     MemoryStats,
     MemoryStore,
     MemoryType,
+    Origin,
     RetrievalStrategy,
 )
+
+
+def _origin_or_default(value: Any) -> Origin:
+    """Read an origin off a row, tolerating a Spine written before M8.
+
+    An unrecognised value becomes `CONVERSATION` rather than raising: a fact
+    whose origin cannot be read is still the user's fact, and refusing to load
+    the Spine over a label would lose everything to protect a footnote.
+    """
+    if not value:
+        return Origin.CONVERSATION
+    try:
+        return Origin(value)
+    except ValueError:
+        logger.warning("Spine: unknown origin %r, reading as conversation", value)
+        return Origin.CONVERSATION
 
 
 class InMemoryMemoryStore(MemoryStore):
@@ -72,8 +90,8 @@ class InMemoryMemoryStore(MemoryStore):
         """Read one record. Reading is not recalling — see `record_access`."""
         return self._records.get(record_id)
 
-    async def record_access(self, record_id: str) -> None:
-        """Count one *recall* of this fact.
+    async def record_access(self, record_id: str, scope: str | None = None) -> None:
+        """Count one *recall* of this fact, and where it happened.
 
         Separate from `get` on purpose. Rule 7e makes this number load-bearing:
         facts enter provisionally, become durable through use, and decay if
@@ -85,15 +103,24 @@ class InMemoryMemoryStore(MemoryStore):
         `SQLiteMemoryStore`, which is the store the product actually runs. So
         every fact read "Recalled 0 times" forever, promotion-through-use could
         never happen, and every fact was permanently a decay candidate.
+
+        `scope` records *which* project recalled it. Rule 7i promotes a fact to
+        global when it has been useful across three different projects, and a
+        bare count cannot answer "three *different*" — so the identities are
+        kept rather than a number.
         """
         record = self._records.get(record_id)
         if record is None:
             return
+        seen = list(record.recalled_in or [])
+        if scope and scope != GLOBAL_SCOPE and scope not in seen:
+            seen.append(scope)
         self._records[record_id] = MemoryRecord(
             **{
                 **record.__dict__,
                 "access_count": record.access_count + 1,
                 "last_accessed": time.time(),
+                "recalled_in": seen,
             }
         )
         self._save()
@@ -148,6 +175,11 @@ class InMemoryMemoryStore(MemoryStore):
             if query.time_range:
                 if not (query.time_range[0] <= record.created_at <= query.time_range[1]):
                     continue
+            # Same scope rule as the SQLite store. Two stores disagreeing about
+            # which project's facts are visible would make a privacy boundary
+            # depend on which backend happened to be configured.
+            if query.scope and record.scope not in (query.scope, GLOBAL_SCOPE):
+                continue
             candidates.append(record)
 
         # Pinned first: the user said these matter, which outranks recency.
@@ -231,12 +263,24 @@ class SQLiteMemoryStore(MemoryStore):
                 ("superseded_by", "ALTER TABLE memories ADD COLUMN superseded_by TEXT"),
                 ("superseded_at", "ALTER TABLE memories ADD COLUMN superseded_at REAL"),
                 ("pinned", "ALTER TABLE memories ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0"),
+                # M8, and the reason it lands before the alpha rather than
+                # after: retrofitting scope onto facts that lack it means
+                # guessing for everything already stored. `global` is the only
+                # honest default for a pre-M8 fact — it was captured with no
+                # project in play, so assigning one would invent a value nobody
+                # entered. Scope and origin migrate together because they are
+                # columns on the same rows and doing them separately is two
+                # migrations over the user's data for no gain.
+                ("scope", f"ALTER TABLE memories ADD COLUMN scope TEXT NOT NULL DEFAULT '{GLOBAL_SCOPE}'"),
+                ("origin", f"ALTER TABLE memories ADD COLUMN origin TEXT NOT NULL DEFAULT '{Origin.CONVERSATION.value}'"),
+                ("recalled_in", "ALTER TABLE memories ADD COLUMN recalled_in TEXT NOT NULL DEFAULT '[]'"),
             ):
                 if column not in existing:
                     conn.execute(ddl)
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_superseded ON memories(superseded_by)"
             )
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_scope ON memories(scope)")
 
     async def put(self, record: MemoryRecord) -> str:
         import sqlite3
@@ -247,8 +291,8 @@ class SQLiteMemoryStore(MemoryStore):
                 INSERT OR REPLACE INTO memories
                 (id, content, memory_type, metadata, embedding, created_at, updated_at,
                  access_count, last_accessed, tags, session_id, user_id, importance, source,
-                 superseded_by, superseded_at, pinned)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 superseded_by, superseded_at, pinned, scope, origin, recalled_in)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
                 (
                     record.id,
@@ -268,6 +312,9 @@ class SQLiteMemoryStore(MemoryStore):
                     record.superseded_by,
                     record.superseded_at,
                     1 if record.pinned else 0,
+                    record.scope,
+                    record.origin.value if hasattr(record.origin, "value") else str(record.origin),
+                    json.dumps(list(record.recalled_in or [])),
                 ),
             )
         return record.id
@@ -282,8 +329,8 @@ class SQLiteMemoryStore(MemoryStore):
                 return None
             return self._row_to_record(row)
 
-    async def record_access(self, record_id: str) -> None:
-        """Count one recall. This store had no equivalent at all.
+    async def record_access(self, record_id: str, scope: str | None = None) -> None:
+        """Count one recall, and where it happened. This store had none at all.
 
         `InMemoryMemoryStore` incremented as a side effect of `get`; this one
         did nothing, and this is the store the product runs. Every fact
@@ -291,14 +338,27 @@ class SQLiteMemoryStore(MemoryStore):
         often it was cited, and `decay.py` — which forgets anything never
         accessed after 30 days — saw a Spine in which nothing had ever been
         used.
+
+        `recalled_in` is read-modify-write rather than a SQL append because it
+        is a JSON set and SQLite has no set type. The window is small and the
+        worst case is a lost duplicate, not a lost fact.
         """
         import sqlite3
 
         with closing(sqlite3.connect(self.db_path)) as conn, conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                "SELECT recalled_in FROM memories WHERE id = ?", (record_id,)
+            ).fetchone()
+            if row is None:
+                return
+            seen = json.loads(row["recalled_in"] or "[]")
+            if scope and scope != GLOBAL_SCOPE and scope not in seen:
+                seen.append(scope)
             conn.execute(
-                "UPDATE memories SET access_count = access_count + 1, last_accessed = ?"
-                " WHERE id = ?",
-                (time.time(), record_id),
+                "UPDATE memories SET access_count = access_count + 1,"
+                " last_accessed = ?, recalled_in = ? WHERE id = ?",
+                (time.time(), json.dumps(seen), record_id),
             )
 
     async def delete(self, record_id: str) -> bool:
@@ -342,6 +402,16 @@ class SQLiteMemoryStore(MemoryStore):
         # Memory surface does — to show the struck-through record.
         if not query.filters.get("include_superseded"):
             where_clauses.append("superseded_by IS NULL")
+
+        # Rule 7i: recall needs both scopes at once. A question asked inside a
+        # project draws on that project's facts *and* on what is true about the
+        # user generally — "the Harbour Lane rate is 425,000" and "never send a
+        # document without a summary" both bear on writing a proposal. Other
+        # projects' facts are excluded, which is what makes scope a boundary
+        # rather than a label.
+        if query.scope:
+            where_clauses.append("(scope = ? OR scope = ?)")
+            params.extend([query.scope, GLOBAL_SCOPE])
 
         where_sql = "WHERE " + " AND ".join(where_clauses) if where_clauses else ""
 
@@ -446,6 +516,15 @@ class SQLiteMemoryStore(MemoryStore):
             superseded_by=row["superseded_by"] if "superseded_by" in row.keys() else None,
             superseded_at=row["superseded_at"] if "superseded_at" in row.keys() else None,
             pinned=bool(row["pinned"]) if "pinned" in row.keys() else False,
+            # A fact written before M8 is `global`, because it was captured
+            # with no project in play. Guessing a project for it would invent a
+            # value the user never entered — which is the whole reason scope
+            # lands before the alpha rather than after.
+            scope=row["scope"] if "scope" in row.keys() and row["scope"] else GLOBAL_SCOPE,
+            origin=_origin_or_default(row["origin"] if "origin" in row.keys() else None),
+            recalled_in=json.loads(
+                row["recalled_in"] if "recalled_in" in row.keys() and row["recalled_in"] else "[]"
+            ),
         )
 
 

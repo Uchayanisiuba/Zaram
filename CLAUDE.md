@@ -426,11 +426,37 @@ fallback only if embeddings prove insufficient. Exemplars are user-editable.
 ("routed to qwen2.5-coder — coding task"), with a per-message override available inline.
 Same posture as memory correction, applied to routing.
 
-**Model residency is a hardware-grading problem.** On 12GB with embeddings and reranker
-resident (~1.8GB), roughly 9GB remains. Some model pairs are co-resident; others force
-an unload/reload costing seconds. Settings must show which is which, and a route that
-requires a swap must be visible in the orb's state. An invisible swap reads as a broken
-product.
+**Model residency is a hardware-grading problem.** Measured on a 12 GB RTX 3060,
+8 August 2026, with `nvidia-smi` and Ollama's `/api/ps` — not estimated:
+
+| | |
+|---|---|
+| bge-m3 embeddings, resident | **0.66 GB** |
+| Reranker, resident | **0 GB** — nothing runs; see `docs/RERANKER.md` |
+| KV-cache reserve (20% of VRAM, a judgement) | 2.58 GB |
+| **Budget a chat model may claim** | **~9.1 GB** |
+
+The old figure here was "~1.8 GB for embeddings and reranker resident, roughly
+9 GB remains". The 9 GB was right by coincidence and the 1.8 GB was wrong in
+both directions: embeddings are 0.66 GB resident, and the reranker share was
+never spent because `bge-reranker-v2-m3` cannot run through Ollama at all.
+
+**The gate does not read this table** — `ProviderManager.resident_budget_bytes`
+computes from whichever embedder discovery actually found. That is the right
+design and it is why the wrong prose never became a wrong decision. Keep it
+that way: a constant in a document that a gate reads is the same failure as a
+wrong `vram_bytes`, only quieter.
+
+One real imprecision remains: the gate uses the embedder's **on-disk size**
+(1.16 GB for bge-m3) as a proxy for its **resident VRAM** (0.66 GB), so it
+over-reserves by ~0.5 GB. Checked across 4–24 GB against the installed model
+set, that never changes which model is selected — the gaps between model sizes
+are 1–3 GB and swamp it. Worth fixing when something depends on finer
+granularity, not before.
+
+Some model pairs are co-resident; others force an unload/reload costing
+seconds. Settings must show which is which, and a route that requires a swap
+must be visible in the orb's state. An invisible swap reads as a broken product.
 
 **Three tiers of control**, so a non-technical user never sees the third:
 1. Default — Zaram picks, one local and one cloud, auto-routed
