@@ -13,19 +13,62 @@ accurate — it is the first thing anyone reads.
 
 ## Current state — 8 August 2026
 
-**Suite: 0 failures.** 1152/27 → **1308/0** on a full dev install, ~1m45s.
-The 27 were four unrelated bugs; the taxonomy and the method for classifying
-future ones are in `docs/KNOWN-FAILURES.md`. Run pytest **from the repo root**.
+**Suite: 0 failures.** 1152/27 → **1330/0**, 5 skipped, ~1m45s on a full dev
+install. The 27 were four unrelated bugs; the taxonomy and the method for
+classifying future ones are in `docs/KNOWN-FAILURES.md`. Run pytest **from the
+repo root**.
+
+### Do these first
+
+Nothing is broken. These are the threads left deliberately, worst first.
+
+1. **`apply_decay` is never called by anything.** Rule 7e — facts enter
+   provisionally, become durable through use, decay if never recalled — is
+   written, tested, and entirely inert. `access_count` now increments (fixed
+   this session) and nothing reads it. It is a scheduling decision, not a
+   memory one: something has to run it. Until then the Spine grows forever and
+   promotion-through-use never happens.
+2. **Citation UI is at step 2 of 5.** The spec section is written and awaiting
+   review (`docs/UI-SPEC.md` → Citations). Next is backend: `StreamEvent.source`
+   carries `kind`, `url`, `title` and needs `excerpt`, `relevance`, an egress
+   reference, a stable citation number, and `MIN_CITATION_SCORE`. **Stop after
+   each step.**
+3. **The orb has no `swapping` state**, which CLAUDE.md requires — "a route
+   that requires a swap must be visible in the orb's state". Neither
+   `orbStore` nor `LivingOrb` has it. Found while scoping the avatar spike.
+4. **One unexplained 404 on every page load.** One request, harmless-looking,
+   unidentified.
+
+### What this session settled
 
 **The frontend has been driven.** M4's UI acceptance, outstanding for four
 milestones, is met — see M4 below. Four defects came out of it that no unit
 test had, including the citation threshold being compared against the wrong
 number for the entire life of the product.
 
-**The reranker question is answered and written up**: `docs/RERANKER.md`, with
-measured VRAM and install costs. Short version — the Ollama route is verified
-broken *and* evicts the working set, and CLAUDE.md's residency arithmetic is
-wrong in both directions.
+**The reranker question is answered: don't buy one.** `docs/RERANKER.md` has
+the options and costs; `test_recall_at_scale.py` has the measurement that
+decided it. The margin *holds* as the corpus grows — +0.147 at 10 documents,
++0.181 at 100, +0.179 at 1,000, with zero false citations at the floor. The one
+miss at 1,000 was **displaced at rank 7 with relevance 0.517**: above the floor,
+outside a top-5. A depth problem, not a scoring one, so `RECALL_CANDIDATES = 25`
+and cut to `MAX_RECALL` after the floor. Costs one wider read.
+
+Also verified there: the Ollama reranker route crashes llama-server *and* evicts
+bge-m3 and gemma3 with it.
+
+**Residency is measured and CLAUDE.md is corrected**: bge-m3 0.66 GB resident,
+reranker 0 GB, KV reserve 2.58 GB, budget ~9.1 GB. The old "~1.8 GB" was wrong
+in both directions. **It changed no decision**, because the fit gate never read
+that constant — it computes from whichever embedder discovery found. One real
+imprecision recorded: the gate uses on-disk size (1.16 GB) as a proxy for
+resident VRAM (0.66 GB), which over-reserves ~0.5 GB and flips nothing between
+4 and 24 GB.
+
+**M8 is done** — see below.
+
+**The avatar spike is scoped, not built**: `docs/EMBODIMENT-SPIKE.md`. Both
+questions answered against the code.
 
 **M7 is done and driven for real.** `backend/ingest/` — parser interface, light
 parsers, quality floor, loud failures. Verified against a real folder: an
@@ -541,13 +584,17 @@ Playwright is still unavailable here.
 Decided 7 August 2026, after an audit of what actually stands between here and
 a 15-person retention test.
 
-**~~Do these first~~ ✅ → ~~M7~~ ✅ → M8 → M9/M9a → cloud engine + M10 as one
-unit → M11 + first run → M12.**
+**~~Do these first~~ ✅ → ~~M7~~ ✅ → ~~M8~~ ✅ → citation UI (in flight) →
+M9/M9a → cloud engine + M10 as one unit → M11 + first run → M12.**
 
-**Next, and it is small: render the ingest outcomes in Knowledge.** M7's service
-returns a reason, a remedy and a progress callback per file, and nothing draws
-them. Until that lands the failures are recorded rather than loud, which is the
-half of M7 that actually protects the user.
+**In flight: the citation UI**, at step 2 of 5. Spec written and awaiting
+review; backend next. Order is fixed and each step stops — see "Queued — the
+citation UI" below and the Citations section of `docs/UI-SPEC.md`.
+
+**Queued behind it: the avatar spike.** Afternoon-sized, not a milestone.
+Scoped in `docs/EMBODIMENT-SPIKE.md`; both blocking questions are answered.
+
+**Still true and still the blocker:** a stranger cannot install this. M11.
 
 **Cut from the alpha path**, not from the product: **M9c** (Unreal/Blender is a
 different wedge on a different day, orthogonal to freelancers) and **Session 5**
@@ -740,13 +787,35 @@ answer from a real document. Then point at a folder containing a scanned PDF
 and watch Knowledge say which file gave nothing back and why. **Met at the
 service level; the Knowledge half is not rendered yet.**
 
-### M8 — Memory scope
-Every fact carries `global` or `project:<id>`, **and `origin`** — the two land
-together because they add fields to the same rows and doing them separately means
-two migrations. **Flip `Artifact.indexed` to `True` here.**
+### M8 — Memory scope ✅
+Every fact carries `scope` (`global` | `project:<id>`) and `origin`, migrated
+together as planned — same rows, one migration over the user's data. Pre-M8
+facts become `global`, the only honest reading: they were captured with no
+project in play, and inventing one would be a value nobody entered.
 
-**Do this before the alpha.** Retrofitting scope onto facts that lack it means
-guessing for everything already stored. It is also the multiplayer boundary.
+**A leak was found doing it.** Scope filtering lived in the store's `query`,
+which the vector path does not use — `_vector_search` asks the index for ids and
+fetches records individually, so a semantic hit on another project's fact walked
+straight past the filter and only the keyword path was ever scoped. Now enforced
+at one chokepoint in `HybridMemoryRetriever.retrieve`: a privacy boundary with
+one enforcement point per code path has one hole per code path.
+
+**Promotion is evidence-based** (rule 7i). `recalled_in` keeps the project
+*identities* rather than a count, because a count cannot answer "recalled across
+three *different* projects". `promotion_candidates()` proposes and never
+promotes — promotion changes what is shareable, and rule 6 says autonomy is
+granted rather than assumed.
+
+**`Artifact.indexed` is flipped to `True`**, and only once the thing that makes
+it safe existed: `MemoryRankerImpl.GENERATED_PENALTY` demotes Zaram's own
+restatements in the *ordering*, never in relevance. Pushing a generated fact
+under the citation floor would be exclusion wearing a different hat; rule 7b
+asks for tagging instead.
+
+**Not built:** nothing sets a project scope yet. Every fact still lands
+`global` in practice because no surface tells the engine which project is
+active. The field, the filter, the migration and the promotion evidence are all
+there — the caller is not. That is the next piece of M8 and it is small.
 
 ### M9 / M9a — The business layer and obligation extraction
 The universal job: invoice → receipts → expenses → how is the business doing.
@@ -863,26 +932,38 @@ answers become the missing line in `docs/PITCH.md`.
 
 ## Known broken
 
-**Nothing.** 1263 tests, 0 failures, ~2m from the repo root on a full dev
-install. The 27 are gone and the section explaining what they actually were is
-above, under "What the 27 actually were".
+**Nothing.** 1330 passed, 5 skipped, 0 failures, ~1m45s from the repo root on a
+full dev install. The 27 are gone and the section explaining what they actually
+were is above, under "What the 27 actually were"; the method for classifying the
+next one is `docs/KNOWN-FAILURES.md`.
 
 Record any change to that number — but the sharper lesson from clearing them is
 about *taxonomy*, not counting. "13 core, 14 voice" made 27 feel understood and
 that is why nobody ran them individually for four milestones. A failure grouped
 under a plausible label is more dangerous than an unexplained one.
 
-Two of the new tests need a live dependency and skip loudly without it:
-`test_recall_eval.py` needs Ollama with `bge-m3` on loopback, because
-similarity over the hash fallback is arbitrary rather than merely worse and a
-green run against it would be a lie.
+**Skips are opt-in, not accidents.** `test_recall_eval.py`'s end-to-end half
+needs Ollama with `bge-m3` on loopback — similarity over the hash fallback is
+arbitrary rather than merely worse, so a green run against it would be a lie.
+`test_recall_at_scale.py` additionally needs `ZARAM_SCALE_EVAL=1`, because
+indexing a hundred documents takes ~45s and does not belong in a run-on-every-
+change suite:
+
+```
+ZARAM_SCALE_EVAL=1 pytest backend/tests/test_recall_at_scale.py -s
+ZARAM_SCALE_EVAL=1 ZARAM_SCALE_EVAL_SIZE=1000 pytest backend/tests/test_recall_at_scale.py -s
+```
+
+Written and inert, which is worse than broken because the suite is green:
+
+- **`apply_decay` is called by nothing.** Rule 7e in full — promotion through
+  use, decay without it — exists, is tested, and never runs. `access_count`
+  increments now and nothing reads it. Top of "Do these first".
+- **Nothing sets a project scope.** M8's field, filter, migration and promotion
+  evidence are all in place; no surface tells the engine which project is
+  active, so every fact lands `global`.
 
 Still broken, found and not fixed:
 
-- `services/speech_manager.py` imports a module that was deleted. Nothing
-  imports `SpeechManager`, so nothing breaks today.
-- `backend/test_kernel.py` is committed truncated mid-expression and is only
-  survivable because `pyproject.toml` ignores it by path. See "Still open from
-  the last audit".
-- `bge-reranker-v2-m3` crashes llama-server through Ollama. See "What the
-  recall eval found".
+- One unexplained 404 on every page load.
+
