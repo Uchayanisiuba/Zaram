@@ -4,6 +4,7 @@ import time
 from typing import Any
 
 from .contracts import (
+    GLOBAL_SCOPE,
     MemoryIndex,
     MemoryQuery,
     MemoryRecord,
@@ -12,6 +13,19 @@ from .contracts import (
     MemoryStore,
     RetrievalStrategy,
 )
+
+
+def _in_scope(record: MemoryRecord, scope: str | None) -> bool:
+    """Whether this fact may be recalled for a question asked in `scope`.
+
+    `None` means unscoped — the Memory surface showing the user everything they
+    have. Otherwise: this project's facts, plus global ones, and nothing else.
+    Global is what is true about the *user* and applies to every job; another
+    project's facts are about someone else's work.
+    """
+    if not scope:
+        return True
+    return getattr(record, "scope", GLOBAL_SCOPE) in (scope, GLOBAL_SCOPE)
 
 
 class HybridMemoryRetriever(MemoryRetriever):
@@ -69,9 +83,23 @@ class HybridMemoryRetriever(MemoryRetriever):
                 if record.id not in all_candidates or score > all_candidates[record.id][1]:
                     all_candidates[record.id] = (record, score, "temporal")
 
+        # Rule 7i's boundary, enforced here rather than per strategy.
+        #
+        # The store's `query` filters by scope, but `_vector_search` does not go
+        # through it — the index knows nothing about scope and returns ids,
+        # which are then fetched individually. So a semantic hit on another
+        # project's fact walked straight past the filter, and only the keyword
+        # path was ever scoped. A privacy boundary with one enforcement point
+        # per code path is a boundary with a hole in it per code path.
+        candidates = [
+            (record, score, reason)
+            for record, score, reason in all_candidates.values()
+            if _in_scope(record, query.scope)
+        ]
+
         results = [
             MemoryResult(record=record, score=score, match_reason=reason, rank=0)
-            for record, score, reason in all_candidates.values()
+            for record, score, reason in candidates
         ]
 
         latency = (time.time() - start) * 1000

@@ -7,12 +7,14 @@ from typing import Any
 from core.async_bridge import run_sync
 from core.event_bus import ZaramEvent
 from .contracts import (
+    GLOBAL_SCOPE,
     MemoryRecord,
     MemoryQuery,
     MemoryResult,
     MemoryRuntime,
     MemoryStatus,
     MemoryType,
+    Origin,
     RetrievalStrategy,
     RuntimeMetadata,
     Capability,
@@ -30,8 +32,26 @@ from .graph import MemoryGraph, EdgeType, create_memory_graph
 from .decay import MemoryDecayEngine, DecayConfig, DecayResult, create_decay_engine
 
 
+def _as_origin(value: Origin | str | None) -> Origin:
+    """Accept an Origin, its string value, or nothing."""
+    if isinstance(value, Origin):
+        return value
+    if not value:
+        return Origin.CONVERSATION
+    try:
+        return Origin(value)
+    except ValueError:
+        return Origin.CONVERSATION
+
+
 class MemoryRuntimeImpl(MemoryRuntime):
     """Main Memory Runtime - single source of truth for all memory operations."""
+
+    #: Distinct projects a fact must be recalled in before Zaram asks whether
+    #: it is really about the user. Rule 7i's number, and it is asked rather
+    #: than applied: promotion changes what gets shared, and the system does
+    #: not get to make that call silently.
+    PROMOTION_THRESHOLD = 3
 
     def __init__(
         self,
@@ -177,7 +197,15 @@ class MemoryRuntimeImpl(MemoryRuntime):
         user_id: str | None = None,
         tags: list[str] | None = None,
         importance: float = 0.5,
+        scope: str | None = None,
+        origin: Origin | str | None = None,
     ) -> str:
+        """Store one fact.
+
+        `scope` defaults to `global` (rule 7i): a fact captured with no project
+        in play is not about a project, and inventing one would be a value
+        nobody entered. The engine passes the current project when there is one.
+        """
         start = time.time()
         try:
             embedding = self._embedder.embed(content) if content else None
@@ -190,6 +218,8 @@ class MemoryRuntimeImpl(MemoryRuntime):
                 user_id=user_id,
                 tags=tags or [],
                 importance=importance,
+                scope=scope or GLOBAL_SCOPE,
+                origin=_as_origin(origin),
             )
             record_id = await self._store.put(record)
             await self._index.add(record)
@@ -205,6 +235,8 @@ class MemoryRuntimeImpl(MemoryRuntime):
                         "session_id": session_id,
                         "user_id": user_id,
                         "tags": tags or [],
+                        "scope": record.scope,
+                        "origin": record.origin.value,
                     },
                 ))
             return record_id
@@ -214,6 +246,50 @@ class MemoryRuntimeImpl(MemoryRuntime):
             raise
         finally:
             self._stats["total_latency_ms"] += (time.time() - start) * 1000
+
+    async def promotion_candidates(self) -> list[MemoryRecord]:
+        """Project facts that have proved useful across several projects.
+
+        Rule 7e forbids asking the user to decide at creation time — that asks
+        them to predict the future, and they will guess. Rule 7i says the
+        moment to ask is when the evidence arrives: *"a fact recalled across
+        three different projects is probably about the person, and that is the
+        moment to ask."*
+
+        This returns the candidates. It does **not** promote them. Promotion
+        moves a fact from project scope, which is shareable, to global scope,
+        which never is — so it changes what could leave the machine, and rule 6
+        says autonomy is granted by the user rather than assumed.
+        """
+        records = await self._store.all_records()
+        return [
+            r for r in records
+            if not r.is_global
+            and len({s for s in (r.recalled_in or []) if s != r.scope})
+            >= self.PROMOTION_THRESHOLD - 1
+        ]
+
+    async def set_scope(self, record_id: str, scope: str) -> bool:
+        """Move a fact between scopes. The user's decision, never inferred.
+
+        Named for the one thing it does, in the shape `artifacts/records.py`
+        argues for: a general `update` is how a provenance record silently
+        becomes wrong.
+        """
+        record = await self._store.get(record_id)
+        if record is None:
+            return False
+        updated = MemoryRecord(**{**record.__dict__, "scope": scope, "updated_at": time.time()})
+        await self._store.put(updated)
+        await self._index.add(updated)
+        if self._event_bus:
+            self._event_bus.publish(ZaramEvent(
+                source_runtime="memory",
+                event_type="memory.scope_changed",
+                priority="normal",
+                data={"record_id": record_id, "scope": scope, "was": record.scope},
+            ))
+        return True
 
     async def correct(self, record_id: str, corrected_content: str) -> dict[str, Any]:
         """Replace a fact with a corrected one, keeping the original visible.
@@ -302,7 +378,15 @@ class MemoryRuntimeImpl(MemoryRuntime):
         session_id: str | None = None,
         user_id: str | None = None,
         filters: dict[str, Any] | None = None,
+        scope: str | None = None,
     ) -> list[MemoryResult]:
+        """Recall, optionally narrowed to one project plus global (rule 7i).
+
+        `scope=None` means every scope, which is what the Memory surface wants
+        — it shows the user everything they have. The engine passes the current
+        project, so a question asked inside one draws on that project and on
+        what is true about the user generally, and on nothing else.
+        """
         start = time.time()
         try:
             query_embedding = self._embedder.embed(query) if query else None
@@ -316,6 +400,7 @@ class MemoryRuntimeImpl(MemoryRuntime):
                 max_results=max_results,
                 strategy=strategy,
                 filters=filters or {},
+                scope=scope,
                 session_id=session_id,
                 user_id=user_id,
                 metadata=query_metadata,
@@ -335,7 +420,7 @@ class MemoryRuntimeImpl(MemoryRuntime):
                 record = getattr(result, "record", None)
                 if record is not None and getattr(record, "id", None):
                     try:
-                        await self._store.record_access(record.id)
+                        await self._store.record_access(record.id, scope=scope)
                     except AttributeError:
                         # A store predating `record_access` still retrieves.
                         break
@@ -506,6 +591,8 @@ class MemoryRuntimeImpl(MemoryRuntime):
         user_id: str | None = None,
         tags: list[str] | None = None,
         importance: float = 0.5,
+        scope: str | None = None,
+        origin: Origin | str | None = None,
     ) -> str:
         """Store a memory with automatic importance scoring."""
         auto_importance = self._calculate_importance(content, memory_type, tags or [])
@@ -517,6 +604,8 @@ class MemoryRuntimeImpl(MemoryRuntime):
             user_id=user_id,
             tags=tags,
             importance=max(importance, auto_importance),
+            scope=scope,
+            origin=origin,
         )
 
     async def reinforce(self, record_id: str, delta: float = 0.1) -> bool:

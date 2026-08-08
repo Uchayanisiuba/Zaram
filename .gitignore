@@ -130,3 +130,7 @@ frontend/screenshot*.png
 # Retired surface, kept on disk only. The name uses vocabulary CLAUDE.md
 # retired; nothing in it is referenced by the build.
 zaram-ai-operating-system-ui/
+
+# Test VRM avatars. Large binaries, and the sample is a licensed VRoid
+# export rather than ours to redistribute.
+*.vrm

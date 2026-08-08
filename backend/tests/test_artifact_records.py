@@ -279,12 +279,28 @@ class TestTheServiceWritesTheFileThenRecordsIt:
 
         assert Path(artifact.path).parent == service.store.root
 
-    def test_nothing_is_indexed_yet(self, service):
-        """`Artifact.indexed` is False until M8 gives facts an origin to rank
-        by. The service is not the place to quietly work around that."""
+    def test_generated_documents_are_indexed(self, service):
+        """Rule 7b's default-on, switched on in the M8 commit.
+
+        This asserted the opposite while the gap was open: `indexed` defaulted
+        to False because recall could not yet rank by origin, so a generated
+        fact would have entered the Spine with no penalty and Zaram would have
+        cited its own restatements. Facts now carry `Origin` and
+        `MemoryRankerImpl.GENERATED_PENALTY` demotes them in the ordering, so
+        the protection the rule describes — tagging, not exclusion — actually
+        exists.
+        """
         artifact = service.create_document(title="P", blocks=["x"])
 
-        assert service.records.get(artifact.id).indexed is False
+        assert service.records.get(artifact.id).indexed is True
+
+    def test_the_user_can_still_refuse(self, service):
+        """`remember_override` is a veto over the default, not a gate."""
+        artifact = service.create_document(title="P", blocks=["x"])
+
+        service.records.set_remember_override(artifact.id, False)
+
+        assert service.records.get(artifact.id).remember_override is False
 
 
 class TestReExport:

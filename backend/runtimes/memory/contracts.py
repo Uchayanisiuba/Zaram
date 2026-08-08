@@ -30,6 +30,49 @@ class MemoryStatus(str, Enum):
     STOPPED = "stopped"
 
 
+class Origin(str, Enum):
+    """Where a fact came from. Rule 7b: every fact carries its origin.
+
+    The point is not bookkeeping. Recall must be able to say *"from a proposal
+    Zaram generated in April"* rather than *"from your client brief"*, because
+    those read very differently to someone deciding whether to trust an answer
+    — and because deprioritising Zaram's own restatements where a user source
+    says the same thing is what makes indexing generated artifacts safe at all.
+    """
+
+    #: A passage from a file the user wrote or received.
+    USER_DOCUMENT = "user_document"
+    #: Something the user said in conversation.
+    CONVERSATION = "conversation"
+    #: Text Zaram produced — a generated document, a summary, a draft.
+    GENERATED = "generated"
+
+
+#: Facts about the *user*: preferences, working style, how they like things
+#: written. Never shared — this is the multiplayer boundary, and it is a
+#: constant rather than a string literal because a typo in a scope check is a
+#: privacy failure that no test would notice.
+GLOBAL_SCOPE = "global"
+
+#: Prefix for facts about *the work*: decisions, constraints, client feedback.
+PROJECT_SCOPE_PREFIX = "project:"
+
+
+def project_scope(project_id: str) -> str:
+    """The scope string for a project. One spelling, in one place."""
+    project_id = (project_id or "").strip()
+    if not project_id:
+        return GLOBAL_SCOPE
+    return f"{PROJECT_SCOPE_PREFIX}{project_id}"
+
+
+def scope_project_id(scope: str) -> str | None:
+    """The project a scope refers to, or None for global."""
+    if scope and scope.startswith(PROJECT_SCOPE_PREFIX):
+        return scope[len(PROJECT_SCOPE_PREFIX):] or None
+    return None
+
+
 class RetrievalStrategy(str, Enum):
     VECTOR_SIMILARITY = "vector_similarity"
     KEYWORD_MATCH = "keyword_match"
@@ -67,10 +110,35 @@ class MemoryRecord:
     superseded_at: float | None = None
     #: Pinned facts are never decayed and are preferred during recall.
     pinned: bool = False
+    #: ``global`` or ``project:<id>`` — rule 7i.
+    #:
+    #: One field on one store, not two stores. Facts move between scopes,
+    #: recall needs both at once, and the correction loop has to stay uniform;
+    #: splitting them would make every one of those a special case.
+    #:
+    #: Defaults to global rather than to a project because a fact captured with
+    #: no project in play genuinely is not about one, and inventing a project
+    #: for it would be a value nobody entered. The engine passes the current
+    #: project when there is one.
+    scope: str = GLOBAL_SCOPE
+    #: Rule 7b. See :class:`Origin`.
+    origin: Origin = Origin.CONVERSATION
+    #: Distinct projects this fact has been recalled in, for rule 7i's
+    #: promotion evidence. A count cannot answer "recalled across three
+    #: *different* projects", so the identities are kept rather than a number.
+    recalled_in: list[str] = field(default_factory=list)
 
     @property
     def is_superseded(self) -> bool:
         return self.superseded_by is not None
+
+    @property
+    def is_global(self) -> bool:
+        return self.scope == GLOBAL_SCOPE
+
+    @property
+    def project_id(self) -> str | None:
+        return scope_project_id(self.scope)
 
 
 @dataclass(frozen=True)
@@ -81,6 +149,9 @@ class MemoryQuery:
     strategy: RetrievalStrategy = RetrievalStrategy.HYBRID
     filters: dict[str, Any] = field(default_factory=dict)
     min_importance: float = 0.0
+    #: Restrict to this scope plus `global`. ``None`` means every scope, which
+    #: only the Memory surface wants — it shows the user everything they have.
+    scope: str | None = None
     session_id: str | None = None
     user_id: str | None = None
     time_range: tuple[float, float] | None = None

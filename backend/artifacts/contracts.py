@@ -171,15 +171,18 @@ class Artifact:
     #: against Zaram citing its own restatements is origin tagging, not
     #: exclusion.
     #:
-    #: KNOWN GAP, time-boxed: the deprioritisation that makes default-on
-    #: indexing safe lives in recall ranking, and recall cannot rank by origin
-    #: until facts carry it — which lands with memory scope (M8), because both
-    #: add a field to the same rows and doing them separately means two
-    #: migrations. Until M8, generated facts would be indexed with no ranking
-    #: penalty, which is the Spine-contamination window the rule exists to
-    #: prevent. So this defaults to False for now: not indexing is the safer
-    #: interim than indexing unranked. Flip it to True in the M8 commit.
-    indexed: bool = False
+    #: Flipped to True in the M8 commit, as planned, and only once the thing
+    #: that makes default-on safe actually existed: facts now carry
+    #: `Origin`, and `MemoryRankerImpl` applies `GENERATED_PENALTY` so a user
+    #: document outranks Zaram's restatement of it where both are relevant.
+    #: The penalty lands on the ranking score and never on relevance — a
+    #: generated fact that genuinely answers the question is still relevant,
+    #: and pushing it under the citation floor would be exclusion by another
+    #: name.
+    #:
+    #: `remember_override` remains the user's veto. It is an override, never a
+    #: gate.
+    indexed: bool = True
 
     #: The "Don't remember this" override on the file card. None means the user
     #: has not expressed a preference — distinct from False, which is a refusal.

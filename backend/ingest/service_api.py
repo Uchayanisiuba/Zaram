@@ -43,11 +43,16 @@ class IngestService:
     # -- storing ------------------------------------------------------------ #
 
     def _store_fact(self, text: str, metadata: dict[str, Any]) -> str:
-        """One chunk into the Spine, tagged with its origin (rule 7b)."""
+        """One chunk into the Spine, with its origin and scope (rules 7b, 7i).
+
+        `origin` is a first-class field now rather than only a metadata key, so
+        recall can say *"from your client brief"* rather than *"from a proposal
+        Zaram generated in April"* without parsing a dict.
+        """
         if self._memory is None:
             return ""
         from core.async_bridge import run_sync
-        from runtimes.memory.contracts import MemoryType
+        from runtimes.memory.contracts import MemoryType, Origin
 
         return run_sync(
             self._memory.remember(
@@ -55,6 +60,10 @@ class IngestService:
                 memory_type=MemoryType.SEMANTIC,
                 metadata=metadata,
                 tags=["ingest", metadata.get("source_name", "")],
+                origin=Origin.USER_DOCUMENT,
+                # A folder is indexed *into* a project when one is active. The
+                # source carries it; nothing invents one when it is absent.
+                scope=metadata.get("scope"),
             )
         )
 

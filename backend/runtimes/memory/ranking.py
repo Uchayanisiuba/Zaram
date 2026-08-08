@@ -4,7 +4,7 @@ import time
 import math
 from typing import Any
 
-from .contracts import MemoryQuery, MemoryRanker, MemoryResult
+from .contracts import MemoryQuery, MemoryRanker, MemoryResult, Origin
 
 
 class MemoryRankerImpl(MemoryRanker):
@@ -20,6 +20,21 @@ class MemoryRankerImpl(MemoryRanker):
             "keyword": 0.10,
             "session_match": 0.10,
         }
+
+    #: How much a Zaram-generated fact is pushed down the ordering.
+    #:
+    #: Rule 7b indexes generated artifacts by default, and says the protection
+    #: against Zaram citing its own restatements is *origin tagging, not
+    #: exclusion* — "recall deprioritises generated content where a user source
+    #: says the same thing".
+    #:
+    #: A penalty on the ranking score is exactly that: a user document and
+    #: Zaram's summary of it are similarly relevant, and the user document
+    #: should come first. Deliberately applied to `score` and never to
+    #: `relevance` — a generated fact that genuinely answers the question is
+    #: still relevant, and demoting it below the citation floor would be
+    #: exclusion wearing a different hat.
+    GENERATED_PENALTY = 0.15
 
     async def rank(self, results: list[MemoryResult], query: MemoryQuery) -> list[MemoryResult]:
         start = time.time()
@@ -55,7 +70,10 @@ class MemoryRankerImpl(MemoryRanker):
                 self._weights["session_match"] * session_factor
             )
 
-            result.score = combined
+            if getattr(record, "origin", None) is Origin.GENERATED:
+                combined -= self.GENERATED_PENALTY
+
+            result.score = max(combined, 0.0)
 
         results.sort(key=lambda r: r.score, reverse=True)
         for i, r in enumerate(results):
