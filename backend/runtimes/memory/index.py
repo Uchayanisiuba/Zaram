@@ -73,8 +73,57 @@ class VectorMemoryIndex(MemoryIndex):
         }
 
 
+#: Words that match almost every document and therefore rank nothing.
+#:
+#: Their absence was a live recall bug, found by `test_recall_eval.py` on its
+#: first run. "What is the capital of France?" matched a Harbour Lane project
+#: brief on `is`, `of` and `the` — three of its six tokens — which bought a
+#: 0.15 boost and carried a completely unrelated document over the citation
+#: threshold. Rule 2 is about answers carrying their sources, and that only
+#: means anything if the converse holds: a citation the answer did not use is a
+#: false claim of provenance.
+_STOPWORDS = frozenset("""
+a an and are as at be been but by can could did do does for from had has have
+he her his how i if in into is it its me my no not of on or our should so than
+that the their them then there these they this to too was we were what when
+where which who will with would you your
+""".split())
+
+
+def content_tokens(text: str) -> set[str]:
+    """Tokens worth ranking on. Stopwords, punctuation and bare digits are not.
+
+    Module-level and shared, because `HybridMemoryRetriever` needs exactly this
+    rule and had its own whitespace-splitting version that disagreed — which is
+    how `France?` became a term and `is` became a good one.
+    """
+    import re
+
+    return {
+        t
+        for t in re.findall(r"\b\w+\b", text.lower())
+        if t not in _STOPWORDS and not t.isdigit()
+    }
+
+
 class HybridMemoryIndex(MemoryIndex):
-    """Hybrid index combining vector similarity with keyword matching."""
+    """Hybrid index combining vector similarity with keyword matching.
+
+    Keyword matching **boosts** a semantic score and never dilutes one. The
+    original blend was `0.7 * vector + 0.3 * keyword`, which capped any
+    document matching on meaning alone at 0.7 of its true similarity: a
+    genuinely relevant note scoring 0.599 under bge-m3 arrived as 0.407 and was
+    dropped by a threshold of 0.42. Both halves of that failure — unrelated
+    documents lifted by stopwords, relevant ones pushed under by dilution —
+    came from this one line, and `MIN_RECALL_SCORE` had been calibrated
+    *through* the distortion, which is why it held on a two-fact Spine and
+    collapsed on five documents.
+    """
+
+    #: How much a full keyword match can add, as a fraction of the headroom
+    #: left above the semantic score. Bounded by construction: the result can
+    #: never exceed 1.0 and never fall below the vector score.
+    KEYWORD_BOOST = 0.3
 
     def __init__(self, embedding_dim: int = 384):
         self._vector_index = VectorMemoryIndex(embedding_dim)
@@ -85,6 +134,16 @@ class HybridMemoryIndex(MemoryIndex):
         import re
 
         return set(re.findall(r"\b\w+\b", text.lower()))
+
+    def _content_tokens(self, text: str) -> set[str]:
+        """Tokens worth ranking on.
+
+        Kept separate from `_tokenize` because the *index* still stores every
+        token — a document containing "the" should be findable by a literal
+        search for it — while *scoring* must ignore the ones that carry no
+        signal.
+        """
+        return content_tokens(text)
 
     async def add(self, record: MemoryRecord) -> None:
         await self._vector_index.add(record)
@@ -103,7 +162,7 @@ class HybridMemoryIndex(MemoryIndex):
         vector_results = await self._vector_index.search(query)
         vector_scores = {rid: score for rid, score in vector_results}
 
-        query_tokens = self._tokenize(query.query)
+        query_tokens = self._content_tokens(query.query)
         keyword_scores: dict[str, float] = {}
         for token in query_tokens:
             if token in self._keyword_index:
@@ -115,7 +174,12 @@ class HybridMemoryIndex(MemoryIndex):
         for rid in all_ids:
             v_score = vector_scores.get(rid, 0.0)
             k_score = keyword_scores.get(rid, 0.0)
-            combined = 0.7 * v_score + 0.3 * min(k_score / max(len(query_tokens), 1), 1.0)
+            ratio = min(k_score / len(query_tokens), 1.0) if query_tokens else 0.0
+            # A boost into the headroom above the semantic score, never a
+            # weighted average. `combined >= v_score` always, and `<= 1.0`
+            # always, so the number stays a similarity a threshold can be
+            # calibrated against.
+            combined = v_score + (1.0 - v_score) * self.KEYWORD_BOOST * ratio
             if combined > 0.05:
                 results.append((rid, combined))
 

@@ -15,7 +15,20 @@ from .contracts import (
 
 
 class HybridMemoryRetriever(MemoryRetriever):
-    """Retrieves memories using multiple strategies and merges results."""
+    """Retrieves memories using multiple strategies and merges results.
+
+    HYBRID means *the hybrid index*, not "run two searches and keep whichever
+    scored higher". It used to mean the latter, and because `_keyword_search`
+    scored on raw whitespace overlap with no stopword filtering, the higher
+    score was routinely the wrong one: "What is the capital of France?" overlaps
+    a Harbour Lane project brief on `is`, `the` and `of` — three of six terms,
+    a keyword score of 0.5 — while the true cosine similarity was 0.226. The
+    max won, so an unrelated document was cited with a number that looked like
+    a similarity and was not.
+
+    Found by `test_recall_eval.py` on the day it was written. Recall is the
+    moat and it had never been measured end to end; this is what was under it.
+    """
 
     def __init__(self, store: MemoryStore, index: MemoryIndex | None = None):
         self._store = store
@@ -28,18 +41,27 @@ class HybridMemoryRetriever(MemoryRetriever):
 
         all_candidates: dict[str, tuple[MemoryRecord, float, str]] = {}
 
-        if query.strategy in (RetrievalStrategy.KEYWORD_MATCH, RetrievalStrategy.HYBRID):
-            keyword_results = await self._keyword_search(query)
-            for record, score in keyword_results:
-                if record.id not in all_candidates or score > all_candidates[record.id][1]:
-                    all_candidates[record.id] = (record, score, "keyword")
-
         if query.strategy in (RetrievalStrategy.VECTOR_SIMILARITY, RetrievalStrategy.HYBRID):
             if self._index:
                 vector_results = await self._vector_search(query)
                 for record, score in vector_results:
                     if record.id not in all_candidates or score > all_candidates[record.id][1]:
                         all_candidates[record.id] = (record, score, "vector")
+
+        # Keyword search is the *fallback*, not a peer. It runs when asked for
+        # explicitly, or when the semantic path produced nothing — an empty
+        # index on boot, a record stored without an embedding, or Ollama being
+        # unreachable. Running it beside a working vector search and taking the
+        # maximum is what let stopword overlap outrank meaning.
+        semantic_worked = bool(all_candidates)
+        wants_keyword = query.strategy is RetrievalStrategy.KEYWORD_MATCH or (
+            query.strategy is RetrievalStrategy.HYBRID and not semantic_worked
+        )
+        if wants_keyword:
+            keyword_results = await self._keyword_search(query)
+            for record, score in keyword_results:
+                if record.id not in all_candidates or score > all_candidates[record.id][1]:
+                    all_candidates[record.id] = (record, score, "keyword")
 
         if query.strategy == RetrievalStrategy.TEMPORAL:
             temporal_results = await self._temporal_search(query)
@@ -58,21 +80,46 @@ class HybridMemoryRetriever(MemoryRetriever):
         return results
 
     async def _keyword_search(self, query: MemoryQuery) -> list[tuple[MemoryRecord, float]]:
+        """Overlap on words that carry meaning.
+
+        Two things were wrong here and both inflated scores. It split on
+        whitespace, so `France?` and `France` were different terms while
+        `is`, `the` and `of` were perfectly good ones — and stopwords match
+        every document, so any question with a few function words scored
+        roughly `stopwords / question length` against the entire Spine.
+
+        Tokenisation is shared with `HybridMemoryIndex` rather than
+        reimplemented. Two hand-maintained copies of the same rule is how this
+        file and that one came to disagree in the first place.
+        """
+        from .index import content_tokens
+
         records = await self._store.query(query)
-        query_terms = set(query.query.lower().split())
+
+        # An empty query is not a question, it is a listing: "everything in
+        # this session", already narrowed by the store's own filters. There is
+        # nothing to rank and nothing to be wrong about, so the records come
+        # back as they are.
+        if not query.query or not query.query.strip():
+            return [(record, 0.5) for record in records][: query.max_results]
+
+        query_terms = content_tokens(query.query)
+        if not query_terms:
+            # A real question made entirely of stopwords — "what is that?".
+            # Unrankable, and returning the whole store at a confident 0.5
+            # would attach citations to an answer that used none of them.
+            return []
+
         results = []
         for record in records:
-            if not query_terms:
-                results.append((record, 0.5))
-                continue
-            content_terms = set(record.content.lower().split())
+            content_terms = content_tokens(record.content)
             overlap = len(query_terms & content_terms)
             if overlap > 0:
                 score = overlap / len(query_terms)
                 if record.tags:
-                    tag_overlap = len(set(query_terms) & set(t.lower() for t in record.tags))
+                    tag_overlap = len(query_terms & {t.lower() for t in record.tags})
                     score += tag_overlap * 0.1
-                results.append((record, score))
+                results.append((record, min(score, 1.0)))
         return sorted(results, key=lambda x: x[1], reverse=True)[: query.max_results]
 
     async def _vector_search(self, query: MemoryQuery) -> list[tuple[MemoryRecord, float]]:

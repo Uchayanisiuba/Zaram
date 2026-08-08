@@ -231,7 +231,8 @@ which is the second half of the same trap.
 
 | Purpose | Choice | Licence |
 |---|---|---|
-| Ingestion / parsing | Docling (+ Granite-Docling-258M) | MIT / Apache 2.0 |
+| Ingestion / parsing | pypdf, python-docx, openpyxl (base) | BSD / MIT |
+| Ingestion / OCR + scans | Docling, under the `[ingest]` extra | MIT |
 | Word | python-docx | MIT |
 | Excel | openpyxl | MIT |
 | PDF | WeasyPrint (HTML-first) or ReportLab | BSD |
@@ -242,6 +243,27 @@ which is the second half of the same trap.
 | Memory engine (if used) | Letta | Apache 2.0 |
 | Provider routing | LiteLLM | MIT |
 | Text to speech | Kokoro-82M | Apache 2.0 |
+
+**Docling is an optional extra, not a base dependency — decided by measurement.**
+It pulls 321 MB of wheels (torch, torchvision, opencv, transformers, scipy,
+rapidocr) against a 267 MB base, which would undo most of the 81% packaging
+reduction and put the installer back where someone on metered data does not
+finish it. Probed against 1,080 real files on a working machine, the
+dependency-light parsers read **50 of 54 PDFs**; the four they cannot are
+image-only scans. So Docling buys a real but narrow capability at more than
+double the download, and it stays behind `pip install zaram[ingest]`.
+
+The gap is never silent. A scan lands in Knowledge with its reason and the
+command, **with the size stated** — "Reading scans needs OCR: pip install
+zaram[ingest] (321 MB, one time)" — the same shape as the voice extra. Naming
+the fix without naming its cost is not a choice the user can make on a metered
+connection.
+
+Parsers sit behind one interface (`backend/ingest/parsers/base.py`) so the
+library is replaceable rather than embedded, exactly as with TTS. Light parsers
+resolve first and Docling is the fallback, so **installing the extra never
+changes how an already-working file is read** — a folder must not index
+differently depending on what happens to be installed.
 
 Do **not** embed an office editor. OnlyOffice is AGPL and is a separate service;
 LibreOffice headless is a several-hundred-megabyte dependency. Zaram generates
