@@ -49,6 +49,11 @@ export type ChatEvent =
   /** A file Zaram made. The same record Work draws a row from, so the card in
    *  the conversation and the row in Work cannot disagree about what exists. */
   | { type: 'artifact'; artifact: Artifact & { download_url: string } }
+  /** Something the user needs to know that is not part of the answer — the
+   *  first case is a file ingest could not read. Kept separate from `token` so
+   *  it is never rendered as the model speaking, and from `error` because
+   *  nothing failed in this exchange. `action` names where to go about it. */
+  | { type: 'notice'; content: string; kind: string; action: string }
   | { type: 'status'; state: string }
   | { type: 'error'; message: string }
   | { type: 'done' };
@@ -250,6 +255,18 @@ function parseLine(line: string): ChatEvent | null {
           ...artifact,
           download_url: artifact.download_url ?? `/artifacts/${artifact.id}/download`,
         },
+      };
+    }
+
+    case 'notice': {
+      const content = String(data.content ?? '').trim();
+      // A notice with nothing to say is not a notice.
+      if (!content) return null;
+      return {
+        type: 'notice',
+        content,
+        kind: String(data.kind ?? ''),
+        action: String(data.action ?? ''),
       };
     }
 

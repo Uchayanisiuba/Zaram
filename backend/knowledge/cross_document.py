@@ -15,6 +15,14 @@ class CrossDocumentLinker:
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     def link_objects(self, objects: list[KnowledgeObject]) -> list[Relationship]:
+        """Relate every pair, and record what was related.
+
+        The recording is new. `link_objects` built relationships and returned
+        them, and nothing ever called `record_link`, so `_links` stayed empty
+        for the life of the process and the public `get_links()` could only
+        ever return an empty set. The test that should have caught it stored
+        two documents and asserted nothing.
+        """
         relationships: list[Relationship] = []
         for i, obj_a in enumerate(objects):
             for j, obj_b in enumerate(objects):
@@ -22,6 +30,8 @@ class CrossDocumentLinker:
                     continue
                 rels = self._link_pair(obj_a, obj_b)
                 relationships.extend(rels)
+                if rels:
+                    self.record_link(obj_a.id, obj_b.id)
         return relationships
 
     def _link_pair(self, a: KnowledgeObject, b: KnowledgeObject) -> list[Relationship]:

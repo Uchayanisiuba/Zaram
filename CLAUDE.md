@@ -391,6 +391,19 @@ spent rebuilding the former is an hour not spent on the latter.
 - Wire one surface to real data, then make it beautiful. The reverse produces
   interfaces that look finished and do nothing.
 - When a plan and the codebase disagree, the codebase wins — say so.
+- **A failure is out of scope only if the code it exercises is out of scope.**
+  Classify by the contract a test asserts, never by the module it lives in.
+  Grouping by module hides live bugs behind a label that discourages reading
+  them: "13 core, 14 voice" made 27 failures feel understood for four
+  milestones, and they turned out to be four unrelated bugs including a live
+  `NameError` in shipped code and a test demanding a rule violation. Not one
+  of the 14 was about voice. See `docs/KNOWN-FAILURES.md`.
+- **A failing test is fixed or deleted, never left.** A test asserting a
+  contract that no longer exists is noise that hides real regressions, and a
+  permanent failure is a permanent invitation to stop looking.
+- **A test that asserts nothing is worse than no test**, because it reports
+  coverage it does not have. Two live defects were found by making two
+  assertion-free tests assert what their names claimed.
 
 ## Patterns worth borrowing (not adopting)
 

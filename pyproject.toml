@@ -74,18 +74,22 @@ norecursedirs = [
     "temp",
     "uploads",
 ]
-# Manual smoke scripts from early kernel work: `asyncio.run(main())` at import time,
-# no test functions, and test_kernel.py does not currently parse. They match test_*.py
-# by accident. Delete or rename these to manual_*.py and drop these lines.
+# The four `--ignore` lines that used to live here are gone, and so is the
+# reason for them. They excused manual smoke scripts from early kernel work —
+# `asyncio.run(main())` at import time, zero test functions — that matched
+# `test_*.py` by accident. Three are now `manual_*.py`; `test_kernel.py` was
+# committed truncated mid-expression and is deleted.
+#
+# The ignores were worse than the files. They are rootdir-relative, so running
+# pytest from `backend/` aborted collection of the entire suite on a
+# SyntaxError, and the failure looked like a broken repo rather than a wrong
+# working directory.
+#
 # Two test files may share a basename. Under the default "prepend" import mode
 # they may not: `providers/tests/test_manager.py` and `media/tests/test_manager.py`
 # both become the top-level module `test_manager` and the second one collected
 # fails with "import file mismatch". That is a packaging accident, not a naming
 # rule worth obeying, and it only appeared once collection widened past one
 # directory. importlib mode derives the module name from the full path.
-addopts = """-v --tb=short --import-mode=importlib
-    --ignore=backend/test_kernel.py
-    --ignore=backend/test_models_runtime.py
-    --ignore=backend/test_execution_engine.py
-    --ignore=backend/core/test_execution_engine.py"""
+addopts = "-v --tb=short --import-mode=importlib"
 asyncio_mode = "auto"

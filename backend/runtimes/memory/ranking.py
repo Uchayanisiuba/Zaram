@@ -32,7 +32,13 @@ class MemoryRankerImpl(MemoryRanker):
 
         for result in results:
             record = result.record
-            score = result.score
+            # Similarity as retrieval produced it. Preserved, not overwritten:
+            # the blend below is an *ordering*, and the citation floor is a
+            # question about relevance. Merging them let a fact with a cosine
+            # of 0.20 clear a 0.42 relevance threshold on recency and session
+            # membership alone.
+            score = result.relevance if result.relevance is not None else result.score
+            result.relevance = score
 
             importance_factor = record.importance
             recency_factor = self._recency_score(record.created_at, now)
@@ -64,12 +70,22 @@ class MemoryRankerImpl(MemoryRanker):
         return 1.0 / (1.0 + age_days / 30.0)
 
     def _keyword_match(self, record: MemoryRecord, query: MemoryQuery) -> float:
+        """Overlap on words that carry meaning.
+
+        The third copy of this rule in the codebase, and the third that split
+        on whitespace and counted stopwords. `is`, `the` and `of` match almost
+        every document, so any question with a few function words scored
+        against the whole Spine. Now shares one tokenizer with the index and
+        the retriever.
+        """
+        from .index import content_tokens
+
         if not query.query:
             return 0.0
-        query_words = set(query.query.lower().split())
-        content_words = set(record.content.lower().split())
+        query_words = content_tokens(query.query)
         if not query_words:
             return 0.0
+        content_words = content_tokens(record.content)
         overlap = len(query_words & content_words)
         return min(overlap / len(query_words), 1.0)
 

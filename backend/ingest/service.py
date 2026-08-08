@@ -168,6 +168,28 @@ def chunk(text: str, size: int = CHUNK_CHARS, overlap: int = CHUNK_OVERLAP) -> l
     return [c for c in chunks if c]
 
 
+def iter_ingest_folder(
+    root: str | Path,
+    *,
+    store_fact: Callable[[str, dict[str, Any]], str] | None = None,
+    paths: Sequence[Path] | None = None,
+) -> Iterator[IngestOutcome]:
+    """Ingest `root`, yielding each file's outcome as it is finished.
+
+    A generator rather than a callback because progress has to be *real*.
+    Collecting every outcome and then replaying them down a stream produces a
+    progress bar that is always complete before it is shown, which is the same
+    class of thing as a status indicator over hardcoded data.
+
+    The caller gets one event per file, in the order they were read, while the
+    walk is still going.
+    """
+    root = Path(root)
+    files = list(paths) if paths is not None else discover(root)
+    for path in files:
+        yield _ingest_one(path, store_fact)
+
+
 def ingest_folder(
     root: str | Path,
     *,
@@ -182,16 +204,14 @@ def ingest_folder(
     "a fact" means. Passing None parses and grades without storing, which is
     what a dry run wants.
 
-    `on_outcome` fires per file, for progress. Knowledge needs to show a folder
-    indexing as it happens, not after.
+    `on_outcome` fires per file as it completes. Use `iter_ingest_folder`
+    directly when the caller is itself a stream.
     """
     root = Path(root)
     started = time.perf_counter()
-    files = list(paths) if paths is not None else discover(root)
     outcomes: list[IngestOutcome] = []
 
-    for path in files:
-        outcome = _ingest_one(path, store_fact)
+    for outcome in iter_ingest_folder(root, store_fact=store_fact, paths=paths):
         outcomes.append(outcome)
         if on_outcome is not None:
             try:

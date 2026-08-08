@@ -249,6 +249,13 @@ def spine(tmp_path_factory):
 
 
 def _recall(spine, question: str) -> list[tuple[str, float]]:
+    """Returns (doc_id, **relevance**) — the number the citation floor uses.
+
+    Deliberately not `score`. `score` is the ranking blend, which mixes in
+    importance, recency, access count and session membership; comparing it to
+    a floor measured as a cosine similarity is the bug this eval exists to
+    catch, and an eval reading the wrong field would have kept missing it.
+    """
     runtime, loop = spine
     results = loop.run_until_complete(
         runtime.retrieve(query=question, max_results=ExecutionEngine.MAX_RECALL)
@@ -257,7 +264,10 @@ def _recall(spine, question: str) -> list[tuple[str, float]]:
     for r in results:
         record = getattr(r, "record", None)
         metadata = (getattr(record, "metadata", None) or getattr(r, "metadata", None) or {})
-        out.append((metadata.get("doc_id", "?"), float(getattr(r, "score", 0.0))))
+        relevance = getattr(r, "relevance", None)
+        if relevance is None:
+            relevance = getattr(r, "score", 0.0)
+        out.append((metadata.get("doc_id", "?"), float(relevance)))
     return out
 
 

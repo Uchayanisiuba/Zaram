@@ -322,6 +322,24 @@ class MemoryRuntimeImpl(MemoryRuntime):
             )
             results = await self._retriever.retrieve(memory_query)
             results = await self._ranker.rank(results, memory_query)
+
+            # Count the recall. Rule 7e: facts become durable through use and
+            # decay if never recalled, and the Memory surface shows the number
+            # — so it has to be one. Nothing incremented it on the store the
+            # product runs, so every fact read "Recalled 0 times" forever.
+            #
+            # Counted after ranking, on what is actually handed back, not on
+            # every candidate the index considered: a fact that was looked at
+            # and discarded was not recalled.
+            for result in results:
+                record = getattr(result, "record", None)
+                if record is not None and getattr(record, "id", None):
+                    try:
+                        await self._store.record_access(record.id)
+                    except AttributeError:
+                        # A store predating `record_access` still retrieves.
+                        break
+
             self._stats["retrievals"] += 1
             if self._event_bus:
                 self._event_bus.publish(ZaramEvent(

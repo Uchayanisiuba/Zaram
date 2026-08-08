@@ -107,23 +107,30 @@ def content_tokens(text: str) -> set[str]:
 
 
 class HybridMemoryIndex(MemoryIndex):
-    """Hybrid index combining vector similarity with keyword matching.
+    """Hybrid index: keyword decides candidates, the vector decides the score.
 
-    Keyword matching **boosts** a semantic score and never dilutes one. The
-    original blend was `0.7 * vector + 0.3 * keyword`, which capped any
-    document matching on meaning alone at 0.7 of its true similarity: a
-    genuinely relevant note scoring 0.599 under bge-m3 arrived as 0.407 and was
-    dropped by a threshold of 0.42. Both halves of that failure — unrelated
-    documents lifted by stopwords, relevant ones pushed under by dilution —
-    came from this one line, and `MIN_RECALL_SCORE` had been calibrated
-    *through* the distortion, which is why it held on a two-fact Spine and
-    collapsed on five documents.
+    Hybrid used to mean blending the two into one number —
+    `0.7 * vector + 0.3 * keyword` — which did both possible harms at once. It
+    capped any document matching on meaning alone at 0.7 of its true
+    similarity, so a genuinely relevant note scoring 0.599 under bge-m3
+    arrived as 0.407 and was dropped by the 0.42 floor; and, with no stopword
+    filtering, it lifted unrelated documents that happened to share `is`,
+    `the` and `of`. `MIN_RECALL_SCORE` had been calibrated *through* that
+    distortion, which is why it held on a two-fact Spine and collapsed on five
+    documents.
+
+    What comes out of here is a **similarity**, because that is what the
+    citation floor is compared against. Keyword overlap, importance, recency
+    and access count all belong to `MemoryRankerImpl`, which orders results —
+    a different question from whether a fact is relevant enough to cite.
     """
 
-    #: How much a full keyword match can add, as a fraction of the headroom
-    #: left above the semantic score. Bounded by construction: the result can
-    #: never exceed 1.0 and never fall below the vector score.
-    KEYWORD_BOOST = 0.3
+    #: What a keyword-only match is worth when there is no embedding to
+    #: compare — an unindexed record, or the hash-backend fallback. Below the
+    #: citation floor on purpose: such a record can still be *found*, but it is
+    #: not evidence a similarity threshold should treat as relevant, because
+    #: nothing measured how relevant it is.
+    KEYWORD_ONLY_SCORE = 0.4
 
     def __init__(self, embedding_dim: int = 384):
         self._vector_index = VectorMemoryIndex(embedding_dim)
@@ -175,11 +182,18 @@ class HybridMemoryIndex(MemoryIndex):
             v_score = vector_scores.get(rid, 0.0)
             k_score = keyword_scores.get(rid, 0.0)
             ratio = min(k_score / len(query_tokens), 1.0) if query_tokens else 0.0
-            # A boost into the headroom above the semantic score, never a
-            # weighted average. `combined >= v_score` always, and `<= 1.0`
-            # always, so the number stays a similarity a threshold can be
-            # calibrated against.
-            combined = v_score + (1.0 - v_score) * self.KEYWORD_BOOST * ratio
+
+            # What this returns is **similarity**, and the citation floor is
+            # calibrated against it — so keyword overlap must not inflate it.
+            # `MemoryRankerImpl` already weights keyword match at 0.10 for
+            # ordering, which is where that belongs; adding it here too both
+            # double-counted it and made the number something other than the
+            # cosine `MIN_RECALL_SCORE` was measured against.
+            #
+            # Keyword still decides *membership* of the candidate set, so a
+            # record with no embedding is still findable — it just enters at
+            # its own honest similarity rather than a borrowed one.
+            combined = v_score if v_score > 0 else self.KEYWORD_ONLY_SCORE * ratio
             if combined > 0.05:
                 results.append((rid, combined))
 

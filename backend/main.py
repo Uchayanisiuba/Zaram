@@ -70,6 +70,13 @@ async def startup_event():
         yield StreamEvent.done().to_ipc() + "\n"
 
     chat_router = ChatRouter(kernel.execution_engine, kernel.event_bus, legacy_gen)
+
+    # Ingest can now reach the Spine, and the engine can say what it could not
+    # read. `core/` keeps no import of `ingest/`; the dependency points inward
+    # from here, which is what lets the engine be tested without either.
+    ingest_service.attach_memory(kernel.memory_runtime)
+    kernel.execution_engine.set_notice_source(ingest_service.notice_text)
+
     print("[Startup] Chat Router initialized. Kernel Online.")
 
 
@@ -969,6 +976,110 @@ async def set_artifact_remember(artifact_id: str, body: RememberBody):
         raise HTTPException(status_code=404, detail="No such artifact")
 
     return {"id": artifact_id, "remember_override": body.remember}
+
+
+# --- Ingest -------------------------------------------------------------- #
+#
+# Knowledge reads these. The service already produced a reason and a remedy per
+# file; without somewhere to read them from, "failures must be loud" reduces to
+# whether anyone happened to be watching the response stream.
+
+from ingest.records import IngestRecords  # noqa: E402
+from ingest.service_api import IngestService, default_db_path as ingest_db_path  # noqa: E402
+
+ingest_service = IngestService(IngestRecords(ingest_db_path()))
+
+
+class IngestBody(BaseModel):
+    path: str
+
+
+class PolicyBody(BaseModel):
+    policy: str
+
+
+@app.post("/ingest")
+async def start_ingest(body: IngestBody):
+    """Index a folder, streaming one event per file as it is read.
+
+    NDJSON on the same pattern as `/chat`, because the frontend already parses
+    it and a second streaming format would be a second set of split-chunk bugs.
+
+    Progress is per *file*, not a percentage: a bar that stops at 90% says
+    nothing about which document is missing, and the name plus what happened to
+    it is the only part the user can act on.
+    """
+    ingest_service.attach_memory(getattr(kernel, "memory_runtime", None))
+
+    def _stream():
+        for event in ingest_service.stream_scan(body.path):
+            yield json.dumps(event) + "\n"
+
+    return StreamingResponse(_stream(), media_type="application/x-ndjson")
+
+
+@app.get("/ingest/sources")
+async def list_ingest_sources():
+    """Every folder the user has pointed at, with its counts."""
+    return {"sources": ingest_service.records.sources()}
+
+
+@app.get("/ingest/outcomes")
+async def list_ingest_outcomes(source_id: str = "", problems_only: bool = False):
+    """What happened to each file. The list Knowledge shows."""
+    return {
+        "outcomes": ingest_service.records.outcomes(
+            source_id=source_id or None, problems_only=problems_only
+        )
+    }
+
+
+@app.post("/ingest/outcomes/{outcome_id}/retry")
+async def retry_ingest_outcome(outcome_id: str):
+    """Re-read one file.
+
+    Offered on every visible problem, because the commonest reason a file
+    failed is that it was open in Word at the time — and a failure the user
+    cannot act on is just bad news.
+    """
+    ingest_service.attach_memory(getattr(kernel, "memory_runtime", None))
+    outcome = ingest_service.retry(outcome_id)
+    if outcome is None:
+        raise HTTPException(status_code=404, detail="No such outcome")
+    return outcome
+
+
+@app.post("/ingest/sources/{source_id}/policy")
+async def set_ingest_policy(source_id: str, body: PolicyBody):
+    """Rule 5: per-source, default deny."""
+    try:
+        changed = ingest_service.records.set_policy(source_id, body.policy)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not changed:
+        raise HTTPException(status_code=404, detail="No such source")
+    return {"id": source_id, "policy": body.policy}
+
+
+@app.delete("/ingest/sources/{source_id}")
+async def remove_ingest_source(source_id: str):
+    """Withdraw a folder, and take its facts out of the Spine with it.
+
+    Rule 4: the user can delete any stored fact and the affected answers
+    change. Removing the folder while leaving its facts recallable would be the
+    rule failing quietly, which is worse than not offering removal at all.
+    """
+    fact_ids = ingest_service.records.remove_source(source_id)
+    forgotten = 0
+    runtime = getattr(kernel, "memory_runtime", None)
+    if runtime is not None:
+        for fact_id in fact_ids:
+            try:
+                if await runtime.forget(fact_id):
+                    forgotten += 1
+            except Exception:
+                print(f"[Ingest] could not forget {fact_id}")
+    return {"id": source_id, "facts_removed": forgotten, "facts_recorded": len(fact_ids)}
 
 
 AUDIO_CACHE_DIR = os.path.abspath("audio_cache")

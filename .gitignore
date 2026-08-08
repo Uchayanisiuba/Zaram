@@ -88,6 +88,21 @@ artifacts.db-shm
 backend/artifacts.db*
 backend/generated/
 
+# Ingest records: which folders the user pointed at, every file in them, and
+# what was extracted. The paths alone describe someone's whole working life —
+# clients, projects, what they are being paid — so this is as private as the
+# Spine and belongs next to it, not in the repo.
+ingest.db
+ingest.db-journal
+ingest.db-wal
+ingest.db-shm
+backend/ingest.db*
+
+# Screenshots from driving the interface. Reproduce them by running the script;
+# committing them means a binary diff on every UI change and a stale picture in
+# the repo the day after.
+frontend/scripts/drive-shots/
+
 # Generated audio. Produced by the speech runtime at runtime, not source.
 backend/audio/
 backend/audio_clips/
