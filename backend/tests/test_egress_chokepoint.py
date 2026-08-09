@@ -71,7 +71,14 @@ NETWORK_LIBRARIES = {
 #: are listed rather than fixed because deleting them is a separate decision.
 #: What must stay true is that nothing *reachable* acquires an entry here.
 NETWORK_LIBRARY_EXEMPT = {
-    "knowledge/providers/duckduckgo_provider.py": "dormant: web search is off until policy exists",
+    # No longer justified by dormancy. It was, and the claim was false: this
+    # file called search() from test_knowledge_runtime.py on every run, so a
+    # module exempted for being unreachable was making an unlogged live request
+    # from inside the suite. The guard below checks reachability *at boot*,
+    # which is why it passed. The provider now asks get_gate().check() before
+    # constructing DDGS, so the decision is logged and default deny means the
+    # library is never reached — the exemption covers only the import.
+    "knowledge/providers/duckduckgo_provider.py": "gated: asks get_gate().check() before DDGS",
     "runtimes/internet/runtime.py": "dormant: internet runtime does not boot",
     "runtimes/internet/connectors.py": "dormant: internet runtime does not boot",
     "runtimes/internet/connectors/base.py": "dormant: internet runtime does not boot",
