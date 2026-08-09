@@ -87,6 +87,15 @@ class KernelBootstrapper:
             self.registry, self.event_bus, semantic_router=self.semantic_router
         )
 
+        # Let the engine ask whether a route forces a model out of VRAM, so a
+        # swap can be announced before the user spends the seconds rather than
+        # during them. Attached after construction because the providers
+        # runtime is registered in step 3 and the engine does not exist yet
+        # there; without this the engine simply never announces a load.
+        providers = getattr(self, "providers_runtime", None)
+        if providers is not None:
+            self.execution_engine.set_provider_manager(providers.manager)
+
         print("[Bootstrapper] Kernel Ready.")
 
     def _init_semantic_router(self):

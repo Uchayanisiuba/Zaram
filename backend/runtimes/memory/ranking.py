@@ -75,13 +75,46 @@ class MemoryRankerImpl(MemoryRanker):
 
             result.score = max(combined, 0.0)
 
-        results.sort(key=lambda r: r.score, reverse=True)
-        for i, r in enumerate(results):
+        # Selection by relevance; ordering by the blend. The two cuts are not
+        # the same question and merging them loses documents outright.
+        #
+        # Measured at 1,000 documents: the single most relevant document in the
+        # corpus for "How should I write to clients?" — cosine 0.599, the
+        # highest score anywhere in the eval — came back at **rank 43**, behind
+        # 42 documents it out-scores on relevance. Truncating to `max_results`
+        # by blend therefore discarded it before any caller could see it, and no
+        # shortlist width fixes that: the engine asks for 25.
+        #
+        # The arithmetic makes it inevitable rather than unlucky. Relevance
+        # spans roughly 0.30–0.60, so at weight 0.35 the semantic term swings
+        # about 0.10 — while importance, recency, access, keyword and session
+        # together swing about 0.55. Non-relevance signals outweigh relevance
+        # by roughly four and a half to one, so on a corpus of near-identical
+        # invoices the blend decides almost everything and similarity decides
+        # almost nothing.
+        #
+        # This is the same lesson this file already learned one step earlier.
+        # The citation floor was moved off `score` and onto `relevance` because
+        # ordering and permission are different questions. *Membership of the
+        # shortlist* is a third question, and it belongs with relevance too:
+        # rank on whatever is useful, but decide what is in the running on
+        # similarity alone.
+        selected = sorted(
+            results,
+            key=lambda r: r.relevance if r.relevance is not None else r.score,
+            reverse=True,
+        )[: query.max_results]
+
+        # Within the shortlist the blend is exactly right, and is what it was
+        # designed for: a pinned, recent, frequently-used fact should be shown
+        # before an equally relevant one that is none of those things.
+        selected.sort(key=lambda r: r.score, reverse=True)
+        for i, r in enumerate(selected):
             r.rank = i + 1
 
         latency = (time.time() - start) * 1000
         self._stats["total_latency_ms"] += latency
-        return results[: query.max_results]
+        return selected
 
     def _recency_score(self, created_at: float, now: float) -> float:
         age_days = (now - created_at) / 86400

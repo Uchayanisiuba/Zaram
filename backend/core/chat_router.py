@@ -22,10 +22,19 @@ class ChatRouter:
         model: str,
         system_prompt: str = "",
         session_id: str = "default",
+        project_id: str | None = None,
     ) -> AsyncGenerator:
-        """Returns the correct generator based on the feature flag."""
+        """Returns the correct generator based on the feature flag.
+
+        `project_id` scopes recall and capture to one project plus global
+        (rule 7i). None means no project is active, which is a real answer:
+        facts captured then stay `global` rather than being assigned to a
+        project nobody chose.
+        """
         if USE_NEW_KERNEL:
-            return self._kernel_stream(request_text, model, system_prompt, session_id)
+            return self._kernel_stream(
+                request_text, model, system_prompt, session_id, project_id
+            )
         else:
             return self._legacy_stream(request_text, model, system_prompt)
 
@@ -35,6 +44,7 @@ class ChatRouter:
         model: str,
         system_prompt: str = "",
         session_id: str = "default",
+        project_id: str | None = None,
     ) -> AsyncGenerator:
         """Streams structured StreamEvent lines from the new Execution Engine.
 
@@ -44,7 +54,9 @@ class ChatRouter:
         from core.streaming_events import StreamEvent, EventType
         try:
             yield StreamEvent.start().to_ipc() + "\n"
-            for item in self.execution_engine.execute(text, model, system_prompt, session_id):
+            for item in self.execution_engine.execute(
+                text, model, system_prompt, session_id, project_id=project_id
+            ):
                 if isinstance(item, StreamEvent):
                     yield item.to_ipc() + "\n"
                 else:

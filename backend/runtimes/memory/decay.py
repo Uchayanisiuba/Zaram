@@ -153,18 +153,24 @@ class MemoryDecayEngine:
         start = time.time()
         result = DecayResult(config=cfg)
 
-        if hasattr(store, '_records'):
-            record_ids = list(store._records.keys())
-        else:
-            record_ids = []
+        # Enumerated through the contract, not through `store._records`.
+        #
+        # That private dict exists only on `InMemoryMemoryStore`. On the SQLite
+        # store the product actually runs, `hasattr` was simply false, the id
+        # list came out empty, and the pass reported a clean run over zero
+        # records — no error, no warning, nothing decayed, ever. It is the same
+        # defect as the `access_count` one: two implementations of one contract,
+        # and the tests exercised the one nobody ships.
+        #
+        # Superseded records are excluded. A correction keeps the old value
+        # visible as struck-through history, and decay deleting it would erase
+        # the evidence that the user corrected anything.
+        records = await store.all_records(include_superseded=False)
 
         now = time.time()
 
-        for rid in record_ids:
-            record = await store.get(rid)
-            if not record:
-                continue
-
+        for record in records:
+            rid = record.id
             age_days = (now - record.created_at) / 86400
 
             if self.should_forget(record.importance, age_days, record.access_count):
@@ -199,7 +205,7 @@ class MemoryDecayEngine:
                     await store.put(updated)
                     result.boosted += 1
 
-        result.total_records = len(record_ids) - result.forgotten
+        result.total_records = len(records) - result.forgotten
         result.timestamp = time.time()
 
         latency = (time.time() - start) * 1000
