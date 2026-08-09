@@ -3,6 +3,8 @@ import * as THREE from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { VRMLoaderPlugin, VRMUtils, type VRM } from '@pixiv/three-vrm'
 import { useEmbodimentState, type EmbodimentState } from '@/hooks/useEmbodimentState'
+import { useSpeechStore } from '@/stores/speechStore'
+import { VISEMES, visemeAt, type Viseme } from '@/lib/visemes'
 
 /**
  * The VRM renderer — the orb's job with more bandwidth.
@@ -243,17 +245,34 @@ export default function VrmAvatar({ px = 320, src = '/avatars/AvatarSample_Z.vrm
           em.setValue('blink', blinking ? 1 : 0)
           if (blinkAt < 0) blinkAt = 2.5 + Math.random() * 3.5
 
-          // Speaking cycles visemes. This is *placeholder motion, not lip
-          // sync*: the spike established that Kokoro's phoneme timings arrive
-          // with the audio from the same forward pass, and the TTS path still
-          // discards them at voice/providers/kokoro.py:242. Until it keeps
-          // `result.tokens`, there is nothing to synchronise against, and a
-          // mouth moving to invented timings would be a rendered claim about
-          // data that does not exist. Labelled here so it is not mistaken for
-          // the finished thing.
+          // Lip sync, driven by Kokoro's own phoneme timings scrubbed against
+          // playback position — not a cycle. `audio.currentTime` is the clock
+          // rather than an elapsed counter, because the two diverge the moment
+          // audio buffers or the tab is backgrounded, and a mouth drifting out
+          // of sync is worse than one that does not move.
+          //
+          // Read from the store per frame rather than through a React
+          // subscription: a 60 Hz state update would re-render the tree to move
+          // a jaw.
+          const { audio, track } = useSpeechStore.getState()
           const talking = s === 'speaking'
-          em.setValue('aa', talking ? (Math.sin(now * 11) * 0.5 + 0.5) * 0.7 : 0)
-          em.setValue('ih', talking ? (Math.sin(now * 7 + 1.7) * 0.5 + 0.5) * 0.25 : 0)
+          let shape: Viseme = 'sil'
+          if (talking && audio && track.length > 0) {
+            shape = visemeAt(track, audio.currentTime)
+          } else if (talking) {
+            // No timings — an engine that cannot produce them, or audio Zaram
+            // did not generate. Fall back to plausible motion rather than a
+            // still mouth. This is the seam the spike reserved for
+            // amplitude-based sync, and it is deliberately the lesser path.
+            shape = Math.sin(now * 9) > 0 ? 'aa' : 'ih'
+          }
+          // Ease rather than snap. Blend shapes switched instantly read as a
+          // puppet; a short lerp at ~15 Hz still resolves every cue at speech
+          // rate while looking like a jaw with mass.
+          for (const v of VISEMES) {
+            const target = shape === v ? (v === 'aa' ? 0.85 : 0.6) : 0
+            em.setValue(v, THREE.MathUtils.lerp(em.getValue(v) ?? 0, target, dt * 15))
+          }
 
           // A swap is the one state where nothing is resident and no work is
           // happening. The face goes quiet rather than sad — "sad" would be an
