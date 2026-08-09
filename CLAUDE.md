@@ -208,11 +208,52 @@ In scope:
   because trust does not recover. Zaram surfaces obligations in context and drafts the
   response — it is not a calendar and must not become one.
 
+- **The 3D embodiment — moved into scope 9 August 2026.** A VRM renderer beside
+  the orb, chosen by a toggle, both reading one derived state so neither knows
+  the other exists. It embodies which model is answering and what it is doing —
+  **not a personality**: no name, no pronoun, no wandering gaze, no expression
+  not derived from system state. The landing default stays the orb.
+
+  Still unmeasured, and it is the measurement that decides: `docs/UI-SPEC.md`
+  forbids 3D on the landing on GPU-budget grounds, and the avatar renders
+  permanently while a local model is resident. The decision is **warn, never
+  block** — which needs a real number to warn with.
+
+- **Voice, both directions — moved into scope 9–10 August 2026.** Speech output
+  (Kokoro) and speech input (faster-whisper, local) alongside the 3D embodiment.
+  This reverses the earlier "voice is out of scope" line, deliberately and by the
+  maintainer's decision, on the grounds that a character that cannot speak or
+  listen is a skin rather than an embodiment.
+
+  **Speech follows the renderer**: avatar selected, replies speak; orb, silent
+  unless asked. One decision the user already made by choosing a face, so it
+  needs no second setting.
+
+  Both are **local and optional**. `zaram[voice]` speaks (~905 MB), `zaram[mic]`
+  listens (81 MB measured — faster-whisper plus every dependency). Split because
+  someone who wants Zaram to talk should not have to buy a microphone stack, and
+  because the second number is an order of magnitude smaller than the first.
+
+  **Cloud speech recognition is prohibited outright, not governed.** Chrome's
+  `webkitSpeechRecognition` streams the user's *audio* — not a transcript — to
+  Google, where no gate can see or log it. That is the same class as the remote
+  font imports `check-no-remote-assets.mjs` bans, carrying far worse cargo, and
+  it is enforced by `frontend/scripts/check-no-cloud-speech.mjs` on every build.
+  The check asserts two things: no live module names the API, and no live module
+  imports from `legacy/`, which still contains it. Asserting the quarantine
+  rather than describing it is the lesson the DuckDuckGo fix cost.
+
 Out of scope until v1 ships and is tested with real users:
 - Any mutative tool (file edits, VS Code, Blender writes, Unreal writes)
 - Web search — see sequencing below
-- Agents, extensions marketplace, updates feed, voice, multi-user, sharing
-- Image generation (competes with local inference for VRAM, not grounded in user data)
+- Agents, extensions marketplace, updates feed, multi-user, sharing
+- **Image and video generation — post-v1, and via cloud routing only.** The
+  original objection was VRAM and grounding, and the VRAM half is answered by
+  the existing rule that VRAM limits *route* a task rather than reject a
+  vertical. So the shape is settled even though the schedule is not: Zaram ships
+  no image or video weights, ever. It routes to a provider, logs the egress,
+  carries project context, and shows what left. It cannot ship before the cloud
+  engine exists, which is still a failing v1 scope line.
 
 ## Sequencing
 

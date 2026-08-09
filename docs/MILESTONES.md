@@ -11,13 +11,156 @@ accurate — it is the first thing anyone reads.
 
 ---
 
-## Current state — 8 August 2026
+## Current state — 10 August 2026
 
-**Suite: 0 failures.** 1330 → **1377/0**, 8 skipped, ~62s from the repo root on
-a full dev install. The 47 new tests are the decay-reach, citation-event,
-swap-preflight, project-scope and corpus-fitness suites below. Run pytest **from the repo root** — `--ignore` in
+**Suite: 0 failures.** 1377 → **1388/0**, 8 skipped, **79s** from the repo root
+on a full dev install. Run pytest **from the repo root** — `--ignore` in
 `pyproject.toml` is rootdir-relative and running from `backend/` still aborts
 the whole suite.
+
+One run on 9 August took **36m25s** and has never reproduced; the two runs
+since were 2m19s and 1m19s. Three wrong explanations were offered for it
+before measurement (live DuckDuckGo calls in the suite — real, but 2.8s;
+`pytest-randomly` — not installed; a first-use HuggingFace download — cache
+untouched). Recorded so nobody spends another hour on it: **it is not
+reproducible and it is not understood.** If it returns, run with
+`--durations=25` first.
+
+### Scope changed this session, deliberately
+
+Two reversals of `CLAUDE.md` as previously written, both the maintainer's
+decision. `CLAUDE.md` has been updated to match; this is the reasoning.
+
+- **Voice is in v1, both directions.** Speech out (Kokoro) and speech in
+  (faster-whisper, local), because a character that cannot speak or listen is
+  a skin rather than an embodiment. **Speech follows the renderer** — avatar
+  speaks, orb is silent unless asked — so it needs no second setting.
+- **The 3D embodiment is in v1**, no longer a spike. Toggle on the landing for
+  now; the shipped control belongs in Settings.
+- Extras split: `zaram[voice]` ~905 MB speaks, `zaram[mic]` **81 MB measured**
+  listens. Light installer, extras fetched **on demand after the product has
+  proved itself** — not during install, which is the same blocking download
+  moved earlier.
+
+### Decided against, so it does not return as a reasonable suggestion
+
+- **Hospitals as a segment. Cut.** The proposal was storing patient records and
+  using GPT Vision to review x-rays and infer patterns across tests. That is
+  diagnostic support — regulated as a medical device (FDA SaMD, EU MDR IIa+) —
+  and it is already on the never-build list. It also means patient data leaving
+  the device to a provider with no BAA. The defensible neighbour is medical
+  *documents* for individual clinicians, never diagnosis, and not before M12.
+- **Cloud speech recognition in Settings. Cut.** Probed in Electron 28.3.3
+  (`electron/probe-speech-support.js`): the constructor exists, `start()` errors
+  `not-allowed`. That result is **confounded** — the probe denies all
+  permissions — and resolving it would mean sending real audio to Google. It
+  does not matter: broken means a dead control, working means microphone audio
+  leaving unlogged. Same answer from both branches.
+- **A `Creative` embodiment state. Cut.** Every other state answers *what is the
+  system doing*; `Creative` answers *what kind of task is this*, which is a genre
+  label. Rendering it means the avatar performs a mood based on subject matter —
+  the drift into personality the spike exists to prevent. Fold into `working`.
+- **"Everything ChatGPT can do" as positioning.** Those are model capabilities;
+  Zaram trains no models and would be permanently one release behind. The claim
+  is **any model, one memory, nothing leaves without you seeing it** — which
+  gets stronger as models improve. Capability arrives by routing and tools,
+  never by Zaram implementing a modality.
+- **An agent framework for the plan object.** ADK, LangGraph, CrewAI all ship
+  their own memory and session abstraction, and memory is the product.
+
+### What this session built
+
+Six commits, `1ccc339..7a7bd45`, all pushed.
+
+- **`66736fa` DuckDuckGo asks the gate.** `DDGS` opened its own socket, bypassing
+  `get_gate()`, while `test_egress_chokepoint.py` exempted the module as
+  *"dormant"* and `test_knowledge_runtime.py` called it for real on every run.
+  The guard checked reachability **at boot**, so it passed while the suite made
+  the unlogged live request. 0.67s live → 0.01s refused and logged. The three
+  web-provider tests were also vacuous *and machine-dependent* — `if results:`
+  asserted nothing, and whether they touched the network depended on the
+  gitignored `backend/egress-policy.json`. Now driven against gate doubles:
+  69 tests, 0.89s, no network.
+- **`f22d06f` The embodiment spike runs.** `useEmbodimentState()` derives one
+  state from `orbStore` (activity) and `sessionStatusStore` (locality) without
+  either duplicating the other. Activity wins over locality, so `local`/`cloud`
+  surface only at rest. `<Embodiment />` picks at mount, no crossfade, VRM lazy
+  so the orb path never pays for `three`. Confirmed in `AvatarSample_Z.vrm`:
+  14 expressions, **all five visemes**, humanoid rig.
+- **`e5e55f0` Kokoro's phoneme timings survive.** They were discarded by tuple
+  unpacking at `kokoro.py:242`; `pred_dur` comes out of the same forward pass, so
+  the cost of keeping them is zero. They cross the interface as `SpeechTiming`,
+  never as Kokoro's `MToken`. Offsets are absolute across chunks; `None`
+  timestamps are skipped, not zeroed.
+- **`576e5aa` The mouth is driven by those timings**, scrubbed against
+  `audio.currentTime`. `check-visemes.mjs` asserts the mapping and was
+  **mutation-tested** before being believed. `check-no-cloud-speech.mjs` bans the
+  Web Speech API and asserts the `legacy/` quarantine.
+- **`cfaa191` The avatar speaks its replies.** Closes the gap that mattered:
+  every piece was green while the character was silent, because nothing called
+  `speak()`.
+- **`7a7bd45` The STT contract.** `SpeechRecogniser`, `Transcript`,
+  `TranscriptSegment` — which mirrors `SpeechTiming` on purpose. `language` is
+  `Optional` and never defaults to `"en"`.
+
+### Do these first
+
+Worst first. Nothing is broken.
+
+1. **`faster_whisper` must be added to `NETWORK_LIBRARIES` in
+   `test_egress_chokepoint.py` *before* the provider lands.** It fetches model
+   weights from huggingface.co on first use. This is the exact trap that file
+   documents — voice discovery contacted HuggingFace on every boot, unlogged,
+   and the only reason anyone noticed was a timeout in the startup log.
+2. **The speech path has never been heard.** Typechecked, guarded, committed —
+   and nobody has watched the avatar speak with real audio, because that needs
+   the backend running with the voice extra. Do this before building on it.
+3. **The citation UI's `web` half has never been rendered with real data.**
+   Unchanged from 8 August. Built against a shape the backend can emit and has
+   not, because search is default-deny. **Do not treat that path as verified.**
+4. **The avatar's GPU cost is unmeasured**, and `docs/UI-SPEC.md` forbids 3D on
+   the landing on GPU-budget grounds. It renders permanently while a local model
+   is resident. This is the measurement that decides whether it ships, and the
+   decision was "warn, never block" — which needs a real number to warn with,
+   not the invented "~1.5 GB" that appeared in conversation.
+5. **`Artifact.indexed` interaction with project scope is unexamined.**
+6. **One unexplained 404 on every page load.** Still present.
+
+### Queued — the architecture discussed, not started
+
+In build order. Steps 1–3 are weeks and step 3 is where a to-do list becomes
+Zaram.
+
+1. **A project record.** There is none — `/artifacts/projects` derives the list
+   by collecting distinct `project_id`s off artifacts, so a project is an
+   emergent label rather than an object. Everything below needs one, and its
+   creation is the only honest moment to choose a **type** (business, coding,
+   MCP, 3D), which activates a pack.
+2. **A durable plan object in the Spine**, scoped `project:<id>` — steps, state,
+   decisions taken **and rejected**. A plan is an obligation you owe yourself,
+   so it is M9a's object with `origin = authored` rather than a new subsystem.
+   **Naming collision to settle first:** `RoutingPlan` and `PlanState` already
+   exist and are ephemeral — a `RoutingPlan` decides which model answers one
+   message. The durable user-facing object should be "Plan"; rename the internal
+   one while it is still internal.
+3. **Plan carried into recall** — the current step is context, and the Spine is
+   already provider-neutral, so this works across models for free.
+4. **Outcome and drift** — recorded from conversation, never from autonomy.
+   Never infer a plan step and assert it: a plan that quietly decides you
+   committed to something breaks the rule that a missed deadline is worse than
+   no reminder.
+5. **Execution** — tier-gated, post-v1. Per-project agent config should be a
+   **tool-tier grant**, not a list of agents: "may things be changed in this
+   project" is answerable at creation; "which agents may run" is not.
+
+Also queued: **the consistent mind is unbuilt and will not emerge from recall.**
+Consistency comes from constraining inputs and outputs — schema-constrained
+generation where shape matters, one provider-neutral system prompt carrying
+global-scope style facts, few-shot from outputs the user accepted. Transport is
+solved by LiteLLM; behaviour is solved by nobody. Mine Letta, Aider's
+`CONVENTIONS.md`, Continue.dev, Instructor/Outlines for patterns — never adopt
+as architecture, and verify every licence at adoption. It needs an eval, built
+as carefully as the recall eval, or it is a claim in a pitch deck.
 
 ### Two inert features became real, and both were inert for the same reason
 
@@ -38,32 +181,16 @@ implementations, where the tests exercise the one the product does not run.**
 `test_decay_runs.py` is parameterised over both stores for exactly this
 reason. Never test one without the other.
 
-### Do these first
-
-Nothing is broken. These are the threads left deliberately, worst first.
-
-1. **The citation UI's `web` half has never been rendered with real data.**
-   Chips, summary, panel and empty state are built and driven — but only
-   against `memory` sources, because web search is default-deny and nothing
-   produces a `web` citation yet. The violet chip, the `N bytes left this
-   device` heading and the link to Activity are written against a shape the
-   backend can emit and has not. **Do not treat that path as verified.** It
-   becomes testable when search lands behind its policy gate; until then the
-   sequencing rule stands — egress log → per-source policy → search.
-2. **`Artifact.indexed` interaction with project scope is unexamined.**
-   Generated artifacts are indexed and now inherit whatever scope the
-   conversation had. That is probably right, and nobody has checked what
-   happens when an artifact generated in one project is recalled in another.
-3. **One unexplained 404 on every page load.** One request, harmless-looking,
-   unidentified. Confirmed still present while driving the citation UI.
-
-### What this session closed
+### Closed on 8 August
 
 - ~~**Nothing calls `beginModelSwap`.**~~ ✅ Now a *pre-flight* check, below.
 - ~~**Nothing sets a project scope.**~~ ✅ M8 is real, below.
 - ~~**Citation UI at step 3 of 5.**~~ ✅ Steps 3–5 done and driven in a browser.
 - ~~**The eval's filler answered its own questions.**~~ ✅ Fixed, and guarded by
   a test that runs in the default suite.
+
+The live thread list is in **Do these first** at the top of this file, not here.
+Two lists of what to do next is how one of them goes stale unread.
 
 ### The swap is announced before it happens, not during
 
