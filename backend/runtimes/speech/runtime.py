@@ -333,6 +333,10 @@ class SpeechRuntime(Runtime):
             "voice": result.voice_id,
             "duration_ms": result.duration_ms,
             "sample_rate": result.sample_rate,
+            # Word timings for lip sync, absolute seconds from the start of the
+            # utterance. Always present, empty when the engine cannot say — a
+            # renderer checks and falls back rather than branching on absence.
+            "timings": result.timings,
         }
 
     async def _execute_stream(self, connector: SpeechConnector, input_data: Dict[str, Any]) -> Dict[str, Any]:

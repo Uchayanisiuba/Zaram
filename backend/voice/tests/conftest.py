@@ -18,8 +18,58 @@ was intact.
 from __future__ import annotations
 
 import importlib.util
+from typing import Any, Iterator
 
 import pytest
+
+
+class FakeToken:
+    """Stand-in for ``misaki``'s ``MToken``.
+
+    ``start_ts``/``end_ts`` default to ``None`` because that is what G2P
+    actually returns before the model has run — it knows *what* sounds, not
+    *when*. A fake that always carried numbers would hide the one case the
+    provider has to handle: punctuation and whitespace tokens that never become
+    sound and must not be given a viseme.
+    """
+
+    def __init__(
+        self,
+        text: str = "",
+        phonemes: str = "",
+        start_ts: float | None = None,
+        end_ts: float | None = None,
+    ) -> None:
+        self.text = text
+        self.phonemes = phonemes
+        self.start_ts = start_ts
+        self.end_ts = end_ts
+
+
+class FakeResult:
+    """Stand-in for ``kokoro.KPipeline.Result``, faithful in the way that bit.
+
+    The real ``Result`` supports **both** tuple unpacking (for backwards
+    compatibility) and attribute access — and ``tokens`` is reachable *only* as
+    an attribute. That asymmetry is the entire reason phoneme timings were being
+    thrown away: the provider unpacked ``for _g, _p, audio in pipeline(...)``,
+    which is legal, silently drops ``tokens``, and looks correct.
+
+    A fake that yielded a bare 3-tuple could not have caught that, and would
+    equally fail to catch its return. So this supports both, exactly as the real
+    class does. Fakes that are shaped more conveniently than the thing they
+    stand for are how a green suite hides a live defect — the model-name
+    matching in the swap pre-flight was the last one.
+    """
+
+    def __init__(self, audio: Any, tokens: list[FakeToken] | None = None) -> None:
+        self.audio = audio
+        self.tokens = tokens or []
+        self.graphemes = "g"
+        self.phonemes = "p"
+
+    def __iter__(self) -> Iterator[Any]:
+        return iter((self.graphemes, self.phonemes, self.audio))
 
 
 def _voice_extra_installed() -> tuple[bool, str]:
