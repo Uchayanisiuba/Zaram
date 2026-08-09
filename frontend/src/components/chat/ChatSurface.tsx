@@ -11,7 +11,7 @@
  * looks.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { motion, type Variants } from 'framer-motion';
+import { motion, AnimatePresence, type Variants } from 'framer-motion';
 import { Send } from 'lucide-react';
 import ArtifactCard from '@/components/ArtifactCard';
 import NoticeCard from '@/components/chat/NoticeCard';
@@ -20,6 +20,9 @@ import { useChatStore } from '@/stores/chatStore';
 import { useSourceStore } from '@/stores/sourceStore';
 import { useOrbStore } from '@/stores';
 import { useSystemStore } from '@/stores/systemStore';
+import ProjectScopePicker from './ProjectScopePicker';
+import CitationSummary from './CitationChips';
+import CitationPanel from './CitationPanel';
 import {
   useLayoutStore,
   CHAT_MIN,
@@ -37,53 +40,6 @@ import type { ChatSource } from '@/services/chatClient';
  *  accumulated text rather than individual tokens, because a marker is often
  *  split across several tokens as it streams. */
 const stripMarkers = (t: string) => t.replace(/\s*\[[MS]\d+\]/g, '');
-
-/** Provenance for one reply. Each citation opens its source. */
-function SourceList({
-  sources,
-  deleted,
-  onOpen,
-}: {
-  sources: ChatSource[];
-  deleted: Set<string>;
-  onOpen: (url: string, el: HTMLElement) => void;
-}) {
-  if (sources.length === 0) return null;
-  return (
-    <div className="mt-2 pl-3 border-l border-white/10">
-      <p
-        className="text-[10px] uppercase text-slate-500 mb-1"
-        style={{ letterSpacing: '0.06em', fontFamily: 'var(--font-display)' }}
-      >
-        {sources.length} source{sources.length === 1 ? '' : 's'}
-      </p>
-      <ul className="flex flex-col gap-1">
-        {sources.map((s, i) => {
-          const gone = s.url != null && deleted.has(s.url);
-          return (
-            <li key={s.url ?? i}>
-              <button
-                type="button"
-                disabled={gone || !s.url}
-                onClick={(e) => s.url && onOpen(s.url, e.currentTarget)}
-                className="text-left text-[11px] leading-snug transition-colors disabled:cursor-default rounded px-1 -mx-1 py-0.5 enabled:hover:bg-white/5 enabled:hover:text-slate-200"
-                style={{
-                  color: gone ? 'var(--color-text-faint)' : 'var(--color-text-muted)',
-                  textDecoration: gone ? 'line-through' : 'none',
-                }}
-                title={gone ? 'Forgotten' : 'Open this source'}
-              >
-                <span className="text-slate-500">[{s.kind}]</span>{' '}
-                {s.title ?? s.url}
-                {gone && <span className="ml-1 text-slate-600">— forgotten</span>}
-              </button>
-            </li>
-          );
-        })}
-      </ul>
-    </div>
-  );
-}
 
 export default function ChatSurface() {
   const reduced = useIsReducedMotion();
@@ -150,6 +106,14 @@ export default function ChatSurface() {
   // through, so a deletion is visibly confirmed rather than silently vanishing.
   const openSourcePanel = useSourceStore((s) => s.openSource);
   const deletedUrls = useSourceStore((s) => s.forgotten);
+
+  // The per-reply citation panel. Local rather than app-level: unlike a fact
+  // panel it belongs to one reply in this transcript and has nothing to say
+  // once you leave it, so there is no reason for the orb region to own it.
+  const [panelFor, setPanel] = useState<{
+    sources: ChatSource[];
+    anchor: HTMLElement | null;
+  } | null>(null);
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -316,10 +280,11 @@ export default function ChatSurface() {
                     {stripMarkers(msg.text)}
                   </p>
                   {msg.role === 'assistant' && (
-                    <SourceList
+                    <CitationSummary
                       sources={msg.sources}
                       deleted={deletedUrls}
-                      onOpen={openSourcePanel}
+                      onOpenPanel={(el) => setPanel({ sources: msg.sources, anchor: el })}
+                      onOpenSource={(s, el) => s.url && openSourcePanel(s.url, el)}
                     />
                   )}
                   {/* Files made by this reply. CLAUDE.md: generated files
@@ -365,11 +330,20 @@ export default function ChatSurface() {
                       </p>
                     </>
                   )}
-                  <SourceList
-                    sources={streamingSources}
-                    deleted={deletedUrls}
-                    onOpen={openSourcePanel}
-                  />
+                  {/* Chips only while streaming. The summary's empty state is a
+                      claim about absence, and a reply that has not finished
+                      arriving cannot yet make it — saying "nothing from your
+                      files" mid-stream would be wrong a moment later. */}
+                  {streamingSources.length > 0 && (
+                    <CitationSummary
+                      sources={streamingSources}
+                      deleted={deletedUrls}
+                      onOpenPanel={(el) =>
+                        setPanel({ sources: streamingSources, anchor: el })
+                      }
+                      onOpenSource={(s, el) => s.url && openSourcePanel(s.url, el)}
+                    />
+                  )}
                   {streamingArtifacts.map((artifact) => (
                     <ArtifactCard key={artifact.id} artifact={artifact} />
                   ))}
@@ -412,7 +386,38 @@ export default function ChatSurface() {
             <Send size={16} className="text-slate-300" />
           </motion.button>
         </div>
+        {/* Under the input rather than over it: the scope is context for what
+            you are about to write, and it must not compete with the thing you
+            came here to do. */}
+        <div className="mt-2 px-1">
+          <ProjectScopePicker />
+        </div>
       </motion.div>
+
+      {/* The citation panel, anchored beside the conversation. */}
+      <AnimatePresence>
+        {panelFor && (
+          <div className="absolute right-full top-1/4 mr-3 z-[75] pointer-events-none">
+            <CitationPanel
+              sources={panelFor.sources}
+              deleted={deletedUrls}
+              returnFocusTo={panelFor.anchor}
+              onClose={() => setPanel(null)}
+              onCorrect={(s) => {
+                // Correction reuses the existing fact panel rather than a
+                // second implementation of the same thing — one pattern, not
+                // two, and rule 4's loop already closes there.
+                if (s.url) openSourcePanel(s.url, panelFor.anchor as HTMLElement);
+                setPanel(null);
+              }}
+              onOpenActivity={() => {
+                openWorkspace('activity');
+                setPanel(null);
+              }}
+            />
+          </div>
+        )}
+      </AnimatePresence>
     </motion.div>
   );
 }

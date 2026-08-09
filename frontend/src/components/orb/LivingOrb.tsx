@@ -8,6 +8,7 @@
  */
 import { motion, AnimatePresence } from 'framer-motion';
 import { useOrbStore } from '@/stores';
+import type { OrbState } from '@/stores/orbStore';
 import globeImage from '@/assets/living-orb-globe.png';
 
 // Deterministic particle positions
@@ -28,7 +29,10 @@ const PARTICLES = [
 const WAVE_BARS = [0, 1, 2, 3, 4, 5, 6];
 const WAVE_HEIGHTS = [28, 44, 60, 72, 60, 44, 28];
 
-export type OrbState = 'idle' | 'listening' | 'thinking' | 'speaking';
+// Re-exported, not redeclared. This file used to define its own four-member
+// copy of the union, so adding `swapping` to the store left the orb's own
+// config maps typed against a union that no longer matched the store's.
+export type { OrbState };
 
 /**
  * The single definition of how the orb behaves.
@@ -71,8 +75,26 @@ interface LivingOrbProps {
   px?: number;
 }
 
-// Per-state visual configs
-const STATE_CONFIG = {
+interface StateConfig {
+  glowColor: string;
+  glowColor2: string;
+  ring1Color: string;
+  ring2Color: string;
+  ring1Duration: number;
+  ring2Duration: number;
+  scale: number[];
+  scaleDuration: number;
+  filter: string;
+}
+
+// Per-state visual configs.
+//
+// Typed as a total map rather than left inferred: an inferred object literal
+// means a new member of `OrbState` produces `cfg === undefined` and a blank
+// orb at runtime, with nothing failing at build time. This is the same remedy
+// M6 applied to the surface list — let the compiler name every file that needs
+// an entry.
+const STATE_CONFIG: Record<OrbState, StateConfig> = {
   idle: {
     glowColor: 'rgba(99,102,241,0.30)',
     glowColor2: 'rgba(168,85,247,0.18)',
@@ -116,6 +138,29 @@ const STATE_CONFIG = {
     scale: [1, 1.04, 1.08, 1.04, 1],
     scaleDuration: 0.9,
     filter: 'drop-shadow(0 0 32px rgba(16,185,129,0.55))',
+  },
+  // Dimmer and slower than every other state, deliberately.
+  //
+  // A swap is the one state where nothing is resident and no work is being
+  // done — the machine is moving weights. Every other state animates *faster*
+  // to signal effort; this one animates slower and darker to signal that there
+  // is nothing to wait on yet. Making it a brighter, busier `thinking` would
+  // say the opposite of what is true.
+  //
+  // Desaturated slate rather than cyan or violet: those two already mean
+  // "stayed local" and "left the device" on the orb and in citation chips, and
+  // a swap is neither. Spending one of them here would break a meaning that is
+  // reused precisely so it needs no legend.
+  swapping: {
+    glowColor: 'rgba(100,116,139,0.30)',
+    glowColor2: 'rgba(71,85,105,0.20)',
+    ring1Color: 'rgba(148,163,184,0.22)',
+    ring2Color: 'rgba(100,116,139,0.28)',
+    ring1Duration: 30,
+    ring2Duration: 24,
+    scale: [1, 1.03, 1],
+    scaleDuration: 3.4,
+    filter: 'drop-shadow(0 0 20px rgba(100,116,139,0.35))',
   },
 };
 
@@ -265,8 +310,21 @@ const LivingOrb = ({
         src={globeImage}
         alt="Living Intelligence Orb"
         className="relative z-10 object-contain pointer-events-none select-none"
-        style={{ width: corePx + 40, height: corePx + 40, filter: `${cfg.filter}${orbBrightness}` }}
-        animate={{ scale: scaleKeyframes }}
+        style={{
+          width: corePx + 40,
+          height: corePx + 40,
+          // Emphasis is suppressed while swapping. `emphasis` is passed at
+          // every call site via ORB_BEHAVIOUR, so without this the orb would
+          // be brightness-amplified 1.4× in the one state whose whole point is
+          // that it is dim.
+          filter: `${cfg.filter}${state === 'swapping' ? '' : orbBrightness}`,
+        }}
+        animate={{
+          scale: scaleKeyframes,
+          // The globe fades toward half-present rather than holding steady:
+          // the model backing it is, at this moment, genuinely not there.
+          opacity: state === 'swapping' ? [0.85, 0.5, 0.85] : 1,
+        }}
         transition={{ duration: cfg.scaleDuration, repeat: Infinity, ease: 'easeInOut' }}
       />
 
