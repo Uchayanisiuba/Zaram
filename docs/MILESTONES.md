@@ -13,31 +13,374 @@ accurate — it is the first thing anyone reads.
 
 ## Current state — 8 August 2026
 
-**Suite: 0 failures.** 1152/27 → **1330/0**, 5 skipped, ~1m45s on a full dev
-install. The 27 were four unrelated bugs; the taxonomy and the method for
-classifying future ones are in `docs/KNOWN-FAILURES.md`. Run pytest **from the
-repo root**.
+**Suite: 0 failures.** 1330 → **1377/0**, 8 skipped, ~62s from the repo root on
+a full dev install. The 47 new tests are the decay-reach, citation-event,
+swap-preflight, project-scope and corpus-fitness suites below. Run pytest **from the repo root** — `--ignore` in
+`pyproject.toml` is rootdir-relative and running from `backend/` still aborts
+the whole suite.
+
+### Two inert features became real, and both were inert for the same reason
+
+`apply_decay` and the citation floor were each written, tested, green, and
+never actually reached the thing they were about. The pattern is worth naming
+because it has now happened four times in this codebase: **a contract with two
+implementations, where the tests exercise the one the product does not run.**
+
+- `access_count` incremented on `InMemoryMemoryStore` and not on SQLite.
+- `apply_decay` read `store._records` — a private dict only
+  `InMemoryMemoryStore` has. On SQLite `hasattr` was simply false, the id list
+  came out empty, and every pass reported a clean run over zero records. No
+  error, no warning, nothing decayed, ever.
+- The citation threshold was compared against the ranking blend rather than
+  the similarity.
+- And now: the *shortlist selection* was made on the ranking blend too.
+
+`test_decay_runs.py` is parameterised over both stores for exactly this
+reason. Never test one without the other.
 
 ### Do these first
 
 Nothing is broken. These are the threads left deliberately, worst first.
 
-1. **`apply_decay` is never called by anything.** Rule 7e — facts enter
-   provisionally, become durable through use, decay if never recalled — is
-   written, tested, and entirely inert. `access_count` now increments (fixed
-   this session) and nothing reads it. It is a scheduling decision, not a
-   memory one: something has to run it. Until then the Spine grows forever and
-   promotion-through-use never happens.
-2. **Citation UI is at step 2 of 5.** The spec section is written and awaiting
-   review (`docs/UI-SPEC.md` → Citations). Next is backend: `StreamEvent.source`
-   carries `kind`, `url`, `title` and needs `excerpt`, `relevance`, an egress
-   reference, a stable citation number, and `MIN_CITATION_SCORE`. **Stop after
-   each step.**
-3. **The orb has no `swapping` state**, which CLAUDE.md requires — "a route
-   that requires a swap must be visible in the orb's state". Neither
-   `orbStore` nor `LivingOrb` has it. Found while scoping the avatar spike.
-4. **One unexplained 404 on every page load.** One request, harmless-looking,
-   unidentified.
+1. **The citation UI's `web` half has never been rendered with real data.**
+   Chips, summary, panel and empty state are built and driven — but only
+   against `memory` sources, because web search is default-deny and nothing
+   produces a `web` citation yet. The violet chip, the `N bytes left this
+   device` heading and the link to Activity are written against a shape the
+   backend can emit and has not. **Do not treat that path as verified.** It
+   becomes testable when search lands behind its policy gate; until then the
+   sequencing rule stands — egress log → per-source policy → search.
+2. **`Artifact.indexed` interaction with project scope is unexamined.**
+   Generated artifacts are indexed and now inherit whatever scope the
+   conversation had. That is probably right, and nobody has checked what
+   happens when an artifact generated in one project is recalled in another.
+3. **One unexplained 404 on every page load.** One request, harmless-looking,
+   unidentified. Confirmed still present while driving the citation UI.
+
+### What this session closed
+
+- ~~**Nothing calls `beginModelSwap`.**~~ ✅ Now a *pre-flight* check, below.
+- ~~**Nothing sets a project scope.**~~ ✅ M8 is real, below.
+- ~~**Citation UI at step 3 of 5.**~~ ✅ Steps 3–5 done and driven in a browser.
+- ~~**The eval's filler answered its own questions.**~~ ✅ Fixed, and guarded by
+  a test that runs in the default suite.
+
+### The swap is announced before it happens, not during
+
+`ProviderManager.swap_preflight(model)` asks Ollama `/api/ps` what is
+**actually resident right now** and decides before generation starts. The orb
+gets a `model_load` stream event ahead of any token.
+
+"Before" is the whole point. A spinner appearing once the machine has already
+stalled is not visibility — by then the user has spent the seconds and drawn
+their own conclusion about why Zaram is slow.
+
+**Four outcomes, because the remedies differ**, and a boolean would hide that:
+
+| kind | means | remedy |
+|---|---|---|
+| `resident` | already loaded | nothing said |
+| `load` | fits alongside what is there | a cold start; passes on its own |
+| `swap` | something resident must be evicted | recurring, it is a model assignment the user can change in Settings |
+| `oversized` | bigger than the whole budget | a hardware fact no setting changes |
+
+Plus a fifth answer that is not an outcome: **`None`, for "cannot tell"** — no
+accelerator, unreadable VRAM, unreachable Ollama, unknown model. Nothing is
+announced then. Announcing a swap that does not happen trains the user to
+ignore the indicator, which costs more than staying quiet.
+
+**Verified live**, with gemma3 actually loaded on the dev machine:
+
+```
+resident now: {'gemma3:latest': 2.84 GB}
+  gemma3:latest       -> resident
+  qwen3:latest        -> load
+  qwen2.5-coder:14b   -> swap, evicts ['gemma3:latest']
+```
+
+**Two defects found only by running it against the real provider layer**, both
+invisible to the unit tests:
+
+- **Three spellings of one model name are in play** — the catalog id is
+  provider-prefixed (`ollama:gemma3:latest`), `/api/ps` and the chat path use
+  the provider-native name (`gemma3:latest`), and a config file may use the
+  bare name (`gemma3`). Comparing ids alone matched none of them, so
+  `swap_preflight` returned `None` for *every model on the machine* while the
+  tests passed — the fakes happened to be keyed the same way as `/api/ps`. It
+  failed the right way, silently rather than falsely, and it failed completely.
+  `TestTheRealCatalogShape` now uses discovery's actual shape.
+- **A model too big for the whole card was reported as a `swap` evicting
+  nothing.** Not a swap — nothing displaced would make room, and an indicator
+  that names nothing evicted cannot explain itself. That is what `oversized`
+  is for, and it was found by a test asserting the embedder was excluded, which
+  it correctly was; the empty `evicts` was the real defect underneath.
+
+### M8 is real — project scope reaches the Spine
+
+`ChatRequest.project_id` → `ChatRouter.route` → `ExecutionEngine.execute` →
+recall scoped to `project:<id>` plus global, and capture written under it.
+`ProjectScopePicker` sits under the chat input, sourced from
+`/artifacts/projects`.
+
+**Verified with real embeddings**, not just tests:
+
+```
+scope='project:harbour'  'My Harbour Lane day rate is 425,000 naira.'
+scope='global'           'I prefer short emails.'
+recall inside harbour -> project:harbour | ... | relevance 0.593
+```
+
+`None` and `global` are deliberately different instructions. As a *recall*
+filter `None` means every scope — right when the user is not inside a project,
+where `global` would hide their own project material from them. Capture
+converts `None` to `global` separately.
+
+**Found by driving it:** `/artifacts/projects` returns `[{id, count}]`, not
+`[string]`. The picker assumed the simpler shape, rendered an object as a React
+child, and **took the entire conversation surface down** — a blank page after
+clicking the orb. The same drift that made `sampleArtifacts.ts` disagree with
+the backend model, and the reason the artifacts client uses backend field names
+directly rather than through a mapping layer.
+
+### Citation UI — steps 3, 4 and 5, driven in a browser
+
+`CitationChips.tsx` (chips + summary line) and `CitationPanel.tsx` (grouped by
+egress). `frontend/scripts/drive-citations.mjs` is re-runnable.
+
+Observed, against a live backend:
+
+```
+summary line: "4 sources · nothing left this device · 2 recalled, not cited"
+chips: numbered, cyan rgb(120,220,240) — the local colour
+panel:  nothing left this device
+        1  My day rate for Harbour Lane is 425,000 naira.   relevance 1.00
+        2  My day rate for Harbour Lane Studio is 425,000…  relevance 0.95
+        3  My day rate for Ashgrove Films is 750,000 naira. relevance 0.77
+        Recalled but not cited — read, and not what carried the answer
+        INVOICE FROM BILL TO … · 0.50    INVOICE Services … · 0.48
+Escape closes: true
+empty state on "capital of France": true
+```
+
+**`MIN_CITATION_SCORE = 0.55` is visibly doing its job** — cited at 0.77–1.00,
+recalled-and-not-cited at 0.47–0.50, with the gap shown rather than hidden.
+That is the "cited versus *used*" problem from the last session, closed.
+
+**A defect driving found:** the panel printed a memory's text twice — once as
+the title, once as the excerpt. The guard compared them for equality, and they
+are never equal because the title truncates at 120 characters and the excerpt
+at 400. It reads as a bug in recall rather than in layout. Now compared on the
+prefix, and skipped entirely for `memory`, whose title *is* the fact.
+
+### Rule 7e now runs — daily, plus once shortly after boot
+
+`runtimes/memory/maintenance.py`. `SpineMaintenance` calls `apply_decay()` and
+`promotion_candidates()` on one pass, wired into the backend lifespan and
+stopped cleanly on shutdown. `GET /memory/maintenance` reports what the last
+pass did.
+
+**Why that schedule, and it is not a guess.** Every threshold in `DecayConfig`
+is expressed in whole days — a 90-day half life, `age_days > 30`,
+`age_days > 7` — so a pass more often than daily cannot change a single
+outcome. Daily is the finest interval the rules can distinguish. Daily *alone*
+would not be enough, though: Zaram is a desktop app, and someone who opens it
+for an hour each morning never reaches a 24-hour timer. The startup pass (60s
+in, clear of the first question) is what makes it real for how the product is
+actually used. Both are overridable by env for testing, and nothing in the
+product sets them.
+
+**Verified against a live server, not just tests:** booted on 8422, waited for
+the pass, `GET /memory/maintenance` returned
+`{"decay":{"boosted":14,"total_records":14,...}}` — fourteen real records in a
+real SQLite Spine. Before the fix that pass reported zero records and did
+nothing, silently.
+
+**Promotion proposes and never promotes** (rule 6). The endpoint returns
+candidates with their content and `recalled_in` evidence; promoting is a
+separate call the user makes. Note that it will return **nothing** until
+something sets a project scope — see "Do these first" item 2.
+
+**One thing to watch.** Decay *boosts* `importance`, and importance carries
+weight 0.20 in the ranking blend — see below. Now that decay actually runs,
+frequently-accessed facts will climb the ordering over time. That is intended,
+but it is a feedback loop that has never been able to operate before, and its
+effect on recall quality has not been measured over any real span of time.
+
+### The reranker question is closed — 5/5 at 1,000 documents
+
+```
+[1000 docs] recalled in top-6: 5/5 answerable targets
+[1000 docs] target ranks by relevance: [1, 1, 1, 1, 1] — deepest 1, headroom 5
+[1000 docs] blend-driven exclusion: none
+[1000 docs] false citations: 0/18 (0%) at floor 0.42
+[1000 docs] related_min 0.517 - unrelated_max 0.410 = +0.106
+[1000 docs] mean recall latency: 673 ms
+```
+
+**Every answerable target is now the single most relevant document in a
+thousand.** Two changes got there and neither was a purchase: selection moved
+onto relevance, and the eval's corpus stopped answering its own questions.
+
+**The margin reads lower — +0.106 against the +0.179 recorded before — and that
+is not a regression.** `related_min` was 0.589 only because the document
+scoring 0.517 was being excluded from the shortlist entirely and so never
+entered the sample. Recalling it correctly put a real 0.517 into the population
+that had been silently missing from it. The old number was flattering because
+of the defect. This one is honest, and 0.42 still sits inside it with room.
+
+**Worth watching:** +0.106 is a narrower gap than the headline used to suggest,
+and `test_recall_eval.py` prints it on every run for exactly that reason. If it
+narrows further as real corpora grow, *that* is when the reranker question
+reopens — on evidence about scoring, which is what a cross-encoder actually
+fixes, rather than on a miss count that turned out to be about something else.
+
+### The ranking fix, and what the eval got wrong
+
+**Instruction for this session was "fix the depth, not the ranking". The
+measurement says depth was never the problem, so this is a deliberate
+departure — recorded here with the numbers that forced it.** No reranker was
+bought; the change is cheaper than raising depth, not more expensive.
+
+At 1,000 documents the eval reported one miss and diagnosed it as displacement
+at rank 7 — a shortlist too narrow. Widening the shortlist did not fix it, and
+looking at *why* found something worse. For *"How should I write to clients?"*
+the target sat at **rank 43 with relevance 0.599 — the highest similarity
+anywhere in the eval** — behind 42 documents it out-scores on relevance.
+
+The arithmetic makes that inevitable rather than unlucky:
+
+| signal | weight | realistic range | swing |
+|---|---|---|---|
+| semantic | 0.35 | 0.30–0.60 | **~0.10** |
+| importance | 0.20 | 0.0–1.0 | 0.20 |
+| recency | 0.15 | 0.0–1.0 | 0.15 |
+| access | 0.10 | 0.0–1.0 | 0.10 |
+| keyword | 0.10 | 0.0–1.0 | 0.10 |
+| session | 0.10 | 0 or 1 | 0.10 |
+
+Similarity contributes a swing of about **0.10** against **0.55** for
+everything else, because cosines live in a narrow band while the other factors
+are normalised across their full range. **Non-relevance signals outweigh
+relevance roughly four and a half to one**, so on a corpus of near-identical
+invoices the blend decides almost everything.
+
+**The fix is selection by relevance, ordering by the blend.** `rank()` now
+picks the top `max_results` by similarity and *then* sorts those by the blend;
+`_recall` does the same before its cut. Ordering inside the shortlist by the
+blend is right and stays — a pinned, recent, frequently-used fact should be
+shown first among equally relevant ones. What must not happen is a document
+being *excluded* on anything but relevance.
+
+This is the same lesson the citation floor already taught, one step earlier in
+the pipeline. The floor was moved off `score` and onto `relevance` because
+ordering and permission are different questions. **Membership of the shortlist
+is a third question, and it belongs with relevance too.**
+
+**Where exactly the loss happened, traced rather than assumed.** The index
+already returns its top `max_results` *by cosine*, so the candidate pool was
+never the problem — `_vector_search` takes `indexed[:max_results]` off a
+similarity-ordered list. The pool of 25 genuinely contained the best document.
+It was the **final 25 → 5 cut in `_recall`** that threw it away, because that
+cut took the first five of whatever order retrieval returned, and that order is
+the blend. So the fix that matters is three lines in `_recall`; the matching
+change in `rank()` guards the same mistake against the keyword path, which
+merges its own candidates into the pool and can displace on the blend before the
+engine ever sees them.
+
+`MAX_RECALL` 5 → **6**, and it is no longer also the citation count —
+`MIN_CITATION_SCORE` decides that separately, so widening what the model can
+use no longer widens what the user is asked to check.
+
+**Two of the eval's own tests were measuring the wrong list**, which is why
+this took three runs to see. They read the raw blend-ordered results and then
+asserted things about the shortlist; those are different lists, and reading the
+second while reasoning about the first is what made an ordering defect look
+like a depth defect for a whole cycle. `_engine_shortlist()` now mirrors
+`_recall` exactly and the tests assert against that.
+
+**And a diagnostic that agreed with me was wrong.** A stability check compared
+two consecutive top-10 slices, passed, and proved nothing — the instability
+lives at the shortlist boundary among documents whose scores differ in the
+third decimal, not in the top ten where the gaps are wide. Rewritten to track
+the target's own rank across six repeats, it showed retrieval is in fact
+perfectly deterministic (`[54, 54, 54, 54, 54, 54]`). The earlier
+disagreement between two tests was the ordering change, not non-determinism.
+
+### The eval was grading itself, and had been for three cycles
+
+The last residual miss was not a product defect at all. `_filler()` drew
+deliverables from a list containing **"title sequence"**, and emitted them in a
+brief template carrying a duration and a date — the same shape as the expected
+answer to *"How long is the title sequence?"*. Counted: **64 of 995 filler
+documents answered that question exactly as well as the target did**, for
+different clients, and the question names no client.
+
+Ranking the expected document 54th out of 65 equally valid answers is *correct
+retrieval*. The eval had been reporting it as a recall miss and inviting a
+reranker to fix it.
+
+`_SVC2` no longer contains "title sequence" — the filler is still the same
+*shape* of document, which is what makes it a useful distractor, it simply no
+longer answers the question being graded. `TestTheCorpusIsFitToMeasureWith`
+enforces that, runs in the default suite, needs no Ollama, and fails with the
+collision count.
+
+**The general lesson, and it is the sharpest one here.** This file already says
+a stable failure count everyone stops looking at is how a real regression hides.
+This is the mirror image: *a stable failure count nobody can explain is how a
+broken instrument survives.* "4 of 5 recalled" survived three measurement
+cycles and nearly bought a cross-encoder, because nobody asked whether the
+corpus could grade the thing it was grading. **Check the instrument before
+reading the measurement.**
+
+### Citation UI — step 2 of 5 done
+
+`StreamEvent.source` now carries `excerpt`, `relevance`, `cited`, `number`,
+`egress_id`, `bytes_sent`, `origin` and `record_id` alongside `kind`, `url`,
+`title`. Keyword-only past `title`, because five optional strings in a row is
+how an excerpt ends up in the url slot at one call site and nowhere else.
+
+- **`MIN_CITATION_SCORE = 0.55`** — a second, higher cut on the same
+  `relevance` field. Sits inside the observed 0.50–0.61 band from the day-rate
+  reply, so the fact that carried the answer is still cited and the
+  merely-adjacent ones move to the panel's quieter section.
+- **Recalled-but-uncited sources are still emitted**, with `cited=False`.
+  Dropping them would hide the gap between the two thresholds, and that gap is
+  what makes the cut arguable rather than magic.
+- **Web sources are always cited**, never thresholded. That is an egress
+  disclosure, not an attribution judgement, and a relevance score is not a
+  reason to stop telling someone what left their machine. `kind` is normalised
+  to `web` rather than passing the provider name through — the UI colours by
+  egress, and a chip saying "tavily" makes the user learn a vocabulary to
+  answer the only question that matters.
+- **A fact from one of the user's files is `document`, not `memory`**, and its
+  title is the filename they recognise rather than a snippet of its text.
+- **Citation numbers are assigned server-side, after dedupe**, at the single
+  point every source event passes through. Numbering in the emitters would
+  double-count a source that recall and search both surfaced, and the user
+  would see a reply citing 1, 2 and 4.
+
+### The orb has a `swapping` state
+
+`orbStore` (visual), `systemStore` (`OrbActivity`, the model name, and the
+plain-language label), rendered by `LivingOrb`, `Aura`, `Halo` and `OrbCore`.
+Dimmer and slower than every other state, in desaturated slate — every other
+state animates *faster* to signal effort, and a swap is the one state where
+nothing is resident and no work is being done. Cyan and violet are not spent
+here because they already mean "stayed" and "left" on the orb and in citation
+chips.
+
+Set it through `systemStore.beginModelSwap(model)` / `endModelSwap()`, never
+`setOrbState('swapping')` — the orb and its label are two renderings of one
+fact, and setting one without the other turns the orb slate-grey while the
+words still read "Local only".
+
+**Found doing it:** the per-state variant maps in `Aura`, `Halo` and `OrbCore`
+were untyped object literals, so adding a state produced no build error and
+framer-motion silently animated to nothing. Now `Record<OrbState, …>` — the
+same remedy M6 applied to the surface list. `LivingOrb` also declared its own
+four-member copy of `OrbState` instead of importing the store's; it now
+re-exports it.
 
 ### What this session settled
 
@@ -584,12 +927,17 @@ Playwright is still unavailable here.
 Decided 7 August 2026, after an audit of what actually stands between here and
 a 15-person retention test.
 
-**~~Do these first~~ ✅ → ~~M7~~ ✅ → ~~M8~~ ✅ → citation UI (in flight) →
+**~~Do these first~~ ✅ → ~~M7~~ ✅ → ~~M8~~ ✅ → ~~citation UI~~ ✅ →
 M9/M9a → cloud engine + M10 as one unit → M11 + first run → M12.**
 
-**In flight: the citation UI**, at step 2 of 5. Spec written and awaiting
-review; backend next. Order is fixed and each step stops — see "Queued — the
-citation UI" below and the Citations section of `docs/UI-SPEC.md`.
+**The citation UI is done** — all five steps, driven in a browser. See the
+Citations section of `docs/UI-SPEC.md` and "Queued — the citation UI" below for
+the reasoning that produced it. Its `web` kind is built and unverified, and
+becomes testable only when search lands behind its policy gate.
+
+**Next on the path is M9/M9a — the business layer and obligation extraction.**
+That is the wedge, and it is the first milestone since M7 whose acceptance is
+about what a freelancer gets rather than about what the system does.
 
 **Queued behind it: the avatar spike.** Afternoon-sized, not a milestone.
 Scoped in `docs/EMBODIMENT-SPIKE.md`; both blocking questions are answered.
@@ -907,11 +1255,18 @@ excerpt and egress reference. It currently carries only `kind`, `url`, `title`
 inventing a kind client-side would be the fabrication rule all over again.
 
 **Order — stop after each:**
-1. Write the spec section, stop, show it
-2. Backend: source events carry kind, excerpt, egress reference, relevance score
-3. Chips and the summary line
-4. The panel
-5. The empty state
+1. ~~Write the spec section, stop, show it~~ ✅
+2. ~~Backend: source events carry kind, excerpt, egress reference, relevance
+   score~~ ✅ — plus `cited`, a server-assigned `number`, `origin`, `record_id`
+   and `MIN_CITATION_SCORE`. See the Current state block.
+3. ~~Chips and the summary line~~ ✅
+4. ~~The panel~~ ✅
+5. ~~The empty state~~ ✅
+
+**All five done, 9 August 2026**, and driven with
+`frontend/scripts/drive-citations.mjs`. The `web` kind is built and *unverified*
+— nothing emits a web citation while search is default-deny. See "Do these
+first" item 1.
 
 ### M11 — Packaging
 **The real blocker.** A stranger cannot install this. See Open questions above —
@@ -956,12 +1311,15 @@ ZARAM_SCALE_EVAL=1 ZARAM_SCALE_EVAL_SIZE=1000 pytest backend/tests/test_recall_a
 
 Written and inert, which is worse than broken because the suite is green:
 
-- **`apply_decay` is called by nothing.** Rule 7e in full — promotion through
-  use, decay without it — exists, is tested, and never runs. `access_count`
-  increments now and nothing reads it. Top of "Do these first".
-- **Nothing sets a project scope.** M8's field, filter, migration and promotion
-  evidence are all in place; no surface tells the engine which project is
-  active, so every fact lands `global`.
+- ~~**`apply_decay` is called by nothing.**~~ ✅ Fixed. `SpineMaintenance` runs
+  it daily and once after boot, and the pass had a second defect underneath the
+  scheduling one: it read `store._records` and so saw nothing at all on SQLite.
+  Verified against a live server.
+- ~~**Nothing sets a project scope.**~~ ✅ `ChatRequest.project_id` reaches the
+  engine, recall is scoped, capture is scoped, and `ProjectScopePicker` sets it.
+  Promotion now has evidence to accumulate.
+- ~~**Nothing calls `beginModelSwap`.**~~ ✅ `swap_preflight` announces it before
+  generation starts.
 
 Still broken, found and not fixed:
 

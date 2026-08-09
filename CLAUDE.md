@@ -159,6 +159,17 @@ overwrite capability at all. A filename collision increments or asks.
 chooses; the tier gate above still runs. Never let a similarity score stand in for a
 permission check.
 
+**Three questions, one number, and they must not be merged: what is *in* the
+shortlist, what order it is *shown* in, and what is *cited*.** Membership and
+citation are decided on relevance alone; ordering may use whatever blend is
+useful. Merging any two has now cost this codebase twice — a citation floor
+compared against the ranking blend cited facts with a true cosine of 0.20, and a
+shortlist *selected* on the same blend discarded the single most relevant
+document in a 1,000-document corpus at rank 43, because similarity swings the
+blended score by ~0.10 while importance, recency, access and session together
+swing ~0.55. A blend is a presentation choice. Never let it decide what the
+model is allowed to see.
+
 A tool description is **third-party text**. An MCP server author — sloppy or hostile —
 can write a description that sits near every query, and ranking is not a security
 boundary. If retrieval ever gates permission rather than ordering candidates, a
@@ -404,6 +415,28 @@ spent rebuilding the former is an hour not spent on the latter.
 - **A test that asserts nothing is worse than no test**, because it reports
   coverage it does not have. Two live defects were found by making two
   assertion-free tests assert what their names claimed.
+- **A score built for ranking is not a score for deciding.** Where a number
+  gates a decision, name which quantity it is and assert on *that*, never on
+  whatever the pipeline happened to leave in the field. This has bitten three
+  times: the citation threshold compared a ranking blend against a floor
+  measured as a cosine, so a fact with a true similarity of 0.20 was cited on
+  recency alone; the shortlist was then *selected* on the same blend, which
+  discarded the single most relevant document in a 1,000-document corpus at
+  rank 43; and the recall eval graded itself. Ranking, selection and permission
+  are three different questions. A blend is a presentation choice — legitimate
+  for ordering, never for deciding what is in the running or what the user is
+  told.
+- **A synthetic eval corpus must be checked before its numbers are read.**
+  Filler that plausibly answers the query produces false negatives
+  indistinguishable from retrieval defects. `_filler()` emitted "title
+  sequence" briefs while one eval question asked how long the title sequence
+  was: 64 of 995 documents answered it as well as the target did, the eval
+  reported a recall miss for three measurement cycles, and it nearly bought a
+  cross-encoder. **Distractors must be near the target without answering it**,
+  and the corpus needs a test asserting that — cheap, no model required, and it
+  guards every other number in the file. A stable failure count nobody can
+  explain is how a broken instrument survives, exactly as a stable count nobody
+  reads is how a real regression hides.
 
 ## Patterns worth borrowing (not adopting)
 

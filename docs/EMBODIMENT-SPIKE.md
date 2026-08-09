@@ -156,12 +156,31 @@ Derived in one hook — `useEmbodimentState()` — that both adapters consume. T
 hook is the seam, and it is what stops the VRM adapter reaching into three
 stores and slowly acquiring opinions about routing.
 
-**2. `swapping` does not exist anywhere.** CLAUDE.md: *"a route that requires a
-swap must be visible in the orb's state. An invisible swap reads as a broken
-product."* Neither the orb nor the store has it. **The orb is missing a state
-the spec requires**, and the avatar would inherit that gap. Worth adding to the
-orb first, in the same shape, so the toggle is switching between two renderers
-of the same vocabulary rather than one renderer with more states than the other.
+**2. ~~`swapping` does not exist anywhere.~~ ✅ Done, 8 August 2026.** It is now
+in `orbStore` (visual), `systemStore` (`OrbActivity` plus the model name and the
+plain-language label), and rendered by `LivingOrb`, `Aura`, `Halo` and `OrbCore`.
+
+Two things came out of doing it that the avatar inherits:
+
+- **The per-state variant maps were untyped object literals**, so adding a state
+  produced no build error and framer-motion silently animated to nothing. They
+  are now `Record<OrbState, …>` — the same remedy M6 applied to the surface
+  list, and the reason a second renderer can be added without hunting for the
+  maps it forgot.
+- **`LivingOrb` declared its own four-member copy of `OrbState`** rather than
+  importing the store's. It now re-exports the store's type. A VRM adapter
+  written against a private copy of the vocabulary is exactly the drift this
+  section warns about.
+
+Set the state through `systemStore.beginModelSwap(model)` / `endModelSwap()`,
+never `setOrbState('swapping')` directly — the orb and its label are two
+renderings of one fact, and setting one without the other turns the orb
+slate-grey while the words still read "Local only".
+
+**Still to wire: nothing calls `beginModelSwap` yet.** The provider layer knows
+what forces a swap — `ProviderManager.resident_budget_bytes` exists to avoid one
+— but no runtime event announces that one is happening. That is the remaining
+half, and it is backend work, not avatar work.
 
 **3. Four mount sites, none of them behind a chooser.** `Landing`, `OrbStatus`,
 `CommandDock`, and a legacy surface all import `LivingOrb` directly. A toggle
@@ -184,8 +203,8 @@ Afternoon-sized, in this order:
 
 | step | why first |
 |---|---|
-| `useEmbodimentState()` + `swapping` on the orb | The seam, and a real spec gap. Both adapters need it before either exists. |
-| `<Embodiment />` chooser + persisted toggle, orb-only | Proves the switch with one renderer. Nothing can break yet. |
+| ~~`swapping` on the orb~~ ✅ · `useEmbodimentState()` | The seam, and a real spec gap. The orb half is done; the hook is not. |
+| `<Embodiment />` chooser + Settings toggle, orb-only | Proves the switch with one renderer. Nothing can break yet. Picks at mount, no crossfade. |
 | Three.js canvas + `@pixiv/three-vrm`, load and **log every blendshape name** | The named requirement, and it is the right one: a missing viseme is silently indistinguishable from a code bug. |
 | Four expressions from `useEmbodimentState()` | The actual product claim. Ship-or-bin decision point. |
 | Keep `result.tokens` through the TTS path | Backend, independent of the renderer, testable on its own. |
@@ -209,17 +228,84 @@ Afternoon-sized, in this order:
 
 ---
 
-## Open question for the spec
+## Decided — 8 August 2026
 
-**Does the toggle belong on the landing state or in Settings?**
+**The toggle lives in Settings. The landing gets nothing.**
 
-The queued brief says landing. That makes it discoverable, and it is where the
-thing being toggled lives. Against it: the landing is the calmest surface in the
-product and a renderer switch is a preference, not an action — and CLAUDE.md's
-navigation argument is that things which hold nothing do not earn a place.
-
-A middle reading: the toggle lives in Settings, and the landing gets nothing.
 Someone who wants an avatar will look for it once; someone who does not should
-never see the control. Worth deciding before the spike, because it changes
-whether `<Embodiment />` needs to animate between renderers or merely pick one
-at mount.
+never see the control. The landing is the calmest surface in the product and a
+renderer switch is a preference rather than an action.
+
+This settles the question the previous entry left open, and it settles a second
+one with it: **`<Embodiment />` picks a renderer at mount and does not
+crossfade.** A preference changed in Settings does not need to animate on a
+surface the user is not looking at, and a crossfade between a glowing sphere and
+a 3D character has no good frame in the middle. Changing the setting changes
+what mounts next.
+
+That also removes the worst version of the bundle problem. With no crossfade
+there is never a moment where both renderers are live, so the lazy-loaded VRM
+adapter is fetched only by people who turned it on — the orb path never pays.
+
+### Settings states the cost, and greys out where the hardware cannot take it
+
+The same honesty as the pack catalogue, for the same reason: a control that is
+silently disabled is indistinguishable from one that is broken.
+
+- Name the download before it happens — `three` plus `@pixiv/three-vrm`, and its
+  size — the way the OCR extra names its 321 MB. Naming the fix without naming
+  its cost is not a choice the user can make on a metered connection.
+- Grade it against *this* machine. A VRM renderer is 3D on the landing state,
+  permanently, while a local model is resident. Where the GPU cannot take it,
+  the row is greyed with the reason stated, not hidden.
+- Hardware detection returns unknown rather than a wrong number, so a machine
+  that cannot be graded is offered the toggle with the caveat, never refused on
+  a guess.
+
+---
+
+## Correction — timings arrive *with* the audio, not before it
+
+Recorded here because it changes how the frontend consumes the stream, which is
+not obvious from the TTS change alone.
+
+The queued brief assumed phoneme timings could be known ahead of the audio, and
+that is wrong. `misaki.en.G2P` produces phonemes with `start_ts` and `end_ts` set
+to **`None`** — it knows *what* sounds, not *when*. The durations are a model
+output: `KModel` returns `pred_dur` on the same forward pass that returns the
+waveform, and `join_timestamps` fills the timestamps from it afterwards.
+
+**What follows for the frontend.** There is no "timings first, audio second"
+sequence to build against — no window in which the avatar could begin shaping a
+word before the sound for it exists. Timings and audio are one payload from one
+forward pass, so:
+
+- the viseme track cannot start ahead of playback, and any design that assumed a
+  lead-in has to go;
+- a stream event carrying timings without its audio chunk is not a state the
+  backend can produce, so the frontend must not have a branch for it;
+- the renderer's synchronisation problem is therefore playback alignment, not
+  prediction — which is the easier problem, and worth knowing before building
+  the harder one.
+
+**Cost is still zero.** `pred_dur` is already computed and already discarded at
+`voice/providers/kokoro.py:243`. The change remains "stop throwing it away".
+
+### Granularity — word-level is enough for the spike
+
+Use Kokoro's own `pred_dur`. Skip `wawa-lipsync` entirely: it exists for audio
+Zaram did not generate, and Zaram generates all of it today. Building both paths
+in one afternoon means neither is tested.
+
+Word-level timings are what `tokens` gives directly, and that is the spike's
+target. Phoneme-level is **arithmetic on data already thrown away at
+`kokoro.py:243`** — `pred_dur` is per-phoneme-token underneath and
+`join_timestamps` merely aggregates it to word boundaries — so it is a refinement
+of the same data, reachable without new inference, and it is not what decides
+whether the spike is worth continuing.
+
+The earlier note that word-level "will read as mushy" at ~2.5 shapes per second
+still stands as a prediction. It is now a thing to *observe* during the spike
+rather than a reason to build the finer path first: if word-level looks
+acceptable, the arithmetic is never needed, and if it does not, the data for it
+is already in hand.

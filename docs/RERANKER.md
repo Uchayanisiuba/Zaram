@@ -1,8 +1,86 @@
 # The reranker question
 
-**Decision needed before M8.** Measured 8 August 2026 on the dev machine — RTX
-3060, 12 GB — with real numbers rather than estimates. Nothing here is decided;
-this is the options and what each costs.
+**Answered: don't buy one — and the reason is not the one this document
+originally gave.** Measured 8 August 2026 on the dev machine — RTX 3060, 12 GB
+— with real numbers rather than estimates.
+
+> ## Correction, later the same day
+>
+> The first version of this answer accepted the eval's diagnosis that the one
+> miss at 1,000 documents was **displacement** — the right answer scoring well
+> and being crowded out of a shortlist that was merely too narrow. That
+> diagnosis was wrong, and the remedy it produced (`RECALL_CANDIDATES = 25`)
+> fixed nothing, because the shortlist was still *selected* on the ranking
+> blend before the width ever mattered.
+>
+> What was actually happening: similarity carries weight 0.35 but lives in a
+> narrow band (~0.30–0.60), so it swings the blended score by about **0.10**,
+> while importance, recency, access, keyword and session together swing about
+> **0.55**. Non-relevance signals outweigh relevance roughly **4.5 to 1**. The
+> single most relevant document in the entire eval — cosine 0.599 — came back
+> at **rank 43**.
+>
+> **That still argues against a reranker, more strongly than before.** A
+> cross-encoder produces better similarities, and better similarities were
+> never the binding constraint: the ones we had were being outvoted. Buying a
+> reranker would have spent 0.6 GB of VRAM and a second forward pass per query
+> to improve the one input that the ranking arithmetic was already discarding.
+> It would have measured as a small improvement, for the wrong reason, and the
+> real defect would have survived underneath it.
+>
+> The fix was selection by relevance and ordering by the blend. It costs
+> nothing. See `MILESTONES.md` → "The ranking fix, and what the eval got
+> wrong".
+>
+> **The lesson is about the measurement, not the model.** "1 missed" is not a
+> finding. *Why* it was missed is the finding, and the two failure modes this
+> document was written to separate — threshold versus depth — turned out to
+> have a third sibling nobody had named: selection. An eval that reports only
+> a count is a purchase order waiting for a plausible story.
+
+## Which number is real: +0.106, not +0.179
+
+**The honest margin at 1,000 documents is +0.106.** Related bottoming out at
+0.517, unrelated topping out at 0.410, floor 0.42 sitting inside the gap.
+
+**The +0.179 recorded earlier in this document was inflated by the defect it
+was measuring.** `related_min` read 0.589 only because the document scoring
+0.517 was being excluded from the shortlist entirely, so it never entered the
+sample the minimum was taken over. Fixing selection put a real 0.517 into a
+population it had always belonged to. Nothing got worse; the measurement
+stopped flattering itself.
+
+Anyone reading this in six months should take **+0.106 as the baseline** and
+treat every earlier margin in this file as measured through a broken selector.
+
+**On the same corpus, after the fix:** 5 of 5 answerable targets recalled, each
+one the single most relevant document of a thousand, zero false citations at
+the floor, 673 ms mean latency.
+
+### What would reopen the question
+
+Measured evidence about *scoring*, and nothing else:
+
+- **The margin narrowing on a real corpus**, not a synthetic one.
+  `test_recall_eval.py` prints it on every run so a narrowing gap is visible
+  before a user feels it. If related_min and unrelated_max converge on real
+  material, that is a similarity problem, and better similarities are exactly
+  what a cross-encoder buys.
+- **Targets falling below the floor** rather than being ordered badly.
+  `test_recall_at_scale.py` already separates those two outcomes by name, and
+  only the first is a reranker's job.
+
+**What must not reopen it:** a miss count. "4 of 5" was the number that nearly
+bought a cross-encoder, and it turned out to be one part ordering defect and
+one part an eval corpus that answered its own question. A count with no
+mechanism behind it is a purchase order waiting for a plausible story. Neither
+does a sense that recall "feels worse" — this file exists because the question
+deserves a measurement, and the measurement is cheap and already written.
+
+---
+
+Everything below stands as the option analysis, and the VRAM and licence
+numbers are unchanged.
 
 ---
 
