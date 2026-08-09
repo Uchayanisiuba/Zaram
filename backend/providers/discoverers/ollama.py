@@ -67,6 +67,42 @@ class OllamaAdapter:
         except Exception as exc:
             return {"available": False, "provider": self.provider_id, "error": str(exc)}
 
+    def resident_models(self, *, timeout: float = 1.0) -> Optional[Dict[str, int]]:
+        """What is loaded in VRAM *right now*, name to bytes.
+
+        `/api/tags` lists what is installed; this asks what is actually
+        resident. They are different questions and only the second can answer
+        "will this request force a swap".
+
+        Returns ``None`` when Ollama cannot be reached or does not answer —
+        never an empty dict. "Nothing is loaded" and "we could not find out" are
+        different facts, and a caller that confuses them will announce a swap on
+        every message the moment Ollama is briefly busy. Same discipline as
+        `vram_bytes`: unknown is a value, not a zero.
+
+        The timeout is deliberately short. This runs before every generation, so
+        it is on the critical path of a reply; a slow answer here is worse than
+        no answer, because the fallback (say nothing) is correct and cheap.
+        """
+        try:
+            payload = self._get("/api/ps", timeout=timeout)
+        except Exception as exc:
+            logger.debug("Ollama residency probe failed: %s", exc)
+            return None
+        if not isinstance(payload, dict):
+            return None
+
+        resident: Dict[str, int] = {}
+        for entry in payload.get("models", []) or []:
+            name = entry.get("name") or entry.get("model")
+            if not name:
+                continue
+            # `size_vram` is what the model occupies on the card. `size` is the
+            # total including any CPU-offloaded layers, which is not what a
+            # residency decision is about.
+            resident[name] = int(entry.get("size_vram") or 0)
+        return resident
+
     def to_dict(self) -> Dict[str, Any]:
         return ProviderSummary(
             id=self.provider_id,

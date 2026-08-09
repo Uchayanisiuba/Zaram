@@ -34,6 +34,16 @@ class EventType(str, Enum):
     #: A file Zaram made. Rendered as a card in the conversation and, from the
     #: same record, as a row in Work.
     ARTIFACT = "artifact"
+    #: A model has to be loaded before this reply can start.
+    #:
+    #: Emitted *before* generation, not while it stalls. CLAUDE.md requires a
+    #: route that forces a swap to be visible in the orb's state, and a
+    #: indicator that appears once the machine has already gone quiet is not
+    #: visibility — the user has spent the seconds and concluded the product
+    #: hung. Distinct from STATUS because it carries what is being loaded and
+    #: what it displaces, which is the evidence a user needs to go and change
+    #: the assignment in Settings.
+    MODEL_LOAD = "model_load"
     #: Something the user needs to know that is not part of the answer.
     #:
     #: Distinct from TOKEN because it must not be mistaken for the model
@@ -89,14 +99,90 @@ class StreamEvent:
         )
 
     @staticmethod
-    def source(kind: str, url: str | None = None, title: str | None = None, correlation_id: str = "") -> StreamEvent:
+    def source(
+        kind: str,
+        url: str | None = None,
+        title: str | None = None,
+        *,
+        excerpt: str | None = None,
+        relevance: float | None = None,
+        cited: bool = True,
+        number: int | None = None,
+        egress_id: str | None = None,
+        bytes_sent: int | None = None,
+        origin: str | None = None,
+        record_id: str | None = None,
+        correlation_id: str = "",
+    ) -> StreamEvent:
+        """One source behind an answer.
+
+        `kind` is the distinction the whole citation UI rests on and no
+        competitor has to make: `memory` and `document` stayed on the machine,
+        `web` means bytes left and there is an egress log row for it. The
+        frontend must never infer a kind — inventing one client-side would be
+        the fabrication rule in a different file.
+
+        Keyword-only past `title` on purpose. Five optional strings in a row is
+        how `excerpt` ends up in the `url` slot at one call site and nowhere
+        else, and a citation pointing at the wrong thing is worse than one that
+        is missing.
+
+        - `excerpt` — the passage that actually bore on the answer, which is
+          what makes a citation checkable rather than decorative.
+        - `relevance` — the similarity, never the ranking blend. Sent so the
+          panel can show the gap between what was recalled and what was cited.
+        - `cited` — whether it cleared `MIN_CITATION_SCORE`. False means
+          recalled but not cited: it belongs in the panel's quieter section, not
+          as an inline chip. Sent rather than dropped, so nothing is hidden.
+        - `number` — the stable citation number. Assigned once, server-side, and
+          shared by the inline chip and the panel card. Numbering client-side
+          would drift the moment a chip is filtered from one view and not the
+          other. `None` for uncited sources, which carry no number by design.
+        - `egress_id` / `bytes_sent` — the egress log row this source came from.
+          Present only for `web`, and the reason the citation and the egress log
+          are the same object viewed twice.
+        """
         return StreamEvent(
             type=EventType.SOURCE,
             data={
                 "kind": kind,
                 "url": url,
                 "title": title,
+                "excerpt": excerpt,
+                "relevance": relevance,
+                "cited": cited,
+                "number": number,
+                "egress_id": egress_id,
+                "bytes_sent": bytes_sent,
+                "origin": origin,
+                "record_id": record_id,
             },
+            correlation_id=correlation_id,
+        )
+
+    @staticmethod
+    def model_load(
+        kind: str,
+        model: str,
+        evicts: list[str] | None = None,
+        correlation_id: str = "",
+    ) -> StreamEvent:
+        """A model must be loaded before this reply can begin.
+
+        `kind` is `load` — a cold start with room to spare — or `swap`, where
+        something resident has to be evicted first. They are separate words
+        because the remedy differs: a cold start passes on its own, while a
+        swap recurring every other message is a model-assignment problem the
+        user can act on. Collapsing them would make `swapping` a synonym for
+        "slow" and cost the distinction its meaning.
+
+        Never emitted speculatively. The pre-flight returns `None` whenever it
+        cannot tell, and no event is sent for that — announcing a swap that
+        does not happen trains the user to ignore the indicator.
+        """
+        return StreamEvent(
+            type=EventType.MODEL_LOAD,
+            data={"kind": kind, "model": model, "evicts": list(evicts or [])},
             correlation_id=correlation_id,
         )
 

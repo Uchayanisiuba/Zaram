@@ -19,6 +19,7 @@ from core.query_classifier import SEARCH_MARKER
 
 # --- LEGACY IMPORTS (Isolated for Fallback) ---
 from implementations.ollama_llm import OllamaLLM
+from runtimes.memory.maintenance import SpineMaintenance
 from services.conversation_manager import ConversationManager
 
 print("Starting Zaram Backend...")
@@ -36,11 +37,12 @@ app.add_middleware(
 # --- KERNEL LIFECYCLE ---
 kernel = KernelBootstrapper()
 chat_router = None
+spine_maintenance = None
 
 
 @app.on_event("startup")
 async def startup_event():
-    global chat_router
+    global chat_router, spine_maintenance
 
     print("[Startup] Booting Zaram Kernel...")
     await kernel.boot()
@@ -77,12 +79,22 @@ async def startup_event():
     ingest_service.attach_memory(kernel.memory_runtime)
     kernel.execution_engine.set_notice_source(ingest_service.notice_text)
 
+    # Rule 7e stops being a document here. The decay rules and the promotion
+    # evidence were written, tested and never once invoked by anything running
+    # — see `runtimes/memory/maintenance.py` for why the schedule is "shortly
+    # after boot, then daily" rather than a shorter interval.
+    if kernel.memory_runtime is not None:
+        spine_maintenance = SpineMaintenance(kernel.memory_runtime, kernel.event_bus)
+        spine_maintenance.start()
+
     print("[Startup] Chat Router initialized. Kernel Online.")
 
 
 @app.on_event("shutdown")
 async def shutdown_event():
     print("[Shutdown] Powering down Zaram Kernel...")
+    if spine_maintenance is not None:
+        await spine_maintenance.stop()
     await kernel.shutdown()
 
 
@@ -137,6 +149,12 @@ class ChatRequest(BaseModel):
     personality: str = "af_heart"
     persona: str = "zaram_prime"
     session_id: str = "default"
+    #: Which project this exchange belongs to, or "" for none (rule 7i).
+    #:
+    #: Empty is a real answer, not a missing one: a question asked outside any
+    #: project genuinely is not about one, and facts captured from it stay
+    #: `global`. Inventing a project here would be a value nobody entered.
+    project_id: str = ""
 
 
 # --- API ENDPOINTS ---
@@ -271,7 +289,10 @@ async def chat(request: ChatRequest):
     final_prompt = request.text
 
     return StreamingResponse(
-        chat_router.route(final_prompt, request.model, system_prompt, request.session_id),
+        chat_router.route(
+            final_prompt, request.model, system_prompt, request.session_id,
+            project_id=request.project_id or None,
+        ),
         media_type="text/event-stream"
     )
 
@@ -377,6 +398,51 @@ async def list_memory(limit: int = 200, offset: int = 0, q: str = ""):
             }
             for r in page
         ],
+    }
+
+
+@app.get("/memory/maintenance")
+async def memory_maintenance_status():
+    """What the last decay pass did, and what promotion is now being offered.
+
+    Exists so the maintenance pass is observable rather than merely running.
+    A background job that silently deletes the user's facts is the wrong shape
+    for this product even when the deletions are correct — rule 4 gives the
+    user authority over stored facts, and authority without visibility is not
+    authority.
+
+    `last_result` is null when no pass has run yet, which is a different claim
+    from a pass that ran and changed nothing.
+    """
+    if spine_maintenance is None:
+        raise HTTPException(status_code=503, detail="Memory runtime not available")
+
+    result = spine_maintenance.last_result
+    candidate_ids = (result or {}).get("promotion_candidates", [])
+
+    # Resolved to content here rather than in the pass: the pass runs
+    # unattended and should hold ids, not copies of facts that a correction may
+    # have since changed underneath it.
+    candidates = []
+    if kernel.memory_runtime and candidate_ids:
+        for rid in candidate_ids:
+            record = await kernel.memory_runtime._store.get(rid)
+            if record is None:
+                continue
+            candidates.append({
+                "id": record.id,
+                "content": record.content,
+                "scope": record.scope,
+                "recalled_in": sorted(record.recalled_in or []),
+                "access_count": record.access_count,
+            })
+
+    return {
+        "last_result": result,
+        # Proposals, never applied. Promotion moves a fact from project scope to
+        # global, changing what is shareable, and rule 6 says that is the user's
+        # to grant. The caller promotes with POST /memory/{id}/scope.
+        "promotion_candidates": candidates,
     }
 
 

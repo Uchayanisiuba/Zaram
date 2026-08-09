@@ -25,6 +25,7 @@ communication flows through the EventBus.
 """
 from __future__ import annotations
 
+import itertools
 import json
 import logging
 import os
@@ -52,6 +53,26 @@ from core.scheduler import RuntimeScheduler
 from core.task_queue import TaskQueue
 
 logger = logging.getLogger(__name__)
+
+
+def _scope_for(project_id: str | None) -> str | None:
+    """The scope string for a project, or None when none is active.
+
+    Rule 7i spells scopes `project:<id>` and that spelling lives in one place —
+    `runtimes.memory.contracts.project_scope`. Imported lazily so `core/` keeps
+    no import-time dependency on the memory runtime, which is the same seam
+    `_memory_runtime` maintains.
+
+    None is deliberate and is not the same as `global`. It means "no project
+    filter", which lets recall see every scope — correct when the user is not
+    working inside a project, and wrong as a *capture* value, which is why
+    storage converts it separately.
+    """
+    if not (project_id or "").strip():
+        return None
+    from runtimes.memory.contracts import project_scope
+
+    return project_scope(project_id)
 
 
 def _relevance_of(result: Any) -> float:
@@ -104,6 +125,20 @@ class ExecutionEngine:
         #: Returns one sentence to say in the transcript, or None. Injected so
         #: `core/` keeps no dependency on `ingest/`; `main.py` supplies it.
         self._notice_source: Any | None = None
+        #: The provider layer, for the pre-flight residency check. Injected
+        #: after boot — see `set_provider_manager`. None means no load or swap
+        #: is ever announced, which is the correct degradation.
+        self._provider_manager: Any | None = None
+
+    def set_provider_manager(self, manager: Any | None) -> None:
+        """Provide the provider layer, for the pre-flight residency check.
+
+        Injected after construction rather than taken as a constructor argument
+        because the providers runtime boots later than the engine. Absent, the
+        engine simply never announces a load or a swap — the indicator is
+        optional, the reply is not.
+        """
+        self._provider_manager = manager
 
     def set_notice_source(self, source: Any | None) -> None:
         """Provide a callable returning a one-off notice, or None.
@@ -134,28 +169,65 @@ class ExecutionEngine:
         model: str = "gemma3:latest",
         system_prompt: str = "",
         session_id: str = "default",
+        project_id: str | None = None,
     ) -> Iterator[Any]:
         """End-to-end execution: Recall -> Plan -> Route -> Dispatch -> Stream.
 
         Yields plain strings for response tokens, and StreamEvent objects for
         structured output such as provenance. Callers that only understand
         strings continue to work unchanged.
+
+        `project_id` is rule 7i's missing caller. M8 built the scope field, the
+        recall filter, the migration and the promotion evidence, and then
+        nothing ever told the engine which project was active — so every fact
+        landed `global` and `promotion_candidates()` could only ever return an
+        empty list. Recall narrows to this project plus global; capture writes
+        this project's scope.
+
+        None means no project is active, and that is a real answer rather than
+        a missing one: a question asked outside any project is not about one.
         """
         logger.debug("Engine: execute prompt='%s...' model=%s", prompt[:50], model)
+
+        # Before anything else, including recall: will this route force a model
+        # out of VRAM? Asked first because the whole point is that the user
+        # learns about the wait *before* they spend it. Recall itself takes
+        # hundreds of milliseconds, so emitting this after it would already be
+        # late.
+        swap_event = self._swap_preflight_event(model)
+        if swap_event is not None:
+            yield swap_event
 
         # Provenance is emitted from two places — recall, and any search step.
         # Both can surface the same record, so dedupe across the whole request.
         seen_sources: set[str] = set()
 
+        # Citation numbers are assigned here, at the single point every source
+        # event passes through, rather than inside the two emitters.
+        #
+        # They have to be assigned *after* the dedupe above, or a source
+        # surfaced by both recall and search consumes a number that no chip
+        # ever shows — and the user sees a reply citing 1, 2 and 4. They also
+        # have to be assigned server-side: the chips and the panel are two
+        # renderings of one list, and a frontend numbering each of them
+        # independently gets them out of step the first time one is filtered.
+        citation_numbers = itertools.count(1)
+
+        def _numbered(event):
+            """Stamp a cited source with the next number. Uncited get none."""
+            if event.data.get("cited"):
+                event.data["number"] = next(citation_numbers)
+            return event
+
         # --- Recall: what does the Spine already know that bears on this? ---
-        recalled = self._recall(prompt, session_id)
+        recalled = self._recall(prompt, session_id, project_id)
         if recalled:
             system_prompt = self._augment_system_prompt(system_prompt, recalled)
             for event in self._provenance_events(recalled):
                 key = event.data.get("url") or event.data.get("title", "")
                 if key and key not in seen_sources:
                     seen_sources.add(key)
-                    yield event
+                    yield _numbered(event)
 
         # "Write that up as a proposal" is a *referential* request: the thing to
         # write up is the previous turn, and nothing in those five words is
@@ -280,7 +352,7 @@ class ExecutionEngine:
                             key = event.data.get("url") or event.data.get("title", "")
                             if key and key not in seen_sources:
                                 seen_sources.add(key)
-                                yield event
+                                yield _numbered(event)
 
             self._publish("execution.step_completed" if not step_failed else "execution.step_failed", {
                 "correlation_id": plan.correlation_id,
@@ -313,7 +385,7 @@ class ExecutionEngine:
 
         # --- Remember: commit what the user told us to the Spine. ---
         answer = step_results.get("reasoning.generate", "")
-        self._remember(prompt, answer, session_id, recalled)
+        self._remember(prompt, answer, session_id, recalled, project_id)
         # Ephemeral, and separate from the Spine write above. This is what a
         # later "write that up" resolves against.
         self._record_exchange(session_id, prompt, answer)
@@ -335,8 +407,20 @@ class ExecutionEngine:
     # Recall — the memory loop
     # ------------------------------------------------------------------
 
-    #: How many recalled facts reach the model and the citation list.
-    MAX_RECALL = 5
+    #: How many recalled facts reach the model.
+    #:
+    #: No longer also the citation count — `MIN_CITATION_SCORE` decides that
+    #: separately, so raising this widens what the model can use without
+    #: widening what the user is asked to check.
+    #:
+    #: 6, from measurement rather than taste: at 1,000 documents the deepest
+    #: answerable target sat at rank 5 once selection was moved onto relevance,
+    #: and a shortlist equal to the deepest observed rank has no headroom at all
+    #: — one more near-identical invoice drops it. See
+    #: `test_the_shortlist_covers_the_deepest_target`, which prints that
+    #: headroom on every run precisely so this number can be revisited from
+    #: evidence.
+    MAX_RECALL = 6
 
     #: How many candidates to retrieve before the floor and the cut.
     #:
@@ -385,6 +469,32 @@ class ExecutionEngine:
     #: number is not transferable between models, which is why the backend can
     #: override it.
     MIN_RECALL_SCORE = float(os.getenv("ZARAM_MIN_RECALL_SCORE", "0.42"))
+
+    #: Below this, a memory was worth giving the model but is not worth citing.
+    #:
+    #: A second, higher cut on the *same* `relevance` field, because "worth
+    #: injecting" and "worth telling the user about" are different questions.
+    #: Injecting six facts and citing the two that carried the answer is the
+    #: correct behaviour, not a compromise.
+    #:
+    #: Measured: driving the interface produced a reply about a day rate citing
+    #: five memories, all genuinely about day rates and payment terms, relevance
+    #: 0.50–0.61 — and only the top one actually used. Nothing was wrong with
+    #: retrieval; the gap is between *recalled* and *used*. An answer wearing
+    #: five citations has taught the user that citations are decoration, and
+    #: after that the real ones cannot help.
+    #:
+    #: 0.55 sits inside that observed band rather than above it, so the fact
+    #: that carried the answer is still cited while the merely-adjacent ones
+    #: move to the panel's "recalled, not cited" section. They are not hidden —
+    #: `_provenance_events` emits them with `cited=False` — and the gap between
+    #: the two thresholds is visible in the UI and therefore arguable.
+    #:
+    #: **Never applies to web sources.** Bytes leaving the machine are always
+    #: cited regardless of relevance; that is an egress disclosure, not an
+    #: attribution judgement, and thresholding it would hide the one thing this
+    #: product exists to show.
+    MIN_CITATION_SCORE = float(os.getenv("ZARAM_MIN_CITATION_SCORE", "0.55"))
 
     #: Capabilities whose output is context for later steps, never shown to the
     #: user. Their raw payloads (JSON search results, for example) would
@@ -475,17 +585,76 @@ class ExecutionEngine:
         return (system_prompt or "") + "\n".join(lines)
 
     def _search_provenance_events(self, sources: list[dict[str, Any]]) -> list[Any]:
-        """Emit one source event per search result, so the UI can show them."""
+        """One source event per search result. Always cited, never thresholded.
+
+        Bytes left the machine to fetch these, so they are disclosed regardless
+        of how central they were to the answer. `MIN_CITATION_SCORE` is an
+        attribution judgement and this is not one — it is the egress log
+        surfacing at the sentence level, and a relevance score is not a reason
+        to stop telling someone what left their computer.
+
+        `kind` is normalised to `web` rather than passed through as the
+        provider name. The UI colours by egress, and a chip that said "brave"
+        or "tavily" would make the user learn a vocabulary to answer the only
+        question that matters: did this leave?
+        """
         from core.streaming_events import StreamEvent
 
         events = []
         for source in sources:
+            snippet = " ".join((source.get("snippet") or "").split())
             events.append(StreamEvent.source(
-                kind=source.get("provider") or "search",
+                kind="web",
                 url=source.get("url"),
                 title=(source.get("title") or "")[:120],
+                excerpt=snippet[: self.EXCERPT_CHARS] or None,
+                relevance=source.get("score"),
+                cited=True,
+                # The link that makes the citation and the egress log the same
+                # object viewed twice. None when the search path did not report
+                # one — shown as absent rather than faked, because a citation
+                # claiming an egress row that does not exist is worse than one
+                # admitting it cannot link.
+                egress_id=source.get("egress_id"),
+                bytes_sent=source.get("bytes_sent"),
+                origin="web",
             ))
         return events
+
+    def _swap_preflight_event(self, model: str) -> Any | None:
+        """Announce a model load or swap before generation, or say nothing.
+
+        Returns None in every uncertain case — no provider manager, no
+        accelerator, unreadable VRAM, an unreachable Ollama, or a model the
+        catalog does not know. The indicator is only worth having if it is
+        right, so silence is the correct output whenever the answer is "cannot
+        tell". This runs on the critical path of every reply, so it also
+        swallows its own failures: a broken residency probe must cost the user
+        an indicator, never an answer.
+        """
+        manager = getattr(self, "_provider_manager", None)
+        if manager is None:
+            return None
+        try:
+            plan = manager.swap_preflight(model)
+        except Exception as exc:
+            logger.debug("Engine: swap pre-flight failed: %s", exc)
+            return None
+
+        # `resident` is the common case and says nothing, deliberately: an
+        # event on every reply would be noise the frontend has to filter, and
+        # the orb already has a word for "working".
+        if plan is None or plan.kind == "resident":
+            return None
+
+        logger.info(
+            "Engine: %s required before reply — %s%s",
+            plan.kind, plan.model,
+            f", evicting {', '.join(plan.evicts)}" if plan.evicts else "",
+        )
+        return StreamEvent.model_load(
+            kind=plan.kind, model=plan.model, evicts=plan.evicts,
+        )
 
     def _memory_runtime(self) -> Any | None:
         """Resolve the memory runtime through the capability router.
@@ -498,7 +667,9 @@ class ExecutionEngine:
         except Exception:
             return None
 
-    def _recall(self, prompt: str, session_id: str) -> list[Any]:
+    def _recall(
+        self, prompt: str, session_id: str, project_id: str | None = None
+    ) -> list[Any]:
         """Retrieve prior context relevant to this prompt.
 
         Retrieves `RECALL_CANDIDATES` and cuts to `MAX_RECALL` after the floor,
@@ -523,6 +694,12 @@ class ExecutionEngine:
                 query=prompt,
                 max_results=self.RECALL_CANDIDATES,
                 session_id=None,
+                # Rule 7i: this project plus global, and nothing else. A
+                # question asked inside one project draws on that project and
+                # on what is true about the user generally — never on another
+                # client's terms. `None` means every scope, which is right when
+                # no project is active and is what the Memory surface wants.
+                scope=_scope_for(project_id),
             ))
         except Exception as exc:
             logger.warning("Engine: recall failed: %s: %s", type(exc).__name__, exc)
@@ -533,10 +710,17 @@ class ExecutionEngine:
         # comparing it to a floor measured as a cosine similarity meant an
         # unrelated fact could be cited on recency alone. Ordering and
         # permission are different questions; this one is about relevance.
-        kept = [
-            r for r in results
-            if _relevance_of(r) >= self.MIN_RECALL_SCORE
-        ][: self.MAX_RECALL]
+        # Floor on relevance, then cut on relevance. The cut used to take the
+        # first five of whatever order retrieval returned, which is the ranking
+        # blend — so the five facts the model was given were the five most
+        # *recently touched* of those above the floor, not the five most
+        # relevant. Both halves have to be the same number or the floor is
+        # protecting a list that something else already chose.
+        kept = sorted(
+            (r for r in results if _relevance_of(r) >= self.MIN_RECALL_SCORE),
+            key=_relevance_of,
+            reverse=True,
+        )[: self.MAX_RECALL]
         logger.info("Engine: recalled %d/%d memories above threshold", len(kept), len(results))
         self._publish("memory.recalled", {
             "query": prompt[:100],
@@ -659,22 +843,61 @@ class ExecutionEngine:
         ]
         return (system_prompt or "") + "\n".join(lines)
 
+    #: How much of a passage to send as the excerpt.
+    #:
+    #: Longer than the 120-character title because they do different jobs: the
+    #: title identifies the source in a chip, the excerpt is the evidence, and
+    #: an excerpt truncated to a chip's length cannot be checked against the
+    #: claim it supports.
+    EXCERPT_CHARS = 400
+
     def _provenance_events(self, recalled: list[Any]) -> list[Any]:
-        """Emit one source event per recalled memory, so the UI can show them."""
+        """One source event per recalled memory, cited or not.
+
+        Emits everything recalled, including what fell below
+        `MIN_CITATION_SCORE`. Those carry `cited=False` and belong in the
+        panel's quieter "recalled but not cited" section — dropping them here
+        would hide the gap between the two thresholds, and that gap is exactly
+        what makes the citation cut arguable rather than magic.
+        """
         from core.streaming_events import StreamEvent
+        from runtimes.memory.contracts import Origin
 
         events = []
         for result in recalled:
             record = result.record
             # Stored exchanges span lines; collapse them so the title reads as a
             # single line in the UI.
-            snippet = " ".join(record.content.split())
-            if len(snippet) > 120:
-                snippet = snippet[:117] + "..."
+            flat = " ".join(record.content.split())
+            snippet = flat if len(flat) <= 120 else flat[:117] + "..."
+            excerpt = flat if len(flat) <= self.EXCERPT_CHARS else (
+                flat[: self.EXCERPT_CHARS - 3] + "..."
+            )
+
+            relevance = _relevance_of(result)
+            origin = getattr(record, "origin", None)
+
+            # A fact that came out of one of the user's own files is a
+            # `document` to the citation UI, not a `memory`. The spec's three
+            # kinds are about where a source came from, and "a passage from an
+            # indexed file" is a different claim to the user — it has a
+            # filename they recognise — than "something Zaram remembered".
+            # Both stayed on the device, so both are cyan; the distinction is
+            # the icon and the card, not the colour.
+            metadata = record.metadata or {}
+            filename = metadata.get("filename") or metadata.get("source_file")
+            is_document = origin is Origin.USER_DOCUMENT or bool(filename)
+
             events.append(StreamEvent.source(
-                kind="memory",
+                kind="document" if is_document else "memory",
                 url=f"memory:{record.id}",
-                title=snippet,
+                title=filename or snippet,
+                excerpt=excerpt,
+                relevance=relevance,
+                # Recalled and cited are two different cuts on one number.
+                cited=relevance >= self.MIN_CITATION_SCORE,
+                origin=origin.value if origin is not None else None,
+                record_id=record.id,
             ))
         return events
 
@@ -794,7 +1017,14 @@ class ExecutionEngine:
         """
         return cls._MARKER_RE.sub("", text or "")
 
-    def _remember(self, prompt: str, answer: str, session_id: str, recalled: list[Any] | None = None) -> None:
+    def _remember(
+        self,
+        prompt: str,
+        answer: str,
+        session_id: str,
+        recalled: list[Any] | None = None,
+        project_id: str | None = None,
+    ) -> None:
         """Store what the user told us, so a later question can recall it.
 
         Stores the user's own words, not the exchange. Storing
@@ -851,8 +1081,22 @@ class ExecutionEngine:
                 session_id=session_id,
                 metadata={"prompt": prompt, "answer": answer},
                 tags=["conversation"],
+                # Rule 7i: default to the current project. A fact captured
+                # while working on one is about that work, and it is the
+                # `recalled_in` evidence gathered across several projects that
+                # later argues for promoting it to global — never a question
+                # asked at capture time, which would ask the user to predict
+                # the future (rule 7e).
+                #
+                # `None` here means no project was active, and `remember`
+                # stores `global` for it. That is the honest reading: a
+                # question asked outside any project is not about one.
+                scope=_scope_for(project_id),
             ))
-            logger.info("Engine: stored exchange in the Spine (session=%s)", session_id)
+            logger.info(
+                "Engine: stored exchange in the Spine (session=%s, project=%s)",
+                session_id, project_id or "none",
+            )
         except Exception as exc:
             logger.warning("Engine: remember failed: %s: %s", type(exc).__name__, exc)
 

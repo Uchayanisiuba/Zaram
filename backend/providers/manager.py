@@ -9,6 +9,7 @@ pure, offline, read-only accessors. It never imports a concrete engine.
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 from core.event_bus import EventBus
@@ -41,6 +42,76 @@ logger = logging.getLogger(__name__)
 #: the heuristic. The honest fix is to compute the reserve from the model's own
 #: context length; until someone measures it, this stays deliberately generous.
 _KV_CACHE_RESERVE_FRACTION = 0.20
+
+
+def _same_model(a: str, b: str) -> bool:
+    """Whether two model names refer to the same model.
+
+    Three spellings of one thing are in play, which is two more than anyone
+    would guess from a single call site:
+
+    - the **catalog id**, provider-prefixed: `ollama:gemma3:latest`
+    - the **provider-native name**, which `/api/ps` and `/api/tags` report and
+      which the chat path passes to Ollama: `gemma3:latest`
+    - the **bare name**, which a config file or a per-task assignment may use,
+      and which Ollama itself treats as `:latest`: `gemma3`
+
+    Comparing any two of those directly fails. Getting it wrong is not a
+    crash — it is a residency check that silently never matches, so the
+    embedder gets charged against the chat budget and the orb announces a swap
+    before every single message. Discovered against the real catalog; the
+    first version of this compared ids only and the fakes in the tests happened
+    to be keyed the same way as `/api/ps`, so nothing failed.
+    """
+    def norm(name: str) -> str:
+        name = (name or "").strip().lower()
+        for prefix in ("ollama:", "lmstudio:", "lm_studio:", "openrouter:"):
+            if name.startswith(prefix):
+                name = name[len(prefix):]
+                break
+        return name[: -len(":latest")] if name.endswith(":latest") else name
+
+    return norm(a) == norm(b)
+
+
+def _matches_resident(model_id: str, resident: Dict[str, int]) -> bool:
+    return any(_same_model(model_id, name) for name in resident)
+
+
+@dataclass(frozen=True)
+class SwapPlan:
+    """What loading a model will cost, decided before it is loaded.
+
+    `kind` is one of:
+
+    - `resident` — already loaded, nothing to say
+    - `load` — a cold start with room to spare
+    - `swap` — something resident must be evicted to make room
+    - `oversized` — larger than the whole budget, so evicting everything would
+      not help; it will load with layers spilled to system RAM
+
+    Four rather than a boolean because the remedies differ. A cold start passes
+    on its own; a recurring swap is a model-assignment problem the user can fix
+    in Settings; an oversized model is a hardware fact no setting will change.
+    """
+
+    kind: str
+    model: str
+    #: Models that would be unloaded to make room. Empty unless `kind` is `swap`.
+    evicts: List[str]
+    bytes_needed: int
+
+    @property
+    def requires_swap(self) -> bool:
+        return self.kind == "swap"
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "kind": self.kind,
+            "model": self.model,
+            "evicts": list(self.evicts),
+            "bytes_needed": self.bytes_needed,
+        }
 
 
 class ProviderManager:
@@ -148,6 +219,136 @@ class ProviderManager:
         vram = hardware.vram_bytes or 0
         reserve = int(vram * _KV_CACHE_RESERVE_FRACTION)
         return max(vram - self.embedding_footprint_bytes() - reserve, 0)
+
+    def swap_preflight(self, model_id: str) -> Optional["SwapPlan"]:
+        """Will answering with ``model_id`` force a model out of VRAM?
+
+        Asked **before** generation starts, not discovered during it. CLAUDE.md
+        requires that a route which forces a swap be visible in the orb's
+        state, and a spinner that appears once the machine has already stalled
+        is not visibility — the user has by then spent the seconds and drawn
+        their own conclusion about why the product is slow.
+
+        Three outcomes, and the middle one is the reason this is not a boolean:
+
+        - **resident** — the model is already loaded. Nothing to say.
+        - **load** — not loaded, but it fits alongside what is. A cold start,
+          which is `warming`: a wait with no eviction behind it.
+        - **swap** — not loaded, and loading it exceeds the budget, so
+          something currently resident has to go. This is the one the rule is
+          about, and it is also the one that will happen *again* on the next
+          message that routes back.
+
+        Returns ``None`` when the question cannot be answered — no accelerator,
+        unreadable VRAM, an unreachable Ollama, or a model whose size we do not
+        know. Never guesses. Announcing a swap that does not happen would train
+        the user to ignore the indicator, which costs more than staying quiet.
+        """
+        model = self._resolve_model(model_id)
+        if model is None or model.size_bytes is None:
+            return None
+
+        budget = self.resident_budget_bytes()
+        if budget is None:
+            return None
+
+        resident = self._resident_models()
+        if resident is None:
+            return None
+
+        # Ollama tags are matched loosely because a request may name
+        # `gemma3` while `/api/ps` reports `gemma3:latest`. Treating those as
+        # different models would announce a swap before every single reply.
+        if _matches_resident(model_id, resident):
+            return SwapPlan(kind="resident", model=model_id, evicts=[], bytes_needed=0)
+
+        # Only chat weights compete for the budget. The embedder's share is
+        # already deducted inside `resident_budget_bytes`, so counting it again
+        # here would double-charge it and report a swap on a machine with room.
+        occupied = sum(
+            size for name, size in resident.items()
+            if not self._is_embedding_model(name)
+        )
+
+        if occupied + model.size_bytes <= budget:
+            return SwapPlan(kind="load", model=model_id, evicts=[], bytes_needed=model.size_bytes)
+
+        evicts = sorted(
+            name for name in resident if not self._is_embedding_model(name)
+        )
+
+        # A model that does not fit even with the card cleared is not swapping
+        # anything — there is nothing to evict that would make room. Ollama
+        # loads it anyway and spills layers to system RAM, which is slow for a
+        # different reason and has a different remedy.
+        #
+        # Reporting that as a swap would produce an indicator naming nothing
+        # displaced, which cannot explain itself: "switching model, evicting —"
+        # is worse than saying nothing. Found by a test asserting the embedder
+        # was excluded, which it was; the leftover `swap` with an empty
+        # `evicts` was the real defect underneath.
+        if model.size_bytes > budget:
+            return SwapPlan(
+                kind="oversized", model=model_id, evicts=[],
+                bytes_needed=model.size_bytes,
+            )
+
+        return SwapPlan(
+            kind="swap",
+            model=model_id,
+            evicts=evicts,
+            bytes_needed=model.size_bytes,
+        )
+
+    def _resolve_model(self, model_id: str) -> Optional[ModelInfo]:
+        """Find a catalogued model, tolerating a missing `:latest`.
+
+        The catalog is keyed by the name Ollama reports (`gemma3:latest`) while
+        a request, a config file or a per-task assignment may say `gemma3`.
+        Ollama treats those as the same model and so must this — an exact-match
+        lookup returns None for a model that is plainly installed, and a
+        pre-flight that cannot find the model reports "cannot determine" for
+        the most ordinary case there is.
+        """
+        exact = self.get_model(model_id)
+        if exact is not None:
+            return exact
+        for candidate in self.catalog.all():
+            # Both spellings, because the catalog id carries a provider prefix
+            # the caller does not use and `display_name` is the provider-native
+            # name that both the chat path and `/api/ps` speak.
+            if _same_model(model_id, candidate.id) or _same_model(
+                model_id, candidate.display_name
+            ):
+                return candidate
+        return None
+
+    def _resident_models(self) -> Optional[Dict[str, int]]:
+        """Live residency from whichever adapter can report it, or None."""
+        for adapter in self.registry.list_model_providers():
+            probe = getattr(adapter, "resident_models", None)
+            if probe is None:
+                continue
+            try:
+                result = probe()
+            except Exception:
+                continue
+            if result is not None:
+                return result
+        return None
+
+    def _is_embedding_model(self, name: str) -> bool:
+        """Whether a resident model is the embedder rather than a chat model.
+
+        Resolved through the catalog rather than by matching on the string
+        "embed", so a differently-named embedder is still recognised — the
+        provider layer must not hardcode which model does the embedding.
+        """
+        embedders = self.list_models(category=ModelCategory.EMBEDDING)
+        return any(
+            _same_model(name, m.id) or _same_model(name, m.display_name)
+            for m in embedders
+        )
 
     def model_fits_resident(self, model: ModelInfo) -> Optional[bool]:
         """Whether ``model`` can be co-resident with the embedder.
