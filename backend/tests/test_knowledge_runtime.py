@@ -23,6 +23,46 @@ from knowledge.providers import (
     PlaceholderProvider,
     SearchMixin,
 )
+from core.egress import EgressDenied
+
+
+# ---------------------------------------------------------------------------
+# Gate doubles
+#
+# Web providers are driven against these rather than against the real gate,
+# because the real gate consults backend/egress-policy.json — which is
+# gitignored, so it differs per machine. The same test reached live Wikipedia
+# on the developer's box and was denied on a clean checkout, passing vacuously
+# in both cases. A test whose behaviour depends on an untracked local file is
+# not a test.
+# ---------------------------------------------------------------------------
+
+
+class _DenyingGate:
+    """Default deny, which is the product's actual posture (Rule 5)."""
+
+    def check(self, url, **kw):
+        raise EgressDenied(
+            f"Zaram blocked a request to {url}: no policy exists for this domain.",
+            host="test",
+            entry_id="test",
+        )
+
+    def request(self, url, **kw):
+        self.check(url, **kw)
+
+
+class _AllowingGate:
+    """Permitted, returning a canned body. Nothing leaves the machine."""
+
+    def __init__(self, payload: str):
+        self._payload = payload
+
+    def check(self, url, **kw):
+        return None
+
+    def request(self, url, **kw):
+        return self._payload
 
 
 # ---------------------------------------------------------------------------
@@ -140,30 +180,80 @@ class TestProviders:
         assert p.id == "vector"
         assert p.is_available() is False
 
+    # The three web providers below used to call search() for real and assert
+    # `if results: ...`, which asserted *nothing* whenever the call came back
+    # empty. They now drive the gate explicitly — denied, then allowed with a
+    # canned payload — so the mapping is asserted and no bytes ever leave.
+
     def test_wikipedia_provider(self):
         p = WikipediaProvider()
         assert p.id == "wikipedia"
         assert p.cache_ttl == 3600
-        results = p.search("Python programming", max_results=2)
-        if results:
-            assert results[0].provider == "wikipedia"
-            assert results[0].type == ResultType.WEB
 
-    def test_duckduckgo_provider(self):
-        p = DuckDuckGoProvider()
-        assert p.id == "duckduckgo"
-        results = p.search("OpenAI", max_results=2)
-        assert isinstance(results, list)
-        if results:
-            assert results[0].provider == "duckduckgo"
+    def test_wikipedia_returns_nothing_when_the_gate_refuses(self, monkeypatch):
+        import knowledge.providers.wikipedia_provider as mod
+
+        monkeypatch.setattr(mod, "get_gate", lambda: _DenyingGate())
+        p = mod.WikipediaProvider()
+        assert p.search("Python programming", max_results=2) == []
+        # A refusal is the user's policy, not a provider fault. That distinction
+        # keeps the health view from reporting a working provider as degraded.
+        assert "blocked" in (p._last_error or "")
+
+    def test_wikipedia_maps_a_response_it_is_given(self, monkeypatch):
+        import knowledge.providers.wikipedia_provider as mod
+
+        payload = '{"query":{"search":[{"title":"Python","snippet":"a <b>language</b>"}]}}'
+        monkeypatch.setattr(mod, "get_gate", lambda: _AllowingGate(payload))
+        results = mod.WikipediaProvider().search("Python", max_results=2)
+        assert len(results) == 1
+        assert results[0].provider == "wikipedia"
+        assert results[0].type == ResultType.WEB
+        # The snippet arrives with HTML in it and must not reach the user raw.
+        assert "<b>" not in results[0].snippet
+
+    def test_duckduckgo_asks_the_gate_before_opening_its_own_socket(self, monkeypatch):
+        """DDGS does its own HTTP, so the gate cannot carry the bytes.
+
+        It must still own the decision. Before this, the module was exempted in
+        test_egress_chokepoint.py as "dormant: web search is off until policy
+        exists" while this very file called search() for real — an unlogged live
+        request from a suite whose own guard says nothing reachable may hold an
+        exemption. The guard checks reachability at boot, so it passed.
+        """
+        import knowledge.providers.duckduckgo_provider as mod
+
+        opened = []
+        monkeypatch.setattr(mod, "DDGS", lambda *a, **k: opened.append(1))
+        monkeypatch.setattr(mod, "get_gate", lambda: _DenyingGate())
+
+        p = mod.DuckDuckGoProvider()
+        assert p.search("OpenAI", max_results=2) == []
+        assert opened == [], "DDGS was constructed despite the gate refusing"
+        assert "blocked" in (p._last_error or "")
+
+    def test_github_returns_nothing_when_the_gate_refuses(self, monkeypatch):
+        import knowledge.providers.github_provider as mod
+
+        monkeypatch.setattr(mod, "get_gate", lambda: _DenyingGate())
+        p = mod.GitHubProvider()
+        assert p.search("ollama", max_results=2) == []
+        assert "blocked" in (p._last_error or "")
+
+    def test_github_maps_a_response_it_is_given(self, monkeypatch):
+        import knowledge.providers.github_provider as mod
+
+        payload = '{"items":[{"full_name":"ollama/ollama","html_url":"https://x","description":"d"}]}'
+        monkeypatch.setattr(mod, "get_gate", lambda: _AllowingGate(payload))
+        results = mod.GitHubProvider().search("ollama", max_results=2)
+        assert len(results) == 1
+        assert results[0].type == ResultType.GITHUB
+        assert results[0].title == "ollama/ollama"
 
     def test_github_provider(self):
         p = GitHubProvider()
         assert p.id == "github"
-        results = p.search("ollama", max_results=2)
-        assert isinstance(results, list)
-        if results:
-            assert results[0].type == ResultType.GITHUB
+        assert p.is_available() is True
 
     def test_project_provider(self):
         p = ProjectProvider()
