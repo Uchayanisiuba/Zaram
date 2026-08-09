@@ -70,10 +70,36 @@ interface ChatState {
   /** Connection-level failure, as opposed to a failure within one reply. */
   connectionError: string | null;
   sessionId: string;
+  /** The project this conversation belongs to, or null for none (rule 7i).
+   *
+   *  Scopes recall to this project plus global, and captures facts under it so
+   *  `recalled_in` can accumulate the evidence that later argues for promoting
+   *  one to global. Null is a real answer, not a missing one. */
+  projectId: string | null;
 
   send: (text: string, opts?: Partial<ChatRequest>) => Promise<void>;
+  /** Change the active project. Survives across replies; cleared only by the
+   *  user, never inferred from what was asked. */
+  setProject: (projectId: string | null) => void;
   cancel: () => void;
   clear: () => void;
+}
+
+/** Where the active project is remembered between launches.
+ *
+ *  Persisted because it is a working context rather than a per-message choice:
+ *  someone who spent yesterday on Harbour Lane is still on it this morning, and
+ *  making them re-select it every launch is how facts end up captured under the
+ *  wrong scope — or under none. */
+const PROJECT_KEY = 'zaram.activeProject';
+
+function loadProject(): string | null {
+  try {
+    return localStorage.getItem(PROJECT_KEY) || null;
+  } catch {
+    // Private mode, or storage disabled. No project is a correct fallback.
+    return null;
+  }
 }
 
 /** Cancels the in-flight request. Module-level so `cancel()` can reach it
@@ -92,6 +118,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
   isStreaming: false,
   connectionError: null,
   sessionId: `session-${newId()}`,
+  projectId: loadProject(),
+
+  setProject: (projectId) => {
+    set({ projectId });
+    try {
+      if (projectId) localStorage.setItem(PROJECT_KEY, projectId);
+      else localStorage.removeItem(PROJECT_KEY);
+    } catch {
+      // The scope still applies to this session; only persistence is lost.
+    }
+  },
 
   send: async (text, opts = {}) => {
     const trimmed = text.trim();
@@ -147,12 +184,21 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }, WARMING_AFTER_MS);
     const settleActivity = (a: 'idle' | 'thinking') => {
       clearTimeout(warmingTimer);
-      useSystemStore.getState().setActivity(a);
+      const sys = useSystemStore.getState();
+      // Leaving a swap has to move the orb as well as the label. `setActivity`
+      // clears the model name but knows nothing about the renderer, so calling
+      // it here would leave the orb dimmed and slate-grey while tokens stream
+      // underneath it — the swap indicator outliving the swap.
+      if (sys.activity === 'swapping') sys.endModelSwap(a === 'idle' ? 'idle' : 'thinking');
+      else sys.setActivity(a);
     };
 
     try {
       for await (const event of streamChat(
-        { text: trimmed, sessionId: get().sessionId, ...opts },
+        // `opts` spreads last so a caller can override the project for one
+        // message, but the store's value is the default — the scope is a
+        // working context, not something each call site decides afresh.
+        { text: trimmed, sessionId: get().sessionId, projectId: get().projectId, ...opts },
         inFlight.signal,
       )) {
         switch (event.type) {
@@ -183,6 +229,27 @@ export const useChatStore = create<ChatState>((set, get) => ({
             // and, from the same record, as a row in Work.
             artifacts.push(event.artifact);
             set({ streamingArtifacts: [...artifacts] });
+            break;
+          }
+
+          case 'model_load': {
+            // Arrives before any token, because the backend checks residency
+            // before it starts generating. This is what makes the wait
+            // explicable rather than merely long.
+            //
+            // The generic warming timer is cancelled: it exists to guess that
+            // silence means a cold model, and we now *know* what the silence
+            // is. A specific answer must not be overwritten by a guess five
+            // seconds later.
+            clearTimeout(warmingTimer);
+            if (event.kind === 'swap') {
+              useSystemStore.getState().beginModelSwap(event.model);
+            } else {
+              // A cold start with room to spare is warming, not swapping.
+              // Same wait, different cause, and only one of them is something
+              // the user can act on in Settings.
+              useSystemStore.getState().setActivity('warming');
+            }
             break;
           }
 

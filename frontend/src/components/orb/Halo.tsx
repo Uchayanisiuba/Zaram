@@ -1,7 +1,9 @@
-import { motion } from 'framer-motion';
+import { motion, type Variants } from 'framer-motion';
 import { useOrbStore } from '@/stores';
+import type { OrbState } from '@/stores/orbStore';
 
-const haloVariants = {
+// Total map — see the note in Aura.tsx.
+const haloVariants: Record<OrbState, Variants[string]> = {
   idle: {
     rotate: 360,
     borderColor: 'rgba(139, 92, 246, 0.4)', // Indigo
@@ -34,6 +36,17 @@ const haloVariants = {
     borderColor: 'rgba(16, 185, 129, 0.7)', // Emerald
     transition: {
       duration: 20,
+      repeat: Infinity,
+      ease: 'linear',
+    } as const,
+  },
+  // The slowest rotation of any state, and the faintest border. Every other
+  // state speeds the halo up to signal work; a swap is waiting, not working.
+  swapping: {
+    rotate: 360,
+    borderColor: 'rgba(148, 163, 184, 0.25)', // Slate
+    transition: {
+      duration: 40,
       repeat: Infinity,
       ease: 'linear',
     } as const,

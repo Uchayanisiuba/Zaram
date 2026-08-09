@@ -34,13 +34,45 @@ import type { Artifact } from './artifactsClient';
 
 const API_BASE = import.meta.env.VITE_ZARAM_API ?? '';
 
+/** One source behind an answer.
+ *
+ *  The three kinds are the distinction the whole citation UI rests on:
+ *  `memory` and `document` stayed on this machine, `web` means bytes left and
+ *  there is an egress log row for it. **Never infer a kind here** — the backend
+ *  sends it, and inventing one client-side would be the fabrication rule in a
+ *  different file. */
+export type SourceKind = 'memory' | 'document' | 'web';
+
 export interface ChatSource {
-  /** Where it came from: "memory" for the Spine, a provider name for search. */
-  kind: string;
+  kind: SourceKind;
   /** Stable identifier, e.g. "memory:1a2b-...". Used for de-duplication. */
   url: string | null;
-  /** Human-readable snippet. */
+  /** Filename for a document, the fact itself for a memory, the page title for web. */
   title: string | null;
+  /** The passage that bore on the answer. What makes a citation checkable. */
+  excerpt: string | null;
+  /** Similarity, never the ranking blend. Null when the backend did not send one. */
+  relevance: number | null;
+  /** Whether it cleared the citation cut. False means recalled but not cited —
+   *  it belongs in the panel's quieter section, never as an inline chip. */
+  cited: boolean;
+  /** Citation number, assigned server-side so chips and panel cards agree.
+   *  Null for uncited sources, which carry no number by design. */
+  number: number | null;
+  /** The egress log row this came from. Web only, and null when the search
+   *  path did not report one — shown as absent rather than faked. */
+  egressId: string | null;
+  bytesSent: number | null;
+  /** `user_document` | `conversation` | `generated` | `web`. */
+  origin: string | null;
+  /** The fact's id, for correct/forget inline in the panel. */
+  recordId: string | null;
+}
+
+/** Whether a source cost the user any privacy. The one question a citation
+ *  exists to answer, and what the chip colour encodes. */
+export function sourceLeftDevice(source: ChatSource): boolean {
+  return source.kind === 'web';
 }
 
 export type ChatEvent =
@@ -54,6 +86,11 @@ export type ChatEvent =
    *  it is never rendered as the model speaking, and from `error` because
    *  nothing failed in this exchange. `action` names where to go about it. */
   | { type: 'notice'; content: string; kind: string; action: string }
+  /** A model has to be loaded before the reply can start. Sent *before*
+   *  generation, so the orb can say why the wait is about to happen rather
+   *  than after the machine has already gone quiet. `kind` is `load` (cold
+   *  start, room to spare) or `swap` (something resident gets evicted). */
+  | { type: 'model_load'; kind: 'load' | 'swap'; model: string; evicts: string[] }
   | { type: 'status'; state: string }
   | { type: 'error'; message: string }
   | { type: 'done' };
@@ -63,6 +100,10 @@ export interface ChatRequest {
   model?: string;
   persona?: string;
   sessionId?: string;
+  /** Which project this exchange belongs to (rule 7i). Undefined or empty
+   *  means none is active, which scopes recall to everything and captures
+   *  facts as `global` — a question asked outside a project is not about one. */
+  projectId?: string | null;
 }
 
 /** A failure that should be shown to the user, with the cause preserved. */
@@ -104,6 +145,7 @@ export async function* streamChat(
         model: req.model ?? 'gemma3:latest',
         persona: req.persona ?? 'zaram_prime',
         session_id: req.sessionId ?? 'default',
+        project_id: req.projectId ?? '',
       }),
       signal,
     });
@@ -233,15 +275,49 @@ function parseLine(line: string): ChatEvent | null {
     case 'token':
       return { type: 'token', content: String(data.content ?? '') };
 
-    case 'source':
+    case 'source': {
+      // An unrecognised kind is dropped rather than coerced. The kind decides
+      // whether the UI tells the user their data left the machine, so a
+      // default of "memory" would quietly claim a web source stayed local —
+      // the one thing this indicator must never get wrong.
+      const kind = String(data.kind ?? '');
+      if (kind !== 'memory' && kind !== 'document' && kind !== 'web') return null;
+
+      const num = (value: unknown): number | null =>
+        value == null || Number.isNaN(Number(value)) ? null : Number(value);
+
       return {
         type: 'source',
         source: {
-          kind: String(data.kind ?? 'unknown'),
+          kind,
           url: data.url == null ? null : String(data.url),
           title: data.title == null ? null : String(data.title),
+          excerpt: data.excerpt == null ? null : String(data.excerpt),
+          relevance: num(data.relevance),
+          // Defaults to cited only when the backend omitted the field, which
+          // is the pre-citation-UI shape. An explicit false is honoured.
+          cited: data.cited === undefined ? true : Boolean(data.cited),
+          number: num(data.number),
+          egressId: data.egress_id == null ? null : String(data.egress_id),
+          bytesSent: num(data.bytes_sent),
+          origin: data.origin == null ? null : String(data.origin),
+          recordId: data.record_id == null ? null : String(data.record_id),
         },
       };
+    }
+
+    case 'model_load': {
+      const kind = String(data.kind ?? '');
+      if (kind !== 'load' && kind !== 'swap') return null;
+      const model = String(data.model ?? '').trim();
+      if (!model) return null;
+      return {
+        type: 'model_load',
+        kind,
+        model,
+        evicts: Array.isArray(data.evicts) ? data.evicts.map(String) : [],
+      };
+    }
 
     case 'artifact': {
       // The backend sends the whole artifact record. Trusted for shape, not

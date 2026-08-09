@@ -11,12 +11,22 @@
  */
 import { create } from 'zustand';
 
+import { useOrbStore } from './orbStore';
 import { useSessionStatusStore } from './sessionStatusStore';
 
 const API_BASE = import.meta.env.VITE_ZARAM_API ?? '';
 
-/** What the Orb is currently doing or reporting. */
-export type OrbActivity = 'idle' | 'warming' | 'thinking' | 'speaking' | 'listening';
+/** What the Orb is currently doing or reporting.
+ *
+ *  `warming` and `swapping` are different waits and are told apart deliberately.
+ *  Warming is a cold start — nothing was resident and the first model is being
+ *  loaded. Swapping is an *eviction*: a model that was answering has to be
+ *  unloaded to make room for the one this request routed to. CLAUDE.md requires
+ *  the second to be visible ("a route that requires a swap must be visible in
+ *  the orb's state"), and it needs its own word because the remedy differs —
+ *  warming passes on its own, while a swap recurring every other message is a
+ *  model-assignment problem the user can fix in Settings. */
+export type OrbActivity = 'idle' | 'warming' | 'thinking' | 'speaking' | 'listening' | 'swapping';
 
 /** Where work is being routed. Today always 'local' — only Ollama is wired. */
 export type RoutingMode = 'local' | 'cloud' | 'mixed' | 'unknown';
@@ -45,11 +55,24 @@ interface SystemState {
   routing: RoutingState | null;
   speech: SpeechAvailability;
   activity: OrbActivity;
+  /** Which model is being loaded, while `activity` is `swapping`.
+   *
+   *  Null in every other state. A stale model name under an idle orb would be
+   *  an invented value, and this file's own rule is that a fabricated signal is
+   *  worse than no signal because it would be trusted. */
+  swappingTo: string | null;
   /** Timestamp of the last confirmed egress, for the Orb's pulse. Nothing can
    *  leave today, so this stays null until web search is governed and enabled. */
   lastEgressAt: number | null;
 
   setActivity: (a: OrbActivity) => void;
+  /** Enter the swap state, naming the model being loaded, and move the orb with
+   *  it. One call sets both stores: they are two renderings of one fact, and
+   *  letting a caller set one without the other is how the orb turns
+   *  slate-grey while the label still reads "Local only". */
+  beginModelSwap: (model: string) => void;
+  /** Leave the swap for whatever comes next, clearing the model name. */
+  endModelSwap: (next?: OrbActivity) => void;
   noteEgress: () => void;
   refresh: () => Promise<void>;
   startPolling: (intervalMs?: number) => () => void;
@@ -60,9 +83,26 @@ export const useSystemStore = create<SystemState>((set, get) => ({
   routing: null,
   speech: null,
   activity: 'idle',
+  swappingTo: null,
   lastEgressAt: null,
 
-  setActivity: (activity) => set({ activity }),
+  // Clears `swappingTo` on every transition, so the name cannot outlive the
+  // state that explains it.
+  setActivity: (activity) => set({ activity, swappingTo: null }),
+
+  beginModelSwap: (model) => {
+    set({ activity: 'swapping', swappingTo: model });
+    useOrbStore.getState().setOrbState('swapping');
+  },
+
+  endModelSwap: (next = 'thinking') => {
+    set({ activity: next, swappingTo: null });
+    // `listening` and `swapping` are the only OrbActivity members the orb has
+    // no visual for, and neither can follow a swap — so this mapping is total
+    // in practice without a cast that would hide a future gap.
+    useOrbStore.getState().setOrbState(next === 'warming' ? 'thinking' : next);
+  },
+
   noteEgress: () => set({ lastEgressAt: Date.now() }),
 
   refresh: async () => {
@@ -121,12 +161,31 @@ export function describeSystem(s: {
   backendOnline: boolean;
   routing: RoutingState | null;
   activity: OrbActivity;
+  swappingTo?: string | null;
 }): { label: string; detail: string; tone: 'local' | 'cloud' | 'offline' | 'busy' } {
   if (!s.backendOnline) {
     return {
       label: 'Offline',
       detail: 'Zaram’s engine is not running, so nothing can be answered.',
       tone: 'offline',
+    };
+  }
+  if (s.activity === 'swapping') {
+    // CLAUDE.md: "a route that requires a swap must be visible in the orb's
+    // state. An invisible swap reads as a broken product." The orb shows it;
+    // this says why, because a dimmed orb alone tells the user something is
+    // happening without telling them it will end.
+    //
+    // The model is named when known. It is the one detail that turns an
+    // unexplained wait into a comprehensible one, and it is also the evidence
+    // a user needs to go and change the assignment in Settings if this keeps
+    // happening.
+    return {
+      label: 'Switching model',
+      detail: s.swappingTo
+        ? `Loading ${s.swappingTo}. It has to replace the model already in memory, which takes a few seconds.`
+        : 'Loading a different model. It has to replace the one already in memory, which takes a few seconds.',
+      tone: 'busy',
     };
   }
   if (s.activity === 'warming') {
