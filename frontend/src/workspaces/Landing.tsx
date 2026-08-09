@@ -1,9 +1,12 @@
 import { useState, useEffect, useRef } from 'react'
 import { motion } from 'framer-motion'
 import { Brain, BookOpen, FileText, Settings, ShieldCheck } from 'lucide-react'
-import LivingOrb, { ORB_BEHAVIOUR } from '../components/orb/LivingOrb'
+import { ORB_BEHAVIOUR } from '../components/orb/LivingOrb'
+import Embodiment from '@/components/embodiment/Embodiment'
+import EmbodimentSpikeControls from '@/components/embodiment/EmbodimentSpikeControls'
 import OrbStatusLabel from '../components/orb/OrbStatusLabel'
 import OrbHint from '../components/orb/OrbHint'
+import { useEmbodimentStore } from '@/stores/embodimentStore'
 import { useChatModeStore } from '@/stores/chatModeStore'
 import { useLayoutStore, orbGeometry } from '@/stores/layoutStore'
 import { useSourceStore } from '@/stores/sourceStore'
@@ -72,6 +75,11 @@ export default function Landing({ onNavigate, onOrbTap }: LandingProps) {
   // blurred and dimmed — so the panel reads as being in front of it rather than
   // competing with it. It returns when the last panel closes.
   const panelsOpen = useSourceStore((s) => s.open.length > 0)
+  // Spike only. The shipped control belongs in Settings — see
+  // docs/EMBODIMENT-SPIKE.md, "the toggle lives in Settings, the landing gets
+  // nothing". It is here so the two renderers can be compared side by side,
+  // which is the only way to answer whether the avatar is worth shipping.
+  const renderer = useEmbodimentStore((s) => s.renderer)
   // The health poll used to start here, because the top bar is hidden on this
   // surface and nothing else was mounted to own it. The persistent bar is
   // mounted on every surface including this one, so it owns the poll now — two
@@ -208,9 +216,14 @@ export default function Landing({ onNavigate, onOrbTap }: LandingProps) {
             }}
           >
             <div style={{ width: ORB_SIZE, height: ORB_SIZE }}>
-              {/* Same orb and same behaviour as the sub-menu — only the
-                  diameter differs. See ORB_BEHAVIOUR. */}
-              <LivingOrb px={ORB_SIZE} {...ORB_BEHAVIOUR} />
+              {/* Same behaviour as the sub-menu — only the diameter differs.
+                  See ORB_BEHAVIOUR.
+
+                  Keyed by renderer so switching remounts rather than
+                  crossfades. docs/EMBODIMENT-SPIKE.md: a crossfade between a
+                  glowing sphere and a 3D character has no good frame in the
+                  middle, so the choice is made at mount. */}
+              <Embodiment key={renderer} px={ORB_SIZE} {...ORB_BEHAVIOUR} />
             </div>
           </motion.div>
 
@@ -328,6 +341,12 @@ export default function Landing({ onNavigate, onOrbTap }: LandingProps) {
           conversation has ever been opened, so it never competes with the
           status label above. */}
       <OrbHint offsetX={visualShiftX} />
+
+      {/* Spike scaffolding. Drives the states by hand because nothing else
+          can yet: `swapping` is set by the backend pre-flight, `speaking` by a
+          TTS path that is out of scope, and `cloud` by an engine that does not
+          exist. Without this the avatar can only ever be observed idle. */}
+      <EmbodimentSpikeControls />
     </div>
   )
 }
