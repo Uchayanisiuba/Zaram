@@ -78,6 +78,15 @@ class SynthesisResult:
     audio_id: str = ""
     format: str = "wav"
     channels: int = 1
+    #: When each word is heard, as plain dicts: ``{text, phonemes, start_s,
+    #: end_s}``, offsets in seconds from the start of the whole utterance.
+    #:
+    #: Dicts rather than the provider's ``SpeechTiming`` because this contract
+    #: sits between the speech runtime and the wire, and importing a type from
+    #: ``voice.providers`` here would couple the runtime to one engine's
+    #: package — the coupling the interface exists to prevent. Empty when the
+    #: engine cannot produce timings; a renderer checks and falls back.
+    timings: List[Dict[str, Any]] = field(default_factory=list)
     metadata: Dict[str, Any] = field(default_factory=dict)
 
 

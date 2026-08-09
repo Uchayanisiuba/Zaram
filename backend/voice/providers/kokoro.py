@@ -56,7 +56,7 @@ import numpy as np
 from voice.config import KokoroConfig
 from voice.exceptions import ProviderUnavailableError
 from voice.health import AudioCache
-from voice.providers.base import VoiceProvider
+from voice.providers.base import SpeechTiming, VoiceProvider
 
 
 # --------------------------------------------------------------------------- #
@@ -84,6 +84,14 @@ class AudioResult:
     format: str = "wav"
     channels: int = 1
     stream_available: bool = False
+    #: When each word is heard, for lip sync. Empty when the engine cannot say.
+    #:
+    #: These are not free-form metadata: a renderer reads them on every frame,
+    #: so they get a typed field rather than a dict key that can silently change
+    #: shape. The `metadata` bucket's docstring reserved a spot for "future
+    #: phonemes, visemes and timing info" — this is that, promoted out of the
+    #: bucket because it now has a consumer.
+    timings: List[SpeechTiming] = field(default_factory=list)
     metadata: Dict[str, Any] = field(default_factory=dict)
 
 
@@ -238,15 +246,61 @@ class KokoroProvider(VoiceProvider):
         sf.write(buffer, audio, sample_rate, format="WAV")
         return buffer.getvalue()
 
-    def _run_synthesis(self, pipeline: Any, text: str, voice: str) -> Optional[Any]:
+    def _run_synthesis(
+        self, pipeline: Any, text: str, voice: str
+    ) -> tuple[Optional[Any], List[SpeechTiming]]:
+        """Synthesise, and keep the timings the model already computed.
+
+        The previous body unpacked each result as a 3-tuple. ``KPipeline.Result``
+        supports that for backwards compatibility, but ``tokens`` is reachable
+        only as an *attribute* — so tuple-unpacking discarded it before anyone
+        could want it. Nothing extra is computed here: ``pred_dur`` comes out of
+        the same forward pass as the waveform and was simply being thrown away.
+
+        Timings arrive *with* the audio, never before it. ``misaki.en.G2P``
+        returns phonemes with ``start_ts``/``end_ts`` set to ``None`` — it knows
+        what sounds, not when — and ``KModel`` fills them from ``pred_dur``
+        afterwards. There is therefore no "timings first, audio second" sequence
+        to build against, and no window in which a renderer could shape a word
+        before the sound for it exists.
+        """
         chunks: List[Any] = []
-        for _graphemes, _phonemes, audio in pipeline(text, voice=voice):
+        timings: List[SpeechTiming] = []
+        # Each chunk's timestamps restart at zero, so they are offset by the
+        # audio already emitted. Without this, a second sentence would claim to
+        # be spoken at the same moment as the first.
+        offset_s = 0.0
+
+        for result in pipeline(text, voice=voice):
+            audio = getattr(result, "audio", None)
+            if audio is None:
+                continue
             chunks.append(audio)
+
+            for token in getattr(result, "tokens", None) or []:
+                start = getattr(token, "start_ts", None)
+                end = getattr(token, "end_ts", None)
+                # A token with no timing is not an error: G2P emits punctuation
+                # and whitespace that never becomes sound. Skipping is correct;
+                # emitting it with a zero span would put a viseme on silence.
+                if start is None or end is None:
+                    continue
+                timings.append(
+                    SpeechTiming(
+                        text=(getattr(token, "text", "") or "").strip(),
+                        phonemes=getattr(token, "phonemes", "") or "",
+                        start_s=float(start) + offset_s,
+                        end_s=float(end) + offset_s,
+                    )
+                )
+
+            offset_s += len(audio) / float(self.config.sample_rate)
+
         if not chunks:
-            return None
+            return None, []
         if len(chunks) == 1:
-            return chunks[0]
-        return np.concatenate(chunks)
+            return chunks[0], timings
+        return np.concatenate(chunks), timings
 
     def _compute_availability(self) -> bool:
         checks = self._last_health.get("checks", {})
@@ -336,7 +390,9 @@ class KokoroProvider(VoiceProvider):
             return AudioResult(success=False, request_id=request_id, voice=selected, error=str(exc))
 
         try:
-            audio = await asyncio.to_thread(self._run_synthesis, pipeline, text, selected)
+            audio, timings = await asyncio.to_thread(
+                self._run_synthesis, pipeline, text, selected
+            )
         except Exception as exc:
             duration_ms = (time.perf_counter() - start) * 1000
             self._log.error(
@@ -374,6 +430,7 @@ class KokoroProvider(VoiceProvider):
             path=path,
             sample_rate=self.config.sample_rate,
             duration_ms=duration_ms,
+            timings=timings,
             audio_id=request_id,
             format="wav",
             channels=1,

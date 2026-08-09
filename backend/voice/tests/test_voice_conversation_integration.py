@@ -26,6 +26,8 @@ from pathlib import Path
 
 import numpy as np
 
+from voice.tests.conftest import FakeResult
+
 from voice.config import KokoroConfig
 from voice.health import AudioCache
 from voice.providers.kokoro import KokoroProvider
@@ -45,7 +47,7 @@ class FakePipeline:
         if self.fail:
             raise RuntimeError("synthesis boom")
         audio = np.zeros(self.sample_rate // 10, dtype=np.float32)
-        yield ("g", "p", audio)
+        yield FakeResult(audio)
 
 
 class FakeDiscoverer:

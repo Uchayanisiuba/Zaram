@@ -103,6 +103,18 @@ class KokoroConnector(SpeechConnector):
             audio_id=result.audio_id,
             format="wav",
             channels=1,
+            # Flattened to dicts at the boundary, so nothing downstream imports
+            # a type out of `voice.providers`. This is the one place that knows
+            # both sides, which is what a connector is for.
+            timings=[
+                {
+                    "text": t.text,
+                    "phonemes": t.phonemes,
+                    "start_s": t.start_s,
+                    "end_s": t.end_s,
+                }
+                for t in (result.timings or [])
+            ],
             metadata=result.metadata or {},
         )
 

@@ -12,6 +12,8 @@ import sys
 from pathlib import Path
 
 import numpy as np
+
+from voice.tests.conftest import FakeResult
 import pytest
 
 from voice.audio_events import audio_event_from_chunk, audio_event_from_result, to_audio_event
@@ -39,7 +41,7 @@ class FakePipeline:
         if self.fail:
             raise RuntimeError("synthesis boom")
         audio = np.zeros(self.sample_rate, dtype=np.float32)  # ~10 x 100ms frames
-        yield ("g", "p", audio)
+        yield FakeResult(audio)
 
 
 class SlowFakePipeline(FakePipeline):
