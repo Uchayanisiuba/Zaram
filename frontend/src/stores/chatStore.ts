@@ -20,6 +20,8 @@ import {
 import type { Artifact } from '@/services/artifactsClient';
 import { useSystemStore } from '@/stores/systemStore';
 import { useSessionStatusStore } from '@/stores/sessionStatusStore';
+import { useEmbodimentStore } from '@/stores/embodimentStore';
+import { useSpeechStore } from '@/stores/speechStore';
 
 /** How long a request may produce nothing before we call it a cold start.
  *  A loaded local model begins emitting well inside this; a cold one does not. */
@@ -325,6 +327,25 @@ export const useChatStore = create<ChatState>((set, get) => ({
       streamingNotices: [],
       isStreaming: false,
     }));
+
+    // Speech follows the renderer: the avatar speaks, the orb stays silent.
+    //
+    // That makes the toggle mean something rather than being a skin, and it is
+    // a decision the user has already made — so it needs no second setting,
+    // which is the "never make the user choose in advance" rule applied to a
+    // preference they expressed by choosing a face.
+    //
+    // Read, never subscribed: this is a store action, not a render.
+    if (
+      text_ &&
+      !replyError &&
+      useEmbodimentStore.getState().renderer === 'avatar'
+    ) {
+      // Deliberately not awaited. Speech is an accompaniment to the reply, not
+      // a step in delivering it — a TTS failure or a missing voice extra must
+      // never delay or block text that has already arrived.
+      void useSpeechStore.getState().speak(text_);
+    }
 
     inFlight = null;
   },
