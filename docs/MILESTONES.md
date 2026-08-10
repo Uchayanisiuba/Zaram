@@ -52,6 +52,43 @@ untouched). Recorded so nobody spends another hour on it: **it is not
 reproducible and it is not understood.** If it returns, run with
 `--durations=25` first.
 
+### Project is the sixth node — decided 10 August 2026
+
+**The navigation is now six: Work · Project · Memory · Knowledge · Activity ·
+Settings.** Maintainer's decision, and it reverses an argument I made against it
+in the same conversation, so both halves are recorded.
+
+The case against: a project only groups artifacts, and a grouping of artifacts
+is a filter inside Work rather than a surface — the same test that cut Canvas
+and Plugins.
+
+**Why that was wrong: rule 7i.** Project scope applies to *facts*, not only
+files. `project:<id>` is a field on the Spine, the queued plan object carries
+the same scope, and Knowledge sources carry it too. A project spans Work, Memory
+and Knowledge at once, and a filter living inside Work cannot own something that
+scopes Memory.
+
+The precedent the maintainer named is the right one: **Memory and Knowledge are
+similar and are not the same**, which is why they are two nodes and not one.
+Project stands in that relation to Work — adjacent, overlapping, distinct.
+
+It also passes "does it hold something real?" more clearly than Work does. A
+project holds a type (which activates a pack), its scoped facts, its assigned
+artifacts, and eventually its plan with decisions taken and rejected.
+
+**Bounded, and the bounds are the point.** No folder tree, no subfolders, no
+nesting — one level. Work is the output; Project is the organisation of it.
+Deleting a project asks what happens to the facts and files inside, never one
+button. `CLAUDE.md` and `docs/UI-SPEC.md` are updated.
+
+**Also declined in the same conversation: sub-apps inside Work for file
+editing.** Already settled in the dependency stack — OnlyOffice is AGPL,
+LibreOffice headless is hundreds of megabytes, both are separate services.
+Zaram generates; users edit in what they already have. The narrow defensible
+version, post-v1 and unpromised, is that HTML is the source of truth for every
+generated document, so *editing Zaram's own generated HTML before export* needs
+no embedded editor. That is a preview that accepts edits, not a word processor.
+
 ### Scope changed this session, deliberately
 
 Two reversals of `CLAUDE.md` as previously written, both the maintainer's
@@ -1502,6 +1539,7 @@ when a 5 GB one fits, with the reason logged.
 
 ### M6 — Shell cleanup ✅
 Orbit carries five nodes: Work · Memory · Knowledge · Activity · Settings.
+*(Six as of 10 August 2026 — Project was added; see the Current state block.)*
 19 unreachable files moved to `legacy/`. **Bundle unchanged — byte-identical,
 same content hash** — which is the proof they were never linked. The win was
 repo clarity, not size.
