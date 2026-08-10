@@ -1238,6 +1238,14 @@ async def voice_stream(request: VoiceStreamRequest):
             
             async for chunk in stream:
                 # Convert AudioChunk to event format
+                # KNOWN WRONG, and unused: this builds the URL from the request
+                # id, which is the defect that made /voice/synthesize return a
+                # 404 for every utterance — AudioCache names files
+                # `{voice}_{hash}.wav`. Fixed there by carrying
+                # `SynthesisResult.audio_filename`; fixing it here needs the
+                # same field on AudioChunk. Nothing in the frontend calls
+                # /voice/stream, so it is marked rather than migrated — but it
+                # must not be wired up in this state.
                 audio_url = f"/audio/{chunk.audio_id}.wav" if chunk.audio_id else ""
                 event = {
                     "type": "audio",

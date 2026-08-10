@@ -107,6 +107,11 @@ frontend/scripts/drive-shots/
 backend/audio/
 backend/audio_clips/
 backend/audio_output/
+# The Kokoro provider's own cache. Missed by the list above because nothing had
+# actually synthesised speech on a working tree until 10 August 2026 — the
+# directory only appears once the model runs. `pyproject.toml` already excludes
+# it from test collection, which is where the omission hid.
+backend/audio_cache/
 
 # Uploads — whatever the user dropped in. Never ours to commit.
 uploads/

@@ -55,7 +55,18 @@ class SpeechRuntime(Runtime):
         self,
         event_bus: EventBus,
         audio_dir: str = "audio_cache",
-        base_url: str = "http://127.0.0.1:8420",
+        #: Prefix for the audio URL. **Empty by default, which makes the URL
+        #: relative** — and relative is what the caller actually wants.
+        #:
+        #: It used to default to `http://127.0.0.1:8420`, hardcoded, and nothing
+        #: ever passed a different value. That is wrong three ways: the backend
+        #: does not always run on 8420 (the port is configurable and the dev
+        #: machine runs two), an absolute URL bypasses the Vite proxy and turns
+        #: an audio fetch into a cross-origin request, and a packaged build
+        #: pointing at a bundled backend has no reason to hardcode a loopback
+        #: address. A relative URL is correct in all three cases because the
+        #: frontend already prefixes it with its configured API base.
+        base_url: str = "",
     ):
         self._event_bus = event_bus
         self._state = RuntimeState.UNINITIALIZED
@@ -323,8 +334,18 @@ class SpeechRuntime(Runtime):
             "audio_id": result.audio_id,
         })
 
-        # Return audio URL for frontend
-        audio_url = f"{self._base_url}/audio/{result.audio_id}.wav" if result.audio_id else ""
+        # Return audio URL for frontend.
+        #
+        # Built from the filename the engine actually wrote. It used to be built
+        # from `audio_id` — the *request* id — while AudioCache names files
+        # `{voice}_{hash}.wav`, so the URL pointed at a file that never existed
+        # and every reply 404'd on playback. Nothing failed loudly: synthesis
+        # succeeded, the response looked right, and the browser got a dead link.
+        audio_url = (
+            f"{self._base_url}/audio/{result.audio_filename}"
+            if result.audio_filename
+            else ""
+        )
         return {
             "success": True,
             "request_id": request.request_id,
