@@ -76,6 +76,18 @@ class SynthesisResult:
     success: bool
     error: Optional[str] = None
     audio_id: str = ""
+    #: The name of the file the engine actually wrote, e.g.
+    #: ``af_heart_05322cae55732340.wav``. Bare filename, never a path — the
+    #: ``/audio/{filename}`` route confines reads to the cache directory and
+    #: rejects anything containing a separator.
+    #:
+    #: **This exists because the URL used to be built from ``audio_id``**, which
+    #: is the *request* id, while ``AudioCache`` names files
+    #: ``{voice}_{hash}.wav``. The two schemes could never agree, so every
+    #: synthesised utterance returned a URL that 404s and speech was silent
+    #: while every test passed. The connector knows both sides; it is the only
+    #: place that can carry this across, exactly as it is for ``timings``.
+    audio_filename: str = ""
     format: str = "wav"
     channels: int = 1
     #: When each word is heard, as plain dicts: ``{text, phonemes, start_s,
