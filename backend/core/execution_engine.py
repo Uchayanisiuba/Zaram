@@ -667,6 +667,23 @@ class ExecutionEngine:
         except Exception:
             return None
 
+    def _recall_gate(self, runtime: Any) -> Any:
+        """The gate, built once per memory runtime and kept.
+
+        Keyed on the runtime rather than cached outright because tests swap the
+        runtime under a live engine, and a gate holding the previous runtime's
+        embedder would answer from the wrong model without saying so.
+        """
+        cached = getattr(self, "_recall_gate_cache", None)
+        if cached is not None and cached[0] is runtime:
+            return cached[1]
+
+        from core.recall_gate import gate_from_memory_runtime
+
+        gate = gate_from_memory_runtime(runtime)
+        self._recall_gate_cache = (runtime, gate)
+        return gate
+
     def _recall(
         self, prompt: str, session_id: str, project_id: str | None = None
     ) -> list[Any]:
@@ -689,6 +706,20 @@ class ExecutionEngine:
         runtime = self._memory_runtime()
         if runtime is None or not prompt.strip():
             return []
+
+        # Does this turn need the Spine at all? Asked before retrieving, not
+        # after, because the floor provably cannot answer it: social turns and
+        # vague referential ones *overlap* on corpus similarity — "good morning"
+        # scores 0.493 against the user's files and "what did I quote them"
+        # scores 0.463. Typing `Hi` pulled three documents, including day rates,
+        # into the prompt. See `core/recall_gate.py` for the measurement.
+        #
+        # Fails open in every uncertain case, so this can cost milliseconds and
+        # a line of UI but never an answer.
+        if not self._recall_gate(runtime).should_recall(prompt):
+            logger.debug("Engine: recall skipped, conversational turn: %r", prompt[:40])
+            return []
+
         try:
             results = run_sync(runtime.retrieve(
                 query=prompt,

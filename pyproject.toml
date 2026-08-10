@@ -66,6 +66,14 @@ ignore_missing_imports = true
 exclude = ["venv", "node_modules", "frontend"]
 
 [tool.pytest.ini_options]
+markers = [
+    # Tests that measure something against a live local model rather than
+    # asserting a recorded number. They skip themselves when Ollama or the model
+    # is absent, so the suite stays offline — but they are the reason the
+    # recorded numbers elsewhere can be trusted, and `pytest -m measure` re-runs
+    # every one of them when an embedding model changes.
+    "measure: measures against a live local model; skips when unavailable",
+]
 # Collect the whole backend, not a hand-listed set of directories. An allow-list
 # silently hides any test dir nobody remembered to add: `backend/tests` alone left
 # garage, media, voice and presence uncollected, so every suite count quoted before
