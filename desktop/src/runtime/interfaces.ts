@@ -8,7 +8,8 @@ import {
   PresenceHealth,
   PresenceLifecycle,
   RendererHealthStatus,
-  ExpressiveParams
+  ExpressiveParams,
+  PresenceState
 } from './types'
 import type { RuntimeSnapshot } from './sources/types'
 import type { RuntimeState } from '@zaram/engine'
@@ -49,6 +50,12 @@ export interface IPresenceRuntime {
   consumeFrameState(frameState: FrameState): void
   getStatus(): EmbodimentStatus
   getHealth(): PresenceHealth
+  
+  // Presence state event system
+  subscribe(listener: (event: any) => void): () => void
+  getPresenceState(): PresenceState
+  setPresenceState(state: PresenceState): void
+  setAudioLevel(level: number): void
 }
 
 export interface IPresenceDiagnostics {

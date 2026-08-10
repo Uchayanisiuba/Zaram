@@ -1,0 +1,174 @@
+"""Provider Runtime (v0.6.0).
+
+The Provider Runtime is Zaram's control center for AI resources. It registers
+with the Kernel exactly like the other runtimes (Voice, Media, Models), owns
+no concrete engine, and wires in the default model providers at startup.
+
+New providers are added by registering an adapter — never by touching this
+runtime or the manager.
+
+Relationship::
+
+    Kernel
+      └── Provider Runtime   (discovers + catalogs AI resources)
+            ├── Ollama adapter        (local LLMs)
+            ├── LM Studio adapter     (local AI server)
+            ├── OpenAI-compatible    (local/cloud, if configured)
+            ├── Voice source          (injected: VoiceManager)
+            ├── Runtime source        (injected: Kernel registry)
+            ├── Personality source    (injected: characters.json)
+            └── Hardware profiler    (host introspection)
+"""
+
+from __future__ import annotations
+
+import logging
+import os
+from typing import Any, Dict, Optional
+
+from core.contracts import (
+    Capability,
+    RuntimeMetadata,
+    RuntimeState,
+)
+from core.event_bus import EventBus, ZaramEvent
+
+from .contracts import ProviderKind
+from .discoverers import (
+    HardwareProfilerImpl,
+    LMStudioAdapter,
+    OllamaAdapter,
+    OpenAICompatibleAdapter,
+    OpenRouterAdapter,
+)
+from .manager import ProviderManager
+from .registry import ProviderRegistry
+from .scanner import ProviderScanner
+
+logger = logging.getLogger(__name__)
+
+RUNTIME_ID = "providers"
+RUNTIME_VERSION = "0.6.0"
+
+
+class ProvidersRuntime:
+    """Kernel-facing runtime that discovers and catalogs AI resources."""
+
+    def __init__(
+        self,
+        event_bus: Optional[EventBus] = None,
+        *,
+        registry: Optional[ProviderRegistry] = None,
+        scanner: Optional[ProviderScanner] = None,
+        manager: Optional[ProviderManager] = None,
+        hardware_profiler: Optional[Any] = None,
+    ) -> None:
+        self._event_bus = event_bus
+        self.registry = registry or ProviderRegistry()
+        self.scanner = scanner or ProviderScanner(self.registry)
+        self.manager = manager or ProviderManager(
+            self.registry, self.scanner, event_bus=event_bus
+        )
+        if hardware_profiler is not None:
+            self.registry.set_hardware_profiler(hardware_profiler)
+        self._state = RuntimeState.UNINITIALIZED
+
+    # --- Runtime protocol ---
+    def get_runtime_id(self) -> str:
+        return RUNTIME_ID
+
+    def get_version(self) -> str:
+        return RUNTIME_VERSION
+
+    def get_metadata(self) -> RuntimeMetadata:
+        return RuntimeMetadata(
+            runtime_id=RUNTIME_ID,
+            version=RUNTIME_VERSION,
+            priority="normal",
+            capabilities=[
+                Capability(id="providers.discover", runtime_id=RUNTIME_ID),
+                Capability(id="providers.profile", runtime_id=RUNTIME_ID),
+            ],
+            dependencies=["event_bus"],
+            auto_start=True,
+        )
+
+    def get_state(self) -> RuntimeState:
+        return self._state
+
+    async def initialize(self) -> None:
+        self._state = RuntimeState.INITIALIZING
+        logger.info("provider layer initializing")
+
+        # Register the default model providers. Network scanning happens only on
+        # demand (refresh), never at boot, so startup stays offline and fast.
+        self._register_default_providers()
+
+        # Ensure a hardware profiler is configured.
+        if self.registry.get_hardware_profiler() is None:
+            self.registry.set_hardware_profiler(HardwareProfilerImpl())
+
+        self._state = RuntimeState.READY
+        self._publish(
+            ZaramEvent(
+                source_runtime=RUNTIME_ID,
+                event_type="runtime.ready",
+                data={"runtime_id": RUNTIME_ID},
+            )
+        )
+        logger.info("provider layer ready")
+
+    async def shutdown(self) -> None:
+        self._state = RuntimeState.STOPPING
+        logger.info("provider layer stopping")
+        self._state = RuntimeState.STOPPED
+
+    def health_check(self) -> Dict[str, Any]:
+        return {
+            "runtime_id": RUNTIME_ID,
+            "state": self._state.value,
+            "healthy": self._state == RuntimeState.READY,
+            "registered_services": self.registry.count_model_providers(),
+        }
+
+    async def health(self) -> Dict[str, Any]:
+        return self.manager.health_report()
+
+    # --- discovery control (delegated to the manager) ---
+    async def refresh(self, *, timeout: float = 2.0) -> None:
+        await self.manager.refresh(timeout=timeout)
+
+    # --- default provider wiring ---
+    def _register_default_providers(self) -> None:
+        # OpenRouter only when a key exists. Registering it keyless would
+        # discover a catalogue of models that cannot be called — a list of
+        # things Zaram appears to offer and does not. Its models carry
+        # data_policy None (unknown) except the free tier, so none of them is
+        # selectable by default and rule 5 is unaffected by its presence.
+        cloud = (OpenRouterAdapter(),) if os.getenv("OPENROUTER_API_KEY") else ()
+        for provider in (OllamaAdapter(), LMStudioAdapter(), *cloud):
+            self._safe_register(provider)
+
+        endpoint = os.getenv("ZARAM_OPENAI_ENDPOINT")
+        if endpoint:
+            api_key = os.getenv("ZARAM_OPENAI_KEY")
+            self._safe_register(
+                OpenAICompatibleAdapter(
+                    provider_id="openai_cloud",
+                    base_url=endpoint,
+                    kind=ProviderKind.CLOUD_API,
+                    api_key=api_key,
+                )
+            )
+
+    def _safe_register(self, provider: Any) -> None:
+        try:
+            self.registry.register_model_provider(provider)
+        except ValueError:
+            # Already registered (e.g. re-initialized) — idempotent.
+            pass
+
+    # --- helpers ---
+    def _publish(self, event: ZaramEvent) -> None:
+        if self._event_bus is not None:
+            self._event_bus.publish(event)

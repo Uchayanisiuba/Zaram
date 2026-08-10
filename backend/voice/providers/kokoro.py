@@ -15,6 +15,31 @@ Design notes
 * **Future-proof streaming.** ``stream_audio`` already yields
   :class:`AudioChunk` objects so real-time PCM emission (Unreal lip-sync, low
   latency SSE) can be added later without touching the ``VoiceManager`` API.
+
+Which Kokoro is this?
+---------------------
+**This module is the keeper.** Four copies of Kokoro existed. Two were orphans
+with no importer and were deleted on 2026-08-04:
+``implementations/kokoro_tts.py`` and ``interfaces/implementation/kokoro_tts.py``.
+
+One copy remains besides this one: ``runtimes/speech/connectors/kokoro.py``,
+reached via ``runtimes/speech/connectors/__init__.py`` and ``base.py``. It is
+**pending, not kept.** Collapsing it into this provider means rewiring the speech
+runtime, and voice is out of scope for v1 (see CLAUDE.md), so the rewiring waits
+until voice returns to scope. Do not add features to the connector in the
+meantime — anything it grows has to be ported here later.
+
+Both loose ends the deletion left are now closed:
+
+* ``services/speech_manager.py`` did ``from implementations.kokoro_tts import
+  KokoroTTS``, which stopped resolving. Nothing imported ``SpeechManager``, so
+  the module was unimportable dead code and is deleted.
+* ``voice/tests/test_kokoro_provider.py`` had five failures against this file,
+  filed as "voice, out of scope". They were nothing of the kind: discovery
+  returns an empty set because ``voice_discovery_enabled`` defaults to
+  **off** — real discovery contacts huggingface.co at startup and rule 7g
+  forbids that before consent — and the tests were never updated. They now
+  enable it explicitly against a fake discoverer, so they reach no network.
 """
 
 from __future__ import annotations
@@ -27,12 +52,11 @@ from dataclasses import dataclass, field
 from typing import Any, AsyncIterator, Callable, Dict, List, Optional, Protocol
 
 import numpy as np
-import soundfile as sf
 
 from voice.config import KokoroConfig
 from voice.exceptions import ProviderUnavailableError
 from voice.health import AudioCache
-from voice.providers.base import VoiceProvider
+from voice.providers.base import SpeechTiming, VoiceProvider
 
 
 # --------------------------------------------------------------------------- #
@@ -60,6 +84,14 @@ class AudioResult:
     format: str = "wav"
     channels: int = 1
     stream_available: bool = False
+    #: When each word is heard, for lip sync. Empty when the engine cannot say.
+    #:
+    #: These are not free-form metadata: a renderer reads them on every frame,
+    #: so they get a typed field rather than a dict key that can silently change
+    #: shape. The `metadata` bucket's docstring reserved a spot for "future
+    #: phonemes, visemes and timing info" — this is that, promoted out of the
+    #: bucket because it now has a consumer.
+    timings: List[SpeechTiming] = field(default_factory=list)
     metadata: Dict[str, Any] = field(default_factory=dict)
 
 
@@ -202,19 +234,73 @@ class KokoroProvider(VoiceProvider):
         return self._pipeline
 
     def _to_wav_bytes(self, audio: Any, sample_rate: int) -> bytes:
+        # Imported here, not at module scope. soundfile ships with the voice
+        # extra, and a top-level import made this whole module unimportable on a
+        # base install — which meant the provider could not even be constructed
+        # to report itself unavailable. The lazy `import kokoro` further down was
+        # written to degrade gracefully and never got the chance, because the
+        # module died three lines into its own imports.
+        import soundfile as sf
+
         buffer = io.BytesIO()
         sf.write(buffer, audio, sample_rate, format="WAV")
         return buffer.getvalue()
 
-    def _run_synthesis(self, pipeline: Any, text: str, voice: str) -> Optional[Any]:
+    def _run_synthesis(
+        self, pipeline: Any, text: str, voice: str
+    ) -> tuple[Optional[Any], List[SpeechTiming]]:
+        """Synthesise, and keep the timings the model already computed.
+
+        The previous body unpacked each result as a 3-tuple. ``KPipeline.Result``
+        supports that for backwards compatibility, but ``tokens`` is reachable
+        only as an *attribute* — so tuple-unpacking discarded it before anyone
+        could want it. Nothing extra is computed here: ``pred_dur`` comes out of
+        the same forward pass as the waveform and was simply being thrown away.
+
+        Timings arrive *with* the audio, never before it. ``misaki.en.G2P``
+        returns phonemes with ``start_ts``/``end_ts`` set to ``None`` — it knows
+        what sounds, not when — and ``KModel`` fills them from ``pred_dur``
+        afterwards. There is therefore no "timings first, audio second" sequence
+        to build against, and no window in which a renderer could shape a word
+        before the sound for it exists.
+        """
         chunks: List[Any] = []
-        for _graphemes, _phonemes, audio in pipeline(text, voice=voice):
+        timings: List[SpeechTiming] = []
+        # Each chunk's timestamps restart at zero, so they are offset by the
+        # audio already emitted. Without this, a second sentence would claim to
+        # be spoken at the same moment as the first.
+        offset_s = 0.0
+
+        for result in pipeline(text, voice=voice):
+            audio = getattr(result, "audio", None)
+            if audio is None:
+                continue
             chunks.append(audio)
+
+            for token in getattr(result, "tokens", None) or []:
+                start = getattr(token, "start_ts", None)
+                end = getattr(token, "end_ts", None)
+                # A token with no timing is not an error: G2P emits punctuation
+                # and whitespace that never becomes sound. Skipping is correct;
+                # emitting it with a zero span would put a viseme on silence.
+                if start is None or end is None:
+                    continue
+                timings.append(
+                    SpeechTiming(
+                        text=(getattr(token, "text", "") or "").strip(),
+                        phonemes=getattr(token, "phonemes", "") or "",
+                        start_s=float(start) + offset_s,
+                        end_s=float(end) + offset_s,
+                    )
+                )
+
+            offset_s += len(audio) / float(self.config.sample_rate)
+
         if not chunks:
-            return None
+            return None, []
         if len(chunks) == 1:
-            return chunks[0]
-        return np.concatenate(chunks)
+            return chunks[0], timings
+        return np.concatenate(chunks), timings
 
     def _compute_availability(self) -> bool:
         checks = self._last_health.get("checks", {})
@@ -304,7 +390,9 @@ class KokoroProvider(VoiceProvider):
             return AudioResult(success=False, request_id=request_id, voice=selected, error=str(exc))
 
         try:
-            audio = await asyncio.to_thread(self._run_synthesis, pipeline, text, selected)
+            audio, timings = await asyncio.to_thread(
+                self._run_synthesis, pipeline, text, selected
+            )
         except Exception as exc:
             duration_ms = (time.perf_counter() - start) * 1000
             self._log.error(
@@ -342,6 +430,7 @@ class KokoroProvider(VoiceProvider):
             path=path,
             sample_rate=self.config.sample_rate,
             duration_ms=duration_ms,
+            timings=timings,
             audio_id=request_id,
             format="wav",
             channels=1,

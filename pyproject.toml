@@ -1,8 +1,37 @@
 [project]
-name = "zaram-os"
+name = "zaram"
 version = "0.1.0"
-description = "Local-First Personal AI Operating System"
+description = "The memory and control layer for people who use more than one AI"
 requires-python = ">=3.11"
+
+# Voice is an optional extra, not part of the base install.
+#
+# Kokoro drags torch, transformers and the spaCy stack — roughly 830 MB, most of
+# the installed backend — for a feature that is out of scope for v1. The chat
+# path imports none of it, and the provider already degrades cleanly when the
+# import fails, so making it optional costs nothing but packaging metadata.
+#
+# The pinned set lives in backend/requirements-voice.txt. It is not duplicated
+# here, because two hand-maintained lists of the same 47 packages would drift.
+#
+#     pip install -r backend/requirements-voice.txt
+#     python -m spacy download en_core_web_sm
+#
+# Ingest OCR is an optional extra for the same reason, decided by measurement.
+#
+# Docling pulls 321 MB of wheels — torch, torchvision, opencv, transformers,
+# scipy, rapidocr — against a 267 MB base. Probed against 1,080 real files on a
+# working machine, the dependency-light parsers (pypdf, python-docx, openpyxl)
+# read 50 of 54 PDFs; the four they cannot are image-only scans. So Docling buys
+# a real but narrow capability at more than double the installer, and M11's
+# acceptance is a stranger reaching a cited answer in under ten minutes.
+#
+# The gap is never silent: a scan lands in Knowledge with its reason and this
+# command, with the size stated. See backend/ingest/quality.py for the
+# measurement and CLAUDE.md's dependency table for the decision.
+[project.optional-dependencies]
+voice = []
+ingest = ["docling>=2.118.1"]
 
 [tool.ruff]
 line-length = 100
@@ -24,6 +53,43 @@ ignore_missing_imports = true
 exclude = ["venv", "node_modules", "frontend"]
 
 [tool.pytest.ini_options]
-testpaths = ["backend/tests"]
+# Collect the whole backend, not a hand-listed set of directories. An allow-list
+# silently hides any test dir nobody remembered to add: `backend/tests` alone left
+# garage, media, voice and presence uncollected, so every suite count quoted before
+# 2026-08-04 was wrong. Excluding is safe (a stale exclusion collects extra tests);
+# including is not (a missing entry hides them).
+testpaths = ["backend"]
+norecursedirs = [
+    "venv",
+    ".venv",
+    "node_modules",
+    "__pycache__",
+    "*.egg-info",
+    # Runtime scratch dirs — data, never tests.
+    "audio",
+    "audio_cache",
+    "audio_clips",
+    "audio_output",
+    "image_output",
+    "temp",
+    "uploads",
+]
+# The four `--ignore` lines that used to live here are gone, and so is the
+# reason for them. They excused manual smoke scripts from early kernel work —
+# `asyncio.run(main())` at import time, zero test functions — that matched
+# `test_*.py` by accident. Three are now `manual_*.py`; `test_kernel.py` was
+# committed truncated mid-expression and is deleted.
+#
+# The ignores were worse than the files. They are rootdir-relative, so running
+# pytest from `backend/` aborted collection of the entire suite on a
+# SyntaxError, and the failure looked like a broken repo rather than a wrong
+# working directory.
+#
+# Two test files may share a basename. Under the default "prepend" import mode
+# they may not: `providers/tests/test_manager.py` and `media/tests/test_manager.py`
+# both become the top-level module `test_manager` and the second one collected
+# fails with "import file mismatch". That is a packaging accident, not a naming
+# rule worth obeying, and it only appeared once collection widened past one
+# directory. importlib mode derives the module name from the full path.
+addopts = "-v --tb=short --import-mode=importlib"
 asyncio_mode = "auto"
-addopts = "-v --tb=short"

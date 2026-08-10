@@ -58,6 +58,20 @@ function registerHandlers(ipcMain, ctx) {
   handle(Channels.window.setTitle, (title) => services.window.setTitle(title));
 
     handle(Channels.backend.getStatus, () => backend.getStatus());
+  handle(Channels.backend.checkHealth, async () => {
+    console.log('[IPC] backend:check-health invoked')
+    try {
+      const res = await fetch(`${config.backend.baseUrl}/health`, { timeout: 5000 });
+      console.log('[IPC] Backend HTTP response:', res.status, res.ok)
+      if (!res.ok) throw new Error(`Health check failed: ${res.status}`);
+      const data = await res.json();
+      console.log('[IPC] Backend health data:', data)
+      return data;
+    } catch (err) {
+      console.error('[IPC] Backend health check error:', err.message)
+      return { status: 'error', kernel: 'offline', error: String(err) };
+    }
+  });
   handle(Channels.backend.restart, () => backend.restart());
 
   handle(Channels.notify.show, (opts) => services.notification.show(opts));

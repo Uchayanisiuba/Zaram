@@ -532,9 +532,21 @@ class TestKnowledgeRuntimePhase2:
         assert len(resolved) >= 1
 
     def test_cross_document_links_created(self):
+        """Asserts the links, which this did not.
+
+        It stored two objects and ended. The name claims cross-document links
+        are created; nothing checked that any were, so the test would have
+        passed against a linker that did nothing at all.
+        """
         runtime = KnowledgeRuntime()
         runtime.store(KnowledgeObject(content="Python programming language", id="obj1"))
         runtime.store(KnowledgeObject(content="Python web development", id="obj2"))
+
+        links = runtime._cross_document.get_links("obj1")
+
+        assert "obj2" in links, (
+            "two documents sharing a concept produced no link between them"
+        )
 
     def test_knowledge_type_classification(self):
         runtime = KnowledgeRuntime()

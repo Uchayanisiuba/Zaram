@@ -96,14 +96,7 @@ class WindowManager {
   }
 
   showMainWindow() {
-  showMainWindow() {
     if (this.mainWindow && !this.mainWindow.isDestroyed()) {
-      if (this.state.maximized) this.mainWindow.maximize();
-      this.mainWindow.show();
-      this.mainWindow.focus();
-      this.mainWindow.webContents.openDevTools({ mode: 'detach' })
-    }
-  }
       if (this.state.maximized) this.mainWindow.maximize();
       this.mainWindow.show();
       this.mainWindow.focus();

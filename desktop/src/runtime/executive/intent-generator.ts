@@ -67,6 +67,7 @@ export class IntentGenerator {
       proactivity,
       shouldInterrupt: ctx.interrupting || decision === 'interrupt-self',
       note: this.makeNote(decision, ctx),
+      reasoning: this.makeReasoning(decision, ctx),
       revision: this.revision,
       updatedAt: now()
     }
@@ -120,6 +121,19 @@ export class IntentGenerator {
     // Interrupts and urgency suppress proactivity (react instead of act).
     const suppress = clamp01(ctx.urgency) * 0.5 + (ctx.interrupting ? 0.3 : 0)
     return clamp01(base - suppress)
+  }
+
+  private makeReasoning(decision: ExecutiveDecision, ctx: IntentContext): string {
+    const parts: string[] = []
+    parts.push(`Decision: ${decision}`)
+    if (ctx.focus !== 'none') parts.push(`Focus: ${ctx.focus}`)
+    if (ctx.goalActive) parts.push('Goal active')
+    if (ctx.interrupting) parts.push('Interrupt triggered')
+    if (ctx.needsClarification) parts.push('Clarification needed')
+    if (ctx.inProgress) parts.push('Continuing in progress')
+    if (ctx.conversationPhase) parts.push(`Phase: ${ctx.conversationPhase}`)
+    if (ctx.worldSalience && ctx.worldSalience > 0.3) parts.push(`World salience: ${ctx.worldSalience.toFixed(2)}`)
+    return parts.join(' | ')
   }
 
   private makeNote(decision: ExecutiveDecision, ctx: IntentContext): string {

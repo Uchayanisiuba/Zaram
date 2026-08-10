@@ -3,33 +3,47 @@ import queue
 import threading
 import time
 from typing import Iterator, Any
-from core.events import TokenGenerated, AudioChunkReady
+from core.events import TokenGenerated, SentenceReady
+from core.event_bus import ZaramEvent
 from implementations.ollama_llm import OllamaLLM
-from implementations.kokoro_tts import KokoroTTS
 from services.speech_planner import SpeechPlanner
-from services.speech_manager import SpeechManager
 
 class ConversationManager:
-    def __init__(self, llm: OllamaLLM, tts: KokoroTTS):
+    """
+    Manages conversation flow: LLM streaming -> sentence planning -> emits to Event Bus.
+    
+    The new flow:
+    1. LLM streams tokens
+    2. SpeechPlanner buffers tokens and detects sentence boundaries
+    3. When sentence is ready, emits 'conversation:sentence_ready' event to Event Bus
+    4. Executive Runtime subscribes to this event and decides when to speak
+    5. Speech Runtime handles executive:speak event
+    
+    No direct TTS calls - everything goes through the Runtime layer.
+    """
+    def __init__(self, llm: OllamaLLM, event_bus, persona: str = "zaram_prime"):
         self.llm = llm
-        self.tts = tts
+        self.event_bus = event_bus
+        self.persona = persona
 
-    def run_conversation(self, prompt: str, model: str, system_prompt: str = "") -> Iterator[Any]:
+    def run_conversation(self, prompt: str, model: str, system_prompt: str = "", persona: str = "zaram_prime") -> Iterator[Any]:
         planner = SpeechPlanner()
-        manager = SpeechManager(self.tts)
         out_queue = queue.Queue()
         error_occurred = [False]
 
         def llm_and_planner_worker():
             try:
-                for token in self.llm.stream_response(prompt, model, system_prompt):
+                # Argument order is `LLMEngine`'s, not this call site's history:
+                # (prompt, system_prompt, model).
+                for token in self.llm.stream_response(prompt, system_prompt, model):
                     out_queue.put({'type': 'token', 'content': token})
                     sentence_event = planner.process_token(token)
                     if sentence_event:
-                        manager.submit_sentence(sentence_event)
+                        # Emit sentence to Event Bus for Executive to consume
+                        self._emit_sentence_ready(sentence_event.text, persona)
                 last_sentence = planner.flush()
                 if last_sentence:
-                    manager.submit_sentence(last_sentence)
+                    self._emit_sentence_ready(last_sentence.text, persona)
             except Exception as e:
                 print(f"❌ LLM/Planner Worker Error: {e}")
                 out_queue.put({'type': 'error', 'content': str(e)})
@@ -54,20 +68,25 @@ class ConversationManager:
                     yield event
             except queue.Empty:
                 pass
-            try:
-                audio_event = manager.output_queue.get_nowait()
-                got_event = True
-                yield {
-                    'type': 'audio',
-                    'url': f"http://127.0.0.1:8000/audio/{audio_event.sentence_id}.wav"
-                }
-            except queue.Empty:
-                pass
             if error_occurred[0]:
                 break
-            # FIX: Use pending_tasks instead of input_queue.empty() to prevent race condition
-            if llm_done and manager.pending_tasks == 0 and manager.output_queue.empty():
+            if llm_done:
                 break
             if not got_event:
                 time.sleep(0.01)
         yield {"type": "done"}
+
+    def _emit_sentence_ready(self, text: str, persona: str = "zaram_prime"):
+        """Emit a sentence-ready event to the Event Bus for Executive consumption."""
+        if not text or not text.strip():
+            return
+        event = ZaramEvent(
+            source_runtime="conversation",
+            event_type="conversation:sentence_ready",
+            data={
+                "text": text,
+                "persona": persona,
+            },
+            priority="high",
+        )
+        self.event_bus.publish(event)

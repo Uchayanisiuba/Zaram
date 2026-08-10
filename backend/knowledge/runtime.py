@@ -2,12 +2,15 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 import threading
 from dataclasses import dataclass, field
 from typing import Any
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+from core.async_bridge import run_sync
+from core.event_bus import ZaramEvent
 from .cache import KnowledgeCache
 from .protocol import (
     KnowledgeChunk, KnowledgeContext, KnowledgeFusion, KnowledgeObject,
@@ -24,6 +27,8 @@ from .citations import CitationEngine
 from .confidence import ConfidenceEngine
 from .fusion import KnowledgeFusionEngine
 from .telemetry import KnowledgeTelemetry
+
+logger = logging.getLogger(__name__)
 from .graph import KnowledgeGraph
 from .entity_extraction import EntityExtractor
 from .relationships import RelationshipBuilder
@@ -60,11 +65,15 @@ class KnowledgeRuntime:
         max_workers: int = 8,
         internet_runtime: Any | None = None,
         memory_runtime: Any | None = None,
+        event_bus: Any | None = None,
     ):
         self._connectors: list[Any] = []
         self._providers: list[Any] = []
         self._internet_runtime = internet_runtime
         self._memory_runtime = memory_runtime
+        self._event_bus = event_bus
+        self._state = "ready"
+        self._start_time = time.time()
         self._cache = KnowledgeCache()
         self._default_cache_ttl = cache_ttl
         self._max_workers = max_workers
@@ -215,8 +224,6 @@ class KnowledgeRuntime:
         all_results: list[KnowledgeResult] = []
         consulted: list[str] = []
         connector_status: dict[str, str] = {}
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
 
         try:
             internet_results = []
@@ -230,12 +237,13 @@ class KnowledgeRuntime:
                         max_results=max_results * 2,
                         connector_types=[InternetConnectorType(c) for c in connectors] if connectors else None,
                     )
-                    internet_results = loop.run_until_complete(self._internet_runtime.search(internet_query))
+                    internet_results = run_sync(self._internet_runtime.search(internet_query))
                     self._stats["internet_searches"] += 1
                     for r in internet_results:
                         consulted.append(r.connector)
                         connector_status[r.connector] = "ok"
                 except Exception as e:
+                    logger.warning("Knowledge: internet search failed: %s: %s", type(e).__name__, e)
                     connector_status["internet"] = "error"
 
             for r in internet_results:
@@ -250,7 +258,7 @@ class KnowledgeRuntime:
             if include_memory and self._memory_runtime:
                 try:
                     from runtimes.memory import MemoryRuntime, MemoryType, RetrievalStrategy
-                    memory_results = loop.run_until_complete(self._memory_runtime.retrieve(
+                    memory_results = run_sync(self._memory_runtime.retrieve(
                         query=query,
                         memory_types=[MemoryType.CONVERSATION, MemoryType.EPISODIC, MemoryType.SEMANTIC],
                         max_results=max_results,
@@ -259,10 +267,11 @@ class KnowledgeRuntime:
                         user_id=user_id,
                     ))
                     self._stats["memory_searches"] += 1
+                    connector_status["memory"] = "ok"
                     for r in memory_results:
                         consulted.append("memory")
-                        connector_status["memory"] = "ok"
                 except Exception as e:
+                    logger.warning("Knowledge: memory search failed: %s: %s", type(e).__name__, e)
                     connector_status["memory"] = "error"
 
             for r in memory_results:
@@ -278,8 +287,8 @@ class KnowledgeRuntime:
                 )
                 result = self._authority.apply_to_result(result)
                 all_results.append(result)
-        finally:
-            loop.close()
+        except Exception as e:
+            logger.warning("Knowledge: search pipeline error: %s: %s", type(e).__name__, e)
 
         graph_results = self._graph_search(query, max_results)
         all_results.extend(graph_results)
@@ -583,6 +592,64 @@ class KnowledgeRuntime:
         relationships = self._cross_document.link_objects(candidates + [obj])
         for rel in relationships:
             self._graph.add_relationship(rel)
+
+    # -------------------------------------------------------------------------
+    # Runtime Protocol (Event Bus integration)
+    # -------------------------------------------------------------------------
+
+    def get_runtime_id(self) -> str:
+        return "knowledge"
+
+    def get_version(self) -> str:
+        return "1.0.0"
+
+    def get_metadata(self) -> dict[str, Any]:
+        return {
+            "runtime_id": self.get_runtime_id(),
+            "version": "1.0.0",
+            "priority": "critical",
+            "capabilities": [
+                "knowledge.search",
+                "knowledge.cache",
+                "knowledge.index",
+                "knowledge.telemetry",
+            ],
+            "dependencies": ["event_bus"],
+        }
+
+    def get_state(self) -> str:
+        return self._state
+
+    def health_check(self) -> dict[str, Any]:
+        return {
+            "runtime_id": self.get_runtime_id(),
+            "state": self._state,
+            "uptime_seconds": time.time() - self._start_time,
+            "connectors": self.list_connectors(),
+            "cache": self.get_cache_stats(),
+            "stats": self.get_stats(),
+        }
+
+    async def initialize(self) -> None:
+        self._state = "ready"
+        if self._event_bus:
+            self._event_bus.subscribe("knowledge.search", self._handle_search_event)
+            self._event_bus.publish(ZaramEvent(
+                source_runtime="knowledge",
+                event_type="runtime.ready",
+                data={"runtime_id": self.get_runtime_id()},
+            ))
+        print("[KnowledgeRuntime] Initialized")
+
+    async def shutdown(self) -> None:
+        self._state = "stopped"
+        await self.close()
+
+    def _handle_search_event(self, event: Any) -> None:
+        data = event.data if hasattr(event, "data") else event
+        query = data.get("query", "")
+        if query:
+            self.search(query, max_results=data.get("max_results", 6))
 
     # -------------------------------------------------------------------------
     # Health & Diagnostics

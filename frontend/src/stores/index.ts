@@ -1,6 +1,23 @@
-export { useChatStore } from './chatStore'
-export { useArtifactStore } from './artifactStore'
-export { useThemeStore } from './themeStore'
-export { useWorkspaceStore } from './workspaceStore'
-export { useZaramStore } from '../store/useZaramStore'
-export * from '../types'
+// === ORB DOMAIN ===
+export { useOrbStore } from './orbStore';
+export { useFrameStore } from './frameStore';
+
+// === CONVERSATION DOMAIN ===
+export { useConversationStore } from './conversationStore';
+export type { Message } from './conversationStore';
+
+// === CHAT MODE DOMAIN ===
+export { useChatModeStore } from './chatModeStore';
+
+// === WORKSPACE DOMAIN ===
+export { useWorkspaceStore } from './workspaceStore';
+export { useCameraStore } from './cameraStore';
+export { useSurfaceStore } from './surfaceStore';
+
+// === UI DOMAIN ===
+export { useShellStore } from './shellStore';
+export { usePaletteStore } from './paletteStore';
+export { useSettingsStore } from './settingsStore';
+
+// === RUNTIME DOMAIN ===
+export { useRuntimeStore } from './runtimeStore';

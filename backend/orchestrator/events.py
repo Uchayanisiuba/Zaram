@@ -2,7 +2,7 @@
 
 Every helper returns a standard :class:`core.event_bus.ZaramEvent` so
 orchestrator events flow through the *same* event bus as kernel, voice, media,
-and garage events. Events are fully generic: they reference request/plan/model
+and provider events. Events are fully generic: they reference request/plan/model
 identifiers, never a provider or model name.
 
 Event types:

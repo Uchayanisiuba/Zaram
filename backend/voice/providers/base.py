@@ -9,7 +9,36 @@ through :class:`~voice.voice_manager.VoiceManager`, never directly.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any, AsyncIterator, Dict, Optional
+from dataclasses import dataclass
+from typing import Any, AsyncIterator, Dict, List, Optional
+
+
+@dataclass(frozen=True)
+class SpeechTiming:
+    """One spoken unit and when it is heard, in seconds from the start.
+
+    This lives at the interface rather than in the Kokoro module on purpose.
+    CLAUDE.md keeps TTS behind an interface so the engine stays replaceable, and
+    lip sync is the exact place that coupling would creep in: passing Kokoro's
+    ``MToken`` across this boundary would make every renderer depend on Kokoro's
+    types, and swapping the engine would then mean rewriting the renderer too.
+
+    So timings cross as a plain structure. An engine that cannot produce them
+    returns an empty list, and a renderer with no timings falls back to whatever
+    it can do without them — amplitude, or nothing. That is the seam a second
+    implementation slots into rather than a rewrite.
+
+    ``start_s``/``end_s`` are offsets into the *whole* utterance, not into the
+    chunk that produced them. A caller must never have to know that the engine
+    synthesised in pieces.
+    """
+
+    #: The word as written. Empty when the engine reports phonemes only.
+    text: str
+    #: IPA for this unit. Empty when the engine reports graphemes only.
+    phonemes: str
+    start_s: float
+    end_s: float
 
 
 class VoiceProvider(ABC):

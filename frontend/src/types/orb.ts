@@ -1,0 +1,1 @@
+export type OrbState = 'idle' | 'thinking' | 'speaking' | 'listening';

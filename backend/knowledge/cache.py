@@ -21,6 +21,10 @@ class KnowledgeCache:
         self._persist_path = persist_path
         self._hits = 0
         self._misses = 0
+        self._evictions = 0
+        self._insertions = 0
+        self._default_ttl = 900.0
+        self._per_key_ttl: dict[str, float] = {}
         if persist_path and os.path.exists(persist_path):
             self._load()
 
@@ -31,26 +35,33 @@ class KnowledgeCache:
                 self._misses += 1
                 return None
             value, ts = entry
-            if time.time() - ts >= ttl:
+            effective_ttl = self._per_key_ttl.get(key, ttl)
+            if time.time() - ts >= effective_ttl:
                 del self._store[key]
+                self._per_key_ttl.pop(key, None)
                 self._misses += 1
                 return None
             self._store.move_to_end(key)
             self._hits += 1
             return value
 
-    def set(self, key: str, value: Any) -> None:
+    def set(self, key: str, value: Any, ttl: float | None = None) -> None:
         with self._lock:
             if key in self._store:
                 self._store.move_to_end(key)
             self._store[key] = (value, time.time())
+            if ttl is not None:
+                self._per_key_ttl[key] = ttl
+            self._insertions += 1
             while len(self._store) > self._max_size:
                 self._store.popitem(last=False)
+                self._evictions += 1
             self._persist_if_enabled()
 
     def invalidate(self, key: str) -> None:
         with self._lock:
             self._store.pop(key, None)
+            self._per_key_ttl.pop(key, None)
 
     def invalidate_pattern(self, pattern: str) -> int:
         regex = re.compile(pattern)
@@ -78,6 +89,7 @@ class KnowledgeCache:
     def clear(self) -> None:
         with self._lock:
             self._store.clear()
+            self._per_key_ttl.clear()
             self._persist_if_enabled()
 
     def cleanup_expired(self, ttl: float = 900) -> int:
@@ -168,4 +180,7 @@ class KnowledgeCache:
                 "hit_rate": self.hit_rate,
                 "hits": self._hits,
                 "misses": self._misses,
+                "evictions": self._evictions,
+                "insertions": self._insertions,
+                "utilization": len(self._store) / self._max_size if self._max_size > 0 else 0.0,
             }

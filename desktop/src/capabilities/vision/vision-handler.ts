@@ -18,7 +18,7 @@ async function streamVisionResponse(prompt: string, image: string): Promise<stri
   return new Promise((resolve, reject) => {
       const req = require('http').request({
         hostname: '127.0.0.1',
-        port: 8000,
+        port: 8420,
         path: '/vision/analyze',
         method: 'POST',
         headers: {

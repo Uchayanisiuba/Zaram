@@ -21,7 +21,7 @@ from core.execution_engine import ExecutionEngine
 
 
 class _FakeService:
-    def generate_response(self, user_text, personality_context=""):
+    def generate_response(self, user_text, personality_context="", model=None):
         yield "hello "
         yield "world"
 
@@ -102,22 +102,31 @@ def test_unknown_capability_raises():
         pass
 
 
-def test_audio_endpoint_rejects_path_traversal():
+async def test_audio_endpoint_rejects_path_traversal():
     import main
 
-    for malicious in ("../secret.txt", "..\\..\\etc\\passwd", "foo/../../bar.wav"):
+    # get_audio is a coroutine function; it must be awaited or the body never
+    # runs and the assertion passes vacuously.
+    for malicious in (
+        "../secret.txt",
+        "..\\..\\etc\\passwd",
+        "foo/../../bar.wav",
+        "..",
+        "/etc/passwd",
+        "C:\\Windows\\win.ini",
+    ):
         try:
-            main.get_audio(malicious)
+            await main.get_audio(malicious)
             assert False, f"Expected HTTPException for {malicious!r}"
         except HTTPException as exc:
-            assert exc.status_code == 400
+            assert exc.status_code == 400, f"{malicious!r} gave {exc.status_code}, expected 400"
 
 
-def test_audio_endpoint_missing_file_returns_404():
+async def test_audio_endpoint_missing_file_returns_404():
     import main
 
     try:
-        main.get_audio("nonexistent.wav")
+        await main.get_audio("nonexistent.wav")
         assert False, "Expected HTTPException 404"
     except HTTPException as exc:
         assert exc.status_code == 404
@@ -128,22 +137,23 @@ def test_main_module_imports_cleanly():
 
     assert hasattr(main, "app")
     paths = {r.path for r in main.app.routes if hasattr(r, "path")}
-    assert "/api/chat" in paths
+    assert "/chat" in paths
     assert "/audio/{filename}" in paths
 
 
-class _FakeLLM:
-    def stream_response(self, prompt, model):
-        for token in ["Hello", " world", ".", " This is one sentence.", " This is another."]:
-            yield token
-
-
 def test_legacy_conversation_terminates_without_tts():
-    """Conversation must complete cleanly when speech is unavailable."""
-    from services.conversation_manager import ConversationManager
-    from voice.voice_manager import VoiceManager
+    """Conversation must complete cleanly when speech is unavailable.
 
-    manager = ConversationManager(_FakeLLM(), VoiceManager())
+    The second argument is the event bus. It used to be a `VoiceManager`, back
+    when the manager drove TTS directly; nobody updated the call when Sprint
+    Alpha.6 moved that behind the bus, and the stale `FakeLLM` signature meant
+    this failed before it ever got far enough to notice.
+    """
+    from core.event_bus import EventBus
+    from services.conversation_manager import ConversationManager
+    from tests.llm_doubles import FakeLLM
+
+    manager = ConversationManager(FakeLLM(), EventBus())
     events = list(manager.run_conversation("hi", "gemma3:latest", "default"))
 
     assert events, "conversation produced no events"

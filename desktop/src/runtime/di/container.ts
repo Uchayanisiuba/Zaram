@@ -7,6 +7,7 @@ export const TOKENS = {
   kernel: 'Kernel',
   conversationRuntime: 'ConversationRuntime',
   voiceRuntime: 'VoiceRuntime',
+  voiceRuntimeFull: 'VoiceRuntimeFull',
   memoryRuntime: 'MemoryRuntime',
   systemRuntime: 'SystemRuntime',
   runtimeAggregator: 'RuntimeSourceAggregator',

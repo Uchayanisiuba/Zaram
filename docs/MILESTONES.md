@@ -1,0 +1,1454 @@
+# Zaram — Milestones
+
+Ordered. Each has an acceptance criterion phrased as something you can *see*, not
+something that passes. "Tests green" is not done; "I ran it and watched X happen" is.
+
+Read with `CLAUDE.md` (the contract) and `docs/UI-SPEC.md` (the interface).
+
+**This file is the handoff.** A new session should be able to read it and know
+where the work stands without being told. Keep the Current state block below
+accurate — it is the first thing anyone reads.
+
+---
+
+## Current state — 10 August 2026
+
+**Suite: 0 failures.** 1377 → **1388/0**, 8 skipped, **79s** from the repo root
+on a full dev install. Run pytest **from the repo root** — `--ignore` in
+`pyproject.toml` is rootdir-relative and running from `backend/` still aborts
+the whole suite.
+
+One run on 9 August took **36m25s** and has never reproduced; the two runs
+since were 2m19s and 1m19s. Three wrong explanations were offered for it
+before measurement (live DuckDuckGo calls in the suite — real, but 2.8s;
+`pytest-randomly` — not installed; a first-use HuggingFace download — cache
+untouched). Recorded so nobody spends another hour on it: **it is not
+reproducible and it is not understood.** If it returns, run with
+`--durations=25` first.
+
+### Scope changed this session, deliberately
+
+Two reversals of `CLAUDE.md` as previously written, both the maintainer's
+decision. `CLAUDE.md` has been updated to match; this is the reasoning.
+
+- **Voice is in v1, both directions.** Speech out (Kokoro) and speech in
+  (faster-whisper, local), because a character that cannot speak or listen is
+  a skin rather than an embodiment. **Speech follows the renderer** — avatar
+  speaks, orb is silent unless asked — so it needs no second setting.
+- **The 3D embodiment is in v1**, no longer a spike. Toggle on the landing for
+  now; the shipped control belongs in Settings.
+- Extras split: `zaram[voice]` ~905 MB speaks, `zaram[mic]` **81 MB measured**
+  listens. Light installer, extras fetched **on demand after the product has
+  proved itself** — not during install, which is the same blocking download
+  moved earlier.
+
+### Decided against, so it does not return as a reasonable suggestion
+
+- **Hospitals as a segment. Cut.** The proposal was storing patient records and
+  using GPT Vision to review x-rays and infer patterns across tests. That is
+  diagnostic support — regulated as a medical device (FDA SaMD, EU MDR IIa+) —
+  and it is already on the never-build list. It also means patient data leaving
+  the device to a provider with no BAA. The defensible neighbour is medical
+  *documents* for individual clinicians, never diagnosis, and not before M12.
+- **Cloud speech recognition in Settings. Cut.** Probed in Electron 28.3.3
+  (`electron/probe-speech-support.js`): the constructor exists, `start()` errors
+  `not-allowed`. That result is **confounded** — the probe denies all
+  permissions — and resolving it would mean sending real audio to Google. It
+  does not matter: broken means a dead control, working means microphone audio
+  leaving unlogged. Same answer from both branches.
+- **A `Creative` embodiment state. Cut.** Every other state answers *what is the
+  system doing*; `Creative` answers *what kind of task is this*, which is a genre
+  label. Rendering it means the avatar performs a mood based on subject matter —
+  the drift into personality the spike exists to prevent. Fold into `working`.
+- **"Everything ChatGPT can do" as positioning.** Those are model capabilities;
+  Zaram trains no models and would be permanently one release behind. The claim
+  is **any model, one memory, nothing leaves without you seeing it** — which
+  gets stronger as models improve. Capability arrives by routing and tools,
+  never by Zaram implementing a modality.
+- **An agent framework for the plan object.** ADK, LangGraph, CrewAI all ship
+  their own memory and session abstraction, and memory is the product.
+
+### What this session built
+
+Six commits, `1ccc339..7a7bd45`, all pushed.
+
+- **`66736fa` DuckDuckGo asks the gate.** `DDGS` opened its own socket, bypassing
+  `get_gate()`, while `test_egress_chokepoint.py` exempted the module as
+  *"dormant"* and `test_knowledge_runtime.py` called it for real on every run.
+  The guard checked reachability **at boot**, so it passed while the suite made
+  the unlogged live request. 0.67s live → 0.01s refused and logged. The three
+  web-provider tests were also vacuous *and machine-dependent* — `if results:`
+  asserted nothing, and whether they touched the network depended on the
+  gitignored `backend/egress-policy.json`. Now driven against gate doubles:
+  69 tests, 0.89s, no network.
+- **`f22d06f` The embodiment spike runs.** `useEmbodimentState()` derives one
+  state from `orbStore` (activity) and `sessionStatusStore` (locality) without
+  either duplicating the other. Activity wins over locality, so `local`/`cloud`
+  surface only at rest. `<Embodiment />` picks at mount, no crossfade, VRM lazy
+  so the orb path never pays for `three`. Confirmed in `AvatarSample_Z.vrm`:
+  14 expressions, **all five visemes**, humanoid rig.
+- **`e5e55f0` Kokoro's phoneme timings survive.** They were discarded by tuple
+  unpacking at `kokoro.py:242`; `pred_dur` comes out of the same forward pass, so
+  the cost of keeping them is zero. They cross the interface as `SpeechTiming`,
+  never as Kokoro's `MToken`. Offsets are absolute across chunks; `None`
+  timestamps are skipped, not zeroed.
+- **`576e5aa` The mouth is driven by those timings**, scrubbed against
+  `audio.currentTime`. `check-visemes.mjs` asserts the mapping and was
+  **mutation-tested** before being believed. `check-no-cloud-speech.mjs` bans the
+  Web Speech API and asserts the `legacy/` quarantine.
+- **`cfaa191` The avatar speaks its replies.** Closes the gap that mattered:
+  every piece was green while the character was silent, because nothing called
+  `speak()`.
+- **`7a7bd45` The STT contract.** `SpeechRecogniser`, `Transcript`,
+  `TranscriptSegment` — which mirrors `SpeechTiming` on purpose. `language` is
+  `Optional` and never defaults to `"en"`.
+
+### Do these first
+
+Worst first. Nothing is broken.
+
+1. **`faster_whisper` must be added to `NETWORK_LIBRARIES` in
+   `test_egress_chokepoint.py` *before* the provider lands.** It fetches model
+   weights from huggingface.co on first use. This is the exact trap that file
+   documents — voice discovery contacted HuggingFace on every boot, unlogged,
+   and the only reason anyone noticed was a timeout in the startup log.
+2. **The speech path has never been heard.** Typechecked, guarded, committed —
+   and nobody has watched the avatar speak with real audio, because that needs
+   the backend running with the voice extra. Do this before building on it.
+3. **The citation UI's `web` half has never been rendered with real data.**
+   Unchanged from 8 August. Built against a shape the backend can emit and has
+   not, because search is default-deny. **Do not treat that path as verified.**
+4. **The avatar's GPU cost is unmeasured**, and `docs/UI-SPEC.md` forbids 3D on
+   the landing on GPU-budget grounds. It renders permanently while a local model
+   is resident. This is the measurement that decides whether it ships, and the
+   decision was "warn, never block" — which needs a real number to warn with,
+   not the invented "~1.5 GB" that appeared in conversation.
+5. **`Artifact.indexed` interaction with project scope is unexamined.**
+6. **One unexplained 404 on every page load.** Still present.
+
+### Queued — the architecture discussed, not started
+
+In build order. Steps 1–3 are weeks and step 3 is where a to-do list becomes
+Zaram.
+
+1. **A project record.** There is none — `/artifacts/projects` derives the list
+   by collecting distinct `project_id`s off artifacts, so a project is an
+   emergent label rather than an object. Everything below needs one, and its
+   creation is the only honest moment to choose a **type** (business, coding,
+   MCP, 3D), which activates a pack.
+2. **A durable plan object in the Spine**, scoped `project:<id>` — steps, state,
+   decisions taken **and rejected**. A plan is an obligation you owe yourself,
+   so it is M9a's object with `origin = authored` rather than a new subsystem.
+   **Naming collision to settle first:** `RoutingPlan` and `PlanState` already
+   exist and are ephemeral — a `RoutingPlan` decides which model answers one
+   message. The durable user-facing object should be "Plan"; rename the internal
+   one while it is still internal.
+3. **Plan carried into recall** — the current step is context, and the Spine is
+   already provider-neutral, so this works across models for free.
+4. **Outcome and drift** — recorded from conversation, never from autonomy.
+   Never infer a plan step and assert it: a plan that quietly decides you
+   committed to something breaks the rule that a missed deadline is worse than
+   no reminder.
+5. **Execution** — tier-gated, post-v1. Per-project agent config should be a
+   **tool-tier grant**, not a list of agents: "may things be changed in this
+   project" is answerable at creation; "which agents may run" is not.
+
+Also queued: **the consistent mind is unbuilt and will not emerge from recall.**
+Consistency comes from constraining inputs and outputs — schema-constrained
+generation where shape matters, one provider-neutral system prompt carrying
+global-scope style facts, few-shot from outputs the user accepted. Transport is
+solved by LiteLLM; behaviour is solved by nobody. Mine Letta, Aider's
+`CONVENTIONS.md`, Continue.dev, Instructor/Outlines for patterns — never adopt
+as architecture, and verify every licence at adoption. It needs an eval, built
+as carefully as the recall eval, or it is a claim in a pitch deck.
+
+### Two inert features became real, and both were inert for the same reason
+
+`apply_decay` and the citation floor were each written, tested, green, and
+never actually reached the thing they were about. The pattern is worth naming
+because it has now happened four times in this codebase: **a contract with two
+implementations, where the tests exercise the one the product does not run.**
+
+- `access_count` incremented on `InMemoryMemoryStore` and not on SQLite.
+- `apply_decay` read `store._records` — a private dict only
+  `InMemoryMemoryStore` has. On SQLite `hasattr` was simply false, the id list
+  came out empty, and every pass reported a clean run over zero records. No
+  error, no warning, nothing decayed, ever.
+- The citation threshold was compared against the ranking blend rather than
+  the similarity.
+- And now: the *shortlist selection* was made on the ranking blend too.
+
+`test_decay_runs.py` is parameterised over both stores for exactly this
+reason. Never test one without the other.
+
+### Closed on 8 August
+
+- ~~**Nothing calls `beginModelSwap`.**~~ ✅ Now a *pre-flight* check, below.
+- ~~**Nothing sets a project scope.**~~ ✅ M8 is real, below.
+- ~~**Citation UI at step 3 of 5.**~~ ✅ Steps 3–5 done and driven in a browser.
+- ~~**The eval's filler answered its own questions.**~~ ✅ Fixed, and guarded by
+  a test that runs in the default suite.
+
+The live thread list is in **Do these first** at the top of this file, not here.
+Two lists of what to do next is how one of them goes stale unread.
+
+### The swap is announced before it happens, not during
+
+`ProviderManager.swap_preflight(model)` asks Ollama `/api/ps` what is
+**actually resident right now** and decides before generation starts. The orb
+gets a `model_load` stream event ahead of any token.
+
+"Before" is the whole point. A spinner appearing once the machine has already
+stalled is not visibility — by then the user has spent the seconds and drawn
+their own conclusion about why Zaram is slow.
+
+**Four outcomes, because the remedies differ**, and a boolean would hide that:
+
+| kind | means | remedy |
+|---|---|---|
+| `resident` | already loaded | nothing said |
+| `load` | fits alongside what is there | a cold start; passes on its own |
+| `swap` | something resident must be evicted | recurring, it is a model assignment the user can change in Settings |
+| `oversized` | bigger than the whole budget | a hardware fact no setting changes |
+
+Plus a fifth answer that is not an outcome: **`None`, for "cannot tell"** — no
+accelerator, unreadable VRAM, unreachable Ollama, unknown model. Nothing is
+announced then. Announcing a swap that does not happen trains the user to
+ignore the indicator, which costs more than staying quiet.
+
+**Verified live**, with gemma3 actually loaded on the dev machine:
+
+```
+resident now: {'gemma3:latest': 2.84 GB}
+  gemma3:latest       -> resident
+  qwen3:latest        -> load
+  qwen2.5-coder:14b   -> swap, evicts ['gemma3:latest']
+```
+
+**Two defects found only by running it against the real provider layer**, both
+invisible to the unit tests:
+
+- **Three spellings of one model name are in play** — the catalog id is
+  provider-prefixed (`ollama:gemma3:latest`), `/api/ps` and the chat path use
+  the provider-native name (`gemma3:latest`), and a config file may use the
+  bare name (`gemma3`). Comparing ids alone matched none of them, so
+  `swap_preflight` returned `None` for *every model on the machine* while the
+  tests passed — the fakes happened to be keyed the same way as `/api/ps`. It
+  failed the right way, silently rather than falsely, and it failed completely.
+  `TestTheRealCatalogShape` now uses discovery's actual shape.
+- **A model too big for the whole card was reported as a `swap` evicting
+  nothing.** Not a swap — nothing displaced would make room, and an indicator
+  that names nothing evicted cannot explain itself. That is what `oversized`
+  is for, and it was found by a test asserting the embedder was excluded, which
+  it correctly was; the empty `evicts` was the real defect underneath.
+
+### M8 is real — project scope reaches the Spine
+
+`ChatRequest.project_id` → `ChatRouter.route` → `ExecutionEngine.execute` →
+recall scoped to `project:<id>` plus global, and capture written under it.
+`ProjectScopePicker` sits under the chat input, sourced from
+`/artifacts/projects`.
+
+**Verified with real embeddings**, not just tests:
+
+```
+scope='project:harbour'  'My Harbour Lane day rate is 425,000 naira.'
+scope='global'           'I prefer short emails.'
+recall inside harbour -> project:harbour | ... | relevance 0.593
+```
+
+`None` and `global` are deliberately different instructions. As a *recall*
+filter `None` means every scope — right when the user is not inside a project,
+where `global` would hide their own project material from them. Capture
+converts `None` to `global` separately.
+
+**Found by driving it:** `/artifacts/projects` returns `[{id, count}]`, not
+`[string]`. The picker assumed the simpler shape, rendered an object as a React
+child, and **took the entire conversation surface down** — a blank page after
+clicking the orb. The same drift that made `sampleArtifacts.ts` disagree with
+the backend model, and the reason the artifacts client uses backend field names
+directly rather than through a mapping layer.
+
+### Citation UI — steps 3, 4 and 5, driven in a browser
+
+`CitationChips.tsx` (chips + summary line) and `CitationPanel.tsx` (grouped by
+egress). `frontend/scripts/drive-citations.mjs` is re-runnable.
+
+Observed, against a live backend:
+
+```
+summary line: "4 sources · nothing left this device · 2 recalled, not cited"
+chips: numbered, cyan rgb(120,220,240) — the local colour
+panel:  nothing left this device
+        1  My day rate for Harbour Lane is 425,000 naira.   relevance 1.00
+        2  My day rate for Harbour Lane Studio is 425,000…  relevance 0.95
+        3  My day rate for Ashgrove Films is 750,000 naira. relevance 0.77
+        Recalled but not cited — read, and not what carried the answer
+        INVOICE FROM BILL TO … · 0.50    INVOICE Services … · 0.48
+Escape closes: true
+empty state on "capital of France": true
+```
+
+**`MIN_CITATION_SCORE = 0.55` is visibly doing its job** — cited at 0.77–1.00,
+recalled-and-not-cited at 0.47–0.50, with the gap shown rather than hidden.
+That is the "cited versus *used*" problem from the last session, closed.
+
+**A defect driving found:** the panel printed a memory's text twice — once as
+the title, once as the excerpt. The guard compared them for equality, and they
+are never equal because the title truncates at 120 characters and the excerpt
+at 400. It reads as a bug in recall rather than in layout. Now compared on the
+prefix, and skipped entirely for `memory`, whose title *is* the fact.
+
+### Rule 7e now runs — daily, plus once shortly after boot
+
+`runtimes/memory/maintenance.py`. `SpineMaintenance` calls `apply_decay()` and
+`promotion_candidates()` on one pass, wired into the backend lifespan and
+stopped cleanly on shutdown. `GET /memory/maintenance` reports what the last
+pass did.
+
+**Why that schedule, and it is not a guess.** Every threshold in `DecayConfig`
+is expressed in whole days — a 90-day half life, `age_days > 30`,
+`age_days > 7` — so a pass more often than daily cannot change a single
+outcome. Daily is the finest interval the rules can distinguish. Daily *alone*
+would not be enough, though: Zaram is a desktop app, and someone who opens it
+for an hour each morning never reaches a 24-hour timer. The startup pass (60s
+in, clear of the first question) is what makes it real for how the product is
+actually used. Both are overridable by env for testing, and nothing in the
+product sets them.
+
+**Verified against a live server, not just tests:** booted on 8422, waited for
+the pass, `GET /memory/maintenance` returned
+`{"decay":{"boosted":14,"total_records":14,...}}` — fourteen real records in a
+real SQLite Spine. Before the fix that pass reported zero records and did
+nothing, silently.
+
+**Promotion proposes and never promotes** (rule 6). The endpoint returns
+candidates with their content and `recalled_in` evidence; promoting is a
+separate call the user makes. Note that it will return **nothing** until
+something sets a project scope — see "Do these first" item 2.
+
+**One thing to watch.** Decay *boosts* `importance`, and importance carries
+weight 0.20 in the ranking blend — see below. Now that decay actually runs,
+frequently-accessed facts will climb the ordering over time. That is intended,
+but it is a feedback loop that has never been able to operate before, and its
+effect on recall quality has not been measured over any real span of time.
+
+### The reranker question is closed — 5/5 at 1,000 documents
+
+```
+[1000 docs] recalled in top-6: 5/5 answerable targets
+[1000 docs] target ranks by relevance: [1, 1, 1, 1, 1] — deepest 1, headroom 5
+[1000 docs] blend-driven exclusion: none
+[1000 docs] false citations: 0/18 (0%) at floor 0.42
+[1000 docs] related_min 0.517 - unrelated_max 0.410 = +0.106
+[1000 docs] mean recall latency: 673 ms
+```
+
+**Every answerable target is now the single most relevant document in a
+thousand.** Two changes got there and neither was a purchase: selection moved
+onto relevance, and the eval's corpus stopped answering its own questions.
+
+**The margin reads lower — +0.106 against the +0.179 recorded before — and that
+is not a regression.** `related_min` was 0.589 only because the document
+scoring 0.517 was being excluded from the shortlist entirely and so never
+entered the sample. Recalling it correctly put a real 0.517 into the population
+that had been silently missing from it. The old number was flattering because
+of the defect. This one is honest, and 0.42 still sits inside it with room.
+
+**Worth watching:** +0.106 is a narrower gap than the headline used to suggest,
+and `test_recall_eval.py` prints it on every run for exactly that reason. If it
+narrows further as real corpora grow, *that* is when the reranker question
+reopens — on evidence about scoring, which is what a cross-encoder actually
+fixes, rather than on a miss count that turned out to be about something else.
+
+### The ranking fix, and what the eval got wrong
+
+**Instruction for this session was "fix the depth, not the ranking". The
+measurement says depth was never the problem, so this is a deliberate
+departure — recorded here with the numbers that forced it.** No reranker was
+bought; the change is cheaper than raising depth, not more expensive.
+
+At 1,000 documents the eval reported one miss and diagnosed it as displacement
+at rank 7 — a shortlist too narrow. Widening the shortlist did not fix it, and
+looking at *why* found something worse. For *"How should I write to clients?"*
+the target sat at **rank 43 with relevance 0.599 — the highest similarity
+anywhere in the eval** — behind 42 documents it out-scores on relevance.
+
+The arithmetic makes that inevitable rather than unlucky:
+
+| signal | weight | realistic range | swing |
+|---|---|---|---|
+| semantic | 0.35 | 0.30–0.60 | **~0.10** |
+| importance | 0.20 | 0.0–1.0 | 0.20 |
+| recency | 0.15 | 0.0–1.0 | 0.15 |
+| access | 0.10 | 0.0–1.0 | 0.10 |
+| keyword | 0.10 | 0.0–1.0 | 0.10 |
+| session | 0.10 | 0 or 1 | 0.10 |
+
+Similarity contributes a swing of about **0.10** against **0.55** for
+everything else, because cosines live in a narrow band while the other factors
+are normalised across their full range. **Non-relevance signals outweigh
+relevance roughly four and a half to one**, so on a corpus of near-identical
+invoices the blend decides almost everything.
+
+**The fix is selection by relevance, ordering by the blend.** `rank()` now
+picks the top `max_results` by similarity and *then* sorts those by the blend;
+`_recall` does the same before its cut. Ordering inside the shortlist by the
+blend is right and stays — a pinned, recent, frequently-used fact should be
+shown first among equally relevant ones. What must not happen is a document
+being *excluded* on anything but relevance.
+
+This is the same lesson the citation floor already taught, one step earlier in
+the pipeline. The floor was moved off `score` and onto `relevance` because
+ordering and permission are different questions. **Membership of the shortlist
+is a third question, and it belongs with relevance too.**
+
+**Where exactly the loss happened, traced rather than assumed.** The index
+already returns its top `max_results` *by cosine*, so the candidate pool was
+never the problem — `_vector_search` takes `indexed[:max_results]` off a
+similarity-ordered list. The pool of 25 genuinely contained the best document.
+It was the **final 25 → 5 cut in `_recall`** that threw it away, because that
+cut took the first five of whatever order retrieval returned, and that order is
+the blend. So the fix that matters is three lines in `_recall`; the matching
+change in `rank()` guards the same mistake against the keyword path, which
+merges its own candidates into the pool and can displace on the blend before the
+engine ever sees them.
+
+`MAX_RECALL` 5 → **6**, and it is no longer also the citation count —
+`MIN_CITATION_SCORE` decides that separately, so widening what the model can
+use no longer widens what the user is asked to check.
+
+**Two of the eval's own tests were measuring the wrong list**, which is why
+this took three runs to see. They read the raw blend-ordered results and then
+asserted things about the shortlist; those are different lists, and reading the
+second while reasoning about the first is what made an ordering defect look
+like a depth defect for a whole cycle. `_engine_shortlist()` now mirrors
+`_recall` exactly and the tests assert against that.
+
+**And a diagnostic that agreed with me was wrong.** A stability check compared
+two consecutive top-10 slices, passed, and proved nothing — the instability
+lives at the shortlist boundary among documents whose scores differ in the
+third decimal, not in the top ten where the gaps are wide. Rewritten to track
+the target's own rank across six repeats, it showed retrieval is in fact
+perfectly deterministic (`[54, 54, 54, 54, 54, 54]`). The earlier
+disagreement between two tests was the ordering change, not non-determinism.
+
+### The eval was grading itself, and had been for three cycles
+
+The last residual miss was not a product defect at all. `_filler()` drew
+deliverables from a list containing **"title sequence"**, and emitted them in a
+brief template carrying a duration and a date — the same shape as the expected
+answer to *"How long is the title sequence?"*. Counted: **64 of 995 filler
+documents answered that question exactly as well as the target did**, for
+different clients, and the question names no client.
+
+Ranking the expected document 54th out of 65 equally valid answers is *correct
+retrieval*. The eval had been reporting it as a recall miss and inviting a
+reranker to fix it.
+
+`_SVC2` no longer contains "title sequence" — the filler is still the same
+*shape* of document, which is what makes it a useful distractor, it simply no
+longer answers the question being graded. `TestTheCorpusIsFitToMeasureWith`
+enforces that, runs in the default suite, needs no Ollama, and fails with the
+collision count.
+
+**The general lesson, and it is the sharpest one here.** This file already says
+a stable failure count everyone stops looking at is how a real regression hides.
+This is the mirror image: *a stable failure count nobody can explain is how a
+broken instrument survives.* "4 of 5 recalled" survived three measurement
+cycles and nearly bought a cross-encoder, because nobody asked whether the
+corpus could grade the thing it was grading. **Check the instrument before
+reading the measurement.**
+
+### Citation UI — step 2 of 5 done
+
+`StreamEvent.source` now carries `excerpt`, `relevance`, `cited`, `number`,
+`egress_id`, `bytes_sent`, `origin` and `record_id` alongside `kind`, `url`,
+`title`. Keyword-only past `title`, because five optional strings in a row is
+how an excerpt ends up in the url slot at one call site and nowhere else.
+
+- **`MIN_CITATION_SCORE = 0.55`** — a second, higher cut on the same
+  `relevance` field. Sits inside the observed 0.50–0.61 band from the day-rate
+  reply, so the fact that carried the answer is still cited and the
+  merely-adjacent ones move to the panel's quieter section.
+- **Recalled-but-uncited sources are still emitted**, with `cited=False`.
+  Dropping them would hide the gap between the two thresholds, and that gap is
+  what makes the cut arguable rather than magic.
+- **Web sources are always cited**, never thresholded. That is an egress
+  disclosure, not an attribution judgement, and a relevance score is not a
+  reason to stop telling someone what left their machine. `kind` is normalised
+  to `web` rather than passing the provider name through — the UI colours by
+  egress, and a chip saying "tavily" makes the user learn a vocabulary to
+  answer the only question that matters.
+- **A fact from one of the user's files is `document`, not `memory`**, and its
+  title is the filename they recognise rather than a snippet of its text.
+- **Citation numbers are assigned server-side, after dedupe**, at the single
+  point every source event passes through. Numbering in the emitters would
+  double-count a source that recall and search both surfaced, and the user
+  would see a reply citing 1, 2 and 4.
+
+### The orb has a `swapping` state
+
+`orbStore` (visual), `systemStore` (`OrbActivity`, the model name, and the
+plain-language label), rendered by `LivingOrb`, `Aura`, `Halo` and `OrbCore`.
+Dimmer and slower than every other state, in desaturated slate — every other
+state animates *faster* to signal effort, and a swap is the one state where
+nothing is resident and no work is being done. Cyan and violet are not spent
+here because they already mean "stayed" and "left" on the orb and in citation
+chips.
+
+Set it through `systemStore.beginModelSwap(model)` / `endModelSwap()`, never
+`setOrbState('swapping')` — the orb and its label are two renderings of one
+fact, and setting one without the other turns the orb slate-grey while the
+words still read "Local only".
+
+**Found doing it:** the per-state variant maps in `Aura`, `Halo` and `OrbCore`
+were untyped object literals, so adding a state produced no build error and
+framer-motion silently animated to nothing. Now `Record<OrbState, …>` — the
+same remedy M6 applied to the surface list. `LivingOrb` also declared its own
+four-member copy of `OrbState` instead of importing the store's; it now
+re-exports it.
+
+### What this session settled
+
+**The frontend has been driven.** M4's UI acceptance, outstanding for four
+milestones, is met — see M4 below. Four defects came out of it that no unit
+test had, including the citation threshold being compared against the wrong
+number for the entire life of the product.
+
+**The reranker question is answered: don't buy one.** `docs/RERANKER.md` has
+the options and costs; `test_recall_at_scale.py` has the measurement that
+decided it. The margin *holds* as the corpus grows — +0.147 at 10 documents,
++0.181 at 100, +0.179 at 1,000, with zero false citations at the floor. The one
+miss at 1,000 was **displaced at rank 7 with relevance 0.517**: above the floor,
+outside a top-5. A depth problem, not a scoring one, so `RECALL_CANDIDATES = 25`
+and cut to `MAX_RECALL` after the floor. Costs one wider read.
+
+Also verified there: the Ollama reranker route crashes llama-server *and* evicts
+bge-m3 and gemma3 with it.
+
+**Residency is measured and CLAUDE.md is corrected**: bge-m3 0.66 GB resident,
+reranker 0 GB, KV reserve 2.58 GB, budget ~9.1 GB. The old "~1.8 GB" was wrong
+in both directions. **It changed no decision**, because the fit gate never read
+that constant — it computes from whichever embedder discovery found. One real
+imprecision recorded: the gate uses on-disk size (1.16 GB) as a proxy for
+resident VRAM (0.66 GB), which over-reserves ~0.5 GB and flips nothing between
+4 and 24 GB.
+
+**M8 is done** — see below.
+
+**The avatar spike is scoped, not built**: `docs/EMBODIMENT-SPIKE.md`. Both
+questions answered against the code.
+
+**M7 is done and driven for real.** `backend/ingest/` — parser interface, light
+parsers, quality floor, loud failures. Verified against a real folder: an
+invoice indexed, an image-only scan reported with its reason and the OCR
+remedy, an encrypted .docx reported as password-protected, then a cited recall
+naming the source document.
+
+**Recall was broken and is now measured.** The eval harness found, on its first
+run, that hybrid retrieval was ranking on stopword overlap — an unrelated
+question outscored a genuinely relevant document. Fixed in three places. See
+"What the recall eval found" — this is the most consequential thing in this
+entry.
+
+**Docling is now an optional extra**, decided by measuring 1,080 real files.
+CLAUDE.md's dependency table is updated; the reasoning is recorded there.
+
+**Base install: ~317 MB.** 267 MB plus a *measured* 50 MB for the exporters
+(matplotlib 31, fonttools 16, openpyxl and the rest 3). Voice remains an
+optional 905 MB extra. If that 50 MB has to come back, the split is charts-only
+— .docx, .md and .xlsx together are 2 MB, and matplotlib is the whole cost.
+
+**M9b and Session 4 are committed.**
+`backend/artifacts/` now has the model, the write path, the HTML layer,
+`export/` (Markdown, .docx, .xlsx, PNG), `records.py` (SQLite) and
+`service.py`. `main.py` serves `/artifacts`. Work reads real records and
+`sampleArtifacts.ts` is deleted. **PDF is the only exporter not working**, and
+it is blocked on packaging rather than on code — see Open questions.
+
+**Verified against a live server**, not just tests: three artifacts generated
+over HTTP, listed, previewed and downloaded through the Vite dev proxy on the
+same path the browser uses.
+
+**Generation is reachable from chat.** "Write that up as a proposal" routes to
+`document.generate`, writes a .docx grounded in the conversation, and returns
+it as a card in the transcript and a row in Work. M9b's acceptance criterion
+is met.
+
+**Routing is embedding-based.** `core/retrieval/` embeds the query with bge-m3
+and compares against task exemplars. Keywords remain the fallback.
+
+**Last commits:** semantic routing + chat-reachable generation → Work reads
+real artifacts → the exporters → artifacts write path → Work surface →
+dependency removals → packaging split → VRAM detection.
+
+### The citation threshold was never applied to a similarity
+
+The biggest single defect this session, found by driving the browser and seeing
+a reply cite **five** memories — including a deploy target and an unrelated
+client — for a statement the user had just made.
+
+`MemoryRankerImpl.rank()` **overwrote** `result.score` with a blend:
+
+```
+0.35 semantic + 0.20 importance + 0.15 recency
++ 0.10 access + 0.10 keyword + 0.10 session_match
+```
+
+`ExecutionEngine` then compared that to `MIN_RECALL_SCORE = 0.42`, a threshold
+measured and documented as a **cosine similarity** floor. Similarity carried a
+weight of 0.35, so a fact with a true cosine of 0.20 could clear the floor on
+recency and session membership alone. Every reply in the product has been
+citing on that number.
+
+`MemoryResult` now carries **two** numbers, because they answer two questions:
+
+- `relevance` — similarity as retrieval produced it. What the citation floor is
+  compared against.
+- `score` — the ranking blend. Ordering only.
+
+CLAUDE.md already draws this line for tools: *"retrieval produces a shortlist;
+the model chooses; a retrieval score authorises nothing."* Citation is the same
+shape — rank on whatever is useful, but decide **whether to cite** on relevance
+alone.
+
+The index was also made to return a similarity rather than a blend: keyword
+overlap decides *membership* of the candidate set, and `MemoryRankerImpl`
+already weights it at 0.10 for ordering, so adding it to the score double-counted
+it and made the number something other than the cosine the floor was measured
+against.
+
+**Measured effect: the eval margin went from +0.080 to +0.147** — related
+bottoming out at 0.517, unrelated topping out at 0.369, floor 0.42 in the gap.
+Those are now raw bge-m3 cosines, which means the distribution recorded in
+`MIN_RECALL_SCORE`'s docstring in April describes reality for the first time.
+Verified live: the unrelated deploy-target fact is no longer cited.
+
+**Still open, and known:** a reply about a day rate still cites five memories,
+now all genuinely about day rates and payment terms (0.50–0.61). That is
+cited-versus-*used*, which the queued citation-UI brief already anticipates —
+"local sources are cited only when they carry the answer… use a second, higher
+relevance threshold than the one that decides injection". It is a separate cut
+on the same number and it is not built.
+
+### What the recall eval found — read this one
+
+**Hybrid retrieval was ranking on stopword overlap.** Recall is the moat, it
+had never been measured end to end, and the eval failed within minutes of
+existing. Three bugs, in three different places, all pointing the same way:
+
+1. **`HybridMemoryRetriever` ran keyword search *beside* vector search in
+   HYBRID mode and kept whichever scored higher** (`retrieval.py`). Keyword
+   scoring split on whitespace with no stopword filter, so *"What is the
+   capital of France?"* overlapped a Harbour Lane project brief on `is`, `the`
+   and `of` — three of six terms, a score of 0.5 — while the true cosine
+   similarity was **0.226**. The max won. An unrelated document was cited with
+   a number that looked like a similarity and was not.
+2. **`HybridMemoryIndex` blended `0.7 * vector + 0.3 * keyword`**, which capped
+   any document matching on meaning alone at 0.7 of its true score. A genuinely
+   relevant note scoring **0.599** under bge-m3 arrived as **0.407** and was
+   dropped by the 0.42 floor. Keyword now *boosts* into the headroom above the
+   semantic score and can never dilute it.
+3. **Stopwords scored at all**, in both places, with two hand-maintained
+   tokenizers that disagreed — `France?` was a term and `is` was a good one.
+   One shared `content_tokens()` now.
+
+**Before: the populations were inverted** — genuinely related documents bottomed
+out at 0.407 while unrelated ones reached 0.493, a margin of **−0.086**. No
+threshold could separate them, so no value of `MIN_RECALL_SCORE` was correct.
+**After: +0.080**, related min 0.469 against unrelated max 0.389, with 0.42
+sitting in the gap. `test_recall_eval.py` prints that margin on every run, so a
+narrowing one is visible before a user feels it.
+
+**`MIN_RECALL_SCORE = 0.42` was not "chosen by feel"** — that claim was wrong.
+It was measured, with the distribution recorded in its docstring and asserted by
+`test_recall_relevance.py`. What was wrong is subtler and worse: it was measured
+*through* the distortion above, on a two-fact Spine. It held there and collapsed
+at five documents. It is now validated against real embeddings on a deliberately
+confusable corpus.
+
+**`bge-reranker-v2-m3` cannot be wired through Ollama.** Both `/api/embed` and
+`/api/generate` terminate llama-server with a stack-buffer overrun
+(`0xc0000409`). It is not merely unreferenced — it is unusable by this route, so
+CLAUDE.md's ~1.8 GB "embeddings and reranker resident" arithmetic is fiction
+until a different route exists. Decide it deliberately; do not assume the model
+being pulled means it works.
+
+### What the 27 actually were — the count was four separate bugs
+
+The previous entry said "13 = one stale test double, 14 = voice, out of scope".
+Both halves were wrong, and the second was the more misleading.
+
+- **The stale `FakeLLM` was real but was only the top layer.** Fixing the
+  signature moved the failure one level down: `test_streaming_conversation` and
+  the voice integration module were written against a `ConversationManager`
+  that took a `VoiceManager` and yielded `audio` events. Sprint Alpha.6
+  replaced that with the event bus. **Half those tests could never have passed
+  again**, whatever was done to the fake. They now test what the manager
+  actually promises; the audio assertions went back to the voice stack.
+- **The 14 "voice, out of scope" failures were not voice.** Five were
+  `test_kokoro_provider` asserting that discovery populates `_voices`, which
+  stopped happening when `voice_discovery_enabled` was deliberately defaulted
+  **off** — real discovery contacts huggingface.co at startup and rule 7g
+  forbids that before consent. Nine more were the ConversationManager problem
+  above. "Out of scope" was the label that stopped anyone reading them.
+- **Two were a live NameError.** `main.py` used `SEARCH_MARKER` without
+  importing it — a real crash on the web-search path, latent only because
+  search is default-deny.
+- **One asserted a rule violation.** `test_alpha10c_acceptance` required
+  `/chat` to trigger a search; search has since moved behind `chat_router` and
+  become default-deny, so the test demanded that a question reach the internet.
+
+The lesson is the one this file already recorded and then fell for anyway: a
+stable failure count everyone stops looking at is how a real regression hides.
+The specific trap was the *taxonomy* — "13 core, 14 voice" made 27 feel
+understood. Nobody had run them individually.
+
+### Still open from the last audit
+
+**Test the seams, not just the components.** Unchanged and still true. Every
+real bug found by driving the live kernel passed unit tests. `test_ingest.py`
+and `test_recall_eval.py` are the first two acceptance-shaped tests; the
+end-to-end recall demo still has no test that boots the real kernel.
+
+**`--ignore` in `pyproject.toml` is rootdir-relative.** Running pytest from
+`backend/` aborts the whole suite on `test_kernel.py`, which is committed
+truncated mid-expression (ends at line 18, `SyntaxError: '(' was never
+closed`). It is a manual smoke script from early kernel work, not a test.
+Delete it or rename it `manual_*.py` — the ignore line is a workaround for a
+file nobody wants.
+
+### Decisions taken that are not yet obvious from the code
+
+- **An externally edited file returns as a new artifact**, origin
+  `user_document`, never as an update to the generated one. We cannot verify
+  which claims survived a Word edit, and letting unverified text inherit
+  citations is the product failing in miniature. **The UI must say this** when
+  it happens — silent lossiness is the same class of problem as silent
+  ingestion failure. Not yet built.
+- **`Artifact.indexed` defaults to `False`**, against rule 7b's default-on. The
+  deprioritisation that makes default-on safe needs origin *on facts*, which
+  lands with M8. Until then, not indexing is safer than indexing unranked.
+  **Flip it in the M8 commit.** This is a known, time-boxed gap.
+- **Collisions increment by default** (`proposal-2.docx`); asking is the escape
+  hatch when the bounded retry exhausts.
+- **`Claim.source_revision` and `verified_at` exist and are unused.** Staleness
+  detection is not built; the fields are there so adding it later does not mean
+  migrating every artifact.
+- **Claims reach Word as bookmarks, not as attributes.** `data-zaram-claim`
+  does not survive export — Word discards unknown markup — so each claim is a
+  real internal hyperlink to a real bookmark on its Sources entry. Clicking a
+  sentence in Word jumps to the source, with Zaram not running. The
+  machine-readable mapping stays on `Artifact.claims`, independently. Word
+  drops a bookmark whose name has a hyphen or exceeds 40 characters *silently*,
+  rendering every link as dead text, so `_bookmark_name` is asserted by test
+  rather than trusted.
+- **The .xlsx exporter refuses to guess.** "₦425,000" becomes the number
+  425000; "50%" and "2026-07-02" stay text. 50% is 0.5 to Excel and 50 to a
+  naive strip, and writing the wrong one into a cell that feeds a formula is
+  the failure the module exists to prevent. Text is visibly unfinished; a wrong
+  number is invisibly wrong.
+- **Charts always ship their data table, and it cannot be turned off.** Three
+  of the eight categorical slots fall below 3:1 contrast on white, which
+  obligates relief. The table is that relief, so the picture is never the only
+  copy of the numbers. A ninth series is refused rather than given an invented
+  hue.
+- **Unavailability is a return value, not an exception.** `export.formats()`
+  lists every format with whether it runs here and why not. An `ImportError`
+  surfaced as "PDF failed" tells a user nothing actionable and reads as a bug
+  in Zaram rather than a missing system library.
+- **Two artifact stores, on purpose.** `store.py` holds files and cannot unmake
+  them; `records.py` holds records and has no general `update` and no `delete`
+  — one named method for the one field the user controls
+  (`set_remember_override`). The module this replaced had an `update()` that
+  `setattr`'d anything passed to it. A second mutation has to be a second named
+  method, which is a conversation rather than a keyword argument nobody
+  reviews.
+- **The file is written before the record, always.** The reverse ordering makes
+  Work show a row for a document that does not exist. This ordering, on
+  failure, leaves a file the user has and Work has not listed — under-claiming,
+  which is visible and recoverable. Over-claiming is neither.
+- **`remember_override` is three-valued.** `None` (undecided, a default may
+  still apply), `True`, `False` (a refusal, which a default may not override).
+- **Work shows project *ids*, not names.** There is no project-name store, and
+  turning `harbour` into "Harbour Lane Studio" would be a value nobody entered.
+  The sample data had names because it was invented.
+- **The preview is an iframe of the stored HTML**, sandboxed with no
+  permissions. HTML is the source of truth, so the preview *is* what the file
+  was rendered from — not a second rendering that can disagree with it.
+
+### Routing and generation
+
+`core/retrieval/` is **one index with two decision rules**, built that way so
+MCP tool selection lands on it rather than beside it. Routing needs a decision
+(one winner, above a floor, with the margin over the runner-up as confidence);
+tool selection needs a shortlist (top-k, no floor). `search()` ranks and stops;
+both rules sit on top as thin functions.
+
+For MCP, what already holds: namespaces with independent drop/re-register (a
+server disconnects, its tools stop being offered), a content-hash embedding
+cache (a reconnect re-registering 200 unchanged descriptions costs nothing),
+and a dimension lock (cosine across two embedders is meaningless, not weaker,
+so the index refuses). **What must never change: a retrieval score authorises
+nothing.** A tool description is third-party text and can be written to sit
+near every query; retrieval produces a shortlist, the model chooses, the risk
+tier gate still runs.
+
+**Keywords remain the fallback and should stay.** The embedder degrades to a
+hash backend when Ollama is unreachable, and similarity over hash vectors is
+arbitrary rather than merely worse. The router reports that and hands back.
+
+Four bugs stood between "every piece works" and "the feature works", and all
+four were only visible end to end:
+
+1. **The reasoning step got the literal prompt.** Asked to "write that up as a
+   proposal" with no framing, the model described its own operating protocol
+   and that text became the file. The planner now derives a writing
+   instruction; the *user's* words still reach the runtime, which reads them
+   for "spreadsheet" or "invoice".
+2. **Recall could not resolve "that".** Similarity against five referential
+   words retrieves nothing, and the model invented a whole client — one run
+   produced a confident document about a "Project Phoenix" with the real
+   client's name and day rate nowhere in it. Fixed with an **ephemeral session
+   buffer on the engine** (rule 7d: session state and the Spine are separate
+   stores). `_remember` deliberately stores the user's words as a fact and not
+   the exchange, which is right for memory and leaves nothing that can answer
+   "what is 'that'".
+3. **The card lacked `exists`.** The `/artifacts` listing had it and the card
+   did not, so a card for a file written a second earlier said "file not found
+   where it was written".
+4. **The title printed two or three times**, and Markdown `**` reached the
+   .docx as literal asterisks.
+
+**Charts from chat are refused, deliberately.** A chart is a claim about
+numbers and the runtime has prose; inventing figures to plot would be worse
+than refusing, and quietly returning a document nobody asked for would be too.
+The refusal names what is missing and offers what works. A real chart path
+arrives with the business layer, where figures come from invoices.
+
+### Providers and data policy
+
+**OpenRouter is registered only when `OPENROUTER_API_KEY` is set**, and its
+models carry `data_policy=None` — unknown — except the `:free` tier, which is
+stated as `LOGGED_AND_TRAINED_ON`. Nothing it returns is
+`selectable_by_default`, so Zaram never routes there on its own initiative.
+
+This came out of an audit that proposed registering OpenRouter with
+`YOUR_KEY_NO_TRAINING`. That one line would have made every model it returns
+auto-selectable, **including the free tier that is free precisely because
+prompts are logged** — a privacy guarantee displayed over the opposite
+behaviour. `test_openrouter_policy.py` asserts the *absence* of that claim so
+it cannot come back quietly.
+
+The asymmetry worth remembering: **we can sometimes prove a model logs; we can
+never prove one does not.** Free tier is stated, everything else is None.
+
+**`backend/config.json` is deleted.** Nothing read it — not the backend, not
+the frontend, not Electron. It declared `ENABLE_WEB_SEARCH: true` beside a
+product whose default is deny, plus model names and a `SYSTEM_PROMPT`
+instructing the model to cite web URLs. All inert, all misleading to the next
+reader. Web search is gated by `ZARAM_WEB_SEARCH` in the environment, read at
+call time by `planner.web_search_enabled()`.
+
+### Open questions
+
+- **How does recall behave as the Spine grows?** The eval runs on five
+  documents. The failure mode it exposed — an unrelated document creeping over
+  the floor — gets *more* likely with more material, because the maximum
+  unrelated score is a maximum over a larger set. A fixed threshold may not
+  survive a thousand documents even now that the scoring is honest. Measuring
+  that needs the eval run at 10, 100 and 1,000 documents and the margin
+  plotted; the harness already prints the number. **This is the argument for a
+  reranker**, and the reranker route through Ollama is broken — so the answer
+  is probably a cross-encoder loaded directly, which changes the residency
+  arithmetic. Do not defer this past M8.
+- **Dev tooling still ships in the base install** — mypy, ruff, pytest,
+  pip-licenses, wheel. Probably 30–40 MB. Same split-verify-measure method as
+  the voice extra. Belongs in the packaging spike.
+- **Jinja2 is declared in the *voice* extra and used by nothing.** An earlier
+  version of this file listed it as available for M9b; it is not on a base
+  install. Nothing needs it — the HTML layer builds strings directly — so the
+  question is whether it is a real transitive dependency of the voice stack or
+  a leftover. Removal plus a green suite is the only way to find out.
+- **WeasyPrint on Windows needs native GTK libraries**, which is a packaging
+  decision rather than a `pip install`. This is the only part of M9b not
+  working. The exporter is written and the format reports itself unavailable
+  with the reason and a per-platform remedy, so the gap is visible rather than
+  silent — but a Windows user cannot produce a PDF until the installer carries
+  the MSYS2 GTK runtime. **Decide this in the packaging spike, not before**:
+  the alternative is ReportLab, which would mean a second document pipeline
+  and breaks "HTML is the source of truth". Markdown and .docx work on every
+  machine, so nobody is blocked from getting a file out meanwhile.
+- **Code signing** is the long-lead packaging item. Windows business
+  verification as a Nigerian sole trader needs investigating now, in parallel.
+  Unsigned costs Zaram more than a typical app: SmartScreen's warning appears on
+  a product whose entire claim is trustworthiness.
+- **`speech.tts` is reachable from the chat path** while voice is out of scope.
+
+---
+
+## Done
+
+### M0 — Recall loop ✅
+Spine on SQLite with `bge-m3` embeddings. Facts stored, retrieved, injected with
+citation markers, provenance events emitted.
+
+**Verified:** a fact stored in one session was recalled in a separate session
+with provenance.
+
+### M1 — Egress log ✅
+Append-only hash-chained log, per-host policy, default deny, all outbound calls
+through one gate. `test_egress_chokepoint.py` fails the build on any direct HTTP
+call outside `core/egress/`, and on a stale exemption naming a deleted file.
+
+### M2 — Provider layer ✅
+`backend/providers/` connected, renamed from `garage/`. Model metadata carries a
+data policy with no default value — unknown is `None`, never a guarantee.
+`select_default_model()` refuses rather than choosing something unlabelled, and
+reports *why* each candidate was refused.
+
+**Verified:** booted against real Ollama, 10 models discovered and labelled.
+
+### M3 — Frontend integration ✅
+`chatClient.ts` does `POST /chat`, parses NDJSON, handles JSON split across
+chunks and multi-byte characters split mid-character.
+
+### M4 — Verify the integration ✅ (the UI half, finally)
+**Driven in a real browser, 8 August 2026.** Outstanding for four milestones
+because the Playwright browser install kept failing here. The MCP server wants a
+chromium build that will not download on this connection; the package already in
+`frontend/node_modules` has one, so `frontend/scripts/drive-*.mjs` uses that
+with an explicit `executablePath`. Re-runnable.
+
+**The recall demo works end to end, watched:** state a fact → ask about it →
+cited answer carrying the right figure → click a citation → a panel showing the
+fact, when it was stored, how often recalled, and Forget → correct it in Memory
+→ the old value stays struck through as *"superseded Aug 8 · you corrected
+this"* → ask again → **the answer changes to the corrected figure and no longer
+mentions the old one** → Activity shows real bytes, blocked count and an
+unbroken hash chain.
+
+Four defects came out of driving it, none of which any unit test had:
+
+1. **`access_count` was never incremented on the store the product runs.**
+   Every fact read "Recalled 0×" forever. `InMemoryMemoryStore` incremented as
+   a side effect of `get`; `SQLiteMemoryStore` had no equivalent — two
+   implementations of one contract, drifted. Rule 7e's whole
+   promotion-through-use mechanism is that integer, and `decay.py` forgets
+   anything never accessed after 30 days, so the Spine looked entirely unused.
+   Fixed as an explicit `record_access` on the protocol: **reading a fact is
+   not recalling it**, or browsing Memory would make everything look
+   load-bearing.
+2. **The citation threshold was applied to the ranking blend, not to
+   relevance.** See below — the largest of the four.
+3. **Collapsed left-rail buttons had no accessible name.** The label renders
+   only when the rail is expanded, so the navigation announced itself as five
+   anonymous buttons and "Knowledge" was unreachable to anything finding
+   controls by name. Now `aria-label` + `title` + `aria-current` always.
+4. **A 404 on every page load.** Unidentified, one request, harmless-looking.
+   Left as a thread to pull.
+
+**Corrected on the way:** the orb does *not* vanish inside a workspace and the
+return path is not broken. The route back is `OrbStatus` in the header, labelled
+"Ask Zaram", `aria-label` ending "Open conversation." An earlier reading of this
+session looked for the landing orb's `data-testid` and wrongly concluded there
+were zero routes back.
+
+**Not done:** stop/abort mid-reply is still unverified.
+
+---
+
+Earlier, at transport level against a live backend. Found and fixed two real
+bugs:
+
+- **`invoice` contains `voice`** — keyword matching was substring-based, so every
+  invoice request routed to text-to-speech and returned a fallback with no model
+  call. Also `essay`→`say`, `profile`→`file`, `research`→`search`. Now matched on
+  word boundaries.
+- **The requested model was logged and then discarded.** `/chat` accepted a
+  model, the dispatcher logged it on the line above the call that did not pass
+  it, and the engine always used its own default.
+
+**Not done:** no UI walkthrough. The Playwright browser install failed on this
+connection, so the interface has never been driven. Whether **stop** actually
+aborts a request is still unverified.
+
+### M5 — VRAM detection ✅
+`_vram_bytes` read `torch.cuda.get_device_properties`, which does not exist in a
+packaged build — so VRAM was `None` for every user and the residency fit gate
+never ran, while its tests passed against pinned profiles. Now nvidia-smi, with
+the Windows registry for AMD/Intel. **Never `Win32_VideoController.AdapterRAM`**:
+uint32, saturates at 4 GB, reports 4294967295 for a 12 GB card.
+
+**Verified on the dev machine:** RTX 3060, 12 GB detected, a 9 GB model refused
+when a 5 GB one fits, with the reason logged.
+
+### M6 — Shell cleanup ✅
+Orbit carries five nodes: Work · Memory · Knowledge · Activity · Settings.
+19 unreachable files moved to `legacy/`. **Bundle unchanged — byte-identical,
+same content hash** — which is the proof they were never linked. The win was
+repo clarity, not size.
+
+Found on the way: the surface list was restated by hand in TopNav, LeftRail and
+CommandPalette, and the palette had silently lost Activity. All three now derive
+from `surfaceOrder` with `Record<WorkspaceId, …>` icon maps, so the compiler
+names every file needing an entry.
+
+### Packaging ✅ (the big one)
+**1,436 MB → 267 MB base**, an 81% reduction, and the single most consequential
+thing done for the alpha — the difference between an installer someone on
+metered data will download and one they won't.
+
+- Voice is an optional 905 MB extra. Voice tests skip with the install command in
+  the reason rather than failing.
+- `soundfile` was imported at module scope in the Kokoro provider, so the
+  graceful-degradation path could never run — the module died three lines into
+  its own imports. Now lazy.
+- Removed `diffusers`, `openai-whisper`, `edge-tts`, `onnxruntime`, `accelerate`,
+  then `scipy`, `numba`, `llvmlite`, `tiktoken`.
+- **spaCy was nearly removed by mistake.** `pip show` reported no dependents
+  because misaki reaches it at runtime without declaring it. Removing it broke
+  speech. **Verify by removal and a green suite, never by metadata.**
+
+### Session 1–2 — Orbit and Work ✅
+Work added as the fifth node. The Work surface built against clearly-labelled
+sample data: 20 artifacts, two projects, filter by project and type, detail panel
+from the right with preview, sources and a link back to the conversation.
+Download is inert and says why — a working button emitting a plausible invoice
+from invented data is worse than no button, because the file outlives the screen
+that explained it.
+
+The landing hint ("Click Orb to Chat") replaced the persistent bar. **Two things
+went with it:** the clickable topic line was the third route back and the only
+one that named its destination, and the `local · model · N facts recalled` line
+is no longer visible. `sessionStatusStore` still tracks all of it.
+
+### Session 4 — Work reads real artifacts ✅
+`sampleArtifacts.ts` is deleted. Work fetches from `/artifacts` through
+`services/artifactsClient.ts`, with loading, error-with-retry and a truthful
+empty state. The detail panel previews the stored HTML in a sandboxed iframe,
+lists claims with their source excerpts, and downloads the real file.
+
+The sample's shape had drifted from the backend model — `projectId` against
+`project_id`, a nested `conversation` object against two flat fields, and a
+`previewText` with nothing behind it. The model won, and the client uses its
+field names directly rather than mapping, because a mapping layer is a second
+vocabulary and a place for the two to disagree quietly.
+
+**Download is real now.** It was inert and said why, because a working button
+over invented data emits a file that outlives the screen explaining it. The
+button now also distinguishes "no file" from "the file is not where it was
+written" — the record can outlive the file, and 410 is a different problem from
+404.
+
+**Verified end to end against a live backend**, through the Vite dev proxy on
+the browser's own path: generate → list → preview HTML with claim anchors →
+download 37 kB of .docx with the right content type. Not driven in a browser —
+Playwright is still unavailable here.
+
+---
+
+## The agreed path to alpha
+
+Decided 7 August 2026, after an audit of what actually stands between here and
+a 15-person retention test.
+
+**~~Do these first~~ ✅ → ~~M7~~ ✅ → ~~M8~~ ✅ → ~~citation UI~~ ✅ →
+M9/M9a → cloud engine + M10 as one unit → M11 + first run → M12.**
+
+**The citation UI is done** — all five steps, driven in a browser. See the
+Citations section of `docs/UI-SPEC.md` and "Queued — the citation UI" below for
+the reasoning that produced it. Its `web` kind is built and unverified, and
+becomes testable only when search lands behind its policy gate.
+
+**Next on the path is M9/M9a — the business layer and obligation extraction.**
+That is the wedge, and it is the first milestone since M7 whose acceptance is
+about what a freelancer gets rather than about what the system does.
+
+**Queued behind it: the avatar spike.** Afternoon-sized, not a milestone.
+Scoped in `docs/EMBODIMENT-SPIKE.md`; both blocking questions are answered.
+
+**Still true and still the blocker:** a stranger cannot install this. M11.
+
+**Cut from the alpha path**, not from the product: **M9c** (Unreal/Blender is a
+different wedge on a different day, orthogonal to freelancers) and **Session 5**
+(CLAUDE.md: build two packs by hand before building the pack system — a
+catalogue with no packs is a promise accumulating). Both stay in this file
+below; neither is next.
+
+**Local *and* cloud, decided deliberately.** An earlier proposal to make the
+alpha local-only was overruled: both capabilities ship. That keeps M10 in
+scope and adds one thing that is missing entirely — see below.
+
+**Cloud is not just a provider setting. `OpenAICompatibleEngine` does not
+exist.** `runtimes/models/engines/` holds `base_engine.py` and
+`ollama_engine.py` and nothing else. The provider layer *discovers*
+OpenAI-compatible endpoints and OpenRouter, but nothing can generate through
+them, so the v1 scope line "chat routed to at least two providers (one cloud,
+one local)" is **not met**. Two local models satisfies the recall demo; it does
+not satisfy that line.
+
+**M10 ships in the same commit as the cloud engine, not after it.** Rule 8 is
+narrower than it looks: `test_outbound_query_invariant.py` enforces that Spine
+content never reaches a *search query*, because recalled facts live in
+`system_prompt` and the search path never reads it. But `system_prompt` is
+exactly what a generation call sends. Today it only reaches `OllamaEngine` on
+localhost, so it is not egress. **The moment a cloud engine exists,
+`system_prompt` becomes egress and it contains Spine content by design.**
+CLAUDE.md intends that — "carries project context into the cloud request" —
+immediately followed by "showing the user exactly what leaves before it does".
+So M10 is the enforcement point for the only path that sends memory
+off-device, not a dialog bolted on later. Cloud generation without it is rule 5
+with the safety removed. It needs a test in the same shape as the existing
+invariant: recalled facts reaching a cloud engine must pass the gate *and* the
+confirmation, structurally.
+
+**Cloud lands after the wedge, not before it.** M10's dialog shows recalled
+facts as removable chips, and that can only be tested honestly against a Spine
+with real material in it. Built before M7 and M9, it is built against an empty
+store and the interaction problems surface during the alpha.
+
+**Start now, in parallel, because it is not coding work:** Windows code
+signing and the Nigerian sole-trader business verification. Longest lead time
+of anything here and it cannot be compressed later.
+
+**Worth one afternoon, soon:** actually run the recall demo end to end and
+record it — ask model A, ask model B later, get a cited answer, delete the
+fact, watch the answer change, open the log. Every piece exists and it has
+never been demonstrated. It is the closest-to-done, least-verified asset in the
+repo, and a break in it should be found before M7 buries it under new code.
+
+## Next
+
+### M9b — Generative documents ✅
+Reachable from chat as of this commit. See "Routing and generation" below for
+the four bugs that stood between the pieces working and the feature working.
+
+### M9b — the pieces (kept for the reasoning)
+**Committed:** the artifact model, the write path, the HTML layer, and the
+exporters — Markdown, .docx, .xlsx and PNG, verified end to end against real
+output. 58 tests in `test_artifact_exporters.py`.
+
+The write path is a property of the code, not a convention: `open(path, "xb")`
+is create-or-fail atomically, there is no function named for deletion, and
+`test_artifact_write_path.py` scans the module's source so the build fails on the
+commit that introduces the capability rather than at runtime after a file is
+gone. Path confinement gets eight traversal payloads — the *model* proposes
+filenames, so `../../.ssh/config` is an input to assume.
+
+**That guarantee now has a second gate.** The exporters return bytes and never
+touch the filesystem; `ArtifactStore` stays the only writer. A source scan over
+`artifacts/export/` enforces it, so adding a sixth format cannot quietly route
+around the store. It matches *calls* rather than names, because `workbook.save`
+and `write_pdf` both write to memory.
+
+**Remaining:** PDF, blocked on GTK packaging (see Open questions), and the
+**conversation half** — nothing generates from chat.
+
+**Acceptance:** ask a question, say "write that up as a proposal", get a .docx
+where claims link back to the source paragraph they came from. The file appears
+as a card in the conversation and as a row in Work.
+
+**Verified:** a proposal with recalled claims exported to .docx, both claim
+hyperlinks resolving to bookmarks present in `word/document.xml`; and the same
+document generated over HTTP, listed and downloaded through the dev proxy. The
+document half and the Work half both hold.
+
+**The gap, precisely.** `POST /artifacts/generate` is the seam and it works —
+it is what a capability would call. What does not exist is the capability: chat
+goes through `CapabilityRouter` / `IntentBasedRouter.INTENT_MAP`, and producing
+a document from natural language means registering a runtime there, adding an
+intent, and emitting a file-card event on the stream. Deliberately not
+half-wired this session. Note also that routing is keyword-based, so
+`INTENT_MAP` will match "proposal" by word rather than by meaning until
+embeddings land.
+
+### Session 5 — Settings → Tools, the pack catalogue
+Each pack shows risk tier (generative / mutative / egressive), data policy, and
+honest grading against this machine — greyed out where unavailable, with the
+reason stated. Only packs that exist or are genuinely next; a catalogue of forty
+things we will never build is a promise accumulating.
+
+### M7 — Ingest ✅
+`backend/ingest/` — a parser interface, four light parsers, a measured quality
+floor, and an outcome for every file rather than only the ones that worked.
+
+**Verified against a real folder**, not just tests: an invoice indexed and
+recalled by a question about its day rate (0.492, cited by filename); an
+image-only scan reported as *"2 pages produced only 1 character (0.5 per page).
+It is probably a scan with a little text on top"* with the OCR remedy and its
+size; an encrypted `.docx` reported as password-protected **without** falsely
+offering OCR, since no parser opens those.
+
+**Docling is an optional extra, decided by measurement.** It costs 321 MB of
+wheels (torch, opencv, transformers, rapidocr, scipy) against a 267 MB base —
+more than doubling the installer that the packaging milestone cut by 81%.
+Probed against 1,080 real files: the light parsers read **50 of 54 PDFs**; the
+four they cannot are image-only scans. `docling-slim` alone is a mirage — 40 MB
+that parses nothing, because every format backend lives in the `standard` extra
+that pulls torch.
+
+`PyPDF2` was in `requirements.txt` and imported by nothing; replaced by `pypdf`
+(0.4 MB), verified by removal plus a green suite rather than by metadata.
+
+**The quality floor is measured, and the interesting half is where it *isn't*
+set.** Zero characters is unambiguous — four files, all image-only scans, no
+false positive possible. The band above zero is not: of twelve PDFs under 200
+chars/page, those between 98 and 190 are *legitimately sparse* — a pitch deck
+at 98.6, a cast sheet at 186.8. A floor at 200 looks reasonable and would tell
+a user their own pitch deck was unreadable. The floor is **50 chars/page**, the
+only place the two populations separate, and it **warns rather than rejects**:
+sparse content is still indexed, because rejecting it would make the floor a
+second, quieter way to lose a file.
+
+**The Knowledge surface renders it, and this was verified in a browser.**
+`ingest/records.py` persists sources and per-file outcomes; `/ingest` streams
+one event per file as it is read; Knowledge lists folders with counts, a
+per-source `local_only` policy toggle (rule 5, default deny), a Needs-attention
+section carrying each reason and remedy, and a retry on every problem.
+
+Driven end to end with Playwright against a real folder:
+
+> **m7folder** — 3 indexed · 2 need attention · Local only
+> **NEEDS ATTENTION · 2**
+> `locked-exam.docx` — Couldn't read — *Password-protected or a legacy .doc
+> renamed .docx.* — Retry
+> `NDA WOTG Uche.pdf` — Almost nothing — *2 pages produced only 1 character
+> (0.5 per page). It is probably a scan with a little text on top.* —
+> *Reading scans needs OCR: pip install zaram[ingest] (321 MB, one time).* — Retry
+
+**And it reaches the conversation.** A new `notice` stream event carries one
+sentence into the transcript after the answer:
+
+> *"2 files in m7folder didn't give me much to work with — locked-exam.docx
+> among them. Password-protected or a legacy .doc renamed .docx. They're listed
+> under Knowledge if you want to look."* → **Open Sources**
+
+Once per scan, verified: it did not reappear on the next question. After the
+answer, not before it — the user asked something, and interrupting with
+housekeeping first is how a warning gets trained away. Rendered as a distinct
+card, never as reply text: attributing it to the model would be putting words
+in its mouth.
+
+Progress is per file rather than a percentage, and it is real — `/ingest`
+yields from a generator as each file completes. An earlier draft collected
+every outcome and replayed them down the stream, which is a progress bar that
+is always finished before it is shown.
+
+**Failures must be loud.** A file that produced nothing appears in Knowledge
+with a reason and a retry, and is mentioned in the conversation the first time
+it matters. Silent ingestion failure is the most likely reason a user concludes
+the product doesn't know their material and leaves.
+
+**"Extracted almost nothing" is a failure, not a success.** A scanned PDF that
+yields three garbled words will silently degrade every answer that touches it,
+and it is *worse* than a hard failure because nothing signals it. The quality
+floor sits beside the error path: a file that parsed cleanly but produced
+almost no text lands in Knowledge with a reason and a retry, exactly like one
+that could not be opened. Decide the floor from measurement (characters per
+page, or extracted length against file size), not from a guessed constant, and
+record how it was chosen.
+
+**Rule 7c: no ingestion path may route documents off-device.** Managed parsing
+APIs are prohibited. This is the exact trade the product refuses.
+
+**Build the recall eval harness here** — see "Do these first" item 3. Ingest is
+what puts real documents in the Spine, so it is the first moment an eval is
+possible and the moment it becomes necessary.
+
+**Acceptance:** point at a folder, watch it index, ask a question, get a cited
+answer from a real document. Then point at a folder containing a scanned PDF
+and watch Knowledge say which file gave nothing back and why. **Met at the
+service level; the Knowledge half is not rendered yet.**
+
+### M8 — Memory scope ✅
+Every fact carries `scope` (`global` | `project:<id>`) and `origin`, migrated
+together as planned — same rows, one migration over the user's data. Pre-M8
+facts become `global`, the only honest reading: they were captured with no
+project in play, and inventing one would be a value nobody entered.
+
+**A leak was found doing it.** Scope filtering lived in the store's `query`,
+which the vector path does not use — `_vector_search` asks the index for ids and
+fetches records individually, so a semantic hit on another project's fact walked
+straight past the filter and only the keyword path was ever scoped. Now enforced
+at one chokepoint in `HybridMemoryRetriever.retrieve`: a privacy boundary with
+one enforcement point per code path has one hole per code path.
+
+**Promotion is evidence-based** (rule 7i). `recalled_in` keeps the project
+*identities* rather than a count, because a count cannot answer "recalled across
+three *different* projects". `promotion_candidates()` proposes and never
+promotes — promotion changes what is shareable, and rule 6 says autonomy is
+granted rather than assumed.
+
+**`Artifact.indexed` is flipped to `True`**, and only once the thing that makes
+it safe existed: `MemoryRankerImpl.GENERATED_PENALTY` demotes Zaram's own
+restatements in the *ordering*, never in relevance. Pushing a generated fact
+under the citation floor would be exclusion wearing a different hat; rule 7b
+asks for tagging instead.
+
+**Not built:** nothing sets a project scope yet. Every fact still lands
+`global` in practice because no surface tells the engine which project is
+active. The field, the filter, the migration and the promotion evidence are all
+there — the caller is not. That is the next piece of M8 and it is small.
+
+### M9 / M9a — The business layer and obligation extraction
+The universal job: invoice → receipts → expenses → how is the business doing.
+Then the keystone: dates and commitments pulled from documents, surfaced before
+they lapse, **every obligation showing its source clause and correctable**.
+
+**Acceptance:** generate an invoice with 30-day terms; on day 31 Zaram says the
+payment is late, shows the clause it read that from, and has the follow-up
+drafted. Correct a wrongly-extracted date and watch the reminder move.
+
+### M9c — Read-only MCP: Unreal and Blender
+Inspect, list, report. No writes, so no undo or sandbox needed — which is why it
+ships in v1 and scoped writes do not. **Epic's plugin binds `127.0.0.1:8000`, so
+the backend must stay on 8420.**
+
+### M10 — Confirm-before-send, editable
+The dialog shows the literal outbound text, the destination and the reason.
+Recalled facts are removable chips, editable inline, edits written through as
+supersessions.
+
+### Queued — the citation UI
+**Requested 7 August 2026. Not started. Order is fixed and each step stops for
+review.**
+
+Read `CLAUDE.md` and `docs/UI-SPEC.md` first. This **adds a section to the
+spec, shows it, and only then implements it**.
+
+**The core idea.** Zaram's sources come in three kinds and no competitor has to
+make this distinction:
+
+- `memory` — a fact from the Spine. Nothing left the device.
+- `document` — a passage from an indexed file. Nothing left the device.
+- `web` — bytes left, and there is an egress log entry for it.
+
+The citation UI has to make that visible, because a citation that tells you
+whether an answer cost you privacy is the product's thesis at the sentence
+level.
+
+**Not everything gets cited.** Web sources are *always* cited regardless of how
+central the claim was — not for attribution, but because bytes left the machine
+and anything involving egress is always visible. Local sources are cited only
+when they carry the answer; the test is whether the claim would be different
+without that source. Use a second, higher relevance threshold than the one that
+decides injection — the retrieval score already exists, this is a separate cut
+on the same number. Division of labour: **chips for what mattered, the recall
+strip for what was used, the panel for everything.**
+
+**Inline chips.** Small pill, kind icon and a number: document icon, memory
+diamond, globe. **Colour encodes egress, not category** — the same cyan and
+violet the orb uses for local versus cloud. Cyan for anything that stayed,
+violet for anything that left. One meaning reused, so it needs no legend.
+**Never render a chip that isn't clickable**: citing without linking fails the
+verification task, and for this product a decorative citation is worse than
+none.
+
+**Summary line.** Below the reply, collapsed by default. Leads with the split —
+"2 sources · 1 sent to the web" — because that is what someone wants at a
+glance. Single-source answers skip the panel entirely and put the card inline;
+a panel for one citation is overkill.
+
+**The panel.** Right side, same anchor and pattern as fact detail — one
+pattern, not two. Escape closes. Grouped by egress with a mono heading per
+group: *nothing left this device* / *1,204 bytes left this device*. Numbering
+matches the inline chips exactly so a chip maps to its card instantly.
+
+Per kind:
+- **document** — filename, the passage quoted with a left border, page and
+  index date, open-document action.
+- **memory** — the fact, its source and date, recall count, and correct /
+  forget inline. This is the fastest correction path in the product and it sits
+  exactly where the user is already checking.
+- **web** — title, excerpt, domain, when it was sent and to whom, and a link to
+  its row in Activity. **That link is the citation and the egress log being the
+  same object viewed twice, and it is the thing nobody else can build.**
+
+Below the cited sources, a quieter section listing what was recalled but not
+cited — so nothing is hidden, it is just not interrupting the prose.
+
+**The empty state is not optional.** When nothing from the user's material
+contributed, say so: *"Answered from the model's own knowledge — nothing from
+your files."* It is a claim about absence, which the user cannot infer from
+missing chips — missing chips could equally mean we didn't bother. A visible
+no-sources state is more trustworthy than confident prose with hidden
+provenance.
+
+**Backend first.** Check whether `StreamEvent.source` already carries kind,
+excerpt and egress reference. It currently carries only `kind`, `url`, `title`
+— so this is the first change. The frontend cannot render what isn't sent, and
+inventing a kind client-side would be the fabrication rule all over again.
+
+**Order — stop after each:**
+1. ~~Write the spec section, stop, show it~~ ✅
+2. ~~Backend: source events carry kind, excerpt, egress reference, relevance
+   score~~ ✅ — plus `cited`, a server-assigned `number`, `origin`, `record_id`
+   and `MIN_CITATION_SCORE`. See the Current state block.
+3. ~~Chips and the summary line~~ ✅
+4. ~~The panel~~ ✅
+5. ~~The empty state~~ ✅
+
+**All five done, 9 August 2026**, and driven with
+`frontend/scripts/drive-citations.mjs`. The `web` kind is built and *unverified*
+— nothing emits a web citation while search is default-deny. See "Do these
+first" item 1.
+
+### M11 — Packaging
+**The real blocker.** A stranger cannot install this. See Open questions above —
+code signing has the longest lead time and cannot be compressed later.
+
+**Acceptance:** a Windows machine that has never seen the repo runs one installer
+and reaches a cited answer from its own files in under ten minutes.
+
+### M12 — Alpha
+Ten to fifteen people, one segment. Onboard individually, watch, do not help.
+Ask at intake: hours spent on admin last month, and what is past due — those
+answers become the missing line in `docs/PITCH.md`.
+
+**Acceptance:** the day-30 number. 5+ of 15 weekly → build the paid tier.
+2–4 → the job is wrong. 0–1 → the thesis is wrong, learned in six weeks.
+
+---
+
+## Known broken
+
+**Nothing.** 1330 passed, 5 skipped, 0 failures, ~1m45s from the repo root on a
+full dev install. The 27 are gone and the section explaining what they actually
+were is above, under "What the 27 actually were"; the method for classifying the
+next one is `docs/KNOWN-FAILURES.md`.
+
+Record any change to that number — but the sharper lesson from clearing them is
+about *taxonomy*, not counting. "13 core, 14 voice" made 27 feel understood and
+that is why nobody ran them individually for four milestones. A failure grouped
+under a plausible label is more dangerous than an unexplained one.
+
+**Skips are opt-in, not accidents.** `test_recall_eval.py`'s end-to-end half
+needs Ollama with `bge-m3` on loopback — similarity over the hash fallback is
+arbitrary rather than merely worse, so a green run against it would be a lie.
+`test_recall_at_scale.py` additionally needs `ZARAM_SCALE_EVAL=1`, because
+indexing a hundred documents takes ~45s and does not belong in a run-on-every-
+change suite:
+
+```
+ZARAM_SCALE_EVAL=1 pytest backend/tests/test_recall_at_scale.py -s
+ZARAM_SCALE_EVAL=1 ZARAM_SCALE_EVAL_SIZE=1000 pytest backend/tests/test_recall_at_scale.py -s
+```
+
+Written and inert, which is worse than broken because the suite is green:
+
+- ~~**`apply_decay` is called by nothing.**~~ ✅ Fixed. `SpineMaintenance` runs
+  it daily and once after boot, and the pass had a second defect underneath the
+  scheduling one: it read `store._records` and so saw nothing at all on SQLite.
+  Verified against a live server.
+- ~~**Nothing sets a project scope.**~~ ✅ `ChatRequest.project_id` reaches the
+  engine, recall is scoped, capture is scoped, and `ProjectScopePicker` sets it.
+  Promotion now has evidence to accumulate.
+- ~~**Nothing calls `beginModelSwap`.**~~ ✅ `swap_preflight` announces it before
+  generation starts.
+
+Still broken, found and not fixed:
+
+- One unexplained 404 on every page load.
+
