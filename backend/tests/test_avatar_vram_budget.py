@@ -6,11 +6,17 @@ grounds, and that the decision is *warn, never block* — which needs a real
 number to warn with. The number that appeared in conversation, "~1.5 GB", was
 invented. This file replaces it with an arithmetic one.
 
-**Why this is a test and not a script.** A number in a document goes stale
-silently; the avatar asset can be swapped for a heavier one and nothing would
-say so. Here the measurement runs on every suite and the ceiling fails when it
-is exceeded, which is the same reason `test_egress_chokepoint.py` is a test
-rather than an audit.
+**Why this is a test and not a script, and why it matters more than usual.**
+`AvatarSample_Z.vrm` is a **placeholder**. The maintainer's intent as of
+10 August 2026 is to replace it with a humanoid robot with an LED face carrying
+only five or six textures, so the 190 MB measured today is this asset's number
+and not the product's. A figure written into a document would survive that swap
+and be wrong; this recomputes on every suite and fails against a ceiling.
+
+The per-texture arithmetic is what carries across: at 2048x2048 each map is
+22.4 MB resident, at 1024x1024 it is 5.6 MB. Six of the former is 134 MB, six of
+the latter 34 MB — so the intended asset lands well inside the ceiling either
+way, and the thing worth watching is texture *dimensions*, not texture count.
 
 **What it measures, precisely.** Texture and geometry VRAM: the two costs that
 scale with the asset and therefore with the choice of avatar. It does *not*
