@@ -212,17 +212,82 @@ class TestTheMetadataBlock:
 
 
 class TestNothingElseChanged:
-    def test_provenance_still_reaches_the_document(self):
-        """The redesign must not have dropped what makes a document defensible."""
+    def test_claim_anchors_survive_even_when_sources_are_not_printed(self):
+        """The anchors are traceability; the Sources section is presentation.
+
+        Dropping the printed section must not drop the machine-readable half —
+        that would turn "the client does not need to see this" into "nobody can
+        check it", which is a different and much worse thing.
+        """
         claim = Claim(id="c1", source_id="memory:55b6", excerpt="Day rate is 425,000 naira.")
         html = _document(
             blocks=[claim],
             claims=[claim],
             sources=[ArtifactSource(kind="memory", title="Rate note")],
         )
-        assert 'data-zaram-claim="c1"' in html
-        assert "Rate note" in html
+        assert 'data-zaram-claim="c1"' in html, "the claim anchor was lost"
+        assert 'data-zaram-source="memory:55b6"' in html
+
+
+class TestProvenanceIsForTheAuthorNotTheRecipient:
+    """An invoice goes to a client. The client is not owed the working.
+
+    Off by default, on where citation is part of the genre. Rule 2 is satisfied
+    by `Artifact.claims` on the record and by Zaram's own preview, which renders
+    provenance as chrome around the document — the same way `CitationPanel`
+    sits around a reply rather than inside it.
+    """
+
+    def _with_sources(self, **kwargs):
+        claim = Claim(id="c1", source_id="memory:55b6", excerpt="Day rate is 425,000 naira.")
+        return _document(
+            blocks=[claim],
+            claims=[claim],
+            sources=[ArtifactSource(kind="memory", title="Rate note")],
+            **kwargs,
+        )
+
+    def test_a_shareable_document_does_not_print_its_sources(self):
+        """Asserted on *visible text*, which is the actual contract.
+
+        `memory:55b6` still appears in the `data-zaram-source` attribute and
+        must — that is the anchor the record and the preview resolve against,
+        and the test above requires it. What the client must not see is the
+        rendered Sources section. Attributes are invisible in every format this
+        document becomes; a heading is not.
+        """
+        visible = _visible_text(self._with_sources())
+        assert "Sources" not in visible
+        assert "Rate note" not in visible
+        assert "memory:55b6" not in visible
+
+    def test_a_document_can_still_ask_for_them(self):
+        html = self._with_sources(include_provenance=True)
         assert "Sources" in html
+        assert "Rate note" in html
+
+    def test_the_default_is_off(self):
+        """Stated as its own assertion, because the default *is* the decision."""
+        import inspect
+
+        from artifacts.html import render_document as render
+
+        assert inspect.signature(render).parameters["include_provenance"].default is False
+
+
+def _visible_text(html: str) -> str:
+    """What a reader actually sees: tags and the stylesheet removed.
+
+    Both removals matter. Keeping attributes would flag `data-zaram-source`,
+    which is invisible provenance the document is *required* to carry; keeping
+    the stylesheet would flag the `.sources` selector, which is a CSS rule and
+    not content. Asserting on raw HTML conflates all three.
+    """
+    without_style = re.sub(r"<style>.*?</style>", "", html, flags=re.DOTALL)
+    return re.sub(r"<[^>]+>", " ", without_style)
+
+
+class TestNothingElseChangedContinued:
 
     def test_existing_callers_need_no_changes(self):
         """Every new parameter is optional and additive.
