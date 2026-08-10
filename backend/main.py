@@ -197,6 +197,11 @@ async def health():
     except Exception:
         speech_health = {}
     
+    # Which build is answering, and since when. Cheap, and it exists because a
+    # backend from 06:32 served this port all day while two already-fixed bugs
+    # were re-diagnosed against it. See core/build_stamp.py.
+    from core.build_stamp import build_stamp
+
     # What the Orb reports. This is the product claim made continuously visible,
     # so it must describe what is actually true rather than what is intended.
     from core.planner import web_search_enabled
@@ -265,6 +270,10 @@ async def health():
         "knowledge_providers": provider_health,
         "speech": speech_health,
         "routing": routing,
+        # `curl localhost:8420/health` now answers "which build is this?" —
+        # the question that would have saved two rounds of re-fixing bugs that
+        # were already fixed.
+        "build": build_stamp(),
     }
 
 
