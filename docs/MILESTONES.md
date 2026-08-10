@@ -13,10 +13,28 @@ accurate — it is the first thing anyone reads.
 
 ## Current state — 10 August 2026
 
-**Suite: 0 failures.** 1377 → **1388/0**, 8 skipped, **79s** from the repo root
-on a full dev install. Run pytest **from the repo root** — `--ignore` in
+**Suite: 0 failures.** 1388 → 1426 → **1433/0**, 8 skipped, 85s from the repo
+root on a full dev install. Run pytest **from the repo root** — `--ignore` in
 `pyproject.toml` is rootdir-relative and running from `backend/` still aborts
 the whole suite.
+
+The 1426 in the previous handoff was measured *before* the last guard test
+landed (`test_no_exemption_is_unnecessary`, parametrised over 7 exemptions).
+That gap is closed: the whole suite has now been run at **1433/0**, and the
+frontend is green on all four gates — `npm run build` (which runs the three
+scanners), `vitest run` at **25/25** across 2 files, and `tsc --noEmit`.
+
+**Everything is committed**, `0cef961..` on `Zaram-V0.1`, four commits, not yet
+pushed.
+
+**Run it with `.venv/Scripts/python.exe`, not with whatever `python` resolves
+to.** The system Python 3.11 on this machine has pytest but not the dev install,
+and the suite reports **54 failures** there — python-docx, openpyxl and the rest
+are missing, so ingest reports "Nothing installed can read this file" and twenty
+artifact tests fail on exporters that are not there. Every one of them looks
+like a product defect and none of them is. Recorded because it cost twenty
+minutes: a suite that fails differently depending on which interpreter found it
+is not telling you about the code.
 
 One run on 9 August took **36m25s** and has never reproduced; the two runs
 since were 2m19s and 1m19s. Three wrong explanations were offered for it
@@ -103,18 +121,336 @@ Six commits, `1ccc339..7a7bd45`, all pushed.
   `TranscriptSegment` — which mirrors `SpeechTiming` on purpose. `language` is
   `Optional` and never defaults to `"en"`.
 
+Then four more, `0cef961..`, committed after the suite was verified at 1433/0
+and **not yet pushed**. Each is written up in full in the sections below.
+
+- **`0cef961` The audio URL 404.** `audio_filename` crosses the connector
+  boundary; `base_url` defaults to empty so the URL is relative.
+- **`b7bca96` Zaram listens.** `WhisperRecogniser`, `/voice/transcribe`,
+  `micStore`, `MicButton` — and `speechStore.error` finally rendered.
+- **`fc1fb42` Three holes in the guards.** The CSS universal selector, the
+  block-comment blind spot, and exemptions that had stopped being needed.
+- **`docs`** — this file.
+
+### The avatar was silent because every audio URL 404'd
+
+`cfaa191` shipped "the avatar speaks its replies" and it has been silent ever
+since. Synthesis succeeded, the response looked correct, and `audio_url`
+pointed at a file that never existed:
+
+- `AudioCache.generate_filename()` writes `{voice}_{sha256[:16]}.wav` —
+  `af_heart_05322cae55732340.wav`
+- `runtimes/speech/runtime.py` built the URL from `result.audio_id`, which is
+  the **request** id — `tts-f68ca98d.wav`
+
+Two naming schemes that could never agree. `new Audio(url)` failed, `speechStore`
+set `'The audio could not be played.'` — **and nothing in the UI rendered that
+field**, so the only symptom was silence.
+
+**Found by a human saying "I didn't hear it", then curling the endpoint.** No
+test covered the seam: the provider tests assert a file is written, the runtime
+tests assert a URL is returned, and nothing asked whether they were the same
+file. That is the sixth instance of this codebase's signature failure — a
+contract with two implementations where the tests exercise the one the product
+does not run.
+
+**Fixes:**
+
+- `SynthesisResult.audio_filename` carries the real filename across the
+  connector boundary — the one place that knows both sides, exactly as it
+  already does for `timings`.
+- `base_url` defaulted to a hardcoded `http://127.0.0.1:8420` that nothing ever
+  overrode. Now `""`, making the URL **relative**: the backend port is
+  configurable, an absolute URL bypasses the Vite proxy and turns audio into a
+  cross-origin fetch, and a packaged build has no reason to hardcode loopback.
+- `speechStore.error` is rendered in the composer beside the mic's line.
+- `/voice/stream` has the identical defect, is called by nothing, and is
+  **marked KNOWN WRONG in place** rather than migrated — fixing it needs the
+  same field on `AudioChunk`. It must not be wired up as-is.
+- `test_the_returned_audio_url_names_a_file_that_exists` is the missing seam
+  test.
+
+**Verified live:** `POST /voice/synthesize` → `200 audio/wav, 124844 bytes`.
+Warm synthesis is 1.6s; the first call is ~12.7s because that is when the model
+loads (lazily, since the boot-egress fix below).
+
+### The guards had holes — all three, and one was covering a bug in itself
+
+Asked to make the guards trustworthy before adding any parallelism, on the
+grounds that every parallel worker is safe exactly to the degree the guards
+catch what it cannot see.
+
+**`check-no-remote-assets.mjs` — two defects, both found by writing its
+self-test.**
+
+1. `COMMENT_OR_DOC = /^\s*(?:\/\/|\*|\/\*|#|<!--)/` treated any line *starting
+   with* `*` as a comment and skipped it. `*` is also the CSS universal
+   selector, so `* { background: url('https://cdn.example/x.png') }` was
+   **silently ignored** in every stylesheet and CSS-in-JS template literal.
+   Confirmed by mutation: with the old heuristic restored the fixture yields
+   **0 findings** where it should yield 1. That is the dangerous direction —
+   missing a real request rather than flagging prose.
+2. Every finding was **double-reported**, because the patterns overlap
+   (`@import url(…)` matches both the `@import` rule and the generic `url()`;
+   `<img src=…>` matches both markup and JSX). The "N remote asset
+   reference(s)" headline was twice the truth. Now deduped on where the scheme
+   sits in the file, so two URLs on one line stay two findings.
+
+**`test_egress_chokepoint.py` — a third hole**, beyond the two already recorded
+below. The staleness test only asks whether the exempted *file* exists. An
+entry for a file that no longer imports a network library keeps its waiver
+forever and silently covers whatever is added back. Two such entries existed;
+**one of them had been granted to paper over a bug in the scanner itself** (a
+relative `from .kokoro import …` read as the PyPI `kokoro`). An exemption
+granted to quiet a false positive outlives the false positive.
+`test_no_exemption_is_unnecessary` now fails on any entry that imports nothing.
+
+**`check-visemes.mjs` needed nothing** — it asserts real behaviour against a
+clear oracle and was already mutation-tested.
+
+**Both scanners now self-test before scanning** — 9 fixtures each, run by
+`npm run build`, each case observed failing against a deliberately broken
+scanner. The general rule this session kept re-learning: **a guard whose logic
+changed and was believed on inspection is a guard nobody has verified.**
+
+### Workflow: the parallelism question, answered
+
+Asked twice how to parallelise Zaram's development, against two detailed
+multi-agent proposals (an Opus/Sonnet/Haiku tier hierarchy, then a Kilo agent
+roster). Recorded because it will otherwise be re-asked.
+
+**Parallelism is not the bottleneck, and unpaid-for parallelism makes this
+codebase worse.** The signature failure is cross-boundary — six instances now.
+Every defect found on 10 August was found by leaving the assigned scope: a
+startup log read while serving a URL, an endpoint curled outside the task, a
+test failing for a reason that needed thinking about. A reviewer handed
+SPEC + PLAN + DIFF passes all three, because each diff *was* correct against
+its spec. More parallel workers means more boundaries.
+
+**So: guards first, hierarchy second.** Parallelism is affordable in proportion
+to what the guards catch — which is why they were fixed before anything else.
+
+- **Split by subsystem, not by role.** Splitting by job (explorer / tester /
+  reviewer) puts every agent in the same files. Packaging, ingest, voice, and
+  the frontend surfaces are independent; the queued architecture (project
+  record → plan object → plan in recall) is a strict chain and does not
+  parallelise at all.
+- **`.kilo/worktrees/` already contains stale divergent copies** using
+  `backend/garage/`, renamed at M2. That is the parallelism failure mode
+  already present in this repo. Delete or refresh before adding more.
+- **Start the long-lead items now.** Code signing and Nigerian sole-trader
+  business verification are weeks of *waiting*, not weeks of work. They block
+  nothing and nothing blocks them; every day unstarted is a day on the end.
+- **Kilo is not needed yet.** Worktrees plus a merge gate cover it. Adopt it
+  after two features have run SPEC → IMPLEMENT → REVIEW by hand — CLAUDE.md's
+  own rule about not building the pack system before two packs exist.
+- **`docs/MILESTONES.md` stays the single status file.** A second
+  `CURRENT_STATE.md` is precisely the "two lists, one goes stale unread"
+  failure this file already names.
+
+### The backend contacted huggingface.co on every boot, unlogged
+
+Found by reading a startup log while bringing the app up to test the
+microphone, and it is the most serious thing in this entry. Rule 3 says every
+byte that leaves is logged. This left, and was not.
+
+**The mechanism, and it is a pattern this codebase has now hit five times: a
+flag deliberately turned off, and another path doing the thing anyway.**
+`KokoroConfig.load_model_eagerly` is `False`. `KokoroProvider.initialize()`
+ends with `self._last_health = await self.health_check()`. And
+`health_check()` called `_ensure_pipeline()` **unconditionally** — so reporting
+health is how the model got loaded, KPipeline resolved through
+`huggingface_hub`, and the fetch happened before any policy had been consulted.
+A health check that changes what it is measuring is not a health check.
+
+**Three guard defects let it hide**, all in `test_egress_chokepoint.py`, and
+all now fixed:
+
+1. **Dormancy was checked by grepping one file for a dotted path.** The
+   bootstrapper does not name `runtimes.speech.connectors.kokoro`; it imports
+   `runtimes.speech.runtime`, which does. The check asked whether the
+   bootstrapper *names* a module when the question is whether it *reaches* one.
+   `_reachable_from_boot()` now walks the import graph, following relative
+   imports, and is deliberately over-approximate — an import inside a function
+   body counts. On the first run it caught **three** false dormancy claims, not
+   one.
+2. **A relative import was read as a third-party package.**
+   `from .kokoro import KokoroProvider` in `voice/providers/__init__.py` has
+   `node.module == "kokoro"`, so the scan flagged the PyPI `kokoro` — and the
+   module had been given a standing exemption to silence it. **An exemption
+   granted to quiet a scanner bug is a hole that outlives the bug**, because
+   nothing revisits it once the noise stops. `node.level` is now checked.
+3. **Two exemptions named modules that import no network library at all.** The
+   staleness test only asks whether the *file* exists, so an entry that has
+   stopped being necessary looks identical to one that is load-bearing.
+
+**The fixes.** `health_check(*, probe_model=False)` no longer loads anything by
+default, and `test_health_check_does_not_load_the_model` is the guard.
+`_ensure_pipeline()` now does what `voice/stt/whisper.py` does: try the cache
+offline first — via `HF_HUB_OFFLINE`, since `KPipeline` has no
+`local_files_only` — and ask the gate only when weights are genuinely absent.
+`runtimes/internet/runtime.py` had a second ungated `DDGS` and got the
+`66736fa` treatment. Both moved to `NETWORK_LIBRARY_GATED`.
+
+`available` also changed meaning for Kokoro, deliberately: it is now "the engine
+is installed and can write its output", **not** "the weights are here" —
+establishing the second requires loading them. That is asymmetric with
+`WhisperRecogniser.is_available()`, which does require a loaded model, and the
+asymmetry is the honest one: listening decides whether to *offer a button*, so
+it must know before the user presses; speaking follows a reply that has already
+arrived, so resolving weights on first use costs a delay rather than a dead
+control.
+
+**Verified by restarting the server**: four HuggingFace and torch lines in the
+boot log before, **zero** after.
+
+### Speech is measured now — and dictated figures cannot be trusted
+
+`backend/tests/test_speech_roundtrip.py`, seven tests, with two committed
+fixtures under `backend/tests/fixtures/`. Kokoro speaks a sentence, it is
+encoded to Opus-in-WebM — the container `MediaRecorder` produces — and Whisper
+transcribes it. The listening half runs on the fixtures, so it needs
+`zaram[mic]` and nothing else: **no torch, no spaCy, no 905 MB**.
+
+Observed, live, through the real route over HTTP:
+
+```
+said:  My day rate for Harbour Lane is four hundred and twenty five thousand naira.
+heard: My day rate for Harbor Lane is 425,000 Nira.
+heard: My day rate for Harbor Lane is 400 and 25,000 Nira.
+heard: My day rate for Harbor Lane is $400,000 and $25,000.
+```
+
+One sentence, one voice, one model, three transcripts. Two findings, and the
+second is much the worse.
+
+- **The figure is unstable.** "four hundred and twenty five thousand" parses as
+  one number or two, depending on the run.
+- **The currency is invented.** The audio says *naira*. The third transcript
+  says **$**, twice, unhedged. A Nigerian day rate rendered as dollars is wrong
+  by a factor of about fifteen hundred, in the direction that looks reasonable
+  on an invoice, and nothing downstream can detect it because `$400,000` is a
+  well-formed amount.
+
+**So: speech is for prose. Amounts get typed, or get confirmed.** That is a
+constraint on M9/M9a rather than a bug to fix in the recogniser, and it is
+exactly what rule 9 exists for — the number leaves the building. Recorded as
+`test_a_dictated_figure_is_not_guaranteed`, which asserts only that *some*
+digits survive, because that is the strongest true statement available. Whether
+`small` fixes the currency is worth measuring before the business layer ships.
+
+**Where the variance lives, traced rather than assumed.** Kokoro's waveform is
+not byte-identical between calls. Whisper on a *fixed* clip inside one process
+is exact — three runs, one string — which is what located it. Across processes
+it is not: `cpu_threads=0` lets CTranslate2 size its own pool from machine load,
+and floating-point reduction order follows thread count. The test is named
+`test_transcription_is_deterministic_within_one_process` for that reason; the
+shorter name would assert something false while passing.
+
+**Measured while doing it:** the mic extra is 61.7 MB of *new* wheels here
+(av 27.6, ctranslate2 19.2, onnxruntime 13.8, faster-whisper 1.1) on top of what
+the voice extra already brought — consistent with the 81 MB from-scratch figure.
+Whisper `base` weights are **141 MB on disk**, not the 145 MB carried in from
+the packaging notes; corrected everywhere.
+
+### Zaram listens — the engine, the route, and the one moment it can leave
+
+`voice/stt/whisper.py`, `POST /voice/transcribe`, `stores/micStore.ts`,
+`components/chat/MicButton.tsx`. `zaram[mic]` pins in
+`backend/requirements-mic.txt`.
+
+**The chokepoint entry landed before the provider did**, which was the whole
+point of putting it first: `faster_whisper` is in `NETWORK_LIBRARIES` because
+`WhisperModel("base")` resolves through `huggingface_hub` and downloads 141 MB
+without asking anyone.
+
+**`NETWORK_LIBRARY_EXEMPT` is now two lists, and the split fixed a live
+falsehood.** Every entry claimed to be justified by dormancy, and the
+DuckDuckGo one had not been since `66736fa` — it is gated, not dormant, and
+`test_..._not_reachable_at_boot` was therefore asking it the wrong question.
+Had the bootstrapper ever imported it, a correctly-gated module would have
+failed a test that could only be silenced by weakening the guard.
+
+- `NETWORK_LIBRARY_DORMANT` — unreachable, checked against the bootstrapper.
+- `NETWORK_LIBRARY_GATED` — reachable, and **asserted in the AST** to call
+  `get_gate()` and to name `EgressDenied`. Prose in the reason column survives
+  the deletion of the code it describes; a parametrised test does not.
+
+**How the weights are governed, and why the order matters.** Offline first
+(`local_files_only=True`), which is the ordinary case after the first run and
+touches nothing. Only on absence does it ask the gate about
+`huggingface.co/Systran/faster-whisper-base`, and under default deny the library
+is never constructed. Asking unconditionally would log a decision about a
+request that was never going to happen, and **a log full of entries for traffic
+that did not occur is worth less than no log.**
+
+**A refusal is the ordinary answer here, not an error**, so it reads like one:
+the reason names the host and the size, the route returns 503 carrying it
+unedited, and the composer renders it as written. Only `tiny` (75 MB) and `base`
+(141 MB) have measured sizes; anything else says *"size not recorded"* rather
+than inventing a number, and a test asserts that.
+
+**Deliberate departures, both recorded so they are decisions rather than
+drift:**
+
+- **The button is press-to-start / press-to-stop, not hold-to-talk.** Holding is
+  a pointer gesture: a keyboard or screen-reader user activating a button gets
+  one event, not a down and an up. A control that is *both* asks the user to
+  discover which gesture they performed. Same reasoning that gave the collapsed
+  left-rail buttons real accessible names.
+- **The transcript lands in the composer as editable text and is never sent.**
+  A recogniser that mishears and then submits has spoken for the user.
+- **`vad_filter` is on.** Whisper hallucinates on silence and push-to-talk audio
+  is mostly silence, so this is rule 9 one surface earlier: invented words in
+  the user's own input box.
+- **The microphone is released on every exit path**, including the failures,
+  and that is what `micStore.test.ts` spends three of its twelve tests on. The
+  browser's recording indicator is the only sight the user has of Zaram
+  listening, and nothing in the UI would reveal a leaked track.
+
+**`check-no-cloud-speech.mjs` was flagging prose, and now has a self-test.** It
+strips `//` comments but never tracked block comments, so a module explaining
+*why* it does thirty lines of `MediaRecorder` plumbing instead of three lines of
+the banned API was reported as a finding — the check disagreeing with its own
+docstring, which promises that comments may discuss the API by name. Block
+tracking is deliberately conservative (an opener must start the line), because
+between "flag a comment" and "miss a use" only one of those errors matters.
+
+Changing a guard and then reading it is not testing it, so the mutation cases
+are checked in rather than run once in a scratchpad: `npm run check:speech` now
+runs nine fixtures first, including *code after a block comment closes* and *an
+unterminated block comment must not swallow the rest of the file*. Both were
+observed to fail against a deliberately broken tracker. `check-visemes.mjs` was
+mutation-tested before being believed; this is the same debt paid the same way.
+
 ### Do these first
 
 Worst first. Nothing is broken.
 
-1. **`faster_whisper` must be added to `NETWORK_LIBRARIES` in
-   `test_egress_chokepoint.py` *before* the provider lands.** It fetches model
-   weights from huggingface.co on first use. This is the exact trap that file
-   documents — voice discovery contacted HuggingFace on every boot, unlogged,
-   and the only reason anyone noticed was a timeout in the startup log.
-2. **The speech path has never been heard.** Typechecked, guarded, committed —
-   and nobody has watched the avatar speak with real audio, because that needs
-   the backend running with the voice extra. Do this before building on it.
+0. ~~**Run the full suite and commit.**~~ Done, 10 August: **1433/0**, frontend
+   green on all four gates, four commits `0cef961..`. **They are not pushed** —
+   that is the only thing left from this item.
+1. **No human has heard it or spoken to it.** Both directions now work against
+   real audio at the API level — Kokoro synthesises, the URL serves
+   `200 audio/wav`, Opus-in-WebM decodes, Whisper transcribes, the weight
+   download was refused and then permitted and observed. What remains untested
+   is the browser at both ends: `MediaRecorder` with a live input device, and
+   `<audio>` playback with a live output device. The specific unknowns:
+   - whether Chromium's muxer produces something PyAV decodes. The fixtures are
+     Opus-in-WebM written by `av`, not by Chromium, so the *format* is exercised
+     and the *producer* is not.
+   - whether `vad_filter` handles real room noise. It is proven on synthetic
+     silence, which is the easy case; a fan and a street are not.
+   - whether autoplay policy blocks the reply audio. `speechStore` handles it
+     and now renders the reason, but it has never fired.
+   - **speech only plays when the embodiment toggle is set to `avatar`** — the
+     landing default is the orb, and nothing on screen says so. That is a real
+     UX gap and the most likely reason a tester reports silence now that the
+     404 is fixed.
+2. **Speech must not write figures.** See the currency finding above: *naira*
+   came back as **$**. Before M9/M9a lets anything dictated near an invoice,
+   decide whether amounts are typed-only or confirmed, and whether `small` is
+   worth its extra weight.
 3. **The citation UI's `web` half has never been rendered with real data.**
    Unchanged from 8 August. Built against a shape the backend can emit and has
    not, because search is default-deny. **Do not treat that path as verified.**
@@ -124,7 +460,10 @@ Worst first. Nothing is broken.
    decision was "warn, never block" — which needs a real number to warn with,
    not the invented "~1.5 GB" that appeared in conversation.
 5. **`Artifact.indexed` interaction with project scope is unexamined.**
-6. **One unexplained 404 on every page load.** Still present.
+6. **One unexplained 404 on every page load.** Still present, and **not** the
+   audio 404 fixed this session — that one was per-utterance, on
+   `/audio/{filename}`, and is closed. This is a single request on page load,
+   unidentified since 8 August.
 
 ### Queued — the architecture discussed, not started
 
@@ -161,6 +500,63 @@ solved by LiteLLM; behaviour is solved by nobody. Mine Letta, Aider's
 `CONVENTIONS.md`, Continue.dev, Instructor/Outlines for patterns — never adopt
 as architecture, and verify every licence at adoption. It needs an eval, built
 as carefully as the recall eval, or it is a claim in a pitch deck.
+
+### The local model is not the centre of truth — the Spine is
+
+Decided 10 August 2026, in conversation, and written here because it is the
+shape of the consistent mind above and the question will otherwise be re-asked
+every time someone notices how much a cloud turn costs.
+
+**The proposal.** Make a resident local model the centre of truth: it holds
+context across sessions, projects and chats, recalls fast, stays consistent, and
+keeps the cloud models in line — so a session uploads almost nothing and spends
+almost no tokens.
+
+**The half that is right, and it is the more important half.** Sending recalled
+*facts* instead of transcripts is the whole economic argument for this product,
+and it compounds per turn. `MAX_RECALL` is 6. That is the difference between
+carrying a project's history into every message and carrying six sentences.
+
+**The half that is wrong.** Truth must live in records, not in weights. Rule 2 —
+every recalled fact carries provenance — is only enforceable when a fact is a
+row with a source. A model *is* the hallucination the Spine exists to remove, so
+promoting it to the authority reintroduces the failure and removes the ability
+to detect it: an answer from weights cannot be corrected, deleted, or traced,
+which takes rules 2 and 4 with it. **The model is a renderer of the Spine, never
+a copy of it.**
+
+**What the local model can be trusted with — one test: is the output checkable
+against a source?**
+
+| Job | Checkable | Verdict |
+|---|---|---|
+| Routing | deterministic, no generation | already built, embeddings |
+| Query rewriting for recall | against what it retrieves | yes |
+| Schema-constrained extraction (obligations, invoice fields) | against the source clause | yes — and it is M9a |
+| Session → fact compaction | against the transcript | yes |
+| Open-ended reasoning and drafting | no | route it |
+
+A local model **supervising** a cloud model fails that test and is rejected:
+it is a second thing that can hallucinate, holding no ground truth the Spine
+does not already hold. Where a check is genuinely possible it should be a
+lookup — does every claim trace to a source — not an inference. That is rule 2
+and rule 9, which already exist, rather than a new subsystem.
+
+**Two consequences worth designing for now.**
+
+- **Prompt-cache order.** A recall block that varies every turn sits in front of
+  the stable text and busts the provider's prefix cache, so the token saving is
+  paid back as a lost cache discount. The payload wants **stable prefix first**
+  (the provider-neutral system prompt, global-scope style facts, project
+  constants) and **varying recall after it**. This is a constraint on the
+  consistent mind's system prompt, not a separate piece of work — and it is
+  measurable, so it belongs in that eval.
+- **Do not put the local model on the critical path of every request.** Rule 1
+  means the user brings their own model, so on a 6 GB machine that model is
+  small. If every request must pass through it, Zaram's quality is gated by the
+  user's GPU in a way *any model, one memory, nothing leaves without you seeing
+  it* does not promise. The **Spine** is what belongs on the critical path: it
+  is deterministic and needs no accelerator at all.
 
 ### Two inert features became real, and both were inert for the same reason
 
