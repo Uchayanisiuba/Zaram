@@ -151,6 +151,34 @@ def _texture_bytes(gltf: dict, binary: bytes) -> tuple[int, list[tuple[int, int]
     return total, sizes
 
 
+def _mesh_complexity(gltf: dict) -> tuple[int, int]:
+    """Triangles and vertices in the asset.
+
+    Reported alongside the VRAM because they answer a different question and
+    people conflate them. VRAM decides whether a model *fits*; triangle count
+    decides what a frame *costs*. An asset can be heavy in one and trivial in
+    the other, and this one is — see the printed breakdown.
+    """
+    accessors = gltf.get("accessors", [])
+    triangles = 0
+    vertices = 0
+
+    for mesh in gltf.get("meshes", []):
+        for primitive in mesh.get("primitives", []):
+            # mode 4 is TRIANGLES, and is the default when mode is absent.
+            if primitive.get("mode", 4) != 4:
+                continue
+            position = primitive.get("attributes", {}).get("POSITION")
+            if position is not None:
+                vertices += accessors[position]["count"]
+            if "indices" in primitive:
+                triangles += accessors[primitive["indices"]]["count"] // 3
+            elif position is not None:
+                triangles += accessors[position]["count"] // 3
+
+    return triangles, vertices
+
+
 def _geometry_bytes(gltf: dict) -> int:
     """Bytes of vertex and index data uploaded to the GPU.
 
@@ -200,7 +228,9 @@ class TestTheAvatarFitsTheGpuBudget:
             for width, height in sorted(sizes, reverse=True)[:8]:
                 each = width * height * BYTES_PER_PIXEL * MIPMAP_MULTIPLIER
                 print(f"      {width:>5} x {height:<5} {each / 1e6:7.1f} MB")
+            triangles, vertices = _mesh_complexity(gltf)
             print(f"  geometry  {geometry / 1e6:8.1f} MB")
+            print(f"  mesh      {triangles:,} triangles, {vertices:,} vertices")
             print(f"  TOTAL     {total / 1e6:8.1f} MB of texture + geometry VRAM\n")
 
         assert total > 0, "measured nothing, which means the parse failed silently"
