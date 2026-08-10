@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import time
 import hashlib
+import urllib.parse
 from typing import Any
 
 from .contracts import (
@@ -15,6 +16,8 @@ from .contracts import (
     InternetStatus,
     InternetCache,
 )
+from core.egress import EgressDenied, get_gate
+
 from .cache import InMemoryInternetCache, create_internet_cache
 
 
@@ -91,6 +94,25 @@ class DuckDuckGoConnector(BaseInternetConnector):
             self._last_error = "duckduckgo-search not installed"
 
     async def search(self, query: SearchQuery) -> list[SearchResult]:
+        # DDGS opens its own connection, so the gate cannot carry these bytes.
+        # It can still own the decision, which is the property that matters:
+        # ask first, and under default deny the library is never reached.
+        #
+        # This module was exempted in test_egress_chokepoint.py as "dormant:
+        # internet runtime does not boot", and the transitive reachability walk
+        # showed the bootstrapper reaches it. Dormancy that nobody checks is
+        # worth exactly nothing — the same lesson knowledge/providers/
+        # duckduckgo_provider.py cost, applied to the other copy.
+        #
+        # The query string is the user's question, which is exactly the outbound
+        # text Rule 3 exists to record.
+        probe = "https://duckduckgo.com/?q=" + urllib.parse.quote(query.query)
+        try:
+            get_gate().check(probe, source="internet-runtime")
+        except EgressDenied as denied:
+            self._last_error = str(denied)
+            return []
+
         if not self._ddgs:
             self._init_ddgs()
             if not self._ddgs:

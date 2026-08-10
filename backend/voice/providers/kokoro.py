@@ -47,12 +47,14 @@ from __future__ import annotations
 import asyncio
 import io
 import logging
+import os
 import time
 from dataclasses import dataclass, field
 from typing import Any, AsyncIterator, Callable, Dict, List, Optional, Protocol
 
 import numpy as np
 
+from core.egress import EgressDenied, get_gate
 from voice.config import KokoroConfig
 from voice.exceptions import ProviderUnavailableError
 from voice.health import AudioCache
@@ -220,17 +222,71 @@ class KokoroProvider(VoiceProvider):
             "provider": self.name,
         }
 
-    def _ensure_pipeline(self) -> Any:
-        if self._pipeline is not None:
-            return self._pipeline
-        if self._kokoro is None:
-            raise ProviderUnavailableError("Kokoro package is not available")
+    def _build_pipeline(self) -> Any:
         factory = self._pipeline_factory or _default_pipeline_factory
-        self._pipeline = factory(
+        return factory(
             repo_id=self.config.repo_id,
             lang_code=self.config.lang_code,
             device=self.config.device,
         )
+
+    def _ensure_pipeline(self) -> Any:
+        """Load the model, asking the gate first if the weights are not here.
+
+        **This used to just construct KPipeline**, which resolves through
+        ``huggingface_hub`` and downloads ~315 MB from huggingface.co without
+        asking anyone. Worse, ``health_check`` called it as a side effect of
+        reporting health and ``initialize`` called ``health_check``, so the
+        backend fetched the model on every boot, unlogged, while
+        ``load_model_eagerly`` sat at ``False``. A flag deliberately turned off
+        and a different path doing the thing anyway is a pattern this codebase
+        has now hit five times.
+
+        The remedy is the one ``voice/stt/whisper.py`` uses, and the ordering is
+        the point: cached weights are the ordinary case and must touch nothing,
+        so the gate is asked only when there is genuinely something to fetch.
+        Asking unconditionally would fill the egress log with decisions about
+        requests that were never going to happen.
+        """
+        if self._pipeline is not None:
+            return self._pipeline
+        if self._kokoro is None:
+            raise ProviderUnavailableError("Kokoro package is not available")
+
+        # `KPipeline` has no `local_files_only`, but everything underneath it
+        # honours HF_HUB_OFFLINE, so that is the lever. Restored afterwards
+        # rather than left set: this process may legitimately fetch other things.
+        previous = os.environ.get("HF_HUB_OFFLINE")
+        os.environ["HF_HUB_OFFLINE"] = "1"
+        try:
+            self._pipeline = self._build_pipeline()
+            return self._pipeline
+        except Exception as offline_failure:
+            self._log.info(
+                "Kokoro weights are not cached (%s); asking the gate before fetching",
+                type(offline_failure).__name__,
+                extra={"provider": self.name},
+            )
+        finally:
+            if previous is None:
+                os.environ.pop("HF_HUB_OFFLINE", None)
+            else:
+                os.environ["HF_HUB_OFFLINE"] = previous
+
+        url = f"https://huggingface.co/{self.config.repo_id}"
+        try:
+            get_gate().check(url, source="text-to-speech")
+        except EgressDenied as denied:
+            # Default deny is the ordinary answer, not an error. Raised as
+            # unavailable so the caller reports it the way it reports any other
+            # missing engine — with a reason a user can act on.
+            raise ProviderUnavailableError(
+                f"Speech needs the Kokoro voice model, which is not on this machine "
+                f"yet. Downloading it from huggingface.co (about 315 MB, one time) "
+                f"was blocked: {denied}"
+            ) from denied
+
+        self._pipeline = self._build_pipeline()
         return self._pipeline
 
     def _to_wav_bytes(self, audio: Any, sample_rate: int) -> bytes:
@@ -505,17 +561,30 @@ class KokoroProvider(VoiceProvider):
     async def available_voices(self) -> Dict[str, Any]:
         return dict(self._voices)
 
-    async def health_check(self) -> Dict[str, Any]:
+    async def health_check(self, *, probe_model: bool = False) -> Dict[str, Any]:
+        """Report health. **Does not load the model unless asked.**
+
+        ``probe_model`` defaults to False, and that default is the whole fix.
+        This method used to call ``_ensure_pipeline()`` unconditionally, and
+        ``initialize()`` calls this method — so reporting health was how the
+        model got loaded, and the boot sequence fetched ~315 MB from
+        huggingface.co on every launch while the eager-load flag said no.
+
+        A health check that changes what it is measuring is not a health check.
+        The model loads on the first synthesis, which is where it belongs.
+        """
         checks: Dict[str, Any] = {}
         checks["kokoro_import"] = self._kokoro is not None
 
-        model_ok = False
-        try:
-            self._ensure_pipeline()
-            model_ok = True
-        except Exception as exc:
-            checks["model_error"] = f"{type(exc).__name__}: {exc}"
+        model_ok = self._pipeline is not None
+        if probe_model and not model_ok:
+            try:
+                self._ensure_pipeline()
+                model_ok = True
+            except Exception as exc:
+                checks["model_error"] = f"{type(exc).__name__}: {exc}"
         checks["model_available"] = model_ok
+        checks["model_loaded"] = self._pipeline is not None
 
         checks["voices_detected"] = len(self._voices)
         checks["cache_writable"] = self._cache.is_writable()
@@ -533,11 +602,17 @@ class KokoroProvider(VoiceProvider):
                 synthesis_test = {"success": False, "error": str(exc)}
         checks["synthesis_test"] = synthesis_test
 
-        available = bool(
-            checks["kokoro_import"]
-            and checks["cache_writable"]
-            and (model_ok or checks["voices_detected"] > 0)
-        )
+        # "The engine is installed and can write its output." Deliberately *not*
+        # "the weights are here": establishing that would mean loading them, and
+        # loading them at health-check time is the defect this method just had.
+        #
+        # Different from `WhisperRecogniser.is_available()`, which does require a
+        # loaded model — and the asymmetry is the honest one. Listening decides
+        # whether to *offer a button*, so it must know before the user presses.
+        # Speaking follows a reply that has already arrived, so resolving the
+        # weights on first use costs a delay rather than a dead control, and the
+        # refusal carries its own reason when it comes.
+        available = bool(checks["kokoro_import"] and checks["cache_writable"])
 
         report = {
             "provider": self.name,

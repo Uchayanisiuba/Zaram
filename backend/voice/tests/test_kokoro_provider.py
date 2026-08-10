@@ -151,8 +151,43 @@ async def test_health_check_healthy(tmp_path: Path):
     assert report["voices"] == len(SAMPLE_VOICES)
     assert report["cache"] == "ok"
     assert report["checks"]["kokoro_import"] is True
-    assert report["checks"]["model_available"] is True
     assert report["checks"]["cache_writable"] is True
+    # `available` now means "the engine is installed and can write its output",
+    # not "the weights are here". Establishing the second requires loading them,
+    # and loading them from a health check is the defect below.
+    assert report["checks"]["model_loaded"] is False
+
+
+async def test_health_check_does_not_load_the_model(tmp_path: Path):
+    """The boot-time egress bug, as a guard.
+
+    `health_check` called `_ensure_pipeline()` unconditionally and `initialize`
+    calls `health_check`, so reporting health is how the model got loaded — and
+    KPipeline resolves through huggingface_hub. The backend therefore fetched
+    weights from huggingface.co on **every boot, unlogged**, while
+    `load_model_eagerly` sat at False and `test_egress_chokepoint.py` asserted
+    the module was dormant.
+
+    A flag deliberately turned off and another path doing the thing anyway is a
+    pattern this codebase has now hit five times. This is the one that made a
+    network request.
+    """
+    provider = make_provider(tmp_path)
+    await provider.initialize()
+
+    assert provider._pipeline is None, (
+        "initialize() built the pipeline. On a real install that reaches "
+        "huggingface.co before the user has consented to anything."
+    )
+
+    await provider.health_check()
+    assert provider._pipeline is None, "health_check() built the pipeline"
+
+    # Asking for it explicitly still works — the capability moved behind a
+    # parameter, it did not disappear.
+    report = await provider.health_check(probe_model=True)
+    assert report["checks"]["model_available"] is True
+    assert provider._pipeline is not None
 
 
 async def test_health_check_invalid_cache(tmp_path: Path):
