@@ -13,8 +13,17 @@ accurate — it is the first thing anyone reads.
 
 ## Current state — 10 August 2026
 
-**Suite: 0 failures.** 1388 → 1426 → 1433 → **1436/0**, 8 skipped, 85–113s from
-the repo root on a full dev install. Run pytest **from the repo root** — `--ignore` in
+**Suite: 0 failures.** 1388 → 1426 → 1433 → 1436 → 1453 → 1457 → **1470/0**,
+8 skipped, 85–170s from the repo root on a full dev install. Frontend: 40 vitest
+across 4 files, build and typecheck green.
+
+**Check which build is answering before debugging anything.** `curl
+localhost:8420/health | jq .build` reports the commit and uptime. A backend
+started at 06:32 on 10 August served that port all day while two *already
+fixed* bugs — the audio 404 and recall on a greeting — were reported live and
+re-diagnosed against it. Windows lets a second uvicorn bind `0.0.0.0:8420`
+beside a `127.0.0.1:8420` without an error, and the older process wins. A
+backend with no `build` field predates this and is stale by definition. Run pytest **from the repo root** — `--ignore` in
 `pyproject.toml` is rootdir-relative and running from `backend/` still aborts
 the whole suite.
 
@@ -558,10 +567,13 @@ Worst first. Nothing is broken.
      landing default is the orb, and nothing on screen says so. That is a real
      UX gap and the most likely reason a tester reports silence now that the
      404 is fixed.
-2. **Speech must not write figures.** See the currency finding above: *naira*
-   came back as **$**. Before M9/M9a lets anything dictated near an invoice,
-   decide whether amounts are typed-only or confirmed, and whether `small` is
-   worth its extra weight.
+2. ~~**Speech must not write figures.**~~ Decided and enforced, 10 August:
+   **confirmed, not typed-only**. `backend/voice/stt/figures.py` flags any
+   amount, currency or number in a transcript and `/voice/transcribe` returns
+   it; the composer renders an amber caution naming the observed failure. It
+   **never corrects** — rewriting `$` to `₦` is guessing intent from unreliable
+   audio. Still open: whether Whisper `small` fixes the currency, worth
+   measuring before M9/M9a.
 3. **The citation UI's `web` half has never been rendered with real data.**
    Unchanged from 8 August. Built against a shape the backend can emit and has
    not, because search is default-deny. **Do not treat that path as verified.**
