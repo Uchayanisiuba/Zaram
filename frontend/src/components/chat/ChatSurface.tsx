@@ -23,6 +23,7 @@ import { useSystemStore } from '@/stores/systemStore';
 import ProjectScopePicker from './ProjectScopePicker';
 import MicButton from './MicButton';
 import CitationSummary from './CitationChips';
+import SpeakButton from './SpeakButton';
 import CitationPanel from './CitationPanel';
 import {
   useLayoutStore,
@@ -322,6 +323,11 @@ export default function ChatSurface() {
                       onOpenSource={(s, el) => s.url && openSourcePanel(s.url, el)}
                     />
                   )}
+                  {/* The "unless asked" half of "orb, silent unless asked".
+                      Without it the landing default is silent with no way to
+                      hear a reply and nothing saying why — which reads as a
+                      broken voice extra rather than as a deliberate default. */}
+                  {msg.role === 'assistant' && <SpeakButton text={stripMarkers(msg.text)} />}
                   {/* Files made by this reply. CLAUDE.md: generated files
                       appear as cards in the conversation. */}
                   {msg.artifacts?.map((artifact) => (
