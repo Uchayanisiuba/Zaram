@@ -13,8 +13,8 @@ accurate — it is the first thing anyone reads.
 
 ## Current state — 10 August 2026
 
-**Suite: 0 failures.** 1388 → 1426 → **1433/0**, 8 skipped, 85s from the repo
-root on a full dev install. Run pytest **from the repo root** — `--ignore` in
+**Suite: 0 failures.** 1388 → 1426 → 1433 → **1436/0**, 8 skipped, 85–113s from
+the repo root on a full dev install. Run pytest **from the repo root** — `--ignore` in
 `pyproject.toml` is rootdir-relative and running from `backend/` still aborts
 the whole suite.
 
@@ -24,8 +24,7 @@ That gap is closed: the whole suite has now been run at **1433/0**, and the
 frontend is green on all four gates — `npm run build` (which runs the three
 scanners), `vitest run` at **25/25** across 2 files, and `tsc --noEmit`.
 
-**Everything is committed**, `0cef961..` on `Zaram-V0.1`, four commits, not yet
-pushed.
+**Everything is committed and pushed**, `0cef961..` on `Zaram-V0.1`.
 
 **Run it with `.venv/Scripts/python.exe`, not with whatever `python` resolves
 to.** The system Python 3.11 on this machine has pytest but not the dev install,
@@ -131,6 +130,74 @@ and **not yet pushed**. Each is written up in full in the sections below.
 - **`fc1fb42` Three holes in the guards.** The CSS universal selector, the
   block-comment blind spot, and exemptions that had stopped being needed.
 - **`docs`** — this file.
+
+### The avatar costs ~190 MB of VRAM, not the invented 1.5 GB
+
+`backend/tests/test_avatar_vram_budget.py` weighs `AvatarSample_Z.vrm` by
+parsing the glTF container — a VRM *is* glTF 2.0, so no VRM library is needed
+and none was added — and computing what the GPU actually holds:
+
+| | |
+|---|---|
+| File on disk | 16.4 MB |
+| Textures, 27 images, decoded RGBA8 + mipmaps | **182.5 MB** |
+| Geometry, vertex and index buffers | **7.5 MB** |
+| **Texture + geometry VRAM** | **189.9 MB** |
+
+Six 2048×2048 textures at 22.4 MB each are 134 MB of the 182. **The file size is
+not the footprint** and is out by a factor of twelve: textures ship compressed
+and land decoded at four bytes a pixel, plus a third again for mipmaps. A test
+asserts that direction so the mistake cannot be made quietly.
+
+**Against the budget this is nothing.** `CLAUDE.md` reserves ~9.1 GB on the
+12 GB card for a chat model; 190 MB is 2% of it, and the gaps between installed
+model sizes are 1–3 GB. The avatar cannot change which model fits. The "~1.5 GB"
+that appeared in conversation was wrong by eight times, in the direction that
+would have killed the feature.
+
+**Corroborated live, and the live instrument is the weaker one.** Toggled
+orb↔avatar three times on the RTX 3060 at 1280×720 in a real browser, reading
+total board memory with `nvidia-smi`: deltas of **189, 433 and 122 MiB**. Same
+order of magnitude, nothing near 1.5 GB, and memory returned *below* its
+starting point afterwards — so nothing leaks per cycle. But a 3.5× spread is
+what total-board memory is worth on a shared desktop, which is why the asset
+arithmetic is the number and this is only its check. GPU utilisation went 25% →
+31% with the avatar rendering.
+
+Two things this deliberately does **not** include: the framebuffer and depth
+buffer, and three.js's own allocations. Those scale with the viewport and the
+renderer rather than with the model, so they do not move when the avatar is
+swapped — and a ceiling can only protect the half that moves. Also confirmed by
+reading the live page: **the orb landing creates no canvas at all**
+(`document.querySelectorAll('canvas').length === 0`), so the orb path genuinely
+pays nothing for `three`.
+
+The ceiling is set at 512 MB. It is a budget decision, not a measurement, and
+raising it means re-checking that it still cannot change which model fits.
+
+### The page-load 404 was the favicon nobody declared
+
+Open since 8 August, closed 10 August. `frontend/index.html` declared no icon
+link, so every browser asked for `/favicon.ico` by default — and nothing serves
+it, because `public/` holds `favicon.svg`, unreferenced.
+
+It survived two days because of where it does *not* appear: a favicon request is
+in neither the console nor `performance.getEntriesByType('resource')`, so both
+places anyone looks were empty while the request was real. It was found by
+reading the HTML, not by watching the network. `curl` settles it —
+`/favicon.ico` 404, `/favicon.svg` 200.
+
+**Two more defects in the same file, same cause.** The title was literally
+`<!-- figma:title -->` and `lang` was `<!-- figma:lang -->`: an unfinished Figma
+export still rendering its own placeholders. The browser tab said
+`<!-- figma:title -->`. `lang` is not cosmetic — a screen reader takes its
+pronunciation from it.
+
+All three are guarded by `frontend/src/index-html.test.ts`, mutation-checked
+against the pre-fix file. This is the one file nothing else covers — not
+imported, not type-checked, not rendered by any component test — and it is also
+the file the next Figma export overwrites, which is why the placeholders get a
+test and not just a fix.
 
 ### The avatar was silent because every audio URL 404'd
 
@@ -427,9 +494,7 @@ mutation-tested before being believed; this is the same debt paid the same way.
 
 Worst first. Nothing is broken.
 
-0. ~~**Run the full suite and commit.**~~ Done, 10 August: **1433/0**, frontend
-   green on all four gates, four commits `0cef961..`. **They are not pushed** —
-   that is the only thing left from this item.
+0. ~~**Run the full suite and commit.**~~ Done and pushed, 10 August.
 1. **No human has heard it or spoken to it.** Both directions now work against
    real audio at the API level — Kokoro synthesises, the URL serves
    `200 audio/wav`, Opus-in-WebM decodes, Whisper transcribes, the weight
@@ -454,16 +519,13 @@ Worst first. Nothing is broken.
 3. **The citation UI's `web` half has never been rendered with real data.**
    Unchanged from 8 August. Built against a shape the backend can emit and has
    not, because search is default-deny. **Do not treat that path as verified.**
-4. **The avatar's GPU cost is unmeasured**, and `docs/UI-SPEC.md` forbids 3D on
-   the landing on GPU-budget grounds. It renders permanently while a local model
-   is resident. This is the measurement that decides whether it ships, and the
-   decision was "warn, never block" — which needs a real number to warn with,
-   not the invented "~1.5 GB" that appeared in conversation.
+4. ~~**The avatar's GPU cost is unmeasured.**~~ **Measured: ~190 MB.** See
+   below. What remains is not measurement but the decision it unblocks — the
+   warning copy, and whether `docs/UI-SPEC.md`'s ban on 3D on the landing
+   survives a number this small.
 5. **`Artifact.indexed` interaction with project scope is unexamined.**
-6. **One unexplained 404 on every page load.** Still present, and **not** the
-   audio 404 fixed this session — that one was per-utterance, on
-   `/audio/{filename}`, and is closed. This is a single request on page load,
-   unidentified since 8 August.
+6. ~~**One unexplained 404 on every page load.**~~ Closed, 10 August: it was
+   `/favicon.ico`. See below.
 
 ### Queued — the architecture discussed, not started
 
