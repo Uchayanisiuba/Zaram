@@ -139,3 +139,8 @@ zaram-ai-operating-system-ui/
 # Test VRM avatars. Large binaries, and the sample is a licensed VRoid
 # export rather than ours to redistribute.
 *.vrm
+
+# Projects — the user's own project records, like the Spine and artifacts.
+backend/projects.db
+backend/projects.db-wal
+backend/projects.db-shm

@@ -484,6 +484,64 @@ class MemoryRuntimeImpl(MemoryRuntime):
         await self._index.remove(record_id)
         return await self._store.delete(record_id)
 
+    # ------------------------------------------------------------------
+    # Scope-wide operations
+    #
+    # These exist for deleting a project. A project holds facts, and rule 4
+    # gives the *user* power over their facts — so a container must be able to
+    # say exactly what it is about to do to them, and then do only that.
+    # ------------------------------------------------------------------
+
+    async def count_by_scope(self, scope: str) -> int:
+        """How many facts carry this scope.
+
+        Read before a destructive confirmation, so the user is told "11 facts"
+        rather than asked to trust that a number exists somewhere.
+        """
+        records = await self._store.all_records()
+        return sum(1 for record in records if record.scope == scope)
+
+    async def rescope_to_global(self, scope: str) -> int:
+        """Move every fact in this scope to global. Returns how many moved.
+
+        The recoverable half of deleting a project: the grouping goes, the
+        knowledge stays. Rule 7i is what makes this cheap — scope is one field
+        on one store, and facts are *meant* to move between scopes, so this is
+        the ordinary operation rather than a migration.
+        """
+        records = await self._store.all_records()
+        moved = 0
+        for record in records:
+            if record.scope != scope:
+                continue
+            await self._store.put(
+                MemoryRecord(**{**record.__dict__, "scope": GLOBAL_SCOPE, "updated_at": time.time()})
+            )
+            moved += 1
+        if moved and self._event_bus:
+            self._event_bus.publish(ZaramEvent(
+                source_runtime="memory",
+                event_type="memory.scope_changed",
+                priority="normal",
+                data={"scope": GLOBAL_SCOPE, "was": scope, "count": moved},
+            ))
+        return moved
+
+    async def forget_scope(self, scope: str) -> int:
+        """Delete every fact in this scope. Returns how many went.
+
+        Never the default anywhere, and never implicit. This is rule 4 being
+        exercised deliberately by the user, which is the only way it may be
+        exercised — a sidebar tidy-up must not be able to reach it by accident.
+        """
+        records = await self._store.all_records()
+        gone = 0
+        for record in records:
+            if record.scope == scope:
+                if await self.forget(record.id):
+                    gone += 1
+        return gone
+
     async def consolidate(self) -> dict[str, Any]:
         """Consolidate memories by grouping similar episodic memories into semantic memories.
 

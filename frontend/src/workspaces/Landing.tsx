@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { motion } from 'framer-motion'
-import { Brain, BookOpen, FileText, Settings, ShieldCheck } from 'lucide-react'
+import { Brain, BookOpen, FileText, Layers, Settings, ShieldCheck } from 'lucide-react'
 import { ORB_BEHAVIOUR } from '../components/orb/LivingOrb'
 import Embodiment from '@/components/embodiment/Embodiment'
 import EmbodimentSpikeControls from '@/components/embodiment/EmbodimentSpikeControls'
@@ -18,27 +18,40 @@ import type { WorkspaceId } from '@/runtime/shortcuts/registry'
 // Build, Canvas and Plugins are out of scope for v1 and no longer appear here.
 // Their surfaces are preserved in src/legacy/.
 //
-// Five nodes, each answering a different question the user actually has:
-// Work — what have I got out of this? Memory — what do you know about me?
-// Knowledge — what have you read? Activity — what did you send?
-// Settings — how do you behave?
+// Six nodes, each answering a different question the user actually has:
+// Work — what have I got out of this? Project — how is it grouped?
+// Memory — what do you know about me? Knowledge — what have you read?
+// Activity — what did you send? Settings — how do you behave?
 //
-// Re-spaced 120 → 90 → 72 degrees as Activity and then Work joined. Five is the
-// count; a sixth needs a reason that survives "why is this not part of
-// Conversation?".
+// Re-spaced 120 → 90 → 72 → 60 degrees as Activity, Work and then Project
+// joined. Six is the count; a seventh needs a reason that survives "why is this
+// not part of Conversation?".
 //
-// Work is first because it is the only node holding something the user made.
-// The other four are all about the system, which is the argument for its
-// existence: nobody pays for a memory browser.
+// Work is first because it is the only node holding something the user made,
+// and Project sits beside it because they are adjacent and distinct: Work is
+// the output, Project is the organisation of it. Project earned a node rather
+// than being a filter inside Work because `project:<id>` scopes *facts* — it
+// reaches the Spine, and a filter inside Work cannot own something that scopes
+// Memory. See CLAUDE.md, 10 August 2026.
 //
 // Two icons are deliberately the odd ones out. Activity's shield is evidence
 // rather than exploration — someone arriving there is checking, not browsing.
-// Work's document is an artifact rather than a view of one.
+// Work's document is an artifact rather than a view of one. Project's layers
+// are grouping and deliberately **not** a folder, which would promise the tree
+// the product refuses to build.
+//
+// **The order and membership are checked against `orbitOrder`** below. This
+// list was a restatement of the canonical one and drifted from it the moment
+// Project was added to the registry: the node existed in the rail, in ⌘K and in
+// the router, and the orbit — the first thing anyone sees — silently kept
+// showing five. `orbitOrder` had no consumers at all, which is how a "canonical
+// list" stays canonical only in its docstring.
 const ORBIT_START_ANGLE = 198
-const ORBIT_STEP = 72
+const ORBIT_STEP = 60
 
-const ORBITAL_NODES = [
+export const ORBITAL_NODES = [
   { id: 'work',      label: 'Work',      icon: <FileText size={24} />,    color: '#e5a44c' },
+  { id: 'project',   label: 'Project',   icon: <Layers size={24} />,      color: '#f472b6' },
   { id: 'memory',    label: 'Memory',    icon: <Brain size={24} />,       color: '#c084fc' },
   { id: 'knowledge', label: 'Knowledge', icon: <BookOpen size={24} />,    color: '#22d3ee' },
   { id: 'activity',  label: 'Activity',  icon: <ShieldCheck size={24} />, color: '#34d399' },

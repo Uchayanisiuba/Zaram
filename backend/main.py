@@ -833,10 +833,173 @@ async def list_artifacts(
 async def list_artifact_projects():
     """Projects that actually hold artifacts, with counts.
 
-    Derived from the artifacts themselves rather than stored separately, so Work
-    cannot offer a filter that leads to an empty list.
+    A *view over artifacts*, and now explicitly only that. It is what Work uses
+    to offer a filter that cannot lead to an empty list. The list of projects
+    that **exist** is `/projects`, which is a different question and used to be
+    conflated with this one — a project you had only talked about was invisible,
+    and one made by a typo could never be removed.
     """
     return {"projects": artifact_service.records.projects()}
+
+
+# --------------------------------------------------------------------------- #
+# Projects
+#
+# A project is an object here, not a label derived from artifacts. It carries
+# the type that activates a pack, and it exists before anything has been saved
+# into it — which is what lets a user work *inside* a project and have their
+# facts scoped to it, rather than only after they have generated a file.
+# --------------------------------------------------------------------------- #
+
+from projects import ProjectRecords, ProjectType, UnknownProject  # noqa: E402
+from projects.records import default_db_path as projects_db_path  # noqa: E402
+
+project_records = ProjectRecords(projects_db_path())
+
+
+def _project_json(project) -> Dict[str, Any]:
+    return {
+        "id": project.id,
+        "name": project.name,
+        "type": project.type.value,
+        "created_at": project.created_at,
+        "note": project.note,
+        "scope": project.scope,
+    }
+
+
+class ProjectCreateRequest(BaseModel):
+    name: str
+    type: str = "general"
+    note: str = ""
+
+
+class ProjectUpdateRequest(BaseModel):
+    name: str | None = None
+    type: str | None = None
+    note: str | None = None
+
+
+@app.get("/projects")
+async def list_projects():
+    """Every project that exists, with what is in it.
+
+    The counts come from the stores that own those things rather than from a
+    column here, so they cannot drift. They are what the delete confirmation is
+    built on: "this holds 3 files and 11 facts" is the difference between an
+    informed decision and a surprise.
+    """
+    out = []
+    for project in project_records.list():
+        entry = _project_json(project)
+        entry["artifacts"] = artifact_service.records.count_for_project(project.id)
+        entry["facts"] = await _fact_count_for_scope(project.scope)
+        out.append(entry)
+    return {"projects": out}
+
+
+async def _fact_count_for_scope(scope: str) -> int:
+    """How many facts are scoped to this project, or ``-1`` when unknown.
+
+    ``-1`` rather than ``0``: a memory runtime that cannot answer is not the
+    same as a project with no facts, and showing "0 facts" on a delete
+    confirmation that then destroys eleven of them is the exact failure this
+    count exists to prevent.
+    """
+    try:
+        runtime = kernel.memory_runtime
+        if runtime is None:
+            return -1
+        return await runtime.count_by_scope(scope)
+    except Exception:
+        return -1
+
+
+@app.post("/projects")
+async def create_project(body: ProjectCreateRequest):
+    try:
+        project = project_records.create(
+            body.name, type=ProjectType(body.type), note=body.note
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return _project_json(project)
+
+
+@app.patch("/projects/{project_id}")
+async def update_project(project_id: str, body: ProjectUpdateRequest):
+    """Rename, retype or annotate. **The id never moves.**
+
+    Facts carry `project:<id>` and artifacts carry `project_id`; re-slugging on
+    rename would orphan every one of them.
+    """
+    try:
+        project = project_records.get(project_id)
+        if body.name is not None:
+            project = project_records.rename(project_id, body.name)
+        if body.type is not None:
+            project = project_records.set_type(project_id, ProjectType(body.type))
+        if body.note is not None:
+            project = project_records.set_note(project_id, body.note)
+    except UnknownProject:
+        raise HTTPException(status_code=404, detail=f"No project called {project_id!r}.")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return _project_json(project)
+
+
+@app.delete("/projects/{project_id}")
+async def delete_project(project_id: str, contents: str = "keep"):
+    """Remove a project. **The caller must say what happens to its contents.**
+
+    `contents=keep` re-scopes the project's facts to global and leaves its files
+    where they are, so nothing is lost — only the grouping. This is the default
+    because it is the recoverable one.
+
+    `contents=delete` removes the facts too. It is never implicit: a container
+    quietly exercising rule 4 on the user's behalf is how someone loses a
+    client's rates by tidying a sidebar.
+
+    Files are never deleted by either path. Zaram has no capability to remove a
+    file from disk and deliberately never has — that is the operating system's
+    job, and a record claiming a file is gone while it sits in the output folder
+    is worse than no record.
+    """
+    if contents not in ("keep", "delete"):
+        raise HTTPException(
+            status_code=400,
+            detail="contents must be 'keep' (re-scope facts to global) or 'delete'.",
+        )
+
+    try:
+        project = project_records.get(project_id)
+    except UnknownProject:
+        raise HTTPException(status_code=404, detail=f"No project called {project_id!r}.")
+
+    moved = removed = 0
+    try:
+        runtime = kernel.memory_runtime
+        if runtime is not None:
+            if contents == "keep":
+                moved = await runtime.rescope_to_global(project.scope)
+            else:
+                removed = await runtime.forget_scope(project.scope)
+    except Exception as exc:
+        # The facts are the irreplaceable half. If they cannot be dealt with,
+        # the project stays — a half-completed delete that orphans facts under a
+        # scope nothing points at is worse than a delete that did not happen.
+        raise HTTPException(
+            status_code=500,
+            detail=f"The project was left in place: its facts could not be {contents}d ({exc}).",
+        )
+
+    project_records.delete(project_id)
+    return {
+        "deleted": project_id,
+        "facts_moved_to_global": moved,
+        "facts_deleted": removed,
+        "files_untouched": artifact_service.records.count_for_project(project_id),
+    }
 
 
 @app.get("/artifacts/formats")

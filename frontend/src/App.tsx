@@ -17,6 +17,7 @@ import CommandPalette from './components/CommandPalette';
 import LandingHint from './components/shell/LandingHint';
 import Landing from './workspaces/Landing';
 import WorkWorkspace from './workspaces/WorkWorkspace';
+import ProjectWorkspace from './workspaces/ProjectWorkspace';
 import MemoryWorkspace from './workspaces/MemoryWorkspace';
 import KnowledgeWorkspace from './workspaces/KnowledgeWorkspace';
 import ActivityWorkspace from './workspaces/ActivityWorkspace';
@@ -129,6 +130,11 @@ export default function App() {
           {workspace === 'work' && (
             <div key="work" style={{ flex: 1, display: 'flex', animation: 'fade-in 0.25s ease' }}>
               <WorkWorkspace onOpenConversation={openConversation} />
+            </div>
+          )}
+          {workspace === 'project' && (
+            <div key="project" style={{ flex: 1, display: 'flex', animation: 'fade-in 0.25s ease' }}>
+              <ProjectWorkspace />
             </div>
           )}
           {workspace === 'memory' && (
