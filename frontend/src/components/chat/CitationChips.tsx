@@ -80,16 +80,30 @@ export default function CitationSummary({
   const cited = sources.filter((s) => s.cited);
   const uncited = sources.length - cited.length;
 
-  // The empty state is not optional. This is a claim about *absence*, which the
-  // user cannot infer from missing chips — missing chips could equally mean we
-  // did not bother. A visible no-sources state is more trustworthy than
-  // confident prose with hidden provenance.
-  if (sources.length === 0) {
-    return (
-      <p className="mt-2 text-[10px] text-slate-600 italic">
-        Answered from the model’s own knowledge — nothing from your files.
-      </p>
-    );
+  // Nothing cited, nothing shown. **Citations appear only where there is a
+  // tangible connection to the user's files.**
+  //
+  // This reverses a deliberate earlier decision, and the reasoning it replaces
+  // is worth keeping: the old comment argued that an empty state is a claim
+  // about *absence*, which the user cannot infer from missing chips, and that a
+  // visible no-sources state beats confident prose with hidden provenance. That
+  // holds for a research question. It does not hold for "Hi" — the line
+  // appeared under every greeting and small-talk turn, which taught the user to
+  // stop reading it, and a provenance affordance nobody reads is worse than
+  // none. Maintainer's call, 10 August 2026.
+  //
+  // Safe against rule 3, and not by luck: bytes that leave are disclosed
+  // through `_search_provenance_events`, which is "always cited, never
+  // thresholded". So `cited.length === 0` guarantees nothing left the device,
+  // and this can never hide an egress. If that ever changes, this check has to
+  // change with it — which is why the guarantee is named here rather than
+  // assumed.
+  //
+  // Most of what this used to render is now prevented upstream: `RecallGate`
+  // stops a conversational turn reaching the Spine at all, so there is usually
+  // no source to hide.
+  if (cited.length === 0) {
+    return null;
   }
 
   const leftCount = cited.filter(sourceLeftDevice).length;
