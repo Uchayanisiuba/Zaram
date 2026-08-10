@@ -1,16 +1,24 @@
 <!doctype html>
-<html lang="<!-- figma:lang -->">
+<html lang="en">
   <head>
-    <!-- figma:head-start -->
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title><!-- figma:title --></title>
-    <!-- figma:head-end -->
+    <title>Zaram</title>
+    <!-- Declared, so the browser stops asking for /favicon.ico.
+
+         With no icon link the browser requests /favicon.ico on every page
+         load by default. Nothing serves that path — public/ holds favicon.svg
+         — so it 404'd on every load since this file was written. It went
+         unexplained for two days because a favicon request appears in neither
+         the console nor performance.getEntriesByType('resource'), so the two
+         places anyone looks were both empty. It was found by reading the HTML.
+
+         Referencing the file that exists removes the request rather than
+         satisfying it. -->
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   </head>
   <body>
-    <!-- figma:body-start -->
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
-    <!-- figma:body-end -->
   </body>
 </html>
