@@ -46,6 +46,7 @@ const api = {
   },
   backend: {
     getStatus: () => invoke(Channels.backend.getStatus),
+    checkHealth: () => invoke(Channels.backend.checkHealth),
     restart: () => invoke(Channels.backend.restart),
     onStatus: (listener) => subscribe(MAIN_EVENTS.backendStatus, listener),
   },

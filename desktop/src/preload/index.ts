@@ -16,6 +16,11 @@ const runtimeAPI = {
       const wrapped = (_event: unknown, vp: unknown) => cb(vp)
       ipcRenderer.on('presence:viewport', wrapped)
       return () => ipcRenderer.removeListener('presence:viewport', wrapped)
+    },
+    onEvent: (cb: (event: unknown) => void) => {
+      const wrapped = (_event: unknown, event: unknown) => cb(event)
+      ipcRenderer.on('presence:event', wrapped)
+      return () => ipcRenderer.removeListener('presence:event', wrapped)
     }
   },
   executive: {
@@ -87,6 +92,13 @@ const runtimeAPI = {
       const wrapped = (_event: unknown, event: unknown) => cb(event)
       ipcRenderer.on('vscode:event', wrapped)
       return () => ipcRenderer.removeListener('vscode:event', wrapped)
+    }
+  },
+  runtime: {
+    onPresenceEvent: (cb: (event: unknown) => void) => {
+      const wrapped = (_event: unknown, event: unknown) => cb(event)
+      ipcRenderer.on('presence:event', wrapped)
+      return () => ipcRenderer.removeListener('presence:event', wrapped)
     }
   }
 }

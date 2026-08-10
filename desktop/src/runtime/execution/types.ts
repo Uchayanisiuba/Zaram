@@ -154,6 +154,10 @@ export interface ExecutionError {
 export interface ExecutionControls {
   // Report progress 0..1.
   reportProgress(progress: number): void
+  // Report an incremental token during streaming execution.
+  reportToken(token: string): void
+  // Report an audio chunk during speech synthesis.
+  reportAudioChunk(chunk: AudioChunkEvent): void
   // Finalise the current attempt successfully.
   succeed(output: unknown): void
   // Finalise the current attempt as a failure.
@@ -162,6 +166,17 @@ export interface ExecutionControls {
   isCancelled(): boolean
   // Elapsed ms since this attempt entered 'running'.
   elapsedMs(): number
+}
+
+export interface AudioChunkEvent {
+  type: 'audio'
+  audio_id: string
+  url: string
+  sequence: number
+  final: boolean
+  voice: string
+  timestamp?: number
+  duration?: number
 }
 
 // --- Invoker contract ---------------------------------------------------
@@ -190,6 +205,8 @@ export type ExecutionEventType =
   | 'execution.waiting'
   | 'execution.retrying'
   | 'execution.progress'
+  | 'execution.token'
+  | 'execution.audio_chunk'
   | 'execution.completed'
   | 'execution.cancelled'
   | 'execution.failed'
@@ -205,4 +222,21 @@ export interface ExecutionEvent {
   priority: 'critical' | 'high' | 'normal' | 'background'
   data: Record<string, unknown>
   correlation_id: string | null
+}
+
+export const TERMINAL_EXECUTION_EVENTS: ReadonlySet<ExecutionEventType> = new Set<ExecutionEventType>([
+  'execution.completed',
+  'execution.cancelled',
+  'execution.failed',
+  'execution.rolledback',
+])
+
+import { isTerminal } from './execution-state-machine'
+
+export function isTerminalExecutionEvent(eventType: ExecutionEventType): boolean {
+  return TERMINAL_EXECUTION_EVENTS.has(eventType)
+}
+
+export function isTerminalExecutionStatus(status: ExecutionStatus): boolean {
+  return isTerminal(status)
 }

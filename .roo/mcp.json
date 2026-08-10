@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "Framelink Figma MCP": {
+      "command": "npx",
+      "args": ["-y", "figma-developer-mcp", "--stdio"],
+      "env": {
+        "FIGMA_API_KEY": "PASTE_YOUR_FIGMA_TOKEN_HERE"
+      },
+      "alwaysAllow": ["get_figma_data", "download_figma_images"]
+    },
+    "context7": {
+      "command": "npx",
+      "args": ["-y", "@upstash/context7-mcp"],
+      "alwaysAllow": ["resolve-library-id", "get-library-docs"]
+    }
+  }
+}

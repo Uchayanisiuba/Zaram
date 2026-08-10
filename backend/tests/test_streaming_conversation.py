@@ -1,246 +1,224 @@
-"""Integration tests for the streaming conversation pipeline (v0.5.4B).
+"""Integration tests for the streaming conversation pipeline.
 
-Covers the file-first -> streaming migration:
+    ConversationManager -> tokens out, `conversation:sentence_ready` on the bus
 
-    ConversationManager -> VoiceManager.stream_synthesis()
-        -> KokoroProvider -> AudioChunk -> SSE audio events
+This is the most-used path in the product and it has been effectively uncovered
+since M4. Two separate staleness problems stacked on top of each other:
 
-Text and audio must interleave, audio chunks must be ordered with exactly one
-final chunk per sentence, failures must not crash or hang the conversation, and
-cancellation must tear down text + audio + provider workers cleanly.
+1. `FakeLLM.stream_response` was `(prompt, model)` while the real client had
+   grown `system_prompt`, so every test here failed at argument binding with an
+   error nobody read. Fixed by `tests/llm_doubles.py` plus a contract test.
 
-All tests run offline with injected fakes; no legacy classes are referenced.
+2. Underneath that, this module was written against a `ConversationManager`
+   that took a `VoiceManager` and yielded `audio` events directly
+   (`v0.5.4B-streaming-conversation`). Sprint Alpha.6 replaced that with the
+   event bus: the manager takes an `event_bus`, emits sentences onto it, and
+   the Speech runtime decides whether to speak. Roughly half of these tests
+   asserted `type == "audio"` from the manager and could never have passed
+   again — fixing the double alone just moved the failure one layer down.
+
+So the audio-pipeline assertions are gone from here rather than repaired. They
+belong to the voice stack (`voice/tests/`, `runtimes/speech/`), which is out of
+scope for the alpha and skipped on a base install. What remains is what
+`ConversationManager` actually promises today, which is the part the product
+depends on.
 """
 
 from __future__ import annotations
 
 import asyncio
-import sys
-from pathlib import Path
 
-import numpy as np
-
+from core.event_bus import EventBus
 from services.conversation_manager import ConversationManager
-from voice.config import KokoroConfig
-from voice.health import AudioCache
-from voice.providers.kokoro import KokoroProvider
-from voice.voice_manager import VoiceManager
-
-SAMPLE_VOICES = ["af_heart", "af_bella", "am_adam"]
+from tests.llm_doubles import FakeLLM
 
 
-class FakeLLM:
-    def stream_response(self, prompt: str, model: str):
-        yield from ["Hello", " world", ".", " This is one sentence.", " This is another sentence."]
+def _types(events: list[dict]) -> list[str]:
+    return [e.get("type") for e in events]
 
 
-class MultiChunkFakePipeline:
-    """Yields enough audio that streaming produces several frames per sentence."""
-
-    def __init__(self, fail: bool = False, sample_rate: int = 24000, frames: int = 3) -> None:
-        self.fail = fail
-        self.sample_rate = sample_rate
-        self.frames = frames
-        self.calls: list[tuple[str, str]] = []
-
-    def __call__(self, text: str, voice: str = ""):
-        self.calls.append((text, voice))
-        if self.fail:
-            raise RuntimeError("synthesis boom")
-        # Long enough that stream_audio slices it into `frames` chunks.
-        audio = np.zeros(self.sample_rate, dtype=np.float32)
-        yield ("g", "p", audio)
-
-
-class FakeDiscoverer:
-    def __init__(self, voices: list[str]) -> None:
-        self.voices = list(voices)
-
-    def discover(self, repo_id: str, lang_code: str) -> list[str]:
-        return list(self.voices)
-
-
-async def _ready_manager(tmp_path: Path, *, fail_pipeline: bool = False, pipeline_cls=MultiChunkFakePipeline, voices=None):
-    config = KokoroConfig.load(cache_directory=str(tmp_path / "audio_cache"), default_voice="af_heart")
-    pipeline = pipeline_cls(fail=fail_pipeline, sample_rate=config.sample_rate)
-
-    def factory(*, repo_id: str, lang_code: str, device):
-        return pipeline
-
-    provider = KokoroProvider(
-        config=config,
-        pipeline_factory=factory,
-        voice_discoverer=FakeDiscoverer(voices or SAMPLE_VOICES),
-        cache=AudioCache(config.cache_directory),
-    )
-    manager = VoiceManager()
-    await manager.register_provider(provider.name, provider, set_active=True)
-    await manager.initialize()
-    return manager, provider, pipeline
+def _sentences(bus: EventBus) -> list[str]:
+    """Sentences the manager published, in order."""
+    return [
+        e.data["text"]
+        for e in bus.get_history(limit=1000)
+        if e.event_type == "conversation:sentence_ready"
+    ]
 
 
 # --- completion / no hang -------------------------------------------------- #
-async def test_conversation_completes_with_streaming(tmp_path: Path):
-    manager, _, _ = await _ready_manager(tmp_path)
-    cm = ConversationManager(FakeLLM(), manager)
+def test_conversation_streams_tokens_and_terminates():
+    bus = EventBus()
+    cm = ConversationManager(FakeLLM(), bus)
+
     events = list(cm.run_conversation("hi", "gemma3:latest", "default"))
+
+    assert events[-1] == {"type": "done"}, "must terminate with a 'done' event"
+    assert "token" in _types(events)
+    assert "error" not in _types(events)
+
+
+def test_tokens_arrive_in_the_order_the_engine_produced_them():
+    bus = EventBus()
+    cm = ConversationManager(FakeLLM(tokens=["a", "b", "c", "d."]), bus)
+
+    events = list(cm.run_conversation("hi", "gemma3:latest", "default"))
+    tokens = [e["content"] for e in events if e.get("type") == "token"]
+
+    assert tokens == ["a", "b", "c", "d."], (
+        "the manager hands tokens between two threads through a queue; "
+        "reordering here would reorder the reply the user reads"
+    )
+
+
+def test_done_is_last_and_appears_once():
+    bus = EventBus()
+    cm = ConversationManager(FakeLLM(), bus)
+
+    events = list(cm.run_conversation("hi", "gemma3:latest", "default"))
+
+    assert _types(events).count("done") == 1
+    assert _types(events)[-1] == "done"
+
+
+# --- what actually reaches the engine -------------------------------------- #
+def test_the_model_and_system_prompt_reach_the_engine():
+    """M4's bug, held down by a test.
+
+    `/chat` accepted a model, the dispatcher logged it on the line above the
+    call that did not pass it, and the engine always used its own default. A
+    double that ignores its arguments cannot catch that, which is why
+    `FakeLLM` records them.
+    """
+    bus = EventBus()
+    llm = FakeLLM()
+    cm = ConversationManager(llm, bus)
+
+    list(cm.run_conversation("write a proposal", "qwen2.5:7b", "You are terse."))
+
+    assert llm.calls == [("write a proposal", "You are terse.", "qwen2.5:7b")]
+
+
+def test_an_empty_system_prompt_is_still_passed_positionally():
+    """Guards the argument *order*, which no type checker can see through.
+
+    `stream_response(prompt, system_prompt, model)` and the old
+    `(prompt, model, system_prompt)` both accept three strings happily. Swapped,
+    the model name arrives as the system prompt and the reply is generated by
+    the default model under instructions that read "gemma3:latest".
+    """
+    bus = EventBus()
+    llm = FakeLLM()
+    cm = ConversationManager(llm, bus)
+
+    list(cm.run_conversation("hi", "gemma3:latest"))
+
+    (_, system_prompt, model) = llm.calls[0]
+    assert model == "gemma3:latest"
+    assert system_prompt == ""
+
+
+# --- sentence segmentation onto the bus ------------------------------------ #
+def test_sentences_are_published_to_the_bus():
+    bus = EventBus()
+    cm = ConversationManager(FakeLLM(), bus)
+
+    list(cm.run_conversation("hi", "gemma3:latest", "default"))
+
+    sentences = _sentences(bus)
+    assert sentences, "the Speech runtime has nothing to subscribe to"
+    assert all(s.strip() for s in sentences), "blank sentences must not be published"
+
+
+def test_a_trailing_fragment_is_flushed_not_dropped():
+    """A reply that does not end in punctuation still reaches the bus.
+
+    The planner buffers until a sentence boundary, so without the explicit
+    flush the last fragment of every unpunctuated reply would be silently lost.
+    """
+    bus = EventBus()
+    cm = ConversationManager(FakeLLM(tokens=["no", " terminator", " here"]), bus)
+
+    list(cm.run_conversation("hi", "gemma3:latest", "default"))
+
+    assert "".join(_sentences(bus)).strip() == "no terminator here"
+
+
+def test_the_persona_travels_with_the_sentence():
+    bus = EventBus()
+    cm = ConversationManager(FakeLLM(), bus)
+
+    list(cm.run_conversation("hi", "gemma3:latest", "default", persona="zaram_calm"))
+
+    published = [e for e in bus.get_history(limit=1000) if e.event_type == "conversation:sentence_ready"]
+    assert published
+    assert all(e.data["persona"] == "zaram_calm" for e in published)
+
+
+# --- failure paths --------------------------------------------------------- #
+def test_an_engine_failure_becomes_an_error_event_and_still_terminates():
+    class ExplodingLLM:
+        def stream_response(self, prompt, system_prompt="", model=None):
+            yield "partial"
+            raise RuntimeError("engine exploded")
+
+    bus = EventBus()
+    cm = ConversationManager(ExplodingLLM(), bus)
+
+    events = list(cm.run_conversation("hi", "gemma3:latest", "default"))
+
+    assert "error" in _types(events)
+    assert events[-1] == {"type": "done"}, "a failure must not leave the stream open"
+
+
+def test_a_subscriber_that_raises_does_not_break_the_reply():
+    """The bus is not a trust boundary the conversation should depend on.
+
+    A speech runtime that throws must not cost the user their text.
+    """
+    bus = EventBus()
+
+    def boom(event):
+        raise RuntimeError("subscriber exploded")
+
+    bus.subscribe("conversation:sentence_ready", boom)
+    cm = ConversationManager(FakeLLM(), bus)
+
+    events = list(cm.run_conversation("hi", "gemma3:latest", "default"))
+
+    assert "token" in _types(events)
     assert events[-1] == {"type": "done"}
-    assert any(e["type"] == "token" for e in events)
-    assert any(e["type"] == "audio" for e in events)
-    assert not any(e["type"] == "error" for e in events)
 
 
-# --- text + audio interleaving -------------------------------------------- #
-async def test_text_and_audio_interleave(tmp_path: Path):
-    manager, _, _ = await _ready_manager(tmp_path)
-    cm = ConversationManager(FakeLLM(), manager)
+def test_an_engine_that_yields_nothing_still_terminates():
+    bus = EventBus()
+    cm = ConversationManager(FakeLLM(tokens=[]), bus)
+
     events = list(cm.run_conversation("hi", "gemma3:latest", "default"))
 
-    token_positions = [i for i, e in enumerate(events) if e["type"] == "token"]
-    audio_positions = [i for i, e in enumerate(events) if e["type"] == "audio"]
-
-    assert token_positions, "expected tokens"
-    assert audio_positions, "expected audio"
-    # Text must start before audio (tokens lead) ...
-    assert token_positions[0] < audio_positions[0]
-    # ... and audio must start before the conversation ends.
-    assert audio_positions[0] < token_positions[-1] or audio_positions[-1] > token_positions[0]
-
-
-# --- multiple sentences ---------------------------------------------------- #
-async def test_multiple_sentences_produce_audio(tmp_path: Path):
-    manager, _, _ = await _ready_manager(tmp_path)
-    cm = ConversationManager(FakeLLM(), manager)
-    events = list(cm.run_conversation("hi", "gemma3:latest", "default"))
-    audio_events = [e for e in events if e["type"] == "audio"]
-    assert audio_events, "expected audio events"
-    # FakeLLM yields 3 sentences -> at least 3 sentences' worth of chunks.
-    assert len(audio_events) >= 3
-
-
-# --- ordered audio chunks -------------------------------------------------- #
-async def test_audio_chunks_ordered_globally(tmp_path: Path):
-    manager, _, _ = await _ready_manager(tmp_path)
-    cm = ConversationManager(FakeLLM(), manager)
-    events = list(cm.run_conversation("hi", "gemma3:latest", "default"))
-    audio_events = [e for e in events if e["type"] == "audio"]
-    sequences = [e["sequence"] for e in audio_events]
-    assert sequences == list(range(len(sequences))), "global audio sequence must be monotonic 0..n"
-
-
-# --- final chunk exactly once per sentence -------------------------------- #
-async def test_final_chunk_exactly_once_per_sentence(tmp_path: Path):
-    manager, _, _ = await _ready_manager(tmp_path)
-    cm = ConversationManager(FakeLLM(), manager)
-    events = list(cm.run_conversation("hi", "gemma3:latest", "default"))
-    audio_events = [e for e in events if e["type"] == "audio"]
-
-    # Group chunks into sentences by walking the stream and resetting at each
-    # final chunk. Each sentence must have exactly one final chunk.
-    sentences = []
-    current: list[dict] = []
-    for ev in audio_events:
-        current.append(ev)
-        if ev["final"] is True:
-            sentences.append(current)
-            current = []
-    assert current == [], "stream must not end mid-sentence (no trailing final)"
-    assert sentences, "expected at least one sentence"
-    for s in sentences:
-        finals = [e for e in s if e["final"] is True]
-        assert len(finals) == 1, "exactly one final chunk per sentence"
-        # Within a sentence, indices must be ordered 0..n-1.
-        assert [e["sequence"] for e in s] == list(range(s[0]["sequence"], s[0]["sequence"] + len(s)))
-
-
-# --- provider unavailable -------------------------------------------------- #
-async def test_provider_unavailable_still_works(tmp_path: Path, monkeypatch):
-    monkeypatch.setitem(sys.modules, "kokoro", None)
-    manager, _, _ = await _ready_manager(tmp_path)
-    cm = ConversationManager(FakeLLM(), manager)
-    events = list(cm.run_conversation("hi", "gemma3:latest", "default"))
-    assert events[-1] == {"type": "done"}
-    assert any(e["type"] == "token" for e in events)
-    assert not any(e["type"] == "audio" for e in events)
-
-
-# --- provider failure ------------------------------------------------------ #
-async def test_provider_failure_no_crash(tmp_path: Path):
-    manager, _, _ = await _ready_manager(tmp_path, fail_pipeline=True)
-    cm = ConversationManager(FakeLLM(), manager)
-    events = list(cm.run_conversation("hi", "gemma3:latest", "default"))
-    assert events[-1] == {"type": "done"}
-    assert any(e["type"] == "token" for e in events)
-    assert not any(e["type"] == "audio" for e in events)
-
-
-# --- provider exception escaping guard ------------------------------------ #
-async def test_provider_exception_no_escape(tmp_path: Path, monkeypatch):
-    manager, _, _ = await _ready_manager(tmp_path)
-
-    async def boom(*args, **kwargs):
-        raise RuntimeError("provider exploded")
-        yield
-
-    monkeypatch.setattr(manager, "stream_synthesis", boom)
-    cm = ConversationManager(FakeLLM(), manager)
-    events = list(cm.run_conversation("hi", "gemma3:latest", "default"))
-    assert events[-1] == {"type": "done"}
-    assert any(e["type"] == "token" for e in events)
-    assert not any(e["type"] == "audio" for e in events)
+    assert events == [{"type": "done"}]
 
 
 # --- cancellation / no hanging generators --------------------------------- #
-async def test_cancellation_terminates_cleanly(tmp_path: Path):
-    manager, _, _ = await _ready_manager(tmp_path)
-    cm = ConversationManager(FakeLLM(), manager)
+async def test_cancellation_mid_stream_terminates_cleanly():
+    bus = EventBus()
+    cm = ConversationManager(FakeLLM(), bus)
 
     gen = cm.run_conversation("hi", "gemma3:latest", "default")
-    # Consume a few events, then cancel mid-stream.
-    seen = [next(gen) for _ in range(3)]
-    assert any(e["type"] in ("token", "audio") for e in seen)
+    seen = [next(gen) for _ in range(2)]
+    assert "token" in _types(seen)
 
     gen.close()  # must not hang and must not raise
 
-    # Give any worker threads a chance to exit; failure here indicates a hang.
+    # Give the worker thread a chance to exit; a hang shows up as a timeout.
     await asyncio.sleep(0.2)
 
 
-async def test_cancellation_early_no_hang(tmp_path: Path):
-    manager, _, _ = await _ready_manager(tmp_path)
-    cm = ConversationManager(FakeLLM(), manager)
+async def test_cancellation_before_any_event_no_hang():
+    bus = EventBus()
+    cm = ConversationManager(FakeLLM(), bus)
 
     gen = cm.run_conversation("hi", "gemma3:latest", "default")
-    # Cancel before pulling anything.
-    gen.close()
+    gen.close()  # cancelled before pulling anything
 
-    await asyncio.sleep(0.2)  # allow workers to terminate
-
-
-# --- SSE event ordering: tokens lead, audio follows, done last ------------ #
-async def test_sse_event_ordering(tmp_path: Path):
-    manager, _, _ = await _ready_manager(tmp_path)
-    cm = ConversationManager(FakeLLM(), manager)
-    events = list(cm.run_conversation("hi", "gemma3:latest", "default"))
-
-    assert events[-1] == {"type": "done"}
-    # The 'done' event must be the last item.
-    assert all(e["type"] != "done" for e in events[:-1])
-    # No error events leaked from provider failures.
-    assert not any(e["type"] == "error" for e in events)
-    # Every audio event uses the provider-agnostic shape.
-    for ev in events:
-        if ev["type"] == "audio":
-            assert set(ev.keys()) >= {"type", "audio_id", "url", "sequence", "final", "voice"}
-            assert ev["type"] == "audio"
-            assert isinstance(ev["sequence"], int)
-
-
-# --- backpressure: speech disabled keeps text only ------------------------ #
-async def test_voice_disabled_still_works(tmp_path: Path):
-    manager = VoiceManager()  # no provider registered -> speech disabled
-    cm = ConversationManager(FakeLLM(), manager)
-    events = list(cm.run_conversation("hi", "gemma3:latest", "default"))
-    assert events[-1] == {"type": "done"}
-    assert any(e["type"] == "token" for e in events)
-    assert not any(e["type"] == "audio" for e in events)
+    await asyncio.sleep(0.2)

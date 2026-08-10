@@ -1,0 +1,633 @@
+Zaram UI Prompt for Figma AI
+Project Overview
+
+Design the complete user interface for Zaram, a Local-First AI Operating System.
+
+Zaram is not a chatbot, not a desktop clone, and not a browser.
+
+It is a living operating system centered around an intelligent entity that exists at the heart of the experience.
+
+The interface should feel like:
+
+Apple Vision Pro
+Arc Browser
+Linear
+Notion
+Raycast
+ChatGPT
+Unreal Engine editor
+
+combined into one coherent operating system.
+
+The overall feeling should be:
+
+Calm.
+
+Intelligent.
+
+Premium.
+
+Spatial.
+
+Minimal.
+
+Alive.
+
+The user should feel like they are working with an intelligent partner rather than controlling software.
+
+Design Philosophy
+
+Design around these principles:
+
+Living Intelligence First
+Local-first
+Spatial computing
+Calm technology
+Context over windows
+Motion with purpose
+Glassmorphism
+Infinite workspace
+AI always present but never intrusive
+
+Avoid:
+
+Windows 11 look
+macOS clone
+Generic dashboard
+Cyberpunk UI
+Gamer aesthetic
+Flat enterprise software
+Primary Layout
+
+Design the application as five major runtime zones.
+
+                Top Navigation
+--------------------------------------------------
+
+ Left Rail     Workspace      Runtime Panel
+
+--------------------------------------------------
+
+             Bottom Command Dock
+
+These areas must remain independent components.
+
+Centerpiece
+
+The Living Intelligence Orb
+
+The Orb is the heart of Zaram.
+
+It must feel alive.
+
+Not a logo.
+
+Not an icon.
+
+It should look like:
+
+flowing plasma
+energy
+breathing
+subtle intelligence
+consciousness
+
+Around it:
+
+floating particles
+energy rings
+soft glow
+dynamic gradients
+
+No text inside the orb.
+
+No branding inside the orb.
+
+Landing Experience
+
+When no workspace is open:
+
+The Orb occupies the center.
+
+Around the Orb are six primary destinations arranged in an elegant orbital layout.
+
+              Build
+
+ Memory               Knowledge
+
+        Living Orb
+
+ Plugins             Canvas
+
+             Settings
+
+These nodes should orbit slowly around the orb.
+
+When hovered:
+
+enlarge slightly
+glow
+subtle particle attraction
+
+When clicked:
+
+they animate toward the center and become the active workspace.
+
+Workspace
+
+When a workspace opens:
+
+The Orb gracefully shrinks.
+
+It moves to the Runtime Panel.
+
+The workspace expands into the center.
+
+The transition should feel organic.
+
+Never abrupt.
+
+Runtime Panel
+
+The right side houses the Living Intelligence.
+
+Contains:
+
+Orb
+Thinking state
+Memory status
+Active context
+Running agents
+Voice controls
+AI reasoning progress
+
+Think of this as:
+
+"AI Brain"
+
+not chat history.
+
+Left Context Rail
+
+Contains:
+
+Recent Context
+
+Pinned Memory
+
+Current Project
+
+Knowledge Sources
+
+Plugins
+
+Search
+
+Navigation
+
+Icons only by default.
+
+Expand on hover.
+
+Bottom Command Dock
+
+Minimal floating dock.
+
+Contains only:
+
+Search
+
+Build
+
+Memory
+
+Knowledge
+
+Canvas
+
+Plugins
+
+Voice
+
+Settings
+
+No application launcher.
+
+No macOS dock imitation.
+
+Top Navigation
+
+Extremely thin.
+
+Contains:
+
+Workspace title
+
+Sync status
+
+Model status
+
+Local indicator
+
+Battery (desktop optional)
+
+Notifications
+
+User profile
+
+Search shortcut
+
+Build Workspace
+
+Visual style:
+
+Modern IDE
+
+Split panes
+
+Glass panels
+
+Floating tabs
+
+Integrated AI suggestions
+
+Large editor area
+
+Context sidebar
+
+Terminal drawer
+
+Memory Workspace
+
+Visualize memory as:
+
+semantic graph
+
+connected nodes
+
+timeline
+
+knowledge clusters
+
+conversation history
+
+Not tables.
+
+Not spreadsheets.
+
+Knowledge Workspace
+
+Research surface.
+
+Cards
+
+Sources
+
+AI summaries
+
+Relationships
+
+Citation panel
+
+Context map
+
+Canvas Workspace
+
+Infinite whiteboard.
+
+Floating AI objects.
+
+Sticky thoughts.
+
+Images.
+
+Code blocks.
+
+Research snippets.
+
+Connections.
+
+Should feel like:
+
+FigJam
+
+Miro
+
+Obsidian Canvas
+
+combined.
+
+Plugin Workspace
+
+Modern marketplace.
+
+Cards
+
+Installed
+
+Available
+
+Permissions
+
+Health
+
+Status
+
+Minimal.
+
+Settings
+
+Elegant categories.
+
+Glass cards.
+
+No dense forms.
+
+Sections:
+
+AI
+
+Memory
+
+Voice
+
+Plugins
+
+Appearance
+
+Security
+
+Advanced
+
+Windows
+
+Floating.
+
+Rounded.
+
+Soft shadows.
+
+Glass.
+
+No harsh borders.
+
+Each workspace can appear as:
+
+Full screen
+
+Floating
+
+Docked
+
+Pinned
+
+Resizable
+
+Design System
+
+Create reusable components.
+
+Buttons
+
+Cards
+
+Glass Panels
+
+Sidebar
+
+Navigation
+
+Floating Window
+
+Command Palette
+
+Lists
+
+Search
+
+Inputs
+
+Dropdowns
+
+Status Chips
+
+Badges
+
+Tabs
+
+Tooltips
+
+Dialogs
+
+Progress
+
+Orb States
+
+Widgets
+
+Notifications
+
+Everything must follow an 8pt spacing system.
+
+Glassmorphism
+
+Use:
+
+Blur
+
+Soft transparency
+
+Layered depth
+
+Gradient borders
+
+Subtle reflections
+
+Never excessive.
+
+Colors
+
+Primary Background
+
+Deep graphite
+
+Secondary
+
+Charcoal
+
+Accent
+
+Electric Indigo
+
+Secondary Accent
+
+Cyan
+
+Success
+
+Emerald
+
+Warning
+
+Amber
+
+Danger
+
+Soft Red
+
+Orb Gradient
+
+Electric Blue
+
+Purple
+
+Teal
+
+White Energy Core
+
+Typography
+
+Inter
+
+SF Pro Display
+
+Space Grotesk
+
+Large headings
+
+Comfortable spacing
+
+Minimal hierarchy
+
+Motion
+
+Design motion specs.
+
+Opening workspace
+
+Orb transitions
+
+Hover states
+
+Dock animations
+
+Context node movement
+
+Panel expansion
+
+Floating particles
+
+Window opening
+
+Command palette
+
+Everything should have:
+
+Spring physics
+
+Natural easing
+
+No sharp movement
+
+Component Modularity
+
+Organize the design into Figma Components.
+
+Example:
+
+Foundation
+    Colors
+    Typography
+    Effects
+
+Components
+    Button
+    Card
+    Panel
+    Sidebar
+    Dock
+    Navigation
+    Window
+    Orb
+    Widget
+
+Runtime
+    Runtime Panel
+    Left Rail
+    Top Navigation
+    Bottom Dock
+
+Surfaces
+    Build
+    Memory
+    Knowledge
+    Canvas
+    Plugins
+    Settings
+
+Each component should be reusable.
+
+Avoid flattened designs.
+
+Responsive Layout
+
+Desktop First.
+
+Minimum width:
+
+1280px
+
+Optimized:
+
+1440
+
+1600
+
+1920
+
+Ultra-wide.
+
+Implementation Constraints
+
+The design must map cleanly to:
+
+React 19
+
+TypeScript
+
+Tailwind CSS
+
+Framer Motion
+
+Electron
+
+Zustand
+
+No impossible layouts.
+
+No overlapping constraints.
+
+No Auto Layout conflicts.
+
+Every section should be independently exportable.
+
+Final Deliverables
+
+Generate:
+
+Complete application shell
+Landing page
+Workspace layouts
+Runtime panel
+Orb states
+Design system
+Component library
+Auto Layout
+Variables
+Color tokens
+Typography tokens
+Motion specifications
+Interaction states
+Light and dark themes (dark is primary)
+
+The final result should feel like the world's first Living AI Operating System, where the Living Intelligence Orb is the heart of every interaction, and every interface element supports calm, intelligent, context-aware work rather than traditional application-centric computing.

@@ -1,0 +1,1 @@
+export type PresenceStatus = 'online' | 'away' | 'dnd' | 'offline';

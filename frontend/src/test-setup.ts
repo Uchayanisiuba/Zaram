@@ -1,3 +1,1 @@
-import '@testing-library/jest-dom'
-
-Element.prototype.scrollIntoView = () => {}
+import '@testing-library/jest-dom';

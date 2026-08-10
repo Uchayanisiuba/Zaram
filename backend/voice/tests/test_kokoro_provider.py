@@ -11,6 +11,8 @@ import sys
 from pathlib import Path
 
 import numpy as np
+
+from voice.tests.conftest import FakeResult
 import pytest
 
 from voice.config import KokoroConfig
@@ -41,7 +43,7 @@ class FakePipeline:
         if self.fail:
             raise RuntimeError("synthesis boom")
         audio = np.zeros(self.sample_rate // 10, dtype=np.float32)
-        yield ("g", "p", audio)
+        yield FakeResult(audio)
 
 
 class FakeDiscoverer:
@@ -68,6 +70,14 @@ def make_provider(tmp_path: Path, *, fail_pipeline: bool = False, cache=None, di
         cache_directory=str(tmp_path / "audio_cache"),
         default_voice="af_heart",
         load_model_eagerly=False,
+        # Explicit, because the default is off and must stay off: real
+        # discovery contacts huggingface.co at startup, which rule 7g forbids
+        # before consent (`test_egress_chokepoint` asserts the default).
+        # These tests are *about* discovery and inject a `FakeDiscoverer`, so
+        # turning it on here reaches no network. Left implicit, the flag
+        # flipping to False silently emptied `_voices` and five tests here
+        # began failing for a reason that had nothing to do with voice.
+        voice_discovery_enabled=True,
     )
     pipeline = FakePipeline(fail=fail_pipeline, sample_rate=config.sample_rate)
 

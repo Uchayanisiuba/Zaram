@@ -27,8 +27,9 @@ const Channels = {
     isMaximized: 'window:is-maximized',
     setTitle: 'window:set-title',
   },
-  backend: {
+backend: {
     getStatus: 'backend:get-status',
+    checkHealth: 'backend:check-health',
     restart: 'backend:restart',
   },
   notify: {
@@ -136,6 +137,7 @@ const RENDERER_INVOKABLE = [
   Channels.window.isMaximized,
   Channels.window.setTitle,
   Channels.backend.getStatus,
+  Channels.backend.checkHealth,
   Channels.backend.restart,
   Channels.notify.show,
   Channels.dialog.showOpen,

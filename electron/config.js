@@ -23,7 +23,7 @@ function createConfig(options) {
   const o = options || {};
   const isDev = o.isDev === true;
   const appPath = o.appPath || process.cwd();
-  const backendPort = o.backendPort || 8000;
+  const backendPort = o.backendPort || 8420;
   const rendererDevPort = o.rendererDevPort || 5173;
   const staticPort = o.staticPort || 5180;
 
@@ -62,6 +62,7 @@ function createConfig(options) {
         '/knowledge',
         '/voice',
         '/health',
+        '/memory',
       ],
     },
     window: {

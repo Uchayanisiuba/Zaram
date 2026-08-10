@@ -60,11 +60,19 @@ class ModelRegistry:
         self._timer.start()
 
     def _refresh(self) -> None:
+        # Through the gate. Normally this is Ollama on loopback, which the gate
+        # classifies as local and passes straight through unlogged — but the
+        # base URL is configurable, and if it is ever pointed off the machine
+        # that must be governed and recorded like anything else. Routing it
+        # here means the caller does not have to know which case it is in.
         try:
-            import urllib.request
-            req = urllib.request.Request(f"{self._base_url}/api/tags", headers={"User-Agent": "Zaram/1.0"})
-            with urllib.request.urlopen(req, timeout=10) as r:
-                data = __import__("json").loads(r.read())
+            from core.egress import get_gate
+
+            data = __import__("json").loads(
+                get_gate().request(
+                    f"{self._base_url}/api/tags", timeout=10, source="model_registry"
+                )
+            )
         except Exception:
             return
 

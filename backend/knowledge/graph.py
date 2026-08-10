@@ -53,8 +53,13 @@ class KnowledgeGraph:
         with self._lock:
             return self._entities.get(entity_id)
 
-    def find_entity_by_name(self, name: str) -> Entity | None:
+    def find_entity_by_name(self, name: str, exact_match: bool = False) -> Entity | None:
         with self._lock:
+            if exact_match:
+                entity = self._entities.get(name)
+                if entity:
+                    return entity
+            # Fall back to alias resolution
             name_lower = name.lower()
             entity_ids = self._adjacency.get(name_lower, set())
             if entity_ids:

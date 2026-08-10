@@ -34,8 +34,8 @@ test('resolvePythonCommand: honors ZARAM_PYTHON', () => {
 });
 
 test('buildArgs: builds uvicorn launch args', () => {
-  assert.deepStrictEqual(buildArgs(8000), [
-    '-m', 'uvicorn', 'backend.main:app', '--host', '127.0.0.1', '--port=8000',
+  assert.deepStrictEqual(buildArgs(8420), [
+    '-m', 'uvicorn', 'backend.main:app', '--host', '127.0.0.1', '--port=8420',
   ]);
 });
 

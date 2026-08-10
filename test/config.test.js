@@ -15,7 +15,7 @@ test('createConfig: prod mode points renderer at the local static server', () =>
   const cfg = createConfig({ isDev: false, appPath: 'C:\\app', userDataPath: 'C:\\data' });
   assert.strictEqual(cfg.isDev, false);
   assert.strictEqual(cfg.renderer.url, 'http://127.0.0.1:5180');
-  assert.strictEqual(cfg.backend.baseUrl, 'http://127.0.0.1:8000');
+  assert.strictEqual(cfg.backend.baseUrl, 'http://127.0.0.1:8420');
 });
 
 test('createConfig: derives platform-aware paths from userData', () => {

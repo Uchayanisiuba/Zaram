@@ -52,6 +52,7 @@ import {
   createExecutionStep,
   cloneExecutionPlan
 } from './execution-plan'
+import { eventBus, type ZaramEventType } from '../event-bus'
 
 // The Executive Runtime depends on the Capability Runtime ONLY through its
 // interface. It requests capabilities (metadata) and never calls tools directly
@@ -153,6 +154,10 @@ export class ExecutiveRuntime {
   private readonly metrics = new Map<string, CapabilityMetrics>()
   private workspaceSnapshot: Record<string, unknown> = {}
 
+  // Speech: pending text to speak when intent is 'reply'
+  private pendingSpeechText: string | null = null
+  private pendingSpeechPersona: string = 'zaram_prime'
+
   constructor(options: ExecutiveRuntimeOptions = {}) {
     this.now = options.now ?? (() => (typeof performance !== 'undefined' ? performance.now() : Date.now()))
     this.capabilityRuntime = options.capabilityRuntime
@@ -160,7 +165,17 @@ export class ExecutiveRuntime {
     if (this.workspaceRuntime) {
       this.workspaceSnapshot = this.workspaceRuntime.getWorkspaceSnapshot() as Record<string, unknown> || {}
     }
+
+    // Subscribe to conversation:sentence_ready from backend
+    this.unsubSentenceReady = eventBus.subscribe('conversation:sentence_ready' as ZaramEventType, (event) => {
+      const data = event.data as { text: string; persona?: string }
+      if (data?.text) {
+        this.setPendingSpeech(data.text, data.persona ?? 'zaram_prime')
+      }
+    })
   }
+
+  private unsubSentenceReady: (() => void) | null = null
 
   // --- Ingestion (subsystems push; never pulled by the executive) ------------
 
@@ -197,6 +212,30 @@ export class ExecutiveRuntime {
   ingestVSCodeContext(signal: VSCodeSignal): void {
     this.vscode = { ...this.vscode, ...signal }
     this.recompute()
+  }
+
+  // --- Speech: set pending text to speak ---------------------------------------
+  // Called by ConversationRuntime when a response is ready.
+  setPendingSpeech(text: string, persona?: string): void {
+    this.pendingSpeechText = text
+    if (persona) this.pendingSpeechPersona = persona
+    this.recompute()
+  }
+
+  // --- Speech control (called by ConversationRuntime or user actions) -----------
+  // The Executive emits events; Speech Runtime subscribes and executes.
+  // Executive remains unaware of speech implementation details.
+
+  requestPauseSpeech(requestId?: string): void {
+    eventBus.publish('executive:pause_speech' as ZaramEventType, {
+      request_id: requestId,
+    }, 'executive')
+  }
+
+  requestStopSpeech(requestId?: string): void {
+    eventBus.publish('executive:stop_speech' as ZaramEventType, {
+      request_id: requestId,
+    }, 'executive')
   }
 
   // --- Goal management (public, the executive owns goals) -------------------
@@ -330,12 +369,29 @@ export class ExecutiveRuntime {
     this.recompute()
   }
 
-  plan(query: string, options?: { persona?: string; model?: string }): ExecutionPlan {
-    console.log(`[EXECUTIVE] plan() called with query: "${query}" persona=${options?.persona} model=${options?.model}`)
+  plan(query: string, options?: { persona?: string; model?: string; internetMode?: string }): ExecutionPlan {
+    console.log(`[EXECUTIVE] plan() called with query: "${query}" persona=${options?.persona} model=${options?.model} internetMode=${options?.internetMode}`)
     const plan = createExecutionPlan(query)
     const lower = query.toLowerCase()
     const persona = options?.persona
     const model = options?.model
+    const internetMode = options?.internetMode || 'automatic'
+
+    const needsInternetByKeyword = (
+      lower.includes('latest') || lower.includes('news') || lower.includes('current') ||
+      lower.includes('today') || lower.includes('recent') || lower.includes('this week') ||
+      lower.includes('this month') || lower.includes('release') || lower.includes('price') ||
+      lower.includes('weather') || lower.includes('stock') || lower.includes('version') ||
+      lower.includes('search') || lower.includes('browse') || lower.includes('internet') ||
+      lower.includes('online') || lower.includes('now') || lower.includes('update') ||
+      lower.includes('won') || lower.includes('election') || lower.includes('president') ||
+      lower.includes('openai') || lower.includes('gemini') || lower.includes('anthropic') ||
+      lower.includes('nvidia') || lower.includes('ai') || lower.includes('who') ||
+      lower.includes('what') || lower.includes('when') || lower.includes('where') ||
+      lower.includes('why') || lower.includes('how') || lower.includes('which') ||
+      lower.includes('2024') || lower.includes('2025') || lower.includes('2026')
+    )
+    const NEEDS_INTERNET = internetMode === 'always' || (internetMode === 'automatic' && needsInternetByKeyword)
 
     if (this.capabilityRuntime) {
       console.log(`[EXECUTIVE] Capability runtime available, evaluating query...`)
@@ -395,9 +451,8 @@ export class ExecutiveRuntime {
         plan.evidence.push('Vision Analysis')
       }
 
-      if (lower.includes('latest') || lower.includes('news') || lower.includes('current') || lower.includes('today') ||
-          lower.includes('search') || lower.includes('browse') || lower.includes('internet') || lower.includes('online')) {
-        plan.steps.push(createExecutionStep('knowledge.search', 'Search Internet', { query }))
+      if (NEEDS_INTERNET) {
+        plan.steps.push(createExecutionStep('knowledge.search', 'Search Internet', { query, internetMode }))
         plan.steps.push(createExecutionStep('reasoning.generate', 'Generate response from search', { prompt: `Based on internet search results for: ${query}`, persona, model }))
         plan.evidence.push('Internet Search')
       }
@@ -425,6 +480,8 @@ export class ExecutiveRuntime {
   }
 
   reset(): void {
+    this.unsubSentenceReady?.()
+    this.unsubSentenceReady = null
     this.goals.reset()
     this.focus.reset()
     this.interrupts.reset()
@@ -491,6 +548,16 @@ export class ExecutiveRuntime {
     }
 
     const intent = this.intentGen.generate(context)
+
+    // Emit executive:speak when decision is 'reply' and we have pending speech text
+    if (intent.decision === 'reply' && this.pendingSpeechText) {
+      const textToSpeak = this.pendingSpeechText
+      this.pendingSpeechText = null // Clear after emitting
+      eventBus.publish('executive:speak' as ZaramEventType, {
+        text: textToSpeak,
+        persona: this.pendingSpeechPersona,
+      }, 'executive')
+    }
 
     this.state = {
       currentGoal,
@@ -579,10 +646,35 @@ export class ExecutiveRuntime {
   }
 
   private emit(): void {
-    if (this.subscribers.size === 0) return
+    if (this.subscribers.size === 0 && eventBus.subscriberCount('executive:intent_changed') === 0 && eventBus.subscriberCount('executive:state_changed') === 0) return
     const snap = this.snapshot()
+    
+    // Emit to local subscribers (existing behavior)
     this.subscribers.forEach((l) => l(snap))
+    
+    // Emit to EventBus for other subsystems
+    if (this.intent.decision !== this.lastEmittedIntent) {
+      eventBus.publish('executive:intent_changed', {
+        decision: this.intent.decision,
+        confidence: this.intent.confidence,
+        reasoning: this.intent.reasoning || '',
+        previous_decision: this.lastEmittedIntent
+      }, 'executive', this.intent.decision)
+      this.lastEmittedIntent = this.intent.decision
+    }
+    
+    // Emit state changes
+    eventBus.publish('executive:state_changed', {
+      focus: this.state.focus,
+      focus_strength: this.state.focusStrength,
+      priority: this.state.priority,
+      urgency: this.state.urgency,
+      goal_active: this.state.currentGoal !== null,
+      conversation_phase: this.conversation.phase
+    }, 'executive')
   }
+  
+  private lastEmittedIntent = ''
 }
 
 function focusFromGoal(label: string | undefined): FocusTarget | null {

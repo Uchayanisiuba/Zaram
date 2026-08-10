@@ -122,6 +122,8 @@ export interface ExecutiveIntent {
   shouldInterrupt: boolean
   // a short human-readable note for diagnostics (never sent to the drawing layer)
   note: string
+  // reasoning behind the decision (for EventBus consumers)
+  reasoning: string
   // monotonically increasing revision
   revision: number
   updatedAt: number

@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 
 class VoiceManager:
-    def __init__(self, audio_dir: str = "audio_cache", base_url: str = "http://127.0.0.1:8000") -> None:
+    def __init__(self, audio_dir: str = "audio_cache", base_url: str = "http://127.0.0.1:8420") -> None:
         self.audio_dir = audio_dir
         self.base_url = base_url
         self.registry = VoiceRegistry()
@@ -162,7 +162,7 @@ class VoiceRuntime:
     def __init__(
         self,
         audio_dir: str = "audio_cache",
-        base_url: str = "http://127.0.0.1:8000",
+        base_url: str = "http://127.0.0.1:8420",
         *,
         auto_register_kokoro: bool = False,
         kokoro_config: Any = None,

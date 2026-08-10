@@ -7,7 +7,8 @@ import { EmbodimentManager } from './embodiment'
 import { DefaultExpressiveParamsSource } from './personality/expressive-params'
 import { NullRenderTransport } from './electron/render-transport'
 import { ConversationRuntime } from './sources/conversation-runtime'
-import { VoiceRuntime } from './sources/voice-runtime'
+import { VoiceRuntime as VoiceSourceRuntime } from './sources/voice-runtime'
+import { VoiceRuntime as VoiceFullRuntime } from './voice/voice-runtime'
 import { MemoryRuntime } from './sources/memory-runtime'
 import { SystemRuntime } from './sources/system-runtime'
 import { RuntimeSourceAggregator } from './sources/aggregator'
@@ -25,6 +26,8 @@ import { FilesystemCapabilityPack } from '../capabilities/filesystem'
 import { VSCodeCapabilityPack } from '../capabilities/vscode'
 import { VisionCapabilityPack } from '../capabilities/vision'
 import { KnowledgeCapabilityPack } from '../capabilities/knowledge'
+import { SPEECH_CAPABILITIES } from '../capabilities/speech'
+import { handleSpeechTTS, createSpeechHandlers } from '../capabilities/speech/speech-handler'
 
 export interface BootstrapOptions {
   renderTransport?: IRenderTransport
@@ -187,10 +190,27 @@ export function bootstrapPresence(options: BootstrapOptions = {}): BootstrapResu
   console.log('[STARTUP] Registered: ExecutionRuntime')
 
   container.register(TOKENS.conversationRuntime, () => new ConversationRuntime(), { singleton: true })
-  container.register(TOKENS.voiceRuntime, () => new VoiceRuntime(), { singleton: true })
+  container.register(TOKENS.voiceRuntime, () => new VoiceSourceRuntime(), { singleton: true })
   container.register(TOKENS.memoryRuntime, () => new MemoryRuntime(), { singleton: true })
   container.register(TOKENS.systemRuntime, () => new SystemRuntime(), { singleton: true })
   console.log('[STARTUP] Registered: Conversation/Voice/Memory/SystemRuntimes')
+
+  // Sprint C.3: VoiceRuntime (full runtime) - owns speech synthesis lifecycle
+  container.register(
+    TOKENS.voiceRuntimeFull,
+    (c) => {
+      console.log('[STARTUP] Instantiating VoiceRuntime (full)...')
+      const instance = new VoiceFullRuntime({
+        executionRuntime: c.resolve<IExecutionRuntime>(TOKENS.executionRuntime),
+        executiveRuntime: c.resolve<ExecutiveRuntime>(TOKENS.executiveRuntime),
+        persona: 'zaram_prime'
+      })
+      console.log('[STARTUP] VoiceRuntime (full) instantiated')
+      return instance
+    },
+    { singleton: true }
+  )
+  console.log('[STARTUP] Registered: VoiceRuntime (full)')
 
   container.register(
     TOKENS.runtimeAggregator,
@@ -344,8 +364,12 @@ export function bootstrapPresence(options: BootstrapOptions = {}): BootstrapResu
         const text = ((req.input as any)?.text || (req.input as any)?.prompt || '') as string
         const persona = ((req.input as any)?.persona as string | undefined) || 'zaram_prime'
         const model = ((req.input as any)?.model as string | undefined) || 'gemma3:latest'
-        const response = await callBackendChat(options.backendUrl!, text, persona, model)
-        controls.succeed({ response })
+        let fullText = ''
+        await callBackendChat(options.backendUrl!, text, persona, model, (token) => {
+          fullText += token
+          controls.reportToken(token)
+        })
+        controls.succeed({ response: fullText })
       } catch (error) {
         controls.fail(error instanceof Error ? error.message : String(error))
       }
@@ -355,10 +379,100 @@ export function bootstrapPresence(options: BootstrapOptions = {}): BootstrapResu
         const prompt = ((req.input as any)?.prompt || '') as string
         const persona = ((req.input as any)?.persona as string | undefined) || 'zaram_prime'
         const model = ((req.input as any)?.model as string | undefined) || 'gemma3:latest'
-        const response = await callBackendChat(options.backendUrl!, prompt, persona, model)
-        controls.succeed({ response })
+        let fullText = ''
+        await callBackendChat(options.backendUrl!, prompt, persona, model, (token) => {
+          fullText += token
+          controls.reportToken(token)
+        })
+        controls.succeed({ response: fullText })
       } catch (error) {
         controls.fail(error instanceof Error ? error.message : String(error))
+      }
+    })
+
+    // Speech TTS capability - streams audio from backend
+    invoker.register('speech.tts', async (req, ctx, controls) => {
+      try {
+        const text = ((req.input as any)?.text || '') as string
+        const voice = ((req.input as any)?.voice as string | undefined)
+        const persona = ((req.input as any)?.persona as string | undefined) || 'zaram_prime'
+        
+        if (!text) {
+          controls.fail({ code: 'validation_error', message: 'text is required', attempt: 0, kind: 'handler' })
+          return
+        }
+
+        const backendUrl = options.backendUrl!.replace(/\/$/, '')
+        const postData = JSON.stringify({ text, voice, persona })
+        
+        const controller = new AbortController()
+        const timeoutId = setTimeout(() => controller.abort(), 120000)
+        
+        const response = await fetch(`${backendUrl}/voice/stream`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Content-Length': Buffer.byteLength(postData).toString()
+          },
+          body: postData,
+          signal: controller.signal
+        })
+        
+        clearTimeout(timeoutId)
+        
+        if (!response.ok) {
+          throw new Error(`Voice stream failed: ${response.status}`)
+        }
+        
+        const reader = response.body?.getReader()
+        const decoder = new TextDecoder()
+        let buffer = ''
+        let sequence = 0
+        
+        if (!reader) {
+          controls.fail({ code: 'handler', message: 'No response body', attempt: 0, kind: 'handler' })
+          return
+        }
+        
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+          
+          buffer += decoder.decode(value, { stream: true })
+          const lines = buffer.split('\n')
+          buffer = lines.pop() || ''
+          
+          for (const line of lines) {
+            const trimmed = line.trim()
+            if (!trimmed || !trimmed.startsWith('data: ')) continue
+            const data = trimmed.slice(6)
+            if (data === '[DONE]' || data === 'done') continue
+            
+            try {
+              const event = JSON.parse(data)
+              if (event.type === 'audio') {
+                // Forward audio chunk via execution event
+                controls.reportProgress(0.5) // Indicate progress
+                // Emit custom event for audio - we'll use reportToken with a special prefix
+                // Or we can publish directly to the event bus
+                ;(controls as any).reportAudioChunk?.(event)
+              } else if (event.type === 'error') {
+                controls.fail({ code: 'handler', message: event.content, attempt: 0, kind: 'handler' })
+                return
+              }
+            } catch {
+              // Ignore malformed events
+            }
+          }
+        }
+        
+        controls.succeed({ response: 'Audio streamed' })
+      } catch (error) {
+        if (error instanceof Error && error.name === 'AbortError') {
+          controls.fail({ code: 'timeout', message: 'Speech synthesis timed out', attempt: 0, kind: 'timeout' })
+        } else {
+          controls.fail({ code: 'handler', message: String(error), attempt: 0, kind: 'handler' })
+        }
       }
     })
 
@@ -383,6 +497,17 @@ export function bootstrapPresence(options: BootstrapOptions = {}): BootstrapResu
         inputSchema: { type: 'object', properties: { prompt: { type: 'string' } }, required: ['prompt'] },
         outputSchema: { type: 'object', properties: { response: { type: 'string' } } },
         latencyEstimateMs: 1500,
+        location: 'backend'
+      },
+      {
+        id: 'speech.tts',
+        name: 'Speech Synthesis',
+        description: 'Stream text-to-speech audio from the backend voice runtime.',
+        category: 'speech',
+        permissions: [] as string[],
+        inputSchema: { type: 'object', properties: { text: { type: 'string' }, voice: { type: 'string' }, persona: { type: 'string' } }, required: ['text'] },
+        outputSchema: { type: 'object', properties: { response: { type: 'string' } } },
+        latencyEstimateMs: 500,
         location: 'backend'
       }
     ]
@@ -432,19 +557,25 @@ import https from 'https'
 
 const RETRY_DELAYS = [1000, 2000, 4000]
 
-async function callBackendChat(baseUrl: string, text: string, persona: string = 'zaram_prime', model: string = 'gemma3:latest'): Promise<string> {
+async function callBackendChat(
+  baseUrl: string,
+  text: string,
+  persona: string = 'zaram_prime',
+  model: string = 'gemma3:latest',
+  onToken?: (token: string) => void
+): Promise<string> {
   const url = new URL(`${baseUrl}/chat`)
   const postData = JSON.stringify({ text, model, persona })
-  
+
   console.log(`[STAGE-9][Backend] POST ${url.toString()} text='${text.slice(0, 50)}...' persona=${persona} model=${model}`)
-  
+
   let lastError: any = null
   for (let attempt = 0; attempt < RETRY_DELAYS.length + 1; attempt++) {
     try {
       return await new Promise((resolve, reject) => {
         const protocol = url.protocol === 'https:' ? https : http
         const startTime = Date.now()
-        
+
         const req = protocol.request({
           hostname: url.hostname,
           port: url.port || (url.protocol === 'https:' ? 443 : 80),
@@ -472,24 +603,22 @@ async function callBackendChat(baseUrl: string, text: string, persona: string = 
             buffer = lines.pop() || ''
             for (const line of lines) {
               const trimmed = line.trim()
-              if (!trimmed || !trimmed.startsWith('data: ')) continue
-              const data = trimmed.slice(6)
-              if (data === '[DONE]') {
-                console.log(`[STAGE-9][Backend] Stream complete. Total tokens: ${tokenCount}`)
-                resolve(fullText)
-                return
-              }
+              if (!trimmed) continue
+              let event: any
               try {
-                const event = JSON.parse(data)
-                if (event.type === 'token') {
-                  tokenCount++
-                  fullText += event.content || ''
-                } else if (event.type === 'error') {
-                  reject(new Error(event.content || 'Backend error'))
-                  return
-                }
+                event = JSON.parse(trimmed)
               } catch {
-                // ignore malformed events
+                // Fallback: treat raw line as token text
+                event = { type: 'token', data: { content: trimmed } }
+              }
+              if (event.type === 'token') {
+                tokenCount++
+                const content = event.data?.content || event.content || ''
+                fullText += content
+                onToken?.(content)
+              } else if (event.type === 'error') {
+                reject(new Error(event.data?.content || event.content || 'Backend error'))
+                return
               }
             }
           })

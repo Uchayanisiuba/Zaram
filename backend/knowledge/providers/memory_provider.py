@@ -19,18 +19,15 @@ class MemoryProvider(BaseKnowledgeProvider):
             self._last_error = "Memory Runtime not connected"
             return []
 
-        import asyncio
+        # run_sync, not a fresh event loop: this is called from inside FastAPI's
+        # running loop, where creating and running another loop raises.
+        from core.async_bridge import run_sync
 
         try:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
-                results = loop.run_until_complete(self._memory_runtime.retrieve(
-                    query=query,
-                    max_results=max_results,
-                ))
-            finally:
-                loop.close()
+            results = run_sync(self._memory_runtime.retrieve(
+                query=query,
+                max_results=max_results,
+            ))
         except Exception as e:
             self._last_error = str(e)
             return []

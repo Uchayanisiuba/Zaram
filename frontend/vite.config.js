@@ -1,22 +1,21 @@
-import { defineConfig } from 'vite'
-import react from '@vitejs/plugin-react'
-import path from 'path'
-import { fileURLToPath } from 'url'
+import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
-const BACKEND = 'http://127.0.0.1:8000'
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
+const BACKEND = 'http://127.0.0.1:8420';
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-// Same-origin proxy so the renderer never crosses origins to reach the backend.
-// The Electron production build mirrors this with its own static-server proxy.
 export default defineConfig({
   plugins: [react()],
+  optimizeDeps: {
+    force: true,
+    exclude: ['@react-three/postprocessing', 'lucide-react'],
+  },
   resolve: {
     alias: {
-      // Project source alias used throughout the frontend.
-      '@': path.resolve(__dirname, 'src')
-      // The Living Orb Engine is consumed as an external black-box dependency.
-      // The renderer is implemented in the frontend and consumes FrameState over IPC.
-    }
+      '@': path.resolve(__dirname, 'src'),
+    },
   },
   server: {
     port: 5173,
@@ -30,7 +29,10 @@ export default defineConfig({
       '/knowledge': { target: BACKEND, changeOrigin: true },
       '/voice': { target: BACKEND, changeOrigin: true },
       '/health': { target: BACKEND, changeOrigin: true },
+      '/memory': { target: BACKEND, changeOrigin: true },
+      '/egress': { target: BACKEND, changeOrigin: true },
       '/artifacts': { target: BACKEND, changeOrigin: true },
+      '/ingest': { target: BACKEND, changeOrigin: true },
     },
   },
-})
+});

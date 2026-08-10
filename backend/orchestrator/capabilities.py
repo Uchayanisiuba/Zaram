@@ -2,7 +2,7 @@
 
 Every discovered model is turned into a :class:`~orchestrator.contracts.ModelProfile`
 carrying *normalized* (0..1) capability scores. The scores are derived purely
-from the provider-agnostic :class:`garage.contracts.ModelInfo` fields — never
+from the provider-agnostic :class:`providers.contracts.ModelInfo` fields — never
 from a model name. This is what lets the scoring engine rank models without
 ever knowing *who* they are.
 """
@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
-from garage.contracts import (
+from providers.contracts import (
     CapabilityLocality,
     HealthStatus,
     ModelCategory,

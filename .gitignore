@@ -5,32 +5,38 @@ __pycache__/
 *.so
 .Python
 venv/
+.venv/
 ENV/
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
 *.egg-info/
-.installed.cfg
 *.egg
+.installed.cfg
+# Anchored to the repo root on purpose. Unanchored `lib/`, `build/` and `dist/`
+# are Python packaging patterns that also swallow real frontend source —
+# `frontend/src/lib/utils.ts` was ignored-but-tracked because of exactly that.
+/build/
+/dist/
+/develop-eggs/
+/downloads/
+/eggs/
+/.eggs/
+/lib/
+/lib64/
+/parts/
+/sdist/
+/var/
+/wheels/
 
-# Testing & Linting
+# Testing & linting caches
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
 .coverage
 htmlcov/
 
-# IDE
-.vscode/
+# IDE — personal settings stay local, but settings.json is shared project
+# config (it keeps Pylance out of frontend/ and the venvs) so it is committed.
+.vscode/*
+!.vscode/settings.json
 .idea/
 *.swp
 *.swo
@@ -39,12 +45,92 @@ htmlcov/
 .DS_Store
 Thumbs.db
 
-# Environment
+# Environment — never commit keys
 .env
-.env.local
+.env.*
+!.env.example
 
-# Node / Frontend
-frontend/node_modules/
+# Node
+node_modules/
 frontend/dist/
 frontend/.vite/
-node_modules
+desktop/dist/
+packages/*/dist/
+dist-electron/
+*.tsbuildinfo
+
+# The Spine — the user's local knowledge base. User data, never committed.
+spine.db
+spine.db-journal
+spine.db-wal
+spine.db-shm
+backend/spine.db*
+
+# The egress log and its policy. A record of every question that left the
+# machine is the most private file Zaram holds — more so than the Spine, which
+# at least only contains what the user chose to store. Never committed.
+egress.db
+egress.db-journal
+egress.db-wal
+egress.db-shm
+backend/egress.db*
+egress-policy.json
+backend/egress-policy.json
+
+# Artifact records, and the files they describe. Both are the user's own work —
+# their invoices, proposals and client spreadsheets. The database holds the
+# provenance and the full HTML of every document generated, which makes it as
+# private as the Spine, and the output directory holds the documents themselves.
+artifacts.db
+artifacts.db-journal
+artifacts.db-wal
+artifacts.db-shm
+backend/artifacts.db*
+backend/generated/
+
+# Ingest records: which folders the user pointed at, every file in them, and
+# what was extracted. The paths alone describe someone's whole working life —
+# clients, projects, what they are being paid — so this is as private as the
+# Spine and belongs next to it, not in the repo.
+ingest.db
+ingest.db-journal
+ingest.db-wal
+ingest.db-shm
+backend/ingest.db*
+
+# Screenshots from driving the interface. Reproduce them by running the script;
+# committing them means a binary diff on every UI change and a stale picture in
+# the repo the day after.
+frontend/scripts/drive-shots/
+
+# Generated audio. Produced by the speech runtime at runtime, not source.
+backend/audio/
+backend/audio_clips/
+backend/audio_output/
+
+# Uploads — whatever the user dropped in. Never ours to commit.
+uploads/
+
+# AI tool scratch space. Session artefacts, vendored skill bundles and
+# worktrees, none of which are Zaram source.
+.playwright-mcp/
+.kilo/skills/
+.kilo/worktrees/
+
+# Ad-hoc captures and command output. Screenshots that are part of the
+# design record live in docs/design/ and are committed deliberately.
+/*.png
+/*.log
+/*.jpg
+tsc_out*
+lint_out*
+zaram-current-state*
+frontend/screenshot*.png
+
+# Retired surface, kept on disk only. The name uses vocabulary CLAUDE.md
+# retired; nothing in it is referenced by the build.
+zaram-ai-operating-system-ui/
+
+# Test VRM avatars. Large binaries, and the sample is a licensed VRoid
+# export rather than ours to redistribute.
+*.vrm
