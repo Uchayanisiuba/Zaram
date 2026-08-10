@@ -30,6 +30,7 @@ import html as html_escape
 from typing import Iterable, List, Sequence
 
 from .contracts import ArtifactSource, Claim
+from .letterhead import Letterhead
 
 #: Attribute names, in one place. The exporters read these back out.
 CLAIM_ATTR = "data-zaram-claim"
@@ -64,6 +65,15 @@ def render_document(
     blocks: Sequence[str | Claim],
     sources: Sequence[ArtifactSource] = (),
     claims: Sequence[Claim] = (),
+    #: The user's branding. Optional and additive: every existing caller keeps
+    #: working and gets the improved typography without knowing this exists.
+    letterhead: "Letterhead | None" = None,
+    #: Label/value pairs for the scan-first block — reference number, dates,
+    #: parties. Ordered, because the caller knows what matters on this document.
+    meta: Sequence[tuple[str, str]] = (),
+    #: What kind of document this is, set small and uppercase opposite the
+    #: letterhead: "Invoice", "Quote", "Proposal".
+    kind_label: str = "",
 ) -> str:
     """Render a complete, self-contained HTML document.
 
@@ -89,12 +99,63 @@ def render_document(
             f"<title>{_esc(title)}</title>",
             f"<style>{_STYLE}</style>",
             "</head><body>",
-            f"<h1>{_esc(title)}</h1>",
+            # One wrapper so the screen preview can draw a sheet of paper around
+            # the content while print leaves the page box to do it.
+            '<div class="sheet">',
+            _masthead(title, letterhead, kind_label),
+            _meta_block(meta),
             *body,
             _sources_section(sources, claims),
+            "</div>",
             "</body></html>",
         ]
     )
+
+
+def _masthead(title: str, letterhead: "Letterhead | None", kind_label: str) -> str:
+    """The top of the page: who it is from, what it is, and what it is called.
+
+    Rendered **even when there is no letterhead**, because a bare `<h1>` sitting
+    at the top of a page is exactly what made the old output read as unfinished.
+    With nothing configured this is still a titled document under a rule; with a
+    logo and an address it is a letterhead.
+    """
+    left: List[str] = []
+    if letterhead is not None and letterhead.logo:
+        # `alt` carries the business name so the logo is not silent to a screen
+        # reader or in a text extraction of the PDF.
+        left.append(
+            f'<img class="logo" alt="{_esc(letterhead.name or "Logo")}" '
+            f'src="{_esc(letterhead.logo)}">'
+        )
+    if letterhead is not None and letterhead.name:
+        left.append(f'<div class="name">{_esc(letterhead.name)}</div>')
+    if letterhead is not None:
+        left.extend(
+            f'<div class="line">{_esc(line)}</div>' for line in letterhead.lines if line
+        )
+
+    who = f'<div class="who">{"".join(left)}</div>' if left else "<div></div>"
+    kind = f'<div class="kind">{_esc(kind_label)}</div>' if kind_label else ""
+
+    return f'<header class="masthead">{who}{kind}</header><h1>{_esc(title)}</h1>'
+
+
+def _meta_block(meta: Sequence[tuple[str, str]]) -> str:
+    """Reference, dates, parties — the fields a reader scans before reading.
+
+    A list of pairs rather than a dataclass with `invoice_number` and `due_date`,
+    because the fields differ by document and by country and a schema written
+    here would be wrong somewhere. The caller knows what this document is.
+    """
+    if not meta:
+        return ""
+    pairs = "".join(
+        f"<div><dt>{_esc(label)}</dt><dd>{_esc(value)}</dd></div>"
+        for label, value in meta
+        if label and value
+    )
+    return f'<dl class="meta">{pairs}</dl>' if pairs else ""
 
 
 def _sources_section(
@@ -271,16 +332,108 @@ def strip_anchors(document_html: str) -> str:
     )
 
 
-_STYLE = (
-    "body{font:14px/1.6 Georgia,serif;max-width:44em;margin:3em auto;color:#111}"
-    "h1{font-size:1.6em;margin-bottom:1em}"
-    "h2{font-size:1.05em;margin-top:2em;text-transform:uppercase;"
-    "letter-spacing:.06em;color:#555}"
-    ".sources{margin-top:3em;border-top:1px solid #ddd;padding-top:1em;"
-    "font-size:.85em;color:#444}"
-    ".sources code{font-size:.9em;color:#777}"
-    f"span[{SOURCE_ATTR}]{{border-bottom:1px dotted #999}}"
+# --------------------------------------------------------------------------- #
+# The document stylesheet.
+#
+# **This used to be eight lines and it is why generated documents looked like a
+# web page printed by accident.** The old rule was
+# `body{font:14px/1.6 Georgia,serif;max-width:44em;margin:3em auto}` — screen
+# conventions, on something whose destination is paper. There was no `@page` at
+# all, which meant no paper size, no print margins, no page numbers, no running
+# header, no letterhead. The model was blamed for this; the model writes the
+# words and every visual property of the output was decided here.
+#
+# Three constraints shape what follows, and each rules out the obvious answer:
+#
+# *No remote assets.* `check-no-remote-assets.mjs` bans them and the product
+# refuses them, so there are no web fonts. System stacks only — which is not a
+# compromise for print, because the stacks below resolve to fonts that were
+# designed for documents on every platform Zaram runs on.
+#
+# *One stylesheet for two media.* The same string is the preview and the PDF
+# source, so `@media screen` and `@media print` do the work rather than two
+# templates that drift. What the user sees is what downloads, which is the whole
+# argument for HTML being the source of truth.
+#
+# *Print rules are not decoration.* `orphans`/`widows`, `break-inside` and
+# `break-after` are what stop a table splitting across a page boundary mid-row
+# or a heading stranding itself at the foot of a page. They are invisible when
+# they work, which is why they were missing.
+# --------------------------------------------------------------------------- #
+
+#: Serif for body text, because a document is read in long lines and on paper.
+#: Charter and Palatino ship on macOS, Cambria and Georgia on Windows; the last
+#: two entries are the generic fallbacks that keep Linux honest.
+_SERIF = "Charter,'Bitstream Charter','Palatino Linotype',Palatino,Cambria,Georgia,serif"
+#: Sans for labels, table headers and the metadata block — the parts a reader
+#: scans rather than reads.
+_SANS = "'Segoe UI',Inter,-apple-system,BlinkMacSystemFont,'Helvetica Neue',Arial,sans-serif"
+
+_PAGE_STYLE = (
+    # A4 because that is the paper everywhere Zaram's first users are. The
+    # margins are the classic document proportions: a wider foot than head, so
+    # the text block sits slightly above centre and does not look like it is
+    # sliding off the page.
+    "@page{size:A4;margin:22mm 20mm 24mm 20mm;"
+    "@bottom-center{content:counter(page) ' of ' counter(pages);"
+    f"font:9pt {_SANS};color:#888}}}}"
 )
+
+_STYLE = (
+    ":root{--ink:#14171a;--muted:#5b6570;--rule:#d8dde2;--accent:#0f766e}"
+    f"body{{font:11.5pt/1.65 {_SERIF};color:var(--ink);"
+    "-webkit-font-smoothing:antialiased;margin:0}"
+    # Screen: emulate a sheet of paper so the preview reads as a document rather
+    # than as a web page. Print: the page box already does this, so the frame is
+    # removed or it would print a border around every page.
+    "@media screen{"
+    "body{background:#eceef1;padding:28px 16px}"
+    ".sheet{background:#fff;max-width:210mm;min-height:297mm;margin:0 auto;"
+    "padding:22mm 20mm 24mm;box-shadow:0 1px 3px rgba(0,0,0,.14),0 8px 28px rgba(0,0,0,.10);"
+    "border-radius:2px}"
+    "}"
+    "@media print{body{background:none;padding:0}"
+    ".sheet{max-width:none;min-height:0;margin:0;padding:0;box-shadow:none}}"
+    # The masthead. Present even with no letterhead configured, because the
+    # title has to sit on something — a bare <h1> at the top of a page is what
+    # made the old output look unfinished.
+    ".masthead{display:flex;justify-content:space-between;align-items:flex-end;"
+    "gap:24px;border-bottom:2px solid var(--ink);padding-bottom:10px;margin-bottom:26px}"
+    f".masthead .who{{font:600 10.5pt/1.35 {_SANS};letter-spacing:.02em}}"
+    ".masthead .who .line{color:var(--muted);font-weight:400}"
+    # Constrained by height, not width: a logo is wide or tall and only the
+    # height decides whether the masthead stays one band. 18mm is the tallest a
+    # mark can be before it starts competing with the document title.
+    ".masthead .logo{max-height:18mm;max-width:70mm;width:auto;height:auto;"
+    "display:block;margin-bottom:6px}"
+    ".masthead .name{margin-bottom:2px}"
+    f".masthead .kind{{font:600 9pt/1.3 {_SANS};text-transform:uppercase;"
+    "letter-spacing:.14em;color:var(--accent);text-align:right;white-space:nowrap}"
+    "h1{font-size:20pt;line-height:1.2;font-weight:600;margin:0 0 4px;"
+    "letter-spacing:-.01em}"
+    # A heading must never be the last thing on a page.
+    "h1,h2,h3{break-after:avoid;page-break-after:avoid}"
+    f"h2{{font:600 9pt/1.3 {_SANS};text-transform:uppercase;letter-spacing:.12em;"
+    "color:var(--muted);margin:26px 0 8px}"
+    "p{margin:0 0 .85em;orphans:3;widows:3}"
+    # The metadata block: reference, dates, parties. Scanned, not read, so it is
+    # set in the sans face and in columns rather than as prose.
+    f".meta{{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));"
+    f"gap:12px 24px;margin:0 0 26px;font:9.5pt/1.45 {_SANS}}}"
+    ".meta dt{color:var(--muted);text-transform:uppercase;letter-spacing:.08em;"
+    "font-size:8pt;margin-bottom:2px}"
+    ".meta dd{margin:0;color:var(--ink);font-weight:500}"
+    # Provenance, kept but made to look deliberate rather than like a debug dump.
+    ".sources{margin-top:32px;border-top:1px solid var(--rule);padding-top:12px;"
+    f"font:9pt/1.5 {_SANS};color:var(--muted);break-inside:avoid}}"
+    ".sources ul{margin:0;padding-left:1.1em}"
+    ".sources li{margin-bottom:6px}"
+    ".sources code{font-size:8.5pt;color:#8a939c}"
+    # The claim underline is provenance made visible in the file itself, so it
+    # has to survive print — where a dotted grey rule is nearly invisible.
+    f"span[{SOURCE_ATTR}]{{border-bottom:1px solid rgba(15,118,110,.45)}}"
+    "@media print{" f"span[{SOURCE_ATTR}]{{border-bottom:1px solid #999}}}}"
+) + _PAGE_STYLE
 
 _TABLE_STYLE = (
     "table{border-collapse:collapse;width:100%;font:13px/1.5 system-ui,sans-serif}"
