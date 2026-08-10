@@ -60,14 +60,29 @@ activity table, cards, metric tiles.
 
 ### Navigation
 
-**The orbit** — five nodes revolving around the Living Orb on the landing state:
-**Work · Memory · Knowledge · Activity · Settings**.
+**The orbit** — six nodes revolving around the Living Orb on the landing state:
+**Work · Project · Memory · Knowledge · Activity · Settings**.
 
 **Work** holds what the user made — documents, spreadsheets, charts — each with the
 conversation that produced it and its sources. Same layout across project types;
 only the content differs. It exists because a navigation made only of Memory,
 Knowledge and Activity is entirely about the system and holds nothing the user
 made.
+
+**Project** holds the projects themselves: create, name, choose the type that
+activates a pack, assign and move artifacts and facts, rename, delete. **Work is the
+output; Project is the organisation of it** — Work browses and previews what was
+made, Project decides what belongs where.
+
+It is a node rather than a filter inside Work because `project:<id>` scopes *facts*,
+not only files: it reaches the Spine and, once the plan object lands, the plan. A
+filter living inside Work cannot own something that scopes Memory. The reasoning, and
+the argument it replaced, are recorded in `CLAUDE.md`.
+
+**No folder tree.** One level of grouping, the project. Nesting would be a second
+organising system competing with scope, provenance and recall — and Project assigns
+files to a project, it does not browse a filesystem. Deleting a project is never one
+button: it holds facts and files, so it asks what happens to them.
 Sources live inside Knowledge. Active item takes a cyan left indicator bar and
 raised background, not a filled pill.
 

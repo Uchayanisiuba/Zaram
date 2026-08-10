@@ -39,14 +39,45 @@ Use these terms only.
 Retired, do not use: "faculty", "nursery", "aperture", "synapse web",
 "AI operating system", "workspace" (as a top-level surface).
 
-## Navigation — five nodes
+## Navigation — six nodes
 
-**Work · Memory · Knowledge · Activity · Settings**, as five nodes orbiting the Living
-Orb on the landing state. Sources live inside Knowledge. Tools are configured inside
-Settings.
+**Work · Project · Memory · Knowledge · Activity · Settings**, as six nodes orbiting
+the Living Orb on the landing state. Sources live inside Knowledge. Tools are
+configured inside Settings.
 
-Five is the count. Adding a sixth requires a reason that survives "why is this not part
-of Conversation?" — the retired design had six and four of them held nothing.
+Six is the count. Adding a seventh requires a reason that survives "why is this not
+part of Conversation?" — the retired design had six and four of them held nothing,
+which is what the count is guarding against.
+
+**Project earned the sixth node, 10 August 2026.** It was argued down first, on the
+grounds that a project only groups artifacts and a grouping of artifacts is a filter
+inside Work rather than a surface. That reasoning was wrong, and rule 7i is what makes
+it wrong: **project scope applies to facts, not only to files.** `project:<id>` is a
+field on the Spine, the queued plan object is scoped the same way, and sources in
+Knowledge carry it too. A project therefore spans Work, Memory and Knowledge at once —
+and a filter living inside Work cannot own something that scopes Memory.
+
+The precedent is Memory and Knowledge themselves. Both are stores of information,
+similar enough that grouping them is tempting, and they are separate because one holds
+derived facts about the user and the other holds the documents those came from. Project
+stands in the same relation to Work: adjacent, overlapping, not the same thing.
+
+It passes the test below more clearly than Work does. A project holds a **type**, which
+activates a pack; the facts scoped to it; the artifacts assigned to it; and — once the
+plan object lands — the steps, decisions taken and decisions rejected.
+
+**What Project is not.** It is not a file manager. No folder tree, no subfolders, no
+nesting: one level of grouping, the project itself. A hierarchy would be a second
+organising system competing with the one that *is* the product — scope, provenance and
+recall — and if a tree is needed to find your own work then recall has failed and the
+tree hides the failure rather than fixing it. It also collides with 7h, since every
+folder is a decision made in advance about where something goes.
+
+The split with Work is: **Work is the output, Project is the organisation of it.** Work
+browses, previews and opens what was made. Project creates, names, types, assigns,
+moves and deletes. Deleting a project is never one button — it holds facts and files,
+so it must ask whether those are re-scoped, reassigned, or deleted with it. Rule 4
+applies to everything inside it.
 
 **Work is where output lives** — documents, spreadsheets, charts the user made, each
 with the conversation that produced it and its sources. It exists because a navigation
@@ -63,11 +94,24 @@ one click: the orb reverses the animation, and the persistent bar's topic line i
 clickable. Never let the animation be the only route back.
 
 **Tools never get menu items.** They are actions inside the conversation. This is what
-lets capability grow without the navigation growing. Adding a fourth top-level surface
-requires a reason that survives "why is this not part of Conversation?"
+lets capability grow without the navigation growing.
 
 Generated files appear as cards in the conversation and land in the output directory.
-There is no Files surface — that duplicates the operating system.
+There is no Files surface — that duplicates the operating system. Project assigns files
+to a project; it does not browse a filesystem.
+
+**Work does not gain sub-apps for editing.** Proposed 10 August 2026 and declined on
+the grounds already recorded in the dependency stack: OnlyOffice is AGPL and would
+force the whole product under it, LibreOffice headless is several hundred megabytes,
+and both are separate services rather than libraries. Zaram *generates* documents and
+users edit them in whatever they already have — different problems, and the second one
+is solved.
+
+The defensible narrow version, post-v1 and not promised: because HTML is the source of
+truth for every generated document, editing **Zaram's own generated HTML** before
+export is conceivable without embedding an editor at all. That is a preview that
+accepts edits, not a word processor, and it is worth building only if users ask for it
+after v1 ships. It is not a sub-app and it does not get a menu item.
 
 ## Immutable rules
 
@@ -349,7 +393,9 @@ as cloud parsing APIs.
 **A pack is data and adapters, never navigation.** A vertical adds four things:
 parsers, tools, output templates, and routing exemplars. It adds no screens. Projects
 have a type, chosen once at creation, and that choice activates the pack. This is what
-lets capability grow while the navigation stays at five nodes.
+lets capability grow while the navigation stays at six nodes. **Project is where that
+type is chosen** — creation is the only honest moment to ask, and it is the one thing
+the user genuinely cannot be asked later without guessing.
 
 **Build two packs by hand before building the pack system.** The abstraction cannot be
 designed from imagination — only from two real examples and the friction between them.
