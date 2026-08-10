@@ -1352,6 +1352,19 @@ async def voice_transcribe(request: Request, language: str | None = None):
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Transcription failed: {exc}")
 
+    # Measured: the same sentence transcribed three ways, and one of them turned
+    # *naira* into **$** — wrong by ~1500x, in the direction that looks
+    # reasonable on an invoice. Nothing downstream can catch that, because
+    # `$400,000` is a well-formed amount. So the transcript says so itself
+    # rather than arriving looking like ordinary prose.
+    #
+    # Reported, never corrected. Rewriting `$` to `₦` would be guessing intent
+    # from audio that has already proven unreliable, which is the failure rule 9
+    # is about.
+    from voice.stt.figures import CONFIRMATION_NOTICE, figures_in
+
+    figures = figures_in(transcript.text)
+
     return {
         "text": transcript.text,
         "language": transcript.language,
@@ -1360,6 +1373,14 @@ async def voice_transcribe(request: Request, language: str | None = None):
             {"text": s.text, "start_s": s.start_s, "end_s": s.end_s}
             for s in transcript.segments
         ],
+        "figures": [
+            {"kind": f.kind, "text": f.text, "start": f.start, "end": f.end}
+            for f in figures
+        ],
+        "needs_confirmation": bool(figures),
+        # Sent rather than duplicated in the frontend, so the wording tracks the
+        # measurement that justifies it.
+        "confirmation_notice": CONFIRMATION_NOTICE if figures else None,
     }
 
 

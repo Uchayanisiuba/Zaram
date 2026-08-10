@@ -111,6 +111,14 @@ export default function ChatSurface() {
   const micError = useMicStore((s) => s.error);
   const micStatus = useMicStore((s) => s.status);
 
+  // The dictated transcript contained an amount. Not an error — the text landed
+  // fine — so it reads as a caution and is styled apart from the failures
+  // below. Measured: *naira* came back as **$**, wrong by ~1500x in the
+  // direction that looks reasonable on an invoice, and `$400,000` is a
+  // well-formed amount that nothing downstream can question. The person who
+  // said it is the last check there is.
+  const figureNotice = useMicStore((s) => s.figureNotice);
+
   // Speech *out* failures were rendered nowhere. `speechStore` sets a careful
   // named reason for each one — "Speech is not installed.", "Playback was
   // blocked.", "The audio could not be played." — and no component read it, so
@@ -429,6 +437,17 @@ export default function ChatSurface() {
             }}
           >
             {micError ?? speechError ?? micUnavailable}
+          </p>
+        )}
+        {/* Amber, not red, and on its own line: nothing failed. The transcript
+            arrived; one part of it is not trustworthy. Rendered separately from
+            the errors above so a caution never hides a failure or vice versa. */}
+        {figureNotice && (
+          <p
+            className="mt-2 px-1 text-[11px] leading-relaxed"
+            style={{ color: '#fcd34d' }}
+          >
+            {figureNotice}
           </p>
         )}
         {/* Under the input rather than over it: the scope is context for what
