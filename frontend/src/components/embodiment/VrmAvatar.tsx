@@ -58,6 +58,93 @@ const MOTION_RATE: Record<EmbodimentState, number> = {
   swapping: 0.45,
 }
 
+/**
+ * How many device pixels to render per CSS pixel.
+ *
+ * **The avatar was pixelated because this used to be `min(dpr, 2)`**, and the
+ * measurement is the whole argument: on a DPR-1 display that renders the entire
+ * head into a **320x320** buffer, and the head only occupies part of it. The
+ * cap was doing its job; there was no floor, and a face is not a page of text.
+ *
+ * `antialias: true` was already set and was not the fix — confirmed live at
+ * `SAMPLES = 4`. MSAA smooths *silhouettes*. It does nothing for shading and
+ * texture sampling inside a surface, which is where the aliasing on a face
+ * actually lives, so the setting that looked like the answer was already on.
+ *
+ * Rendering at 2 on a DPR-1 display is supersampling: 640x640 resolved down to
+ * 320 CSS px. The old comment here priced that as unaffordable next to a
+ * resident local model, and the arithmetic says otherwise — 409,600 fragments
+ * against the 2,073,600 of a single 1080p frame. It is a fifth of one frame of
+ * the screen it is drawn on.
+ *
+ * Still capped at 2. Above that the returns are invisible at this size and the
+ * cost is real, so a DPR-3 display renders slightly soft on purpose.
+ */
+export function renderScaleFor(devicePixelRatio: number): number {
+  return Math.min(Math.max(devicePixelRatio, 2), 2)
+}
+
+/**
+ * Turn on anisotropic filtering for every texture under `root`.
+ *
+ * The second half of the pixelation, and the larger half. three.js defaults
+ * `Texture.anisotropy` to **1**, which is no anisotropic filtering at all. This
+ * asset carries six 2048x2048 maps rendered onto a head a couple of hundred
+ * pixels tall — around 10x minification — and at anisotropy 1 that samples one
+ * texel per fragment and shimmers.
+ *
+ * Texture slots are found by walking the material rather than by naming `map`,
+ * `normalMap` and friends, because VRM materials are MToon and carry
+ * `shadeMultiplyTexture`, `rimMultiplyTexture`, `matcapTexture` and others that
+ * a hardcoded list would silently skip — and skipping the shade map on a
+ * cel-shaded face misses the aliasing everyone can see.
+ *
+ * **Two places have to be searched, and the second one is the one that
+ * matters.** The first version of this walked `Object.values(material)` only.
+ * It passed its unit test against a `MeshBasicMaterial` and reported
+ * `textures filtered: 0` against the real avatar, because `MToonMaterial`
+ * extends `ShaderMaterial` and exposes its maps as *prototype accessors* over
+ * `this.uniforms` — and `Object.values` on the instance enumerates neither
+ * prototype properties nor accessors. The count is printed at load for exactly
+ * this reason: the fix looked right, the test agreed, and the number said no.
+ *
+ * Returns how many textures were changed, so a caller can tell "filtering
+ * applied" from "there was nothing to apply it to".
+ */
+export function applyTextureFiltering(root: THREE.Object3D, maxAnisotropy: number): number {
+  const seen = new Set<THREE.Texture>()
+
+  const filter = (value: unknown) => {
+    if (!(value instanceof THREE.Texture) || seen.has(value)) return
+    seen.add(value)
+    value.anisotropy = maxAnisotropy
+    // Mipmaps are what anisotropic filtering samples between. A texture set to
+    // NearestFilter has none, and would keep aliasing however high the
+    // anisotropy went — so the two are set together or not at all.
+    value.minFilter = THREE.LinearMipmapLinearFilter
+    value.magFilter = THREE.LinearFilter
+    value.generateMipmaps = true
+    value.needsUpdate = true
+  }
+
+  root.traverse((object) => {
+    const material = (object as THREE.Mesh).material
+    if (!material) return
+    for (const entry of Array.isArray(material) ? material : [material]) {
+      // Ordinary materials: the texture is an own property.
+      for (const value of Object.values(entry)) filter(value)
+      // ShaderMaterial and everything built on it, MToon included: the texture
+      // is a uniform, and the named property is an accessor pointing at it.
+      const uniforms = (entry as unknown as { uniforms?: Record<string, { value?: unknown }> }).uniforms
+      if (uniforms) {
+        for (const uniform of Object.values(uniforms)) filter(uniform?.value)
+      }
+    }
+  })
+
+  return seen.size
+}
+
 interface VrmAvatarProps {
   /** Rendered box, in px. Matches the orb's `px` so the two are swappable. */
   px?: number
@@ -97,9 +184,7 @@ export default function VrmAvatar({ px = 320, src = '/avatars/AvatarSample_Z.vrm
     // painting a second ground over it.
     const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true })
     renderer.setSize(px, px)
-    // Capped at 2: a 3x device pixel ratio triples fragment cost for a face
-    // 320px wide, and the GPU budget is shared with a resident local model.
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
+    renderer.setPixelRatio(renderScaleFor(window.devicePixelRatio))
     renderer.outputColorSpace = THREE.SRGBColorSpace
     mount.appendChild(renderer.domElement)
 
@@ -144,6 +229,9 @@ export default function VrmAvatar({ px = 320, src = '/avatars/AvatarSample_Z.vrm
           // skinned mesh that is always on screen only costs a test.
           o.frustumCulled = false
         })
+        // After VRMUtils and before the first frame: the loader leaves every
+        // texture at three.js's default anisotropy of 1.
+        const filtered = applyTextureFiltering(vrm.scene, renderer.capabilities.getMaxAnisotropy())
         scene.add(vrm.scene)
 
         // The named requirement from the spike: log every expression the model
@@ -156,7 +244,12 @@ export default function VrmAvatar({ px = 320, src = '/avatars/AvatarSample_Z.vrm
           `[embodiment] ${src}\n` +
             `  expressions (${names.length}): ${names.join(', ') || 'none'}\n` +
             `  visemes present: ${['aa', 'ih', 'ou', 'ee', 'oh'].filter((v) => names.includes(v)).join(', ') || 'none'}\n` +
-            `  humanoid: ${vrm.humanoid ? 'yes' : 'no'}`,
+            `  humanoid: ${vrm.humanoid ? 'yes' : 'no'}\n` +
+            // Printed because both were silently wrong and looked right: the
+            // buffer was 320x320 on a DPR-1 display, and every texture sat at
+            // anisotropy 1. Neither is visible in the code that sets them.
+            `  render buffer: ${px * renderer.getPixelRatio()}px for a ${px}px box\n` +
+            `  textures filtered: ${filtered} at anisotropy ${renderer.capabilities.getMaxAnisotropy()}`,
         )
         if (names.length === 0) {
           setReason('This avatar has no expressions, so only head motion will respond to state.')

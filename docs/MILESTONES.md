@@ -175,6 +175,52 @@ pays nothing for `three`.
 The ceiling is set at 512 MB. It is a budget decision, not a measurement, and
 raising it means re-checking that it still cannot change which model fits.
 
+**`AvatarSample_Z.vrm` is a placeholder and 190 MB is its number, not the
+product's.** The intent as of 10 August is to replace it with a humanoid robot
+with an LED face carrying five or six textures. What carries across the swap is
+the per-texture arithmetic, not the total: **22.4 MB per 2048×2048 map, 5.6 MB
+per 1024×1024**. Six of the first is 134 MB and six of the second is 34 MB, so
+the intended asset lands well inside the ceiling either way — and the thing to
+watch is texture *dimensions*, never texture count. This is why the figure is
+recomputed by a test on every run instead of written down here.
+
+### The avatar was pixelated, and `antialias: true` was not the fix
+
+Two settings, both wrong in the way that is hardest to see: the code already
+looked like it handled the problem.
+
+**The render buffer was 320×320.** `setPixelRatio(Math.min(dpr, 2))` capped a
+high DPR — correctly — but had no floor, so on an ordinary 1× display the entire
+head rendered into 320 pixels square. Now `max(dpr, 2)` capped at 2, which
+supersamples to 640×640 and resolves down. The old comment priced that as
+unaffordable beside a resident local model; the arithmetic disagrees — 409,600
+fragments against the 2,073,600 in one 1080p frame, a fifth of a single frame of
+the screen it is drawn on. Measured: GPU utilisation over the orb went from
++6pp to +5–10pp, which is to say it did not move.
+
+**Every texture sat at anisotropy 1**, three.js's default. Six 2048² maps on a
+head a couple of hundred pixels tall is ~10× minification, sampling one texel
+per fragment. Now 16, with the mipmapped min filter set alongside it — raising
+one without the other is a no-op that reads as a fix.
+
+`antialias: true` was already on and confirmed live at `SAMPLES = 4`. **MSAA
+smooths silhouettes and does nothing for shading or texture sampling inside a
+surface**, which is where aliasing on a face lives. The setting that looks like
+the answer was the setting already applied.
+
+**The first attempt reported `textures filtered: 0`** and its unit tests passed.
+`MToonMaterial` extends `ShaderMaterial` and exposes `map` and
+`shadeMultiplyTexture` as *prototype accessors* over `this.uniforms`, so
+`Object.values(instance)` enumerates neither — while the test fixture, a
+`MeshBasicMaterial`, held its textures as own properties and agreed with the
+bug. The walk now searches uniforms too, the fixture that would have caught it
+is in `VrmAvatar.test.ts`, and the count is printed at load: **71 textures at
+anisotropy 16**, `render buffer: 640px for a 320px box`. The diagnostic is why
+this was caught in minutes rather than shipped.
+
+This matters more after the asset swap, not less: an emissive LED dot grid
+aliases harder than skin.
+
 ### The page-load 404 was the favicon nobody declared
 
 Open since 8 August, closed 10 August. `frontend/index.html` declared no icon
