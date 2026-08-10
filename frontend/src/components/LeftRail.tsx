@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Home, Brain, BookOpen, FileText, ShieldCheck, Settings, Search, FolderOpen, Database, Clock } from 'lucide-react'
+import { Home, Brain, BookOpen, FileText, Layers, ShieldCheck, Settings, Search, FolderOpen, Database, Clock } from 'lucide-react'
 import ResizeHandle from '@/components/common/ResizeHandle'
 import {
   useLayoutStore,
@@ -29,6 +29,9 @@ const NAV_ICONS: Record<WorkspaceId, React.ReactNode> = {
   // entry, navigating into a workspace was a one-way trip.
   landing: <Home size={32} />,
   work: <FileText size={32} />,
+  // Layers, not a folder. Project groups work; it does not browse a filesystem,
+  // and a folder icon would promise the tree CLAUDE.md rules out.
+  project: <Layers size={32} />,
   memory: <Brain size={32} />,
   knowledge: <BookOpen size={32} />,
   // Activity is evidence rather than content, which is why its icon is the odd

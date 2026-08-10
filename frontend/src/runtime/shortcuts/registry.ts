@@ -7,6 +7,7 @@ export type Platform = 'mac' | 'win';
 export type WorkspaceId =
   | 'landing'
   | 'work'
+  | 'project'
   | 'memory'
   | 'knowledge'
   | 'activity'
@@ -32,6 +33,7 @@ export interface Shortcut {
 export const surfaceOrder: WorkspaceId[] = [
   'landing',
   'work',
+  'project',
   'memory',
   'knowledge',
   'activity',
@@ -41,13 +43,20 @@ export const surfaceOrder: WorkspaceId[] = [
 export const surfaceLabels: Record<WorkspaceId, string> = {
   landing: 'Landing',
   work: 'Work',
+  project: 'Project',
   memory: 'Memory',
   knowledge: 'Knowledge',
   activity: 'Activity',
   settings: 'Settings',
 };
 
-/** The five nodes of the orbit, in order. Landing is the shell, not a node.
+/** The six nodes of the orbit, in order. Landing is the shell, not a node.
+ *
+ *  Project sits next to Work because they are adjacent and distinct: Work is
+ *  the output, Project is the organisation of it. It earned a node rather than
+ *  being a filter inside Work because `project:<id>` scopes *facts* — it
+ *  reaches the Spine and the plan, and a filter living inside Work cannot own
+ *  something that scopes Memory. See CLAUDE.md, 10 August 2026.
  *
  *  Consumers that render navigation derive their list from this, and key their
  *  icons off `Record<WorkspaceId, …>` so the compiler names every file that
@@ -58,6 +67,7 @@ export const surfaceLabels: Record<WorkspaceId, string> = {
  *  and the restatements were removed. */
 export const orbitOrder: Exclude<WorkspaceId, 'landing'>[] = [
   'work',
+  'project',
   'memory',
   'knowledge',
   'activity',

@@ -249,6 +249,20 @@ class ArtifactRecords:
 
         return [{"id": row["project_id"], "count": row["n"]} for row in rows]
 
+    def count_for_project(self, project_id: str) -> int:
+        """How many artifacts are assigned to a project.
+
+        Read before deleting one, so the confirmation can say what is in it.
+        Counted here rather than cached on the project record, because a count
+        stored in two places is a count that disagrees with itself.
+        """
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) AS n FROM artifacts WHERE project_id = ?",
+                (project_id,),
+            ).fetchone()
+        return int(row["n"])
+
 
 class DuplicateArtifact(ValueError):
     """That id is already stored. Records are written once."""
