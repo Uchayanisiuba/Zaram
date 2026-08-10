@@ -144,6 +144,70 @@ describe('recording', () => {
   });
 });
 
+describe('a dictated amount is flagged for the person who said it', () => {
+  // Measured, through the real route: the audio said *naira* and Whisper
+  // returned **$400,000**. Wrong by about fifteen hundred times, in the
+  // direction that looks reasonable on an invoice, and `$400,000` is a
+  // well-formed amount that nothing downstream can question. The speaker is the
+  // last check there is, so the notice has to reach them before they press send.
+  const HEARD = 'My day rate for Harbor Lane is $400,000 and $25,000.';
+
+  it('surfaces the backend’s notice, and still returns the text', async () => {
+    stubBrowser();
+    stubFetch(
+      json({
+        text: HEARD,
+        needs_confirmation: true,
+        confirmation_notice: 'Check the figures — dictation heard “naira” as “$”.',
+      }),
+    );
+
+    await useMicStore.getState().start();
+    const text = await useMicStore.getState().stop();
+
+    // The transcript is not withheld or altered. Nothing failed.
+    expect(text).toBe(HEARD);
+    expect(useMicStore.getState().figureNotice).toContain('naira');
+    // A caution is not a failure, and conflating them would either hide a real
+    // error or make an ordinary transcript look broken.
+    expect(useMicStore.getState().error).toBeNull();
+  });
+
+  it('says nothing for prose', async () => {
+    stubBrowser();
+    stubFetch(json({ text: 'Call the client about the brief.', needs_confirmation: false }));
+
+    await useMicStore.getState().start();
+    await useMicStore.getState().stop();
+
+    expect(useMicStore.getState().figureNotice).toBeNull();
+  });
+
+  it('clears the notice when the next recording starts', async () => {
+    // It describes one transcript. Leaving it up would attach a warning about
+    // an old amount to a new sentence.
+    stubBrowser();
+    stubFetch(json({ text: HEARD, needs_confirmation: true, confirmation_notice: 'check it' }));
+
+    await useMicStore.getState().start();
+    await useMicStore.getState().stop();
+    expect(useMicStore.getState().figureNotice).toBe('check it');
+
+    await useMicStore.getState().start();
+    expect(useMicStore.getState().figureNotice).toBeNull();
+  });
+
+  it('falls back to its own wording against a backend that does not send one', async () => {
+    stubBrowser();
+    stubFetch(json({ text: HEARD, needs_confirmation: true }));
+
+    await useMicStore.getState().start();
+    await useMicStore.getState().stop();
+
+    expect(useMicStore.getState().figureNotice).toBeTruthy();
+  });
+});
+
 describe('the microphone is released', () => {
   it('after a successful transcription', async () => {
     stubBrowser();

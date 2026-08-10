@@ -83,6 +83,17 @@ interface MicStore {
    *  A denied microphone permission is not a missing extra, and telling someone
    *  to install 81 MB when they clicked Block would be a wrong diagnosis. */
   error: string | null;
+  /** Set when the last transcript contained an amount, a currency or a number.
+   *
+   *  Not a failure and not styled as one. Measured: the same sentence came back
+   *  three different ways and one of them turned *naira* into **$**, wrong by
+   *  about fifteen hundred times in the direction that looks reasonable on an
+   *  invoice. Nothing downstream can catch that, because `$400,000` is a
+   *  well-formed amount — so the only place it can be caught is here, by the
+   *  person who said it, before they press send.
+   *
+   *  Cleared on the next recording, because it describes one transcript. */
+  figureNotice: string | null;
 
   /** Ask the backend whether it can listen. Local call; no egress. */
   checkAvailability: () => Promise<void>;
@@ -99,6 +110,7 @@ export const useMicStore = create<MicStore>((set, get) => ({
   status: 'idle',
   unavailableReason: null,
   error: null,
+  figureNotice: null,
 
   checkAvailability: async () => {
     if (!micSupported()) {
@@ -132,7 +144,10 @@ export const useMicStore = create<MicStore>((set, get) => ({
       return;
     }
 
-    set({ status: 'requesting', error: null });
+    // The notice describes the previous transcript, so it clears here rather
+    // than on send — leaving it up would attach a warning about an old amount
+    // to a new sentence.
+    set({ status: 'requesting', error: null, figureNotice: null });
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     } catch (e) {
@@ -214,8 +229,21 @@ export const useMicStore = create<MicStore>((set, get) => ({
         return '';
       }
 
-      const body: { text?: string } = await res.json();
-      set({ status: 'idle', error: null });
+      const body: {
+        text?: string;
+        needs_confirmation?: boolean;
+        confirmation_notice?: string | null;
+      } = await res.json();
+      // The wording comes from the backend rather than being written here, so
+      // it tracks the measurement that justifies it instead of drifting from
+      // it. Falls back only if the field is missing — an older backend.
+      set({
+        status: 'idle',
+        error: null,
+        figureNotice: body.needs_confirmation
+          ? body.confirmation_notice ?? 'Check the figures — dictated amounts are not reliable.'
+          : null,
+      });
       return (body.text ?? '').trim();
     } catch (e) {
       set({
