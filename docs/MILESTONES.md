@@ -13,27 +13,46 @@ accurate — it is the first thing anyone reads.
 
 ## Current state — 10 August 2026
 
-**Suite: 0 failures.** 1388 → 1426 → 1433 → 1436 → 1453 → 1457 → **1470/0**,
-8 skipped, 85–170s from the repo root on a full dev install. Frontend: 40 vitest
-across 4 files, build and typecheck green.
+**Suite: 0 failures.** 1388 → … → **1535/0**, 8 skipped, ~145s from the repo
+root on a full dev install. Frontend: **44 vitest across 5 files**, plus build
+(which runs the three scanners) and `tsc --noEmit`, all green.
 
-**Check which build is answering before debugging anything.** `curl
-localhost:8420/health | jq .build` reports the commit and uptime. A backend
-started at 06:32 on 10 August served that port all day while two *already
-fixed* bugs — the audio 404 and recall on a greeting — were reported live and
-re-diagnosed against it. Windows lets a second uvicorn bind `0.0.0.0:8420`
-beside a `127.0.0.1:8420` without an error, and the older process wins. A
-backend with no `build` field predates this and is stale by definition. Run pytest **from the repo root** — `--ignore` in
-`pyproject.toml` is rootdir-relative and running from `backend/` still aborts
-the whole suite.
+**Everything is committed and pushed**, `0cef961..a0d2bed` on `Zaram-V0.1`,
+17 commits. Working tree clean.
 
-The 1426 in the previous handoff was measured *before* the last guard test
-landed (`test_no_exemption_is_unnecessary`, parametrised over 7 exemptions).
-That gap is closed: the whole suite has now been run at **1433/0**, and the
-frontend is green on all four gates — `npm run build` (which runs the three
-scanners), `vitest run` at **25/25** across 2 files, and `tsc --noEmit`.
+### Read this before debugging anything
 
-**Everything is committed and pushed**, `0cef961..` on `Zaram-V0.1`.
+**Check which build is answering.**
+
+```
+curl -s localhost:8420/health | jq .build
+```
+
+It reports the commit and uptime. A backend started at 06:32 on 10 August served
+that port for the rest of the day while two *already fixed* bugs — the audio 404
+and recall firing on a greeting — were reported as live and re-diagnosed against
+it. Both fixes had been correct the whole time. **Windows lets a second uvicorn
+bind `0.0.0.0:8420` beside a `127.0.0.1:8420` without an error, and the older
+process wins for loopback.** A backend with no `build` field at all predates
+this commit and is stale by definition.
+
+Proven rather than assumed, same input to both, same second:
+
+```
+port 8420 ('Hello') -> 3 source events     (the stale process)
+port 8425 ('Hello') -> 0 source events     (current code)
+```
+
+**Run pytest from the repo root**, with `.venv/Scripts/python.exe` — not with
+whatever `python` resolves to. `--ignore` in `pyproject.toml` is rootdir-relative
+so running from `backend/` aborts the whole suite, and the system Python 3.11
+has pytest but not the dev install, where the suite reports 54 failures that all
+look like product defects and none of which are.
+
+Live measurements against a local model carry a `measure` marker and skip when
+Ollama is absent. `pytest -m measure` re-runs every one of them — do that when an
+embedding model changes, because several recorded numbers are calibrated to
+bge-m3 and do not transfer.
 
 **Run it with `.venv/Scripts/python.exe`, not with whatever `python` resolves
 to.** The system Python 3.11 on this machine has pytest but not the dev install,
@@ -88,6 +107,61 @@ Zaram generates; users edit in what they already have. The narrow defensible
 version, post-v1 and unpromised, is that HTML is the source of truth for every
 generated document, so *editing Zaram's own generated HTML before export* needs
 no embedded editor. That is a preview that accepts edits, not a word processor.
+
+### Documents are laid out for paper now — and it was never the model
+
+The report was that generated PDFs and Word files "lack design, have no header,
+and would not pass as a document anyone deals with in 2026", and the suspicion
+was that the local LLM was the limit. **It was not.** The model writes the
+words. Every visual property came from eight lines of CSS at the bottom of
+`artifacts/html.py`:
+
+```css
+body{font:14px/1.6 Georgia,serif;max-width:44em;margin:3em auto;color:#111}
+```
+
+`max-width` and `margin:auto` are screen conventions on something destined for
+paper, and there was **no `@page` rule anywhere** — so no paper size, no print
+margins, no page numbers, no running foot, no letterhead. A larger model would
+have written better prose on the same unstyled page.
+
+Now: A4 with document margins, "page N of M", a real type scale, a ruled
+masthead, an optional metadata block, and the print rules that are invisible
+when they work — `orphans`, `widows`, `break-after` on headings, `break-inside`
+on tables. One stylesheet with `@media screen` / `@media print`, because the
+same string is the preview *and* the WeasyPrint input and two templates would
+drift. No web fonts: a generated document is opened on machines Zaram does not
+control, so a linked font would make it phone home from a stranger's laptop.
+
+**Tables are set the way printed documents set them.** The old rules boxed every
+cell in a 1px grid, which is a spreadsheet convention. Three details separate a
+document from a table dump: `tabular-nums` so a money column aligns on the
+decimal, `thead{display:table-header-group}` so headings repeat on every page,
+and `break-inside:avoid` on rows so a line item is never cut in half.
+
+**Branding.** `Letterhead` carries a name, free-form lines and a logo. The logo
+is **embedded as a data URI, never linked** — `export/pdf.py` calls WeasyPrint
+with no `base_url`, so a path cannot resolve. SVG is refused with a reason: it
+can carry `<image href="https://…">` and no scanner sees inside a data URI.
+
+**Sources and claims are no longer printed into the document.** An invoice goes
+to a client, and the client has no use for `memory:55b6` at the foot of it. This
+does not weaken rule 2 — rule 2 is traceability, and its operational test
+(`test_provenance_invariant.py`) is about the *stream*. The anchors stay in the
+markup and on `Artifact.claims`; the preview renders provenance as chrome around
+the document, the same relationship `CitationPanel` has to a reply.
+`include_provenance=True` turns it back on for a research brief or a proposal,
+where citation is part of the genre.
+
+### Where branding is captured — decided, not yet built
+
+Global scope, captured in chat, offered at the moment of doubt. Rule 7i decides
+it: a letterhead is about *the user*, not about the work, so it is global with a
+per-project override for someone genuinely trading under two names. Rule 7e says
+do not make them fill a form before their first document — drop the logo in the
+composer and say "use this as my letterhead". Rule 7h says offer it the first
+time a document is generated without one. **Settings is where it is visible and
+editable afterwards, never the only way in.**
 
 ### Scope changed this session, deliberately
 
@@ -166,16 +240,77 @@ Six commits, `1ccc339..7a7bd45`, all pushed.
   `TranscriptSegment` — which mirrors `SpeechTiming` on purpose. `language` is
   `Optional` and never defaults to `"en"`.
 
-Then four more, `0cef961..`, committed after the suite was verified at 1433/0
-and **not yet pushed**. Each is written up in full in the sections below.
+Then seventeen more, `0cef961..a0d2bed`, all pushed. Each is written up in full
+in the sections below.
 
+**Voice**
 - **`0cef961` The audio URL 404.** `audio_filename` crosses the connector
   boundary; `base_url` defaults to empty so the URL is relative.
 - **`b7bca96` Zaram listens.** `WhisperRecogniser`, `/voice/transcribe`,
   `micStore`, `MicButton` — and `speechStore.error` finally rendered.
+- **`2c4c819` A dictated amount is flagged, never corrected.** The audio says
+  *naira*; Whisper said **$**.
+- **`67ca372` The orb can be asked to speak.** The "unless asked" half of
+  "orb, silent unless asked", which was never implemented.
+
+**Guards and correctness**
 - **`fc1fb42` Three holes in the guards.** The CSS universal selector, the
   block-comment blind spot, and exemptions that had stopped being needed.
-- **`docs`** — this file.
+- **`0c8cc8b` A greeting no longer pulls the user's files into the prompt.**
+- **`b69b147` `/health` says which build is answering.**
+
+**Embodiment**
+- **`09e5303` The avatar's GPU cost, measured — 190 MB, not 1.5 GB.**
+- **`2cbe9bb` The avatar was pixelated, and `antialias:true` was not the fix.**
+- **`f2a2a16` Triangle count reported alongside VRAM.** 37,678 today.
+
+**Documents**
+- **`3d3d0a1` Laid out for paper, and carrying the user's branding.**
+- **`517c3da` The client sees the document, not the working.**
+
+**Navigation**
+- **`faabf4a` Project is the sixth node** — docs only.
+- **`a0d2bed` The sixth node exists in the app**, not only in the docs.
+
+**Also** `9f22bfb` the page-load 404 (it was `/favicon.ico`), and three `docs`
+commits including this file.
+
+### Project is a real object now — and the lesson from building it
+
+`a0d2bed`. A project used to be `SELECT DISTINCT project_id FROM artifacts`, so
+it existed only once a file had been saved into it, could not be created,
+renamed or deleted, and had nowhere to keep the type that activates a pack.
+
+Both endpoints remain and answer different questions: `/artifacts/projects` is
+"which projects hold files" (Work's filter, which cannot lead to an empty list),
+`/projects` is "which projects exist". Conflating them was the bug.
+
+**Deleting states what it will do and then does only that.** `contents=keep`
+re-scopes facts to global — the grouping goes, the knowledge stays — and is the
+default because it is recoverable. `contents=delete` is never implicit; an
+unrecognised value is a 400 rather than a guess at the destructive branch. Files
+are never touched and the response says so, because "the project is gone" would
+otherwise read as "the files are gone". Fact counts are `-1` when the Spine
+cannot answer, rendered as "an unknown number", and the destructive button is
+**disabled** in that state — "0 facts" on a confirmation that then destroys
+eleven is the failure the sentinel exists for.
+
+**Renaming never moves the id**, because facts carry `project:<id>`.
+
+**The lesson worth carrying forward: a comment describing a bug does not prevent
+the bug.** `registry.ts` calls `orbitOrder` the canonical node list and warns, in
+prose, that three components had each restated it and CommandPalette had
+silently lost Activity as a result. That was written down and never enforced —
+and `orbitOrder` ended up with **no consumers at all**. So adding Project
+updated the rail, ⌘K and the router while the orbit, the first thing anyone
+sees, kept rendering five nodes. It was caught by taking a screenshot, not by
+reading the code. `Landing.test.ts` now asserts the orbit against `orbitOrder`
+for membership, order, labels and spacing.
+
+Two more found the same way: `slugify` **stripped accents instead of folding
+them** ("Ünïcodé Studio" → `n-cod-studio`, which is what a French, German or
+Yorùbá business name would have become), and `/projects` was **missing from the
+Vite proxy**, so every call from the frontend would have hit the dev server.
 
 ### The avatar costs ~190 MB of VRAM, not the invented 1.5 GB
 
@@ -584,7 +719,9 @@ mutation-tested before being believed; this is the same debt paid the same way.
 
 ### Do these first
 
-Worst first. Nothing is broken.
+Worst first. Nothing is broken. **Restart the backend before testing anything** —
+see the build-stamp note at the top; a stale process cost two rounds on
+10 August.
 
 0. ~~**Run the full suite and commit.**~~ Done and pushed, 10 August.
 1. **No human has heard it or spoken to it.** Both directions now work against
@@ -600,10 +737,10 @@ Worst first. Nothing is broken.
      silence, which is the easy case; a fan and a street are not.
    - whether autoplay policy blocks the reply audio. `speechStore` handles it
      and now renders the reason, but it has never fired.
-   - **speech only plays when the embodiment toggle is set to `avatar`** — the
-     landing default is the orb, and nothing on screen says so. That is a real
-     UX gap and the most likely reason a tester reports silence now that the
-     404 is fixed.
+   - ~~speech only plays when the toggle is `avatar` and nothing says so.~~
+     Closed by `67ca372`: a **Speak** button on each reply when the orb is the
+     renderer. The remaining unknown is whether it works against a real output
+     device.
 2. ~~**Speech must not write figures.**~~ Decided and enforced, 10 August:
    **confirmed, not typed-only**. `backend/voice/stt/figures.py` flags any
    amount, currency or number in a transcript and `/voice/transcribe` returns
@@ -621,6 +758,56 @@ Worst first. Nothing is broken.
 5. **`Artifact.indexed` interaction with project scope is unexamined.**
 6. ~~**One unexplained 404 on every page load.**~~ Closed, 10 August: it was
    `/favicon.ico`. See below.
+7. **Project exists but nothing can be moved into it yet.** The node, the
+   surface, the store and the API all work — create, rename, retype, delete
+   with an explicit contents choice. What is missing is *assignment*: there is
+   no way from the UI to put an artifact or a fact into a project. The store
+   supports it (`set_scope`, `project_id` on artifacts); the surface does not
+   expose it. Until then a project can only be filled by being selected in the
+   composer before a fact is captured.
+8. **The whole project-scope path is still barely exercised on real data.**
+   `spine.db` held **zero** `project:*` facts before this session. Now that a
+   project can exist before a file does, this is testable for the first time —
+   and it should be tested, because rule 7i's project half has never run in
+   anger.
+
+### Next, in the order I would take them
+
+Not a queue anyone has committed to — a recommendation, with the reasoning, so
+the next session can disagree cheaply.
+
+1. **Invoice and quote templates, hand-built.** `CLAUDE.md` already names
+   "output templates" as one of the four things a pack adds, so this is the
+   business pack's slot rather than a new concept. The real argument beyond
+   convenience: **a template with named slots is a refusal surface.** Generation
+   is prose-shaped today, so a missing fact becomes plausible invented text; a
+   slot makes the same gap a visible blank that can stop the export, which is
+   rule 9 working at the point it matters. Note the constraint: *build two packs
+   by hand before building the pack system*.
+2. **The preview panel with page navigation.** Asked for directly. Much cheaper
+   now that documents have real pages — the HTML *is* the paginated document, so
+   this renders what exists rather than reimplementing pagination. The pattern
+   to copy is a scroll container of page-sized sheets, not a PDF viewer.
+3. **Assignment** — item 7 above.
+4. **Packaging.** `CLAUDE.md` still calls this *the actual blocker*: "a stranger
+   cannot install this… capability is not what stands between the current state
+   and a 15-person retention test." Nothing this session moved it. If the next
+   milestone is real users rather than more capability, this is the honest
+   answer and it should jump the queue.
+
+### Asked for, and deliberately not built
+
+- **Running the user's apps from a repo inside Zaram.** Splits in two. Rendering
+  generated or simple web content in a **sandboxed frame** is v1-feasible and is
+  the same technology as the document preview. Executing code from a repository
+  is arbitrary execution on the user's machine — queued step 5, "tier-gated,
+  post-v1", and rule 6 says tools confirm before acting. It needs a sandbox
+  story before anyone touches it.
+- **Folder trees inside Project.** One level of grouping, permanently. A
+  hierarchy competes with scope, provenance and recall; if a tree is needed to
+  find your own work then recall has failed and the tree hides that.
+- **Sub-apps inside Work for editing.** See the note above — settled on licence
+  and size grounds, with the narrow HTML-editing version recorded for post-v1.
 
 ### Queued — the architecture discussed, not started
 
