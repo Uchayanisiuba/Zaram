@@ -5,7 +5,7 @@ import os
 import time
 from typing import Any, Dict
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
@@ -95,6 +95,10 @@ async def shutdown_event():
     print("[Shutdown] Powering down Zaram Kernel...")
     if spine_maintenance is not None:
         await spine_maintenance.stop()
+    # No-op unless somebody actually used the microphone this session; the
+    # recogniser is built on first use, not at boot.
+    from voice.stt.service import shutdown_recogniser
+    await shutdown_recogniser()
     await kernel.shutdown()
 
 
@@ -1281,6 +1285,73 @@ async def voice_health():
         return {"status": "unavailable", "reason": "Speech runtime not initialized"}
     health = kernel.speech_runtime.health_check()
     return health
+
+
+# --------------------------------------------------------------------------- #
+# Listening
+#
+# The audio arrives as a raw body rather than a multipart form: it is one blob
+# with one content type, and a form would add a filename and a field name that
+# nothing reads. It is transcribed in this process, on this machine, and is
+# never written to disk — a microphone recording is the most sensitive input
+# Zaram takes, and a temp file would outlive the request that needed it.
+# --------------------------------------------------------------------------- #
+
+#: A push-to-talk clip is seconds long. The cap is not about disk — nothing is
+#: written — but about not reading an unbounded body into memory because a
+#: caller said so.
+MAX_TRANSCRIBE_BYTES = 25 * 1024 * 1024
+
+
+@app.get("/voice/stt/health")
+async def stt_health():
+    """Whether Zaram can listen, and when it cannot, why.
+
+    Called by the UI to decide whether the microphone button is offered.
+    CLAUDE.md: disabled capabilities are visible, not silent — a mic button that
+    is simply absent tells the user nothing, and one that fails on press tells
+    them something worse.
+    """
+    from voice.stt.service import get_recogniser
+
+    recogniser = await get_recogniser()
+    return await recogniser.health_check()
+
+
+@app.post("/voice/transcribe")
+async def voice_transcribe(request: Request, language: str | None = None):
+    """Turn a recording into text. Local only."""
+    from voice.stt.service import get_recogniser
+
+    audio = await request.body()
+    if len(audio) > MAX_TRANSCRIBE_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"That recording is larger than the {MAX_TRANSCRIBE_BYTES // (1024 * 1024)} MB limit.",
+        )
+
+    recogniser = await get_recogniser()
+    if not recogniser.is_available():
+        report = await recogniser.health_check()
+        # 503 with the recogniser's own reason. It is written for a user — it
+        # names the install and its size, or the blocked download and its size —
+        # so it is passed through rather than replaced with "unavailable".
+        raise HTTPException(status_code=503, detail=report.get("reason", "Speech recognition is unavailable."))
+
+    try:
+        transcript = await recogniser.transcribe(audio, language=language)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Transcription failed: {exc}")
+
+    return {
+        "text": transcript.text,
+        "language": transcript.language,
+        "duration_s": transcript.duration_s,
+        "segments": [
+            {"text": s.text, "start_s": s.start_s, "end_s": s.end_s}
+            for s in transcript.segments
+        ],
+    }
 
 
 PERSONAS = {

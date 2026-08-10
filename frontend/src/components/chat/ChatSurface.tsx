@@ -21,6 +21,7 @@ import { useSourceStore } from '@/stores/sourceStore';
 import { useOrbStore } from '@/stores';
 import { useSystemStore } from '@/stores/systemStore';
 import ProjectScopePicker from './ProjectScopePicker';
+import MicButton from './MicButton';
 import CitationSummary from './CitationChips';
 import CitationPanel from './CitationPanel';
 import {
@@ -30,6 +31,8 @@ import {
   clamp,
 } from '@/stores/layoutStore';
 import { useChatModeStore } from '@/stores/chatModeStore';
+import { useMicStore } from '@/stores/micStore';
+import { useSpeechStore } from '@/stores/speechStore';
 import ResizeHandle from '@/components/common/ResizeHandle';
 import { useIsReducedMotion } from '@/hooks/useReducedMotion';
 import { useViewport } from '@/hooks/useViewport';
@@ -99,6 +102,30 @@ export default function ChatSurface() {
 
   const [inputText, setInputText] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Why voice input is off, when it is, and what went wrong with an attempt.
+  // Two different things: a missing extra is not a declined permission prompt,
+  // and CLAUDE.md's rule is that a disabled capability is visible rather than
+  // silent — a mic button that is simply absent explains nothing.
+  const micUnavailable = useMicStore((s) => s.unavailableReason);
+  const micError = useMicStore((s) => s.error);
+  const micStatus = useMicStore((s) => s.status);
+
+  // Speech *out* failures were rendered nowhere. `speechStore` sets a careful
+  // named reason for each one — "Speech is not installed.", "Playback was
+  // blocked.", "The audio could not be played." — and no component read it, so
+  // every synthesised utterance 404'd for as long as the feature has existed
+  // and the only symptom was silence. Same rule as the mic: a disabled
+  // capability is visible, not silent.
+  const speechError = useSpeechStore((s) => s.error);
+
+  // Transcribed speech lands in the composer as ordinary editable text and is
+  // never sent on the user's behalf. A recogniser that mishears and submits has
+  // spoken for them.
+  const appendTranscript = useCallback((text: string) => {
+    setInputText((current) => (current ? `${current} ${text}` : text));
+    inputRef.current?.focus();
+  }, []);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // Panels live in the orb region and the orb has to react to them, so this is
@@ -370,11 +397,16 @@ export default function ChatSurface() {
             value={inputText}
             onChange={(e) => setInputText(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Ask Zaram anything…"
+            placeholder={
+              micStatus === 'recording'
+                ? 'Listening on this machine…'
+                : 'Ask Zaram anything…'
+            }
             aria-label="Message Zaram"
             disabled={isStreaming}
-            className="w-full px-4 py-3 text-sm bg-[var(--color-glass)] border border-white/5 rounded-xl text-slate-200 placeholder-slate-500 outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-colors"
+            className="w-full pl-4 pr-16 py-3 text-sm bg-[var(--color-glass)] border border-white/5 rounded-xl text-slate-200 placeholder-slate-500 outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-colors"
           />
+          <MicButton onTranscript={appendTranscript} disabled={isStreaming} />
           <motion.button
             onClick={handleSend}
             disabled={isStreaming || !inputText.trim()}
@@ -386,6 +418,19 @@ export default function ChatSurface() {
             <Send size={16} className="text-slate-300" />
           </motion.button>
         </div>
+        {/* Voice input's state, in words. A disabled button with a tooltip is
+            invisible to a keyboard or touch user, and "why is this greyed out"
+            is exactly the question a silent control leaves unanswered. */}
+        {(micError || micUnavailable || speechError) && (
+          <p
+            className="mt-2 px-1 text-[11px] leading-relaxed"
+            style={{
+              color: micError || speechError ? '#fca5a5' : 'var(--color-text-muted)',
+            }}
+          >
+            {micError ?? speechError ?? micUnavailable}
+          </p>
+        )}
         {/* Under the input rather than over it: the scope is context for what
             you are about to write, and it must not compete with the thing you
             came here to do. */}
