@@ -36,6 +36,7 @@ from . import export
 from .contracts import Artifact, ArtifactKind, ArtifactSource, Claim
 from .html import (
     render_chart,
+    render_deck,
     render_document,
     render_invoice,
     render_spreadsheet,
@@ -56,6 +57,7 @@ DEFAULT_FORMAT = {
     ArtifactKind.INVOICE: "docx",
     ArtifactKind.SPREADSHEET: "xlsx",
     ArtifactKind.CHART: "png",
+    ArtifactKind.DECK: "pptx",
 }
 
 
@@ -97,6 +99,47 @@ class ArtifactService:
             title=title,
             filename=filename,
             kind=kind,
+            fmt=fmt,
+            project_id=project_id,
+            conversation_id=conversation_id,
+            conversation_title=conversation_title,
+            sources=sources,
+            claims=claims,
+        )
+
+    def create_deck(
+        self,
+        *,
+        title: str,
+        slides: Sequence[tuple[str, Sequence[object]]],
+        subtitle: str = "",
+        filename: str = "",
+        fmt: Optional[str] = None,
+        project_id: str = "",
+        conversation_id: str = "",
+        conversation_title: str = "",
+        sources: Sequence[ArtifactSource] = (),
+        claims: Sequence[Claim] = (),
+    ) -> Artifact:
+        """Slides, authored as an outline.
+
+        Not a second pipeline: the HTML this produces is an ordinary document
+        with one `<h2>` per slide, which is what the .pptx exporter splits on
+        anyway. The kind exists so the default format is `.pptx` and the
+        preview is the outline — not because slides need their own machinery.
+        """
+        html = render_deck(
+            title=title,
+            slides=[(heading, list(bullets)) for heading, bullets in slides],
+            subtitle=subtitle,
+            sources=sources,
+            claims=claims,
+        )
+        return self._persist(
+            html=html,
+            title=title,
+            filename=filename,
+            kind=ArtifactKind.DECK,
             fmt=fmt,
             project_id=project_id,
             conversation_id=conversation_id,

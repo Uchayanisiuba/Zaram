@@ -46,6 +46,11 @@ class ArtifactKind(str, Enum):
     DOCUMENT = "document"
     SPREADSHEET = "spreadsheet"
     CHART = "chart"
+    #: Slides. A *kind*, not a format — the .pptx exporter reads headings, so
+    #: any document can be exported as slides. This exists for the case where
+    #: the user asked for a deck, so the outline is what gets previewed and
+    #: `.pptx` is what gets written by default.
+    DECK = "deck"
 
 
 class Origin(str, Enum):
