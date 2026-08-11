@@ -268,11 +268,21 @@ class EgressGate:
         if body is not None:
             body_text = body.decode("utf-8", "replace") if isinstance(body, bytes) else body
 
-        self.check(url, method=method, body=body_text, source=source)
+        # Same reasoning as `stream_lines`: the confirmation may have rewritten
+        # the body, and what is sent has to be what was logged and agreed to.
+        approved = self.check(url, method=method, body=body_text, source=source)
+        edited = approved is not None and approved.body != body_text
 
-        payload = body if isinstance(body, bytes) else (
-            body.encode("utf-8") if body else None
-        )
+        if edited:
+            payload = approved.body.encode("utf-8") if approved.body else None
+        else:
+            # Unedited bodies keep their original bytes. Re-encoding from the
+            # logged text would round-trip a binary payload through a lossy
+            # `decode(..., "replace")` and corrupt it — the log is allowed to
+            # hold a best-effort rendering of bytes; the wire is not.
+            payload = body if isinstance(body, bytes) else (
+                body.encode("utf-8") if body else None
+            )
         req = urllib.request.Request(
             url,
             data=payload,
@@ -327,9 +337,15 @@ class EgressGate:
         response, which is what makes a provider's "no credit left" reachable
         rather than becoming a bare 402.
         """
-        body_bytes = body.encode("utf-8") if body is not None else None
-
-        self.check(url, method=method, body=body, source=source)
+        # Checked first, and the body read back *afterwards*. A confirmation
+        # may rewrite it — M10's dialog lets the user remove a recalled fact
+        # before sending — and the gate logs the edited text, so encoding
+        # before the check would send bytes that differ from the ones logged
+        # and approved. That gap is worse than not asking, because it looks
+        # like consent.
+        approved = self.check(url, method=method, body=body, source=source)
+        final_body = approved.body if approved is not None else body
+        body_bytes = final_body.encode("utf-8") if final_body is not None else None
 
         req = urllib.request.Request(
             url,
