@@ -1088,6 +1088,29 @@ class GenerateSource(BaseModel):
     title: str | None = None
 
 
+class GenerateLineItem(BaseModel):
+    description: str
+    #: Strings, so JSON's single double-precision number type cannot round the
+    #: money before it reaches the Decimal that is supposed to protect it.
+    quantity: str = "1"
+    unit_price: str
+    unit: str = ""
+
+
+class GenerateAdjustment(BaseModel):
+    """A named amount after the subtotal — tax, discount, deposit held.
+
+    `label` is the user's word for it and is printed as given. Zaram does not
+    know whether this is VAT or GST, does not decide whether it applies, and
+    holds no table of rates: CLAUDE.md forbids computing tax liability. Summing
+    what someone tells you is bookkeeping; deciding it is advice.
+    """
+
+    label: str
+    rate: str | None = None
+    amount: str | None = None
+
+
 class GenerateBody(BaseModel):
     title: str
     #: Prose. A string is a plain paragraph; an object with a matching claim id
@@ -1105,6 +1128,30 @@ class GenerateBody(BaseModel):
     header: list[str] = []
     rows: list[list[Any]] = []
     caption: str = ""
+    # Invoice only.
+    #
+    # Amounts are strings, not floats. JSON has one number type and it is a
+    # double, so `"unit_price": 0.1` arrives as 0.1000000000000000055…, and an
+    # invoice built from that cannot be reconciled by hand. `invoice.py` refuses
+    # a float rather than converting one; keeping the wire type a string is what
+    # makes that refusal reachable instead of a 500 nobody can act on.
+    items: list[GenerateLineItem] = []
+    adjustments: list[GenerateAdjustment] = []
+    number: str = ""
+    #: ISO date. Defaults to today, which is what "make me an invoice" means.
+    issued: str = ""
+    #: Days from issue until payment is due. Produces both the printed terms
+    #: sentence and the Due date, from one number, so they cannot disagree.
+    terms_days: int | None = None
+    currency: str = ""
+    bill_to: list[str] = []
+    notes: str = ""
+    payment: list[str] = []
+    #: The masthead — who the invoice is from. Optional: with nothing supplied
+    #: the document is still titled and ruled rather than a bare heading, which
+    #: is why the absence of branding does not read as a rendering failure.
+    from_name: str = ""
+    from_lines: list[str] = []
 
 
 @app.post("/artifacts/generate")
@@ -1122,7 +1169,11 @@ async def generate_artifact(body: GenerateBody):
     with the router, which is separate work. This endpoint is the thing that
     capability will call.
     """
+    from datetime import date
+
+    from artifacts import invoice as invoice_module
     from artifacts.contracts import ArtifactKind, ArtifactSource, Claim
+    from artifacts.letterhead import Letterhead
 
     try:
         kind = ArtifactKind(body.kind)
@@ -1166,7 +1217,52 @@ async def generate_artifact(body: GenerateBody):
     )
 
     try:
-        if kind == ArtifactKind.SPREADSHEET:
+        if kind == ArtifactKind.INVOICE:
+            artifact = artifact_service.create_invoice(
+                items=[
+                    invoice_module.line_item(
+                        description=i.description,
+                        quantity=i.quantity,
+                        unit_price=i.unit_price,
+                        unit=i.unit,
+                    )
+                    for i in body.items
+                ],
+                adjustments=[
+                    invoice_module.Adjustment(
+                        label=a.label,
+                        rate=invoice_module.to_decimal(a.rate, field_name=f"rate for {a.label!r}")
+                        if a.rate is not None
+                        else None,
+                        amount=invoice_module.to_decimal(
+                            a.amount, field_name=f"amount for {a.label!r}"
+                        )
+                        if a.amount is not None
+                        else None,
+                    )
+                    for a in body.adjustments
+                ],
+                number=body.number,
+                issued=date.fromisoformat(body.issued) if body.issued else None,
+                terms_days=body.terms_days,
+                currency=body.currency,
+                bill_to=body.bill_to,
+                notes=body.notes,
+                payment=body.payment,
+                # Supplied per request, not read from a store, because **where
+                # branding is captured is an open decision** (see MILESTONES,
+                # "Where branding is captured — decided, not yet built"). A
+                # request field commits to nothing: when capture lands, this
+                # becomes its default rather than a second source of truth.
+                letterhead=(
+                    Letterhead(name=body.from_name, lines=body.from_lines)
+                    if (body.from_name or body.from_lines)
+                    else None
+                ),
+                fmt=body.fmt,
+                **common,
+            )
+        elif kind == ArtifactKind.SPREADSHEET:
             artifact = artifact_service.create_spreadsheet(
                 header=body.header, rows=body.rows, caption=body.caption,
                 fmt=body.fmt, **common
@@ -1195,6 +1291,15 @@ async def generate_artifact(body: GenerateBody):
             )
     except HTTPException:
         raise
+    except invoice_module.InvoiceIncomplete as exc:
+        # 400, not 500. Rule 9 refusals are the caller being told what is
+        # missing — "an invoice needs at least one line" is actionable, and a
+        # 500 would present a deliberate, correct refusal as a crash. The
+        # message is written for a person and goes back unchanged.
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except ValueError as exc:
+        # Chiefly `date.fromisoformat` on a malformed `issued`. Same reasoning.
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 

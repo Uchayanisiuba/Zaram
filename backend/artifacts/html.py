@@ -30,6 +30,7 @@ import html as html_escape
 from typing import Iterable, List, Sequence
 
 from .contracts import ArtifactSource, Claim
+from .invoice import LineItem, Totals, format_money
 from .letterhead import Letterhead
 
 #: Attribute names, in one place. The exporters read these back out.
@@ -219,6 +220,115 @@ def _sources_section(
         f"<ul>{''.join(items)}</ul>"
         + (f"<h2>Claims</h2><ul>{claim_rows}</ul>" if claim_rows else "")
         + "</section>"
+    )
+
+
+def render_invoice(
+    *,
+    title: str,
+    items: Sequence["LineItem"],
+    totals: "Totals",
+    currency: str = "",
+    #: Who is being billed, one line per line of the address. A block rather
+    #: than a meta pair because an address has line breaks and a country, and
+    #: squeezing it into a definition list makes it read as a reference number.
+    bill_to: Sequence[str] = (),
+    meta: Sequence[tuple[str, str]] = (),
+    #: The terms sentence, printed verbatim. **This is what the due date traces
+    #: to**, so it is on the page rather than implied by it — an obligation
+    #: whose source clause is not visible is one the user cannot check.
+    terms: str = "",
+    notes: str = "",
+    #: How to pay. Free text: bank details, a link, "cash on collection". Zaram
+    #: has no opinion and stores no payment credentials.
+    payment: Sequence[str] = (),
+    letterhead: "Letterhead | None" = None,
+    sources: Sequence[ArtifactSource] = (),
+    claims: Sequence[Claim] = (),
+) -> str:
+    """An invoice, laid out for the person paying it.
+
+    Provenance is **off the page** by default here and there is no parameter to
+    turn it on. A client has no use for `memory:55b6` under the total: it is
+    internal working, it reads as unfinished, and it discloses how the figure
+    was arrived at to someone who is not owed that. Traceability lives where it
+    is useful — `Artifact.claims` on the record, and Zaram's own preview.
+
+    The amount column is the only right-aligned one, and it is marked with a
+    class rather than detected: a reference number that happens to be digits
+    would be right-aligned by any heuristic that reads cell text.
+    """
+    rows = []
+    for item in items:
+        quantity = f"{item.quantity:g}"
+        if item.unit:
+            quantity = f"{quantity} {_esc(item.unit)}"
+        rows.append(
+            "<tr>"
+            f"<td>{_esc(item.description)}</td>"
+            f'<td class="num">{quantity}</td>'
+            f'<td class="num">{_esc(format_money(item.unit_price, currency))}</td>'
+            f'<td class="num">{_esc(format_money(item.amount, currency))}</td>'
+            "</tr>"
+        )
+
+    foot = [
+        '<tr><td colspan="3">Subtotal</td>'
+        f'<td class="num">{_esc(format_money(totals.subtotal, currency))}</td></tr>'
+    ]
+    for label, amount in totals.adjustments:
+        foot.append(
+            f'<tr><td colspan="3">{_esc(label)}</td>'
+            f'<td class="num">{_esc(format_money(amount, currency))}</td></tr>'
+        )
+    # Last row, which the stylesheet rules off and bolds — the one number the
+    # reader is looking for.
+    foot.append(
+        '<tr><td colspan="3">Total due</td>'
+        f'<td class="num">{_esc(format_money(totals.total, currency))}</td></tr>'
+    )
+
+    table = (
+        "<table>"
+        "<thead><tr><th>Description</th>"
+        '<th class="num">Qty</th>'
+        '<th class="num">Rate</th>'
+        '<th class="num">Amount</th></tr></thead>'
+        f"<tbody>{''.join(rows)}</tbody>"
+        f"<tfoot>{''.join(foot)}</tfoot>"
+        "</table>"
+    )
+
+    billed = ""
+    if bill_to:
+        lines = "<br>".join(_esc(line) for line in bill_to if line)
+        billed = f'<section class="billed-to"><h2>Billed to</h2><p>{lines}</p></section>'
+
+    tail = []
+    if terms:
+        tail.append(f'<p class="terms">{_esc(terms)}</p>')
+    if notes:
+        tail.append(f"<p>{_esc(notes)}</p>")
+    if payment:
+        pay = "<br>".join(_esc(line) for line in payment if line)
+        tail.append(f'<section class="payment"><h2>Payment</h2><p>{pay}</p></section>')
+
+    return "\n".join(
+        [
+            "<!DOCTYPE html>",
+            '<html lang="en"><head><meta charset="utf-8">',
+            f"<title>{_esc(title)}</title>",
+            f"<style>{_STYLE}</style>",
+            "</head><body>",
+            '<div class="sheet">',
+            _masthead(title, letterhead, "Invoice"),
+            billed,
+            _meta_block(meta),
+            table,
+            *tail,
+            "</div>",
+            "</body></html>",
+        ]
     )
 
 
@@ -501,4 +611,13 @@ _TABLE_STYLE = (
     "tfoot tr:last-child td{border-top:1.5px solid var(--ink);font-weight:700;"
     "font-size:11pt}"
     "img{max-width:100%;height:auto;margin:1em 0}"
+    # Invoice blocks. "Billed to" sits above the metadata because the first
+    # question a reader asks of an invoice is whether it is addressed to them.
+    f".billed-to h2,.payment h2{{font:600 8pt/1.3 {_SANS};text-transform:uppercase;"
+    "letter-spacing:.09em;color:var(--muted);margin:0 0 4px}"
+    ".billed-to{margin:18px 0 4px}"
+    ".payment{margin-top:20px;break-inside:avoid;page-break-inside:avoid}"
+    # The terms sentence. Set apart because the due date is derived from it, so
+    # it is the clause a disputed reminder gets checked against.
+    f".terms{{font:italic 10pt/1.5 {_SANS};color:var(--muted);margin-top:16px}}"
 )
