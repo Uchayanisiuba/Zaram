@@ -1109,6 +1109,55 @@ see the build-stamp note at the top; a stale process cost two rounds on
    — but proven once, by hand, is not the same as exercised. Rule 7i's project
    half still has not run in anger.
 
+### The road to alpha — asked for 11 August, one fork still open
+
+Four steps, and the first costs no code.
+
+**0. Code signing, starting now, in parallel.** The longest-lead item and the
+only one here that *cannot be compressed later*. Windows business verification
+as a Nigerian sole trader is an unknown that needs a real answer before M11
+finishes, not after. Unsigned, SmartScreen warns on a product whose entire
+claim is trustworthiness — the alpha's day-30 number would be measuring the
+warning rather than the product. Paperwork and waiting; every day not started
+is a day added to the end.
+
+**1. M9a, obligation extraction.** The half the alpha measures. Needed under
+every branch below, so it is never wasted work.
+
+**2. The cloud engine + M10, as one commit.** This is the step that will be
+argued down, and the argument is wrong. `runtimes/models/engines/` contains
+**only `ollama_engine.py`** — there is no cloud chat, and "chat routed to at
+least two providers (one cloud, one local)" is a failing v1 scope line.
+
+The tempting shortcut is a local-only alpha. It fails on **recruitment**, not
+on capability: every tester would need Ollama and adequate VRAM, which filters
+fifteen freelancers down to the technical ones — and `CLAUDE.md` says plainly
+that the target user is not technical. A day-30 number from fifteen people who
+can configure Ollama measures a different market than the one being aimed at,
+so six weeks buys a number nobody can act on. M10 ships in the same commit
+because rule 8 gets teeth the moment a cloud engine exists.
+
+**3. M11 packaging + guided first run.** Acceptance unchanged. Three decisions
+are already queued inside it — GTK for WeasyPrint, dev tooling in the base
+install, and whether Jinja2 is a real transitive dependency.
+
+**The gate nobody has scheduled.** Recall has only ever been evaluated on
+**five documents**, and Open questions says do not defer this past M8 — which
+is done. Fifteen users pointing Zaram at real folders means thousands of
+documents, and the known failure mode, an unrelated document creeping over the
+citation floor, gets *more* likely as the corpus grows. Run the eval at 10, 100
+and 1,000 and plot the margin **before recruiting**: if cited recall breaks at
+scale, every other alpha number is noise, because cited recall is the claim.
+
+**Cut from the alpha, kept in v1:** M9c (Unreal/Blender read-only) is
+irrelevant to a freelancer-admin alpha; web search needs egress log plus
+per-source policy first and buys the alpha nothing; image/video is post-v1 and
+blocked on the cloud engine anyway.
+
+**Still open, and it is the maintainer's call:** whether the alpha waits for
+the cloud engine. The recommendation above is that it does. It was asked on
+11 August and not answered, so nothing downstream of it has been assumed.
+
 ### Next, in the order I would take them
 
 Not a queue anyone has committed to — a recommendation, with the reasoning, so
