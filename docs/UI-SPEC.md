@@ -105,7 +105,10 @@ in the output directory — there is no Files surface.
 sidebar. Memory carries its view toggle plus a Constellation link; Settings
 uses a segmented control.
 
-**Command palette** — ⌘K. Glass overlay, centred, 640px. Searches facts,
+**Command palette** — Ctrl K, and Cmd K on a Mac. Every chord is written once
+in `runtime/shortcuts/registry.ts`, where `meta` means *the platform's primary
+modifier* — never spelled out anywhere else, in the interface or in this
+document. Glass overlay, centred, 640px. Searches facts,
 sources and commands, results grouped under mono section labels, keyboard
 hints in the footer.
 
@@ -437,7 +440,7 @@ may leave, egress retention, and a prominent local kill switch.
 
 ### 8. Command palette
 
-⌘K overlay. Three states: empty, typing, results. Results grouped by kind with
+Ctrl K overlay (Cmd K on a Mac). Three states: empty, typing, results. Results grouped by kind with
 mono section labels.
 
 ### 8b. Fact history
