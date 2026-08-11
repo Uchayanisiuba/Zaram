@@ -19,8 +19,23 @@
  * The screen someone lands on when they have no projects is the important one,
  * so it says what a project is *for* rather than showing an empty table.
  */
-import { useCallback, useEffect, useState } from 'react';
-import { Layers, Plus, Trash2, Check, X, AlertTriangle } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  Layers,
+  Plus,
+  Trash2,
+  Check,
+  X,
+  AlertTriangle,
+  ChevronRight,
+  ChevronDown,
+  CornerUpLeft,
+} from 'lucide-react';
+import {
+  assignToProject,
+  listArtifacts,
+  type Artifact,
+} from '@/services/artifactsClient';
 import {
   PROJECT_TYPES,
   useProjectStore,
@@ -210,6 +225,7 @@ function CreateRow({ onDone }: { onDone: () => void }) {
 function ProjectRow({ project, onDelete }: { project: Project; onDelete: () => void }) {
   const rename = useProjectStore((s) => s.rename);
   const [editing, setEditing] = useState(false);
+  const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState(project.name);
 
   return (
@@ -218,7 +234,18 @@ function ProjectRow({ project, onDelete }: { project: Project; onDelete: () => v
       style={{ background: 'var(--color-glass)', border: '1px solid rgba(255,255,255,.06)' }}
     >
       <div className="flex items-center justify-between gap-4">
-        <div className="min-w-0">
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          aria-expanded={open}
+          aria-label={`${open ? 'Hide' : 'Show'} what is in ${project.name}`}
+          className="shrink-0 rounded p-1 transition-colors"
+          style={{ color: 'var(--color-text-muted)' }}
+        >
+          {open ? <ChevronDown size={14} aria-hidden /> : <ChevronRight size={14} aria-hidden />}
+        </button>
+
+        <div className="min-w-0 flex-1">
           {editing ? (
             <input
               autoFocus
@@ -269,7 +296,201 @@ function ProjectRow({ project, onDelete }: { project: Project; onDelete: () => v
           <Trash2 size={14} aria-hidden />
         </button>
       </div>
+
+      {open && <ProjectContents project={project} />}
     </li>
+  );
+}
+
+/**
+ * What is in a project, and the only place a file is put into one.
+ *
+ * `CLAUDE.md` splits the two surfaces: **Work is the output, Project is the
+ * organisation of it.** Work browses and previews; assigning, moving and
+ * removing belong here. Project shipped on 10 August with everything except
+ * this — a group you could create and could not fill, so the only way in was to
+ * pick the project in the composer *before* the file existed. That is rule 7h
+ * inverted: it made the user decide in advance of the work instead of at the
+ * moment the answer is obvious.
+ *
+ * **Adding a file that belongs to another project moves it.** A file has one
+ * project, so the button says so rather than reading as a copy and quietly
+ * emptying somewhere else.
+ *
+ * Nothing here touches the disk. A project is a label; the output directory
+ * stays flat, and there is no folder tree to keep in step with it.
+ */
+function ProjectContents({ project }: { project: Project }) {
+  const load = useProjectStore((s) => s.load);
+  const [files, setFiles] = useState<Artifact[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [picking, setPicking] = useState(false);
+  const [query, setQuery] = useState('');
+
+  const refresh = useCallback(async () => {
+    try {
+      // Everything, not just this project's: the picker needs the files that
+      // are somewhere else, and one request answers both halves.
+      const listing = await listArtifacts();
+      setFiles(listing.artifacts);
+      setError(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not load your files.');
+    }
+  }, []);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  const move = useCallback(
+    async (id: string, destination: string) => {
+      setBusy(id);
+      try {
+        await assignToProject(id, destination);
+        await refresh();
+        // The counts on every row are derived from the artifacts table on the
+        // server, so they are re-read rather than adjusted here. A number kept
+        // in two places is a number that disagrees with itself, and this one
+        // ends up on a delete confirmation.
+        await load();
+        setError(null);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'Could not move that file.');
+      } finally {
+        setBusy(null);
+      }
+    },
+    [load, refresh],
+  );
+
+  const mine = useMemo(
+    () => (files ?? []).filter((f) => f.project_id === project.id),
+    [files, project.id],
+  );
+
+  const elsewhere = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    return (files ?? [])
+      .filter((f) => f.project_id !== project.id)
+      .filter((f) => !needle || `${f.filename} ${f.conversation_title}`.toLowerCase().includes(needle));
+  }, [files, project.id, query]);
+
+  return (
+    <div className="mt-3 border-t pt-3" style={{ borderColor: 'rgba(255,255,255,.06)' }}>
+      {error && (
+        <p className="mb-2 text-[11px]" style={{ color: '#fca5a5' }}>
+          {error}
+        </p>
+      )}
+
+      {files === null && !error && (
+        <p className="text-[11px]" style={{ color: 'var(--color-text-muted)' }}>
+          Loading files…
+        </p>
+      )}
+
+      {files !== null && mine.length === 0 && (
+        <p className="text-[11px]" style={{ color: 'var(--color-text-muted)' }}>
+          No files in this project yet.
+        </p>
+      )}
+
+      {mine.length > 0 && (
+        <ul className="flex flex-col gap-1">
+          {mine.map((file) => (
+            <li key={file.id} className="flex items-center justify-between gap-3">
+              <span className="truncate text-[11px]" title={file.filename}>
+                {file.filename}
+              </span>
+              <button
+                type="button"
+                onClick={() => void move(file.id, '')}
+                disabled={busy === file.id}
+                aria-label={`Remove ${file.filename} from ${project.name}`}
+                title="Remove from this project. The file is not deleted."
+                className="inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-1 text-[10px] transition-colors disabled:opacity-40"
+                style={{ color: 'var(--color-text-muted)' }}
+              >
+                <CornerUpLeft size={11} aria-hidden />
+                Remove
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {files !== null && !picking && (
+        <button
+          type="button"
+          onClick={() => setPicking(true)}
+          className="mt-2 inline-flex items-center gap-1 rounded px-2 py-1 text-[10px] transition-colors"
+          style={{ background: 'var(--color-glass)', border: '1px solid rgba(255,255,255,.08)' }}
+        >
+          <Plus size={11} aria-hidden />
+          Add files
+        </button>
+      )}
+
+      {picking && (
+        <div className="mt-2">
+          <div className="flex items-center gap-2">
+            <input
+              autoFocus
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') setPicking(false);
+              }}
+              placeholder="Find a file"
+              aria-label={`Find a file to add to ${project.name}`}
+              className="flex-1 bg-transparent text-[11px] outline-none placeholder-slate-500"
+            />
+            <button
+              type="button"
+              onClick={() => setPicking(false)}
+              aria-label="Done adding files"
+              className="rounded p-1"
+              style={{ color: 'var(--color-text-muted)' }}
+            >
+              <X size={12} aria-hidden />
+            </button>
+          </div>
+
+          {elsewhere.length === 0 ? (
+            <p className="mt-2 text-[10px]" style={{ color: 'var(--color-text-muted)' }}>
+              {query.trim() ? 'Nothing matches that.' : 'Every file is already in this project.'}
+            </p>
+          ) : (
+            <ul className="mt-2 flex max-h-56 flex-col gap-1 overflow-y-auto">
+              {elsewhere.map((file) => (
+                <li key={file.id} className="flex items-center justify-between gap-3">
+                  <span className="min-w-0 truncate text-[11px]" title={file.filename}>
+                    {file.filename}
+                    {file.project_id && (
+                      /* Naming where it currently lives is what makes the
+                         button below honest: this is a move, and somewhere
+                         else loses the file. */
+                      <span style={{ color: 'var(--color-text-muted)' }}> · in {file.project_id}</span>
+                    )}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => void move(file.id, project.id)}
+                    disabled={busy === file.id}
+                    className="shrink-0 rounded px-1.5 py-1 text-[10px] transition-colors disabled:opacity-40"
+                    style={{ color: 'var(--color-cyan)' }}
+                  >
+                    {file.project_id ? 'Move here' : 'Add'}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 

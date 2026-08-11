@@ -170,6 +170,26 @@ class ArtifactRecords:
             )
             return cursor.rowcount > 0
 
+    def set_project(self, artifact_id: str, project_id: str) -> bool:
+        """Move an artifact into a project, out of one, or between two.
+
+        The empty string means *no project*, which is the same value a file
+        gets when it is generated outside one — so unassigning restores the
+        original state rather than inventing a third one. There is no "None"
+        here for the same reason `project_id` is `NOT NULL DEFAULT ''`: two
+        spellings of "nowhere" is one more than the filter can ask about.
+
+        Whether the destination project exists is not this layer's question.
+        Records store what they are told; the route validates, because that is
+        where the caller can be answered with a 400 that says why.
+        """
+        with self._lock, self._connect() as conn:
+            cursor = conn.execute(
+                "UPDATE artifacts SET project_id = ? WHERE id = ?",
+                (project_id, artifact_id),
+            )
+            return cursor.rowcount > 0
+
     # ---------------------------------------------------------------- reading
 
     def get(self, artifact_id: str) -> Optional[Artifact]:

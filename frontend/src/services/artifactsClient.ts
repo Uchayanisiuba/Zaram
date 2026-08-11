@@ -158,6 +158,24 @@ export function downloadUrl(id: string): string {
   return `${API_BASE}/artifacts/${encodeURIComponent(id)}/download`;
 }
 
+/** Move a file into a project, out of one, or between two.
+ *
+ *  `''` is the destination for "no project" — the same value a file is born
+ *  with, so leaving a project restores its original state rather than inventing
+ *  a third one. The backend refuses a project it has never heard of, which is
+ *  what stops a typo creating a group that cannot be renamed or deleted.
+ *
+ *  Nothing moves on disk. A project is a label, not a folder, and the output
+ *  directory is deliberately flat. */
+export async function assignToProject(id: string, projectId: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/artifacts/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ project_id: projectId }),
+  });
+  if (!res.ok) throw await failure(res, 'Could not move that file');
+}
+
 export async function setRemember(id: string, remember: boolean | null): Promise<void> {
   const res = await fetch(`${API_BASE}/artifacts/${encodeURIComponent(id)}/remember`, {
     method: 'POST',
