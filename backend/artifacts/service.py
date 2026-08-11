@@ -29,11 +29,19 @@ quietly work around that — see the note on the field itself.
 from __future__ import annotations
 
 import logging
+from datetime import date
 from typing import Optional, Sequence
 
 from . import export
 from .contracts import Artifact, ArtifactKind, ArtifactSource, Claim
-from .html import render_chart, render_document, render_spreadsheet
+from .html import (
+    render_chart,
+    render_document,
+    render_invoice,
+    render_spreadsheet,
+)
+from .invoice import Adjustment, LineItem, due_date, total_of
+from .letterhead import Letterhead
 from .records import ArtifactRecords
 from .store import ArtifactStore
 
@@ -89,6 +97,86 @@ class ArtifactService:
             title=title,
             filename=filename,
             kind=kind,
+            fmt=fmt,
+            project_id=project_id,
+            conversation_id=conversation_id,
+            conversation_title=conversation_title,
+            sources=sources,
+            claims=claims,
+        )
+
+    def create_invoice(
+        self,
+        *,
+        title: str,
+        items: Sequence[LineItem],
+        number: str = "",
+        issued: Optional[date] = None,
+        terms_days: Optional[int] = None,
+        currency: str = "",
+        bill_to: Sequence[str] = (),
+        adjustments: Sequence[Adjustment] = (),
+        notes: str = "",
+        payment: Sequence[str] = (),
+        letterhead: Optional[Letterhead] = None,
+        filename: str = "",
+        fmt: Optional[str] = None,
+        project_id: str = "",
+        conversation_id: str = "",
+        conversation_title: str = "",
+        sources: Sequence[ArtifactSource] = (),
+        claims: Sequence[Claim] = (),
+    ) -> Artifact:
+        """An invoice, with its due date derived rather than typed.
+
+        `terms_days` produces both the printed terms sentence and the Due date
+        in the metadata, from one number. They cannot disagree, which matters
+        because the reminder M9a will raise is the due date and the thing a
+        client disputes is the sentence — if those two were entered separately,
+        the reminder could cite a clause that does not support it.
+
+        `issued` defaults to today. That is the one default here, and it is safe
+        in a way the money is not: an invoice issued today is what "make me an
+        invoice" means, and the date is visible on the document for correction.
+        Nothing about the amounts is defaulted — see `invoice.py`.
+        """
+        issued = issued or date.today()
+        totals = total_of(items, adjustments)
+
+        meta: list[tuple[str, str]] = []
+        if number:
+            meta.append(("Invoice", number))
+        meta.append(("Issued", issued.isoformat()))
+
+        terms = ""
+        if terms_days is not None:
+            due = due_date(issued, terms_days)
+            meta.append(("Due", due.isoformat()))
+            terms = (
+                "Payment due on receipt."
+                if terms_days == 0
+                else f"Payment due within {terms_days} days of the issue date."
+            )
+
+        html = render_invoice(
+            title=title,
+            items=items,
+            totals=totals,
+            currency=currency,
+            bill_to=bill_to,
+            meta=meta,
+            terms=terms,
+            notes=notes,
+            payment=payment,
+            letterhead=letterhead,
+            sources=sources,
+            claims=claims,
+        )
+        return self._persist(
+            html=html,
+            title=title,
+            filename=filename,
+            kind=ArtifactKind.INVOICE,
             fmt=fmt,
             project_id=project_id,
             conversation_id=conversation_id,
