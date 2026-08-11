@@ -50,6 +50,7 @@ import json
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any, Callable
 
@@ -286,3 +287,56 @@ class EgressGate:
         """The shape almost every existing call site actually wanted."""
         return json.loads(self.request(url, timeout=timeout, source=source,
                                        headers=headers))
+
+    def stream_lines(
+        self,
+        url: str,
+        *,
+        method: str = "POST",
+        body: str | None = None,
+        headers: dict[str, str] | None = None,
+        timeout: float = 120.0,
+        source: str = "unknown",
+    ) -> Iterator[bytes]:
+        """Check, log, and stream the response one line at a time.
+
+        Added for cloud generation, which is the first outbound call whose
+        response must be consumed *as it arrives* — a chat reply that only
+        appears once the model has finished is a worse product than a local one,
+        and buffering it here would undo the reason for going to the cloud.
+
+        It exists on the gate rather than in the engine because of what
+        `test_egress_chokepoint.py` enforces: no shipped module opens its own
+        outbound connection. The engine could have called `check` and then used
+        its own client — `check` is deliberately separable and async call sites
+        do exactly that — but doing so in a *synchronous* path that had no such
+        constraint would have traded the invariant for convenience, and the
+        chokepoint scan is right to refuse it. The gate is the transport; this
+        is the transport growing the one shape it was missing.
+
+        **Headers are sent and not logged.** That asymmetry is deliberate and
+        is what makes this usable for an authenticated API: the log is
+        append-only and tamper-evident, so writing a bearer token into it would
+        create a credential the user cannot delete and therefore cannot rotate
+        away from. What the log records is the destination and the body — what
+        left and where it went, which is the question it exists to answer.
+
+        Raises :class:`EgressDenied` before opening a socket if policy or the
+        user says no, and lets `urllib.error.HTTPError` through so the caller
+        can read the status and explain it. An `HTTPError` is itself a readable
+        response, which is what makes a provider's "no credit left" reachable
+        rather than becoming a bare 402.
+        """
+        body_bytes = body.encode("utf-8") if body is not None else None
+
+        self.check(url, method=method, body=body, source=source)
+
+        req = urllib.request.Request(
+            url,
+            data=body_bytes,
+            method=method.upper(),
+            headers={"User-Agent": self._user_agent, **(headers or {})},
+        )
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            for line in resp:
+                yield line

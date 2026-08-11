@@ -26,7 +26,7 @@ accurate — it is the first thing anyone reads.
 > `test_deck_api.py` is the test that closes that gap, and it was checked by
 > removing the field and watching all four fail.
 
-**Suite: 0 failures.** 1388 → … → **1621/0**, 9 skipped, ~239s from the repo
+**Suite: 0 failures.** 1388 → … → **1645/0**, 9 skipped, ~315s from the repo
 root on a full dev install. Frontend: **86 vitest across 12 files**, plus build
 (which runs the three scanners) and `tsc --noEmit`, all green.
 
@@ -1136,6 +1136,37 @@ that the target user is not technical. A day-30 number from fifteen people who
 can configure Ollama measures a different market than the one being aimed at,
 so six weeks buys a number nobody can act on. M10 ships in the same commit
 because rule 8 gets teeth the moment a cloud engine exists.
+
+**Decided by the maintainer, 11 August: cloud is in v1**, on exactly that
+ground — "people without a graphics card and low hardware".
+
+> **Step 2a — the engine, landed 11 August.**
+> `OpenAICompatibleEngine` exists, satisfies `LLMEngine`, and is covered by
+> `test_cloud_generation_invariant.py`. It has **no HTTP client**: the body is
+> built and handed to `EgressGate.stream_lines`, which is new and is the gate
+> growing the one shape it lacked. The first draft did own a client —
+> `check` then `requests.post` — and `test_egress_chokepoint.py` rejected it on
+> the first run, correctly. The remedy the scan demands was the right one.
+>
+> **No LiteLLM**, deviating from `CLAUDE.md`'s dependency table and recorded in
+> the module rather than done quietly. `/v1/chat/completions` is already the
+> lingua franca — OpenAI, OpenRouter, Groq, Together, DeepSeek, Mistral, vLLM,
+> llama.cpp, LM Studio — and OpenRouter fronts Anthropic and Gemini. So the
+> whole surface is one POST and an SSE parser with no new dependency, against a
+> library that would enlarge the installer packaging cut by 81% *and* need an
+> exemption from the chokepoint scan, since it brings its own client. Reversible:
+> nothing above `LLMEngine` knows what is inside.
+>
+> **Step 2b — not done, and the engine is not reachable from chat.** Nothing
+> constructs it yet: no configuration surface for base URL, key and model, and
+> no routing decision that would pick it. That wiring is a real design question
+> — `ProviderManager`, the routing exemplars, and `CLAUDE.md`'s three tiers of
+> control — and doing it badly is worse than doing it next.
+>
+> **Step 2c — M10's dialog.** Until it exists the gate has no confirmation
+> handler, and a gate with no handler *refuses*. That is the designed resting
+> state and it is asserted: cloud generation is wired, tested, and declines to
+> send. Shipping it half-done fails closed.
 
 **3. M11 packaging + guided first run.** Acceptance unchanged. Three decisions
 are already queued inside it — GTK for WeasyPrint, dev tooling in the base
@@ -2649,7 +2680,7 @@ answers become the missing line in `docs/PITCH.md`.
 
 ## Known broken
 
-**Nothing.** 1621 passed, 9 skipped, 0 failures, ~4m00s from the repo root on a
+**Nothing.** 1645 passed, 9 skipped, 0 failures, ~5m15s from the repo root on a
 full dev install, 11 August 2026. Frontend: 86 across 12 files. The 27 are gone
 and the section explaining what they actually were is above, under "What the 27
 actually were"; the method for classifying the next one is

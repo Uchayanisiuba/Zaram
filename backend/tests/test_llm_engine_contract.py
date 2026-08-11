@@ -25,11 +25,18 @@ import pytest
 from implementations.ollama_llm import OllamaLLM
 from runtimes.models.engines.base_engine import ERROR_PREFIX, LLMEngine
 from runtimes.models.engines.ollama_engine import OllamaEngine
+from runtimes.models.engines.openai_compatible_engine import OpenAICompatibleEngine
 from tests.llm_doubles import FakeLLM
 
 #: Real engines and the doubles that stand in for them. The doubles are in this
 #: list deliberately — a fake exempt from the contract is the original bug.
-ENGINES = [OllamaEngine, OllamaLLM, FakeLLM]
+#:
+#: `OpenAICompatibleEngine` joined on 11 August 2026, which is what the note at
+#: the top of this file was reserving a place for. It matters more here than the
+#: others do: it is the only engine whose `system_prompt` leaves the machine, so
+#: a signature drift that dropped or reordered it would change *what is sent to
+#: a third party* rather than only what the model reads.
+ENGINES = [OllamaEngine, OllamaLLM, OpenAICompatibleEngine, FakeLLM]
 
 #: The one call shape. Every caller uses it: `ModelsService.generate_response`,
 #: `ConversationManager.run_conversation`, `Dispatcher.dispatch_stream`.
