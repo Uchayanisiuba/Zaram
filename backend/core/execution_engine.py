@@ -424,15 +424,20 @@ class ExecutionEngine:
 
     #: How many candidates to retrieve before the floor and the cut.
     #:
-    #: Measured at 1,000 documents: the right answer to one eval question sat
-    #: at rank 7 with relevance 0.517 — above the 0.42 floor, outside a top-5.
-    #: Near-identical invoices crowd a small shortlist long before they defeat
-    #: the threshold, so the fix is depth, not a better score.
+    #: **The rank-7 displacement this was written for no longer happens**, and
+    #: the honest reason is that two separate defects were being read as one.
+    #: The corpus was emitting filler that answered the eval question as well as
+    #: the target did, and selection was cutting on the ranking blend rather
+    #: than on relevance. With both fixed, every answerable target now returns
+    #: at **rank 1 at 1,000 documents** — re-measured 11 August 2026, headroom
+    #: 5 on a shortlist of 6.
     #:
-    #: 25 is five times the shortlist, which covered every displacement seen at
-    #: 1,000 documents with room to spare. Retrieval is a linear scan either
-    #: way; the only extra cost is carrying twenty more rows a few
-    #: milliseconds further.
+    #: 25 is kept anyway, and on a weaker claim than the one it was chosen on:
+    #: depth is nearly free — retrieval is a linear scan either way and the only
+    #: cost is carrying twenty more rows a few milliseconds further — so this is
+    #: cheap insurance against a real corpus that crowds harder than a synthetic
+    #: one. It is no longer evidence of a displacement anybody has observed.
+    #: Do not cite it as such.
     RECALL_CANDIDATES = 25
 
     #: How many turns of ephemeral session state to keep, per session.
@@ -692,16 +697,25 @@ class ExecutionEngine:
         Retrieves `RECALL_CANDIDATES` and cuts to `MAX_RECALL` after the floor,
         rather than asking for five and hoping the right one is in them.
 
-        Measured, at 1,000 documents: the relevance floor held — margin +0.179,
-        zero false citations — but the answer to *"How long is the title
-        sequence?"* sat at **rank 7 with relevance 0.517**, comfortably above
-        the 0.42 floor and outside a top-5 shortlist. Crowded out by
-        near-identical invoices, not scored badly.
+        Re-measured 11 August 2026 at 10, 100 and 1,000 documents: the floor
+        holds at every size, with **zero false citations** and all five
+        answerable targets returning at rank 1. The margin narrows as the corpus
+        grows and then flattens — +0.131, +0.108, +0.106 — because `related_min`
+        is a cosine between two fixed vectors and does not move, while
+        `unrelated_max` is a maximum over the corpus and every document added is
+        another draw.
 
-        That distinction decided the reranker question. A scoring failure is
-        what a cross-encoder is for; a depth failure is fixed by asking for more
-        candidates, which costs one wider SQL read and no VRAM. See
-        `test_recall_at_scale.py` and `docs/RERANKER.md`.
+        **The `+0.179` this docstring used to quote was never real.** It was
+        inflated by the selection defect it was measuring: the document scoring
+        0.517 was cut from the shortlist, so it never entered the sample the
+        minimum was taken over. `docs/RERANKER.md` records +0.106 as the
+        baseline and every earlier margin as read through a broken selector.
+
+        That episode decided the reranker question, and not the way the numbers
+        first suggested. Better similarities were never the binding constraint —
+        the ones already available were being outvoted by importance, recency
+        and access at roughly 4.5 to 1. See `test_recall_at_scale.py` and
+        `docs/RERANKER.md`.
         """
         runtime = self._memory_runtime()
         if runtime is None or not prompt.strip():

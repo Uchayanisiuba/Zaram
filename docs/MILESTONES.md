@@ -26,7 +26,7 @@ accurate — it is the first thing anyone reads.
 > `test_deck_api.py` is the test that closes that gap, and it was checked by
 > removing the field and watching all four fail.
 
-**Suite: 0 failures.** 1388 → … → **1621/0**, 8 skipped, ~279s from the repo
+**Suite: 0 failures.** 1388 → … → **1621/0**, 9 skipped, ~239s from the repo
 root on a full dev install. Frontend: **86 vitest across 12 files**, plus build
 (which runs the three scanners) and `tsc --noEmit`, all green.
 
@@ -1141,13 +1141,19 @@ because rule 8 gets teeth the moment a cloud engine exists.
 are already queued inside it — GTK for WeasyPrint, dev tooling in the base
 install, and whether Jinja2 is a real transitive dependency.
 
-**The gate nobody has scheduled.** Recall has only ever been evaluated on
-**five documents**, and Open questions says do not defer this past M8 — which
-is done. Fifteen users pointing Zaram at real folders means thousands of
-documents, and the known failure mode, an unrelated document creeping over the
-citation floor, gets *more* likely as the corpus grows. Run the eval at 10, 100
-and 1,000 and plot the margin **before recruiting**: if cited recall breaks at
-scale, every other alpha number is noise, because cited recall is the claim.
+**~~The gate nobody has scheduled.~~ Run 11 August, and it passes.** Recall had
+only ever been evaluated on five documents; it is now measured at 10, 100 and
+1,000. The margin narrows and then flattens — **+0.131, +0.108, +0.106** — with
+5/5 targets recalled at rank 1 and zero false citations at every size. Full
+numbers and the caveat are in Open questions.
+
+**This does not clear the alpha, it clears one hypothesis.** The synthetic
+corpus has four templates and ten client names, so it stops adding *kinds* of
+document long before a real folder does — which is the most likely reason the
+curve flattens. The measurement to want is the same one on real material, and
+the honest place to get it is the alpha itself: `test_recall_eval.py` prints
+the margin on every run, so a narrowing gap is visible before a user feels it.
+**Watch that number during M12 rather than treating this as settled.**
 
 **Paced out of the alpha, not cut — decided by the maintainer, 11 August.**
 The distinction is the whole point and the wording of an earlier draft was
@@ -2051,16 +2057,46 @@ call time by `planner.web_search_enabled()`.
 
 ### Open questions
 
-- **How does recall behave as the Spine grows?** The eval runs on five
-  documents. The failure mode it exposed — an unrelated document creeping over
-  the floor — gets *more* likely with more material, because the maximum
-  unrelated score is a maximum over a larger set. A fixed threshold may not
-  survive a thousand documents even now that the scoring is honest. Measuring
-  that needs the eval run at 10, 100 and 1,000 documents and the margin
-  plotted; the harness already prints the number. **This is the argument for a
-  reranker**, and the reranker route through Ollama is broken — so the answer
-  is probably a cross-encoder loaded directly, which changes the residency
-  arithmetic. Do not defer this past M8.
+- ~~**How does recall behave as the Spine grows?**~~ **Measured 11 August
+  2026, at all three sizes. The floor holds and the reranker stays unbought.**
+
+  | docs | `related_min` | `unrelated_max` | margin | recalled | false citations | latency |
+  |---|---|---|---|---|---|---|
+  | 10 | 0.517 | 0.386 | **+0.131** | 5/5 | 0/18 | 41 ms |
+  | 100 | 0.517 | 0.409 | **+0.108** | 5/5 | 0/18 | 65 ms |
+  | 1,000 | 0.517 | 0.410 | **+0.106** | 5/5 | 0/18 | 285 ms |
+
+  The structural worry was right in its mechanism and wrong in its size.
+  `related_min` does not move at all — it is a cosine between two fixed vectors
+  and corpus size cannot touch it. All movement is on `unrelated_max`, exactly
+  as predicted. But the curve **saturates**: 10→100 cost +0.023, 100→1,000 cost
+  **+0.001**. A linear reading of the first two points predicts 0.432 at a
+  thousand and a crossed floor; the real answer was 0.410. Every answerable
+  target returns at **rank 1**, headroom 5 on a shortlist of 6.
+
+  **Read this as bounded, not settled.** `_filler` draws from four templates
+  and ten client names, so a thousand synthetic documents hold a few hundred
+  distinct texts and no new vocabulary — which is the most likely reason
+  `unrelated_max` flattens. You stop adding *kinds* of document and only add
+  instances. A thousand real documents have far more variety and the maximum
+  may keep climbing. This shows the floor survives **this corpus** at scale.
+  It is the same "check the corpus before reading its numbers" rule that cost
+  three measurement cycles, applied to its own result.
+
+  **The margin metric was hardened in the same pass.** Both populations are now
+  read at full corpus depth rather than at `SHORTLIST`. The exclusion bias was
+  already diagnosed and fixed at the *selection* end — see `docs/RERANKER.md`,
+  "Which number is real: +0.106, not +0.179" — but the measurement still
+  depended on that fix holding: at shortlist depth, a crowded-out target stops
+  contributing and the reported margin *improves*. Measured both ways at 10 and
+  100: identical, because the bias is inactive. Inactive is not absent, and
+  `test_every_target_contributes_to_the_margin_however_it_ranked` is the guard.
+  At 1,000 the unrelated population went from 18 samples to 3,000 and
+  `unrelated_max` did not move.
+
+  **What would reopen it:** the margin narrowing on a *real* corpus, or targets
+  falling below the floor rather than being ordered badly. Both are scoring
+  failures and both are what a cross-encoder buys. Neither has been observed.
 - **Dev tooling still ships in the base install** — mypy, ruff, pytest,
   pip-licenses, wheel. Probably 30–40 MB. Same split-verify-measure method as
   the voice extra. Belongs in the packaging spike.
@@ -2613,7 +2649,7 @@ answers become the missing line in `docs/PITCH.md`.
 
 ## Known broken
 
-**Nothing.** 1621 passed, 8 skipped, 0 failures, ~4m39s from the repo root on a
+**Nothing.** 1621 passed, 9 skipped, 0 failures, ~4m00s from the repo root on a
 full dev install, 11 August 2026. Frontend: 86 across 12 files. The 27 are gone
 and the section explaining what they actually were is above, under "What the 27
 actually were"; the method for classifying the next one is

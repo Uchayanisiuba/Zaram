@@ -351,24 +351,83 @@ class TestRankingIsStable:
 @scale_only
 class TestMarginAtScale:
     def test_the_margin_survives_the_corpus(self, big_spine):
-        """The headline number, at `CORPUS_SIZE` rather than five."""
+        """The headline number, at `CORPUS_SIZE` rather than five.
+
+        **Both populations are read at full corpus depth, not at `SHORTLIST`.**
+        The margin asks whether the *relevance* populations separate — a
+        property of scoring, which has nothing to do with how many rows the
+        shortlist holds.
+
+        The bias this removes is already documented and already fixed *at the
+        other end*: `docs/RERANKER.md` records that the `+0.179` still sitting
+        in `execution_engine.py` was inflated because the document scoring 0.517
+        was excluded from the shortlist entirely and so never entered the sample
+        the minimum was taken over. Selection by relevance fixed that, and
+        +0.106 is the baseline.
+
+        What was left is that **the measurement still depended on the fix.**
+        Reading `related` at shortlist depth only gives an honest answer while
+        selection is behaving; the day a target is crowded out again, the metric
+        reports a *better* margin — loudest praise exactly when a user stops
+        getting their answer. A number that can only be trusted when the thing
+        it measures is working is not an instrument.
+
+        The unrelated side had the mirror of it. Results arrive ordered by the
+        ranking blend, so the most relevant unrelated document need not be in
+        the first six — `max(unrelated)` was a maximum over whatever the blend
+        promoted, not over the corpus.
+
+        Measured both ways at 10 and 100 documents: identical numbers, because
+        the bias is currently inactive. That is the point — it is inactive, not
+        absent.
+        """
         related, unrelated = [], []
         for case in CASES:
-            question, expected = case.question, case.expected
-            for _, doc, rel in _ranked(big_spine, question, SHORTLIST):
-                if doc in expected:
+            for _, doc, rel in _ranked(big_spine, case.question, CORPUS_SIZE):
+                if doc in case.expected:
                     related.append(rel)
         for question in UNANSWERABLE:
-            for _, _, rel in _ranked(big_spine, question, SHORTLIST):
+            for _, _, rel in _ranked(big_spine, question, CORPUS_SIZE):
                 unrelated.append(rel)
 
         margin = min(related) - max(unrelated)
         print(f"\n[{CORPUS_SIZE} docs] related_min {min(related):.3f} - "
-              f"unrelated_max {max(unrelated):.3f} = {margin:+.3f} (floor {FLOOR})")
+              f"unrelated_max {max(unrelated):.3f} = {margin:+.3f} (floor {FLOOR}) "
+              f"— full-depth, {len(related)} targets vs {len(unrelated)} unrelated")
 
         assert margin > 0, (
             f"at {CORPUS_SIZE} documents the populations overlap; no threshold "
             f"separates them and a reranker is not optional"
+        )
+
+    def test_every_target_contributes_to_the_margin_however_it_ranked(self, big_spine):
+        """The guard on the metric above, and it is worth its own name.
+
+        If the margin is ever measured at shortlist depth again, a crowded-out
+        target silently leaves the population and the number *improves*. That
+        failure is invisible in the margin itself — it looks like a better
+        result — so it cannot be caught by asserting on the margin.
+
+        What can be asserted is the population: every answerable case must
+        contribute exactly one relevance, whatever rank its target reached. A
+        count that drops means a target was dropped, and the next margin printed
+        is measuring a smaller and flattering set.
+        """
+        answerable = [c for c in CASES if c.expected]
+        contributed = []
+        for case in answerable:
+            found = [rel for _, doc, rel in _ranked(big_spine, case.question, CORPUS_SIZE)
+                     if doc in case.expected]
+            contributed.append((case.question, len(found)))
+
+        missing = [q for q, n in contributed if n == 0]
+        print(f"\n[{CORPUS_SIZE} docs] margin population: "
+              f"{len(answerable) - len(missing)}/{len(answerable)} targets found at full depth")
+
+        assert not missing, (
+            f"{len(missing)} target(s) never appeared at any depth, so they "
+            f"contribute nothing to the margin and the printed number is taken "
+            f"over the targets that happened to survive: {missing}"
         )
 
     def test_a_missed_target_is_diagnosed_not_just_counted(self, big_spine):
