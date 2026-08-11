@@ -8,7 +8,7 @@
  * enforced — and `orbitOrder` ended up with **no consumers at all**, so it was
  * canonical only in its own docstring.
  *
- * The result: adding Project to the registry updated the rail, ⌘K and the
+ * The result: adding Project to the registry updated the rail, the command palette and the
  * router, and the orbit — the first thing anyone sees on opening Zaram — kept
  * rendering five nodes. The node was "added" and invisible.
  *
