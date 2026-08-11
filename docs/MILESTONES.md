@@ -26,9 +26,14 @@ accurate — it is the first thing anyone reads.
 > `test_deck_api.py` is the test that closes that gap, and it was checked by
 > removing the field and watching all four fail.
 
-**Suite: 0 failures.** 1388 → … → **1605/0**, 8 skipped, ~197s from the repo
-root on a full dev install. Frontend: **81 vitest across 11 files**, plus build
+**Suite: 0 failures.** 1388 → … → **1621/0**, 8 skipped, ~279s from the repo
+root on a full dev install. Frontend: **86 vitest across 12 files**, plus build
 (which runs the three scanners) and `tsc --noEmit`, all green.
+
+**Measure the suite with nothing else running.** One run reported 2401s and was
+believed for ten minutes: a previously-cancelled pytest was still alive and the
+two were competing. The wrapper task was stopped; the process it started was
+not. A timing taken against an unknown background load is not a measurement.
 
 Run it as `.venv\Scripts\python.exe -m pytest`. Bare `python` on PATH is a
 broken shim that reports a missing install path — this costs the first ten
@@ -1076,14 +1081,28 @@ see the build-stamp note at the top; a stale process cost two rounds on
 7. ~~**Project exists but nothing can be moved into it yet.**~~ Closed,
    10 August. Files and facts both move, from Project and from Memory. See
    below.
-7b. **Projects that exist only on artifacts cannot be adopted.** Opened by the
-   fix above. Existing rows carry `project_id` values — `harbour`, `northwind` —
-   that were never project objects, so Project shows an empty screen while Work
-   groups the same files. Validation now makes it a one-way door: a file can
-   leave such a group and cannot return, because the destination does not exist.
-   **This is the first thing a user with existing work will hit.** Needs an
-   adoption path, not a guess: either Project lists them as "not a project yet",
-   or something backfills at startup. Both are migrations.
+7b. ~~**Projects that exist only on artifacts cannot be adopted.**~~ Closed,
+   11 August. Project lists them under "not projects yet" with an **Adopt**
+   action; `GET /projects/unclaimed` finds them and `POST /projects/{id}/adopt`
+   claims one, keeping the id exactly. The startup-backfill alternative was
+   rejected: it would invent a name and a type nobody chose, and the type is
+   rule 7e's one genuine exception — it activates a pack and cannot be inferred
+   from behaviour. Adoption **is** the creation moment, so it is where the
+   question is asked.
+
+   The second half matters as much and is easy to forget: **generation was
+   validated too.** `PATCH /artifacts/{id}` checked its destination and
+   `POST /artifacts/generate` did not, so a file could be *born* into a project
+   it was then forbidden from moving into. That asymmetry is how `harbour` and
+   `northwind` arrived. Adoption without it would keep refilling the list it
+   had just emptied.
+
+   Verified against the real database on this machine: both ghosts listed with
+   their counts, `harbour` adopted through the UI as "Harbour Lane"/business
+   with its file intact, then reverted with `DELETE /projects/harbour?contents=keep`
+   so the maintainer picks the real name and type. Chat's `project_id` is still
+   unvalidated and deliberately so — refusing a message because of a stale
+   selection is worse than a ghost scope, now that ghost scopes are reclaimable.
 8. **The whole project-scope path is still barely exercised on real data.**
    `spine.db` held **zero** `project:*` facts before this session. One fact was
    scoped, observed and moved back during verification, so the path is *proven*
@@ -1124,9 +1143,10 @@ terms to read rather than fixtures written to make them pass.
    now that documents have real pages — the HTML *is* the paginated document, so
    this renders what exists rather than reimplementing pagination. The pattern
    to copy is a scroll container of page-sized sheets, not a PDF viewer.
-3. ~~**Assignment**~~ — done, 10 August. Its successor is **item 7b**: adopting
-   the projects that exist only as strings on artifacts. Small, and it is what
-   any user with existing files meets first.
+3. ~~**Assignment**~~ — done, 10 August. ~~Its successor is **item 7b**~~ —
+   also done, 11 August. Project adopts the groups that existed only as strings
+   on artifacts, and generation now validates its `project_id` so no more
+   arrive. See item 7b for what was decided and what was deliberately left.
 3b. **Rank fusion and lexical retrieval**, from the TencentDB review above.
    Small, and it is the only change on this list that attacks a *documented*
    failure rather than adding capability: rule 9's invented "Project Phoenix"
@@ -2510,8 +2530,8 @@ answers become the missing line in `docs/PITCH.md`.
 
 ## Known broken
 
-**Nothing.** 1601 passed, 8 skipped, 0 failures, ~4m33s from the repo root on a
-full dev install, 11 August 2026. Frontend: 81 across 11 files. The 27 are gone
+**Nothing.** 1621 passed, 8 skipped, 0 failures, ~4m39s from the repo root on a
+full dev install, 11 August 2026. Frontend: 86 across 12 files. The 27 are gone
 and the section explaining what they actually were is above, under "What the 27
 actually were"; the method for classifying the next one is
 `docs/KNOWN-FAILURES.md`.

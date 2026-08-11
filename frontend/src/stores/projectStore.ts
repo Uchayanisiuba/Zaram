@@ -45,8 +45,30 @@ export interface Project {
  *  someone loses a client's rates by tidying a sidebar. */
 export type DeleteContents = 'keep' | 'delete';
 
+/** A group that exists on its contents but is not a project.
+ *
+ *  Files and facts carry whatever `project_id` the request had, and neither
+ *  creation path used to check that the project existed — so a stale selection
+ *  or a typo produced a group Work groups files under and Project could not
+ *  show, rename or delete. Assignment now validates its destination, which
+ *  turned that into a one-way door: a file can leave and cannot return.
+ *
+ *  This is the way back in. It is not a second kind of project — it is the
+ *  absence of one, listed so it can be fixed. */
+export interface UnclaimedGroup {
+  id: string;
+  artifacts: number;
+  /** Facts under `project:<id>`, or **-1 when the Spine could not say**. Same
+   *  rule as `Project.facts`: the unknown case stays distinguishable, because
+   *  "no facts" and "could not count" lead to different decisions. */
+  facts: number;
+}
+
 interface ProjectStore {
   projects: Project[];
+  /** Ordered by id, and normally empty. A non-empty list is a defect the user
+   *  is being offered a fix for, not a feature of the screen. */
+  unclaimed: UnclaimedGroup[];
   loading: boolean;
   error: string | null;
 
@@ -54,6 +76,7 @@ interface ProjectStore {
   create: (name: string, type: ProjectType, note?: string) => Promise<Project | null>;
   rename: (id: string, name: string) => Promise<void>;
   setType: (id: string, type: ProjectType) => Promise<void>;
+  adopt: (id: string, name: string, type: ProjectType) => Promise<void>;
   remove: (id: string, contents: DeleteContents) => Promise<void>;
 }
 
@@ -68,6 +91,7 @@ async function readError(res: Response, fallback: string): Promise<string> {
 
 export const useProjectStore = create<ProjectStore>((set, get) => ({
   projects: [],
+  unclaimed: [],
   loading: false,
   error: null,
 
@@ -86,6 +110,24 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
         loading: false,
         error: e instanceof Error ? e.message : 'Could not load projects.',
       });
+      return;
+    }
+
+    // Separate request, and deliberately not fatal. The unclaimed list is a
+    // repair offer; a backend too old to serve it, or a failure reading it,
+    // must not take the projects screen down with it — the user still has
+    // projects to look at, and an error banner over a working list would be
+    // Zaram reporting its own new endpoint as their problem.
+    try {
+      const res = await fetch(`${API}/projects/unclaimed`);
+      if (!res.ok) {
+        set({ unclaimed: [] });
+        return;
+      }
+      const body: { unclaimed?: UnclaimedGroup[] } = await res.json();
+      set({ unclaimed: body.unclaimed ?? [] });
+    } catch {
+      set({ unclaimed: [] });
     }
   },
 
@@ -128,6 +170,23 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
     });
     if (!res.ok) {
       set({ error: await readError(res, 'That project type could not be changed.') });
+      return;
+    }
+    await get().load();
+  },
+
+  adopt: async (id, name, type) => {
+    // The id is passed through untouched and is never re-derived from the
+    // name. Every file and every fact in this group points at this exact
+    // string; slugifying the name here would create a *different* project and
+    // adopt nothing, which is the one failure this whole path exists to end.
+    const res = await fetch(`${API}/projects/${encodeURIComponent(id)}/adopt`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, type }),
+    });
+    if (!res.ok) {
+      set({ error: await readError(res, `${id} could not be adopted.`) });
       return;
     }
     await get().load();

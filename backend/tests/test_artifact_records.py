@@ -363,6 +363,7 @@ class TestTheHttpSurface:
     @pytest.fixture
     def client(self, tmp_path, monkeypatch):
         from fastapi.testclient import TestClient
+        from projects import ProjectRecords
 
         monkeypatch.setenv("ZARAM_ARTIFACTS_DB", str(tmp_path / "a.db"))
         monkeypatch.setenv("ZARAM_OUTPUT_DIR", str(tmp_path / "out"))
@@ -375,6 +376,16 @@ class TestTheHttpSurface:
             ArtifactRecords(str(tmp_path / "a.db")),
             ArtifactStore(tmp_path / "out"),
         )
+
+        # Projects too, and for two reasons. Generation now validates its
+        # `project_id` — it used to write whatever it was given, which is how
+        # groups arrived that Project could not show — so `north` has to be a
+        # real project for these tests to describe a real request. Without the
+        # rebind they would also validate against the *developer's* projects.db
+        # and pass or fail depending on whose machine they ran on.
+        main.project_records = ProjectRecords(str(tmp_path / "p.db"))
+        main.project_records.create("North", project_id="north")
+
         return TestClient(main.app)
 
     @staticmethod

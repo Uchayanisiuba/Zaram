@@ -937,6 +937,144 @@ async def create_project(body: ProjectCreateRequest):
     return _project_json(project)
 
 
+# Before `/projects/{project_id}` in declaration order. FastAPI matches in the
+# order routes are registered, and while no `GET /projects/{id}` exists today,
+# adding one later would silently shadow this and read "unclaimed" as an id.
+@app.get("/projects/unclaimed")
+async def list_unclaimed_projects():
+    """Groups that exist on files and facts, but are not projects.
+
+    A `project_id` reaches an artifact, and a `project:<id>` scope reaches the
+    Spine, from whatever the request carried. Neither creation path checked that
+    the project existed, so a stale selection or a typo produces a group Project
+    cannot show, rename or delete — while Work happily groups files under it.
+
+    **Assignment validates its destination, which is what turned this from
+    untidiness into a one-way door.** A file can leave such a group and cannot
+    return, because the destination is not a project. That validation is right;
+    what was missing is a way back in, and this is the list that offers it.
+
+    Counted from the stores that own the things, so the numbers are what
+    adoption would actually claim rather than an estimate. A group is reported
+    whether it holds files, facts, or both — a project whose only trace is a
+    handful of facts is exactly the one that is hardest to find by hand.
+    """
+    counts: Dict[str, Dict[str, int]] = {}
+    for entry in artifact_service.records.projects():
+        counts.setdefault(entry["id"], {"artifacts": 0, "facts": 0})
+        counts[entry["id"]]["artifacts"] = entry["count"]
+
+    # -1 is not folded into 0 anywhere else this count is shown, and it is not
+    # folded here: "no facts" and "the Spine could not say" lead to different
+    # decisions, and adoption is about to act on the difference.
+    facts_known = True
+    try:
+        runtime = kernel.memory_runtime
+        if runtime is None:
+            facts_known = False
+        else:
+            for project_id, n in (await runtime.project_fact_counts()).items():
+                counts.setdefault(project_id, {"artifacts": 0, "facts": 0})
+                counts[project_id]["facts"] = n
+    except Exception:
+        facts_known = False
+
+    unclaimed = [
+        {
+            "id": project_id,
+            "artifacts": n["artifacts"],
+            "facts": n["facts"] if facts_known else -1,
+        }
+        for project_id, n in sorted(counts.items())
+        if not project_records.exists(project_id)
+    ]
+    return {"unclaimed": unclaimed, "facts_counted": facts_known}
+
+
+class ProjectAdoptRequest(BaseModel):
+    """A name and a type for a group that already has contents.
+
+    `name` defaults to the id, which is the honest default: the id is the only
+    thing the user ever actually wrote for this group, and inventing a prettier
+    name would be Zaram deciding what their work is called.
+    """
+
+    name: str = ""
+    type: str = "general"
+
+
+@app.post("/projects/{project_id}/adopt")
+async def adopt_project(project_id: str, body: ProjectAdoptRequest):
+    """Turn a group that exists only on its contents into a real project.
+
+    **The id is kept exactly.** That is the whole operation — every artifact
+    row and every `project:<id>` scope points at this string, and a project
+    created under any other id would adopt nothing while looking like it had.
+    `ProjectRecords.create` appends a numeric suffix on collision, which is
+    right for a user typing a name twice and catastrophic here, so the
+    collision is checked and refused rather than resolved.
+
+    Adoption is the creation moment, so it is where the **type** is asked for —
+    the one thing rule 7e says the system genuinely cannot infer from behaviour,
+    and the choice that activates a pack. It is asked once, here, rather than
+    guessed from the files that happen to be in the group.
+
+    Nothing is moved, re-scoped or rewritten. The contents already carry this
+    id; what was missing was the record they point at.
+    """
+    wanted = project_id.strip()
+    if not wanted:
+        raise HTTPException(status_code=400, detail="No project id given.")
+
+    if project_records.exists(wanted):
+        raise HTTPException(
+            status_code=409,
+            detail=f"{wanted!r} is already a project.",
+        )
+
+    # Refuse to adopt a group with nothing in it. Otherwise this is a second
+    # create route that lets the caller choose its own id, and the ids it would
+    # mint are precisely the ones `slugify` exists to keep readable.
+    holds_artifacts = artifact_service.records.count_for_project(wanted) > 0
+    holds_facts = False
+    try:
+        runtime = kernel.memory_runtime
+        if runtime is not None:
+            holds_facts = await runtime.count_by_scope(project_scope(wanted)) > 0
+    except Exception:
+        holds_facts = False
+
+    if not (holds_artifacts or holds_facts):
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"Nothing is grouped under {wanted!r}, so there is nothing to "
+                "adopt. Create it as a new project instead."
+            ),
+        )
+
+    try:
+        project = project_records.create(
+            body.name.strip() or wanted,
+            type=ProjectType(body.type),
+            project_id=wanted,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    # Asserted rather than assumed. If the id ever moved, the caller would get a
+    # cheerful 200 for a project that adopted nothing, and the files would still
+    # be stranded — the exact failure this route exists to end.
+    if project.id != wanted:
+        project_records.delete(project.id)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Adoption would have created {project.id!r}, not {wanted!r}.",
+        )
+
+    return _project_json(project)
+
+
 @app.patch("/projects/{project_id}")
 async def update_project(project_id: str, body: ProjectUpdateRequest):
     """Rename, retype or annotate. **The id never moves.**
@@ -1333,6 +1471,18 @@ async def generate_artifact(body: GenerateBody):
                     "remedy": availability.remedy,
                 },
             )
+
+    # The same check `PATCH /artifacts/{id}` makes, at the other end of the same
+    # hole. Assignment validated its destination and creation did not, so a file
+    # could be *born* into a project that does not exist while being forbidden
+    # from moving into one — and the ghost groups on this machine, `harbour` and
+    # `northwind`, arrived exactly this way. Refusing here costs a 400 before
+    # anything is written; not refusing costs a file nothing can regroup.
+    if body.project_id.strip() and not project_records.exists(body.project_id.strip()):
+        raise HTTPException(
+            status_code=400,
+            detail=f"No project called {body.project_id.strip()!r}. Create it first.",
+        )
 
     sources = [ArtifactSource(**s.model_dump()) for s in body.sources]
     claims = [Claim(**c.model_dump()) for c in body.claims]
