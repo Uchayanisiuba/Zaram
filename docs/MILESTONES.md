@@ -1149,19 +1149,43 @@ citation floor, gets *more* likely as the corpus grows. Run the eval at 10, 100
 and 1,000 and plot the margin **before recruiting**: if cited recall breaks at
 scale, every other alpha number is noise, because cited recall is the claim.
 
-**Cut from the alpha, kept in v1:** M9c (Unreal/Blender read-only) is
-irrelevant to a freelancer-admin alpha; web search needs egress log plus
-per-source policy first and buys the alpha nothing; image/video is post-v1 and
-blocked on the cloud engine anyway.
+**Cut from the alpha — decided by the maintainer, 11 August.** All three are
+*alpha* cuts, not v1 cuts: nothing leaves `CLAUDE.md`'s v1 scope, and none of
+them costs anything to make, because none is built or on by default today.
+
+- **M9c, read-only MCP for Unreal and Blender.** Not started. Irrelevant to a
+  freelancer-admin alpha, which is one segment and not that one. Stays in v1.
+- **Web search.** Already default-deny in code and requires no change:
+  `planner.web_search_enabled()` reads `ZARAM_WEB_SEARCH` at call time and is
+  off unless explicitly set. The sequencing commitment stands — egress log,
+  then per-source policy, then search as its first governed source — and the
+  alpha needs none of it. Verified 11 August rather than assumed; the
+  `config.json` that once declared `ENABLE_WEB_SEARCH: true` beside a
+  default-deny product is deleted.
+- **Image and video generation.** Post-v1 already, and blocked on the cloud
+  engine regardless.
+
+**Ordering, set by the maintainer 11 August: M9a goes last**, after the cloud
+engine, packaging and the recall-at-scale gate. That does not shorten the path
+— the alpha cannot start without obligation extraction, since it is the half
+the alpha measures — but it attacks the *stated* blocker earlier, and it means
+M9a is built against a packaged product rather than a dev tree. The cost to
+watch: it is the least-understood piece, and discovering a problem in it last
+is the expensive way to discover one.
 
 **Still open, and it is the maintainer's call:** whether the alpha waits for
-the cloud engine. The recommendation above is that it does. It was asked on
-11 August and not answered, so nothing downstream of it has been assumed.
+the cloud engine. The recommendation above is that it does. Asked on 11 August
+and not answered, so nothing downstream of it has been assumed.
 
 ### Next, in the order I would take them
 
 Not a queue anyone has committed to — a recommendation, with the reasoning, so
 the next session can disagree cheaply.
+
+**Superseded for the alpha by "The road to alpha" above**, which the maintainer
+set on 11 August: the cuts are decided and M9a goes last. The list below is
+kept because the *reasoning* per item is still the best record of why each
+thing is worth doing — read it for the why, and take the order from the road.
 
 **Re-ordered 11 August**: the maintainer asked for the business layer directly
 ("work on the invoice and other types of document"), so item 1 is now partly
