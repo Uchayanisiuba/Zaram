@@ -18,13 +18,30 @@ must not start depending on a network scan to come up.
 import logging
 from typing import Any, Dict, Optional
 
-from core.contracts import Capability, Runtime, RuntimeMetadata, RuntimeState
+from core.contracts import Capability, CapabilityLocality, Runtime, RuntimeMetadata, RuntimeState
 from core.event_bus import EventBus, ZaramEvent
 
 from .engines.ollama_engine import OllamaEngine
+from .engines.openai_compatible_engine import from_environment as cloud_engine_from_environment
+from .engines.routed_engine import RoutedEngine
 from .models_service import ModelsService
 
 logger = logging.getLogger(__name__)
+
+#: Localities that mean "this leaves the machine".
+#:
+#: `HYBRID` is included deliberately. It says a provider *may* go off-device,
+#: and a maybe has to be treated as a yes here — routing it local would be
+#: right half the time and silently wrong the other half, with the wrong half
+#: being the one where data leaves. `REMOTE_DEVICE` is another machine on the
+#: network, which is not this machine, which is what the gate cares about.
+REMOTE_LOCALITIES = frozenset(
+    {
+        CapabilityLocality.CLOUD,
+        CapabilityLocality.HYBRID,
+        CapabilityLocality.REMOTE_DEVICE,
+    }
+)
 
 
 class ModelsRuntime(Runtime):
@@ -72,7 +89,7 @@ class ModelsRuntime(Runtime):
     async def initialize(self) -> None:
         self._state = RuntimeState.INITIALIZING
 
-        engine = OllamaEngine()
+        engine = self._build_engine()
         self._selected_model = await self._choose_model()
         if self._selected_model:
             engine.default_model = self._selected_model
@@ -91,6 +108,56 @@ class ModelsRuntime(Runtime):
             )
         )
         logger.info("[ModelsRuntime] Initialized (model=%s)", self._selected_model or "engine default")
+
+    def _build_engine(self):
+        """Local always; cloud as well when the user has brought a key.
+
+        Ollama is constructed unconditionally and stays the default, because
+        the product is local-first and because rule 5 forbids sending anything
+        off-device as a default. Cloud exists so that **someone with no
+        graphics card can use Zaram at all** — the constraint on the alpha was
+        never capability, it was who can run it.
+
+        With no key this returns the local engine unchanged, so nothing about
+        the previous behaviour depends on the new path existing. No network
+        call happens here either way: rule 7g, and `from_environment` reads
+        variables rather than testing them.
+        """
+        local = OllamaEngine()
+        cloud = cloud_engine_from_environment()
+        if cloud is None:
+            return local
+
+        logger.info("[ModelsRuntime] Cloud engine available (%s)", cloud.base_url)
+        return RoutedEngine(local=local, cloud=cloud, is_remote=self._is_remote_model)
+
+    def _is_remote_model(self, model: Optional[str]) -> bool:
+        """Would answering with this model send data off the machine?
+
+        Answered from what discovery recorded, never from the shape of the
+        name. `gpt-oss` runs on Ollama; a router that matched `"gpt"` would
+        send a local model's prompts to a cloud provider, which is the exact
+        class of mistake `locality` exists to prevent.
+
+        False whenever the question cannot be answered — no provider layer, an
+        unknown model, an exception. The failure modes are not symmetric:
+        guessing local costs a possibly-wrong model, guessing cloud costs the
+        user's documents leaving the machine on a lookup that failed.
+        """
+        if not model or self._provider_manager is None:
+            return False
+
+        info = self._provider_manager.get_model(model)
+        if info is None:
+            # `get_model` is exact; `_resolve_model` normalises tags and
+            # aliases the way the rest of the provider layer does.
+            resolve = getattr(self._provider_manager, "_resolve_model", None)
+            info = resolve(model) if callable(resolve) else None
+        if info is None:
+            logger.debug("no provider record for model %r, routing local", model)
+            return False
+
+        return info.locality in REMOTE_LOCALITIES
 
     async def _choose_model(self) -> Optional[str]:
         """Ask the provider layer which model may be used without being asked.

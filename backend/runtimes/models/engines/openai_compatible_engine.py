@@ -78,6 +78,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import urllib.error
 from collections.abc import Iterator
 from typing import Any
@@ -92,6 +93,58 @@ logger = logging.getLogger(__name__)
 #: because a cold cloud model behind a queue can take a while to start, and a
 #: timeout mid-answer is worse than a slow one.
 DEFAULT_TIMEOUT = 120.0
+
+
+#: OpenRouter's endpoint, used when `OPENROUTER_API_KEY` is set. Hardcoded
+#: because it is the address of a specific service rather than a preference,
+#: and the provider layer already registers OpenRouter from the same variable —
+#: two places reading one key is fine; two places inventing two URLs is not.
+OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+
+
+def from_environment(**kwargs: Any) -> "OpenAICompatibleEngine | None":
+    """Build a cloud engine from configuration, or return ``None``.
+
+    ``None`` is the ordinary answer, not a failure: a user who has not brought
+    a key has no cloud engine, and rule 1 says Zaram never supplies one.
+
+    Reads the variables the provider layer already uses, so a key configured
+    once is discovered *and* callable rather than producing a catalogue of
+    models that cannot be reached:
+
+    * ``ZARAM_OPENAI_ENDPOINT`` + ``ZARAM_OPENAI_KEY`` — any compatible service
+    * ``OPENROUTER_API_KEY`` — OpenRouter, whose endpoint is not a preference
+
+    An explicit endpoint wins, because someone who set one meant it.
+
+    **Nothing here touches the network.** Rule 7g: no network call occurs before
+    the user has consented to one, and that includes checking whether a key
+    works. A key is validated by being used, at which point the gate has already
+    logged the attempt and asked.
+    """
+    endpoint = (os.getenv("ZARAM_OPENAI_ENDPOINT") or "").strip()
+    key = (os.getenv("ZARAM_OPENAI_KEY") or "").strip()
+
+    if not endpoint and (os.getenv("OPENROUTER_API_KEY") or "").strip():
+        endpoint = OPENROUTER_BASE_URL
+        key = os.getenv("OPENROUTER_API_KEY", "").strip()
+
+    if not endpoint or not key:
+        return None
+
+    # The model is supplied per request by the router, so the default here is
+    # only a fallback for a caller that names none. It is deliberately not
+    # guessed from a hardcoded list of provider model names: those change
+    # weekly and a stale guess is a confusing 404 rather than a helpful default.
+    default_model = (os.getenv("ZARAM_CLOUD_MODEL") or "").strip()
+
+    try:
+        return OpenAICompatibleEngine(
+            base_url=endpoint, api_key=key, default_model=default_model, **kwargs
+        )
+    except (MissingApiKey, ValueError) as exc:
+        logger.warning("cloud engine not configured: %s", exc)
+        return None
 
 
 class MissingApiKey(ValueError):

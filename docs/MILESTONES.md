@@ -26,7 +26,7 @@ accurate — it is the first thing anyone reads.
 > `test_deck_api.py` is the test that closes that gap, and it was checked by
 > removing the field and watching all four fail.
 
-**Suite: 0 failures.** 1388 → … → **1645/0**, 9 skipped, ~315s from the repo
+**Suite: 0 failures.** 1388 → … → **1661/0**, 9 skipped, ~207s from the repo
 root on a full dev install. Frontend: **86 vitest across 12 files**, plus build
 (which runs the three scanners) and `tsc --noEmit`, all green.
 
@@ -1157,11 +1157,36 @@ ground — "people without a graphics card and low hardware".
 > exemption from the chokepoint scan, since it brings its own client. Reversible:
 > nothing above `LLMEngine` knows what is inside.
 >
-> **Step 2b — not done, and the engine is not reachable from chat.** Nothing
-> constructs it yet: no configuration surface for base URL, key and model, and
-> no routing decision that would pick it. That wiring is a real design question
-> — `ProviderManager`, the routing exemplars, and `CLAUDE.md`'s three tiers of
-> control — and doing it badly is worse than doing it next.
+> **Step 2b — wired, 11 August.** `RoutedEngine` satisfies `LLMEngine` and
+> sits where the single engine used to, so `ModelsService` and everything above
+> it are unchanged. It delegates per message on the model's **declared
+> locality**, read from what discovery recorded — never from the shape of the
+> name. `gpt-oss` runs on Ollama, so a router matching `"gpt"` would send a
+> local model's system prompt, recalled facts included, to a cloud provider.
+>
+> **Every unknown routes local**, and the asymmetry is the argument: guessing
+> local costs a possibly-worse answer, guessing cloud costs the user's
+> documents leaving on a lookup that failed. `HYBRID` counts as remote for the
+> same reason — a maybe has to be treated as a yes. The gate would still refuse
+> an unapproved host, but a design that leans on its last line of defence for
+> ordinary behaviour has one line of defence.
+>
+> Configuration reuses the variables the provider layer already reads —
+> `ZARAM_OPENAI_ENDPOINT` + `ZARAM_OPENAI_KEY`, or `OPENROUTER_API_KEY` — so a
+> key configured once is *discovered and callable* rather than producing a
+> catalogue of models that cannot be reached. No network call at construction
+> (rule 7g): a key is validated by being used, at which point the gate has
+> already logged and asked. **With no key, the engine is the local one
+> unchanged**, so nothing about the previous behaviour depends on this path.
+>
+> Cloud requested with no key configured **says so** rather than answering
+> quietly from a small local model — "disabled capabilities are visible, not
+> silent", applied to model choice.
+>
+> Still missing at this layer: a **Settings surface**, so today the key comes
+> from the environment; and `CLAUDE.md`'s three tiers of control
+> (*Prefer local · Auto · Prefer cloud*) — there is a router, not yet a
+> preference the user can express.
 >
 > **Step 2c — M10's dialog.** Until it exists the gate has no confirmation
 > handler, and a gate with no handler *refuses*. That is the designed resting
@@ -2680,7 +2705,7 @@ answers become the missing line in `docs/PITCH.md`.
 
 ## Known broken
 
-**Nothing.** 1645 passed, 9 skipped, 0 failures, ~5m15s from the repo root on a
+**Nothing.** 1661 passed, 9 skipped, 0 failures, ~3m27s from the repo root on a
 full dev install, 11 August 2026. Frontend: 86 across 12 files. The 27 are gone
 and the section explaining what they actually were is above, under "What the 27
 actually were"; the method for classifying the next one is
