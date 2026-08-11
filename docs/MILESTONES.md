@@ -11,14 +11,46 @@ accurate — it is the first thing anyone reads.
 
 ---
 
-## Current state — 10 August 2026
+## Current state — 11 August 2026
 
-**Suite: 0 failures.** 1388 → … → **1535/0**, 8 skipped, ~145s from the repo
-root on a full dev install. Frontend: **44 vitest across 5 files**, plus build
+> ### 10–11 August is committed
+>
+> Landed as seven commits on `Zaram-V0.1`, in dependency order: export formats,
+> invoices, slides, project and memory scope, speech chunking, the Windows
+> shortcut fix, the draggable orbit. Docs last. Nothing is in the working tree.
+>
+> One live bug was found by the split itself and is fixed in the slides commit:
+> `POST /artifacts/generate` with `kind: "deck"` read `body.slides`, which
+> `GenerateBody` did not have, so every deck request came back 500. The exporter
+> tests were green throughout because none of them went through the wire —
+> `test_deck_api.py` is the test that closes that gap, and it was checked by
+> removing the field and watching all four fail.
+
+**Suite: 0 failures.** 1388 → … → **1605/0**, 8 skipped, ~197s from the repo
+root on a full dev install. Frontend: **81 vitest across 11 files**, plus build
 (which runs the three scanners) and `tsc --noEmit`, all green.
 
-**Everything is committed and pushed**, `0cef961..a0d2bed` on `Zaram-V0.1`,
-17 commits. Working tree clean.
+Run it as `.venv\Scripts\python.exe -m pytest`. Bare `python` on PATH is a
+broken shim that reports a missing install path — this costs the first ten
+minutes of a session that does not know it.
+
+**Whatever is on 8420 predates these commits.** It was last restarted at 19:00
+on 10 August, before the deck fix and before anything was committed. Check the
+build stamp before believing anything it says — see immediately below.
+
+### What changed, in one screen
+
+Read the sections further down for the reasoning; this is the index.
+
+| | |
+|---|---|
+| **Shortcuts** | Every chord was dead on Windows — the matcher waited for the Win key while the overlay advertised Ctrl. Fixed, and `registry.test.ts` now asserts the printed chord actually fires. |
+| **Assignment** | `PATCH /artifacts/{id}` and `POST /memory/{id}/scope`. Files and facts can be put into a project from the UI. Closes item 7. |
+| **Invoices** | Real line items, Decimal money, terms → due date derived from one number, refuses rather than inventing. `ArtifactKind.INVOICE` finally produces something. |
+| **Formats** | `.html`, `.txt`, `.csv`, `.pptx` added to `.md`/`.docx`/`.xlsx`/`.pdf`/`.png`. Slides work by treating headings as slide boundaries, so any existing document exports as a deck. |
+| **Speech** | Time-to-first-sound 9.9s → 2.5s, and it no longer scales with reply length. Nothing was streaming; one blocking request per reply. |
+| **Landing** | Orbit nodes drag and spring back to their live slot. Left rail: one Settings, not two; 440px → 260px. |
+| **Docs** | TencentDB Agent Memory reviewed — two ideas taken, the tiers and L0 rejected, not a dependency. |
 
 ### Read this before debugging anything
 
@@ -42,6 +74,21 @@ Proven rather than assumed, same input to both, same second:
 port 8420 ('Hello') -> 3 source events     (the stale process)
 port 8425 ('Hello') -> 0 source events     (current code)
 ```
+
+**It happened again on 10 August and cost the same way.** A backend from 06:32
+was still serving 8420 at 19:00 with **no `build` field at all** — it predated
+the stamp. Restarting it is what made the new routes reachable. To restart:
+
+```
+powershell -Command "Get-NetTCPConnection -LocalPort 8420 -State Listen | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force }"
+```
+
+then `backend/start.bat`, and confirm `build.commit_short` before testing.
+
+**The venv is `C:\Zaram\.venv`, and bare `python` on PATH is a broken shim** —
+it exits with "the install path was not found". Use
+`C:\Zaram\.venv\Scripts\python.exe` for every pytest run. `py` is also
+unreliable here.
 
 **Run pytest from the repo root**, with `.venv/Scripts/python.exe` — not with
 whatever `python` resolves to. `--ignore` in `pyproject.toml` is rootdir-relative
@@ -302,15 +349,226 @@ the bug.** `registry.ts` calls `orbitOrder` the canonical node list and warns, i
 prose, that three components had each restated it and CommandPalette had
 silently lost Activity as a result. That was written down and never enforced —
 and `orbitOrder` ended up with **no consumers at all**. So adding Project
-updated the rail, ⌘K and the router while the orbit, the first thing anyone
-sees, kept rendering five nodes. It was caught by taking a screenshot, not by
-reading the code. `Landing.test.ts` now asserts the orbit against `orbitOrder`
-for membership, order, labels and spacing.
+updated the rail, the command palette and the router while the orbit, the first
+thing anyone sees, kept rendering five nodes. It was caught by taking a
+screenshot, not by reading the code. `Landing.test.ts` now asserts the orbit
+against `orbitOrder` for membership, order, labels and spacing.
 
 Two more found the same way: `slugify` **stripped accents instead of folding
 them** ("Ünïcodé Studio" → `n-cod-studio`, which is what a French, German or
 Yorùbá business name would have become), and `/projects` was **missing from the
 Vite proxy**, so every call from the frontend would have hit the dev server.
+
+### TencentDB Agent Memory, read and mined — 11 August 2026
+
+Reviewed at the maintainer's request. **It is not a competitor and it is not a
+dependency; it is a source of two retrieval ideas Zaram should take.**
+
+**Why it is not a competitor.** Its user is a team wiring an agent fleet, with a
+control panel governing what a fleet shares. Zaram's user is one person who uses
+more than one AI and wants their own continuity. The overlap is the substrate,
+not the product — and `CLAUDE.md` already says the substrate is commodity and
+the surfaces are not. A strong open-source local memory engine **commoditises
+the layer Zaram was never going to win on while validating the thesis**. The
+convergence is worth noting: SQLite plus `sqlite-vec`, zero external calls,
+provenance back to raw evidence, share-versus-private governance. Four
+architectural choices Zaram made independently, arrived at by a team at Tencent.
+
+**Why it is not a dependency, despite MIT.** Node ≥ 22.16, distributed as three
+Docker services. The actual blocker is that a stranger cannot install Zaram;
+adding a container runtime to a Python backend moves that blocker backwards.
+Licence was the gate everyone expects to fail and it passed — packaging is the
+one that fails.
+
+**Taken: rank fusion (RRF).** They fuse BM25 and vector results by rank position
+rather than by blended score. This is the most valuable thing in the project for
+this codebase, because merging a ranking blend with a selection or citation
+threshold has cost it three times and the current defence is a discipline —
+`relevance` selects, `score` orders, remember which. RRF is on no source's
+scale, so there is no magnitude that *could* be compared against a cosine floor.
+It converts a rule someone must remember into one that cannot be broken. Taken
+for ordering only.
+
+**Taken: real lexical retrieval, fused rather than averaged.** `_keyword_match`
+is term overlap and its own comment records that function words score against
+everything. The argument is not tidiness — it is **rule 9's documented
+failure**. "Write that up as a proposal" retrieves nothing because five
+referential words resemble nothing; but a client name or a reference number is
+precisely what a lexical index finds and a dense embedding misses. This is the
+one retrieval change with a known failure already waiting for it.
+
+**Corrected from the first read of this project.** I described their tiered
+retrieval as a membership gate and warned it would reintroduce the rank-43
+defect. Reading the design, that was wrong: L2/L3 are a *fast context bootstrap*
+and specific-fact queries fall back to BM25 + vector + RRF over L1 and L0. It is
+two-phase, not a gate. The caution survives in a narrower form — if a bootstrap
+answers and the fallback never runs, tier decided membership after all — but the
+architecture as built does not make that mistake.
+
+**Rejected: the four tiers.** L1 atom / L2 scenario / L3 persona is Zaram's
+scope field with more machinery. Rule 7i already argues one field on one store
+is better: facts move, recall needs both at once, and the correction loop stays
+uniform. Their pyramid would buy nothing and cost that.
+
+**Rejected: L0.** Persisting raw dialogue is rule 7d inverted, and 7d was
+written from a specific failure — duplicate citations and Zaram quoting its own
+replies. They keep L0 for verification; Zaram keeps provenance, which is the
+same guarantee without the store.
+
+**Deferred: symbolic short-term memory.** Compressing intermediate tool logs is
+genuinely applicable — the execution engine runs multi-step plans and those logs
+are the bloat this targets — and it touches **session state only**, so rule 7d
+is untouched and nothing changes about what enters the Spine. Worth prototyping;
+not started.
+
+**Their numbers are a hypothesis.** 61% fewer tokens and +50% task success come
+from secondary write-ups. `CLAUDE.md` says benchmark against LoCoMo /
+LongMemEval, not by feel, and this codebase has already been burned by an eval
+that graded itself and by a corpus whose filler answered the question. Those
+figures get measured on Zaram's own harness or they do not count.
+
+### Assignment exists — a project can be filled
+
+`PATCH /artifacts/{id}` and `POST /memory/{record_id}/scope`, wired into the
+Project and Memory surfaces. This closes **item 7** and makes **item 8**
+testable: a file and a fact can now be put into a project after the fact, which
+is the only way project scope was ever going to be exercised on real data.
+
+**Assignment lives in Project, not Work.** `CLAUDE.md` splits them — Work
+browses and previews, Project creates, names, types, assigns, moves and deletes
+— so a project row expands to show what is in it, with a picker for what is not.
+Adding a file that already belongs somewhere says **"Move here"** and names
+where it currently lives, because a file has one project and a button reading
+"Add" would look like a copy while quietly emptying somewhere else.
+
+**The destination is validated, and that is the whole point.** An unchecked
+write lets a typo create a project that exists only as a string on one row:
+absent from `/projects`, so unnameable, undeletable, and able to collect facts
+under a scope nothing points at — rule 4 broken by a spelling mistake. This is
+the same ghost the `/projects` ÷ `/artifacts/projects` split was made to kill,
+approached from the other end.
+
+**`null` and `""` are different instructions** on both routes. Omitted means
+*the caller said nothing* and is a 400; empty means *take it out*, and restores
+the value a file is born with rather than inventing a third state.
+`assignment.test.ts` asserts the client actually sends `""`, because every
+ordinary instinct — dropping falsy fields, `|| undefined` — collapses the two,
+and the only symptom is that **Remove silently stops working** while everything
+else looks fine.
+
+**`scope` was missing from both memory serializers.** A fact could be scoped to
+a project and there was no way to see that it was: rule 7i's field existed and
+was invisible from outside the backend. Now on `/memory` and `/memory/{id}`, as
+one field — the surface derives the project id from it rather than being handed
+a second spelling that can disagree.
+
+**The artifacts store's mutation guard was counting instead of naming.**
+`test_no_sql_deletes_or_blanket_updates` asserted `count("UPDATE ARTIFACTS")
+== 1`, so a second named mutation failed it even though the class docstring
+asks for exactly that ("adding a second has to be a deliberate act"). It now
+asserts an allow-list of mutable columns and one column per statement. A count
+says *how many* named mutations exist and not *which*, so swapping a safe one
+for a dangerous one left it green — the number was never the property worth
+guarding.
+
+**A test that passed alone and failed in the suite.** The fact fixture drove
+`asyncio.get_event_loop().run_until_complete`; by the time the full run reaches
+it another module has closed the thread's loop and it raises rather than making
+one. Now `async def` and awaited. A test that only passes in isolation gets
+blamed on the suite.
+
+**Driven in the browser, on the real Spine**: created a project, added a file
+(0 → 1 file), removed it (back to 0), moved one in from another project, moved
+a fact in (0 → 1 fact) and watched Work's filter follow. Everything touched was
+put back — the fact to global, the file to its original id, the test project
+deleted.
+
+**Left open, and found by that restore.** Existing artifacts carry `project_id`
+strings for projects that were never objects — `harbour`, `northwind`. Project
+cannot see them, and validation now makes them a **one-way door**: a file can
+leave such a group and can never go back, because the destination does not
+exist. Restoring the file needed a direct store write. Someone with existing
+work therefore opens Project to an empty screen while Work shows their files
+grouped, which reads as two products. The fix is an adoption path — Project
+listing artifact-only ids as "not a project yet", or a backfill at startup —
+and it is a migration decision, so it was flagged rather than guessed at.
+
+### Two Settings buttons, and a rail twice as wide as its own labels
+
+Both reported by the maintainer from a screenshot, which is twice now that the
+navigation's defects have been caught by looking rather than by reading.
+
+**Settings was in `surfaceOrder` *and* pinned at the foot**, so the rail drew
+the same destination twice, three rows apart — which reads as two different
+places. The node list has now drifted three times in three distinct shapes:
+CommandPalette silently **lost** Activity, the landing orbit silently **missed**
+Project, and the rail silently **doubled** Settings. A
+`Record<WorkspaceId, …>` catches the first, `Landing.test.ts` catches the
+second, and neither catches the third — a Record proves every node has an entry
+and says nothing about how many times it is rendered. `LeftRail.test.tsx` now
+renders the rail and asserts each node appears exactly once.
+
+The list is still derived, minus one named id. A derivation with a deliberate
+omission is not a restatement: a seventh node still arrives on its own.
+
+**The rail defaulted to 440px** to hold labels that need about 210 — a band of
+empty rail as wide as the content beside it, on the surface `UI-SPEC.md` says
+density matters most. Now 260, still draggable.
+
+**The migration is the part that nearly shipped broken.** A persisted width
+beats a constant, so lowering the default reaches nobody who has opened the app
+before — the change lands and the rail stays wide, looking like an edit that did
+not take. The first attempt was `from < 1`, which read correct and did nothing,
+and the browser said so: still 440 after a reload. Two facts, both checked
+rather than assumed:
+
+- zustand gates migration on `typeof stored.version === 'number'`, so an entry
+  with **no version key is never migrated at all** — it is loaded as-is and
+  `migrate` is not called.
+- every entry zustand itself wrote carries `version: 0`, because that is the
+  default when the option is absent. So real users migrate, and the version-less
+  case is unreachable through the normal path.
+
+The comment in the code originally claimed the opposite, and asserting the wrong
+reason for a real behaviour is how the next person inherits a false model of it.
+
+### Every keyboard shortcut was dead on Windows, and the interface said otherwise
+
+The same lesson again, one file over. `chordTokens` and `matches` both read
+`keys.meta`, and they disagreed about what it meant. The renderer treated it as
+*the platform's primary modifier* and printed **Ctrl** on Windows. The matcher
+took it literally and required `event.metaKey` — the physical Windows key, which
+the OS claims before the page sees it.
+
+So the help overlay listed fourteen shortcuts, every chord correctly labelled,
+and **not one of them fired**: not Ctrl K, not Ctrl 1–7, not the orb states.
+Nothing threw, nothing logged, and the keycap was a claim about the system the
+system did not honour — which is rule "never render invented values" in its
+quietest form, because the value here was a promise rather than a number.
+
+**`meta` now means the platform's primary chord key, and that is written down
+where both halves read it.** On Windows `meta` and `ctrl` collapse onto Ctrl,
+exactly as the label says; holding the Windows key is a non-match rather than a
+forgiven near-miss, so Win+K does not open the palette.
+
+`registry.test.ts` is the enforcement, and it is the shape worth copying: for
+every shortcut, on both platforms, it **synthesises the exact event the rendered
+chord describes and requires the matcher to accept it**. A label and a matcher
+agreeing is not something a type can express. Reverting the fix fails it with
+`nav.landing is shown as "Ctrl 1" and does not respond to it` — checked, not
+assumed, because a test written after the fix has never seen the bug.
+
+Driven in the browser afterwards: Ctrl K opens the palette, Ctrl 2 and Ctrl 3
+land on Work and Project, `?` opens the overlay and all fourteen chords read
+`Ctrl …`. The one remaining restatement, `components/palette/CommandPalette.tsx`
+with its own `metaKey || ctrlKey` listener, has no importers — it is not the
+palette the shell renders.
+
+Mac glyphs are gone from the live frontend and from `UI-SPEC.md`. TopNav derives
+its `Search (Ctrl K)` label from the registry instead of spelling it out.
+`src/legacy/` and `figma-assets/` still contain `⌘` and were left alone: the
+first is quarantined and unreachable, the second is imported design source
+rather than shipped UI.
 
 ### The avatar costs ~190 MB of VRAM, not the invented 1.5 GB
 
@@ -717,14 +975,59 @@ unterminated block comment must not swallow the rest of the file*. Both were
 observed to fail against a deliberately broken tracker. `check-visemes.mjs` was
 mutation-tested before being believed; this is the same debt paid the same way.
 
+### How the commit split actually went
+
+Seven commits, not the six sketched here beforehand, and in a different order.
+The plan put the shortcut fix first and folded invoices and formats together;
+the dependency graph did not allow it.
+
+**`artifacts/html.py` imports `.invoice` at module scope, and
+`test_invoice_api.py` generates with `fmt: "html"` — an exporter that did not
+exist yet.** So the exporters had to land before invoices, and invoices before
+slides, because `render_deck` lives in the same module as `render_invoice`. The
+real order was: formats → invoices → slides → project and memory scope → speech
+→ shortcuts and rail → orbit drag → docs.
+
+`backend/main.py` was touched by three of them, not two. It was split by
+writing each intermediate state as *the final file with the later commits'
+blocks removed* — never by retyping, which would produce a fourth version of
+the code that can disagree with the one that was tested. Each state was
+compiled and its own tests run before the commit was made.
+
+Worth keeping for next time: **the split is a review.** Reading the tree one
+commit at a time is what surfaced the `kind: "deck"` 500 — the branch and the
+model that fed it were written in the same session and never read against each
+other.
+
 ### Do these first
 
 Worst first. Nothing is broken. **Restart the backend before testing anything** —
 see the build-stamp note at the top; a stale process cost two rounds on
 10 August.
 
-0. ~~**Run the full suite and commit.**~~ Done and pushed, 10 August.
-1. **No human has heard it or spoken to it.** Both directions now work against
+1. **Speech now plays promptly and lip-syncs — the remaining unknowns moved.**
+   The maintainer's *"I've never heard Zaram respond with speech"* was answered
+   on 11 August in part: the avatar was driven in a browser, `orbState` reached
+   `speaking`, 31 viseme cues were live, and the mouth was caught open
+   mid-word. **What is still unconfirmed is a human hearing it through a real
+   output device** — every check so far reads `audio.currentTime` advancing,
+   which is not the same as sound leaving a speaker.
+
+   Two new items from that work:
+   - **Synthesis runs at roughly real time on CPU (RTF ≈ 1.0).** Chunking hides
+     the first sentence's cost, but there is *no headroom*: a reply of many
+     short sentences can out-run synthesis and pause mid-way. Fixing that
+     properly means Kokoro on the GPU, which is the VRAM decision `CLAUDE.md`
+     deliberately took. Kokoro-82M is ~0.3 GB against a ~9.1 GB chat budget —
+     worth revisiting now there is a number.
+   - **`/voice/stream` is still known-broken and unused.** It builds the audio
+     URL from the request id; the comment in `main.py` says it must not be
+     wired up in that state. The chunking fix went through `/voice/synthesize`
+     instead, so this is untouched and still a trap.
+
+   The standing list below is unchanged for the input half:
+
+   Both directions work against
    real audio at the API level — Kokoro synthesises, the URL serves
    `200 audio/wav`, Opus-in-WebM decodes, Whisper transcribes, the weight
    download was refused and then permitted and observed. What remains untested
@@ -756,39 +1059,81 @@ see the build-stamp note at the top; a stale process cost two rounds on
    warning copy, and whether `docs/UI-SPEC.md`'s ban on 3D on the landing
    survives a number this small.
 5. **`Artifact.indexed` interaction with project scope is unexamined.**
+5b. **Pointer-tracking gaze was built and removed on 11 August.** Not on
+   principle — because it did not visibly work, and the reason is the lesson:
+   the maths had unit tests and the `.vrm` was confirmed to carry a `lookAt`
+   bone rig, and **neither is evidence that an eye moved on screen.** The
+   asset's fringe covers the eyes at 320px, which was noted at the time and
+   then not checked. `lib/gaze.ts` and its tests are deleted; if it returns it
+   returns with a screenshot showing two different eye positions.
+5c. **`RECENT_CONTEXTS` in `LeftRail.tsx` is invented data** — "zaram-core
+   v0.4.2", "Vector store sync", "Agent: code-review", with timestamps. It
+   renders on every workspace and violates "never render invented values".
+   Flagged 10 August, left alone because removing it versus wiring it to real
+   data is a product decision nobody has taken.
 6. ~~**One unexplained 404 on every page load.**~~ Closed, 10 August: it was
    `/favicon.ico`. See below.
-7. **Project exists but nothing can be moved into it yet.** The node, the
-   surface, the store and the API all work — create, rename, retype, delete
-   with an explicit contents choice. What is missing is *assignment*: there is
-   no way from the UI to put an artifact or a fact into a project. The store
-   supports it (`set_scope`, `project_id` on artifacts); the surface does not
-   expose it. Until then a project can only be filled by being selected in the
-   composer before a fact is captured.
+7. ~~**Project exists but nothing can be moved into it yet.**~~ Closed,
+   10 August. Files and facts both move, from Project and from Memory. See
+   below.
+7b. **Projects that exist only on artifacts cannot be adopted.** Opened by the
+   fix above. Existing rows carry `project_id` values — `harbour`, `northwind` —
+   that were never project objects, so Project shows an empty screen while Work
+   groups the same files. Validation now makes it a one-way door: a file can
+   leave such a group and cannot return, because the destination does not exist.
+   **This is the first thing a user with existing work will hit.** Needs an
+   adoption path, not a guess: either Project lists them as "not a project yet",
+   or something backfills at startup. Both are migrations.
 8. **The whole project-scope path is still barely exercised on real data.**
-   `spine.db` held **zero** `project:*` facts before this session. Now that a
-   project can exist before a file does, this is testable for the first time —
-   and it should be tested, because rule 7i's project half has never run in
-   anger.
+   `spine.db` held **zero** `project:*` facts before this session. One fact was
+   scoped, observed and moved back during verification, so the path is *proven*
+   — but proven once, by hand, is not the same as exercised. Rule 7i's project
+   half still has not run in anger.
 
 ### Next, in the order I would take them
 
 Not a queue anyone has committed to — a recommendation, with the reasoning, so
 the next session can disagree cheaply.
 
-1. **Invoice and quote templates, hand-built.** `CLAUDE.md` already names
-   "output templates" as one of the four things a pack adds, so this is the
-   business pack's slot rather than a new concept. The real argument beyond
-   convenience: **a template with named slots is a refusal surface.** Generation
-   is prose-shaped today, so a missing fact becomes plausible invented text; a
-   slot makes the same gap a visible blank that can stop the export, which is
-   rule 9 working at the point it matters. Note the constraint: *build two packs
-   by hand before building the pack system*.
+**Re-ordered 11 August**: the maintainer asked for the business layer directly
+("work on the invoice and other types of document"), so item 1 is now partly
+built — invoices generate, and `.docx`/`.xlsx`/`.pdf`/`.md`/`.html`/`.txt`/
+`.csv`/`.pptx`/`.png` all export. **What M9 still needs is obligation
+extraction**, which is the half that was never started and the half the alpha
+measures. The invoice was deliberately built first so obligations have real
+terms to read rather than fixtures written to make them pass.
+
+1. **Obligation extraction — M9a, and the half M9 is still missing.** The
+   invoice half landed on 11 August, and it landed as a **refusal surface**
+   exactly as this item argued: `invoice.py` raises `InvoiceIncomplete` rather
+   than defaulting a price, a quantity or a line, and the route returns it as a
+   400 the caller can act on. That is rule 9 working where it does the most
+   damage.
+
+   What remains is the keystone: **dates and commitments pulled out of
+   documents and surfaced before they lapse, each showing its source clause and
+   correctable.** The due date is already derived from `terms_days` and carried
+   on the record, and the terms sentence is printed on the page — so the seed
+   and its evidence both exist. Acceptance is unchanged: on day 31 Zaram says
+   the payment is late, shows the clause it read that from, and has the
+   follow-up drafted; correcting a wrongly-extracted date moves the reminder.
+
+   A quote template is the second pack example and is still worth building by
+   hand — *build two packs by hand before building the pack system*.
 2. **The preview panel with page navigation.** Asked for directly. Much cheaper
    now that documents have real pages — the HTML *is* the paginated document, so
    this renders what exists rather than reimplementing pagination. The pattern
    to copy is a scroll container of page-sized sheets, not a PDF viewer.
-3. **Assignment** — item 7 above.
+3. ~~**Assignment**~~ — done, 10 August. Its successor is **item 7b**: adopting
+   the projects that exist only as strings on artifacts. Small, and it is what
+   any user with existing files meets first.
+3b. **Rank fusion and lexical retrieval**, from the TencentDB review above.
+   Small, and it is the only change on this list that attacks a *documented*
+   failure rather than adding capability: rule 9's invented "Project Phoenix"
+   is a rare-token problem, and rare tokens are what a lexical index finds and
+   an embedding misses. RRF is the safe way to combine the two here, because it
+   cannot be compared against a citation floor by accident — which is the
+   mistake this codebase has now made three times.
 4. **Packaging.** `CLAUDE.md` still calls this *the actual blocker*: "a stranger
    cannot install this… capability is not what stands between the current state
    and a 15-person retention test." Nothing this session moved it. If the next
@@ -797,6 +1142,16 @@ the next session can disagree cheaply.
 
 ### Asked for, and deliberately not built
 
+- **TencentDB Agent Memory as a dependency.** MIT, so not a licence question —
+  a packaging one. Node ≥22.16 as three Docker services against a Python
+  backend whose stated blocker is that a stranger cannot install it. Its ideas
+  were taken; its code was not. See the review above.
+- **The four-tier memory pyramid.** L1/L2/L3 is Zaram's `global` /
+  `project:<id>` scope field with more machinery, and rule 7i already argues one
+  field on one store is the better shape. L0 is rule 7d inverted and is refused
+  outright.
+- **Pointer-tracking gaze.** Built and removed the same day — see item 5b. The
+  argument for it still stands; the verification did not.
 - **Running the user's apps from a repo inside Zaram.** Splits in two. Rendering
   generated or simple web content in a **sandboxed frame** is v1-feasible and is
   the same technology as the document preview. Executing code from a repository
@@ -2155,10 +2510,16 @@ answers become the missing line in `docs/PITCH.md`.
 
 ## Known broken
 
-**Nothing.** 1330 passed, 5 skipped, 0 failures, ~1m45s from the repo root on a
-full dev install. The 27 are gone and the section explaining what they actually
-were is above, under "What the 27 actually were"; the method for classifying the
-next one is `docs/KNOWN-FAILURES.md`.
+**Nothing.** 1601 passed, 8 skipped, 0 failures, ~4m33s from the repo root on a
+full dev install, 11 August 2026. Frontend: 81 across 11 files. The 27 are gone
+and the section explaining what they actually were is above, under "What the 27
+actually were"; the method for classifying the next one is
+`docs/KNOWN-FAILURES.md`.
+
+The count in this section was stale by 271 tests and two months of runtime
+before 11 August. Update it, or it stops being a signal — a number nobody
+refreshes is how a real regression hides, which is the same lesson as the
+stable-failure-count one above, wearing the opposite face.
 
 Record any change to that number — but the sharper lesson from clearing them is
 about *taxonomy*, not counting. "13 core, 14 voice" made 27 feel understood and

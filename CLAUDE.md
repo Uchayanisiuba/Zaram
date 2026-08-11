@@ -258,6 +258,17 @@ In scope:
   **not a personality**: no name, no pronoun, no wandering gaze, no expression
   not derived from system state. The landing default stays the orb.
 
+  **Pointer-tracking gaze was built and removed the same day, 11 August 2026.**
+  Not on principle — the argument that cursor tracking is *attention* rather
+  than drift still holds, and it would have been a narrowing of the rule rather
+  than an exception to it. It was removed because **it did not visibly work**,
+  and the reason it shipped in that state is the lesson: the maths had unit
+  tests, the VRM was confirmed to carry a `lookAt` bone rig, and neither of
+  those is evidence that an eye moved on screen. The asset's fringe covers the
+  eyes at the rendered size, so the one check that mattered was the one not
+  made. If it returns, it returns with a screenshot showing two different eye
+  positions.
+
   Still unmeasured, and it is the measurement that decides: `docs/UI-SPEC.md`
   forbids 3D on the landing on GPU-budget grounds, and the avatar renders
   permanently while a local model is resident. The decision is **warn, never
@@ -533,6 +544,51 @@ spent rebuilding the former is an hour not spent on the latter.
 - **Before/after tool callbacks** — the interception point that can block or rewrite a
   call. This is where the risk-tier gate lives. The tier taxonomy is ours and is
   better, because it is about consequence rather than lifecycle.
+
+- **Rank fusion instead of a weighted blend (RRF).** Read from TencentDB Agent
+  Memory, 11 August 2026, and it is the most valuable thing there. It fuses
+  rankers by **rank position** — `Σ 1/(k + rank)` — never by score magnitude.
+
+  That matters here more than anywhere, because merging a ranking blend with a
+  selection or citation threshold is **this codebase's most expensive recurring
+  bug** and has cost it three times. The current fix is a discipline: keep
+  `relevance` for selection and `score` for ordering, and remember which is
+  which. RRF removes the class rather than guarding it — its output is on no
+  source's scale, so there is no blended magnitude that *could* be compared
+  against a floor measured as a cosine. A rule you cannot break beats a rule you
+  must remember.
+
+  Take it for **ordering**. It does not answer membership or citation, and
+  wiring it into either would reintroduce the defect by a new route.
+
+- **BM25 beside the vectors, fused rather than averaged.** Same source. Zaram's
+  `_keyword_match` is naive term overlap, and its own comment records the
+  problem: function words score against everything.
+
+  The reason to want real lexical retrieval is rule 9's failure, not tidiness.
+  "Write that up as a proposal" retrieves nothing because five referential words
+  have no similarity to anything — but the *rare tokens* in a project, a client
+  name or a reference number, are exactly what a lexical index is good at and a
+  dense embedding is worst at. This is the one retrieval change with a
+  documented failure waiting for it.
+
+**Their four-tier pyramid is our scope field with more machinery, and ours is
+the better shape.** L1 atom / L2 scenario / L3 persona maps onto facts carrying
+`global` or `project:<id>` — rule 7i already argues why that belongs in one
+field on one store rather than in separate tiers: facts move, recall needs both
+at once, and the correction loop must stay uniform. Adopting the tiers would buy
+nothing and cost the uniformity.
+
+**L0 is rejected outright.** Persisting raw dialogue is rule 7d inverted, and
+that rule was written from a specific failure — duplicate citations and Zaram
+quoting its own replies. Their pipeline keeps L0 for verification; ours keeps
+provenance instead, which is the same guarantee without the store.
+
+**Not a dependency, at any licence.** It is MIT, so nothing is excluded on those
+grounds — it is excluded on packaging. It is Node ≥22.16 shipped as three Docker
+services, and the actual blocker is that a stranger cannot install Zaram. Adding
+a container runtime to a Python backend moves that blocker backwards. Mine it
+for patterns; do not link it.
 
 ## Models and routing
 
