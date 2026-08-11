@@ -42,7 +42,7 @@ import type { WorkspaceId } from '@/runtime/shortcuts/registry'
 //
 // **The order and membership are checked against `orbitOrder`** below. This
 // list was a restatement of the canonical one and drifted from it the moment
-// Project was added to the registry: the node existed in the rail, in ⌘K and in
+// Project was added to the registry: the node existed in the rail, in the command palette and in
 // the router, and the orbit — the first thing anyone sees — silently kept
 // showing five. `orbitOrder` had no consumers at all, which is how a "canonical
 // list" stays canonical only in its docstring.
@@ -77,6 +77,27 @@ const CONTAINER_SCALE = 1.4
 export default function Landing({ onNavigate, onOrbTap }: LandingProps) {
   const [_, setHovered] = useState<string | null>(null)
   const reduced = useIsReducedMotion()
+
+  /** Which node is being dragged, or null. State rather than a ref because the
+   *  render reads it: the held node is lifted above its siblings, and its drift
+   *  compensation is computed from it. */
+  const [dragging, setDragging] = useState<string | null>(null)
+  /** The orbit angle at the moment the drag began.
+   *
+   *  **The orbit does not stop for a drag.** The other five nodes keep going
+   *  round, so the held one has to be pinned against a moving frame: its slot
+   *  advances underneath it, and the compensation below cancels that so the
+   *  node stays under the pointer. Releasing removes the compensation, which
+   *  returns the node to the slot it *would* have reached had it never been
+   *  picked up — its place relative to the others, not the place it left.
+   *
+   *  A ref, not state: `orbitAngle` already re-renders every frame, so this is
+   *  read fresh without scheduling a second render per frame. */
+  const dragFromAngle = useRef(0)
+  /** Set on drag start, cleared a tick after drag end. A drag ends with a
+   *  pointerup over the button, which the browser then reports as a click — so
+   *  without this, letting go of Memory navigates to Memory. */
+  const draggedRef = useRef(false)
   const { chatView, closeChat } = useChatModeStore()
   const chat = chatView === 'chat'
 
@@ -248,6 +269,16 @@ export default function Landing({ onNavigate, onOrbTap }: LandingProps) {
           const animatedRad = ((node.angle - 90 + orbitAngle) * Math.PI) / 180
           const restX = Math.cos(animatedRad) * ORBIT_RADIUS
           const restY = Math.sin(animatedRad) * ORBIT_RADIUS
+
+          // Drift compensation, and only for the node in hand. Its slot keeps
+          // advancing with the rest of the orbit, so without this the node
+          // would creep out from under the pointer at ~17px/s. Holding it still
+          // against a moving frame costs exactly the distance the slot has
+          // travelled since the drag began.
+          const heldRad = ((node.angle - 90 + dragFromAngle.current) * Math.PI) / 180
+          const held = dragging === node.id
+          const driftX = held ? Math.cos(heldRad) * ORBIT_RADIUS - restX : 0
+          const driftY = held ? Math.sin(heldRad) * ORBIT_RADIUS - restY : 0
           // Dispersal target: push ~0.8 * ORBIT_RADIUS further along the same angle.
           const dx = Math.cos(animatedRad) * ORBIT_RADIUS * 0.8
           const dy = Math.sin(animatedRad) * ORBIT_RADIUS * 0.8
@@ -266,11 +297,14 @@ export default function Landing({ onNavigate, onOrbTap }: LandingProps) {
           return (
             <div
               key={node.id}
-              className="absolute z-20 flex flex-col items-center gap-2"
+              className="absolute flex flex-col items-center gap-2"
               style={{
                 left: '50%', top: '50%',
                 transform: `translate(-50%, -50%) translate(${restX}px, ${restY}px)`,
                 pointerEvents: chat ? 'none' : 'auto',
+                // Lifted while held, so a node dragged across the ring passes
+                // over its siblings instead of sliding beneath them.
+                zIndex: dragging === node.id ? 40 : 20,
               }}
             >
               <motion.div
@@ -286,8 +320,74 @@ export default function Landing({ onNavigate, onOrbTap }: LandingProps) {
                   delay: chat ? 0 : 0.03 * (node.angle / 90),
                 }}
               >
+                {/* Drag lives in its own layer, for the reason the comment
+                    above gives about the orbit and the dispersal: three
+                    concerns each own one transform, so none of them fights the
+                    others. The parent holds the orbit position, the layer above
+                    holds the dispersal, and this one holds the offset from the
+                    pointer — which is why letting go can simply return this
+                    layer to zero without knowing where the node belongs.
+
+                    `dragSnapToOrigin` is the whole "returns to its revolution"
+                    behaviour: origin here *is* the orbit slot, and it keeps
+                    turning underneath while the spring plays out. */}
+                {/* Drift compensation. Zero except for the node being held, and
+                    animated to zero the instant it is let go — which is what
+                    delivers it back to where it *would* have been rather than
+                    to where it was picked up. Instant while held so it tracks
+                    the orbit frame by frame; sprung on release so it arrives
+                    with the same weight as the pointer offset beside it. */}
+                <motion.div
+                  animate={{ x: driftX, y: driftY }}
+                  transition={
+                    held
+                      ? { duration: 0 }
+                      : reduced
+                        ? { type: 'tween', duration: 0.16 }
+                        : { type: 'spring', stiffness: 320, damping: 26 }
+                  }
+                >
+                <motion.div
+                  drag={!chat}
+                  dragSnapToOrigin
+                  // No momentum. A flick that sends a menu item coasting across
+                  // the screen is a toy; this is a nudge that springs back.
+                  dragMomentum={false}
+                  // Slightly under 1 so a long pull resists, which is what makes
+                  // the return read as elastic rather than as a reset.
+                  dragElastic={0.9}
+                  whileDrag={{ scale: 1.06, cursor: 'grabbing' }}
+                  dragTransition={{ bounceStiffness: 320, bounceDamping: 26 }}
+                  transition={
+                    reduced
+                      ? { type: 'tween', duration: 0.16 }
+                      : { type: 'spring', stiffness: 320, damping: 26 }
+                  }
+                  onDragStart={() => {
+                    draggedRef.current = true
+                    // Captured before the state update, so the first compensated
+                    // frame measures from where the node actually was.
+                    dragFromAngle.current = orbitAngle
+                    setDragging(node.id)
+                  }}
+                  onDragEnd={() => {
+                    setDragging(null)
+                    // Cleared next tick, not immediately: the click this drag is
+                    // about to produce has not been dispatched yet.
+                    setTimeout(() => {
+                      draggedRef.current = false
+                    }, 0)
+                  }}
+                  style={{ cursor: 'grab', touchAction: 'none' }}
+                >
                 <motion.button
-                  onClick={() => onNavigate(node.id as WorkspaceId)}
+                  onClick={() => {
+                    // A drag that ends over the node would otherwise navigate,
+                    // so moving Memory out of the way and letting go would open
+                    // Memory — the one outcome the gesture must not have.
+                    if (draggedRef.current) return
+                    onNavigate(node.id as WorkspaceId)
+                  }}
                   onHoverStart={() => setHovered(node.id)}
                   onHoverEnd={() => setHovered(null)}
                   className="relative flex flex-col items-center"
@@ -318,6 +418,8 @@ export default function Landing({ onNavigate, onOrbTap }: LandingProps) {
                     {node.label}
                   </span>
                 </motion.button>
+                </motion.div>
+                </motion.div>
               </motion.div>
             </div>
           )
