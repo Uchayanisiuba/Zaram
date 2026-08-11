@@ -13,18 +13,32 @@ accurate — it is the first thing anyone reads.
 
 ## Current state — 11 August 2026
 
-> ### 10–11 August is committed
+> ### Everything is committed. `HEAD` is `84aaf18` on `Zaram-V0.1`.
 >
-> Landed as seven commits on `Zaram-V0.1`, in dependency order: export formats,
-> invoices, slides, project and memory scope, speech chunking, the Windows
-> shortcut fix, the draggable orbit. Docs last. Nothing is in the working tree.
+> Twelve commits across 10–11 August, working tree clean. In order: export
+> formats, invoices, slides, project and memory scope, speech chunking, the
+> Windows shortcut fix, the draggable orbit, project adoption, the recall-at-
+> scale measurement, the cloud engine, cloud routing, confirm-before-send.
 >
-> One live bug was found by the split itself and is fixed in the slides commit:
-> `POST /artifacts/generate` with `kind: "deck"` read `body.slides`, which
-> `GenerateBody` did not have, so every deck request came back 500. The exporter
-> tests were green throughout because none of them went through the wire —
-> `test_deck_api.py` is the test that closes that gap, and it was checked by
-> removing the field and watching all four fail.
+> **The single most useful thing to know: cloud generation exists, is tested,
+> and cannot send.** That is deliberate and it is the designed resting state —
+> a gate with no confirmation handler refuses, and nothing has installed one
+> yet. Do not "fix" it by loosening the gate. The remaining work is the two
+> pieces named under *Right here* below.
+>
+> Three bugs were found by doing the work rather than by looking for them, and
+> each is worth more than the feature it was found in:
+>
+> * `kind: "deck"` returned 500 for every request — the route read
+>   `body.slides` and `GenerateBody` had no such field. Exporter tests were
+>   green throughout because none went through the wire.
+> * The egress gate was asked **twice per message**, which on an `ask` host
+>   would have shown two confirmation dialogs for one question.
+> * `stream_lines` encoded the body *before* the confirmation, so an edited
+>   request would have sent the original bytes while logging the edited ones.
+>
+> All three were verified by reintroducing them and watching the new tests
+> fail. That habit is the reason to keep doing it.
 
 **Suite: 0 failures.** 1388 → … → **1669/0**, 9 skipped, ~218s from the repo
 root on a full dev install. Frontend: **86 vitest across 12 files**, plus build
@@ -39,9 +53,31 @@ Run it as `.venv\Scripts\python.exe -m pytest`. Bare `python` on PATH is a
 broken shim that reports a missing install path — this costs the first ten
 minutes of a session that does not know it.
 
-**Whatever is on 8420 predates these commits.** It was last restarted at 19:00
-on 10 August, before the deck fix and before anything was committed. Check the
-build stamp before believing anything it says — see immediately below.
+**Whatever is on 8420 is stale.** Restarting it is step one of testing anything
+— a process from 10 August served requests for hours on 11 August while two
+sessions debugged the wrong build. Kill it and confirm `build.commit_short`
+matches `git rev-parse --short HEAD` before believing a single response.
+
+### Right here — the two pieces that finish M10
+
+Cloud is wired end to end *except* for the person answering the question. Both
+remaining pieces are small and neither is a design question any more.
+
+1. **HTTP endpoints for pending confirmations.** `PendingConfirmations` exists
+   and is tested (`core/egress/confirm.py`), but nothing exposes it. Needs
+   `GET /egress/pending`, `POST /egress/pending/{id}` taking
+   `{approved, body}`, and `gate.set_confirm(pending.ask)` at startup plus
+   `cancel_all()` at shutdown — a parked thread will otherwise stop the
+   process exiting.
+2. **The dialog.** Shows `literal_text`, the destination and the reason;
+   recalled facts as removable chips; the edit posts back as `body`. The
+   machinery already guarantees the edited text is what is logged *and* what
+   is sent, so the frontend does not have to be careful about that — it only
+   has to send what the user approved.
+
+Then M10 is done and cloud is genuinely usable. Two things it still lacks
+after that, both named in the road-to-alpha section: a Settings surface for the
+key (it comes from the environment today) and the three tiers of control.
 
 ### What changed, in one screen
 
@@ -49,13 +85,15 @@ Read the sections further down for the reasoning; this is the index.
 
 | | |
 |---|---|
-| **Shortcuts** | Every chord was dead on Windows — the matcher waited for the Win key while the overlay advertised Ctrl. Fixed, and `registry.test.ts` now asserts the printed chord actually fires. |
-| **Assignment** | `PATCH /artifacts/{id}` and `POST /memory/{id}/scope`. Files and facts can be put into a project from the UI. Closes item 7. |
-| **Invoices** | Real line items, Decimal money, terms → due date derived from one number, refuses rather than inventing. `ArtifactKind.INVOICE` finally produces something. |
-| **Formats** | `.html`, `.txt`, `.csv`, `.pptx` added to `.md`/`.docx`/`.xlsx`/`.pdf`/`.png`. Slides work by treating headings as slide boundaries, so any existing document exports as a deck. |
-| **Speech** | Time-to-first-sound 9.9s → 2.5s, and it no longer scales with reply length. Nothing was streaming; one blocking request per reply. |
-| **Landing** | Orbit nodes drag and spring back to their live slot. Left rail: one Settings, not two; 440px → 260px. |
-| **Docs** | TencentDB Agent Memory reviewed — two ideas taken, the tiers and L0 rejected, not a dependency. |
+| **Cloud engine** | `OpenAICompatibleEngine`, no new dependency, **no HTTP client of its own** — `EgressGate.stream_lines` carries the bytes. Recorded deviation from CLAUDE.md's LiteLLM entry, with reasons, reversible behind `LLMEngine`. |
+| **Cloud routing** | `RoutedEngine` picks local or cloud per message by the model's **declared locality**, never by name — `gpt-oss` runs on Ollama. Every unknown routes local; `HYBRID` counts as remote. |
+| **Confirm-before-send** | The confirmation may *edit* the outbound text, and the gate now reads the body back after the check so the edit reaches the wire and the log identically. |
+| **Project adoption** | `harbour` and `northwind` existed on files but were not projects, and assignment validation had made that a one-way door. Adopt keeps the id exactly; generation is validated so no new ghosts arrive. |
+| **Recall at scale** | Measured at 10/100/1,000: margin +0.131 → +0.108 → **+0.106**, 5/5 recalled at rank 1, zero false citations. The curve saturates. Reranker stays unbought. |
+| **Shortcuts** | Every chord was dead on Windows — the matcher waited for the Win key while the overlay advertised Ctrl. |
+| **Invoices / formats** | Decimal money, terms → due date from one number, refusal rather than invention. `.html`, `.txt`, `.csv`, `.pptx` added; slides are headings, not a second pipeline. |
+| **Speech** | Time-to-first-sound 9.9s → 2.5s, no longer scaling with reply length. |
+| **Landing** | Orbit nodes drag and spring back to their live slot. One Settings in the rail, not two; 440px → 260px. |
 
 ### Read this before debugging anything
 
@@ -1245,9 +1283,20 @@ M9a is built against a packaged product rather than a dev tree. The cost to
 watch: it is the least-understood piece, and discovering a problem in it last
 is the expensive way to discover one.
 
-**Still open, and it is the maintainer's call:** whether the alpha waits for
-the cloud engine. The recommendation above is that it does. Asked on 11 August
-and not answered, so nothing downstream of it has been assumed.
+**~~Still open~~ — answered 11 August: the alpha waits for the cloud engine**,
+and the maintainer's reason is the one that matters more than the
+recommendation above: *"Zaram is local first, but v1 should come with cloud, so
+people without a graphics card and low hardware"*. Local-first is not
+local-only, and the constraint was never capability — it was who can run it.
+
+**What is genuinely still open**, and neither blocks the next session:
+
+* **Where the API key is captured.** It comes from the environment today, which
+  is fine for a developer and useless for the freelancer the cloud path exists
+  to serve. Settings is the obvious home; nobody has designed it.
+* **The three tiers of control** — *Prefer local · Auto · Prefer cloud*. There
+  is a router; there is no preference the user can express, so today the model
+  chosen per message is the only lever.
 
 ### Next, in the order I would take them
 
