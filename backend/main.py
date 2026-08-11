@@ -1111,6 +1111,17 @@ class GenerateAdjustment(BaseModel):
     amount: str | None = None
 
 
+class GenerateSlide(BaseModel):
+    """One slide: a heading and its bullets.
+
+    A heading with no bullets is kept — it is a section marker, and dropping it
+    loses the deck's structure.
+    """
+
+    heading: str
+    bullets: list[str] = []
+
+
 class GenerateBody(BaseModel):
     title: str
     #: Prose. A string is a plain paragraph; an object with a matching claim id
@@ -1128,6 +1139,11 @@ class GenerateBody(BaseModel):
     header: list[str] = []
     rows: list[list[Any]] = []
     caption: str = ""
+    # Deck only. The outline: one heading per slide, bullets beneath it. Not a
+    # second authoring path — the exporter splits any document on its headings,
+    # and this is only how a caller says "I meant slides" so `.pptx` is the
+    # default format and the preview is the outline.
+    slides: list[GenerateSlide] = []
     # Invoice only.
     #
     # Amounts are strings, not floats. JSON has one number type and it is a
@@ -1259,6 +1275,13 @@ async def generate_artifact(body: GenerateBody):
                     if (body.from_name or body.from_lines)
                     else None
                 ),
+                fmt=body.fmt,
+                **common,
+            )
+        elif kind == ArtifactKind.DECK:
+            artifact = artifact_service.create_deck(
+                slides=[(s.heading, s.bullets) for s in body.slides],
+                subtitle=body.caption,
                 fmt=body.fmt,
                 **common,
             )

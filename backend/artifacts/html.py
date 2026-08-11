@@ -223,6 +223,57 @@ def _sources_section(
     )
 
 
+def render_deck(
+    *,
+    title: str,
+    slides: Sequence[tuple[str, Sequence[str | Claim]]],
+    subtitle: str = "",
+    letterhead: "Letterhead | None" = None,
+    sources: Sequence[ArtifactSource] = (),
+    claims: Sequence[Claim] = (),
+    include_provenance: bool = True,
+) -> str:
+    """A deck, as an outline. **The HTML is the same shape any document has.**
+
+    One `<h2>` per slide with a list beneath it — which is exactly what the
+    .pptx exporter splits on, so nothing here is a private format. The preview
+    shows the outline; PowerPoint shows the slides; neither is a second
+    rendering of the other.
+
+    Provenance defaults **on**, the opposite of an invoice. A deck argues from
+    evidence to a room that will ask where a number came from, and a closing
+    Sources slide is part of the genre rather than internal working leaking onto
+    a client's page.
+    """
+    body: List[str] = []
+    for heading, bullets in slides:
+        body.append(f"<h2>{_esc(heading)}</h2>")
+        items = "".join(
+            f"<li>{claim_span(b) if isinstance(b, Claim) else _esc(b)}</li>"
+            for b in bullets
+        )
+        # A heading with no bullets is a section marker and stays a slide.
+        if items:
+            body.append(f"<ul>{items}</ul>")
+
+    return "\n".join(
+        [
+            "<!DOCTYPE html>",
+            '<html lang="en"><head><meta charset="utf-8">',
+            f"<title>{_esc(title)}</title>",
+            f"<style>{_STYLE}</style>",
+            "</head><body>",
+            '<div class="sheet">',
+            _masthead(title, letterhead, "Deck"),
+            f"<p><em>{_esc(subtitle)}</em></p>" if subtitle else "",
+            *body,
+            _sources_section(sources, claims) if include_provenance else "",
+            "</div>",
+            "</body></html>",
+        ]
+    )
+
+
 def render_invoice(
     *,
     title: str,
