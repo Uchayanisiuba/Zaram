@@ -100,7 +100,7 @@ regex==2026.6.28
 requests==2.34.2
 rfc3986==1.5.0
 rpds-py==2026.6.3
-ruff==0.15.21
+ruff==0.15.22
 segments==2.4.0
 six==1.17.0
 socksio==1.0.0

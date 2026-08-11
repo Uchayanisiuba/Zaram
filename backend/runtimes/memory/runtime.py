@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from typing import Any
+from typing import Any, Dict
 
 from core.async_bridge import run_sync
 from core.event_bus import ZaramEvent
@@ -19,6 +19,7 @@ from .contracts import (
     RuntimeMetadata,
     Capability,
     CapabilityLocality,
+    scope_project_id,
 )
 from .store import InMemoryMemoryStore, create_memory_store, MemoryStore
 from .index import HybridMemoryIndex, create_memory_index, MemoryIndex
@@ -500,6 +501,27 @@ class MemoryRuntimeImpl(MemoryRuntime):
         """
         records = await self._store.all_records()
         return sum(1 for record in records if record.scope == scope)
+
+    async def project_fact_counts(self) -> Dict[str, int]:
+        """Facts per project id, for every project scope the Spine actually holds.
+
+        The question this answers is *which* projects the Spine believes in, not
+        how many facts a named one has — and it is asked because the Spine can
+        end up believing in a project no project record exists for. A scope is
+        written from whatever `project_id` came in on the request, so a stale
+        selection or a typo puts facts under a group that Project cannot show,
+        rename or delete: rule 4 defeated by a spelling mistake.
+
+        Global is excluded. It is not a project, and offering to adopt it would
+        propose turning every fact about the user into a project's contents.
+        """
+        records = await self._store.all_records()
+        counts: Dict[str, int] = {}
+        for record in records:
+            project_id = scope_project_id(record.scope)
+            if project_id:
+                counts[project_id] = counts.get(project_id, 0) + 1
+        return counts
 
     async def rescope_to_global(self, scope: str) -> int:
         """Move every fact in this scope to global. Returns how many moved.

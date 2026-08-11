@@ -42,6 +42,7 @@ import {
   type DeleteContents,
   type Project,
   type ProjectType,
+  type UnclaimedGroup,
 } from '@/stores/projectStore';
 
 /** What each type means, in the user's terms rather than ours. Shown at
@@ -55,8 +56,13 @@ const TYPE_BLURB: Record<ProjectType, string> = {
   mcp: 'Tools and servers you are wiring up.',
 };
 
+/** The two that are not words. Title-casing an acronym gives "Mcp", which
+ *  reads as a typo in a row of real words — and MCP is the tool protocol's
+ *  name, not a label we get to restyle. */
+const TYPE_LABELS: Partial<Record<ProjectType, string>> = { '3d': '3D', mcp: 'MCP' };
+
 function typeLabel(type: ProjectType): string {
-  return type === '3d' ? '3D' : type[0].toUpperCase() + type.slice(1);
+  return TYPE_LABELS[type] ?? type[0].toUpperCase() + type.slice(1);
 }
 
 export default function ProjectWorkspace() {
@@ -64,6 +70,8 @@ export default function ProjectWorkspace() {
   const loading = useProjectStore((s) => s.loading);
   const error = useProjectStore((s) => s.error);
   const load = useProjectStore((s) => s.load);
+
+  const unclaimed = useProjectStore((s) => s.unclaimed);
 
   const [creating, setCreating] = useState(false);
   const [confirming, setConfirming] = useState<Project | null>(null);
@@ -103,7 +111,13 @@ export default function ProjectWorkspace() {
 
       {creating && <CreateRow onDone={() => setCreating(false)} />}
 
-      {!loading && projects.length === 0 && !creating && <EmptyState />}
+      {unclaimed.length > 0 && <UnclaimedSection groups={unclaimed} />}
+
+      {/* Not empty when there are groups to adopt. The empty state explains what
+          a project is for, which is the right thing to say to someone who has
+          none — and the wrong thing to say above a list of their own work that
+          Zaram is asking them to claim. */}
+      {!loading && projects.length === 0 && unclaimed.length === 0 && !creating && <EmptyState />}
 
       {projects.length > 0 && (
         <ul className="flex flex-col gap-2">
@@ -140,6 +154,174 @@ function EmptyState() {
       </p>
     </div>
   );
+}
+
+/**
+ * Groups that hold work but are not projects.
+ *
+ * Normally absent. When it is here, it is because files or facts carry a
+ * `project_id` no project record exists for — a stale selection, a typo, or a
+ * build that wrote the id without checking. Work groups those files happily;
+ * Project could not show them, and since assignment started validating its
+ * destination, a file could leave such a group and not get back in.
+ *
+ * So this is a repair offer, and it reads as one: it says what happened, shows
+ * exactly what would be claimed, and does nothing until asked. The alternative
+ * — backfilling projects at startup — would invent a name and a type nobody
+ * chose, which is the question rule 7e says can only be asked at creation.
+ * Adoption *is* that creation moment.
+ */
+function UnclaimedSection({ groups }: { groups: UnclaimedGroup[] }) {
+  return (
+    <section
+      className="mb-5 rounded-xl px-4 py-4"
+      style={{ background: 'var(--color-glass)', border: '1px solid rgba(245,158,11,.22)' }}
+    >
+      <h2 className="flex items-center gap-2 text-xs font-semibold" style={{ color: '#fbbf24' }}>
+        <AlertTriangle size={13} aria-hidden />
+        {groups.length === 1 ? 'One group is not a project yet' : `${groups.length} groups are not projects yet`}
+      </h2>
+      <p className="mt-1.5 max-w-xl text-[11px] leading-relaxed" style={{ color: 'var(--color-text-muted)' }}>
+        These hold your work but were never created as projects, so they cannot
+        be renamed, typed or deleted — and files cannot be moved back into them.
+        Adopting one keeps everything where it is and gives it a record.
+      </p>
+
+      <ul className="mt-3 flex flex-col gap-2">
+        {groups.map((group) => (
+          <UnclaimedRow key={group.id} group={group} />
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function UnclaimedRow({ group }: { group: UnclaimedGroup }) {
+  const adopt = useProjectStore((s) => s.adopt);
+  const [open, setOpen] = useState(false);
+  // Defaults to the id, which is the only string the user ever actually wrote
+  // for this group. A prettier guess would be Zaram naming their work for them.
+  const [name, setName] = useState(group.id);
+  const [type, setType] = useState<ProjectType>('general');
+  const [busy, setBusy] = useState(false);
+
+  const submit = useCallback(async () => {
+    if (!name.trim() || busy) return;
+    setBusy(true);
+    await adopt(group.id, name.trim(), type);
+    setBusy(false);
+  }, [adopt, busy, group.id, name, type]);
+
+  return (
+    <li
+      className="rounded-lg px-3 py-2.5"
+      style={{ background: 'rgba(0,0,0,.16)', border: '1px solid rgba(255,255,255,.06)' }}
+    >
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          {/* Mono, because it is an id rather than a name — the same string that
+              appears in `project:<id>` and in the egress log. */}
+          <p className="truncate text-xs" style={{ fontFamily: 'var(--font-mono)' }}>
+            {group.id}
+          </p>
+          <p className="mt-0.5 text-[10px]" style={{ color: 'var(--color-text-muted)' }}>
+            {countLabel(group)}
+          </p>
+        </div>
+
+        {!open && (
+          <button
+            type="button"
+            onClick={() => setOpen(true)}
+            className="inline-flex shrink-0 items-center gap-1 rounded px-2.5 py-1.5 text-[11px]"
+            style={{ background: 'var(--color-glass)', border: '1px solid rgba(255,255,255,.1)' }}
+          >
+            <CornerUpLeft size={12} aria-hidden />
+            Adopt
+          </button>
+        )}
+      </div>
+
+      {open && (
+        <div className="mt-3">
+          <input
+            autoFocus
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') void submit();
+              if (e.key === 'Escape') setOpen(false);
+            }}
+            aria-label={`Name for ${group.id}`}
+            className="w-full bg-transparent text-sm outline-none placeholder-slate-500"
+          />
+          {/* The id is fixed and the name is not, so the difference is stated
+              rather than left to be discovered. Renaming later is ordinary;
+              the id can never move, because the contents point at it. */}
+          <p className="mt-1 text-[10px]" style={{ color: 'var(--color-text-muted)' }}>
+            Keeps the id <span style={{ fontFamily: 'var(--font-mono)' }}>{group.id}</span> — the
+            files and facts already point at it.
+          </p>
+
+          <div className="mt-3 flex flex-wrap gap-1.5">
+            {PROJECT_TYPES.map((candidate) => (
+              <button
+                key={candidate}
+                type="button"
+                onClick={() => setType(candidate)}
+                aria-pressed={type === candidate}
+                className="rounded px-2 py-1 text-[10px] transition-colors"
+                style={{
+                  background: type === candidate ? 'var(--color-cyan-dim, rgba(120,220,240,.16))' : 'transparent',
+                  border: '1px solid rgba(255,255,255,.08)',
+                  color: type === candidate ? 'var(--color-cyan)' : 'var(--color-text-muted)',
+                }}
+              >
+                {typeLabel(candidate)}
+              </button>
+            ))}
+          </div>
+          <p className="mt-2 text-[10px]" style={{ color: 'var(--color-text-muted)' }}>
+            {TYPE_BLURB[type]}
+          </p>
+
+          <div className="mt-3 flex gap-2">
+            <button
+              type="button"
+              onClick={() => void submit()}
+              disabled={!name.trim() || busy}
+              className="inline-flex items-center gap-1 rounded px-2.5 py-1.5 text-[11px] disabled:opacity-40"
+              style={{ background: 'var(--color-glass)', border: '1px solid rgba(255,255,255,.1)' }}
+            >
+              <Check size={12} aria-hidden />
+              Adopt
+            </button>
+            <button
+              type="button"
+              onClick={() => setOpen(false)}
+              className="rounded px-2.5 py-1.5 text-[11px]"
+              style={{ color: 'var(--color-text-muted)' }}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+    </li>
+  );
+}
+
+/** What adoption would claim, in words.
+ *
+ *  `-1` facts means the Spine could not answer, and it is never rendered as
+ *  "0 facts" — the same rule the delete confirmation follows. Claiming there
+ *  is nothing there when the count simply failed is how a user is surprised by
+ *  their own data. */
+function countLabel(group: UnclaimedGroup): string {
+  const files = `${group.artifacts} ${group.artifacts === 1 ? 'file' : 'files'}`;
+  if (group.facts < 0) return `${files} · facts unknown`;
+  if (group.facts === 0) return files;
+  return `${files} · ${group.facts} ${group.facts === 1 ? 'fact' : 'facts'}`;
 }
 
 function CreateRow({ onDone }: { onDone: () => void }) {
