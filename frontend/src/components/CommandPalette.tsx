@@ -6,7 +6,7 @@ import type { WorkspaceId } from '@/runtime/shortcuts/registry'
 
 // Keyed by WorkspaceId so a new node cannot be added without giving it an entry
 // here. This list used to be written out by hand and had silently lost
-// Activity — it was in the rail and the orbit but not reachable from ⌘K, which
+// Activity — it was in the rail and the orbit but not reachable from the command palette, which
 // is the one route a keyboard user has.
 const COMMAND_ICONS: Record<WorkspaceId, React.ReactNode> = {
   landing: <Home size={28} />,

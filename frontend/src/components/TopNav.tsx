@@ -1,8 +1,13 @@
 import { Search, ChevronRight } from 'lucide-react'
 import OrbStatus from '@/components/orb/OrbStatus'
 
-import { surfaceLabels } from '@/runtime/shortcuts/registry'
-import type { WorkspaceId } from '@/runtime/shortcuts/registry'
+import { REGISTRY, chordTokens, detectPlatform, surfaceLabels } from '@/runtime/shortcuts/registry'
+import type { Shortcut, WorkspaceId } from '@/runtime/shortcuts/registry'
+
+// Read the chord rather than spelling it out. The label here said "⌘K" on
+// every machine, including the Windows ones where the key does not exist —
+// a restatement of the registry that could not follow it.
+const commandShortcut = REGISTRY.find((s) => s.id === 'command') as Shortcut
 
 // Titles come from the registry; only the landing differs, where the product
 // name reads better than the surface name.
@@ -20,6 +25,7 @@ interface TopNavProps {
 
 export default function TopNav({ workspace, onSearchOpen, onOpenConversation }: TopNavProps) {
   const isLanding = workspace === 'landing'
+  const commandChord = chordTokens(commandShortcut, detectPlatform())
 
   return (
     <header
@@ -74,10 +80,10 @@ export default function TopNav({ workspace, onSearchOpen, onOpenConversation }: 
 
       {/* Right: actions.
           The wide Search button is gone — it was the third way to reach the
-          same command palette, after the left rail's search and ⌘K, and its
+          same command palette, after the left rail's search and the chord, and its
           64px internal gap made it wider than the breadcrumb it sat opposite. */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 20, minWidth: 200, justifyContent: 'flex-end' }}>
-        <NavIcon onClick={onSearchOpen} label="Search (⌘K)">
+        <NavIcon onClick={onSearchOpen} label={`Search (${commandChord})`}>
           <Search size={24} />
         </NavIcon>
 

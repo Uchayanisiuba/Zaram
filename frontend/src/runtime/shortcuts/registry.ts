@@ -63,7 +63,7 @@ export const surfaceLabels: Record<WorkspaceId, string> = {
  *  needs updating when a node is added. The comment above about Activity
  *  breaking four places was written and then not acted on: TopNav, LeftRail and
  *  CommandPalette each restated the list anyway, and CommandPalette silently
- *  lost Activity as a result — it was unreachable from ⌘K until Work was added
+ *  lost Activity as a result — it was unreachable from Ctrl K until Work was added
  *  and the restatements were removed. */
 export const orbitOrder: Exclude<WorkspaceId, 'landing'>[] = [
   'work',
@@ -142,6 +142,11 @@ export const REGISTRY: Shortcut[] = [
   },
 ];
 
+/** `meta` means *the platform's primary chord key* — Command on a Mac, Control
+ *  on Windows. It does not mean the physical Windows key, which the OS takes
+ *  before the page sees it and which no shortcut may claim. `ctrl` is the
+ *  literal Control key, distinct from `meta` only on a Mac; on Windows the two
+ *  collapse onto Ctrl, which is why `chordTokens` renders both as "Ctrl". */
 export function chordTokens(shortcut: Shortcut, platform: Platform): string {
   const parts: string[] = [];
   if (shortcut.keys.meta) parts.push(platform === 'mac' ? '\u2318' : 'Ctrl');
@@ -152,7 +157,10 @@ export function chordTokens(shortcut: Shortcut, platform: Platform): string {
   return parts.join(' ');
 }
 
-const SHIFTED_KEYS = new Set(['?', '!', '@', '#', '$', '%', '^', '&', '*', '(', ')', '+', '{', '}', '|', '<', '>', '~', ':', '"']);
+/** Characters a standard layout cannot produce without Shift held. Exported so
+ *  a test can synthesise the same event the keyboard would, rather than
+ *  restating the set and drifting from it. */
+export const SHIFTED_KEYS = new Set(['?', '!', '@', '#', '$', '%', '^', '&', '*', '(', ')', '+', '{', '}', '|', '<', '>', '~', ':', '"']);
 
 export function matches(event: KeyboardEvent, shortcut: Shortcut, platform: Platform): boolean {
   const { meta, ctrl, alt, shift, key } = shortcut.keys;
@@ -166,8 +174,15 @@ export function matches(event: KeyboardEvent, shortcut: Shortcut, platform: Plat
     if (!!meta !== event.metaKey) return false;
     if (!!ctrl !== event.ctrlKey) return false;
   } else {
-    if (!!ctrl !== event.ctrlKey) return false;
-    if (!!meta !== event.metaKey) return false;
+    // Windows: `meta` and `ctrl` both resolve to Ctrl, exactly as chordTokens
+    // renders them. This branch used to require `event.metaKey` for a `meta`
+    // shortcut, so the help overlay advertised "Ctrl K" while the matcher
+    // waited for Win+K — a chord the OS intercepts. Every registry shortcut
+    // was unreachable on Windows and the interface said otherwise.
+    if ((!!meta || !!ctrl) !== event.ctrlKey) return false;
+    // The Windows key is never part of a chord here, so holding it is not a
+    // near-miss to be forgiven: Win+K must not open the palette.
+    if (event.metaKey) return false;
   }
   return true;
 }
