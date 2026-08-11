@@ -87,6 +87,11 @@ pytest==9.1.1
 pytest-asyncio==1.4.0
 python-dateutil==2.9.0.post0
 python-docx==1.2.0
+# python-pptx: slides. MIT. Measured 2.5 MB, plus 1.7 MB for XlsxWriter behind
+# it; lxml and Pillow were already present for other reasons, so 4.2 MB is the
+# true marginal cost. Asked for on 10 August 2026, which is the condition
+# CLAUDE.md set when it deferred PowerPoint with "later, only if asked".
+python-pptx==1.0.2
 python-dotenv==1.2.2
 python-multipart==0.0.32
 rdflib==7.6.0

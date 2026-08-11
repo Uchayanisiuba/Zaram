@@ -26,9 +26,13 @@ from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 
 from .base import AVAILABLE, Availability, Exporter, ExportUnavailable
 from .chart import ChartExporter
+from .csv import CsvExporter
 from .docx import DocxExporter
+from .html import HtmlExporter
 from .markdown import MarkdownExporter
 from .pdf import PdfExporter
+from .pptx import PptxExporter
+from .text import TextExporter
 from .xlsx import XlsxExporter
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -51,9 +55,17 @@ __all__ = [
 EXPORTERS: Dict[str, Exporter] = {
     exporter.extension: exporter
     for exporter in (
+        # The four that cannot be unavailable: nothing to import, nothing to
+        # detect. When PDF is blocked on native libraries and .docx on a missing
+        # wheel, these still answer — which is what makes "generate a document"
+        # a promise the product can keep on any machine.
         MarkdownExporter(),
+        HtmlExporter(),
+        TextExporter(),
+        CsvExporter(),
         DocxExporter(),
         XlsxExporter(),
+        PptxExporter(),
         ChartExporter(),
         PdfExporter(),
     )
