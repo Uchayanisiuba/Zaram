@@ -280,6 +280,7 @@ export default function VrmAvatar({ px = 320, src = '/avatars/AvatarSample_Z.vrm
         const head = vrm.humanoid?.getNormalizedBoneNode('head')
         const target = new THREE.Vector3(0, 1.35, 0)
         if (head) head.getWorldPosition(target)
+
         // Head and shoulders. The orb occupies a 320px circle and the avatar
         // replaces it in the same space, so a full body would render the face —
         // the only part carrying state — a few dozen pixels tall.
