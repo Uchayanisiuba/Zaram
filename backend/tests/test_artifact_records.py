@@ -212,20 +212,45 @@ class TestTheRecordStoreHasNoGeneralMutation:
             "the one field the user controls."
         )
 
+    #: The columns a user may change after an artifact is written. Everything
+    #: else — filename, path, size, origin, sources, claims — is provenance,
+    #: and a provenance record that can be edited is not one.
+    #:
+    #: Adding to this list is the deliberate act the class docstring asks for.
+    #: It is a list rather than a count because a count says *how many* named
+    #: mutations exist and not *which*, so swapping a safe one for a dangerous
+    #: one leaves it green — the number was never the property worth guarding.
+    MUTABLE_COLUMNS = {"REMEMBER_OVERRIDE", "PROJECT_ID"}
+
     def test_no_sql_deletes_or_blanket_updates(self):
-        """`set_remember_override` is the only UPDATE, and it names its column.
+        """Every UPDATE names one allowed column, and nothing else mutates.
 
         Scans the SQL the module actually executes, not its text. A raw-text
         scan matches the docstrings explaining *why* these statements are
         absent, so it fails on a module that is correct and documented — which
         would train someone to delete the explanation to get a green build.
         """
-        sql = " ".join(_executed_sql(RECORDS_SOURCE)).upper()
+        statements = [s.upper() for s in _executed_sql(RECORDS_SOURCE)]
+        sql = " ".join(statements)
 
         assert "DELETE FROM" not in sql
         assert "DROP TABLE" not in sql
         assert "INSERT OR REPLACE" not in sql
-        assert sql.count("UPDATE ARTIFACTS") == 1
+
+        updates = [s for s in statements if "UPDATE ARTIFACTS" in s]
+        assert updates, "records.py updates nothing — has the mutation path moved?"
+
+        for statement in updates:
+            column = statement.split("SET", 1)[1].split("=", 1)[0].strip()
+            assert column in self.MUTABLE_COLUMNS, (
+                f"records.py updates {column!r}, which is not one of "
+                f"{sorted(self.MUTABLE_COLUMNS)}. Mutation is one named method "
+                "per field the user controls; add the column here deliberately."
+            )
+            # One column per statement. A comma would mean a statement that
+            # moves several fields at once, which is the blanket update this
+            # store exists without.
+            assert "," not in statement.split("SET", 1)[1].split("WHERE")[0]
 
 
 class TestTheServiceWritesTheFileThenRecordsIt:

@@ -20,6 +20,9 @@ from core.query_classifier import SEARCH_MARKER
 # --- LEGACY IMPORTS (Isolated for Fallback) ---
 from implementations.ollama_llm import OllamaLLM
 from runtimes.memory.maintenance import SpineMaintenance
+# One spelling of `project:<id>`, from the module that owns it. A scope string
+# built by hand at a call site is rule 7i's privacy boundary written twice.
+from runtimes.memory.contracts import project_scope
 from services.conversation_manager import ConversationManager
 
 print("Starting Zaram Backend...")
@@ -402,6 +405,10 @@ async def list_memory(limit: int = 200, offset: int = 0, q: str = ""):
                 "source": r.source,
                 "tags": list(r.tags or []),
                 "session_id": r.session_id,
+                # Rule 7i: `global` or `project:<id>`. One field, sent as one
+                # field — the surface derives the project id from it rather
+                # than being handed a second spelling that can disagree.
+                "scope": r.scope,
                 "superseded_by": r.superseded_by,
                 "superseded_at": r.superseded_at,
                 "pinned": r.pinned,
@@ -688,6 +695,10 @@ async def get_memory(record_id: str):
         "source": record.source,
         "tags": list(record.tags or []),
         "session_id": record.session_id,
+        # Where this fact belongs. Absent until 10 August, which meant a fact
+        # could be scoped to a project and there was no way to see that it was
+        # — rule 7i's field existed and was invisible from the outside.
+        "scope": record.scope,
         "metadata": dict(record.metadata or {}),
     }
 
@@ -999,6 +1010,111 @@ async def delete_project(project_id: str, contents: str = "keep"):
         "facts_moved_to_global": moved,
         "facts_deleted": removed,
         "files_untouched": artifact_service.records.count_for_project(project_id),
+    }
+
+
+class ArtifactUpdateRequest(BaseModel):
+    """`None` means "not mentioned"; `""` means "no project".
+
+    The same distinction the remember override draws, for the same reason: a
+    field the caller left out and a field the caller cleared are different
+    instructions, and collapsing them makes unassigning indistinguishable from
+    forgetting to say.
+    """
+
+    project_id: str | None = None
+
+
+@app.patch("/artifacts/{artifact_id}")
+async def update_artifact(artifact_id: str, body: ArtifactUpdateRequest):
+    """Move a file into a project, out of one, or between two.
+
+    Assignment lives here rather than at generation time because the decision
+    is usually made afterwards: a file exists, and *then* it becomes clear what
+    it belongs to. Rule 7h — the offer belongs at the moment of doubt, not as a
+    question asked in advance of the work.
+
+    **The destination is checked before the move.** A typo would otherwise
+    create a project that exists only as a string on one file: invisible in
+    `/projects`, unnameable, undeletable, and carrying facts nothing points at.
+    That is the bug `/artifacts/projects` and `/projects` were split to fix, and
+    an unvalidated write here would put it straight back.
+
+    Files are only ever re-labelled. Nothing moves on disk — the output
+    directory is not a folder tree and a project is not a folder.
+    """
+    if body.project_id is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Nothing to change. Send project_id, or \"\" to remove it from its project.",
+        )
+
+    destination = body.project_id.strip()
+    if destination:
+        try:
+            project_records.get(destination)
+        except UnknownProject:
+            raise HTTPException(
+                status_code=400,
+                detail=f"No project called {destination!r}. Create it first.",
+            )
+
+    if not artifact_service.records.set_project(artifact_id, destination):
+        raise HTTPException(status_code=404, detail="No such artifact")
+
+    return {"id": artifact_id, "project_id": destination}
+
+
+# Declared here, among the project routes, rather than beside the other
+# `/memory` ones: validating the destination needs `project_records`, which is
+# imported at the top of this section. The alternative was hoisting that import
+# above the whole artifacts block for one route's benefit.
+class MemoryScope(BaseModel):
+    """Where a fact belongs. `""` means global — about the user, not the work."""
+
+    project_id: str
+
+
+@app.post("/memory/{record_id}/scope")
+async def set_memory_scope(record_id: str, body: MemoryScope):
+    """Move a fact between global and a project, or between two projects.
+
+    Rule 7i keeps scope as **one field on one store** precisely so this is a
+    move rather than a copy between two stores. It is also the multiplayer
+    boundary, which is what makes the direction matter: project memory is
+    shareable and global memory never is, so moving a fact *into* a project
+    widens who could eventually see it. That has to be the user's decision,
+    which is why nothing here infers it.
+
+    Promotion to global stays evidence-driven per rule 7e — a fact recalled
+    across three projects is probably about the person, and that is when Zaram
+    asks. This route is the answer to that question, and the manual override
+    for when the system never asks.
+    """
+    if not kernel.memory_runtime:
+        raise HTTPException(status_code=503, detail="Memory runtime not available")
+
+    destination = (body.project_id or "").strip()
+    if destination:
+        try:
+            project_records.get(destination)
+        except UnknownProject:
+            raise HTTPException(
+                status_code=400,
+                detail=f"No project called {destination!r}. Create it first.",
+            )
+
+    scope = project_scope(destination)
+    if not await kernel.memory_runtime.set_scope(record_id, scope):
+        raise HTTPException(status_code=404, detail="No such memory")
+
+    return {
+        "id": record_id,
+        "scope": scope,
+        "note": (
+            "Facts about you stay global; facts about the work move with the "
+            "project. Recall reads both."
+        ),
     }
 
 

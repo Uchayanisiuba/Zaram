@@ -29,6 +29,21 @@ export interface MemoryRecord {
   pinned?: boolean;
   /** Set when this record replaced another. The inverse of superseded_by. */
   corrects?: string | null;
+  /** Rule 7i: `global`, or `project:<id>`. One field, because facts move
+   *  between the two and recall needs both at once — two stores would make a
+   *  move a copy, and the correction loop would have to exist twice.
+   *
+   *  It is also the multiplayer boundary: project memory is shareable and
+   *  global memory never is. That is why this is shown rather than kept
+   *  internal — where a fact sits decides who could eventually see it. */
+  scope?: string;
+}
+
+/** The project a scope belongs to, or `null` for global. One place that knows
+ *  the `project:` prefix, so a hand-built string cannot drift from it. */
+export function scopeProjectId(scope: string | undefined): string | null {
+  if (!scope || !scope.startsWith('project:')) return null;
+  return scope.slice('project:'.length) || null;
 }
 
 /** Shared failure handling. The dev proxy answers 500 with an empty body when
@@ -164,6 +179,35 @@ export async function pinMemory(
     throw new Error('Could not reach the Zaram backend.');
   }
   if (!res.ok) throw await failure(res, 'Could not pin this fact');
+}
+
+/** Move a fact between global and a project, or between two projects.
+ *
+ *  `''` is global — about the user rather than about the work. Rule 7e keeps
+ *  promotion evidence-driven, so Zaram asks when a fact has been recalled
+ *  across several projects; this is where that answer goes, and the manual
+ *  override for when it never asks.
+ *
+ *  The backend refuses an unknown project. A fact under a scope no project
+ *  points at could not be found to be corrected or deleted, which is rule 4
+ *  broken by a spelling mistake. */
+export async function setMemoryScope(
+  id: string,
+  projectId: string,
+  signal?: AbortSignal,
+): Promise<void> {
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}/memory/${encodeURIComponent(id)}/scope`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ project_id: projectId }),
+      signal,
+    });
+  } catch {
+    throw new Error('Could not reach the Zaram backend.');
+  }
+  if (!res.ok) throw await failure(res, 'Could not move this fact');
 }
 
 export async function deleteMemory(id: string, signal?: AbortSignal): Promise<void> {

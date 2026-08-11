@@ -37,10 +37,13 @@ import {
   fetchMemoryList,
   fetchMemoryStats,
   pinMemory,
+  scopeProjectId,
+  setMemoryScope,
   type MemoryRecord,
   type MemoryStats,
 } from '@/services/memoryClient';
 import { useSourceStore } from '@/stores/sourceStore';
+import { useProjectStore } from '@/stores/projectStore';
 
 const relative = (seconds: number) => {
   const delta = Date.now() / 1000 - seconds;
@@ -150,6 +153,15 @@ export default function MemoryWorkspace() {
     const t = setTimeout(() => void load(query), query ? 250 : 0);
     return () => clearTimeout(t);
   }, [query, load]);
+
+  // The projects a fact can be moved to. Read from `/projects` — the list of
+  // projects that *exist* — rather than from the ones that happen to hold
+  // files, because a fact is often the first thing a new project holds.
+  const projects = useProjectStore((s) => s.projects);
+  const loadProjects = useProjectStore((s) => s.load);
+  useEffect(() => {
+    void loadProjects();
+  }, [loadProjects]);
 
   const present = useMemo(
     () => records.filter((r) => !forgotten.has(`memory:${r.id}`)),
@@ -336,6 +348,23 @@ export default function MemoryWorkspace() {
                       >
                         {r.content}
                       </p>
+                      {/* Only project facts are badged. Global is the default
+                          and badging it would put a label on every row that
+                          says nothing — the interesting state is the one that
+                          narrows where a fact applies and who could see it. */}
+                      {scopeProjectId(r.scope) && (
+                        <span
+                          className="mt-0.5 shrink-0 rounded px-1.5 py-0.5 text-[9px]"
+                          style={{
+                            fontFamily: 'var(--font-mono)',
+                            border: '1px solid var(--color-border-subtle)',
+                            color: 'var(--color-text-muted)',
+                          }}
+                          title={`Scoped to the ${scopeProjectId(r.scope)} project`}
+                        >
+                          {scopeProjectId(r.scope)}
+                        </span>
+                      )}
                     </div>
 
                     <p
@@ -487,6 +516,37 @@ export default function MemoryWorkspace() {
                                 {r.pinned ? <PinOff size={12} /> : <Pin size={12} />}
                                 {r.pinned ? 'Unpin' : 'Pin'}
                               </button>
+                              {/* Where the fact belongs. Rule 7i keeps this as
+                                  one field on one store, so this is a move and
+                                  not a copy — and it is the multiplayer
+                                  boundary, since project memory is shareable
+                                  and global memory never is. The label says
+                                  what global *means* rather than naming the
+                                  scope string, because "about you" is the part
+                                  that decides whether it belongs there. */}
+                              <label
+                                className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] text-slate-300"
+                                style={{ border: '1px solid var(--color-border-subtle)' }}
+                              >
+                                <span className="text-slate-500">Belongs to</span>
+                                <select
+                                  disabled={busy}
+                                  value={scopeProjectId(r.scope) ?? ''}
+                                  onChange={(e) => void act(() => setMemoryScope(r.id, e.target.value))}
+                                  aria-label="Which project this fact belongs to"
+                                  className="bg-transparent text-[11px] outline-none disabled:opacity-40"
+                                  style={{ color: 'var(--color-text)' }}
+                                >
+                                  <option value="" style={{ color: '#000' }}>
+                                    you (global)
+                                  </option>
+                                  {projects.map((p) => (
+                                    <option key={p.id} value={p.id} style={{ color: '#000' }}>
+                                      {p.name}
+                                    </option>
+                                  ))}
+                                </select>
+                              </label>
                             </>
                           )}
                           <button
