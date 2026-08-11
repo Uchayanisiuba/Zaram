@@ -1149,21 +1149,31 @@ citation floor, gets *more* likely as the corpus grows. Run the eval at 10, 100
 and 1,000 and plot the margin **before recruiting**: if cited recall breaks at
 scale, every other alpha number is noise, because cited recall is the claim.
 
-**Cut from the alpha — decided by the maintainer, 11 August.** All three are
-*alpha* cuts, not v1 cuts: nothing leaves `CLAUDE.md`'s v1 scope, and none of
-them costs anything to make, because none is built or on by default today.
+**Paced out of the alpha, not cut — decided by the maintainer, 11 August.**
+The distinction is the whole point and the wording of an earlier draft was
+wrong: **none of these is dropped.** They keep their place in v1 and each has a
+named re-entry point, because a thing "cut" quietly stops being anyone's
+problem, and three of these are things the product has promised.
 
-- **M9c, read-only MCP for Unreal and Blender.** Not started. Irrelevant to a
-  freelancer-admin alpha, which is one segment and not that one. Stays in v1.
-- **Web search.** Already default-deny in code and requires no change:
+Each is *off the alpha's critical path* only, and none costs anything today,
+because none is built or on by default.
+
+- **M9c, read-only MCP for Unreal and Blender.** Not started. **Re-enters after
+  M12 intake**, and the alpha itself decides how fast: if a tester's segment is
+  3D rather than admin, it moves up. It is one of two v1 verticals and stays
+  there — `CLAUDE.md`'s integration tests still pass for it.
+- **Web search.** Already default-deny in code and needs no change:
   `planner.web_search_enabled()` reads `ZARAM_WEB_SEARCH` at call time and is
-  off unless explicitly set. The sequencing commitment stands — egress log,
-  then per-source policy, then search as its first governed source — and the
-  alpha needs none of it. Verified 11 August rather than assumed; the
-  `config.json` that once declared `ENABLE_WEB_SEARCH: true` beside a
-  default-deny product is deleted.
-- **Image and video generation.** Post-v1 already, and blocked on the cloud
-  engine regardless.
+  off unless explicitly set. **Re-enters on its stated sequence, unchanged** —
+  egress log, then per-source policy, then search as their first governed
+  source. Both prerequisites exist, so this is nearer than its position
+  suggests; the alpha simply does not need it to produce a day-30 number.
+  Verified 11 August rather than assumed: the `config.json` that once declared
+  `ENABLE_WEB_SEARCH: true` beside a default-deny product is deleted.
+- **Image and video generation.** Post-v1 already. **Re-enters when the cloud
+  engine lands**, which is step 2 — so this is paced behind a step the alpha
+  may well include, not behind the alpha. The shape is settled: Zaram ships no
+  weights ever, routes to a provider, logs the egress, carries project context.
 
 **Ordering, set by the maintainer 11 August: M9a goes last**, after the cloud
 engine, packaging and the recall-at-scale gate. That does not shorten the path
