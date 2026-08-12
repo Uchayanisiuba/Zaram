@@ -13,16 +13,21 @@ accurate — it is the first thing anyone reads.
 
 ## Current state — 12 August 2026
 
-> ### The session is committed. `HEAD` is `8f05872`, on `Zaram-V0.1`, unpushed.
+> ### The session is committed, on `Zaram-V0.1`, unpushed.
 >
-> Five commits, re-verified green before staging rather than on the previous
-> session's word. Read the two "found by running it" sections below before
-> debugging anything, because three of the defects fixed here were invisible to
-> a passing suite.
+> Committed in coherent pieces, re-verified green before staging rather than on
+> the previous session's word. Read the two "found by running it" sections below
+> before debugging anything, because four of the defects fixed here were
+> invisible to a passing suite.
 >
 > **M10 is finished and cloud generation now sends**, after a person says it
-> may. **M11 has started and the product has been packaged for the first time:**
-> `Zaram.exe` launches its own bundled Python and reaches `kernel: online`.
+> may. **M11 has an installer**: `Zaram-0.1.0-x64.exe`, 186 MB, plus a portable
+> build — the NSIS step had never once completed, because an unset signing
+> variable killed it after packaging had already succeeded. `Zaram.exe` launches
+> its own bundled Python and reaches `kernel: online`.
+>
+> **The only thing left in M11 is running it somewhere that has never seen this
+> repo**, which cannot be done from here.
 >
 > Suites, measured 12 August: **1647 backend passed / 0 failed**, 76 skipped,
 > 3m29s. **103 frontend** across 14 files. **30 Electron**. Every skip names its
@@ -207,8 +212,41 @@ only by knowing to type `npx vitest run`. Exactly the shape of the Electron
 `npm test` at the root now runs both JS suites, and `npm run test:backend`
 encodes the venv interpreter so the wrong-`python` trap costs nothing.
 
-**Still missing from M11's acceptance:** the NSIS installer itself, and a run on
-a machine that has never seen this repo.
+**The installer exists.** `Zaram-0.1.0-x64.exe`, **186 MB**, NSIS, plus
+`Zaram-Portable-0.1.0-x64.exe` beside it — from 679 MB unpacked, most of which
+is the 410 MB Python runtime. Built unsigned, which `check:signing` permits for
+a development build and refuses under `ZARAM_RELEASE=1`.
+
+**Why it had never been built is the finding.** `electron-builder.yml` set
+`certificateSubjectName: "${env.ZARAM_SIGN_SUBJECT}"`, with a comment claiming
+an unset variable resolves to empty and signing is skipped. It resolves to
+nothing of the kind — the literal reaches the signer, which looks for a
+certificate by that name and fails:
+
+```
+⨯ Cannot find certificate ${env.ZARAM_SIGN_SUBJECT}, all certs:
+```
+
+So **no machine without a code-signing certificate could produce an installer**,
+which is every machine today. What hid it is *where* it fails: packaging
+succeeds, `win-unpacked` is written, `Zaram.exe` starts — and the build dies
+afterwards, signing the *uninstaller*. Both earlier statements were true at
+once and nobody connected them.
+
+`scripts/build-installer.mjs` injects the subject only when there is one, which
+YAML cannot express, and `check:signing` now refuses any `${env.}` macro in the
+config. **That check runs before the development-build exit, unlike every other
+check in the file** — every one of them was release-only, which is exactly how
+the setting that made an unsigned build impossible was never examined on an
+unsigned build. A check that only runs where the defect isn't is not a check.
+
+The installed tree was verified directly rather than through the payload globs:
+no `.db`, no `-wal` or `-shm` sidecar, no `egress-policy.json`, no venv, no
+generated documents, and nothing matching inside `app.asar`.
+
+**Still missing from M11's acceptance:** a run on a machine that has never seen
+this repo. That is now the whole of it, and it is the one part that cannot be
+done from here.
 
 ### Code signing — decided, prepared, not purchased
 
@@ -302,11 +340,12 @@ paths.
 
 ### What is next
 
-1. **Produce a real installer** and run it on a machine that has never seen the
-   repo. That is the rest of M11's acceptance and the only remaining unknown in
-   it. Building it here needs Developer Mode or elevation — see *Before you run
-   anything* — and the icon now survives a fresh clone, so what that run is
-   actually testing is the NSIS step and first launch, not the payload.
+1. **Run the installer on a machine that has never seen this repo.** The
+   installer itself now exists — `dist-electron/Zaram-0.1.0-x64.exe`, 186 MB —
+   and its payload has been checked against the built tree, so what that run
+   tests is install, first launch and the bundled interpreter finding itself
+   under a different path. Take the portable build too; it isolates whether a
+   failure is NSIS or the app. **Nothing else in M11 is unknown.**
 2. **Obligation extraction (M9a)** — not started, no module, and it is the half
    the alpha measures.
 3. **The business base layer** — invoices exist; quotes, receipt capture,
@@ -343,6 +382,7 @@ Read the sections further down for the reasoning; this is the index.
 | **Electron tests run** | `npm test` wired to `test/`, which held 26 tests nobody had ever run and two failures. Both were stale tests over correct production code — and one of them encoded the loopback binding. |
 | **Frontend tests run** | Same shape, found later: 103 vitest tests across 14 files with no script pointing at them. `npm test` now runs both JS suites; `test:backend` encodes the venv interpreter. |
 | **Installer icon** | `electron-builder.yml` names no icon and `/build/` was ignored, so a fresh clone would have built an installer with the default Electron icon and no error. `build/icon.ico` is tracked now. |
+| **The installer exists** | 186 MB NSIS plus a portable build. It had never been buildable without a code-signing certificate: `${env.ZARAM_SIGN_SUBJECT}` does not resolve to empty when unset, and the literal killed the build while signing the uninstaller — after packaging had already succeeded, which is why "packaged" and "no installer" were both true and never connected. |
 | **Code signing** | OV, prepared, not purchased. **EV buys nothing** — Microsoft's own docs say it no longer bypasses SmartScreen. Artifact Signing unavailable in Nigeria. Identity by env var, timestamping mandatory, release gate refuses unsigned. |
 | **Brand** | Mark traced from the source image rather than eyeballed — it is 1.31:1, two interlocking planes, gradient ending in cyan. One generator emits SVG, PNG and a seven-size `.ico`. Top-left app icon returns home. |
 | **Project adoption** | `harbour` and `northwind` existed on files but were not projects, and assignment validation had made that a one-way door. Adopt keeps the id exactly; generation is validated so no new ghosts arrive. |
