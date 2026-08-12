@@ -382,6 +382,39 @@ paths.
 **Blocked on the maintainer, and only this:** buying the OV certificate. Every
 day it is not begun adds a day to the end.
 
+### The phone — decided 12 August, foundation built
+
+**A PWA served from the user's own machine over a Tailscale tunnel.** No app
+store, no server, no account. Decided because it is the only shape that keeps
+the product's claim intact: the phone reaches *into* the machine rather than
+the machine copying itself outward.
+
+**The bind is never widened.** `tailscale serve` runs locally and proxies
+tailnet traffic into `127.0.0.1:8420`, so `LISTEN_HOST` stays loopback and
+non-configurable. The morning's security fix survives the feature that would
+most obviously have undone it.
+
+**No accounts.** Device pairing instead — the machine holding the Spine is the
+authority, as in WhatsApp and Signal. Accounts become necessary at exactly
+three points, none of them now: teams, sync with the machine off, and payment.
+When they arrive, an account authenticates and never takes custody.
+
+**Cloud-only inference on the phone, and it changes the consent shape.** Every
+phone message is an egress event, so the per-message confirmation that works on
+the desktop becomes the reason people uninstall it. Standing consent per
+project and per provider, revocable, with the log still complete. And the phone
+recalls only what the per-source policy already permits to leave — which needs
+no second privacy model — and **says what it withheld**.
+
+`core/pairing.py` is the first authentication the API has ever had: one-time
+tokens that expire in a minute, credentials returned once and stored only as
+hashes, constant-time comparison, and revocation that refuses through the same
+path as a forgery so no caller can forget to check. 25 tests.
+
+**Not built:** the endpoints, the QR, the linked-devices UI, the mobile bundle,
+and the `tailscale serve` toggle. The mobile build must exclude `three` and
+`@pixiv/three-vrm` — megabytes of avatar that is pointless on a phone.
+
 ### Documents as templates — agreed 12 August
 
 Asked for on 12 August — upload an existing invoice or letterhead and have
