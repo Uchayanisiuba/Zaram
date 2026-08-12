@@ -1,9 +1,15 @@
 {
+  "name": "zaram",
+  "version": "0.1.0",
+  "description": "The memory and control layer for people who use more than one AI",
+  "author": "Zaram",
   "private": true,
   "workspaces": [
     "packages/*"
   ],
   "devDependencies": {
+    "electron": "^28.0.0",
+    "electron-builder": "^24.9.1",
     "@types/node": "^26.1.1",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
@@ -32,9 +38,7 @@
     "reactflow": "^11.11.4",
     "socket.io-client": "^4.8.3",
     "tailwind-merge": "^3.6.0",
-    "zustand": "^5.0.14",
-    "electron": "^28.0.0",
-    "electron-builder": "^24.9.1"
+    "zustand": "^5.0.14"
   },
   "scripts": {
     "dev": "concurrently \"npm run dev:frontend\" \"npm run dev:backend\" \"npm run dev:desktop\"",
@@ -43,11 +47,20 @@
     "dev:desktop": "cd desktop && npm run dev",
     "build": "npm run build:frontend && npm run build:desktop",
     "build:frontend": "cd frontend && npm run build",
-    "build:desktop": "cd desktop && npm run build && cd .. && electron-builder --win",
-    "build:desktop:portable": "cd desktop && npm run build && electron-builder --win --target portable",
+    "test": "npm run test:electron && npm run test:frontend",
+    "test:electron": "node --test \"test/*.test.js\"",
+    "test:frontend": "cd frontend && npm test",
+    "test:backend": "cd backend && venv\\Scripts\\python.exe -m pytest -q",
+    "check:payload": "node scripts/check-installer-payload.mjs",
+    "check:signing": "node scripts/check-signing.mjs",
+    "check:release": "npm run check:payload && npm run check:runtime && npm run check:signing",
+    "build:desktop": "cd desktop && npm run build && cd .. && npm run check:release && electron-builder --win",
+    "build:desktop:portable": "cd desktop && npm run build && cd .. && npm run check:release && electron-builder --win --target portable",
     "build:engine": "cd packages/zaram-engine && npm run build",
     "preview": "cd frontend && npm run preview",
     "install:desktop": "cd desktop && npm install",
-    "postinstall": "npm run install:desktop"
+    "postinstall": "npm run install:desktop",
+    "build:runtime": "node scripts/build-python-runtime.mjs",
+    "check:runtime": "node scripts/check-runtime.mjs"
   }
 }

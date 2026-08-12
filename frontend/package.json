@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "test": "vitest run",
     "build": "npm run check:assets && npm run check:speech && npm run check:visemes && vite build",
     "check:assets": "node scripts/check-no-remote-assets.mjs",
     "check:speech": "node scripts/check-no-cloud-speech.mjs",

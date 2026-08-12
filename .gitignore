@@ -13,7 +13,14 @@ ENV/
 # Anchored to the repo root on purpose. Unanchored `lib/`, `build/` and `dist/`
 # are Python packaging patterns that also swallow real frontend source —
 # `frontend/src/lib/utils.ts` was ignored-but-tracked because of exactly that.
-/build/
+/build/*
+# ...except the installer icon. electron-builder finds it by convention rather
+# than by a path in electron-builder.yml, so a clone without it produces an
+# installer wearing the default Electron icon — silently, with nothing failing.
+# It is generated output like the brand PNGs under frontend/public/, and it is
+# tracked for the same reason: the build must not depend on someone having run
+# the generator first. Regenerate with scripts/build-brand-assets.py.
+!/build/icon.ico
 /dist/
 /develop-eggs/
 /downloads/
@@ -144,3 +151,35 @@ zaram-ai-operating-system-ui/
 backend/projects.db
 backend/projects.db-wal
 backend/projects.db-shm
+
+# Code signing material. A committed certificate is a revoked certificate:
+# once the private key is in git history it is compromised, and the only
+# remedy is reissuing — paid for again, and re-validated from scratch.
+#
+# Since 2023 a publicly-trusted signing key must live on a hardware token or
+# an HSM, so a .pfx in the repo should not exist at all. These patterns are
+# here for the ones that do anyway: test certificates, exported backups, and
+# whatever a future self downloads "just to try it".
+*.pfx
+*.p12
+*.pem
+*.key
+*.crt
+*.cer
+*.spc
+*.pvk
+.signing/
+signing-*.json
+
+# Brand preview sheets. `scripts/build-brand-assets.py` writes them beside the
+# source image so a preview can never land in `frontend/public/`, which ships.
+# They are regenerated from the same definition as the real assets, so tracking
+# them would put a rebuildable PNG in every diff that touches the mark.
+Logo_Image/_preview.png
+
+# The bundled Python runtime. ~300 MB of third-party CPython plus the backend's
+# dependencies, assembled by scripts/build-python-runtime.mjs and rebuilt from
+# a pinned release rather than tracked. Committing it would put a vendored
+# interpreter in every clone and in every diff.
+/runtime/
+/.runtime-download/
