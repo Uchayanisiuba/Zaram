@@ -292,7 +292,12 @@ class MemoryRuntimeImpl(MemoryRuntime):
             ))
         return True
 
-    async def correct(self, record_id: str, corrected_content: str) -> dict[str, Any]:
+    async def correct(
+        self,
+        record_id: str,
+        corrected_content: str,
+        valid_from: float | None = None,
+    ) -> dict[str, Any]:
         """Replace a fact with a corrected one, keeping the original visible.
 
         Rule 4 in full. Deletion was only ever half of it: removing a wrong fact
@@ -304,6 +309,17 @@ class MemoryRuntimeImpl(MemoryRuntime):
         So this writes a *new* record and marks the old one superseded. The old
         fact stays on disk, is dropped from the vector index so it can never be
         recalled again, and remains visible in the Memory surface struck through.
+
+        `valid_from` is *when the new fact became true*, which is usually not
+        now. A client raised the rate in June and the user is saying so in
+        August; passing June keeps "what was my rate in July" answerable, and
+        passing nothing means "as far as I know, since now".
+
+        The two timestamps are not interchangeable and both are written:
+        `superseded_at` is when Zaram was told, `valid_until` is when the old
+        fact stopped being true. Collapsing them would answer questions about
+        the past with what is true in the present, which for anything financial
+        is the difference between a correct invoice and a wrong one.
 
         Returns both ids, so the caller can show what replaced what.
         """
@@ -329,6 +345,10 @@ class MemoryRuntimeImpl(MemoryRuntime):
             importance=original.importance,
             source=original.source,
             pinned=original.pinned,
+            # When the world changed, not when we were told. Defaulting to now
+            # is the honest fallback: the user did not state a date, so the
+            # earliest moment Zaram can vouch for is this one.
+            valid_from=valid_from if valid_from is not None else time.time(),
         )
         new_id = await self._store.put(replacement)
         await self._index.add(replacement)
@@ -337,7 +357,12 @@ class MemoryRuntimeImpl(MemoryRuntime):
             **{
                 **original.__dict__,
                 "superseded_by": new_id,
+                # Recorded time: when the user said so.
                 "superseded_at": time.time(),
+                # Valid time: the instant the replacement took over. The two
+                # windows meet exactly, so an as-of query at any point lands on
+                # one fact rather than none or two.
+                "valid_until": replacement.valid_from,
                 "updated_at": time.time(),
             }
         )

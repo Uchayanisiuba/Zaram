@@ -108,6 +108,29 @@ class MemoryRecord:
     #: believe when it says it is right.
     superseded_by: str | None = None
     superseded_at: float | None = None
+    #: When the fact *became* true, and when it stopped — as distinct from
+    #: when Zaram was told either of those things.
+    #:
+    #: `superseded_at` is **recorded time**: the moment the user corrected it.
+    #: `valid_until` is **valid time**: the moment the world changed. They are
+    #: routinely months apart, and conflating them loses the question people
+    #: actually ask. A client raises your rate in June and you tell Zaram in
+    #: August; with only `superseded_at`, "what was my rate in July" cannot be
+    #: answered, because the store knows when it was told and not when it was
+    #: true.
+    #:
+    #: That is not a reporting nicety — it decides whether a July invoice was
+    #: right. An accounting question asked about the past must be answered with
+    #: what was true then, not with what is true now.
+    #:
+    #: Both default to None, and None is meaningful rather than missing:
+    #: `valid_from` unknown means "assume it has always been true as far as
+    #: Zaram knows", which for a fact captured in conversation is honest —
+    #: nobody stated a start date. `valid_until` of None means it still stands.
+    #: Neither is defaulted to `created_at`, because a capture time presented
+    #: as a validity date is a value nobody entered.
+    valid_from: float | None = None
+    valid_until: float | None = None
     #: Pinned facts are never decayed and are preferred during recall.
     pinned: bool = False
     #: ``global`` or ``project:<id>`` — rule 7i.
