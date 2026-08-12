@@ -11,73 +11,321 @@ accurate — it is the first thing anyone reads.
 
 ---
 
-## Current state — 11 August 2026
+## Current state — 12 August 2026
 
-> ### Everything is committed. `HEAD` is `84aaf18` on `Zaram-V0.1`.
+> ### The session is committed. `HEAD` is `8f05872`, on `Zaram-V0.1`, unpushed.
 >
-> Twelve commits across 10–11 August, working tree clean. In order: export
-> formats, invoices, slides, project and memory scope, speech chunking, the
-> Windows shortcut fix, the draggable orbit, project adoption, the recall-at-
-> scale measurement, the cloud engine, cloud routing, confirm-before-send.
+> Five commits, re-verified green before staging rather than on the previous
+> session's word. Read the two "found by running it" sections below before
+> debugging anything, because three of the defects fixed here were invisible to
+> a passing suite.
 >
-> **The single most useful thing to know: cloud generation exists, is tested,
-> and cannot send.** That is deliberate and it is the designed resting state —
-> a gate with no confirmation handler refuses, and nothing has installed one
-> yet. Do not "fix" it by loosening the gate. The remaining work is the two
-> pieces named under *Right here* below.
+> **M10 is finished and cloud generation now sends**, after a person says it
+> may. **M11 has started and the product has been packaged for the first time:**
+> `Zaram.exe` launches its own bundled Python and reaches `kernel: online`.
 >
-> Three bugs were found by doing the work rather than by looking for them, and
-> each is worth more than the feature it was found in:
->
-> * `kind: "deck"` returned 500 for every request — the route read
->   `body.slides` and `GenerateBody` had no such field. Exporter tests were
->   green throughout because none went through the wire.
-> * The egress gate was asked **twice per message**, which on an `ask` host
->   would have shown two confirmation dialogs for one question.
-> * `stream_lines` encoded the body *before* the confirmation, so an edited
->   request would have sent the original bytes while logging the edited ones.
->
-> All three were verified by reintroducing them and watching the new tests
-> fail. That habit is the reason to keep doing it.
+> Suites, measured 12 August: **1647 backend passed / 0 failed**, 76 skipped,
+> 3m29s. **103 frontend** across 14 files. **30 Electron**. Every skip names its
+> reason — the voice and mic extras are absent from this shell and the scale
+> eval is opt-in behind `ZARAM_SCALE_EVAL=1`. An earlier note here read "1714 /
+> 9 skipped" against the same 1723 collected: the same suite on a machine that
+> had the extras installed. **Read the skip count as a fact about the
+> environment, not the code**, and `-rs` prints why.
 
-**Suite: 0 failures.** 1388 → … → **1669/0**, 9 skipped, ~218s from the repo
-root on a full dev install. Frontend: **86 vitest across 12 files**, plus build
-(which runs the three scanners) and `tsc --noEmit`, all green.
+### The lesson this session kept teaching
 
-**Measure the suite with nothing else running.** One run reported 2401s and was
-believed for ten minutes: a previously-cancelled pytest was still alive and the
-two were competing. The wrapper task was stopped; the process it started was
-not. A timing taken against an unknown background load is not a measurement.
+**A feature's tests can all pass while the feature cannot happen.** It happened
+twice, in unrelated places, and both times the only thing that could see it was
+starting the product and asking it to do the thing.
 
-Run it as `.venv\Scripts\python.exe -m pytest`. Bare `python` on PATH is a
-broken shim that reports a missing install path — this costs the first ten
+Confirm-before-send was complete: the gate blocked, the question appeared, an
+approval released the thread, an edit reached the wire — all asserted. It could
+not work. `ChatRouter._kernel_stream` was an `async def` generator driving the
+engine's *synchronous* generator with a plain `for`, so every blocking step ran
+on the event loop thread. When the gate blocked on its confirm hook the whole
+backend stopped answering, `/egress/pending` could not be served, the dialog
+could never appear, and the only reachable outcome was a two-minute timeout with
+`/health` dead throughout. The gate, the confirmations, the engine and the
+endpoints were each correct in isolation and still are. **The defect lived in
+the seam.**
+
+The second: the packaged installer would have shipped `spine.db` and
+`egress.db`. Every unit test was green. Nothing tests what a glob matches.
+
+Both are now covered — `backend/tests/test_confirm_does_not_freeze.py` and
+`scripts/check-installer-payload.mjs` — and both were verified by reintroducing
+the defect and watching the new test fail.
+
+### M10 — confirm before send, done and driven
+
+`GET /egress/pending`, `GET /egress/pending/{id}`, `POST /egress/pending/{id}`
+taking `{approved, body}`. Answering something already decided is a 404, so a
+double-click cannot approve a second send. `get_pending()` / `set_pending()` sit
+beside `get_gate()`; the bootstrapper wires
+`gate.set_confirm(lambda r: get_pending().ask(r))` — **resolved per call, not
+bound once**, or a later `set_pending` leaves the gate asking a store nothing is
+watching. `cancel_all()` runs first at shutdown, before anything awaits.
+
+`ConfirmSendDialog` is mounted in the shell on every surface, because a tool can
+reach the network from anywhere. It polls at 1s while something is in flight and
+renders nothing otherwise. Recalled facts become removable chips by **parsing
+the outbound body** for the engine's `[M1] (date) …` lines — parsed rather than
+handed over, so the chips cannot drift from the text they describe. A body it
+cannot parse gets the plain decision and **no chips**, never invented ones.
+
+**Verified against a running product.** A fake OpenAI-compatible provider on the
+LAN address (non-loopback, so the gate treats it as egress), a real cloud-routed
+chat, the dialog on screen with three genuinely recalled facts. Struck the one
+holding the day rate, approved, and compared all three: preview, append-only
+log, and what arrived at the destination — **byte-identical at 1650 bytes, and
+the struck fact in none of them.**
+
+Two more defects fell out of that run:
+
+* **The log said the user refused when nobody was asked.** A timeout was
+  recorded as "you chose not to send this" — a permanent, tamper-evident record
+  of a decision that never happened. `EgressRequest.refusal_reason` now carries
+  the truth: nobody answered, Zaram was shutting down, or it could not ask.
+* **Discovery asked for `/v1/v1/models`.** The engine normalises a trailing
+  `/v1`; the discoverer did not. Given `ZARAM_OPENAI_ENDPOINT` written the way
+  providers print it, discovery 404s, no cloud model is known, and routing
+  silently sends every message local. Chat still works, which is what makes it
+  hard to notice.
+
+A guard sits under the freeze: asked from the event-loop thread, the confirm
+hook refuses in milliseconds and says why, rather than freezing the server that
+would have answered it. **The call site is fixed; the guard is so the next one
+costs a refusal instead of the product.**
+
+**One clause of M10 was deliberately not built.** The acceptance line asks for
+edits "written through as supersessions". Striking a fact in the dialog changes
+*that request only*. "Do not send my day rate to this provider" and "this fact
+is wrong" are different statements, and writing one through as the other would
+delete a correct fact at the exact moment the user is being careful. Reasoning
+in the M10 section below.
+
+### The API was published to the network
+
+`main.py` bound `0.0.0.0` — every interface — and `backendLauncher.js` launches
+the packaged app through exactly that path. **No endpoint has authentication.**
+On any café, hotel or shared-office network, anyone reaching port 8420 could
+read the whole Spine through `/memory`, read the egress log, set a host to
+`allow` through `/egress/policy`, and approve a pending confirmation.
+
+Now `LISTEN_HOST = "127.0.0.1"`, **not configurable** — a setting that reopened
+it would be set once while debugging and never unset, and the failure is silent
+because everything keeps working. Verified live: loopback answers, the LAN
+address refuses, `netstat` shows `127.0.0.1:8420`.
+
+**How it happened is the more useful half.** `test/backendLauncher.test.js`
+asserted the launcher passed `--host 127.0.0.1`. The launcher changed to run
+`main.py`, the test started failing, and **nothing in this repo ran it** — there
+was no script wired to `test/`. Twenty-six Electron tests existed, two were
+failing, and the failing one encoded the loopback guarantee.
+
+`npm test` now runs them and both failures are fixed. The second was
+`staticServer`, whose fake returned `arrayBuffer()` from when the proxy
+buffered; the proxy streams now, because `/chat` emits tokens as they are
+generated. **Production code was correct in both cases** — the tests had rotted
+where nobody could see them. The replacement assertion grades the *property*
+rather than the argument list, so it survives either launcher shape.
+
+### M11 — packaging
+
+**The installer had never been buildable.** electron-builder exited before
+packaging anything, on missing `name` and `version` in `package.json` and on
+`electron` / `electron-builder` sitting in `dependencies`. All fixed.
+`build:desktop:portable` also never returned to the repo root after
+`cd desktop`.
+
+**What it would have shipped is the finding that matters.** The config included
+the backend as one glob with four exclusions:
+
+* `!backend/.venv` does not match `backend/venv`, which is what the directory is
+  actually called here. **376 MB**, plus 61 MB of `audio_cache` and
+  `audio_output`.
+* Nothing excluded `spine.db`, `egress.db` (with its `-wal` and `-shm` sidecars,
+  which hold the most recent writes), `artifacts.db`, `projects.db`,
+  `egress-policy.json`, or `backend/generated/`. **The maintainer's memory,
+  their record of everything that has ever left the machine, their invoices, and
+  their per-host privacy rules — all on disk today, all matching the glob.**
+
+The backend is now included by **allow-list**. That is the opposite polarity to
+`pyproject.toml`'s argument about test collection, and deliberately: a stale
+exclusion there collects an extra test, while a missing exclusion here publishes
+private data. Two checks hold it — `scripts/check-installer-payload.mjs` runs
+inside `build:desktop` with the real `minimatch` and exits non-zero, and
+`backend/tests/test_installer_payload.py` catches a bad edit in the suite long
+before anyone builds.
+
+**Python is bundled and the packaged app runs.** `resolvePythonCommand` resolves
+`ZARAM_PYTHON` → bundled runtime → dev venv, and **PATH is deliberately not a
+fallback**: finding a stranger's Python 3.9 is worse than finding none, because
+it fails later and reads as a broken product. The runtime is found via
+`resourcesPath` when packaged, since the backend is inside `app.asar` and an
+archived file cannot be executed.
+
+**Relocatable CPython, not PyInstaller — the product already decided this.**
+`backend/ingest/quality.py` tells the user "pip install zaram[ingest]". Voice,
+mic and OCR are extras installed after the product is running, on its own
+instruction, and **you cannot pip install into a frozen bundle.**
+
+CPython 3.11.9 from python-build-standalone, SHA-256 verified, base
+requirements only. **401 MB runtime, 679 MB unpacked app.**
+`dist-electron/win-unpacked/Zaram.exe` launches
+`resources/runtime/python.exe` — confirmed by process path — reaching
+`kernel: online` in about five seconds, with voice degrading exactly as
+designed: *"Kokoro package unavailable … (speech disabled, chat unaffected)"*.
+The asar carries 323 backend entries, 271 of them `.py`, and **no database, no
+venv, no generated document, no policy file and no tests** — verified by listing
+the archive, not by trusting the payload checker.
+
+**Dev tooling is out of the base install: 83.5 MB, measured.** An earlier note
+guessed "probably 30–40 MB" and was under by more than half — mypy alone is
+42.1 MB, ruff 32.9 MB. Now `backend/requirements-dev.txt`.
+
+**Jinja2 stays where it is.** Not a leftover: spaCy and torch both require it
+unconditionally. Answered from declared metadata, which is trustworthy in that
+direction — a package *declaring* a dependency is evidence; nothing declaring
+one is not, which is the misaki/spaCy trap.
+
+**The installer icon was one clone away from being wrong.** `electron-builder.yml`
+names no icon at all — electron-builder finds `build/icon.ico` by convention —
+and `/build/` was gitignored. On this machine the icon is present because the
+brand generator wrote it here; on a fresh clone there is none, and the build
+does not fail, it just produces an installer wearing the default Electron icon.
+`build/icon.ico` is now tracked, for the same reason the brand PNGs under
+`frontend/public/` are: **the build must not depend on someone having run the
+generator first.** This is the same class as the two above — a check that
+passes locally and means nothing anywhere else — and it sits on the one path
+that matters, which is a stranger installing this.
+
+**The frontend suite had no way to run it.** 14 vitest files, 103 tests, vitest
+in `devDependencies`, and no `test` script anywhere pointing at them: reachable
+only by knowing to type `npx vitest run`. Exactly the shape of the Electron
+`test/` directory that hid a failing loopback assertion for who knows how long.
+`npm test` at the root now runs both JS suites, and `npm run test:backend`
+encodes the venv interpreter so the wrong-`python` trap costs nothing.
+
+**Still missing from M11's acceptance:** the NSIS installer itself, and a run on
+a machine that has never seen this repo.
+
+### Code signing — decided, prepared, not purchased
+
+`docs/CODE-SIGNING.md` is the runbook. **OV, and not EV later either.**
+
+An earlier version of that document said EV buys immediate SmartScreen
+reputation. **That is false**, and it is worth recording as false because it is
+the most repeated code-signing advice there is. Microsoft, checked 12 August:
+*"EV certificates no longer bypass SmartScreen … Paying a premium for EV solely
+to avoid SmartScreen warnings is no longer justified."* Their table gives OV and
+EV the same first-download behaviour: a warning until reputation accrues. What
+signing buys is **your name in that warning**, and the ability to accumulate
+reputation at all — unsigned starts from zero every version, forever.
+
+**Microsoft Artifact Signing is ruled out on geography, not merit.** It is the
+better architecture — ~$10/month, no token, HSM-backed, CI-native, and it would
+keep the key off the dev machine. But Public Trust certificates are limited to a
+listed set of countries, and **individual developers must be in the US or
+Canada.** Nigeria is on neither list. Re-check before public beta; the list has
+grown before.
+
+Two things that raise the stakes beyond a click-through: **Smart App Control on
+Windows 11 blocks unsigned executables outright**, on all executables rather
+than only downloaded ones; and **modifying a file after signing breaks the
+signature**, which matters for the bundled runtime — post-processing happens
+before signing, never after.
+
+The repo is ready. `electron-builder.yml` names the identity by environment
+variable and never names a key. Timestamping is configured, because without it
+every signature dies with the certificate *including on machines where it is
+already installed*. `scripts/check-signing.mjs` fails a release that is
+unsigned, that signs from a key file, or that has no timestamp server.
+`.gitignore` carries certificate patterns.
+
+### Brand
+
+**Tagline: "One memory. Every model."** Settled. Not yet placed — it belongs in
+`README.md` and `docs/PITCH.md`, not the app chrome.
+
+The mark was **traced** from `Logo_Image/`, not eyeballed: threshold the hero
+glyph, follow the boundary, reduce with Ramer-Douglas-Peucker. Each plane came
+down to six and eight corners, which is itself the check that the trace found
+real geometry. It corrected three things an earlier reconstruction had wrong —
+the mark is **1.31:1, not square**; it is **two interlocking planes, not three
+slabs**, and the diagonal gap between them is its whole character; and the
+gradient ends in **cyan (#4BADE6), not blue**.
+
+`scripts/build-brand-assets.py` emits SVG, PNG and a seven-size `.ico` from one
+definition, so the favicon, app icon and installer icon cannot drift into being
+three logos. The top-left of every workspace is now the rounded app-icon tile,
+51px, **icon only** — it returns to the landing with the conversation closed,
+which keeps the orb's single meaning as the way *in*.
+
+Previews write to `Logo_Image/`, never `frontend/public/` — everything under
+`public/` is built into `dist` and shipped.
+
+### Before you run anything
+
+The short list. *Read this before debugging anything*, further down, has the
+restart command and the longer catalogue — including why a run under the wrong
+interpreter reports 54 failures that all look like product defects.
+
+**Run the suite as `.venv\Scripts\python.exe -m pytest`.** Bare `python` on PATH
+is a broken shim that reports a missing install path — this costs the first ten
 minutes of a session that does not know it.
 
-**Whatever is on 8420 is stale.** Restarting it is step one of testing anything
-— a process from 10 August served requests for hours on 11 August while two
-sessions debugged the wrong build. Kill it and confirm `build.commit_short`
-matches `git rev-parse --short HEAD` before believing a single response.
+**Measure the suite with nothing else running.** A run that reported 435s
+against a normal 245s produced one failure in
+`test_measure_exemplar_separation`; it passes alone with a wide margin and
+passed two clean runs after. That test is a `measure` test against a live local
+model, which is the class most sensitive to a loaded machine. **Not hardened,
+deliberately** — loosening a measurement to survive contention is how it stops
+measuring.
 
-### Right here — the two pieces that finish M10
+**Whatever is on 8420 is stale.** Restarting it is step one of testing anything.
+Confirm `build.commit_short` matches `git rev-parse --short HEAD` before
+believing a single response.
 
-Cloud is wired end to end *except* for the person answering the question. Both
-remaining pieces are small and neither is a design question any more.
+**Building the installer needs a privilege this shell does not have.**
+electron-builder extracts its `winCodeSign` cache using symlinks, which requires
+Developer Mode or elevation; without it the build fails on two irrelevant
+*darwin* `.dylib` links and the error names 7-Zip rather than the privilege.
+**`--config.win.signAndEditExecutable=false` gets past it** — at the cost of the
+exe's icon and version metadata, which is also the step that applies
+`build/icon.ico`. The icon and the signature arrive together or not at all.
 
-1. **HTTP endpoints for pending confirmations.** `PendingConfirmations` exists
-   and is tested (`core/egress/confirm.py`), but nothing exposes it. Needs
-   `GET /egress/pending`, `POST /egress/pending/{id}` taking
-   `{approved, body}`, and `gate.set_confirm(pending.ask)` at startup plus
-   `cancel_all()` at shutdown — a parked thread will otherwise stop the
-   process exiting.
-2. **The dialog.** Shows `literal_text`, the destination and the reason;
-   recalled facts as removable chips; the edit posts back as `body`. The
-   machinery already guarantees the edited text is what is logged *and* what
-   is sent, so the frontend does not have to be careful about that — it only
-   has to send what the user approved.
+**GNU tar cannot extract to a Windows absolute path.** It reads `C:\…` as
+`host:path` and tries SSH. Git for Windows puts GNU tar on PATH while Windows
+ships bsdtar, so *which tar answers* decides whether a build works. Use relative
+paths.
 
-Then M10 is done and cloud is genuinely usable. Two things it still lacks
-after that, both named in the road-to-alpha section: a Settings surface for the
-key (it comes from the environment today) and the three tiers of control.
+### What is next
+
+1. **Produce a real installer** and run it on a machine that has never seen the
+   repo. That is the rest of M11's acceptance and the only remaining unknown in
+   it. Building it here needs Developer Mode or elevation — see *Before you run
+   anything* — and the icon now survives a fresh clone, so what that run is
+   actually testing is the NSIS step and first launch, not the payload.
+2. **Obligation extraction (M9a)** — not started, no module, and it is the half
+   the alpha measures.
+3. **The business base layer** — invoices exist; quotes, receipt capture,
+   expense categorisation and the monthly picture do not. Largest remaining
+   volume of v1 work and the most likely to be underestimated.
+4. **Cloud's Settings surface and the three tiers of control.** The key comes
+   from the environment today. The recommended shape is Electron `safeStorage`
+   (DPAPI on Windows) with the key passed to the Python child as an environment
+   variable — which is what the backend already reads, so no backend change.
+   **Never expose an endpoint that returns a key**, given the local API has no
+   authentication.
+5. **The avatar.** Seven states, closed set, from `useEmbodimentState`: idle,
+   local, cloud, thinking, listening, speaking, swapping. Six mouth visemes —
+   `sil aa ee ih oh ou` — from `src/lib/visemes.ts`. Eyes are state-derived
+   only, no gaze. The acceptance test is two states side by side in a screenshot
+   at the size they will actually render.
+
+**Blocked on the maintainer, and only this:** buying the OV certificate. Every
+day it is not begun adds a day to the end.
 
 ### What changed, in one screen
 
@@ -87,7 +335,16 @@ Read the sections further down for the reasoning; this is the index.
 |---|---|
 | **Cloud engine** | `OpenAICompatibleEngine`, no new dependency, **no HTTP client of its own** — `EgressGate.stream_lines` carries the bytes. Recorded deviation from CLAUDE.md's LiteLLM entry, with reasons, reversible behind `LLMEngine`. |
 | **Cloud routing** | `RoutedEngine` picks local or cloud per message by the model's **declared locality**, never by name — `gpt-oss` runs on Ollama. Every unknown routes local; `HYBRID` counts as remote. |
-| **Confirm-before-send** | The confirmation may *edit* the outbound text, and the gate now reads the body back after the check so the edit reaches the wire and the log identically. |
+| **Confirm-before-send** | The confirmation may *edit* the outbound text, and the gate now reads the body back after the check so the edit reaches the wire and the log identically. **Answerable as of 12 August** — endpoints, dialog, and the event-loop fix that made delivering the question possible at all. |
+| **Chat streams off the loop** | Both `ChatRouter` paths iterate the engine's synchronous generator in a worker thread. Previously any blocking step froze the whole backend; with a confirm hook in the path that made the feature unreachable rather than merely slow. |
+| **Loopback only** | The API bound `0.0.0.0` with no authentication on any endpoint — the Spine, the egress log and the policy were readable by anyone on the same network. Now `127.0.0.1`, not configurable. The test that would have caught it existed and had never been run. |
+| **Installer payload** | Included by allow-list, not denylist. A denylist was shipping 437 MB of venv and scratch **plus `spine.db`, `egress.db`, the artifacts and projects databases, the privacy policy and the generated invoices.** Two gates hold it — one in the suite, one in the build. |
+| **Python in the installer** | Relocatable CPython 3.11.9, SHA-256 verified, 401 MB. PyInstaller ruled out because the product tells users to `pip install zaram[ingest]` and you cannot pip into a frozen bundle. **`Zaram.exe` packaged and starting its own backend for the first time.** |
+| **Electron tests run** | `npm test` wired to `test/`, which held 26 tests nobody had ever run and two failures. Both were stale tests over correct production code — and one of them encoded the loopback binding. |
+| **Frontend tests run** | Same shape, found later: 103 vitest tests across 14 files with no script pointing at them. `npm test` now runs both JS suites; `test:backend` encodes the venv interpreter. |
+| **Installer icon** | `electron-builder.yml` names no icon and `/build/` was ignored, so a fresh clone would have built an installer with the default Electron icon and no error. `build/icon.ico` is tracked now. |
+| **Code signing** | OV, prepared, not purchased. **EV buys nothing** — Microsoft's own docs say it no longer bypasses SmartScreen. Artifact Signing unavailable in Nigeria. Identity by env var, timestamping mandatory, release gate refuses unsigned. |
+| **Brand** | Mark traced from the source image rather than eyeballed — it is 1.31:1, two interlocking planes, gradient ending in cyan. One generator emits SVG, PNG and a seven-size `.ico`. Top-left app icon returns home. |
 | **Project adoption** | `harbour` and `northwind` existed on files but were not projects, and assignment validation had made that a one-way door. Adopt keeps the id exactly; generation is validated so no new ghosts arrive. |
 | **Recall at scale** | Measured at 10/100/1,000: margin +0.131 → +0.108 → **+0.106**, 5/5 recalled at rank 1, zero false citations. The curve saturates. Reranker stays unbought. |
 | **Shortcuts** | Every chord was dead on Windows — the matcher waited for the Win key while the overlay advertised Ctrl. |
@@ -2202,14 +2459,25 @@ call time by `planner.web_search_enabled()`.
   **What would reopen it:** the margin narrowing on a *real* corpus, or targets
   falling below the floor rather than being ordered badly. Both are scoring
   failures and both are what a cross-encoder buys. Neither has been observed.
-- **Dev tooling still ships in the base install** — mypy, ruff, pytest,
-  pip-licenses, wheel. Probably 30–40 MB. Same split-verify-measure method as
-  the voice extra. Belongs in the packaging spike.
-- **Jinja2 is declared in the *voice* extra and used by nothing.** An earlier
-  version of this file listed it as available for M9b; it is not on a base
-  install. Nothing needs it — the HTML layer builds strings directly — so the
-  question is whether it is a real transitive dependency of the voice stack or
-  a leftover. Removal plus a green suite is the only way to find out.
+- ~~**Dev tooling still ships in the base install.**~~ **Split, 12 August:
+  `backend/requirements-dev.txt`. 83.5 MB measured** — the "probably 30–40 MB"
+  guess was under by more than half, because mypy is 42.1 MB and ruff 32.9 MB
+  on their own. `wheel` was never in base. The exclusive transitive packages
+  went with them; `typing_extensions` stayed, since twenty-odd runtime packages
+  require it. **Not yet proven by a clean install** — see the next item.
+- **A base install has never been built and run.** The split above is
+  reasoned from declared dependencies and a source scan, which is good evidence
+  and is not the evidence this project accepts for a dependency claim. The
+  check is a fresh venv with `requirements.txt` alone that boots the backend and
+  reaches a cited answer. `tabulate` is the one entry riding on the weaker
+  argument: nothing declares it and nothing imports it, which is exactly the
+  reading that once recommended deleting spaCy.
+- ~~**Jinja2 is declared in the *voice* extra and used by nothing.**~~
+  **Answered 12 August: it is a real transitive dependency and stays.** spaCy
+  and torch both require it *unconditionally* — not behind an extra. No removal
+  experiment was needed, because the metadata is trustworthy in this direction:
+  a package **declaring** a dependency is evidence it needs one. The unreliable
+  direction is the absence of a declaration, which is the misaki/spaCy trap.
 - **WeasyPrint on Windows needs native GTK libraries**, which is a packaging
   decision rather than a `pip install`. This is the only part of M9b not
   working. The exporter is written and the format reports itself unavailable
@@ -2651,6 +2919,30 @@ The dialog shows the literal outbound text, the destination and the reason.
 Recalled facts are removable chips, editable inline, edits written through as
 supersessions.
 
+**Done 12 August 2026, with one clause deliberately not implemented.**
+
+Shipped: the literal text (behind a disclosure, so the primary view stays
+legible for a non-technical user while the exact bytes remain checkable), the
+destination, the reason, and recalled facts as removable chips. Removing a chip
+rewrites the outbound body, and the gate logs and sends that rewritten text —
+verified against a live backend by comparing preview, log and destination.
+
+**Not implemented: "edits written through as supersessions."** Striking a fact
+here changes *this request only*; the Spine is untouched. The two intents are
+different and merging them destroys information. "Do not send my day rate to
+this provider" is a statement about an outbound request; a supersession is a
+statement that the fact is **wrong**, and it stops that fact being recalled
+anywhere, permanently. Writing one through as the other would delete a correct
+fact because it was once sensitive — and it would do so at the exact moment the
+user is trying to be careful, which is the worst possible time to be surprised
+by a side effect.
+
+Correction already has a home that says what it means: the Memory surface, per
+rule 4. If a user wants both, the honest shape is an offer *after* the send —
+"you removed this from that request; should Zaram stop remembering it?" — which
+is rule 7h's contextual offer rather than a hidden consequence of a button whose
+label says something else. Not built, because nobody has asked for it yet.
+
 ### Queued — the citation UI
 **Requested 7 August 2026. Not started. Order is fixed and each step stops for
 review.**
@@ -2754,8 +3046,20 @@ answers become the missing line in `docs/PITCH.md`.
 
 ## Known broken
 
-**Nothing.** 1669 passed, 9 skipped, 0 failures, ~3m38s from the repo root on a
-full dev install, 11 August 2026. Frontend: 86 across 12 files. The 27 are gone
+**Nothing.** 1703 passed, 9 skipped, 0 failures, ~4m05s from the repo root on a
+full dev install, 12 August 2026. Frontend: 97 across 13 files.
+
+**One flake seen once, and the cause is the trap at the top of this file.**
+`test_measure_exemplar_separation` failed in a suite run that took **435s
+against a normal 245s** — nearly double, which is contention, not code. It
+passes alone with a wide margin (smallest social margin +0.220 against a
+largest non-social +0.025) and passed two consecutive clean full runs
+afterwards. It is a `measure` test against a live local model, which is the
+class most sensitive to a loaded machine. Not hardened, deliberately: loosening
+a measurement to survive a contended run is how a measurement stops measuring.
+If it recurs on an idle machine, that is a real signal.
+
+The 27 are gone
 and the section explaining what they actually were is above, under "What the 27
 actually were"; the method for classifying the next one is
 `docs/KNOWN-FAILURES.md`.
