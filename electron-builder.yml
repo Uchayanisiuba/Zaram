@@ -122,9 +122,15 @@ win:
     - nsis
     - portable
   artifactName: Zaram-${version}-${arch}.${ext}
-  # Empty unless the environment provides it; electron-builder then skips
-  # signing, which is what a local development build should do.
-  certificateSubjectName: "${env.ZARAM_SIGN_SUBJECT}"
+  # certificateSubjectName is deliberately absent. It used to be written as
+  # "${env.ZARAM_SIGN_SUBJECT}" with a comment saying an unset variable resolves
+  # to empty and signing is skipped. It does not: the literal reaches the signer,
+  # which fails with `Cannot find certificate ${env.ZARAM_SIGN_SUBJECT}` while
+  # signing the uninstaller — the last minute of a ten-minute build, and the
+  # reason an installer had never been produced here.
+  #
+  # scripts/build-installer.mjs injects it when the environment has one, so the
+  # field is present exactly when it can be honoured.
   rfc3161TimeStampServer: http://timestamp.digicert.com
   timeStampServer: http://timestamp.digicert.com
   signingHashAlgorithms:

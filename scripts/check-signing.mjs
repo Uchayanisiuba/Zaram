@@ -38,6 +38,39 @@ function fail(lines) {
   process.exit(1);
 }
 
+/**
+ * Refuse `${env.NAME}` anywhere in the build config.
+ *
+ * It does not resolve to empty when NAME is unset — electron-builder passes the
+ * literal through to whatever consumes it. As a certificate subject that
+ * produced `Cannot find certificate ${env.ZARAM_SIGN_SUBJECT}` in the step that
+ * signs the uninstaller: the last minute of a ten-minute build, after packaging
+ * had already succeeded and `win-unpacked` looked fine. Anything conditional on
+ * the environment is injected by scripts/build-installer.mjs instead, which can
+ * express "absent" by leaving the field out.
+ *
+ * Comments are stripped first, so electron-builder.yml may describe the trap
+ * without tripping it.
+ */
+function requireNoEnvMacros(config) {
+  const live = config.replace(/(^|\s)#.*$/gm, '');
+  const found = [...live.matchAll(/^\s*([\w.]+):.*?\$\{env\.(\w+)\}/gm)];
+  if (found.length === 0) return;
+  fail([
+    '  electron-builder.yml interpolates the environment directly:',
+    '',
+    ...found.map(([, field, name]) => `    ${field}: \${env.${name}}`),
+    '',
+    '  An unset variable does not become empty here. The literal reaches the',
+    '  consumer, and for a certificate subject that fails the build while',
+    '  signing the uninstaller — at the very end, long after packaging looked',
+    '  like it had worked.',
+    '',
+    '  Inject it from scripts/build-installer.mjs, which can leave the field',
+    '  out entirely when the environment has nothing to put in it.',
+  ]);
+}
+
 if (fileBasedInUse.length > 0) {
   fail([
     `  Signing is configured from a key file (${fileBasedInUse.join(', ')}).`,
@@ -52,6 +85,16 @@ if (fileBasedInUse.length > 0) {
     '  certificate store. See docs/CODE-SIGNING.md.',
   ]);
 }
+
+const config = fs.readFileSync(path.join(ROOT, 'electron-builder.yml'), 'utf8');
+
+// Checked before the development-build exit below, unlike everything else here.
+// This one is not about whether a build may ship — it is about whether a build
+// can complete at all, and it breaks a machine with *no* certificate hardest.
+// That is how it survived: every check in this file was release-only, so the
+// one configuration that made an unsigned local build impossible was never
+// examined on an unsigned local build.
+requireNoEnvMacros(config);
 
 if (!isRelease) {
   console.log(
@@ -77,7 +120,6 @@ if (!subject) {
 
 // A timestamp server has to be configured or the signature dies with the
 // certificate — including on machines where it is already installed.
-const config = fs.readFileSync(path.join(ROOT, 'electron-builder.yml'), 'utf8');
 if (!/rfc3161TimeStampServer:\s*\S+/.test(config)) {
   fail([
     '  No RFC 3161 timestamp server is configured.',
