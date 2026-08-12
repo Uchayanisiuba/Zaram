@@ -6,6 +6,24 @@ import { useEmbodimentState, type EmbodimentState } from '@/hooks/useEmbodimentS
 import { useSpeechStore } from '@/stores/speechStore'
 import { VISEMES, visemeAt, type Viseme } from '@/lib/visemes'
 
+// Keep the fetched VRM in memory across mounts.
+//
+// This component unmounts when a surface opens and remounts on the way back to
+// the landing, and three.js ships its file cache *disabled*, so every return
+// re-fetched the whole model before it could draw anything. That is the empty
+// avatar panel for several seconds after coming back from a menu — the
+// conspicuous cost of a round trip nobody needed to pay twice.
+//
+// `THREE.Cache` is keyed by URL and read by the `FileLoader` underneath
+// `GLTFLoader`, so enabling it is the entire change; a remount now goes
+// straight to parsing. It holds one avatar's bytes, which is the right trade
+// against re-reading tens of megabytes on every navigation.
+//
+// Parsing still happens per mount. Removing that too means keeping the
+// renderer mounted and pausing its loop instead of tearing it down, which is a
+// larger change to the component's lifecycle and is worth doing separately.
+THREE.Cache.enabled = true
+
 /**
  * The VRM renderer — the orb's job with more bandwidth.
  *
