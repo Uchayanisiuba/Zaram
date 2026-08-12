@@ -15,6 +15,7 @@ import ChatSurface from './components/chat/ChatSurface';
 import SourcePanelLayer from './components/chat/SourcePanelLayer';
 import CommandPalette from './components/CommandPalette';
 import LandingHint from './components/shell/LandingHint';
+import ConfirmSendDialog from './components/egress/ConfirmSendDialog';
 import Landing from './workspaces/Landing';
 import WorkWorkspace from './workspaces/WorkWorkspace';
 import ProjectWorkspace from './workspaces/ProjectWorkspace';
@@ -95,6 +96,11 @@ export default function App() {
           workspace={workspace}
           onSearchOpen={() => setCommandOpen(true)}
           onOpenConversation={openConversation}
+          // Home is the landing at rest. `navigate` already closes the chat and
+          // resets the conversation's context, which is exactly what returning
+          // to the start should do — and is deliberately not `openConversation`,
+          // so the orb keeps its single meaning.
+          onHome={() => navigate('landing')}
         />
       )}
 
@@ -182,6 +188,13 @@ export default function App() {
 
       {/* Shortcuts help overlay */}
       <HelpOverlay open={helpOpen} platform={platform} onClose={() => setHelpOpen(false)} />
+
+      {/* Confirm before send. Mounted on every surface rather than beside the
+          conversation: a tool can reach the network from anywhere, and a
+          question the user cannot see is one that times out and denies while
+          they wonder why nothing is happening. Renders nothing until something
+          is actually waiting. */}
+      <ConfirmSendDialog />
     </div>
   );
 }
