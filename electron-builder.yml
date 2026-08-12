@@ -136,6 +136,11 @@ win:
   signingHashAlgorithms:
     - sha256
 nsis:
+  # Uninstall asks what to do with the user's data: keep, export then delete,
+  # or delete. Named explicitly rather than relying on electron-builder finding
+  # build/installer.nsh by convention — the same convention that produced an
+  # installer wearing the default Electron icon when build/icon.ico was absent.
+  include: build/installer.nsh
   oneClick: false
   perMachine: false
   allowToChangeInstallationDirectory: true

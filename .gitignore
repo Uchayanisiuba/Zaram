@@ -21,6 +21,9 @@ ENV/
 # tracked for the same reason: the build must not depend on someone having run
 # the generator first. Regenerate with scripts/build-brand-assets.py.
 !/build/icon.ico
+# The uninstaller's data questions. Source, not build output — without it the
+# uninstaller silently keeps everything and "remove completely" is unavailable.
+!/build/installer.nsh
 /dist/
 /develop-eggs/
 /downloads/
