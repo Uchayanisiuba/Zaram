@@ -660,6 +660,34 @@ def test_openai_compatible_cloud_locality():
     assert models[0].locality is CapabilityLocality.CLOUD
 
 
+def test_openai_compatible_adapter_asks_for_models_once():
+    """`ZARAM_OPENAI_ENDPOINT` written any of the three documented ways.
+
+    Found against a running backend, not by reading. The engine normalises a
+    trailing `/v1` — its docstring says so, because that is what providers print
+    in their own dashboards — and this adapter did not, so an endpoint ending in
+    `/v1` produced a request for `/v1/v1/models`. Against a real provider that
+    is a 404: discovery returns nothing, no cloud model is known, and routing
+    quietly sends every message to the local model instead. Chat still works,
+    which is what makes it hard to notice.
+    """
+    for given in (
+        "http://provider.test",
+        "http://provider.test/",
+        "http://provider.test/v1",
+    ):
+        gate = _FakeGate({"data": [{"id": "gpt-x"}]})
+        with patch("core.egress.get_gate", return_value=gate):
+            adapter = OpenAICompatibleAdapter(
+                provider_id="openai_cloud", base_url=given, kind=ProviderKind.CLOUD_API
+            )
+            asyncio.run(adapter.discover_models(timeout=1.0))
+
+        assert gate.calls == ["http://provider.test/v1/models"], (
+            f"{given} asked for {gate.calls}"
+        )
+
+
 def test_lm_studio_adapter_defaults():
     assert LMStudioAdapter().provider_id == "lm_studio"
     assert LMStudioAdapter().base_url == "http://127.0.0.1:1234"

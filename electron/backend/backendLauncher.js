@@ -4,24 +4,59 @@ const path = require('path');
 const { checkHealth } = require('./health');
 
 /**
+ * Where the interpreter lives inside a packaged install.
+ *
+ * Unpacked beside the app rather than inside `app.asar`, because an archived
+ * file cannot be executed and a bundled CPython has to be. `extraResources` in
+ * `electron-builder.yml` is what puts it here.
+ */
+const BUNDLED_RUNTIME_DIR = 'runtime';
+
+function bundledPython(root, plat) {
+  return plat === 'win32'
+    ? path.join(root, BUNDLED_RUNTIME_DIR, 'python.exe')
+    : path.join(root, BUNDLED_RUNTIME_DIR, 'bin', 'python3');
+}
+
+/**
  * Resolves the Python interpreter to launch the backend.
  *
- * Order: ZARAM_PYTHON env -> project venv -> python3 -> python.
+ * Order: ZARAM_PYTHON -> bundled runtime -> development venv.
  * Kept pure (no child_process import at top level) so it can be unit tested.
  *
+ * **A stranger has no Python, and that was the blocker.** This used to look for
+ * `ZARAM_PYTHON`, then a `.venv`, then `python` on PATH — three things that
+ * exist only on a developer's machine. The packaged app would install
+ * correctly and then never start.
+ *
+ * **PATH is deliberately not a fallback.** Finding *some* Python on a stranger's
+ * machine is worse than finding none: it will be the wrong version, without the
+ * backend's dependencies, and the failure arrives later and reads as a broken
+ * product rather than a missing runtime. Not finding an interpreter is a clear
+ * error; finding the wrong one is a confusing one.
+ *
  * @param {object} opts
- * @param {string} opts.cwd
+ * @param {string} opts.cwd            backend directory (where main.py lives)
+ * @param {string} [opts.resourcesPath] packaged resources dir, if packaged
  * @param {Record<string,string>} [opts.env]
  * @param {string} [opts.platform]
  * @returns {string}
  */
-function resolvePythonCommand({ cwd, env, platform }) {
+function resolvePythonCommand({ cwd, resourcesPath, env, platform }) {
   const e = env || process.env;
   if (e.ZARAM_PYTHON) return e.ZARAM_PYTHON;
 
-  // `cwd` here is the backend directory (where main.py lives). The venv may
-  // live alongside it (dev) or at the repo root (packaged layouts).
   const plat = platform || process.platform;
+
+  // The bundled runtime wins over any venv. In a packaged install it is the
+  // only interpreter present; on a developer machine that has both, shipping
+  // behaviour is what should be exercised by default.
+  const roots = [resourcesPath, path.join(cwd, '..'), cwd].filter(Boolean);
+  for (const root of roots) {
+    const candidate = bundledPython(root, plat);
+    if (fsExistsSync(candidate)) return candidate;
+  }
+
   const venvLocal = plat === 'win32'
     ? path.join(cwd, '.venv', 'Scripts', 'python.exe')
     : path.join(cwd, '.venv', 'bin', 'python');
@@ -124,6 +159,7 @@ class BackendLauncher {
     const backendDir = this._resolveBackendDir();
     const command = resolvePythonCommand({
       cwd: backendDir,
+      resourcesPath: this.config.resourcesPath,
       env: process.env,
       platform: this._platform,
     });
@@ -240,4 +276,10 @@ class BackendLauncher {
   }
 }
 
-module.exports = { BackendLauncher, resolvePythonCommand, buildArgs };
+module.exports = {
+  BackendLauncher,
+  resolvePythonCommand,
+  buildArgs,
+  bundledPython,
+  BUNDLED_RUNTIME_DIR,
+};

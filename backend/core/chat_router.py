@@ -1,5 +1,27 @@
+"""Routing a chat request to the engine that answers it.
+
+**Both streams below drive a synchronous generator from an async one, and that
+seam is load-bearing.** The engine, the providers and the egress gate are all
+ordinary blocking code. Iterated with a plain ``for`` inside an ``async def``,
+every one of their blocking steps runs on the event loop thread — which means
+the server cannot answer anything else until the token arrives.
+
+That was survivable while every step was fast and local. It stopped being
+survivable the moment the egress gate learned to ask: the confirm hook blocks
+until a person answers, the person answers through ``/egress/pending``, and a
+frozen event loop cannot serve the endpoint that would release it. Observed
+rather than reasoned about — the whole backend, ``/health`` included, went
+unresponsive for the full confirmation timeout, and the log then recorded the
+timeout as though the user had refused.
+
+So the sync generator is iterated in a worker thread. `iterate_in_threadpool`
+runs each ``__next__`` off the loop, which costs one pooled thread per active
+stream and keeps the process answering while a question is on screen.
+"""
+
 import os
 from dotenv import load_dotenv
+from starlette.concurrency import iterate_in_threadpool
 from typing import AsyncGenerator, Any
 
 load_dotenv()
@@ -50,13 +72,17 @@ class ChatRouter:
 
         The engine yields plain strings for response tokens and StreamEvent
         objects for structured output such as provenance; both are forwarded.
+
+        Iterated off the event loop — see the module docstring. The engine can
+        block for a long time inside one `next()`, and while it does, the loop
+        has to keep serving the endpoints that end the wait.
         """
         from core.streaming_events import StreamEvent, EventType
         try:
             yield StreamEvent.start().to_ipc() + "\n"
-            for item in self.execution_engine.execute(
+            async for item in iterate_in_threadpool(self.execution_engine.execute(
                 text, model, system_prompt, session_id, project_id=project_id
-            ):
+            )):
                 if isinstance(item, StreamEvent):
                     yield item.to_ipc() + "\n"
                 else:
@@ -67,12 +93,21 @@ class ChatRouter:
         yield StreamEvent.done().to_ipc() + "\n"
 
     async def _legacy_stream(self, text: str, model: str, system_prompt: str = "") -> AsyncGenerator:
-        """Transforms legacy ConversationManager events into structured StreamEvents."""
+        """Transforms legacy ConversationManager events into structured StreamEvents.
+
+        Off the event loop for the same reason as the kernel stream. This path
+        talks to Ollama, which is loopback and never reaches the confirm hook —
+        but it blocks the loop for the length of every generation regardless,
+        and leaving one of the two chat paths able to freeze the server is the
+        kind of asymmetry that gets found by a user rather than by a test.
+        """
         from core.streaming_events import StreamEvent, EventType
         import json
         try:
             yield StreamEvent.start().to_ipc() + "\n"
-            for event in self.legacy_generator_func(text, model, system_prompt):
+            async for event in iterate_in_threadpool(
+                self.legacy_generator_func(text, model, system_prompt)
+            ):
                 if isinstance(event, dict):
                     etype = event.get("type")
                     if etype == "token":

@@ -35,12 +35,24 @@ class KernelBootstrapper:
             EgressPolicy,
             default_log_path,
             default_policy_path,
+            get_pending,
             set_gate,
         )
 
         log = EgressLog(default_log_path())
         policy = EgressPolicy(default_policy_path())
         gate = EgressGate(log, policy)
+
+        # The hook is installed here, with the gate, rather than by whoever
+        # happens to serve the dialog. A gate that exists without one refuses
+        # every `ask` host — correct as a resting state, and the wrong thing to
+        # leave running once there is an interface that can answer.
+        #
+        # Resolved per call rather than bound once. `get_pending().ask` would
+        # capture whichever instance existed at boot, so a later `set_pending`
+        # would leave the gate asking a store nothing is watching — the question
+        # invisible to the dialog, and the answer to it a two-minute timeout.
+        gate.set_confirm(lambda request: get_pending().ask(request))
         set_gate(gate)
 
         days = int(os.getenv("ZARAM_EGRESS_RETENTION_DAYS", "30"))
