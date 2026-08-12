@@ -13,6 +13,29 @@ accurate — it is the first thing anyone reads.
 
 ## Current state — 12 August 2026
 
+> ### Pushed. `Zaram-V0.1` is at `1366ab9`, 51 commits ahead of `main`.
+>
+> **A later session added nine feature commits and pushed the branch.** The PR
+> was not opened: `gh` is not installed on this machine, and no PR should be
+> claimed that does not exist. The compare link is
+> `github.com/Uchayanisiuba/Zaram/compare/main...Zaram-V0.1?expand=1`.
+>
+> **Read "The next task" below before starting anything.** The first-run screen
+> is specified down to its payload, and its backend half is already built and
+> tested — what is left is a React component, not a design problem.
+>
+> Suites: **1848 backend passed / 0 failed**, 76 skipped, 1924 collected. The
+> skips are the voice and mic extras plus the opt-in scale eval, each naming
+> its own reason; they are environmental, not rot.
+>
+> **A number in this block was invented once today and caught by running the
+> suite.** A handoff claimed 1835 passing without measuring, and a subagent
+> given it as a baseline found the tree 17 tests short and holding a failure
+> the figure did not show. Every count here is now from a run. This is the
+> file's own lesson about stale numbers, arriving from the other direction:
+> a *fabricated* number is worse than a stale one, because nothing about it
+> looks old.
+>
 > ### The session is committed, on `Zaram-V0.1`, unpushed.
 >
 > Committed in coherent pieces, re-verified green before staging rather than on
@@ -337,6 +360,63 @@ exe's icon and version metadata, which is also the step that applies
 `host:path` and tries SSH. Git for Windows puts GNU tar on PATH while Windows
 ships bsdtar, so *which tar answers* decides whether a build works. Use relative
 paths.
+
+### The next task — first run and Settings, as one block
+
+**Settings has no toggles at all, and that was deliberate.**
+`SettingsWorkspace.tsx` is a read-only report built from `GET /health`, and its
+own docstring gives the reason: a settings screen full of inert switches tells
+the user they have control they do not have, which on a privacy product is the
+worst thing to be wrong about. That was right when nothing behind it worked. It
+is now the single thing holding the most value back — **seven working
+capabilities are stranded behind one screen**: the cloud key, per-source egress
+policy, egress retention, export, the first-run offers, device pairing, and the
+three tiers of routing control.
+
+Memory is the exception and already works end to end — correct, delete, forget,
+pin and scope are all wired in `MemoryWorkspace.tsx`. Rule 4 is honoured today.
+
+**Start with the first-run screen. Its backend is done and there is no logic
+left to invent.** `GET /readiness` returns exactly:
+
+```json
+{ "readiness": "no_engine | engine_without_model | ready",
+  "summary": "one line, plain language, no model filenames",
+  "can_chat": false,
+  "offers": [ { "kind": "install_engine | pull_model | use_cloud_key | explore",
+                "label": "...", "detail": "...",
+                "download_bytes": 1201483776, "download_label": "1.1 GB" } ],
+  "still_works": [ "Add documents to Knowledge — …", "…" ] }
+```
+
+The screen is a render of that payload. Rules it must not break, each already
+enforced on the backend side and easy to undo in the UI:
+
+* **Never show a dead composer.** Every unready state carries offers; render
+  them. `still_works` exists so the screen reads as unconfigured rather than
+  broken, and it is the difference between someone exploring and someone
+  uninstalling.
+* **Show `download_label` on the button itself**, not behind a tooltip. Naming
+  a fix without naming its price is not a choice someone on a metered
+  connection can make.
+* **`download_bytes` of `null` means nothing is fetched.** Render no size at
+  all — not "0 MB", which reads as free rather than as absent.
+* **No model filenames anywhere in the primary path.** There is a backend test
+  asserting the strings are clean; do not reintroduce them in the component.
+* **Choosing an offer must not act on its own.** `/readiness` reports and never
+  fetches, by design and by test. The executor that performs an install or a
+  pull does not exist yet and is the next piece after the screen.
+
+Then the **cloud key field**, which is the smallest change that unblocks the
+friend test: anyone with a key can use Zaram without installing Ollama at all.
+Recommended shape is Electron `safeStorage` (DPAPI on Windows) with the value
+passed to the Python child as `ZARAM_OPENAI_KEY`, which is what the backend
+already reads — **so no backend change is needed**. Never expose an endpoint
+that returns a key; the local API has no authentication.
+
+Order after that: export button, per-source privacy and retention, the
+*Prefer local · Auto · Prefer cloud* control, then linked devices — which needs
+the pairing endpoints written first.
 
 ### What is next
 
