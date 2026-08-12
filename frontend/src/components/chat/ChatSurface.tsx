@@ -15,6 +15,8 @@ import { motion, AnimatePresence, type Variants } from 'framer-motion';
 import { Send } from 'lucide-react';
 import ArtifactCard from '@/components/ArtifactCard';
 import NoticeCard from '@/components/chat/NoticeCard';
+import FirstRunPanel from '@/components/firstrun/FirstRunPanel';
+import { useReadiness, setupToOffer } from '@/hooks/useReadiness';
 import { useConversationStore } from '@/stores/conversationStore';
 import { useChatStore } from '@/stores/chatStore';
 import { useSourceStore } from '@/stores/sourceStore';
@@ -67,6 +69,18 @@ export default function ChatSurface() {
   // takes less width than on the landing, where it is the main event. Each
   // context keeps its own remembered size.
   const context = useChatModeStore((s) => s.context);
+  const closeChat = useChatModeStore((s) => s.closeChat);
+
+  // Whether there is anything to answer with. Asked when the conversation
+  // opens, because that is the moment it matters and the moment the answer can
+  // have changed — someone who installs a model and comes back finds the
+  // composer, with nothing to dismiss and no decision remembered anywhere.
+  //
+  // `setupToOffer` returns null unless the backend said plainly that chat
+  // cannot work, so a slow or unreachable probe leaves the composer exactly
+  // where it was.
+  const readiness = useReadiness();
+  const setupNeeded = setupToOffer(readiness);
   const landingFraction = useLayoutStore((s) => s.chatFraction);
   const workspaceFraction = useLayoutStore((s) => s.chatFractionWorkspace);
   const chatFraction = context === 'workspace' ? workspaceFraction : landingFraction;
@@ -268,6 +282,15 @@ export default function ChatSurface() {
         </div>
       )}
 
+      {/* Nothing to answer with. The offers stand where the composer stands —
+          a box that accepts text and produces nothing is how a new user decides
+          the product is broken, and it is the one impression there is no second
+          chance at. Never render both: an input under an explanation of why
+          there is no input is still an input, and it will be typed into. */}
+      {setupNeeded ? (
+        <FirstRunPanel report={setupNeeded} onExplore={closeChat} />
+      ) : (
+        <>
       {/* Transcript */}
       <motion.div ref={scrollRef} className="flex-1 overflow-y-auto" variants={item}>
         <div className="flex flex-col gap-4 p-6">
@@ -463,6 +486,8 @@ export default function ChatSurface() {
           <ProjectScopePicker />
         </div>
       </motion.div>
+        </>
+      )}
 
       {/* The citation panel, anchored beside the conversation. */}
       <AnimatePresence>
