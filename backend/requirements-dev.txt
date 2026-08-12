@@ -1,0 +1,47 @@
+# Zaram backend — development tooling. NOT part of an install.
+#
+# **83.5 MB measured, not estimated.** An earlier note in docs/MILESTONES.md
+# guessed "probably 30–40 MB"; mypy alone is 42.1 MB and ruff is 32.9 MB, so
+# the guess was under by more than half. That is the whole argument for the
+# split — M11's acceptance is a stranger reaching a cited answer in under ten
+# minutes, and a tenth of the base install was a type checker and a linter that
+# no running product has ever imported.
+#
+#     mypy            42.1 MB
+#     ruff            32.9 MB
+#     wcwidth          4.5 MB   (via prettytable, via pip-licenses)
+#     pytest           3.2 MB
+#     everything else  0.8 MB
+#
+# Nothing shipped imports any of these — asserted, not assumed, by
+# backend/tests/test_installer_payload.py's sibling check on the payload and by
+# a source scan that found no `import pytest` outside tests.
+#
+# The transitive entries below are here because each is required *only* by a
+# tool above it: iniconfig and pluggy by pytest, mypy_extensions by mypy,
+# prettytable by pip-licenses, wcwidth by prettytable. Verified by reading
+# every declared dependency in the environment rather than by assuming.
+#
+# `typing_extensions` deliberately stays in requirements.txt: twenty-odd
+# runtime packages need it, including fastapi, pydantic, uvicorn and starlette.
+#
+#     pip install -r backend/requirements.txt -r backend/requirements-dev.txt
+#
+# Not yet verified by a clean install. The remaining check is a fresh venv with
+# requirements.txt alone that boots the backend and answers — see M11.
+iniconfig==2.3.0
+mypy==2.2.0
+mypy_extensions==1.1.0
+pip-licenses==5.5.5
+pluggy==1.6.0
+prettytable==3.18.0
+pytest==9.1.1
+pytest-asyncio==1.4.0
+ruff==0.15.22
+# A leftover: pip-licenses dropped it, nothing declares it, and no module in
+# this repo imports it. Kept pinned here rather than deleted outright, because
+# "no dependent in the metadata" is the exact reading that once recommended
+# removing spaCy — which misaki reaches at runtime without declaring it. The
+# clean-install check is what settles this one.
+tabulate==0.10.0
+wcwidth==0.8.2
