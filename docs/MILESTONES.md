@@ -13,28 +13,42 @@ accurate — it is the first thing anyone reads.
 
 ## Current state — 12 August 2026
 
-> ### Pushed. `Zaram-V0.1` is at `1366ab9`, 51 commits ahead of `main`.
+> ### The first-run screen is built — `b243e17`, with this docs commit on top
+> of it. That leaves `Zaram-V0.1` **55 commits ahead of `origin/main`**, two of
+> them unpushed. (A hash for the docs commit is deliberately not written here:
+> the first version of this line named one, and amending the commit to correct
+> a count changed the hash out from under it.)
 >
-> **A later session added nine feature commits and pushed the branch.** The PR
-> was not opened: `gh` is not installed on this machine, and no PR should be
-> claimed that does not exist. The compare link is
-> `github.com/Uchayanisiuba/Zaram/compare/main...Zaram-V0.1?expand=1`.
+> The screen that "The next task" specifies now exists and has been driven
+> against the running product in both unready states. **Read "What is next"
+> rather than "The next task"** — that section has been rewritten to say what
+> is left, which is the executor behind the offers.
 >
-> **Read "The next task" below before starting anything.** The first-run screen
-> is specified down to its payload, and its backend half is already built and
-> tested — what is left is a React component, not a design problem.
+> Suites, all measured this session: **1915 backend passed / 0 failed**, 9
+> skipped, 1924 collected. **116 frontend** across 17 files. **30 Electron**.
 >
-> Suites: **1848 backend passed / 0 failed**, 76 skipped, 1924 collected. The
-> skips are the voice and mic extras plus the opt-in scale eval, each naming
-> its own reason; they are environmental, not rot.
+> **Three numbers in the block this replaces were wrong, in three different
+> ways, and each is worth a line.**
 >
-> **A number in this block was invented once today and caught by running the
-> suite.** A handoff claimed 1835 passing without measuring, and a subagent
-> given it as a baseline found the tree 17 tests short and holding a failure
-> the figure did not show. Every count here is now from a run. This is the
-> file's own lesson about stale numbers, arriving from the other direction:
-> a *fabricated* number is worse than a stale one, because nothing about it
-> looks old.
+> *Stale by environment.* It read 1848 passed / 76 skipped against the same
+> 1924 collected. Nothing about the backend changed; the voice and mic extras
+> are installed in this shell and were not in that one. The file already says
+> to read the skip count as a fact about the environment — this is what that
+> looks like from the other side, and the total is what stays constant.
+>
+> *Stale by measurement.* "51 commits ahead of `main`" is 142 if you measure it
+> against local `main`, which is at `7a4a89d` and dates from 26 July. The
+> figure that means anything is against `origin/main`.
+>
+> *Contradicted by history.* "The PR was not opened" is no longer true and had
+> already stopped being true: `origin/main` is `d29b19b`, **"Merge pull request
+> #1 from Uchayanisiuba/Zaram-V0.1", 10 August**. The branch has been merged
+> once and has run ahead again since. `gh` is still not installed here, so this
+> is read from the commit graph rather than from GitHub.
+>
+> The earlier note about a *fabricated* 1835 stands and is worth keeping: a
+> made-up number is worse than a stale one, because nothing about it looks old.
+> Every count in this block is from a run.
 >
 > ### The session is committed, on `Zaram-V0.1`, unpushed.
 >
@@ -361,7 +375,67 @@ exe's icon and version metadata, which is also the step that applies
 ships bsdtar, so *which tar answers* decides whether a build works. Use relative
 paths.
 
-### The next task — first run and Settings, as one block
+### First run is built — what it does, and the half that is still missing
+
+`b243e17`. The screen below is no longer the next task; it exists. It is
+`FirstRunPanel`, and it renders **in place of the composer** inside the
+conversation rather than as a modal over the landing — the failure is explained
+at the exact spot where it would otherwise be silent, and there is nothing to
+dismiss and no decision remembered anywhere. `useReadiness` asks on every mount
+of the conversation, so someone who sets a model up and comes back finds the
+composer without touching a setting. Rule 7e: measure what happened rather than
+asking the user to predict it.
+
+**Doubt renders chat.** `setupToOffer` takes the composer away only on a known
+`can_chat: false`. Still checking, or unable to ask, both leave it — and the
+second is the one a later reader will want to collapse. "The probe failed, so
+nothing is set up" is a reasonable-sounding inference and it is wrong: a failed
+fetch says nothing about whether a model is installed. It is pure and exported
+so the two states that must do nothing are asserted, since they differ only in
+what they refuse to claim.
+
+**Of the four offer kinds, exactly one can be carried out, and that is the
+whole of what is left.** Looking around is a navigation and needs nothing
+behind it. Install, pull and store-a-key each need an executor that does not
+exist, so they are disabled and say why in a sentence. They are **not**
+actionable buttons that swallow a click, and no instruction was invented to
+fill the gap — a command to type or a site to visit would be a value in the
+interface that nothing else in the product maintains, which is the
+hardcoded-status-indicator failure by another route. `canBeCarriedOut()` in
+`FirstRunPanel.tsx` is the single place a new executor is admitted.
+
+**The wording was wrong first, and reading the rendered text is what showed
+it** — not reading the code, and not the tests, which were green either way. A
+shouted pill beside the label, `SET UP OUTSIDE ZARAM FOR NOW`, read as jargon,
+and it sat directly above a detail line promising "installs the engine that
+runs models on your own machine" on a button that installs nothing. The
+sentence moved under the detail: the detail says what the option *is*, the line
+below says why the button will not do it.
+
+**`/readiness` was missing from the Vite proxy**, exactly as `/projects` was,
+and that failure is silent — the dev server answers 200 with `index.html`, so
+nothing errors. `frontend/src/services/proxied.test.ts` now reads the literal
+`${API_BASE}` paths out of every service client and the rule keys out of
+`vite.config.js` and requires a prefix match. Mutation-tested by deleting the
+rule.
+
+**Two things about verifying it here, so the next session does not chase
+them.** The backend on 8420 was stale *again* — started 11:49, predating the
+`/readiness` route, so the endpoint 404'd through it while answering fine on a
+fresh process. Third recurrence; check `build.commit_short` first, always. And
+the browser pane in this environment does not composite frames, so there is no
+screenshot and `AnimatePresence` exits never complete: after "Look around
+first" the panel stays in the DOM even though the store has closed the
+conversation, which `LandingHint` reappearing confirms. That is the
+environment, not a leak.
+
+Both unready states were driven against the running product with payloads from
+the shipped `diagnose()`: composer gone, `1.1 GB` and `397 MB` on their
+buttons, no size at all on the two that fetch nothing, `still_works` listed.
+The ready state was checked live through the proxy and leaves the composer
+alone.
+
+### The rest of the block this was the first item in
 
 **Settings has no toggles at all, and that was deliberate.**
 `SettingsWorkspace.tsx` is a read-only report built from `GET /health`, and its
@@ -376,8 +450,9 @@ three tiers of routing control.
 Memory is the exception and already works end to end — correct, delete, forget,
 pin and scope are all wired in `MemoryWorkspace.tsx`. Rule 4 is honoured today.
 
-**Start with the first-run screen. Its backend is done and there is no logic
-left to invent.** `GET /readiness` returns exactly:
+**The first-run screen is built — the payload below is kept because the rules
+under it still bind, and because the executor will be written against the same
+shape.** `GET /readiness` returns exactly:
 
 ```json
 { "readiness": "no_engine | engine_without_model | ready",
@@ -389,8 +464,10 @@ left to invent.** `GET /readiness` returns exactly:
   "still_works": [ "Add documents to Knowledge — …", "…" ] }
 ```
 
-The screen is a render of that payload. Rules it must not break, each already
-enforced on the backend side and easy to undo in the UI:
+The screen is a render of that payload. Rules it must not break — each already
+enforced on the backend side, each now asserted in
+`FirstRunPanel.test.tsx`, and every one of them still a single careless edit
+away from being lost:
 
 * **Never show a dead composer.** Every unready state carries offers; render
   them. `still_works` exists so the screen reads as unconfigured rather than
@@ -405,7 +482,13 @@ enforced on the backend side and easy to undo in the UI:
   asserting the strings are clean; do not reintroduce them in the component.
 * **Choosing an offer must not act on its own.** `/readiness` reports and never
   fetches, by design and by test. The executor that performs an install or a
-  pull does not exist yet and is the next piece after the screen.
+  pull **still does not exist, and is now the next piece.** Three of the four
+  offers are disabled until it does. Order of tractability: `pull_model` is a
+  `POST` driving `OllamaAdapter` with progress; `use_cloud_key` needs Electron
+  `safeStorage` and a relaunch of the Python child, since the backend reads the
+  key from its environment at start and a running process cannot see a change;
+  `install_engine` means fetching and running an installer and is the largest
+  by a wide margin.
 
 Then the **cloud key field**, which is the smallest change that unblocks the
 friend test: anyone with a key can use Zaram without installing Ollama at all.
@@ -420,6 +503,13 @@ the pairing endpoints written first.
 
 ### What is next
 
+0. **The offer executor.** The first-run screen states what is missing and can
+   act on exactly one of the four things it offers. Until something carries out
+   a pull, an install or a stored key, a fresh user's only working choice is to
+   look around — which is honest, and thin. `pull_model` first: it is the
+   smallest, it is the state a user reaches *after* installing the engine, and
+   it is the one where a stated size becomes a real download the user agreed to.
+   Admit it in `canBeCarriedOut()`.
 1. **Run the installer on a machine that has never seen this repo.** The
    installer itself now exists — `dist-electron/Zaram-0.1.0-x64.exe`, 186 MB —
    and its payload has been checked against the built tree, so what that run
