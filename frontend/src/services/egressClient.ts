@@ -144,6 +144,71 @@ export async function forgetEgressPolicy(host: string): Promise<void> {
   await json(`/egress/policy/${encodeURIComponent(host)}`, { method: 'DELETE' });
 }
 
+/**
+ * A request parked inside the gate, waiting for the user to answer.
+ *
+ * The thread that produced this is blocked on it: the model is not thinking,
+ * the reply is not streaming, and nothing has been logged or sent. That is the
+ * whole design — the decision happens before the bytes move, not after.
+ */
+export interface PendingEgress {
+  id: string;
+  host: string;
+  method: string;
+  url: string;
+  body: string | null;
+  /** Exactly what would go on the wire. The dialog shows this, not a summary. */
+  literalText: string;
+  byteCount: number;
+  /** Which part of Zaram is asking — "chat", a tool name. */
+  source: string;
+  /** Unix seconds, for ordering when more than one is waiting. */
+  createdAt: number;
+}
+
+export async function fetchPendingEgress(): Promise<PendingEgress[]> {
+  const raw = await json<{ pending: Array<Record<string, unknown>> }>('/egress/pending');
+  return (raw.pending ?? []).map((p) => ({
+    id: String(p.id),
+    host: String(p.host),
+    method: String(p.method),
+    url: String(p.url),
+    body: p.body == null ? null : String(p.body),
+    literalText: String(p.literal_text ?? p.url),
+    byteCount: Number(p.byte_count ?? 0),
+    source: String(p.source ?? 'unknown'),
+    createdAt: Number(p.created_at ?? 0),
+  }));
+}
+
+/**
+ * Answer a waiting request.
+ *
+ * `body` is what the user approved after editing — omit it to send the request
+ * unchanged. Omitting is meaningfully different from passing the same string
+ * back: an unedited body keeps its original bytes, while an edit is
+ * re-serialised, and the two are only guaranteed identical for text that
+ * survives a round trip.
+ *
+ * Resolves `false` when there was nothing left to answer, which is the normal
+ * outcome of a double-click or of a dialog that sat open past the timeout. It
+ * is not an error worth showing — the request was already refused.
+ */
+export async function decidePendingEgress(
+  id: string,
+  approved: boolean,
+  body?: string,
+): Promise<boolean> {
+  const res = await fetch(`${API_BASE}/egress/pending/${encodeURIComponent(id)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ approved, body: body ?? null }),
+  });
+  if (res.status === 404) return false;
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  return true;
+}
+
 export interface RetentionResult {
   removed: number;
   remaining: number;

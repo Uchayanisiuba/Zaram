@@ -1,5 +1,6 @@
 import { Search, ChevronRight } from 'lucide-react'
 import OrbStatus from '@/components/orb/OrbStatus'
+import ZaramMark from '@/components/brand/ZaramMark'
 
 import { REGISTRY, chordTokens, detectPlatform, surfaceLabels } from '@/runtime/shortcuts/registry'
 import type { Shortcut, WorkspaceId } from '@/runtime/shortcuts/registry'
@@ -21,9 +22,11 @@ interface TopNavProps {
   onSearchOpen: () => void
   /** Leave the workspace and open the conversation at full size. */
   onOpenConversation: () => void
+  /** Return to the landing with the conversation closed. The mark's job. */
+  onHome: () => void
 }
 
-export default function TopNav({ workspace, onSearchOpen, onOpenConversation }: TopNavProps) {
+export default function TopNav({ workspace, onSearchOpen, onOpenConversation, onHome }: TopNavProps) {
   const isLanding = workspace === 'landing'
   const commandChord = chordTokens(commandShortcut, detectPlatform())
 
@@ -42,19 +45,14 @@ export default function TopNav({ workspace, onSearchOpen, onOpenConversation }: 
         zIndex: 50,
       }}
     >
-      {/* Left: breadcrumb */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 64, minWidth: 200 }}>
-        <span
-          style={{
-            fontFamily: 'var(--font-display)',
-            fontSize: 'var(--text-h1)',
-            fontWeight: 600,
-            letterSpacing: '0.02em',
-          }}
-          className="text-gradient-orb"
-        >
-          Zaram
-        </span>
+      {/* Left: the mark, then the breadcrumb.
+          The mark was a static wordmark and is now the route home — see
+          ZaramMark for why it returns to the landing rather than opening the
+          conversation. */}
+      {/* 20px, not the 64 this used when it held a wordmark. A gap sized for a
+          six-letter word reads as a hole once only the icon is there. */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 20, minWidth: 200 }}>
+        <ZaramMark onHome={onHome} />
         {!isLanding && (
           <>
             <ChevronRight size={24} style={{ color: 'var(--color-text-faint)' }} />
