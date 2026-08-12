@@ -431,15 +431,36 @@ relevance-and-trust score (the blend-versus-threshold bug, three times), and a
 graph database (a stranger cannot install it). Two parts are better than what
 exists:
 
-* **Supersession.** Storing an old belief and a new one and letting retrieval
-  choose is how contradictions accumulate silently. The correction should mark
-  the old superseded. This is already a known gap: M10's acceptance asked for
-  edits "written through as supersessions" and it was deliberately not built.
-* **Ingest is an unguarded path into memory.** The rule that a tool description
-  is third-party text applies equally to a document that becomes a fact. This
-  matters now that obligations are extracted from documents: a hostile PDF is a
-  way to plant a commitment in someone's week. Nothing retrieved or ingested
-  may widen what the system will act on without the user seeing it.
+* **Supersession — built, as detection.** The *recording* half already existed
+  and is good: `correct()` writes a replacement, marks the original superseded,
+  drops it from the index and keeps it visible struck through. What never
+  existed was anything that **noticed**, so the ordinary path was to store both
+  and let recall choose between "the target is developers" and "the target is
+  consumers" — a coin toss dressed as an answer.
+  `runtimes/memory/conflicts.py` reads simple assertions and reports
+  contradictions. **It resolves nothing**, and that division is the part most
+  likely to be argued away later: auto-resolving on recency is wrong about as
+  often as it is right, and auto-resolving on confidence lets a well-phrased
+  sentence in an uploaded PDF overwrite something the user said aloud. Both
+  fail silently and both destroy the record rule 4 protects.
+  **Scope is what makes it tractable**, and it is what the external designs
+  cannot express: two projects holding different payment terms is the normal
+  case, not a conflict, so a conflict requires the same scope. 20 tests.
+* **Ingest is an unguarded path into memory — the rule is now code.**
+  `core/untrusted.py`: only what the user typed may instruct, written as an
+  allow-list of one value so a channel added later is refused by omission
+  rather than permitted by it. `scan()` labels blatant injection attempts and
+  **never filters** — stripping suspicious text corrupts real documents and
+  teaches the user nothing, and a clean scan is explicitly not clearance.
+  This matters now rather than later because obligation and template
+  extraction both turn a file somebody else wrote into something Zaram acts
+  on: a hostile invoice is a way to put a deadline in someone's week or a
+  different bank account on their letterhead. 15 tests.
+
+  **Not yet wired.** The module is a boundary with no call sites — the ingest
+  path does not yet tag what it produces with a `Provenance`, and until it
+  does, this is a guard nobody has asked. That wiring is the next step and it
+  is the one that makes the rule real rather than stated.
 
 ### What changed, in one screen
 
