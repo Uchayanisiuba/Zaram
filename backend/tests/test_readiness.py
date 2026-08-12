@@ -140,6 +140,29 @@ class TestSerialisation:
         assert any(offer["download_label"] for offer in payload["offers"])
 
 
+def test_readiness_and_health_are_separate_routes():
+    """They answer different questions — "is the process alive" and "can the
+    product do its job" — and the desktop runtime health check reads the first.
+
+    Guarding it because adding `/readiness` above `/health` stacked both
+    decorators onto one function, which silently made `/health` return the
+    readiness payload. Nothing would have failed until the desktop health check
+    started misreading a running backend.
+    """
+    from main import app
+
+    routes = {
+        getattr(route, "path", None): getattr(route, "endpoint", None)
+        for route in app.routes
+    }
+
+    assert "/readiness" in routes
+    assert "/health" in routes
+    assert routes["/readiness"] is not routes["/health"]
+    assert routes["/health"].__name__ == "health"
+    assert routes["/readiness"].__name__ == "readiness"
+
+
 def test_nothing_in_this_module_touches_the_network():
     """Rule 7g: no network call before the user has consented to one — which
     includes the check for what is available. Diagnosis reports; the caller
