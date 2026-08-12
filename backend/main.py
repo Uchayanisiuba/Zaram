@@ -96,6 +96,17 @@ async def startup_event():
 @app.on_event("shutdown")
 async def shutdown_event():
     print("[Shutdown] Powering down Zaram Kernel...")
+
+    # First, and before anything that awaits. A thread parked inside the egress
+    # gate is waiting on an event only a browser can set, and a browser that is
+    # closing is not going to. Releasing them as denied is both the correct
+    # answer while shutting down and the reason the process can exit at all.
+    from core.egress import get_pending
+
+    released = get_pending().cancel_all()
+    if released:
+        print(f"[Shutdown] Denied {released} unanswered egress confirmation(s).")
+
     if spine_maintenance is not None:
         await spine_maintenance.stop()
     # No-op unless somebody actually used the microphone this session; the
@@ -667,6 +678,90 @@ async def apply_egress_retention(update: EgressRetentionUpdate):
             "Pruning is itself recorded, so the log can always show that entries "
             "were removed even though it can no longer show what they were."
         ),
+    }
+
+
+# --------------------------------------------------------------------------- #
+# Pending confirmations — the person answering the gate's question.
+#
+# `EgressGate.check` calls its confirm hook from the middle of a synchronous
+# decision, before anything is logged or sent, and blocks there. These three
+# endpoints are the other end of that block: what is waiting, and the decision
+# that releases it. Rule 6 in practice — the confirmation is the moment autonomy
+# is granted, and it is granted per request rather than once.
+#
+# Polled rather than pushed. The chat stream is exactly what stalls while a
+# question waits, so the notification cannot arrive on it, and a second channel
+# to carry one event would be more machinery than a poll the dialog runs only
+# while a request is in flight.
+# --------------------------------------------------------------------------- #
+
+
+@app.get("/egress/pending")
+async def egress_pending():
+    """Everything waiting on an answer, oldest first.
+
+    A list, because a chat reply and a tool call can be in flight together and
+    an interface built on the assumption of one would silently drop the second.
+    """
+    from core.egress import get_pending
+
+    waiting = get_pending().pending()
+    return {"pending": waiting, "count": len(waiting)}
+
+
+@app.get("/egress/pending/{confirmation_id}")
+async def egress_pending_one(confirmation_id: str):
+    """One waiting question, for a dialog that reopened and wants its subject.
+
+    404 once it has been decided. That is not an error state to paper over —
+    a question already answered is exactly what a second dialog must not be
+    able to answer again.
+    """
+    from core.egress import get_pending
+
+    found = get_pending().get(confirmation_id)
+    if found is None:
+        raise HTTPException(
+            status_code=404,
+            detail="That request is no longer waiting — it was answered, or it timed out.",
+        )
+    return found
+
+
+class EgressDecision(BaseModel):
+    approved: bool
+    #: The edited outbound text, or omitted to send it unchanged. Ignored on a
+    #: refusal: there is no such thing as editing something you are not sending.
+    body: str | None = None
+
+
+@app.post("/egress/pending/{confirmation_id}")
+async def decide_egress_pending(confirmation_id: str, decision: EgressDecision):
+    """Answer a waiting question, and release the thread holding it.
+
+    ``body`` is what the user approved after editing — striking a recalled fact
+    they did not want to send. The gate reads the body back after the hook
+    returns and logs it before sending, so what is shown, what is logged and
+    what goes on the wire are the same bytes. The frontend does not have to be
+    careful about that; it only has to send what the user approved.
+    """
+    from core.egress import get_pending
+
+    released = get_pending().decide(
+        confirmation_id, approved=decision.approved, body=decision.body
+    )
+    if not released:
+        # A double-click, a retry, or a dialog answering something that already
+        # timed out. Never approve a second send of text that has already gone.
+        raise HTTPException(
+            status_code=404,
+            detail="That request is no longer waiting — it was answered, or it timed out.",
+        )
+    return {
+        "id": confirmation_id,
+        "approved": decision.approved,
+        "edited": decision.approved and decision.body is not None,
     }
 
 
@@ -2034,6 +2129,27 @@ def get_personality(persona_id: str):
     }
 
 
+#: The address the API listens on. **Loopback, and not configurable.**
+#:
+#: This was `0.0.0.0` — every network interface — and `backendLauncher.js`
+#: starts the packaged app through exactly this path, so the shipped product
+#: would have published its API to whatever network the user was on. There is
+#: no authentication on any endpoint, so anyone able to reach port 8420 in a
+#: café, a hotel or a shared office could read the whole Spine through
+#: `/memory`, read the egress log, flip a host to `allow` through
+#: `/egress/policy`, and approve a pending confirmation. For a product whose
+#: claim is that your documents stay on your machine, that is the worst
+#: available bug.
+#:
+#: Not an environment variable, deliberately. A setting that re-opens this
+#: would be set once by someone debugging on a second device and then never
+#: unset — and the failure is silent, because everything keeps working.
+#: Someone who genuinely needs LAN access can change this line and own the
+#: decision. `test_backend_binds_loopback_only.py` asserts it.
+LISTEN_HOST = "127.0.0.1"
+LISTEN_PORT = 8420
+
+
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8420)
+    uvicorn.run(app, host=LISTEN_HOST, port=LISTEN_PORT)

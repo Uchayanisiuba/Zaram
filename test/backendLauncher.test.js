@@ -5,7 +5,7 @@ const assert = require('node:assert');
 const path = require('node:path');
 const { EventEmitter } = require('node:events');
 const { createConfig } = require('../electron/config');
-const { BackendLauncher, resolvePythonCommand, buildArgs } = require('../electron/backend/backendLauncher');
+const { BackendLauncher, resolvePythonCommand, buildArgs, bundledPython } = require('../electron/backend/backendLauncher');
 
 function fakeChild() {
   const c = new EventEmitter();
@@ -26,6 +26,77 @@ test('resolvePythonCommand: defaults to project venv', () => {
   );
 });
 
+/**
+ * A throwaway install layout on disk. Resolution is filesystem-dependent, and
+ * a mocked `existsSync` would only prove the mock agrees with itself.
+ */
+function fakeInstall({ runtime = false, platform = 'win32' }) {
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'zaram-runtime-'));
+  const backendDir = path.join(root, 'backend');
+  fs.mkdirSync(backendDir, { recursive: true });
+  fs.writeFileSync(path.join(backendDir, 'main.py'), '');
+
+  if (runtime) {
+    const exe = bundledPython(root, platform);
+    fs.mkdirSync(path.dirname(exe), { recursive: true });
+    fs.writeFileSync(exe, '');
+  }
+  return { root, backendDir, cleanup: () => fs.rmSync(root, { recursive: true, force: true }) };
+}
+
+test('resolvePythonCommand: prefers the bundled runtime', () => {
+  // The whole point of M11's runtime work: a machine with no Python still has
+  // an interpreter, because the installer brought one.
+  const { root, backendDir, cleanup } = fakeInstall({ runtime: true });
+  try {
+    assert.strictEqual(
+      resolvePythonCommand({ cwd: backendDir, env: {}, platform: 'win32' }),
+      bundledPython(root, 'win32'),
+    );
+  } finally {
+    cleanup();
+  }
+});
+
+test('resolvePythonCommand: finds the runtime via resourcesPath when packaged', () => {
+  const { root, backendDir, cleanup } = fakeInstall({ runtime: true });
+  try {
+    // In a packaged app the backend sits inside app.asar while the runtime is
+    // unpacked beside it, so the only path that reaches it is resourcesPath.
+    assert.strictEqual(
+      resolvePythonCommand({
+        cwd: path.join(root, 'app.asar', 'backend'),
+        resourcesPath: root,
+        env: {},
+        platform: 'win32',
+      }),
+      bundledPython(root, 'win32'),
+    );
+  } finally {
+    cleanup();
+  }
+});
+
+test('resolvePythonCommand: never falls back to PATH when nothing is found', () => {
+  // Finding some stranger's Python 3.9 is worse than finding none: it is the
+  // wrong version, it lacks the backend's dependencies, and it fails later in
+  // a way that reads as a broken product rather than a missing runtime.
+  const { backendDir, cleanup } = fakeInstall({ runtime: false });
+  try {
+    const resolved = resolvePythonCommand({ cwd: backendDir, env: {}, platform: 'win32' });
+    assert.notStrictEqual(resolved, 'python');
+    assert.notStrictEqual(resolved, 'python3');
+    assert.ok(
+      path.isAbsolute(resolved),
+      `expected an absolute path so the failure names a location, got ${resolved}`,
+    );
+  } finally {
+    cleanup();
+  }
+});
+
 test('resolvePythonCommand: honors ZARAM_PYTHON', () => {
   assert.strictEqual(
     resolvePythonCommand({ cwd: '/app', env: { ZARAM_PYTHON: '/usr/bin/python3' }, platform: 'linux' }),
@@ -33,10 +104,44 @@ test('resolvePythonCommand: honors ZARAM_PYTHON', () => {
   );
 });
 
-test('buildArgs: builds uvicorn launch args', () => {
-  assert.deepStrictEqual(buildArgs(8420), [
-    '-m', 'uvicorn', 'backend.main:app', '--host', '127.0.0.1', '--port=8420',
-  ]);
+test('buildArgs: launches the backend through its own entrypoint', () => {
+  // The launcher used to invoke uvicorn directly with an explicit
+  // `--host 127.0.0.1`. It now runs `main.py`, so that both `backend.main` and
+  // the relative `core`/`runtimes` imports resolve regardless of CWD.
+  assert.deepStrictEqual(buildArgs(8420), ['main.py']);
+});
+
+test('buildArgs: never asks the backend to listen beyond loopback', () => {
+  // **This assertion is the one that was lost, and losing it cost a real bug.**
+  //
+  // The previous version of this test hardcoded the full uvicorn argument list
+  // including `--host 127.0.0.1`. When the launcher changed to `main.py` the
+  // test began failing — and nothing in this repo ran it, because there was no
+  // script wired to `test/`. The loopback binding then quietly moved into
+  // `main.py`, where it was written as `0.0.0.0`: every network interface, on
+  // an API with no authentication.
+  //
+  // So this asserts the *property* rather than the argument list. It holds
+  // whether the launcher runs `main.py` or goes back to invoking uvicorn, which
+  // is what the old test could not do. The binding inside `main.py` is asserted
+  // separately by `backend/tests/test_backend_binds_loopback_only.py`; between
+  // the two there is no way to open the port to a network without a test
+  // objecting.
+  const args = buildArgs(8420);
+  const hostFlag = args.indexOf('--host');
+  if (hostFlag !== -1) {
+    const host = args[hostFlag + 1];
+    assert.ok(
+      host === '127.0.0.1' || host === 'localhost' || host === '::1',
+      `launcher would bind ${host}, which is reachable from other machines`,
+    );
+  }
+  for (const arg of args) {
+    assert.ok(
+      !String(arg).includes('0.0.0.0'),
+      `launcher argument ${arg} would bind every network interface`,
+    );
+  }
 });
 
 test('BackendLauncher: transitions to available when health ok', async () => {

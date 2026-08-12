@@ -58,6 +58,12 @@ def _policy_for(base_url: str) -> Optional[DataPolicy]:
     return None
 
 
+def _strip_version(base_url: str) -> str:
+    """The API root without a trailing `/v1`, however the user wrote it."""
+    trimmed = (base_url or "").strip().rstrip("/")
+    return trimmed[: -len("/v1")] if trimmed.endswith("/v1") else trimmed
+
+
 class OpenAICompatibleAdapter:
     """Discovers models from any OpenAI-compatible ``/v1/models`` endpoint."""
 
@@ -72,7 +78,15 @@ class OpenAICompatibleAdapter:
     ) -> None:
         self.provider_id = provider_id
         self.kind = kind
-        self.base_url = base_url.rstrip("/")
+        # `/v1` is stripped here and re-added by each path below, so a base URL
+        # given either way reaches the same place. The engine already accepts
+        # both — its docstring says so, because both are what providers print
+        # in their own dashboards — and the two halves of the cloud path
+        # disagreeing about one env var is how `ZARAM_OPENAI_ENDPOINT` ending
+        # in `/v1` produced a working chat and a discovery that asked for
+        # `/v1/v1/models`. Discovery then returned nothing, no cloud model was
+        # known, and routing sent every message local without saying why.
+        self.base_url = _strip_version(base_url)
         self._api_key = api_key
         self._data_policy = data_policy if data_policy is not None else _policy_for(base_url)
 

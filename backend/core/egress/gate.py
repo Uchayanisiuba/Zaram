@@ -112,6 +112,15 @@ class EgressRequest:
     url: str
     body: str | None
     source: str
+    #: Why the confirm hook said no, when it did not say no on the user's behalf.
+    #:
+    #: The log's default wording for a refusal is "you chose not to send this",
+    #: which is true when a person clicked the button and false in every other
+    #: way a confirmation can fail. A hook that could not reach anyone sets this
+    #: instead, so the record says what actually happened. An append-only,
+    #: tamper-evident log that confidently attributes a decision to a user who
+    #: never saw the question is worse than one that admits it does not know.
+    refusal_reason: str | None = None
 
     @property
     def literal_text(self) -> str:
@@ -195,7 +204,11 @@ class EgressGate:
 
         if decision.mode is Mode.ASK:
             if not self._confirm(req):
-                entry = self._record(req, "cancelled", "you chose not to send this")
+                entry = self._record(
+                    req,
+                    "cancelled",
+                    req.refusal_reason or "you chose not to send this",
+                )
                 raise EgressDenied(
                     f"The request to {host} was cancelled.",
                     host=host,

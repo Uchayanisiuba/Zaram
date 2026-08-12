@@ -17,10 +17,24 @@ test('staticServer: isApiRequest matches prefixes', () => {
 test('staticServer: serves built index and proxies API', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'zaram-static-'));
   fs.writeFileSync(path.join(dir, 'index.html'), '<html>app</html>');
+  // The fake must return a *web* ReadableStream body, because that is what
+  // `fetch` returns and what the proxy pipes. It used to return only
+  // `arrayBuffer()`, from when the proxy buffered the whole response — so this
+  // test failed the moment the proxy was changed to stream, and kept failing
+  // unseen because nothing ran it.
+  //
+  // Streaming is not an optimisation here: `/chat` emits tokens as they are
+  // generated, and buffering would hold the entire reply until the model
+  // finished. A fake that cannot stream cannot test the thing that matters.
   const fetchImpl = async () => ({
     status: 200,
     headers: { forEach: () => {} },
-    arrayBuffer: async () => new TextEncoder().encode('pong').buffer,
+    body: new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('pong'));
+        controller.close();
+      },
+    }),
   });
   const server = createStaticServer({
     staticDir: dir,

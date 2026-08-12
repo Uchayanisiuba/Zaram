@@ -33,6 +33,7 @@ already gone.
 
 from __future__ import annotations
 
+import asyncio
 import threading
 import time
 import uuid
@@ -75,7 +76,29 @@ class PendingConfirmations:
         refusal, a timeout, a shutdown — is False, because this function
         answers "may this leave?" and the safe reading of every ambiguity is
         no.
+
+        **Refuses immediately rather than blocking the event loop.** If this is
+        reached on the thread running asyncio, the server that would serve
+        `/egress/pending` is the server about to be frozen: the question could
+        never be delivered, no answer could arrive, and the only possible
+        outcome is a timeout — with the whole backend unresponsive until it
+        expires. That is not a hypothetical. The chat path drove a synchronous
+        engine from an async generator, `/health` stopped answering for the
+        full two minutes, and the log recorded the timeout as a user's refusal.
+        The call site was fixed; this is here so the next one fails in seconds
+        and says why, instead of hanging the product.
         """
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            pass  # No loop on this thread: blocking here costs one thread.
+        else:
+            request.refusal_reason = (
+                "Zaram could not ask you — the request was made in a way that "
+                "would have frozen the interface, so it was refused"
+            )
+            return False
+
         pending = _Pending(
             id=uuid.uuid4().hex[:12], request=request, created_at=time.time()
         )
@@ -88,6 +111,9 @@ class PendingConfirmations:
             self._waiting.pop(pending.id, None)
 
         if not answered:
+            request.refusal_reason = (
+                "nobody answered in time, so Zaram did not send it"
+            )
             return False
         if not pending.approved:
             return False
@@ -151,6 +177,11 @@ class PendingConfirmations:
             waiting = list(self._waiting.values())
             for pending in waiting:
                 pending.approved = False
+                # Said on the record. Closing the machine is not the user
+                # declining, and the log should not claim it was.
+                pending.request.refusal_reason = (
+                    "Zaram was shutting down, so it was not sent"
+                )
                 pending.event.set()
             self._waiting.clear()
         return len(waiting)
