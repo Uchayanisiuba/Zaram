@@ -192,32 +192,34 @@ async def readiness():
     why `core.readiness` has no HTTP client of its own and a test asserting so.
     """
     import os
-    import urllib.request
 
     from core.readiness import diagnose
+    from providers.discoverers.ollama import OllamaAdapter
 
+    # Through the adapter, not a request of our own. The first version of this
+    # opened its own `urllib` connection and `test_no_module_opens_its_own_
+    # connection` failed it — correctly. The probe is loopback and genuinely not
+    # egress, but the chokepoint is structural on purpose: a module that opens
+    # its own socket is exactly how an unlogged path appears, and an exception
+    # granted for a local call is an exception the next author generalises.
     chat_models: list[str] = []
     engine_installed = False
     try:
-        # Short timeout. A machine without Ollama should reach the offer
-        # screen quickly, not sit on a spinner deciding it is broken.
-        with urllib.request.urlopen(
-            "http://127.0.0.1:11434/api/tags", timeout=1.5
-        ) as response:
-            engine_installed = True
-            payload = json.loads(response.read().decode("utf-8"))
-            for model in payload.get("models", []):
-                name = model.get("name", "")
-                # Embedding models cannot hold a conversation, and counting one
-                # as a chat model is how a user with only bge-m3 installed gets
-                # told they are ready and then meets a composer that answers
-                # nothing.
-                if name and "embed" not in name.lower() and "bge" not in name.lower():
-                    chat_models.append(name)
+        # Short timeout. A machine without Ollama should reach the offer screen
+        # quickly rather than sit on a spinner deciding it is broken.
+        discovered = await OllamaAdapter().discover_models(timeout=1.5)
+        engine_installed = bool(discovered)
+        for model in discovered:
+            name = model.id or model.display_name
+            # Embedding models cannot hold a conversation. Counting bge-m3 as a
+            # chat model is how someone with only embeddings installed is told
+            # they are ready and then meets a composer that answers nothing.
+            if name and "embed" not in name.lower() and "bge" not in name.lower():
+                chat_models.append(name)
     except Exception:
         # Unreachable means not installed *as far as this matters*. The
         # distinction between "absent" and "installed but not running" is real
-        # but not actionable differently: both need the same offer.
+        # and is not actionable differently: both need the same offer.
         engine_installed = False
 
     result = diagnose(
