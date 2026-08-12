@@ -346,8 +346,24 @@ paths.
    tests is install, first launch and the bundled interpreter finding itself
    under a different path. Take the portable build too; it isolates whether a
    failure is NSIS or the app. **Nothing else in M11 is unknown.**
-2. **Obligation extraction (M9a)** — not started, no module, and it is the half
-   the alpha measures.
+2. **Obligation extraction (M9a) — the extractor exists; nothing calls it yet.**
+   `backend/obligations/` reads payment, deliverable, expiry and renewal
+   clauses with the sentence each came from, resolves `net 30` against an issue
+   date, and returns a *question* rather than a commitment when it cannot
+   honestly resolve one — an ambiguous `03/04/2026`, a relative term with no
+   anchor, a date that does not exist. 28 tests.
+
+   What remains is everything around it: nothing calls it on ingest, there is
+   no store, no surface, and no reminder. The acceptance line — day 31, Zaram
+   says the payment is late, shows the clause, and has the follow-up drafted —
+   is not met and cannot be until obligations persist. Direction is deliberately
+   `UNKNOWN` until a caller supplies it, and the caller that knows is the ingest
+   path, via rule 7b's origin.
+
+   One bug worth carrying forward: the sentence splitter cut `£2,400.00` at the
+   decimal point, so precise figures extracted nothing while round ones worked.
+   It failed on realistic input and passed on tidy examples, which is why the
+   suite now holds a whole scruffy invoice rather than only single sentences.
 3. **The business base layer** — invoices exist; quotes, receipt capture,
    expense categorisation and the monthly picture do not. Largest remaining
    volume of v1 work and the most likely to be underestimated.
@@ -365,6 +381,65 @@ paths.
 
 **Blocked on the maintainer, and only this:** buying the OV certificate. Every
 day it is not begun adds a day to the end.
+
+### Documents as templates — agreed 12 August
+
+Asked for on 12 August — upload an existing invoice or letterhead and have
+Zaram produce new documents that look like the company's own. Agreed the same
+day, including the cut below.
+
+**The shape that is worth building, and the part that is not.** Exact layout
+cloning is refused, for the reason that already excluded an embedded office
+engine: reproducing an arbitrary `.docx` means reimplementing Word's layout,
+and a PDF carries no structure to reproduce at all. The failure mode is the
+specific one that matters — a *near* miss. A document 90% in the house style
+is worse than one obviously Zaram's, because the client notices the wrong font
+on something carrying their letterhead.
+
+What users want decomposes into three things that are reliable: **identity**
+(logo, trading name, address, accent colour), **boilerplate** (terms, footer,
+bank details, numbering scheme) and **conventions** (standard terms, currency).
+
+**The second and third are facts, not formatting**, and that is what makes this
+cheap: they belong in the Spine with provenance and scope, correctable under
+rule 4, rather than in a template store. Which means uploading three past
+invoices does not merely style new ones — it teaches Zaram the business.
+CLAUDE.md already promises Zaram "knows the client's rate, their terms, and
+that they pay late"; this is how that is true on day one instead of day ninety.
+It is the onboarding path for the business layer, not a formatting feature.
+
+`Letterhead` and `render_document` are the seam, and HTML-as-source-of-truth
+means a style profile is CSS variables plus masthead content. No new pipeline.
+
+Conditions, if it is built: a review step before first use — never silently
+adopt an extracted identity; refusal rather than approximation when a logo
+cannot be extracted cleanly; fonts matched to a bundled family **and said so**,
+since remote fonts are banned and embedding a licensed one is a licensing
+question; and per-project templates, which `scope` already allows. An uploaded
+template is a source in Knowledge under the per-source policy like any other.
+
+**The layout-cloning cut is accepted.** Everything above depends on it.
+
+### Two ideas worth taking from outside
+
+Read against an external memory-architecture proposal, 12 August. Most of it
+was already here under rules with recorded failures behind them, and four
+parts contradict things this repo has measured — a mandatory reranker (bought
+nothing at 1,000 documents, and `bge-reranker-v2-m3` cannot run through Ollama
+at all), a raw-dialogue experience log (rule 7d inverted), a merged
+relevance-and-trust score (the blend-versus-threshold bug, three times), and a
+graph database (a stranger cannot install it). Two parts are better than what
+exists:
+
+* **Supersession.** Storing an old belief and a new one and letting retrieval
+  choose is how contradictions accumulate silently. The correction should mark
+  the old superseded. This is already a known gap: M10's acceptance asked for
+  edits "written through as supersessions" and it was deliberately not built.
+* **Ingest is an unguarded path into memory.** The rule that a tool description
+  is third-party text applies equally to a document that becomes a fact. This
+  matters now that obligations are extracted from documents: a hostile PDF is a
+  way to plant a commitment in someone's week. Nothing retrieved or ingested
+  may widen what the system will act on without the user seeing it.
 
 ### What changed, in one screen
 
