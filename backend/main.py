@@ -178,6 +178,56 @@ class ChatRequest(BaseModel):
 # --- API ENDPOINTS ---
 
 
+@app.get("/readiness")
+async def readiness():
+    """Can Zaram answer yet, and if not, what should be offered.
+
+    Separate from `/health`, which reports whether the process is alive. This
+    answers a different question — whether the *product* can do its job — and
+    the first-run screen is built on it.
+
+    The Ollama probe is a loopback request to a process on this machine, so it
+    is not egress and rule 7g does not apply. Nothing here reaches the network:
+    the decision of whether to *fetch* anything stays with the user, which is
+    why `core.readiness` has no HTTP client of its own and a test asserting so.
+    """
+    import os
+    import urllib.request
+
+    from core.readiness import diagnose
+
+    chat_models: list[str] = []
+    engine_installed = False
+    try:
+        # Short timeout. A machine without Ollama should reach the offer
+        # screen quickly, not sit on a spinner deciding it is broken.
+        with urllib.request.urlopen(
+            "http://127.0.0.1:11434/api/tags", timeout=1.5
+        ) as response:
+            engine_installed = True
+            payload = json.loads(response.read().decode("utf-8"))
+            for model in payload.get("models", []):
+                name = model.get("name", "")
+                # Embedding models cannot hold a conversation, and counting one
+                # as a chat model is how a user with only bge-m3 installed gets
+                # told they are ready and then meets a composer that answers
+                # nothing.
+                if name and "embed" not in name.lower() and "bge" not in name.lower():
+                    chat_models.append(name)
+    except Exception:
+        # Unreachable means not installed *as far as this matters*. The
+        # distinction between "absent" and "installed but not running" is real
+        # but not actionable differently: both need the same offer.
+        engine_installed = False
+
+    result = diagnose(
+        engine_installed=engine_installed,
+        chat_models=chat_models,
+        cloud_key_configured=bool((os.getenv("ZARAM_OPENAI_KEY") or "").strip()),
+    )
+    return result.to_dict()
+
+
 @app.get("/health")
 async def health():
     """Liveness/readiness probe used by the desktop runtime health check."""
