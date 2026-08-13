@@ -5,6 +5,7 @@ import { VRMLoaderPlugin, VRMUtils, type VRM } from '@pixiv/three-vrm'
 import { useEmbodimentState, type EmbodimentState } from '@/hooks/useEmbodimentState'
 import { useSpeechStore } from '@/stores/speechStore'
 import { VISEMES, visemeAt, type Viseme } from '@/lib/visemes'
+import { inspectAvatar } from '@/lib/vrmSafety'
 
 // Keep the fetched VRM in memory across mounts.
 //
@@ -266,7 +267,31 @@ export default function VrmAvatar({ px = 320, src = '/avatars/AvatarSample_Z.vrm
     rim.position.set(-1.4, 0.6, -1)
     scene.add(rim)
 
-    const loader = new GLTFLoader()
+    // Nothing this loader resolves may leave the machine.
+    //
+    // A `.vrm` is a file somebody else wrote, and glTF `buffers` and `images`
+    // carry an optional `uri` that the loader fetches. An absolute `https://`
+    // one is a request no gate in this product can see: `EgressGate` intercepts
+    // what the *backend* sends, and `check-no-remote-assets.mjs` scans *source*.
+    // A URL inside a binary asset is invisible to both, so rule 3 — every byte
+    // that leaves is logged — would be broken by a data file with nothing
+    // anywhere reporting it. It is also a working beacon: whoever authored the
+    // avatar learns the user's IP and when they opened Zaram.
+    //
+    // Two layers, deliberately. `inspectAvatar` refuses the file before a
+    // single request is made and can say why; this modifier is the structural
+    // backstop for anything the scan did not recognise as a URI, and it fails
+    // to a broken model rather than to a silent request. Belt and braces on the
+    // one path where the failure is invisible.
+    const manager = new THREE.LoadingManager()
+    manager.setURLModifier((url) => {
+      if (url.startsWith('data:') || url.startsWith('blob:')) return url
+      // eslint-disable-next-line no-console
+      console.warn(`[embodiment] refused an external avatar resource: ${url}`)
+      return 'data:application/octet-stream;base64,'
+    })
+
+    const loader = new GLTFLoader(manager)
     loader.register((parser) => new VRMLoaderPlugin(parser))
 
     const clock = new THREE.Clock()
@@ -275,9 +300,37 @@ export default function VrmAvatar({ px = 320, src = '/avatars/AvatarSample_Z.vrm
     // second on a surface that renders permanently beside a resident model.
     const rimTarget = new THREE.Color()
 
-    loader.load(
+    // Fetched as bytes and inspected before parsing, rather than handed
+    // straight to `loader.load`. Reading the glTF JSON first is the only point
+    // at which an external URI can be refused *before* the loader resolves it.
+    // `FileLoader` rather than `fetch` so `THREE.Cache` still serves a remount.
+    const bytes = new THREE.FileLoader(manager)
+    bytes.setResponseType('arraybuffer')
+    bytes.load(
       src,
-      (gltf) => {
+      (data) => {
+        if (disposed) return
+        const buffer = data as ArrayBuffer
+        const verdict = inspectAvatar(buffer)
+        if (!verdict.ok) {
+          setStatus('failed')
+          setReason(verdict.reason)
+          // eslint-disable-next-line no-console
+          console.warn(`[embodiment] refused ${src}: ${verdict.reason}`, verdict.external)
+          return
+        }
+        loader.parse(buffer, '', onLoaded, onLoadError)
+      },
+      undefined,
+      (err) => {
+        if (disposed) return
+        setStatus('failed')
+        setReason(err instanceof Error ? err.message : 'The avatar file could not be read.')
+      },
+    )
+
+    function onLoaded(gltf: { scene: THREE.Group; userData: { vrm?: VRM } }) {
+      {
         if (disposed) return
         const loaded = gltf.userData.vrm as VRM | undefined
         if (!loaded) {
@@ -359,17 +412,17 @@ export default function VrmAvatar({ px = 320, src = '/avatars/AvatarSample_Z.vrm
         camera.lookAt(0, target.y - 0.07, 0)
 
         setStatus('ready')
-      },
-      undefined,
-      (err) => {
-        if (disposed) return
-        setStatus('failed')
-        // Named, never silent. A blank square where a face should be is
-        // indistinguishable from a code bug, which is the same reason the
-        // ingest path reports why a file could not be read.
-        setReason(err instanceof Error ? err.message : 'The avatar file could not be read.')
-      },
-    )
+      }
+    }
+
+    function onLoadError(err: unknown) {
+      if (disposed) return
+      setStatus('failed')
+      // Named, never silent. A blank square where a face should be is
+      // indistinguishable from a code bug, which is the same reason the
+      // ingest path reports why a file could not be read.
+      setReason(err instanceof Error ? err.message : 'The avatar file could not be read.')
+    }
 
     const tick = () => {
       raf = requestAnimationFrame(tick)
