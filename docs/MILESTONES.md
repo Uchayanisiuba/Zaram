@@ -24,8 +24,14 @@ accurate — it is the first thing anyone reads.
 > rather than "The next task"** — that section has been rewritten to say what
 > is left, which is the executor behind the offers.
 >
-> Suites, all measured this session: **1915 backend passed / 0 failed**, 9
-> skipped, 1924 collected. **116 frontend** across 17 files. **30 Electron**.
+> Suites, all measured this session: **1929 backend passed / 0 failed**, 9
+> skipped. **121 frontend** across 17 files. **30 Electron**.
+>
+> **The assistant introduces itself as Zaram now**, not as whichever model is
+> answering, and it names that model truthfully instead of guessing from its
+> training. The eight character personas are tone-only presets. Avatar state
+> changes ease rather than cut, and every lerp in that file is frame-rate
+> independent for the first time. See the two sections below the current state.
 >
 > **Three numbers in the block this replaces were wrong, in three different
 > ways, and each is worth a line.**
@@ -875,6 +881,89 @@ decision. `CLAUDE.md` has been updated to match; this is the reasoning.
   listens. Light installer, extras fetched **on demand after the product has
   proved itself** — not during install, which is the same blocking download
   moved earlier.
+
+### The assistant knows what it is — 13 August 2026
+
+**Reported symptom: asked what it was, the product answered "I am Qwen, made by
+Alibaba".** Three things were producing it and only one was obvious.
+
+`core/identity.py` is the fix and the reasoning is worth keeping: **a model does
+not know what it is deployed as.** Ask a local model its identity and it answers
+from training data — fine-tunes claim to be GPT-4 all the time — so "which model
+am I talking to" is a question about *system state*, and the true answer exists
+only where routing already resolved it. The module composes it and `main.py`
+puts it in front of the persona on every request. Nothing is suppressed; the
+model is handed a truer answer than its weights contain.
+
+**The personas were the larger half.** Eight entries in `main.py`, each opening
+"You are Baba, a wise and analytical AI assistant" or "You are Nova, fast-paced
+and technical". Every one made an identity claim, so the assistant had three
+candidate answers to "what are you" — the persona's, the model's training, and
+the truth — with no reason to prefer the last. They were also precisely the
+*someone* the embodiment rule refuses, sitting in the prompt rather than on a
+face; removing it from the avatar the same day and leaving it here would have
+moved the projection rather than ended it. They are tone-only presets now.
+`zaram_prime` carries an empty prompt, its one genuinely behavioural instruction
+— prefer recalled facts over training and say which you used — having moved into
+the identity block where it applies to every request rather than one preset. The
+`/personalities` endpoint keeps its shape and the speech path keeps its Kokoro
+voice selection, which is why they were rewritten rather than deleted.
+
+**Locality had to be split, and this is the part most likely to be merged back.**
+`ModelsRuntime._is_remote_model` returns `False` for a model it cannot resolve,
+which is the correct fail-safe for routing: guessing local costs a
+possibly-wrong model, guessing cloud costs the user's documents leaving on a
+lookup that failed. Identity inheriting that would have described an unresolved
+model as *running on this machine* — a confident false claim on the one thing a
+user is most likely to check. `locality_of` returns `local`, `cloud` or `None`,
+and `identity_preamble` renders nothing for `None`. Same input, two questions,
+two answers, exactly as `vram_bytes` returns `None` rather than `0`.
+
+**Verified by asking the running product**, which is the only thing that could
+have shown it:
+
+> *"I am Zaram. I'm a memory and control layer running on this machine … Right
+> now, gemma3:latest is answering you."*
+
+Names Zaram, does not claim to be Gemma, reports the real model. 14 tests, and
+the one that would have caught the original defect asserts no preset contains
+"You are".
+
+### State changes are transitions, not cuts — and the lerps were frame-tied
+
+The rim light is the avatar's state channel and it was assigned absolutely every
+frame, so idle-to-thinking swapped slate for cyan between two frames. On a
+surface briefed as *calm over delight*, an instant colour flip is the one motion
+that reads as a glitch rather than as a state. It eases now, over 0.22s.
+
+**The larger finding was underneath it.** Every lerp in the file was
+`lerp(a, b, dt * k)`, which covers a different fraction of the distance per
+*second* at every refresh rate — so the avatar eased at visibly different speeds
+depending on the display, and the tuning was only correct on the machine it was
+tuned on. `approachRate(dt, τ)` is the exponential form, `1 - e^(-dt/τ)`, and
+head, mouth and rim all use it. The time constants were chosen to match what the
+old factors produced at 60Hz, so nothing looks different on the machine it was
+tuned on and everything looks the same on the machines it wasn't.
+
+**Two of the new tests failed first and both were the test correcting the
+comment**, which is worth recording because it is the file's own lesson pointed
+at a claim rather than at code. The comment said the clamp prevents overshoot on
+a long frame; `approachRate(5, 0.22)` returned `0.9999999998`, not `1`, because
+`1 - e^(-x)` cannot reach or pass 1 for any finite input — overshoot is
+impossible by construction and the clamp is belt-and-braces. The *linear* form it
+replaced genuinely did overshoot: at `dt = 0.5` the old factor is 1.5, and a lerp
+past its target springs back. The second failure was an assertion that the two
+forms diverge by more than 1% between 60Hz and 240Hz; the real figure is 0.68%,
+because `dt * k` is a first-order approximation that agrees closely at short
+frame times. The test now asserts what is true — that the error *grows* with
+frame time, and that past `dt = 1/3` the old form breaks completely rather than
+gradually.
+
+**Not verified visually.** This environment cannot take a screenshot — the
+browser pane does not composite — so what is asserted is the maths, which is
+frame-rate independence and the absence of overshoot. Whether 0.22s reads as
+calm or as sluggish is a judgement nobody has made yet. Given the pointer-gaze
+lesson, that gap is stated rather than glossed: **somebody should look at it.**
 
 ### The avatar stops reporting which model answered — 13 August 2026
 
