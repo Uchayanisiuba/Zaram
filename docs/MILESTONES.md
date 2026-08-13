@@ -11,13 +11,80 @@ accurate — it is the first thing anyone reads.
 
 ---
 
-## Current state — 12 August 2026
+## Current state — 14 August 2026
 
-> ### The first-run screen is built — `b243e17`, with this docs commit on top
-> of it. That leaves `Zaram-V0.1` **55 commits ahead of `origin/main`**, two of
-> them unpushed. (A hash for the docs commit is deliberately not written here:
-> the first version of this line named one, and amending the commit to correct
-> a count changed the hash out from under it.)
+> ### `Zaram-V0.1` is **62 commits ahead of `origin/main`**, nine of them
+> unpushed, ending with this docs commit.
+>
+> (No hash for this commit: an earlier version of this line named one, and
+> amending to correct a count changed the hash out from under it. Measure with
+> `git rev-list --count origin/main..HEAD` rather than trusting the number
+> above — it is right when written and stale the moment anything lands.)
+>
+> Suites, all measured this session: **1929 backend passed / 0 failed**, 9
+> skipped · **141 frontend** across 19 files · **30 Electron** · typecheck clean.
+>
+> **Start here, in this order.**
+>
+> 1. **`npm run lint` cannot pass and has not been able to for some time** —
+>    143 warnings across `frontend/src` on a script that runs
+>    `--max-warnings 0`. Nothing I added caused it and nothing I added is worse
+>    than what was there, but this is the fourth instance of the shape this file
+>    keeps recording: *a gate nobody can run*. The Electron tests had no script,
+>    the frontend tests had no script, the signing check only ran where the
+>    defect wasn't. Either fix the warnings or change the threshold and say
+>    why — a lint script that always fails is not a lint script.
+> 2. **Two things were built this session that nobody has looked at.** The
+>    avatar's state transitions now ease over 0.22s and the user's chat messages
+>    moved to the right. Both are asserted — the easing by maths, the alignment
+>    by measured DOM geometry — and **neither has been seen by a human**. This
+>    shell cannot screenshot: the browser pane does not composite frames. Given
+>    what the pointer-tracking gaze cost, thirty seconds of somebody's eyes on
+>    both is worth more than any further assertion.
+> 3. **The offer executor is still the next real feature.** The first-run screen
+>    reports what is missing and can act on exactly one of the four things it
+>    offers ("look around"). See *What is next*, item 0.
+>
+> **What changed since the 12 August block below:** first-run screen, provider
+> catalogue, the assistant's identity, the avatar dropping locality, eased state
+> transitions, streaming speech, and a loader gate for avatar files. Each has its
+> own section; the 12 August block is kept because everything in it is still
+> true about packaging, signing, the API binding and the installer.
+
+### This session — 13–14 August
+
+**The assistant introduces itself as Zaram**, not as whichever model is
+answering, and names that model truthfully instead of guessing from training
+data. Eight character personas became tone-only presets. Full reasoning under
+*The assistant knows what it is*.
+
+**Speech keeps pace with the text.** It used to wait for the whole reply to
+finish generating before saying a word. Measured against the running product:
+first synthesis at 35.8s against a stream that closed at 52.4s — speech started
+**16.6 seconds before generation finished**, and the gap grows with reply
+length. Found on the way: citation markers were being read aloud, because the
+automatic speech path was the one caller of three that never stripped them.
+
+**An avatar file cannot phone home.** glTF can reference external URIs that the
+browser fetches, which is rule 3 broken by a data file with nothing reporting
+it — invisible to the egress gate (backend only) and to the remote-asset check
+(source only). Refused before any request is made, with a `LoadingManager`
+backstop. This is the prerequisite for bring-your-own-VRM.
+
+**The user's messages sit on the right**, capped at 85% width, with the speaker
+label kept because side is a cue a screen reader cannot use.
+
+**Three of my own claims were wrong first and the tests caught all three** — a
+clamp said to prevent an overshoot the formula cannot have, a divergence figure
+of 1% that measures 0.68%, and a justification for the avatar change that the
+DOM contradicted. Each is recorded in its section rather than quietly corrected,
+because the pattern is the point: an assertion written to sound right is the
+same failure as a number written without measuring.
+
+## Superseded — 12 August 2026
+
+> ### The first-run screen is built — `b243e17`. *(Counts in this block are as
+> of 13 August and are superseded by the current state above.)*
 >
 > The screen that "The next task" specifies now exists and has been driven
 > against the running product in both unready states. **Read "What is next"
@@ -516,6 +583,18 @@ the pairing endpoints written first.
    smallest, it is the state a user reaches *after* installing the engine, and
    it is the one where a stated size becomes a real download the user agreed to.
    Admit it in `canBeCarriedOut()`.
+
+0b. **Look at the two unseen changes**, and fix `npm run lint`. Both are in the
+   current-state block at the top; neither is large and both are the kind of
+   thing that rots if it waits.
+
+0c. **Bring your own VRM is now unblocked.** `lib/vrmSafety.ts` refuses an
+   avatar that would fetch anything while loading, which was the stated
+   prerequisite. What remains is a file picker, persisting the choice, and
+   resource ceilings — a triangle and texture budget, which the URI gate does
+   not cover and which a hostile file can still use to exhaust VRAM. Deliberately
+   not built yet: those need a measurement on real assets rather than a guessed
+   constant, which is the same argument the reranker table settles.
 1. **Run the installer on a machine that has never seen this repo.** The
    installer itself now exists — `dist-electron/Zaram-0.1.0-x64.exe`, 186 MB —
    and its payload has been checked against the built tree, so what that run
