@@ -167,6 +167,21 @@ export const useChatStore = create<ChatState>((set, get) => ({
     if (!status.topic) status.setTopic(trimmed);
     status.setRecallCount(null);
 
+    // Speech follows the renderer: the avatar speaks, the orb stays silent.
+    //
+    // That makes the toggle mean something rather than being a skin, and it is
+    // a decision the user has already made — so it needs no second setting,
+    // which is the "never make the user choose in advance" rule applied to a
+    // preference they expressed by choosing a face.
+    //
+    // Decided once, here, rather than read again at the end: a renderer change
+    // mid-reply would otherwise leave a queue open with nothing to close it, or
+    // start speaking a reply whose first half was never queued.
+    const speaking = useEmbodimentStore.getState().renderer === 'avatar';
+    // Opened before the first token so the queue exists when one arrives. It
+    // synthesises nothing until something is pushed.
+    if (speaking) useSpeechStore.getState().beginSpeech();
+
     // Accumulated locally as well as in the store: on failure we still need the
     // partial text, and reading it back out of the store mid-teardown is racy.
     let text_ = '';
@@ -212,6 +227,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
             }
             text_ += event.content;
             set({ streamingText: text_ });
+            // Speech keeps pace with the text instead of waiting for it.
+            // `pushSpeech` queues only sentences that will not change again, so
+            // this is safe to call on every token and the first one is being
+            // synthesised while the model is still writing the third.
+            if (speaking) useSpeechStore.getState().pushSpeech(text_);
             break;
 
           case 'source': {
@@ -336,15 +356,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
     // preference they expressed by choosing a face.
     //
     // Read, never subscribed: this is a store action, not a render.
-    if (
-      text_ &&
-      !replyError &&
-      useEmbodimentStore.getState().renderer === 'avatar'
-    ) {
-      // Deliberately not awaited. Speech is an accompaniment to the reply, not
-      // a step in delivering it — a TTS failure or a missing voice extra must
-      // never delay or block text that has already arrived.
-      void useSpeechStore.getState().speak(text_);
+    if (speaking) {
+      if (text_ && !replyError) {
+        // Flush the tail. Everything before it has already been queued and much
+        // of it has already been heard — this is the last partial sentence,
+        // which was held back because it might still have grown.
+        useSpeechStore.getState().pushSpeech(text_);
+        useSpeechStore.getState().endSpeech();
+      } else {
+        // Nothing worth saying, or the reply failed. Release the loop rather
+        // than leaving it waiting on a queue nobody will push to again.
+        useSpeechStore.getState().stop();
+      }
     }
 
     inFlight = null;
