@@ -1,6 +1,5 @@
 import { useEmbodimentStore } from '@/stores/embodimentStore'
 import { useOrbStore, type OrbState } from '@/stores/orbStore'
-import { useSessionStatusStore } from '@/stores/sessionStatusStore'
 import { useEmbodimentState } from '@/hooks/useEmbodimentState'
 
 /**
@@ -9,9 +8,9 @@ import { useEmbodimentState } from '@/hooks/useEmbodimentState'
  * Two jobs, both temporary. It switches renderer so the orb and the avatar can
  * be compared side by side, and it drives the states by hand because nothing
  * else can yet: `swapping` is set by the backend pre-flight during a real model
- * load, `speaking` by a TTS path that is out of scope for v1, and `cloud` by an
- * engine that does not exist. Without this the avatar could only ever be
- * observed idle, which answers none of the questions the spike exists to ask.
+ * load, and `speaking` by a TTS path that has to be driven end to end to see.
+ * Without this the avatar could only ever be observed idle, which answers none
+ * of the questions the spike exists to ask.
  *
  * The shipped renderer toggle belongs in Settings, greyed out with the reason
  * where the hardware cannot take it, and naming the download before it happens
@@ -31,9 +30,6 @@ export default function EmbodimentSpikeControls() {
   const setRenderer = useEmbodimentStore((s) => s.setRenderer)
   const setOrbState = useOrbStore((s) => s.setOrbState)
   const orbState = useOrbStore((s) => s.orbState)
-  const locality = useSessionStatusStore((s) => s.locality)
-  const model = useSessionStatusStore((s) => s.model)
-  const applyHealth = useSessionStatusStore((s) => s.applyHealth)
   const derived = useEmbodimentState()
 
   const chip = (active: boolean) =>
@@ -84,25 +80,13 @@ export default function EmbodimentSpikeControls() {
         ))}
       </div>
 
-      <div className="flex gap-1.5 items-center">
-        <span style={{ fontSize: 10, color: '#64748b', width: 52 }}>locality</span>
-        {(['local', 'cloud'] as const).map((l) => (
-          <button
-            key={l}
-            style={chip(locality === l)}
-            // applyHealth takes both fields; passing only locality would blank
-            // the model the bar is displaying.
-            onClick={() => applyHealth({ model, locality: locality === l ? null : l })}
-          >
-            {l}
-          </button>
-        ))}
-      </div>
+      {/* The locality chips are gone. They drove `sessionStatusStore` so the
+          avatar could show `local` and `cloud`, and the avatar no longer
+          reports where an answer came from — `OrbStatusLabel` does, in words.
+          Removed rather than left inert: a control that sets a value nothing
+          renders is how a panel starts lying about what it is testing. */}
 
-      {/* The derived value, shown because it is the thing under test. Activity
-          wins over locality whenever there is any, so `local` and `cloud` are
-          only visible at rest — seeing that rule operate is most of the point
-          of this panel. */}
+      {/* The derived value, shown because it is the thing under test. */}
       <div style={{ fontSize: 10, color: '#94a3b8' }}>
         useEmbodimentState() → <span style={{ color: '#78dcf0' }}>{derived}</span>
       </div>
