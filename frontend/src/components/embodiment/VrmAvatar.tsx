@@ -28,9 +28,13 @@ THREE.Cache.enabled = true
  * The VRM renderer — the orb's job with more bandwidth.
  *
  * `docs/EMBODIMENT-SPIKE.md` fixes the constraint before any code: **the avatar
- * embodies which model is answering and what it is doing.** Local versus cloud,
- * thinking versus idle, speaking. Not a personality, not a name, not a
- * relationship.
+ * embodies what the system is doing.** Thinking versus idle, listening,
+ * speaking, swapping. Not a personality, not a name, not a relationship.
+ *
+ * **It no longer embodies which model answered** — narrowed 13 August 2026.
+ * Locality is stated in words by `OrbStatusLabel`, which renders beside this
+ * component under either renderer and can express a distinction a rim colour
+ * cannot. Reasoning in `useEmbodimentState`.
  *
  * That line decides every argument below. The moment the avatar has a name,
  * users form a relationship with a status indicator, and every routing decision
@@ -49,13 +53,20 @@ THREE.Cache.enabled = true
  * crash rather than as calm. They carry no information and never vary by state.
  */
 
-/** Colour is the same vocabulary the orb and the citation chips already use:
- *  cyan for what stayed on the device, violet for what left, slate for a swap.
- *  One meaning reused, so the avatar needs no legend of its own. */
+/** The rim light says whether the system is working, and nothing else.
+ *
+ *  It used to carry locality as well — cyan for what stayed on the device,
+ *  violet for what left. Removed 13 August 2026: `LivingOrb` never rendered
+ *  locality, so this was the only renderer that did and the two disagreed about
+ *  what they report. `OrbStatusLabel` states it in words, with a distinction a
+ *  colour cannot make ("Local · can send" is not "Cloud enabled"), and a face
+ *  that reports routing is a face read as a someone. Reasoning in
+ *  `useEmbodimentState`.
+ *
+ *  So: slate at rest, cyan while working, dim slate while nothing is resident.
+ *  Three values, no legend to learn. */
 const RIM_COLOUR: Record<EmbodimentState, number> = {
   idle: 0x93a3b8,
-  local: 0x78dcf0,
-  cloud: 0xc084fc,
   thinking: 0x78dcf0,
   listening: 0x78dcf0,
   speaking: 0x78dcf0,
@@ -68,8 +79,6 @@ const RIM_COLOUR: Record<EmbodimentState, number> = {
 /** How lively the resting motion is. Swapping is deliberately the slowest. */
 const MOTION_RATE: Record<EmbodimentState, number> = {
   idle: 1,
-  local: 1,
-  cloud: 1,
   thinking: 1.6,
   listening: 1.2,
   speaking: 1.4,

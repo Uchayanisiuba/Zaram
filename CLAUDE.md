@@ -253,10 +253,33 @@ In scope:
   response — it is not a calendar and must not become one.
 
 - **The 3D embodiment — moved into scope 9 August 2026.** A VRM renderer beside
-  the orb, chosen by a toggle, both reading one derived state so neither knows
-  the other exists. It embodies which model is answering and what it is doing —
-  **not a personality**: no name, no pronoun, no wandering gaze, no expression
-  not derived from system state. The landing default stays the orb.
+  the orb, chosen by a toggle, both reading one state so neither knows the other
+  exists. It embodies **what the system is doing** — **not a personality**: no
+  name, no pronoun, no wandering gaze, no expression not derived from system
+  state. The landing default stays the orb.
+
+  **It does not embody which model answered — narrowed 13 August 2026.** The
+  earlier line was "which model is answering and what it is doing", and `local`
+  and `cloud` were two of seven states. `LivingOrb` never rendered locality, so
+  the avatar was the only renderer that did and the two disagreed about what
+  they report. Locality is stated in words by `OrbStatusLabel` — "Local only",
+  "Local · can send", "Cloud enabled" — a distinction a rim colour cannot make,
+  on the one indicator whose whole job is to be trusted. And a face that reports
+  routing is read as a *someone*, which is the projection the embodiment rule
+  exists to prevent. **Known gap:** that label renders only while the
+  conversation is open, so at rest nothing reports locality — true of the orb
+  path already, and fixable in `Landing.tsx` rather than on a face.
+
+  **One avatar ships, not three.** A character set is 16 MB each into a 186 MB
+  installer against a rule that says never block on a download. The direction
+  after one is **bring your own VRM** — the same posture as bring your own key
+  and bring your own model — which needs a loader gate first, because a `.vrm`
+  is a file somebody else wrote and glTF can reference external URIs that the
+  browser would fetch unlogged. An avatar **store** stays where the scope list
+  already puts an extensions marketplace: after v1, and it is the feature that
+  drags in accounts, since payment is one of the three things that require them.
+  Attaching avatars to **agents** is the direction that replaces embodying a
+  model — an agent is a thing with a job — and it waits on agents.
 
   **Pointer-tracking gaze was built and removed the same day, 11 August 2026.**
   Not on principle — the argument that cursor tracking is *attention* rather

@@ -543,11 +543,22 @@ the pairing endpoints written first.
    variable — which is what the backend already reads, so no backend change.
    **Never expose an endpoint that returns a key**, given the local API has no
    authentication.
-5. **The avatar.** Seven states, closed set, from `useEmbodimentState`: idle,
-   local, cloud, thinking, listening, speaking, swapping. Six mouth visemes —
-   `sil aa ee ih oh ou` — from `src/lib/visemes.ts`. Eyes are state-derived
-   only, no gaze. The acceptance test is two states side by side in a screenshot
-   at the size they will actually render.
+5. **The avatar.** **Five** states, closed set, from `useEmbodimentState`: idle,
+   thinking, listening, speaking, swapping — `local` and `cloud` were removed on
+   13 August, see below. Six mouth visemes — `sil aa ee ih oh ou` — from
+   `src/lib/visemes.ts`. Eyes are state-derived only, no gaze. The acceptance
+   test is two states side by side in a screenshot at the size they will
+   actually render.
+
+   Before a second character or any avatar the maintainer did not author: **the
+   loader has no URI policy.** `new GLTFLoader()` in `VrmAvatar.tsx` takes no
+   `LoadingManager`, and glTF buffers and images may carry absolute `https://`
+   URIs, which the browser would fetch on load. That is the class
+   `check-no-remote-assets.mjs` bans — a request no gate can see — arriving as
+   *data*, which is why a build-time source scan structurally cannot catch it.
+   Same shape as `core/untrusted.py`: a downloaded avatar is not something the
+   user typed. Needs an embedded-and-`data:`-only allow-list plus texture and
+   triangle ceilings, and it is the prerequisite for bring-your-own-VRM.
 
 **Blocked on the maintainer, and only this:** buying the OV certificate. Every
 day it is not begun adds a day to the end.
@@ -864,6 +875,103 @@ decision. `CLAUDE.md` has been updated to match; this is the reasoning.
   listens. Light installer, extras fetched **on demand after the product has
   proved itself** — not during install, which is the same blocking download
   moved earlier.
+
+### The avatar stops reporting which model answered — 13 August 2026
+
+Maintainer's decision, narrowing the spike's own constraint. `local` and `cloud`
+are gone from `EmbodimentState`, which is now five states and is the *same type*
+as `OrbState` rather than a copy of it. `useEmbodimentState` no longer reads
+`sessionStatusStore` at all.
+
+**The justification for this was written wrong first, and driving it in the
+browser is what caught it** — which is the file's own lesson arriving again, on
+a docs change rather than a feature. The claim written into three documents was
+that `OrbStatusLabel` renders under either renderer, so nothing is lost. Reading
+the DOM at rest returned no status element at all: the label is behind
+`{chat && …}` in `Landing.tsx`, deliberately, because *"at rest the landing is
+meant to be quiet"*.
+
+**The real finding is better than the wrong one.** `LivingOrb` reads
+`orbStore.orbState` directly and has **never rendered locality**. The avatar was
+therefore the only renderer that reported where an answer came from, and the
+same status told the user different things depending on a toggle. The spike's
+claim that both renderers read one derived state was half true — the derivation
+existed and one consumer ever saw it. Removing `local` and `cloud` makes the two
+agree.
+
+Where locality is reported is `OrbStatusLabel`, in words: "Local only", "Local ·
+can send", "Cloud enabled". `describeSystem`'s comment records why three rather
+than two — permitting one search host once flipped it to "Cloud enabled" while
+every answer was still generated locally, *"on the one indicator whose entire
+job is to be trusted."* A colour cannot express that, so the colour and the
+label could only ever have agreed by luck.
+
+**And the loss, stated rather than papered over.** The avatar surfaced
+`local`/`cloud` **only at rest**, which is exactly when that label is absent, so
+the two were complementary rather than redundant. At rest, nothing now reports
+locality — already the case on the orb path. If it should be visible at rest,
+that is one condition in `Landing.tsx`, not a colour on a face. Also noted while
+checking: CLAUDE.md says *"the Orb shows system state (idle / thinking / local /
+cloud)"* and `OrbState` has never held the last two. The codebase wins.
+
+**The other half is the reason it came up.** A face that reports where an answer
+came from is read as a *someone* — "she used the cloud" — which is the exact
+projection the embodiment rule exists to prevent, and the pressure toward it
+comes from anything that sells or personalises characters. Recorded rather than
+merely done, because that pressure arrives from the revenue side, which is the
+hardest kind to resist later.
+
+**What replaces it, eventually: an avatar attached to an agent.** An agent is a
+thing with a job, and a face standing for one claims nothing about
+infrastructure. Not designed and not scheduled — agents are out of scope until
+v1 ships and get no menu item when they arrive. Noted so the removal reads as a
+redirection rather than a deletion.
+
+`swapping` stays, and it is the judgement call. It is about model residency, so
+it is adjacent to what was removed — but it answers *what is happening now*
+(nothing, while a model loads) rather than *who answered*, and CLAUDE.md
+requires a swap to be visible because an invisible one reads as a broken
+product.
+
+### One avatar, then bring your own — the store stays out
+
+Decided in the same conversation. **One character ships.** Three would be ~48 MB
+of VRM into a 186 MB installer against "never block on a download", three rigs
+to pose, and two shading models to light — the sample is MToon, and a robot is
+the case that needs real PBR.
+
+**PBR is not configured today**, which is worth knowing before a robot is
+authored: no `scene.environment`, no `PMREMGenerator`, no `toneMapping`
+anywhere in `src/`. `GLTFLoader` builds `MeshStandardMaterial` correctly, but a
+metallic surface with nothing to reflect renders near-black however many lights
+are added. The fix needs no downloaded asset — `RoomEnvironment` is procedural
+and in-bundle, which matters because `check-no-remote-assets.mjs` would refuse
+an HDR fetched from anywhere. Enabling tone mapping will visibly change the
+MToon avatar that exists, so it is a deliberate change rather than a free one.
+
+**Sketchfab's renderer is not worth reimplementing.** Their viewer is
+proprietary; the open piece was `osgjs`, MIT and long unmaintained — worth
+verifying before anyone relies on that. What makes such viewers light is the
+*asset pipeline*, not the shading, and every part of it already ships with
+three: KTX2/Basis (textures stay compressed in VRAM, which is the real win
+against six 2048² maps), Draco or meshopt geometry, and prefiltered IBL via
+`PMREMGenerator`. Rebuilding a renderer to get those is the trade CLAUDE.md
+already rules on — rendering is commodity and improves every quarter; the
+state mapping is not.
+
+**Bring your own VRM is the next step, and an avatar store is not.** BYO needs a
+file picker and a validator, no account, no payments, no moderation — and it is
+the same posture as bring your own key and bring your own model. A store is an
+extensions marketplace under another name, which the scope list already defers
+past v1, and it is the feature that forces accounts, since payment is one of the
+three things this file already says require them. It also brings IP and NSFW
+moderation over an ecosystem saturated with derivative characters, and
+cross-border payouts — which deserve the same early geographic check that code
+signing needed rather than a late one. If BYO shows people actually swapping
+avatars, that is the evidence a store is worth it. Behaviour, not a guess.
+
+The validator BYO needs is the loader URI gate described in item 5 above, and it
+is required before *any* avatar the maintainer did not author is loaded.
 
 ### Decided against, so it does not return as a reasonable suggestion
 
