@@ -431,6 +431,23 @@ lets capability grow while the navigation stays at six nodes. **Project is where
 type is chosen** — creation is the only honest moment to ask, and it is the one thing
 the user genuinely cannot be asked later without guessing.
 
+**Zaram never sells access to anything.** If a pack is ever priced, what is sold
+is domain knowledge that runs on the user's machine — parsers that handle real
+messy documents of one type, extraction validated against real examples,
+templates, exemplars. Only one of a pack's four parts is MCP, and it is the
+least load-bearing. Hosting tool servers would give Zaram cost of goods, route
+user data through its own infrastructure, and become the trade the product
+exists to refuse. Nothing is accessed; something is installed.
+
+**Any MCP server may always be connected, including one that competes with a
+paid pack.** A paid tier that restricts what the user may attach is a crippled
+free tier wearing a different label, and it would make the tool layer a
+gatekeeping surface — which the risk tiers already forbid for a different
+reason. A *third-party* pack marketplace is a separate business and stays where
+the scope list puts an extensions marketplace: after v1. It inherits the
+tool-description-is-third-party-text problem below, plus accounts, moderation
+and cross-border payouts.
+
 **Build two packs by hand before building the pack system.** The abstraction cannot be
 designed from imagination — only from two real examples and the friction between them.
 
@@ -624,6 +641,36 @@ fallback only if embeddings prove insufficient. Exemplars are user-editable.
 **Routing must be legible.** Every reply names the model that answered and why
 ("routed to qwen2.5-coder — coding task"), with a per-message override available inline.
 Same posture as memory correction, applied to routing.
+
+**Identity is a fact the system supplies, not a story the model tells.** A model
+does not know what it is deployed as — ask a local Qwen and it answers from
+training data, which is how "I am Qwen, made by Alibaba" became the product's
+answer to "what are you". The true answer exists only where routing resolved it,
+so `core/identity.py` composes it and puts it in front of every request:
+what Zaram is, which model is answering, and where that model runs.
+
+**This is identity, not personality, and the distinction is the whole point.**
+The embodiment rule refuses a *someone* — no name, no pronoun, no expression not
+derived from system state. It does not refuse the product describing itself; a
+status indicator that cannot say what it is is not calm, it is broken. What is
+refused is a character: the eight named personas that each opened "You are Baba,
+a wise and analytical AI assistant" were removed on 13 August 2026 and replaced
+with tone-only presets, because each one made a competing identity claim and
+gave the model a third candidate answer about itself.
+
+**Never hide the model.** The temptation, once the assistant stops naming
+somebody else's, is to have it name none. That forfeits routing legibility and
+the product's best demonstration: the memory holds while the model changes
+underneath it. A model switch is not a leak in the story, it *is* the story.
+
+**Locality is three-valued for identity and two-valued for routing.**
+`_is_remote_model` answers `False` for a model it cannot resolve, because
+routing must fail safe — guessing local costs a possibly-wrong model, guessing
+cloud costs the user's documents leaving on a lookup that failed. Identity must
+not inherit that: `locality_of` returns `None`, because "runs on this machine"
+would be a confident false claim on the one thing the user is most likely to
+check. Same input, two questions, two answers, and they must not be merged —
+the same split `vram_bytes` makes by returning `None` rather than `0`.
 
 **Model residency is a hardware-grading problem.** Measured on a 12 GB RTX 3060,
 8 August 2026, with `nvidia-smi` and Ollama's `/api/ps` — not estimated:

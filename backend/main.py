@@ -13,6 +13,7 @@ from pydantic import BaseModel
 # --- KERNEL IMPORTS (Strict Boundary) ---
 from core.bootstrapper import KernelBootstrapper
 from core.chat_router import ChatRouter
+from core.identity import compose_system_prompt, identity_preamble
 # `_format_search_results` has referenced this without importing it: a
 # NameError latent only because web search is off by default.
 from core.query_classifier import SEARCH_MARKER
@@ -343,6 +344,43 @@ async def health():
     }
 
 
+def _current_inference(requested_model: str | None) -> dict[str, str | None]:
+    """What is actually about to answer — model name and where it runs.
+
+    Every failure returns ``None`` for the field it could not establish, and
+    `identity_preamble` renders nothing for a ``None``. The alternative is a
+    preamble that names a plausible model, which would be a confident false
+    claim in the one place the user is most likely to check.
+
+    The requested model wins over the runtime's default because that is what
+    will answer this message; the default is only the fallback for a request
+    that named nothing.
+    """
+    model: str | None = (requested_model or "").strip() or None
+    locality: str | None = None
+
+    try:
+        runtime = kernel.registry.get_runtime("models")
+    except Exception:
+        return {"model": model, "locality": None}
+
+    if model is None:
+        try:
+            model = runtime.health_check().get("model") or None
+        except Exception:
+            model = None
+
+    try:
+        # Three-valued on purpose. `_is_remote_model` answers False for an
+        # unresolved model because routing must fail safe; identity must not
+        # inherit that, or an unknown model gets described as local.
+        locality = runtime.locality_of(model)
+    except Exception:
+        locality = None
+
+    return {"model": model, "locality": locality}
+
+
 @app.post("/chat")
 async def chat(request: ChatRequest):
     """Strangler Fig Endpoint: Routes via ChatRouter."""
@@ -361,7 +399,17 @@ async def chat(request: ChatRequest):
         )
 
     persona_data = PERSONAS.get(request.persona, PERSONAS.get("zaram_prime", {}))
-    system_prompt = persona_data.get("system_prompt", "") if persona_data else ""
+    persona_prompt = persona_data.get("system_prompt", "") if persona_data else ""
+
+    # Identity first, voice second. A model cannot know what it is deployed as —
+    # ask a local Qwen and it answers from training data, which is how "I am
+    # Qwen, made by Alibaba" ends up being the product's answer to "what are
+    # you". The true answer only exists here, so it is handed over rather than
+    # left to the weights.
+    system_prompt = compose_system_prompt(
+        identity_preamble(**_current_inference(request.model)),
+        persona_prompt,
+    )
 
     # The Kernel owns planning, search, grounding, and response generation.
     # The API layer passes the raw prompt through without independent search.
@@ -2088,63 +2136,92 @@ async def voice_transcribe(request: Request, language: str | None = None):
     }
 
 
+# Voices, not characters — rewritten 13 August 2026.
+#
+# These were eight named personalities, each opening "You are Baba, a wise and
+# analytical AI assistant" or "You are Nova, fast-paced and technical". Three
+# things were wrong with that and they compounded.
+#
+# **They competed with the product's own identity.** Every entry made an
+# identity claim, so the assistant was told it was Nova, by a system whose
+# entire pitch is that it is Zaram. Asked what it was, it had three candidate
+# answers — the persona's, the model's training ("I am Qwen, made by Alibaba"),
+# and the truth — and no reason to prefer the last.
+#
+# **They were the personality the embodiment rule already refuses.** "A wise
+# elder voice", "patient teacher": a *someone* to form a relationship with, on
+# a product whose indicator is meant to report system state rather than perform.
+# The avatar had that removed on the same day; leaving it in the prompt would
+# have kept the projection and merely moved it.
+#
+# **Only one of the eight ever said anything about behaviour that mattered** —
+# `zaram_prime`'s instruction to prefer recalled facts over training and to name
+# which it used. That has moved into `core/identity.py`, where it applies to
+# every request instead of one preset.
+#
+# What survives is what these were genuinely carrying: a **tone** and a Kokoro
+# **voice**. The `/personalities` endpoint keeps its shape, the speech path
+# keeps its voice selection, and no entry claims to be anybody.
 PERSONAS = {
     "zaram_prime": {
-        "name": "Zaram Prime",
+        "name": "Default",
         "gender": "neutral",
-        "description": "Professional, calm, and authoritative. The primary cybernetic intelligence core.",
-        "system_prompt": "You are Zaram Prime, a professional and authoritative AI assistant. You are calm, structured, and highly capable. You speak with confidence and precision. When you are given search results or remembered facts, prefer them over your training data and say which you used. When you are given neither, answer normally from what you know — do not refer to sources, memories or search results that were not provided to you.",
-        "voice": "af_heart"
+        "description": "Calm and precise. The default voice.",
+        # Deliberately empty. Identity and the recall instructions come from
+        # `core/identity.py` on every request; a default that added tone on top
+        # would make the plain case the only one nobody chose.
+        "system_prompt": "",
+        "voice": "af_heart",
     },
     "baba": {
-        "name": "Baba",
+        "name": "Considered",
         "gender": "neutral",
-        "description": "Wise elder voice. Calm, analytical, focused on deep systems logic.",
-        "system_prompt": "You are Baba, a wise and analytical AI assistant. You speak calmly and thoughtfully, focusing on deep understanding and systems thinking. You are patient and thorough.",
-        "voice": "am_michael"
+        "description": "Unhurried. Works through the reasoning before the answer.",
+        "system_prompt": "Write unhurriedly. Set out the reasoning before the conclusion, and prefer understanding the whole shape of a problem to answering the narrow question.",
+        "voice": "am_michael",
     },
     "nova": {
-        "name": "Nova",
+        "name": "Technical",
         "gender": "neutral",
-        "description": "Fast-paced code analysis agent with a sharp, technical voice.",
-        "system_prompt": "You are Nova, a fast-paced and technical AI assistant. You are sharp, efficient, and focused on code and technical analysis. You speak with energy and precision.",
-        "voice": "af_nicole"
+        "description": "Sharp and efficient. Built for code and technical detail.",
+        "system_prompt": "Write tersely and technically. Lead with the answer, use precise terms rather than approximations, and prefer a code example to a description of one.",
+        "voice": "af_nicole",
     },
     "mentor": {
-        "name": "Mentor",
+        "name": "Explanatory",
         "gender": "neutral",
-        "description": "Patient teacher. Explains concepts clearly and encourages learning.",
-        "system_prompt": "You are Mentor, a patient and encouraging AI assistant. You excel at explaining complex concepts clearly and guiding users through learning. You are supportive and thorough.",
-        "voice": "am_adam"
+        "description": "Explains rather than asserts. Good for unfamiliar ground.",
+        "system_prompt": "Explain rather than assert. Define a term the first time it appears, build from what the reader is likely to already know, and say when something is a simplification.",
+        "voice": "am_adam",
     },
     "creator": {
-        "name": "Creator",
+        "name": "Expressive",
         "gender": "neutral",
-        "description": "Creative and expressive. Helps with writing, design, and creative projects.",
-        "system_prompt": "You are Creator, a creative and expressive AI assistant. You help with writing, design, and creative projects. You are imaginative, inspiring, and detail-oriented.",
-        "voice": "af_bella"
+        "description": "For writing and design work.",
+        "system_prompt": "Write with attention to rhythm and word choice. Offer alternatives where a choice is genuinely open, and say what each one costs.",
+        "voice": "af_bella",
     },
     "analyst": {
-        "name": "Analyst",
+        "name": "Evidential",
         "gender": "neutral",
-        "description": "Data-driven and precise. Focuses on facts, metrics, and objective analysis.",
-        "system_prompt": "You are Analyst, a data-driven and precise AI assistant. You focus on facts, metrics, and objective analysis. You are methodical, thorough, and evidence-based in your responses.",
-        "voice": "am_michael"
+        "description": "Figures and sources first.",
+        "system_prompt": "Lead with figures and sources. Separate what is measured from what is inferred, and say plainly when a number is an estimate.",
+        "voice": "am_michael",
     },
     "researcher": {
-        "name": "Researcher",
+        "name": "Thorough",
         "gender": "neutral",
-        "description": "Thorough investigator. Deep dives into topics and synthesizes information.",
-        "system_prompt": "You are Researcher, a thorough and investigative AI assistant. You excel at deep dives into topics, synthesizing information from multiple sources. You are comprehensive and detail-oriented.",
-        "voice": "af_heart"
+        "description": "Covers the ground, including what disagrees.",
+        "system_prompt": "Cover the ground. Include what disagrees with the conclusion rather than only what supports it, and name what was not checked.",
+        "voice": "af_heart",
     },
     "minimal": {
-        "name": "Minimal",
+        "name": "Brief",
         "gender": "neutral",
-        "description": "Concise and efficient. Short answers, no fluff.",
-        "system_prompt": "You are Minimal, a concise and efficient AI assistant. You provide short, direct answers without unnecessary elaboration. You respect the user's time and attention.",
-        "voice": "af_nicole"
-    }
+        "description": "Short answers, no preamble.",
+        "system_prompt": "Answer in as few words as the question genuinely needs. No preamble, no summary of what you are about to say, no offer of further help.",
+        "voice": "af_nicole",
+    },
 }
 
 

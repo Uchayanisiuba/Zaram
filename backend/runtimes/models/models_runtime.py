@@ -131,6 +131,31 @@ class ModelsRuntime(Runtime):
         logger.info("[ModelsRuntime] Cloud engine available (%s)", cloud.base_url)
         return RoutedEngine(local=local, cloud=cloud, is_remote=self._is_remote_model)
 
+    def locality_of(self, model: Optional[str]) -> Optional[str]:
+        """Where this model runs: ``"local"``, ``"cloud"``, or ``None``.
+
+        Deliberately *not* `_is_remote_model` with a nicer return type. That
+        method answers "may this leave the machine?" and returns ``False`` for
+        anything it cannot resolve, because the failure modes of routing are not
+        symmetric. This one answers "where does this run?", and for that question
+        an unresolved model is genuinely unknown — reporting it as local would be
+        a confident false claim about the one thing the user has to be able to
+        trust, which is worse than saying nothing.
+
+        Same input, two questions, two answers. Callers must not swap them.
+        """
+        if not model or self._provider_manager is None:
+            return None
+
+        info = self._provider_manager.get_model(model)
+        if info is None:
+            resolve = getattr(self._provider_manager, "_resolve_model", None)
+            info = resolve(model) if callable(resolve) else None
+        if info is None:
+            return None
+
+        return "cloud" if info.locality in REMOTE_LOCALITIES else "local"
+
     def _is_remote_model(self, model: Optional[str]) -> bool:
         """Would answering with this model send data off the machine?
 
