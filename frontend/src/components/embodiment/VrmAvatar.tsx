@@ -112,6 +112,47 @@ export function renderScaleFor(devicePixelRatio: number): number {
 }
 
 /**
+ * How far to move toward a target this frame, given how long the move takes.
+ *
+ * **State changes used to be cuts.** The rim light is the state channel, and it
+ * was assigned absolutely every frame — `rim.color.setHex(RIM_COLOUR[s])` — so
+ * going from idle to thinking swapped slate for cyan between two frames. On a
+ * surface whose whole brief is *calm over delight*, an instant colour flip is
+ * the one motion that reads as a glitch rather than as a state.
+ *
+ * **Frame-rate independent, which the lerps already here are not.**
+ * `lerp(a, b, dt * 3)` moves three times further per second at 144Hz than at
+ * 48Hz, so the same avatar eases at visibly different speeds on different
+ * machines and the tuning is only correct on the one it was tuned on. The
+ * exponential form is the standard fix: `1 - e^(-dt/τ)` covers the same
+ * fraction of the remaining distance per unit of *time* rather than per frame.
+ *
+ * `seconds` is the time constant — roughly 63% of the way there. Three of them
+ * is close enough to be indistinguishable from arrived.
+ *
+ * **The clamp is defensive, not load-bearing, and the test says which.** A long
+ * frame — a tab returning to the foreground, a model finishing a load — is
+ * exactly what made the linear form dangerous: `dt * 3` at `dt = 5` is 15, so
+ * the value flies past its target and springs back. `1 - e^(-dt/τ)` cannot
+ * exceed 1 for any finite input, so overshoot is impossible by construction
+ * here. `Math.min` stays because it costs nothing and the next person to change
+ * this formula may reintroduce the hazard, but the guarantee comes from the
+ * shape of the function rather than from the clamp.
+ */
+export function approachRate(dt: number, seconds: number): number {
+  if (!(dt > 0)) return 0;
+  if (!(seconds > 0)) return 1;
+  return Math.min(1, 1 - Math.exp(-dt / seconds));
+}
+
+/** How long the rim light takes to reach a new state's colour.
+ *
+ *  Slow enough to read as a transition rather than a cut, short enough that the
+ *  indicator is not still catching up when the thing it indicates has moved on.
+ *  Thinking can be over in under a second, so this cannot be much longer. */
+const RIM_EASE_SECONDS = 0.22
+
+/**
  * Turn on anisotropic filtering for every texture under `root`.
  *
  * The second half of the pixelation, and the larger half. three.js defaults
@@ -230,6 +271,9 @@ export default function VrmAvatar({ px = 320, src = '/avatars/AvatarSample_Z.vrm
 
     const clock = new THREE.Clock()
     let blinkAt = 2 + Math.random() * 3
+    // Allocated once. A `new THREE.Color()` per frame is 60 allocations a
+    // second on a surface that renders permanently beside a resident model.
+    const rimTarget = new THREE.Color()
 
     loader.load(
       src,
@@ -334,8 +378,14 @@ export default function VrmAvatar({ px = 320, src = '/avatars/AvatarSample_Z.vrm
       const s = stateRef.current
       const rate = MOTION_RATE[s]
 
-      rim.color.setHex(RIM_COLOUR[s])
-      rim.intensity = s === 'swapping' ? 1.1 : 2.2
+      // Eased, not assigned. Both are pushed toward the state's value rather
+      // than set to it, so a state change is a short crossfade in the one
+      // channel that carries state. `Color.lerp` interpolates in linear RGB,
+      // which is what keeps slate-to-cyan from passing through a muddy middle.
+      const k = approachRate(dt, RIM_EASE_SECONDS)
+      rimTarget.setHex(RIM_COLOUR[s])
+      rim.color.lerp(rimTarget, k)
+      rim.intensity = THREE.MathUtils.lerp(rim.intensity, s === 'swapping' ? 1.1 : 2.2, k)
 
       if (vrm) {
         const em = vrm.expressionManager
@@ -351,11 +401,14 @@ export default function VrmAvatar({ px = 320, src = '/avatars/AvatarSample_Z.vrm
           // a status indicator, and a head that swings reads as a character.
           const tilt = s === 'thinking' ? 0.09 : 0
           const lean = s === 'listening' ? 0.06 : 0
-          head.rotation.z = THREE.MathUtils.lerp(head.rotation.z, tilt, dt * 3)
+          // Same time constant the old `dt * 3` produced at 60Hz, now the same
+          // at any refresh rate — see `approachRate`.
+          const kHead = approachRate(dt, 1 / 3)
+          head.rotation.z = THREE.MathUtils.lerp(head.rotation.z, tilt, kHead)
           head.rotation.x = THREE.MathUtils.lerp(
             head.rotation.x,
             lean + Math.sin(now * 0.7 * rate) * 0.008,
-            dt * 3,
+            kHead,
           )
         }
 
@@ -390,9 +443,10 @@ export default function VrmAvatar({ px = 320, src = '/avatars/AvatarSample_Z.vrm
           // Ease rather than snap. Blend shapes switched instantly read as a
           // puppet; a short lerp at ~15 Hz still resolves every cue at speech
           // rate while looking like a jaw with mass.
+          const kMouth = approachRate(dt, 1 / 15)
           for (const v of VISEMES) {
             const target = shape === v ? (v === 'aa' ? 0.85 : 0.6) : 0
-            em.setValue(v, THREE.MathUtils.lerp(em.getValue(v) ?? 0, target, dt * 15))
+            em.setValue(v, THREE.MathUtils.lerp(em.getValue(v) ?? 0, target, kMouth))
           }
 
           // A swap is the one state where nothing is resident and no work is
