@@ -14,7 +14,7 @@
  */
 import * as THREE from 'three'
 import { describe, it, expect } from 'vitest'
-import { renderScaleFor, applyTextureFiltering } from './VrmAvatar'
+import { renderScaleFor, applyTextureFiltering, approachRate } from './VrmAvatar'
 
 describe('renderScaleFor', () => {
   it('supersamples on an ordinary 1x display', () => {
@@ -142,5 +142,109 @@ describe('applyTextureFiltering', () => {
 
     expect(applyTextureFiltering(root, 8)).toBe(1)
     expect(material.map.anisotropy).toBe(8)
+  })
+})
+
+/**
+ * State changes are transitions now, not cuts.
+ *
+ * The rim light is the state channel and it was assigned absolutely every
+ * frame, so idle-to-thinking swapped slate for cyan between two frames. On a
+ * surface briefed as *calm over delight*, an instant colour flip is the one
+ * motion that reads as a glitch rather than as a state.
+ *
+ * The property worth asserting is not "it eases" — that is visible or it is
+ * not, and this environment cannot take a screenshot. It is that the easing is
+ * **frame-rate independent**, which is invisible on the machine it was tuned on
+ * and wrong everywhere else. The lerps already in this file were not: at 144Hz
+ * `dt * 3` covers three times the distance per second it covers at 48Hz.
+ */
+describe('approachRate', () => {
+  it('covers the same distance in the same wall-clock time at any refresh rate', () => {
+    // A quarter second at three refresh rates. The frame counts have to divide
+    // it exactly or the test compares different durations and fails for a
+    // reason that has nothing to do with the property — which is what the
+    // first version of this did, at 8 frames of 30Hz for 0.267s against 0.25s.
+    const remainingAfterQuarterSecond = (hz: number) => {
+      const frames = 0.25 * hz
+      expect(Number.isInteger(frames)).toBe(true)
+      let left = 1
+      for (let i = 0; i < frames; i++) left *= 1 - approachRate(1 / hz, 0.22)
+      return left
+    }
+
+    const at48 = remainingAfterQuarterSecond(48)
+    const at60 = remainingAfterQuarterSecond(60)
+    const at240 = remainingAfterQuarterSecond(240)
+
+    // Within a percent of each other despite five times the frame count.
+    expect(Math.abs(at60 - at240)).toBeLessThan(0.01)
+    expect(Math.abs(at60 - at48)).toBeLessThan(0.01)
+  })
+
+  it('is what the old frame-tied form was not, and the honest size of that', () => {
+    // Written first as "the old form diverges by more than 1% between 60Hz and
+    // 240Hz" and it failed at 0.68%. The claim was too strong: `dt * rate` is a
+    // first-order approximation of the exponential, so at short frame times the
+    // two agree closely. Where it actually breaks is long frames — and it
+    // breaks completely rather than gradually.
+    const oldForm = (hz: number) => {
+      let left = 1
+      for (let i = 0; i < 0.25 * hz; i++) left *= 1 - (1 / hz) * 3
+      return left
+    }
+    const newForm = (hz: number) => {
+      let left = 1
+      for (let i = 0; i < 0.25 * hz; i++) left *= 1 - approachRate(1 / hz, 1 / 3)
+      return left
+    }
+
+    // The error grows as the frame time grows — that is the whole defect.
+    const errorAt20 = Math.abs(oldForm(20) - oldForm(240))
+    const errorAt60 = Math.abs(oldForm(60) - oldForm(240))
+    expect(errorAt20).toBeGreaterThan(errorAt60)
+
+    // The new form does not have it, at either rate.
+    expect(Math.abs(newForm(20) - newForm(240))).toBeLessThan(errorAt20)
+
+    // And past dt = 1/3 the old factor exceeds 1, which is not a small error —
+    // the value shoots past its target and comes back.
+    expect(0.5 * 3).toBeGreaterThan(1)
+    expect(approachRate(0.5, 1 / 3)).toBeLessThanOrEqual(1)
+  })
+
+  it('is close to arrived after three time constants', () => {
+    // The tuning claim in the comment, asserted: ~95% of the way there.
+    let left = 1
+    for (let i = 0; i < 60; i++) left *= 1 - approachRate(0.66 / 60, 0.22)
+    expect(left).toBeLessThan(0.06)
+  })
+
+  it('never overshoots on a long frame', () => {
+    // A backgrounded tab returning, or a model finishing a load. The first
+    // version of this asserted `toBe(1)` and failed at 0.9999999998 — which
+    // was the test teaching the comment above it: the exponential form
+    // approaches 1 and never reaches or passes it, so overshoot is impossible
+    // by construction and the clamp is belt-and-braces rather than the
+    // guarantee. The linear form it replaced genuinely did overshoot.
+    // 0.5s was in this list at first and failed at 0.897 — correctly, because
+    // half a second is only 2.3 time constants and not a "long frame" at all.
+    // The bound belongs on genuinely stalled frames.
+    for (const dt of [5, 50, 1e6]) {
+      expect(approachRate(dt, 0.22)).toBeLessThanOrEqual(1)
+      expect(approachRate(dt, 0.22)).toBeGreaterThan(0.99)
+    }
+
+    // Never negative, never above 1, for anything a clock can produce.
+    for (const dt of [1 / 240, 1 / 24, 0.5, 5]) {
+      const k = approachRate(dt, 0.22)
+      expect(k).toBeGreaterThan(0)
+      expect(k).toBeLessThanOrEqual(1)
+    }
+  })
+
+  it('does not move on a zero or negative frame', () => {
+    expect(approachRate(0, 0.22)).toBe(0)
+    expect(approachRate(-1, 0.22)).toBe(0)
   })
 })
