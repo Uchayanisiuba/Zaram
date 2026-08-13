@@ -1,7 +1,8 @@
 import { create } from 'zustand';
 import { useOrbStore } from './orbStore';
 import { toVisemeTrack, type VisemeCue, type WordTiming } from '@/lib/visemes';
-import { splitIntoUtterances } from '@/lib/utterances';
+import { takeCompleteUtterances } from '@/lib/utterances';
+import { stripCitationMarkers } from '@/lib/markers';
 
 /**
  * Zaram speaking, and the mouth shapes that go with it.
@@ -66,9 +67,72 @@ interface SpeechStore {
   /** Why speech is unavailable, when it is. Named, never silent. */
   error: string | null;
 
+  /** Speak a complete piece of text. Used by the speak-aloud button, where the
+   *  whole reply already exists. */
   speak: (text: string, voice?: string) => Promise<void>;
+
+  /** Start speaking a reply that is still being generated.
+   *
+   *  Call `pushSpeech` as tokens arrive and `endSpeech` when the stream ends.
+   *  Returns immediately; playback runs on its own. */
+  beginSpeech: (voice?: string) => void;
+  /** Hand over the reply so far. Safe to call on every token: only sentences
+   *  that will not change again are queued, the rest is held. */
+  pushSpeech: (replySoFar: string) => void;
+  /** No more text is coming. Flushes whatever is held. */
+  endSpeech: () => void;
+
   stop: () => void;
 }
+
+/**
+ * The pieces waiting to be synthesised, which may not all exist yet.
+ *
+ * The play loop used to walk a fixed array, which is correct when the whole
+ * reply is known and useless while it is still arriving. This is the same loop
+ * over a queue that can grow underneath it: `next()` waits when the queue is
+ * empty rather than ending, and only ends once the producer has said there is
+ * no more coming.
+ */
+class UtteranceQueue {
+  private items: string[] = [];
+  private closed = false;
+  private waiting: (() => void) | null = null;
+
+  push(text: string): void {
+    this.items.push(text);
+    this.wake();
+  }
+
+  close(): void {
+    this.closed = true;
+    this.wake();
+  }
+
+  private wake(): void {
+    const w = this.waiting;
+    this.waiting = null;
+    w?.();
+  }
+
+  /** The next piece, or null once the queue is closed and drained. */
+  async next(): Promise<string | null> {
+    while (this.items.length === 0) {
+      if (this.closed) return null;
+      await new Promise<void>((resolve) => {
+        this.waiting = resolve;
+      });
+    }
+    return this.items.shift() ?? null;
+  }
+}
+
+/** The queue the current generation is reading from. */
+let queue: UtteranceQueue | null = null;
+/** The reply so far, markers stripped, as last handed over. */
+let spokenSoFar = '';
+/** How many characters of it have already been queued as utterances. */
+let consumed = 0;
 
 /** Bumped by `stop()` and by each new `speak()`. Every async step checks it
  *  before touching state, so a reply that begins while another is still
@@ -149,53 +213,121 @@ export const useSpeechStore = create<SpeechStore>((set, get) => ({
   error: null,
 
   speak: async (text, voice) => {
+    // The whole reply is already known, so this is the streaming path with
+    // everything pushed at once. One loop, not two — a second copy of the
+    // play-and-prefetch sequence is where the two would drift.
+    get().beginSpeech(voice);
+    get().pushSpeech(text);
+    get().endSpeech();
+  },
+
+  beginSpeech: (voice) => {
     get().stop();
     const mine = ++generation;
-    const setOrbState = useOrbStore.getState().setOrbState;
-
-    const pieces = splitIntoUtterances(text);
-    if (pieces.length === 0) return;
+    const mineQueue = new UtteranceQueue();
+    queue = mineQueue;
+    spokenSoFar = '';
+    consumed = 0;
 
     set({ error: null });
-    setOrbState('speaking');
+    useOrbStore.getState().setOrbState('speaking');
 
-    // One piece ahead, no more. Two would synthesise work that a `stop()` is
-    // about to discard, and Kokoro is the scarce resource here.
-    let pending = synthesise(pieces[0], voice, mine);
+    // Drives itself. The caller pushes text and walks away, because speech is
+    // an accompaniment to the reply and must never be something the reply has
+    // to wait for.
+    void (async () => {
+      const setOrbState = useOrbStore.getState().setOrbState;
 
-    for (let i = 0; i < pieces.length; i++) {
-      const current = await pending;
-      if (generation !== mine) return;
-
-      pending =
-        i + 1 < pieces.length
-          ? synthesise(pieces[i + 1], voice, mine)
-          : Promise.resolve(null);
-
-      if (current === null) return;
-      if ('error' in current) {
-        set({ error: current.error });
-        // The first piece failing is the whole utterance failing; a later one
-        // failing has already said something, and stopping there is better
-        // than pressing on through a gap the listener will hear as a fault.
-        break;
+      // One piece ahead, no more. Two would synthesise work that a `stop()` is
+      // about to discard, and Kokoro is the scarce resource here.
+      const first = await mineQueue.next();
+      if (first === null || generation !== mine) {
+        if (generation === mine && useOrbStore.getState().orbState === 'speaking') {
+          setOrbState('idle');
+        }
+        return;
       }
 
-      set({ audio: current.audio, track: current.track });
-      await playToEnd(current.audio);
-      URL.revokeObjectURL(current.objectUrl);
+      let pending: Promise<Utterance | { error: string } | null> = synthesise(
+        first,
+        voice,
+        mine,
+      );
+
+      for (;;) {
+        const current = await pending;
+        if (generation !== mine) return;
+
+        // Ask for the next piece *before* playing this one. On a live stream it
+        // may not exist yet, and waiting for it here — rather than after
+        // playback — is what lets synthesis overlap the model still generating.
+        const upcoming = await mineQueue.next();
+        if (generation !== mine) return;
+        pending =
+          upcoming === null
+            ? Promise.resolve(null)
+            : synthesise(upcoming, voice, mine);
+
+        if (current === null) break;
+        if ('error' in current) {
+          set({ error: current.error });
+          // The first piece failing is the whole utterance failing; a later one
+          // failing has already said something, and stopping there is better
+          // than pressing on through a gap the listener will hear as a fault.
+          break;
+        }
+
+        set({ audio: current.audio, track: current.track });
+        await playToEnd(current.audio);
+        URL.revokeObjectURL(current.objectUrl);
+
+        if (generation !== mine) return;
+        if (upcoming === null) break;
+      }
 
       if (generation !== mine) return;
-    }
+      // Only stand down if nothing else has taken the state in the meantime.
+      if (useOrbStore.getState().orbState === 'speaking') setOrbState('idle');
+      set({ audio: null, track: [] });
+    })();
+  },
 
-    if (generation !== mine) return;
-    // Only stand down if nothing else has taken the state in the meantime.
-    if (useOrbStore.getState().orbState === 'speaking') setOrbState('idle');
-    set({ audio: null, track: [] });
+  pushSpeech: (replySoFar) => {
+    if (!queue) return;
+    // Citation markers are display chrome and were being read aloud: nothing
+    // stripped them on this path, so Kokoro pronounced "[M1]" mid-sentence.
+    // `ChatSurface` and `SpeakButton` both strip for their own reasons; this is
+    // the third caller and the only one that had been missed.
+    const spoken = stripCitationMarkers(replySoFar);
+    if (spoken.length <= consumed) return;
+
+    spokenSoFar = spoken;
+    // A character cursor rather than a held string. The caller hands over the
+    // whole reply every time, so the only safe record of what has been said is
+    // how far into that text we have got — and `rest` is a suffix of what was
+    // passed in, which is what makes the arithmetic below exact.
+    const { ready, rest } = takeCompleteUtterances(spoken.slice(consumed));
+    consumed = spoken.length - rest.length;
+    for (const piece of ready) queue.push(piece);
+  },
+
+  endSpeech: () => {
+    if (!queue) return;
+    const { ready } = takeCompleteUtterances(spokenSoFar.slice(consumed), true);
+    for (const piece of ready) queue.push(piece);
+    consumed = spokenSoFar.length;
+    queue.close();
+    queue = null;
   },
 
   stop: () => {
     generation++;
+    // Release anything the loop is blocked on, or it waits for a queue nobody
+    // will ever push to again — a leaked promise per interrupted reply.
+    queue?.close();
+    queue = null;
+    spokenSoFar = '';
+    consumed = 0;
     const { audio } = get();
     if (audio) {
       audio.pause();

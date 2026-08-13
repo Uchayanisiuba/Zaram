@@ -17,6 +17,7 @@ import ArtifactCard from '@/components/ArtifactCard';
 import NoticeCard from '@/components/chat/NoticeCard';
 import FirstRunPanel from '@/components/firstrun/FirstRunPanel';
 import { useReadiness, setupToOffer } from '@/hooks/useReadiness';
+import { stripCitationMarkers } from '@/lib/markers';
 import { useConversationStore } from '@/stores/conversationStore';
 import { useChatStore } from '@/stores/chatStore';
 import { useSourceStore } from '@/stores/sourceStore';
@@ -42,10 +43,11 @@ import { useViewport } from '@/hooks/useViewport';
 import type { ChatSource } from '@/services/chatClient';
 
 /** Strip internal citation markers ([M1], [S2]) from displayed text.
- *  They ground the model's answer but mean nothing to the user. Applied to
- *  accumulated text rather than individual tokens, because a marker is often
- *  split across several tokens as it streams. */
-const stripMarkers = (t: string) => t.replace(/\s*\[[MS]\d+\]/g, '');
+ *
+ *  Moved to `@/lib/markers` because a third caller needed it and had been
+ *  missed: the path that speaks a reply automatically was handing Kokoro the
+ *  raw text, markers and all. One copy, so the next caller cannot miss it. */
+const stripMarkers = stripCitationMarkers;
 
 export default function ChatSurface() {
   const reduced = useIsReducedMotion();
@@ -304,10 +306,28 @@ export default function ChatSurface() {
           ) : (
             <>
               {messages.map((msg) => (
-                <div key={msg.id}>
+                <div
+                  key={msg.id}
+                  // Who said it is now carried by *side* as well as by label and
+                  // colour. Both speakers used to stack down the left edge,
+                  // which made a long exchange read as one continuous document
+                  // rather than as a conversation — the turn boundaries were
+                  // there but you had to read the labels to find them.
+                  //
+                  // Capped short of the full width on purpose: a bubble that
+                  // spans the panel has no visible right edge to be aligned to,
+                  // so the alignment stops meaning anything on exactly the long
+                  // messages where the cue is most useful.
+                  style={{
+                    alignSelf: msg.role === 'user' ? 'flex-end' : 'stretch',
+                    maxWidth: msg.role === 'user' ? '85%' : undefined,
+                  }}
+                >
                   {/* Speaker is named, not just coloured. Colour alone fails
                       colourblind users and is invisible to a screen reader,
-                      which would otherwise read one unbroken wall of text. */}
+                      which would otherwise read one unbroken wall of text.
+                      Side is a third cue and, like colour, it is the one a
+                      screen reader cannot use — so the label stays. */}
                   <p
                     className="text-[10px] uppercase tracking-wider mb-1"
                     style={{
@@ -316,6 +336,7 @@ export default function ChatSurface() {
                           ? 'var(--color-text-muted)'
                           : 'var(--color-cyan)',
                       fontFamily: 'var(--font-display)',
+                      textAlign: msg.role === 'user' ? 'right' : undefined,
                     }}
                   >
                     {msg.role === 'user' ? 'You' : 'Zaram'}
@@ -328,12 +349,23 @@ export default function ChatSurface() {
                           ? 'var(--color-text)'
                           : 'var(--color-cyan)',
                       // A second, non-colour cue: the assistant's replies are
-                      // indented behind a rule.
+                      // indented behind a rule. The user's get a quiet surface
+                      // instead, so the right edge the text is aligned to is
+                      // actually drawn — right-aligned text against nothing
+                      // reads as a layout accident.
                       borderLeft:
                         msg.role === 'assistant'
                           ? '2px solid var(--color-cyan-light)'
                           : undefined,
                       paddingLeft: msg.role === 'assistant' ? 10 : undefined,
+                      background:
+                        msg.role === 'user' ? 'var(--color-glass)' : undefined,
+                      border:
+                        msg.role === 'user'
+                          ? '1px solid rgba(255,255,255,0.06)'
+                          : undefined,
+                      borderRadius: msg.role === 'user' ? 12 : undefined,
+                      padding: msg.role === 'user' ? '8px 12px' : undefined,
                     }}
                   >
                     {stripMarkers(msg.text)}

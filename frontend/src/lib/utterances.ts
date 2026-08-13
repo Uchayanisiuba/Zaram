@@ -129,3 +129,55 @@ export function splitIntoUtterances(text: string): string[] {
 
   return merged.flatMap(breakLongPiece).filter(Boolean)
 }
+
+/**
+ * The pieces of a still-arriving reply that are finished enough to synthesise.
+ *
+ * **This is what makes speech start while the text is still appearing.**
+ * `splitIntoUtterances` stopped time-to-first-sound scaling with reply length,
+ * but it was only ever called once the whole reply had arrived — so the user
+ * still waited for the model to finish generating before hearing a word. On a
+ * long answer that is most of the delay, and it is the delay that remains after
+ * the synthesis fix.
+ *
+ * Called as tokens arrive with everything not yet handed over. Returns the
+ * pieces that will not change again, and the remainder to keep and pass back in
+ * with the next tokens.
+ *
+ * **The last piece is held back, and that is the whole subtlety.** A sentence
+ * without its final full stop is not finished, and one that *has* a full stop
+ * may still be merged into by `splitIntoUtterances` when the next sentence turns
+ * out to be short. Emitting either produces speech that pauses in the wrong
+ * place — worse than waiting, because a listener reads a wrong pause as a fault
+ * rather than as latency.
+ *
+ * `flush` is the end of the stream: there is no more text coming, so whatever
+ * is left is complete by definition and short pieces stop being worth holding.
+ */
+export function takeCompleteUtterances(
+  pending: string,
+  flush = false,
+): { ready: string[]; rest: string } {
+  if (flush) return { ready: splitIntoUtterances(pending), rest: '' }
+
+  const pieces = splitIntoUtterances(pending)
+  if (pieces.length === 0) return { ready: [], rest: pending }
+
+  const last = pieces[pieces.length - 1]
+
+  // Complete only if the text stops at a sentence boundary *and* the final
+  // piece is long enough that more text would not have been merged into it.
+  const endsAtBoundary = /[.!?\n]["'”’)\]]*\s*$/.test(pending)
+  if (endsAtBoundary && last.length >= MIN_CHARS) {
+    return { ready: pieces, rest: '' }
+  }
+
+  // Slice from the source rather than returning the split piece: splitting
+  // trims, and a trimmed remainder would lose the space before the next token
+  // and run two words together.
+  const at = pending.lastIndexOf(last)
+  return {
+    ready: pieces.slice(0, -1),
+    rest: at >= 0 ? pending.slice(at) : last,
+  }
+}
