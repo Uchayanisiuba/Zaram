@@ -234,3 +234,39 @@ describe('failure', () => {
     expect(events).toEqual([]);
   });
 });
+
+describe('the request body', () => {
+  /**
+   * Nothing here asserted what was *sent* — only what came back — and that is
+   * how `model: 'gemma3:latest'` survived in this transport for months. It
+   * overrode the provider layer's vetted selection on every message, with its
+   * residency and data-policy gates already applied, and made choosing any
+   * other model impossible from the interface however the backend was
+   * configured. The tests were all green throughout.
+   */
+  const sent = (fetchMock: ReturnType<typeof vi.fn>) =>
+    JSON.parse(String((fetchMock.mock.calls[0][1] as RequestInit).body)) as Record<string, unknown>;
+
+  it('names no model when the caller expressed no preference', async () => {
+    const fetchMock = vi.fn(() => streamingResponse([done()]));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await collect(streamChat({ text: 'hi' }));
+
+    // Empty, never a model name. Empty means "this request has no opinion", and
+    // the backend then uses the chosen model or its own selection. A literal
+    // here silently wins over both.
+    expect(sent(fetchMock).model).toBe('');
+  });
+
+  it('passes the caller’s model through untouched', async () => {
+    const fetchMock = vi.fn(() => streamingResponse([done()]));
+    vi.stubGlobal('fetch', fetchMock);
+
+    // Provider-prefixed, because that is the real shape of a discovered cloud
+    // model id and the transport must not try to be clever about it.
+    await collect(streamChat({ text: 'hi', model: 'openai:gpt-4o' }));
+
+    expect(sent(fetchMock).model).toBe('openai:gpt-4o');
+  });
+});

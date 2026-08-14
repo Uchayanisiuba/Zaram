@@ -142,7 +142,17 @@ export async function* streamChat(
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         text: req.text,
-        model: req.model ?? 'gemma3:latest',
+        // Empty means "this request expresses no preference", and the backend
+        // then uses the model chosen in Settings, or its own vetted selection.
+        //
+        // **This was `'gemma3:latest'`** — a model name hardcoded in the
+        // transport, on every message, that no control in the interface ever
+        // changed. So the provider layer's selection ran, applied its residency
+        // and data-policy gates, and was then overridden by a string literal
+        // here. No routing decision the backend made was observable, and
+        // choosing a cloud model was impossible from the interface however the
+        // backend was configured.
+        model: req.model ?? '',
         persona: req.persona ?? 'zaram_prime',
         session_id: req.sessionId ?? 'default',
         project_id: req.projectId ?? '',
