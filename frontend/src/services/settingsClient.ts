@@ -204,6 +204,14 @@ export interface DiscoveredModel {
   /** Whether Zaram may route here without being asked. False is normal for
    *  cloud models and is the reason one has to be chosen deliberately. */
   selectableByDefault: boolean;
+  /** `llm`, `embedding`, and whatever the provider layer adds later.
+   *
+   *  Carried because an embedder cannot hold a conversation: Ollama answers
+   *  `/api/generate` for `bge-m3` with a 400, so offering it under *Which
+   *  model answers* is offering a choice that can only fail. `/readiness`
+   *  already excludes embedders from its chat-model count; the picker was the
+   *  one surface that did not. */
+  category: string;
 }
 
 /**
@@ -223,6 +231,7 @@ export async function fetchModels(): Promise<DiscoveredModel[]> {
     locality: String(m.locality ?? ''),
     dataPolicy: typeof m.data_policy === 'string' ? m.data_policy : null,
     selectableByDefault: m.selectable_by_default === true,
+    category: String(m.category ?? ''),
   }));
 }
 

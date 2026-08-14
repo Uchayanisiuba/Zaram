@@ -52,6 +52,19 @@ class EventType(str, Enum):
     #: be *mentioned in the conversation the first time it matters*, since
     #: Knowledge showing it only helps someone who opens Knowledge.
     NOTICE = "notice"
+    #: Which model is about to answer, and where it runs.
+    #:
+    #: `CLAUDE.md`: "Every reply names the model that answered and why", and
+    #: "Never hide the model" — the memory holding while the model changes
+    #: underneath it is the product's best demonstration, and a reply that
+    #: names nothing forfeits it. It is also the only way a user can tell a
+    #: cloud answer from a local one: the maintainer connected OpenRouter and
+    #: had no way to know whether anything ever reached it.
+    #:
+    #: Emitted *before* the first token, for the reason MODEL_LOAD is: an
+    #: attribution that arrives after the answer is a footnote, and the
+    #: question "where did this come from" is asked while reading, not after.
+    ANSWERING = "answering"
 
 
 @dataclass
@@ -183,6 +196,47 @@ class StreamEvent:
         return StreamEvent(
             type=EventType.MODEL_LOAD,
             data={"kind": kind, "model": model, "evicts": list(evicts or [])},
+            correlation_id=correlation_id,
+        )
+
+    @staticmethod
+    def answering(
+        model: str | None,
+        locality: str | None,
+        *,
+        chosen_by: str | None = None,
+        provider: str | None = None,
+        correlation_id: str = "",
+    ) -> StreamEvent:
+        """Which model is answering, where it runs, and who picked it.
+
+        **Three fields that must not be collapsed into one sentence here.** The
+        backend reports; the interface phrases. A pre-composed string would put
+        wording in the layer that cannot be styled, cannot be translated, and
+        cannot show locality as anything but words — and locality is the field
+        a user checks before trusting the rest.
+
+        `locality` is three-valued and ``None`` is a real answer, carried from
+        `ModelsRuntime.locality_of` rather than defaulted. Saying "on this
+        machine" about a model whose record could not be resolved would be a
+        confident false claim on the one thing the product asks to be trusted
+        for; the interface renders nothing for a ``None`` instead.
+
+        `chosen_by` is `request`, `settings` or `zaram`, and it is the honest
+        version of `CLAUDE.md`'s "routed to qwen2.5-coder — coding task". Task
+        classification does not exist yet, so the reason available is *where
+        the choice came from*, and inventing a task label would be a rendered
+        value nobody measured. When routing gains task exemplars this field
+        gains their answer; until then it says the true thing.
+        """
+        return StreamEvent(
+            type=EventType.ANSWERING,
+            data={
+                "model": model,
+                "locality": locality,
+                "chosen_by": chosen_by,
+                "provider": provider,
+            },
             correlation_id=correlation_id,
         )
 

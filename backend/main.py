@@ -223,6 +223,78 @@ def _resolve_model(requested: str | None) -> str | None:
         return None
 
 
+def _who_chose(requested: str | None) -> str:
+    """`request`, `settings`, or `zaram` — where this message's model came from.
+
+    The honest version of `CLAUDE.md`'s "routed to qwen2.5-coder — coding
+    task". Routing has no task classifier yet, so the reason that exists is
+    where the choice was made, and a task label would be a rendered value
+    nobody measured. Mirrors `_resolve_model`'s precedence exactly; if the two
+    ever disagree the reply names a source that did not decide.
+    """
+    if (requested or "").strip():
+        return "request"
+    try:
+        from core.user_settings import get_user_settings
+
+        return "settings" if get_user_settings().default_model else "zaram"
+    except Exception:
+        return "zaram"
+
+
+def _answering_event(model: str | None, requested: str | None):
+    """The event that tells the user which model is about to speak.
+
+    Built here rather than in `ChatRouter` because this is where the model is
+    resolved, and rebuilding that resolution one layer down is how two places
+    come to disagree about which model answered — the exact failure the
+    hardcoded ``gemma3:latest`` in the transport was.
+
+    Every field degrades to ``None`` independently. A name Zaram cannot place
+    still gets reported *as a name*, with no locality and no provider beside
+    it, because "qwen3 answered" is true and useful while "qwen3 answered on
+    this machine" would be a claim from a lookup that failed.
+    """
+    from core.streaming_events import StreamEvent
+
+    name: str | None = model
+    locality: str | None = None
+    provider: str | None = None
+
+    try:
+        runtime = kernel.registry.get_runtime("models")
+    except Exception:
+        runtime = None
+
+    if runtime is not None:
+        if not name:
+            # Nobody chose, so the answering model is the runtime's own — the
+            # provider layer's vetted pick, which it reports as a wire name.
+            try:
+                name = runtime.health_check().get("model") or None
+            except Exception:
+                name = None
+        try:
+            locality = runtime.locality_of(model or name)
+        except Exception:
+            locality = None
+        try:
+            provider = runtime.provider_of(model or name)
+        except Exception:
+            provider = None
+        try:
+            name = runtime.wire_name(name) if name else name
+        except Exception:
+            pass
+
+    return StreamEvent.answering(
+        name,
+        locality,
+        chosen_by=_who_chose(requested),
+        provider=provider,
+    )
+
+
 def _locality_of_model(model: str | None) -> str | None:
     """``"local"``, ``"cloud"``, or ``None`` when it cannot be established.
 
@@ -492,6 +564,17 @@ def _current_inference(requested_model: str | None) -> dict[str, str | None]:
         except Exception:
             model = None
 
+    # The name the *user* would recognise, not the id the catalogue invented.
+    # Asked "what model is answering", Zaram replied "ollama:qwen2.5-coder:1.5b"
+    # — a string that appears nowhere in the interface, prefixed with a word
+    # that looks like part of the model's name. Locality below is still asked
+    # about the id, because that is what the catalogue is keyed by.
+    display = model
+    try:
+        display = runtime.wire_name(model) if model else model
+    except Exception:
+        display = model
+
     try:
         # Three-valued on purpose. `_is_remote_model` answers False for an
         # unresolved model because routing must fail safe; identity must not
@@ -500,7 +583,7 @@ def _current_inference(requested_model: str | None) -> dict[str, str | None]:
     except Exception:
         locality = None
 
-    return {"model": model, "locality": locality}
+    return {"model": display, "locality": locality}
 
 
 @app.post("/chat")
@@ -559,11 +642,24 @@ async def chat(request: ChatRequest):
     # The API layer passes the raw prompt through without independent search.
     final_prompt = request.text
 
-    return StreamingResponse(
-        chat_router.route(
+    # Who is answering, said before the first token rather than after the last.
+    #
+    # `CLAUDE.md` requires every reply to name the model that answered, and
+    # nothing did — so a user who had connected a cloud provider had no way to
+    # tell whether anything ever reached it, which is precisely the report that
+    # sent me looking. Ahead of the stream for the reason `model_load` is ahead
+    # of it: an attribution that arrives after the answer is a footnote, and
+    # the question is asked while reading.
+    async def _stream_with_attribution():
+        yield _answering_event(model, request.model).to_ipc() + "\n"
+        async for chunk in chat_router.route(
             final_prompt, model, system_prompt, request.session_id,
             project_id=request.project_id or None,
-        ),
+        ):
+            yield chunk
+
+    return StreamingResponse(
+        _stream_with_attribution(),
         media_type="text/event-stream"
     )
 
