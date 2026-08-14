@@ -11,8 +11,100 @@ accurate — it is the first thing anyone reads.
 
 ---
 
-## Current state — 14 August 2026
+## Current state — 15 August 2026
 
+> ### Settings became real, and five dead features were found behind it.
+>
+> `Zaram-V0.1` is **64 commits ahead of `origin/main`**, and this session's work
+> is **uncommitted** — 44 changed or new files in the working tree. Measure with
+> `git rev-list --count origin/main..HEAD` rather than trusting that number.
+>
+> Suites, all measured this session: **1987 backend passed / 0 failed**, 9
+> skipped · **155 frontend** across 20 files · typecheck clean ·
+> `scripts/drive-settings.mjs` **14/14** and `scripts/drive-composer.mjs`
+> **9/9**, both against the running product in a real browser.
+>
+> **Two things built late and not seen by a human**: the artifact Preview panel
+> over the orb area, and speech barge-in. Both are asserted by construction;
+> `probe-preview-geometry.mjs` skipped because the probe browser had no
+> artifacts, and nothing drives barge-in yet. Given what the pointer-tracking
+> gaze cost, look at both before building on them.
+>
+> **What this session was.** The maintainer asked for a Settings screen they
+> could actually operate, and for cloud and web search they could test. Both
+> now work. Getting there turned up **five separate features that were complete,
+> tested, and could not happen** — the shape this file keeps recording, found
+> five times in one day:
+>
+> 1. **`/providers/*` was never mounted.** A full router with its own passing
+>    test file, 404 on the running product for the entire life of the provider
+>    layer, because its tests build their own app and mount it themselves.
+> 2. **`chatClient.ts` hardcoded `model: 'gemma3:latest'`** on every message.
+>    The provider layer's vetted selection ran, applied its residency and
+>    data-policy gates, and was overridden by a string literal in the transport.
+>    No routing decision was observable and no cloud model was reachable from
+>    the interface however the backend was configured. Nothing asserted what the
+>    request body contained.
+> 3. **`KnowledgeRuntime` never had an internet runtime.** `search()` reads web
+>    results from `self._internet_runtime` and nothing ever constructed one, so
+>    the web half of every search silently returned nothing.
+>    `create_internet_runtime` was defined, exported, and never called.
+> 4. **`InternetRuntimeImpl.initialize()` raised `AttributeError`** on its last
+>    line — three of the four `InternetStatus` values it used do not exist. Live
+>    broken code in a module nothing had ever executed.
+> 5. **The routing preference control I built was itself a dead switch** —
+>    persisted, served, rendered, read by nothing. Recorded here rather than
+>    quietly fixed, because it is the same defect as the four above, committed
+>    by someone who had spent the day finding them.
+>
+> **And one that was worse than dead: web search *appeared* to work.** Every
+> DuckDuckGo call site imported `duckduckgo_search`, which has been superseded
+> and, against the current endpoints, **returns an empty list without raising**.
+> Measured: 0 results where `ddgs` returned 3, same connection, seconds apart.
+> So search was enabled, left the machine, was logged as allowed at 107 bytes,
+> and produced answers with no web sources — indistinguishable from "the web had
+> nothing to say". Every layer reported success. `core/ddgs_import.py` is now
+> the single import site and `test_search_uses_the_working_package.py` guards
+> it. Web search now returns real results: Guardian, TechCrunch, NYT.
+>
+> **Start here, in this order.**
+>
+> 1. **Nothing is committed.** 44 files. Read *What this session built* below
+>    and commit in coherent pieces; do not commit `backend/settings.json`, which
+>    is now gitignored alongside the egress policy.
+> 2. **`npm run lint` still cannot pass** — 143 pre-existing warnings against
+>    `--max-warnings 0`. Untouched this session. Fourth instance of *a gate
+>    nobody can run*.
+> 3. **The cloud round trip is still unverified by a human.** LM Studio on
+>    loopback proves the connect path without a credential; nobody has connected
+>    a real key, selected a cloud model and watched a reply arrive. That needs
+>    the maintainer's own key — see *Testing cloud and search* below for the
+>    exact steps and the one non-obvious blocker.
+>
+> ### Testing cloud and search — the step that is not obvious
+>
+> **Connecting a provider does not permit it.** The key is stored; the
+> destination still has no rule, and the default is refuse. So *Look for models*
+> is denied, the list comes back empty, and there is no way to select a cloud
+> model — with nothing on screen explaining why. That happened to the
+> maintainer. The Cloud section now names the host and offers a one-click
+> *Allow*, but the sequence is worth stating:
+>
+> 1. Settings → Cloud providers → pick the provider, paste the key, **Connect**.
+> 2. Allow its host when the amber line offers it (`openrouter.ai`, say).
+> 3. Models → **Look for models** — this is the network call.
+> 4. Pick one under *Which model answers*.
+>
+> Until step 4, Zaram answers locally and says so truthfully. "No, nothing in
+> this conversation has left the device" is **correct** while `default_model` is
+> null, not a bug — it is `core/identity.py` working.
+>
+> For search: it is on, `duckduckgo.com` is allowed, and the question has to
+> actually look like it needs live information — `needs_search()` decides.
+> "Are you connected to the cloud?" is not such a question, so no search runs.
+>
+> ### Old current-state block — 14 August 2026
+>
 > ### `Zaram-V0.1` is **62 commits ahead of `origin/main`**, nine of them
 > unpushed, ending with this docs commit.
 >
@@ -50,6 +142,171 @@ accurate — it is the first thing anyone reads.
 > transitions, streaming speech, and a loader gate for avatar files. Each has its
 > own section; the 12 August block is kept because everything in it is still
 > true about packaging, signing, the API binding and the installer.
+
+### What this session built — 15 August
+
+**Settings, whole.** `SettingsWorkspace` was read-only and lied in both
+directions: it reported "Egress log: not built" and "Kill switch: not built"
+while `/egress` and `/egress/policy` had been served for weeks. *"Not built"
+about something that exists* is the more damaging of the two lies here — it
+tells a user worried about their data that Zaram is not recording what leaves,
+when it is. Now: kill switch, per-source rules, web search with its scope,
+routing preference, model choice, cloud providers, speech, renderer.
+
+**The kill switch is new, not relabelled.** It lives in `EgressPolicy.decide`
+rather than in a route, so it covers tool traffic and model discovery, not just
+chat, and an `allow` rule cannot survive it. Loopback is deliberately untouched
+— a request to 127.0.0.1 cannot leave, so there is nothing to cut, and sealing
+it would stop the local model answering. Verified live: with it on, discovery
+was refused and logged as *"the kill switch is on"* while a local chat with full
+recall answered normally.
+
+**Several cloud providers at once**, not one. The environment-variable design
+could express exactly one endpoint and key, which is not how people hold keys —
+the maintainer wants coding on one service and images on another.
+`cloud_config` holds a set; `CloudFanout` resolves per model and strips the
+`provider_id:` prefix before the wire, which also fixes a latent bug where a
+discovered cloud model's real id would have been sent verbatim and 404'd.
+
+**The three tiers of routing control now do something.** `prefer_local` is a
+*constraint* — Zaram will not auto-pick a cloud model at all, and returns
+nothing rather than falling back, because the strictest setting must not be the
+one that silently sends data off-device. `auto` ranks local first and may fall
+back. `prefer_cloud` ranks cloud first among models already consented to. None
+of the three is a permission: `selectable_by_default` still gates on data
+policy, and `test_routing_preference_is_not_inert.py` asserts that the claim the
+screen makes to the user is true.
+
+**Web search works, and is honest about what still blocks it.** The row states
+whether the environment is overriding the toggle, whether the kill switch is on,
+and whether the search host has a rule yet — because "on" alone would have the
+user turn it on, get a refusal, and conclude the feature is broken.
+
+**Search scope: local models only, by default.** The maintainer's call — search
+compensates for what the answering model does not know, and a local 12B knows
+least. One honest caveat is recorded in `SearchScope`: **cloud models do not
+generally come with web search**, so this trades recency for latency rather than
+avoiding something the provider was going to do anyway. Carried per-request in a
+`ContextVar`, not a global — two chat requests with different models are in
+flight at once the moment a second window exists.
+
+**The orb reports connected cloud providers.** `inference_providers` was
+hardcoded to Ollama with a comment saying a cloud engine "must list it, or the
+Orb will under-report egress"; a cloud engine arrived and the line never did. So
+connecting OpenRouter changed nothing on screen. `routing.mode` was likewise the
+literal string `"local"`. Both derived now.
+
+**"Warming up" was appearing on almost every message.** Nothing set Ollama's
+`keep_alive`, so its five-minute default applied and any ordinary pause cost a
+full cold start. Two halves: `keep_alive: 30m` keeps weights resident once
+loaded, and `warm_local_model()` preloads them seconds after boot in a thread.
+Measured: `gemma4:12b` resident at 8.08 GB within ~15s of launch, nobody having
+asked anything. 30 minutes rather than forever — pinning weights indefinitely
+would make a background app the reason a game will not start.
+
+**Citations were labelling memory as web.** `_search_provenance_events`
+hardcoded `kind="web"` for every result, and a knowledge search returns the
+*merged* list. The moment the internet runtime was wired, facts from the user's
+own Spine arrived as web citations with `memory:` URIs and egress-coloured
+chips. Derived per result now, defaulting to `web` when unknown — over-warning
+about privacy is the safe error, under-warning is not.
+
+**Chat controls**: copy on every message, edit and ask-again on the user's own.
+**No thumbs**, and `drive-composer.mjs` asserts their absence — rule 7f, and
+this is the row where every other product puts them. Editing loads the text back
+into the composer rather than rewriting the transcript: a Zaram answer carries
+citations and may have put facts in the Spine, so deleting the question that
+produced them would leave provenance pointing at something the user cannot see.
+
+**Preview beside Download** on generated files, in a panel over the blurred
+orb — the treatment `CitationPanel` already uses. The preview is the HTML the
+file was built from, so fidelity is structural. Rendered in an `iframe` with an
+empty `sandbox` and a `default-src 'none'` CSP: the HTML is model-generated, and
+an external `<img>` in it would be a request the egress gate cannot see, because
+that gate intercepts what the *backend* sends. Same hole `vrmSafety` closed for
+avatar files, arriving by a different route.
+
+**The composer's mic and send buttons overlapped on hover.** Two hand-computed
+offsets — `right-9` and `right-2`, each 28px wide, adjacent with a gap of
+exactly zero — and `whileHover` scaling either one closed it. Replaced with a
+flex row. Measured: 3.5px gap at rest, still separated when hovered.
+
+**The orb is calmer.** Speaking ripples at a third the rate and a fraction of
+the opacity; the waveform bars are gone. Worth recording *why* the bars were
+wrong beyond taste: their heights were the hardcoded array
+`[28, 44, 60, 72, 60, 44, 28]` on a fixed loop. They never read the audio — a
+level meter that measures nothing, which `UI-SPEC` forbids outright. If one
+returns it must read `useSpeechStore`'s audio element, the way visemes already
+do.
+
+**Three new guards, and two found real defects on their first run.**
+`check-proxy-covers-backend.mjs` caught `/vision` never having been proxied
+(served and unreachable from the dev frontend the whole time) and then caught
+`/search` the moment it was added. `test_routes_are_mounted.py` asserts
+reachability against the real app object. `test_egress_chokepoint.py` now
+matches full dotted import paths, because centralising the DuckDuckGo import
+into `core.ddgs_import` **erased five modules' entries from that guard in a
+single refactor** — a guard a refactor can switch off is not a guard.
+
+### Speech has a north star now — 15 August 2026
+
+Set by the maintainer: **speech follows the text without lag, the user never
+waits, and the user can interrupt by typing or by microphone.**
+
+**Barge-in is built.** `bargeIn()` is a separate action from `stop()`
+deliberately — `stop()` is the mechanism and fires on every `beginSpeech`, on
+cancel, on teardown; `bargeIn()` is the *intent*, so a call site reads as "the
+user interrupted". They do the same thing today; when they stop doing the same
+thing (a resume, a fade rather than a cut) only one of them changes and every
+barge-in site changes with it.
+
+Two call sites. Typing in the composer, on *change* rather than on focus —
+clicking in to re-read is not an interruption, and stopping there would make
+speech feel fragile rather than responsive. And the microphone, where it is a
+**correctness requirement rather than a courtesy**: without it the mic records
+Zaram's own voice from the speakers and transcribes it back as if the user had
+said it.
+
+**A queue of clips is easier to interrupt than a live stream**, which is worth
+recording because the instinct runs the other way. There is no half-received
+buffer to discard and no connection to tear down — a generation counter is
+bumped, every async step checks it and bails, the queue is released so the loop
+is not left blocked on it, and the worst case is one already-synthesised clip
+thrown away. What it cannot do is *resume* mid-utterance, because the unit of
+playback is a sentence.
+
+**`/voice/stream` exists, is unused, and moving to it would not help** — noted
+so it is not "fixed" later on the assumption that it would. Kokoro is not a
+streaming model: it synthesises a whole utterance and returns a whole waveform,
+so those SSE chunks are chunks of a *finished clip*, not frames emitted as the
+model produces them. Backend chunking would change where the split is decided
+without changing when the first sound arrives, and would cost the one thing the
+client can uniquely do — decide "will this sentence change?" against text that
+is still arriving, which the backend cannot know because it sees one utterance
+at a time. **The layer follows the engine**; if a genuinely frame-streaming
+model ever replaces Kokoro, this inverts.
+
+Full write-up, with every measurement and the open questions:
+`docs/SPEECH-ARCHITECTURE.md`.
+
+### Preview sits over the orb, not over everything — 15 August 2026
+
+The panel occupies the orb's half of the window and stops where the
+conversation panel begins. Covering the whole window would hide the exchange
+that produced the file — the context that makes the document make sense — and
+would put the preview over the message that was clicked.
+
+Its width derives from the same fraction the conversation panel and the orb's
+own offset derive from, so the three cannot disagree. The panel is resizable; a
+hardcoded 55% would drift the moment anybody dragged the divider.
+`scripts/probe-preview-geometry.mjs` measures it at two divider positions for
+that reason. **It skipped on its last run** — the browser profile had no
+artifacts — so the geometry is asserted by construction and not yet by
+measurement. Generate a document and re-run it.
+
+Preview is on **both** surfaces, the conversation card and Work's detail panel,
+using one component. A control that exists in one place and not the other reads
+as a bug in whichever lacks it.
 
 ### This session — 13–14 August
 
@@ -601,7 +858,51 @@ Order after that: export button, per-source privacy and retention, the
 *Prefer local · Auto · Prefer cloud* control, then linked devices — which needs
 the pairing endpoints written first.
 
-### What is next
+### What is next — reordered 15 August
+
+These come before the older list below, which is still accurate about
+everything it covers.
+
+0a. **Name the model that answered, on every reply.** `CLAUDE.md` requires it —
+   *"Every reply names the model that answered and why, with a per-message
+   override available inline"* — and nothing does. The maintainer asked "how do
+   I know which model answered?" and the honest answer was: you cannot. The
+   backend knows (`_resolve_model`, `locality_of`); it never reaches the
+   message. This is the last missing piece of routing legibility and the
+   cheapest remaining trust win.
+
+0b. **Voice selection, male by default.** Kokoro ships 54 voices, `/voice/voices`
+   serves them, and the default is `af_heart` (female). **Read what that endpoint
+   actually returns before choosing** — hardcoding a name that is not in the
+   installed pack is the failure this file keeps warning about.
+
+0c. **Persist cloud keys with Electron `safeStorage`.** Connections live in
+   memory, so a restart forgets them. `CLAUDE.md` names the shape: DPAPI at
+   rest, handed to the Python child as an environment variable at launch, which
+   `cloud_config.seed_from_environment()` already adopts. Never an endpoint that
+   returns a key.
+
+0d. **Task-based routing across providers.** The maintainer's ask: coding to one
+   service, images to another. The foundation is in — several connections at
+   once, per-model resolution, `ProjectType` sitting unused with five values.
+   The shape argued and agreed: **project type supplies a prior, never a
+   decision**; per-message classification still runs, by embedding similarity
+   against exemplars, never by a generative call. A project is not one task — a
+   coding project still needs its invoice written. And a project type must
+   **never** cause a silent cloud route.
+
+0e. **Two providers the catalogue grades unreachable, both fixable.** Gemini's
+   OpenAI-compatible root ends in `/openai` with the chat path hanging directly
+   off it, and Zaram's URL builder assumes `<root>/v1/...` — the catalogue calls
+   this "a small change to how endpoints are built" and it is. Anthropic needs a
+   real adapter: `/v1/messages`, `x-api-key`, system prompt as a top-level field
+   rather than a message, which matters here because that is where recalled
+   facts live. OpenRouter reaches both today.
+
+0f. **Search relevance.** The internet runtime queries Wikipedia, GitHub *and*
+   DuckDuckGo for every question, so an election query returned a junk GitHub
+   repo. Deliberately not touched — it is a ranking problem, not a gate problem,
+   and the gate work was what was asked for.
 
 0. **The offer executor.** The first-run screen states what is missing and can
    act on exactly one of the four things it offers. Until something carries out
