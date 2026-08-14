@@ -83,6 +83,62 @@ describe('parsing', () => {
     });
   });
 
+  it('carries the answering model, and its locality, ahead of the tokens', async () => {
+    // The order is the assertion. It arrives before the first token so the
+    // attribution is on screen while the reply is read.
+    mockFetch(() =>
+      streamingResponse([
+        line({
+          type: 'answering',
+          data: {
+            model: 'anthropic/claude-sonnet-4.5',
+            locality: 'cloud',
+            provider: 'openrouter',
+            chosen_by: 'settings',
+          },
+        }),
+        token('Hi'),
+        done(),
+      ]),
+    );
+
+    const events = await collect(streamChat({ text: 'hi' }));
+    expect(events.map((e) => e.type)).toEqual(['answering', 'token', 'done']);
+    expect(events[0]).toMatchObject({
+      model: 'anthropic/claude-sonnet-4.5',
+      locality: 'cloud',
+      provider: 'openrouter',
+      chosenBy: 'settings',
+    });
+  });
+
+  it('reports an unresolved locality as null rather than as local', async () => {
+    // The whole reason locality is three-valued. Coercing null to "local"
+    // would tell the user their data stayed on the machine on the strength of
+    // a lookup that failed — a confident false claim about the one field they
+    // are most likely to check.
+    mockFetch(() =>
+      streamingResponse([
+        line({ type: 'answering', data: { model: 'something-unrecognised', locality: null } }),
+        done(),
+      ]),
+    );
+
+    const events = await collect(streamChat({ text: 'hi' }));
+    expect(events[0]).toMatchObject({ model: 'something-unrecognised', locality: null });
+  });
+
+  it('drops an attribution that names no model', async () => {
+    // The backend sends the event whether or not it resolved a name, because
+    // the absence is worth knowing there. Here there is nothing to draw.
+    mockFetch(() =>
+      streamingResponse([line({ type: 'answering', data: { model: '' } }), token('x'), done()]),
+    );
+
+    const events = await collect(streamChat({ text: 'hi' }));
+    expect(events.map((e) => e.type)).toEqual(['token', 'done']);
+  });
+
   it('reassembles a JSON object split across chunk boundaries', async () => {
     // The single most likely transport bug: chunks do not respect line breaks.
     const whole = token('reassembled');

@@ -705,7 +705,9 @@ export default function SettingsWorkspace() {
                   {models === null ? 'Look for models' : 'Look again'}
                 </Button>
                 {models !== null && (
-                  <span className="text-[11px] text-slate-500">{models.length} found</span>
+                  <span className="text-[11px] text-slate-500">
+                    {models.filter((m) => m.category !== 'embedding').length} found
+                  </span>
                 )}
               </div>
 
@@ -728,12 +730,20 @@ export default function SettingsWorkspace() {
                   }
                 >
                   <option value="">Zaram decides</option>
-                  {models.map((model) => (
-                    <option key={model.id} value={model.id}>
-                      {model.displayName} — {model.locality}
-                      {model.dataPolicy ? '' : ' · terms unknown'}
-                    </option>
-                  ))}
+                  {/* Embedders are not offered. `bge-m3` is a model, is
+                      discovered like one, and answers `/api/generate` with a
+                      400 — so listing it here is offering a choice whose only
+                      outcome is a failed reply. `/readiness` already excludes
+                      them from its chat-model count; this was the surface that
+                      did not. */}
+                  {models
+                    .filter((model) => model.category !== 'embedding')
+                    .map((model) => (
+                      <option key={model.id} value={model.id}>
+                        {model.displayName} — {model.locality}
+                        {model.dataPolicy ? '' : ' · terms unknown'}
+                      </option>
+                    ))}
                 </select>
               )}
             </div>

@@ -45,9 +45,28 @@ export interface ChatMessage {
    *  model said. */
   notices: ChatNotice[];
   timestamp: number;
+  /** Which model answered this, and where it ran.
+   *
+   *  Kept per message rather than as one banner for the conversation, because
+   *  the model can change between replies — that is the product's argument, not
+   *  an edge case, and a single label would be wrong the moment it happened. */
+  answeredBy?: ChatAttribution | null;
   /** Set when this reply failed or was cut short. Any text already received is
    *  kept — a partial answer is still worth showing, provided it is labelled. */
   error?: string;
+}
+
+/** Who answered, from what routing resolved — never inferred here.
+ *
+ *  `locality` is null when the backend could not place the model. Rendering
+ *  "on this machine" for that case would be a confident false claim about the
+ *  one thing the user is most likely to check, so the interface says nothing
+ *  instead. */
+export interface ChatAttribution {
+  model: string;
+  locality: 'local' | 'cloud' | null;
+  provider: string | null;
+  chosenBy: string | null;
 }
 
 export interface ChatNotice {
@@ -68,6 +87,10 @@ interface ChatState {
   streamingArtifacts: Artifact[];
   /** Notices for the in-flight reply. Arrive last, after the answer. */
   streamingNotices: ChatNotice[];
+  /** Who is answering the in-flight reply. Arrives before the first token, so
+   *  the attribution is on screen while the answer is being read rather than
+   *  appearing under it once the reading is done. */
+  streamingAnsweredBy: ChatAttribution | null;
   isStreaming: boolean;
   /** Connection-level failure, as opposed to a failure within one reply. */
   connectionError: string | null;
@@ -117,6 +140,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   streamingSources: [],
   streamingArtifacts: [],
   streamingNotices: [],
+  streamingAnsweredBy: null,
   isStreaming: false,
   connectionError: null,
   sessionId: `session-${newId()}`,
@@ -154,6 +178,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       ],
       streamingText: '',
       streamingSources: [],
+      streamingAnsweredBy: null,
       isStreaming: true,
       connectionError: null,
     }));
@@ -190,6 +215,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const notices: ChatNotice[] = [];
     const seen = new Set<string>();
     let replyError: string | undefined;
+    let answeredBy: ChatAttribution | null = null;
 
     // A cold local model can take many seconds to load before its first token.
     // Left unexplained that silence reads as a hang, so it is named instead.
@@ -287,6 +313,20 @@ export const useChatStore = create<ChatState>((set, get) => ({
             break;
           }
 
+          case 'answering': {
+            // Arrives ahead of the first token. Held locally as well as in the
+            // store for the same reason the text is: the committed message
+            // needs it after the stream has been cleared.
+            answeredBy = {
+              model: event.model,
+              locality: event.locality,
+              provider: event.provider,
+              chosenBy: event.chosenBy,
+            };
+            set({ streamingAnsweredBy: answeredBy });
+            break;
+          }
+
           case 'error':
             // Reported by the backend. Keep whatever text arrived first.
             replyError = event.message;
@@ -337,6 +377,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 artifacts,
                 notices,
                 timestamp: Date.now(),
+                answeredBy,
                 error: replyError,
               },
             ]
@@ -345,6 +386,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       streamingSources: [],
       streamingArtifacts: [],
       streamingNotices: [],
+      streamingAnsweredBy: null,
       isStreaming: false,
     }));
 
@@ -381,6 +423,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       streamingText: '',
       streamingSources: [],
       streamingNotices: [],
+      streamingAnsweredBy: null,
     });
   },
 
@@ -393,6 +436,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       streamingSources: [],
       streamingArtifacts: [],
       streamingNotices: [],
+      streamingAnsweredBy: null,
       isStreaming: false,
       connectionError: null,
       sessionId: `session-${newId()}`,

@@ -91,6 +91,21 @@ export type ChatEvent =
    *  than after the machine has already gone quiet. `kind` is `load` (cold
    *  start, room to spare) or `swap` (something resident gets evicted). */
   | { type: 'model_load'; kind: 'load' | 'swap'; model: string; evicts: string[] }
+  /** Which model is about to answer, and where it runs. Arrives *before* the
+   *  first token, so the attribution is present while the reply is read rather
+   *  than added underneath it afterwards.
+   *
+   *  `locality` is null when the backend could not resolve the model — a real
+   *  answer, and the reason the field is not a boolean. Rendering "on this
+   *  machine" for an unresolved model would be a confident false claim on the
+   *  one thing the user is most likely to check. */
+  | {
+      type: 'answering';
+      model: string;
+      locality: 'local' | 'cloud' | null;
+      provider: string | null;
+      chosenBy: string | null;
+    }
   | { type: 'status'; state: string }
   | { type: 'error'; message: string }
   | { type: 'done' };
@@ -326,6 +341,26 @@ function parseLine(line: string): ChatEvent | null {
         kind,
         model,
         evicts: Array.isArray(data.evicts) ? data.evicts.map(String) : [],
+      };
+    }
+
+    case 'answering': {
+      const model = String(data.model ?? '').trim();
+      // Nothing to attribute is not an attribution. The backend sends the
+      // event whether or not it could resolve a name, because the absence is
+      // itself worth knowing there; the interface has nothing to draw.
+      if (!model) return null;
+      const locality = String(data.locality ?? '');
+      return {
+        type: 'answering',
+        model,
+        // Only the two values the backend defines. Anything else — including
+        // the `null` it sends for a model it could not place — becomes null
+        // and renders as no claim about where the reply came from, which is
+        // the whole reason locality is three-valued on that side.
+        locality: locality === 'local' || locality === 'cloud' ? locality : null,
+        provider: data.provider == null ? null : String(data.provider),
+        chosenBy: data.chosen_by == null ? null : String(data.chosen_by),
       };
     }
 

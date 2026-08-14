@@ -27,6 +27,7 @@ import ProjectScopePicker from './ProjectScopePicker';
 import MicButton from './MicButton';
 import CitationSummary from './CitationChips';
 import MessageActions from './MessageActions';
+import { AnsweredBy } from './AnsweredBy';
 import SpeakButton from './SpeakButton';
 import CitationPanel from './CitationPanel';
 import {
@@ -58,6 +59,7 @@ export default function ChatSurface() {
   const streamingSources = useChatStore((s) => s.streamingSources);
   const streamingArtifacts = useChatStore((s) => s.streamingArtifacts);
   const streamingNotices = useChatStore((s) => s.streamingNotices);
+  const streamingAnsweredBy = useChatStore((s) => s.streamingAnsweredBy);
   // A notice names where to go about it; the route has to actually work, so
   // it drives the same node selection the orbit uses.
   const openWorkspace = useConversationStore((s) => s.setActiveNode);
@@ -400,6 +402,11 @@ export default function ChatSurface() {
                     }
                     retryLabel="Ask again"
                   />
+                  {/* Who answered. Above the citations because it is a claim
+                      about this reply rather than about a source, and because
+                      a reply with no sources must still say where it came
+                      from. */}
+                  {msg.role === 'assistant' && <AnsweredBy attribution={msg.answeredBy} />}
                   {msg.role === 'assistant' && (
                     <CitationSummary
                       sources={msg.sources}
@@ -456,6 +463,10 @@ export default function ChatSurface() {
                       </p>
                     </>
                   )}
+                  {/* The attribution arrives before the first token, which is
+                      the point of sending it early: it is on screen while the
+                      answer is being read, not appended once reading is done. */}
+                  <AnsweredBy attribution={streamingAnsweredBy} />
                   {/* Chips only while streaming. The summary's empty state is a
                       claim about absence, and a reply that has not finished
                       arriving cannot yet make it — saying "nothing from your

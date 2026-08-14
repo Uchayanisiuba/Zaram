@@ -164,10 +164,20 @@ class OpenAICompatibleAdapter:
         # (size, context, quantization, capabilities) is not part of the spec,
         # so we record what we know and leave the rest unknown.
         owned_by = entry.get("owned_by", "unknown")
+        # The short name is what `specialisation_from_name` reads, and it is the
+        # wrong thing to *show*. An aggregator's ids are `vendor/model` —
+        # `anthropic/claude-sonnet-4.5` — and dropping the vendor gives a list
+        # where two different models can appear under one label, on the screen
+        # whose whole job is choosing between them. It is also the name the
+        # provider itself uses, so it is what a user recognises from anywhere
+        # else they have seen it.
+        #
+        # Safe to widen: the cloud wire name comes from `resolve_for_model`,
+        # which partitions the catalogue id and never reads this field.
         name = model_id.split("/")[-1]
         return ModelInfo(
             id=f"{self.provider_id}:{model_id}",
-            display_name=name,
+            display_name=model_id,
             provider=self.provider_id,
             provider_kind=self.kind,
             category=ModelCategory.LLM,
