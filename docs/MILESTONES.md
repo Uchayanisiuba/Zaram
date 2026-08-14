@@ -65,6 +65,10 @@ first synthesis at 35.8s against a stream that closed at 52.4s — speech starte
 length. Found on the way: citation markers were being read aloud, because the
 automatic speech path was the one caller of three that never stripped them.
 
+**Bring your own VRM is agreed and designed**, and an avatar store is split into
+three businesses that must not be argued as one. See *Avatars: bring your own,
+and the store question*.
+
 **An avatar file cannot phone home.** glTF can reference external URIs that the
 browser fetches, which is rule 3 broken by a data file with nothing reporting
 it — invisible to the egress gate (backend only) and to the remote-asset check
@@ -611,13 +615,26 @@ the pairing endpoints written first.
    current-state block at the top; neither is large and both are the kind of
    thing that rots if it waits.
 
-0c. **Bring your own VRM is now unblocked.** `lib/vrmSafety.ts` refuses an
-   avatar that would fetch anything while loading, which was the stated
-   prerequisite. What remains is a file picker, persisting the choice, and
-   resource ceilings — a triangle and texture budget, which the URI gate does
-   not cover and which a hostile file can still use to exhaust VRAM. Deliberately
-   not built yet: those need a measurement on real assets rather than a guessed
-   constant, which is the same argument the reranker table settles.
+0c. **Bring your own VRM — agreed 14 August, designed, not built.** The gate
+   that blocked it exists, so this is now five pieces and only one of them is a
+   decision. See *Avatars: bring your own, and the store question* below for the
+   full shape and for what a store would and would not cost.
+
+   | | |
+   |---|---|
+   | File picker in Settings, plus drag-and-drop onto the avatar | not built |
+   | Refuse an unsafe file — `inspectAvatar` | **built** |
+   | Resource ceilings: triangles and texture memory | **not built, needs a number** |
+   | Store the file: IndexedDB blob, loaded as a `blob:` URL | not built |
+   | Remember the choice in `embodimentStore` | not built |
+
+   `VrmAvatar` already takes `src` as a prop, so pointing it at a blob URL is
+   nearly free. **The ceiling is the only open question and it must be
+   measured, not guessed**: the bundled avatar is 37,678 triangles and ~190 MB
+   resident, and a limit invented from those without headroom would refuse
+   legitimate avatars — which is as bad as accepting a hostile one. Same
+   argument as the reranker table: a constant that gates a decision has to come
+   from a measurement.
 1. **Run the installer on a machine that has never seen this repo.** The
    installer itself now exists — `dist-electron/Zaram-0.1.0-x64.exe`, 186 MB —
    and its payload has been checked against the built tree, so what that run
@@ -983,6 +1000,57 @@ decision. `CLAUDE.md` has been updated to match; this is the reasoning.
   listens. Light installer, extras fetched **on demand after the product has
   proved itself** — not during install, which is the same blocking download
   moved earlier.
+
+### Avatars: bring your own, and the store question — 14 August 2026
+
+**Bring your own VRM is agreed.** Shape and status are in *What is next*, item
+0c. The one open decision is the resource ceiling, and it needs a measurement.
+
+**Storage is IndexedDB as a Blob, loaded through a `blob:` URL**, and the
+reasoning is worth keeping because a filesystem path looks like the obvious
+answer. A blob works in Electron *and* in a browser surface, which `CLAUDE.md`
+deliberately keeps possible by having the frontend call the backend over HTTP
+rather than through IPC; there is no packaged path to get wrong, which is the
+class of bug that made the bundled Python runtime hard to find; and the URL
+modifier added with the loader gate already permits `blob:`, so nothing else in
+the renderer changes.
+
+**BYO does not strain the embodiment rule, and this distinction is what makes
+it safe to build.** The rule refuses a *someone* — no name, no pronoun, no
+expression not derived from system state. Choosing what the indicator looks like
+is skinning; the rule is about behaviour, and it holds whatever mesh is
+rendering. What creates pressure is *selling* characters, because to sell one
+you market it as somebody, and that pull comes from the revenue side, which is
+the hardest kind to resist later.
+
+**"An avatar store" is three different businesses and they must not be argued
+as one.**
+
+| | What it is | What it costs |
+|---|---|---|
+| **First-party set** | Zaram ships a handful it commissioned | Files. No accounts, no moderation, no payouts. |
+| **Curated directory** | A manifest pointing at avatars hosted elsewhere — VRoid Hub, Booth, a creator's own site. Zaram holds no money and hosts nothing; each download is an explicit, logged egress under the existing per-source policy. | Small, and it buys **discovery**, which is the part that makes a store feel like something. |
+| **Marketplace** | Users sell to each other | Accounts, IP and adult-content moderation, cross-border payouts, tax, disputes. A different company. |
+
+The middle one was not offered clearly enough when this was first argued down on
+13 August, and it is the interesting answer: browse-and-pick with none of the
+machinery, and honest about what Zaram is — a safety gate and a bookmark list,
+not a merchant.
+
+**Sequence: BYO → directory → measure whether people actually swap → then
+decide about money.** If nobody changes their avatar, a marketplace was never
+going to work. If many do, that is the evidence that justifies accounts — which
+`CLAUDE.md` already says arrive only at teams, off-machine sync, or payment.
+
+**One argument this file previously under-weighted**, recorded because it is the
+strongest case for doing any of it: an avatar is the first thing in Zaram a user
+can make *theirs*, and every creator who lists one markets the product to an
+audience that already runs local models. That is a distribution argument, and it
+is better than the revenue argument.
+
+**Attaching avatars to agents remains where a character legitimately becomes a
+someone** — an agent is a thing with a job. Post-v1, and it is what makes a
+store coherent with the embodiment rule rather than in tension with it.
 
 ### The assistant knows what it is — 13 August 2026
 
