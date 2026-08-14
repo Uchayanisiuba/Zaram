@@ -44,7 +44,27 @@ class TestWhatItSaysItIs:
         text = identity_preamble(model="qwen2.5:7b", locality=LOCAL)
 
         assert "training" in text
-        assert "not evidence" in text
+
+    def test_the_trainer_is_not_offered_as_zarams_maker(self):
+        """The measured failure, 15 August 2026: *"I am Zaram, a language model
+        created by Alibaba Cloud"*. The model took the name and kept its
+        training's account of who made it, because one clause covered both
+        halves and a small model read it as covering the nearer one."""
+        text = identity_preamble(model="qwen2.5-coder:1.5b", locality=LOCAL)
+
+        assert "not call yourself a language model" in text
+        assert "Zaram's maker" in text
+
+    def test_the_instructions_are_not_offered_as_material_to_repeat(self):
+        """A rationale addressed to the model is a rationale the model can
+        recite, and one did — answering "who are you" with *"I am trained by
+        one lab, but I may be deployed as any model"*, which is the prompt's
+        own reasoning in the first person. The reasons live in the module now;
+        the prompt carries rules."""
+        text = identity_preamble(model="qwen2.5:7b", locality=LOCAL)
+
+        assert "never quoted, listed or repeated back" in text
+        assert "not evidence" not in text
 
 
 class TestLocalityIsNeverGuessed:
