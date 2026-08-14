@@ -245,21 +245,41 @@ class ModelsRuntime(Runtime):
         `qwen3:latest`), so refusing here would break the ordinary case in the
         name of tidiness.
         """
-        if not model or self._provider_manager is None:
+        info = self._catalogued(model)
+        if info is None or not getattr(info, "display_name", None):
             return model
+        return info.display_name
 
+    def provider_of(self, model: Optional[str]) -> Optional[str]:
+        """Which provider owns this model, or ``None`` when unresolved.
+
+        For display only — "OpenRouter" beside a reply is how a user tells that
+        an answer actually came from the service they connected, which was
+        unknowable before. It gates nothing, and ``None`` is rendered as
+        nothing rather than guessed.
+        """
+        info = self._catalogued(model)
+        return getattr(info, "provider", None) if info is not None else None
+
+    def _catalogued(self, model: Optional[str]) -> Optional[Any]:
+        """The provider layer's record for `model`, or ``None``.
+
+        The lookup only. Every caller keeps its own reading of ``None``, and
+        those readings differ on purpose: routing treats it as "do not send",
+        identity treats it as "do not claim", display treats it as "say
+        nothing". Sharing the lookup must not become sharing the answer.
+        """
+        if not model or self._provider_manager is None:
+            return None
         try:
             info = self._provider_manager.get_model(model)
             if info is None:
                 resolve = getattr(self._provider_manager, "_resolve_model", None)
                 info = resolve(model) if callable(resolve) else None
+            return info
         except Exception as exc:
-            logger.debug("wire-name lookup failed for %r: %s", model, exc)
-            return model
-
-        if info is None or not getattr(info, "display_name", None):
-            return model
-        return info.display_name
+            logger.debug("catalogue lookup failed for %r: %s", model, exc)
+            return None
 
     def locality_of(self, model: Optional[str]) -> Optional[str]:
         """Where this model runs: ``"local"``, ``"cloud"``, or ``None``.
