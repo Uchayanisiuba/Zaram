@@ -57,6 +57,17 @@ DEFAULT_DECISION = Decision(
     "no policy exists for this destination, and the default is to refuse",
 )
 
+#: What every host gets while the kill switch is on.
+#:
+#: Phrased as something the user did, because they did it, and because a
+#: blocked request needs to be distinguishable at a glance from one blocked by
+#: an ordinary rule — otherwise the log reads as a fault and the fix is
+#: un-findable.
+KILL_SWITCH_DECISION = Decision(
+    Mode.DENY,
+    "the kill switch is on, so nothing may leave this device",
+)
+
 
 class EgressPolicy:
     """Host → mode, persisted as JSON next to the egress log.
@@ -71,6 +82,20 @@ class EgressPolicy:
         self._path = path
         self._lock = threading.Lock()
         self._rules: dict[str, Mode] = {}
+        #: One switch that denies everything, whatever the per-host rules say.
+        #:
+        #: It lives *here* rather than in the API layer or the chat path so
+        #: that it covers every caller of :meth:`decide` — tool traffic, model
+        #: discovery, an update check somebody adds next year. A kill switch
+        #: enforced at one call site is a kill switch for that call site, and
+        #: the whole value of the control is that the user does not have to
+        #: know how many outbound paths exist.
+        #:
+        #: It also cannot be worked around by allowing a host, which is the
+        #: property that makes it worth having beside a per-host policy: it is
+        #: a single action whose effect the user can state without reading a
+        #: rule list.
+        self._kill_switch = False
         self._load()
 
     def _load(self) -> None:
@@ -84,6 +109,12 @@ class EgressPolicy:
                 for host, mode in (raw.get("hosts") or {}).items()
                 if mode in {m.value for m in Mode}
             }
+            # Persisted, because a kill switch that forgets itself on restart
+            # is worse than none: the user believes the machine is sealed and
+            # it is not. Read defensively — anything that is not exactly `true`
+            # leaves it off, so a hand-edited file cannot silently seal the app
+            # either.
+            self._kill_switch = raw.get("kill_switch") is True
         except Exception:
             # A corrupt policy file must not fail open. Falling back to an empty
             # rule set means every host is unknown, and every unknown host is
@@ -97,7 +128,10 @@ class EgressPolicy:
             os.makedirs(parent, exist_ok=True)
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(
-                {"hosts": {h: m.value for h, m in sorted(self._rules.items())}},
+                {
+                    "hosts": {h: m.value for h, m in sorted(self._rules.items())},
+                    "kill_switch": self._kill_switch,
+                },
                 f,
                 indent=2,
             )
@@ -105,8 +139,19 @@ class EgressPolicy:
 
     # ------------------------------------------------------------------ read
 
+    def kill_switch(self) -> bool:
+        """Whether everything outbound is currently refused."""
+        return self._kill_switch
+
     def decide(self, host: str) -> Decision:
         """What should happen to a request addressed to ``host``."""
+        # First, and before the rules are consulted at all. An `allow` rule
+        # must not survive the switch, or "cut all outbound traffic" would mean
+        # "cut the traffic you had not already permitted", which is not what
+        # the words say and not what someone reaching for it wants.
+        if self._kill_switch:
+            return KILL_SWITCH_DECISION
+
         mode = self._rules.get(host.lower())
         if mode is None:
             return DEFAULT_DECISION
@@ -122,6 +167,20 @@ class EgressPolicy:
             return {h: m.value for h, m in sorted(self._rules.items())}
 
     # ----------------------------------------------------------------- write
+
+    def set_kill_switch(self, on: bool) -> bool:
+        """Turn the master refusal on or off. Returns the new state.
+
+        Turning it *off* restores the per-host rules exactly as they were —
+        nothing is forgotten. That matters because the alternative design,
+        clearing the rules, would make the switch a destructive action wearing
+        the costume of a toggle, and someone would lose their allow-list by
+        being careful.
+        """
+        with self._lock:
+            self._kill_switch = bool(on)
+            self._save()
+        return self._kill_switch
 
     def set(self, host: str, mode: Mode | str) -> None:
         with self._lock:
