@@ -13,8 +13,10 @@ from ..contracts import (
 )
 from .base import BaseDiscoveryProvider
 
+# Prefers `ddgs`; see `core/ddgs_import.py` — the old package returns zero
+# results without raising.
 try:
-    from duckduckgo_search import DDGS  # type: ignore
+    from core.ddgs_import import DDGS  # type: ignore
 except Exception:  # pragma: no cover
     DDGS = None  # type: ignore
 

@@ -60,6 +60,11 @@ NETWORK_LIBRARIES = {
     "kokoro": "KPipeline downloads model weights from HuggingFace on first use",
     "duckduckgo_search": "queries the live DuckDuckGo API",
     "ddgs": "queries the live DuckDuckGo API",
+    # Ours, and listed here on purpose: it re-exports DDGS, so importing it
+    # hands the caller a client that opens its own socket. Tracking only the
+    # third-party names would let the indirection erase every caller's entry
+    # from this file in a single refactor — which is exactly what happened.
+    "core.ddgs_import": "re-exports DDGS, which queries the live DuckDuckGo API",
     "openai": "contacts the OpenAI API",
     "anthropic": "contacts the Anthropic API",
     # Added before the provider that uses it, deliberately. WhisperModel resolves
@@ -78,8 +83,17 @@ NETWORK_LIBRARIES = {
 #: decision. What must stay true is that nothing *reachable* acquires an entry
 #: here — a reachable module needs the gate, which is the list after this one.
 NETWORK_LIBRARY_DORMANT = {
-    "runtimes/internet/connectors.py": "internet runtime does not boot",
-    "runtimes/internet/connectors/base.py": "internet runtime does not boot",
+    # **Both reasons here were "internet runtime does not boot" and that stopped
+    # being true on 14 August**, when the runtime was finally constructed by the
+    # bootstrapper — `KnowledgeRuntime.search` reads web results from it and
+    # nothing had ever built one, so the web half of every search returned
+    # nothing. These two files survive the change because they are a superseded
+    # parallel copy of the connectors: the live `DuckDuckGoConnector` is defined
+    # in `runtimes/internet/runtime.py`, and nothing in the product imports
+    # either of these. Checked by grep, not assumed — an exemption whose reason
+    # has quietly expired is how the Kokoro entry below came to be wrong.
+    "runtimes/internet/connectors.py": "superseded copy; no production module imports it",
+    "runtimes/internet/connectors/base.py": "superseded copy; no production module imports it",
     "runtime/discovery/providers/duckduckgo.py": "discovery is unreachable from chat",
 }
 
@@ -100,8 +114,29 @@ NETWORK_LIBRARY_DORMANT = {
 #: The library still opens its own socket in both cases, so the gate cannot
 #: carry the bytes. It owns the *decision*, which is the property that matters:
 #: ask first, and under default deny the library is never reached.
+#: Modules that import a network library **only to re-export it**, and never
+#: call it. A third category because the other two do not fit and forcing one
+#: would make it a lie: this is not dormant — it is imported by live code — and
+#: it cannot ask the gate, because it never reaches the network to be gated.
+#:
+#: The risk lives entirely with the callers, which are covered by the two lists
+#: above. What has to stay true here is the *only* part: the moment such a
+#: module starts calling the library, it becomes an ungated network path and
+#: `test_reexport_exemptions_never_call_the_library` fails.
+#:
+#: `core/ddgs_import.py` exists because five modules imported
+#: `duckduckgo_search` independently and that package answers successfully with
+#: **zero results** against the current endpoints — so web search appeared to
+#: work, was logged as allowed, and returned nothing. Centralising the import
+#: is what makes "which package are we actually using" a question with one
+#: answer.
+NETWORK_LIBRARY_REEXPORT = {
+    "core/ddgs_import.py": "binds DDGS for callers and never calls it",
+}
+
 NETWORK_LIBRARY_GATED = {
     "knowledge/providers/duckduckgo_provider.py": "asks get_gate().check() before constructing DDGS",
+    "runtimes/internet/runtime.py": "asks get_gate().check() before constructing DDGS",
     "voice/stt/whisper.py": "asks get_gate().check() before any weight download; loads cached weights offline",
     # Was exempted as dormant, and was not. The bootstrapper reaches it through
     # runtimes.speech.runtime, and health_check() built the pipeline as a side
@@ -110,10 +145,13 @@ NETWORK_LIBRARY_GATED = {
     # sat at False and a test asserted dormancy. Same remedy as Whisper: try the
     # cache offline first, ask the gate only when weights are genuinely absent.
     "voice/providers/kokoro.py": "asks get_gate().check() before any weight download; loads cached weights offline",
-    "runtimes/internet/runtime.py": "asks get_gate().check() before constructing DDGS",
 }
 
-NETWORK_LIBRARY_EXEMPT = {**NETWORK_LIBRARY_DORMANT, **NETWORK_LIBRARY_GATED}
+NETWORK_LIBRARY_EXEMPT = {
+    **NETWORK_LIBRARY_DORMANT,
+    **NETWORK_LIBRARY_GATED,
+    **NETWORK_LIBRARY_REEXPORT,
+}
 
 #: Calls that open a connection to somewhere.
 OUTBOUND_CALLS = {
@@ -179,6 +217,18 @@ def _network_imports_in(path: Path) -> list[tuple[int, str]]:
             # exemption granted to quiet a scanner bug is a hole that outlives
             # the bug, because nothing revisits it once the noise stops.
             if node.level:
+                continue
+            # Matched on the full dotted path first, then on the root package.
+            #
+            # Without the full-path check, centralising an import *launders it
+            # past this scanner*: `core/ddgs_import.py` re-exports DDGS, so
+            # `from core.ddgs_import import DDGS` has the root `core` and reads
+            # as an ordinary internal import while handing the caller a client
+            # that opens its own socket. Five modules moved to that import in
+            # one change, and all five silently lost their coverage here. A
+            # guard that a refactor can switch off is not a guard.
+            if node.module in NETWORK_LIBRARIES:
+                found.append((node.lineno, node.module))
                 continue
             root = node.module.split(".")[0]
             if root in NETWORK_LIBRARIES:
@@ -457,6 +507,51 @@ class TestNothingBypassesTheGate:
             "means refusal is the *common* path, not the exceptional one, and "
             "an unhandled refusal is a 500 where the honest answer is "
             "'unavailable, and here is why'."
+        )
+
+    @pytest.mark.parametrize("rel,reason", sorted(NETWORK_LIBRARY_REEXPORT.items()))
+    def test_reexport_exemptions_never_call_the_library(self, rel: str, reason: str):
+        """A re-export module binds the name and does nothing with it.
+
+        That is the whole justification for the exemption: the module cannot
+        need the gate because it never reaches the network. The moment it calls
+        the library — a convenience wrapper, a health probe, "just one search to
+        check it works" — it becomes an ungated outbound path, and the reason in
+        the table stops being true while still reading as though it is.
+
+        Checked in the AST rather than by grep so a mention in a docstring does
+        not trip it, matching the gated test next door.
+        """
+        tree = ast.parse((BACKEND / rel).read_text(encoding="utf-8"), filename=rel)
+
+        # Every name this module imports from a known network library.
+        imported: set[str] = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and (node.module or "").split(".")[0] in NETWORK_LIBRARIES:
+                imported.update(alias.asname or alias.name for alias in node.names)
+            elif isinstance(node, ast.Import):
+                for alias in node.names:
+                    if alias.name.split(".")[0] in NETWORK_LIBRARIES:
+                        imported.add(alias.asname or alias.name.split(".")[0])
+
+        called = {
+            node.func.id
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+        } | {
+            node.func.value.id
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and isinstance(node.func.value, ast.Name)
+        }
+
+        used = imported & called
+        assert not used, (
+            f"{rel} is exempted because it {reason}, but it calls "
+            f"{', '.join(sorted(used))}. A module that uses a network library "
+            "needs the gate; move it to NETWORK_LIBRARY_GATED and make the "
+            "claim true."
         )
 
     def test_voice_discovery_stays_off_by_default(self):
