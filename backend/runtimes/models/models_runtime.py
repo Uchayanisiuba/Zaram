@@ -133,7 +133,7 @@ class ModelsRuntime(Runtime):
         call happens here either way: rule 7g, and `from_environment` reads
         variables rather than testing them.
         """
-        local = OllamaEngine()
+        local = OllamaEngine(wire_name=self.wire_name)
 
         # The factory wins when the provider layer has attached one, because it
         # knows about every connection rather than the single pair of
@@ -223,6 +223,43 @@ class ModelsRuntime(Runtime):
         else:
             self._service.engine = engine
         return isinstance(engine, RoutedEngine)
+
+    def wire_name(self, model: str) -> str:
+        """The name the provider itself speaks, for a model catalogued as `model`.
+
+        Three questions about one model, and they must not be merged: *where
+        does it run* (`locality_of`), *may it leave the machine*
+        (`_is_remote_model`), and *what is it called on the wire* (this). The
+        first two already had homes and this one did not, so the id the
+        catalogue invented — ``ollama:qwen2.5-coder:1.5b`` — travelled all the
+        way into the request body and Ollama answered 400.
+
+        `display_name` is the provider-native name: the discoverer sets it from
+        what the provider reported, and `ProviderManager._resolve_model`
+        already documents it as "the name that both the chat path and
+        `/api/ps` speak".
+
+        Returns the input unchanged whenever the catalogue cannot place it —
+        no provider layer, an unknown name, a lookup that raised. A model this
+        cannot resolve is very often one Ollama can (`qwen3` for
+        `qwen3:latest`), so refusing here would break the ordinary case in the
+        name of tidiness.
+        """
+        if not model or self._provider_manager is None:
+            return model
+
+        try:
+            info = self._provider_manager.get_model(model)
+            if info is None:
+                resolve = getattr(self._provider_manager, "_resolve_model", None)
+                info = resolve(model) if callable(resolve) else None
+        except Exception as exc:
+            logger.debug("wire-name lookup failed for %r: %s", model, exc)
+            return model
+
+        if info is None or not getattr(info, "display_name", None):
+            return model
+        return info.display_name
 
     def locality_of(self, model: Optional[str]) -> Optional[str]:
         """Where this model runs: ``"local"``, ``"cloud"``, or ``None``.

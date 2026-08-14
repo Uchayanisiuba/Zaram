@@ -3,12 +3,21 @@ import requests
 import json
 import logging
 from collections.abc import Iterator
+from typing import Callable, Optional
 from .base_engine import ERROR_PREFIX, LLMEngine
 
 logger = logging.getLogger(__name__)
 
 #: How long Ollama holds the weights after a reply. See `stream_response`.
 KEEP_ALIVE = "30m"
+
+#: Given the id a model is catalogued under, return the name Ollama speaks.
+#:
+#: A callable rather than a `ProviderManager`, for the same reason
+#: `CloudFanout` takes `ResolveCloud`: this module must not import `providers`,
+#: and the mapping from an id to a provider-native name is knowledge that
+#: belongs where the catalogue lives.
+WireName = Callable[[str], str]
 
 
 class OllamaEngine(LLMEngine):
@@ -17,11 +26,53 @@ class OllamaEngine(LLMEngine):
     Every request carries `keep_alive`, and `warm()` loads the model without
     asking it to say anything — together they are why "Warming up" should be a
     once-per-session state rather than a once-per-message one.
+
+    **The id a model is catalogued under is not the name Ollama answers to, and
+    conflating them broke every model the user chose deliberately.** The
+    provider layer records each discovered model as ``<provider_id>:<model>``,
+    because two providers can offer the same name and the ids have to be
+    distinct; Settings stores what the user picked, which is that id. This
+    engine put whatever it was handed straight into the request body, so
+    choosing a model sent ``ollama:qwen2.5-coder:1.5b`` to `/api/generate` and
+    got back `400 Bad Request` — measured, against the bare name returning 200
+    seconds later on the same server.
+
+    `CloudFanout` already fixed this on the cloud side and the local side never
+    learned it, which is the tell: the conversion belongs at the one place a
+    name goes on the wire, on *both* paths, or the next engine repeats it.
+
+    The resolution is a lookup, never a string operation. Stripping a leading
+    ``ollama:`` by hand would be the same guess-from-the-name mistake
+    `RoutedEngine` refuses for locality, and it would mangle a model whose own
+    name carries a prefix — `qllama/bge-reranker-v2-m3:latest` is installed on
+    this machine today. An id the catalogue cannot place passes through
+    unchanged, because a hand-typed `qwen3` is a name Ollama resolves itself.
     """
 
-    def __init__(self, base_url: str = "http://127.0.0.1:11434"):
+    def __init__(
+        self,
+        base_url: str = "http://127.0.0.1:11434",
+        wire_name: Optional[WireName] = None,
+    ):
         self.base_url = base_url
         self.default_model = "gemma3:latest"
+        self._wire_name = wire_name
+
+    def _wire(self, model: Optional[str]) -> Optional[str]:
+        """The name to put in the request body for `model`.
+
+        Never raises. A resolver that fails must cost the request nothing more
+        than the name it already had — the alternative is a lookup taking chat
+        down, which is the failure this whole layer is arranged to avoid.
+        """
+        if not model or self._wire_name is None:
+            return model
+        try:
+            resolved = self._wire_name(model)
+        except Exception as exc:
+            logger.debug("wire-name lookup failed for %r: %s", model, exc)
+            return model
+        return resolved or model
 
     def warm(self, model: str | None = None, *, timeout: float = 180.0) -> bool:
         """Load the model into memory without generating anything.
@@ -41,7 +92,7 @@ class OllamaEngine(LLMEngine):
         and the first-run screen already handles that. A failure here must cost
         a slower first reply and nothing else.
         """
-        target = model or self.default_model
+        target = self._wire(model or self.default_model)
         if not target:
             return False
         try:
@@ -71,7 +122,7 @@ class OllamaEngine(LLMEngine):
             yield ERROR_PREFIX + "Image input is not supported for text chat. Use /vision/analyze for image analysis, or remove the image and try again."
             return
         payload = {
-            "model": model or self.default_model,
+            "model": self._wire(model or self.default_model),
             "prompt": prompt,
             "system": system_prompt,
             "stream": True,
@@ -115,7 +166,36 @@ class OllamaEngine(LLMEngine):
             logger.debug("OllamaEngine.stream_response: done, %d tokens", token_count)
         except Exception as e:
             logger.warning("OllamaEngine.stream_response failed: %s: %s", type(e).__name__, e)
-            yield ERROR_PREFIX + str(e)
+            yield ERROR_PREFIX + self._explain(e, payload["model"])
+
+    @staticmethod
+    def _explain(exc: Exception, model: Optional[str]) -> str:
+        """What went wrong, in terms that name the model and Ollama's reason.
+
+        `requests` renders a refusal as "400 Client Error: Bad Request for url:
+        http://127.0.0.1:11434/api/generate", which names neither the model nor
+        the cause — the user sees a URL and an HTTP code for what is usually
+        "that model is not installed" or "this model cannot generate text".
+        Ollama itself says which in the response body, and it was being thrown
+        away.
+
+        The body is quoted rather than translated. Guessing at a friendlier
+        phrasing would mean inventing a diagnosis for a failure this layer did
+        not make, and the honest sentence is the server's own.
+        """
+        detail = ""
+        response = getattr(exc, "response", None)
+        if response is not None:
+            try:
+                body = response.json()
+                detail = str(body.get("error") or "").strip()
+            except Exception:
+                detail = (getattr(response, "text", "") or "").strip()[:300]
+
+        named = model or "the selected model"
+        if detail:
+            return f"Ollama refused the request for {named}: {detail}"
+        return f"Ollama could not answer with {named}: {exc}"
 
     def stream_vision_response(self, prompt: str, images: list[str], system_prompt: str = "") -> Iterator[str]:
         url = f"{self.base_url}/api/generate"
