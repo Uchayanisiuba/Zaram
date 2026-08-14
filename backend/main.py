@@ -17,6 +17,8 @@ from core.identity import compose_system_prompt, identity_preamble
 # `_format_search_results` has referenced this without importing it: a
 # NameError latent only because web search is off by default.
 from core.query_classifier import SEARCH_MARKER
+# Per-request, and set before the planner runs. See the call site in `chat`.
+from core.planner import set_search_locality
 
 # --- LEGACY IMPORTS (Isolated for Fallback) ---
 from implementations.ollama_llm import OllamaLLM
@@ -38,6 +40,20 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# The provider layer's HTTP surface: which models exist, what hardware was
+# found, and which cloud provider Zaram may call.
+#
+# **This line is the whole bug.** The router has existed, with tests, since the
+# provider layer landed, and was never included here — so `/providers/models`,
+# `/providers/hardware` and the rest answered 404 on the running product while
+# `providers/tests/test_api.py` passed, because it builds its own app and
+# mounts the router itself. Every route below is asserted against *this* object
+# in `tests/test_routes_are_mounted.py`, which is the only place the claim can
+# be true.
+from providers.api import router as providers_router  # noqa: E402
+
+app.include_router(providers_router)
+
 # --- KERNEL LIFECYCLE ---
 kernel = KernelBootstrapper()
 chat_router = None
@@ -50,6 +66,15 @@ async def startup_event():
 
     print("[Startup] Booting Zaram Kernel...")
     await kernel.boot()
+
+    # The provider routes answer 503 until this runs, which is deliberate: an
+    # empty model list during boot is indistinguishable from a machine with no
+    # models, and the first-run screen acts on that difference.
+    from providers.api import set_providers_runtime
+
+    providers_runtime = getattr(kernel, "providers_runtime", None)
+    if providers_runtime is not None:
+        set_providers_runtime(providers_runtime)
 
     # Speech Runtime is now initialized via KernelBootstrapper
     speech_runtime = kernel.speech_runtime
@@ -90,6 +115,20 @@ async def startup_event():
     if kernel.memory_runtime is not None:
         spine_maintenance = SpineMaintenance(kernel.memory_runtime, kernel.event_bus)
         spine_maintenance.start()
+
+    # Preload the local model, in the background, so the first message does not
+    # pay for it. Fire-and-forget on purpose: the backend must answer /health
+    # and /readiness while several gigabytes move onto the card, or the first
+    # run screen sits on a spinner deciding the product is broken.
+    async def _warm():
+        try:
+            runtime = kernel.registry.get_runtime("models")
+            await runtime.warm_local_model()
+        except Exception:
+            # A preload is an optimisation. Never let it stop the app starting.
+            pass
+
+    asyncio.create_task(_warm())
 
     print("[Startup] Chat Router initialized. Kernel Online.")
 
@@ -162,9 +201,52 @@ def _format_search_results(query: str, search_result: Dict[str, Any]) -> str:
 
 
 # --- REQUEST MODELS ---
+def _resolve_model(requested: str | None) -> str | None:
+    """Which model should answer: the request, then Settings, then Zaram's own pick.
+
+    ``None`` is a real answer and the best one when nobody has chosen — it means
+    "use the engine default", which is the provider layer's vetted selection
+    with the residency and data-policy gates already applied. Substituting a
+    hardcoded name here would defeat both, which is exactly what the frontend's
+    ``gemma3:latest`` did from the other end.
+    """
+    named = (requested or "").strip()
+    if named:
+        return named
+
+    try:
+        from core.user_settings import get_user_settings
+
+        return get_user_settings().default_model
+    except Exception:
+        # A preference file must never be able to stop chat working.
+        return None
+
+
+def _locality_of_model(model: str | None) -> str | None:
+    """``"local"``, ``"cloud"``, or ``None`` when it cannot be established.
+
+    Asks the models runtime's `locality_of`, which is deliberately *not*
+    `_is_remote_model`: that one answers "may this leave the machine?" and
+    returns `False` for anything it cannot resolve, because guessing wrong
+    there costs the user's documents. This question is "where does it run?",
+    and for that an unresolved model is genuinely unknown. Same input, two
+    questions, and the two must not be merged.
+    """
+    try:
+        runtime = kernel.registry.get_runtime("models")
+        return runtime.locality_of(model)
+    except Exception:
+        return None
+
+
 class ChatRequest(BaseModel):
     text: str
-    model: str = "gemma3:latest"
+    #: Empty means "no preference expressed by this request", which is not the
+    #: same as "no model". See `_resolve_model`. It was ``"gemma3:latest"`` —
+    #: a default that silently answered on behalf of a user who had chosen
+    #: nothing, and overrode a Settings choice they had.
+    model: str = ""
     personality: str = "af_heart"
     persona: str = "zaram_prime"
     session_id: str = "default"
@@ -288,11 +370,41 @@ async def health():
     try:
         for cap in capabilities:
             if cap == "reasoning.generate":
-                # Only the local engine is wired today. When a cloud engine is
-                # added this must list it, or the Orb will under-report egress.
                 inference_providers.append(
                     {"id": "ollama", "locality": "local", "model": active_model}
                 )
+    except Exception:
+        pass
+
+    # Connected cloud providers, so the Orb stops under-reporting.
+    #
+    # This list was hardcoded to Ollama alone, with a comment saying a cloud
+    # engine "must list it, or the Orb will under-report egress" — and that is
+    # what happened the first time somebody connected one. `describeSystem`
+    # reads this list to decide between "Cloud enabled" and "Local · can send",
+    # so connecting OpenRouter changed nothing on screen and the indicator kept
+    # saying inference was local while a cloud model was one dropdown away.
+    #
+    # Reported as *connected*, which is not the same as *answering*. Zaram still
+    # answers locally until a cloud model is chosen, and rule 5 is why: nothing
+    # routes off-device by default. "Cloud enabled" is the honest word for it —
+    # a cloud model can answer, not that one did.
+    try:
+        from providers import cloud_config
+
+        for connection in cloud_config.connections().values():
+            if connection.is_loopback:
+                # LM Studio and friends are another process on this machine.
+                # Listing them as cloud would over-report egress, which is the
+                # opposite error and just as much a lie.
+                continue
+            inference_providers.append(
+                {
+                    "id": connection.provider_id,
+                    "locality": "cloud",
+                    "model": None,
+                }
+            )
     except Exception:
         pass
 
@@ -319,10 +431,20 @@ async def health():
         pass
 
     can_egress = egress_summary["allowed_hosts"] > 0 or search_on
+    # Derived, not asserted. This was the literal string "local" with a comment
+    # promising it would become "cloud" or "mixed" once a remote provider was
+    # wired — and it stayed "local" after one was, which is the shape of every
+    # invented value this codebase has had to go back and fix.
+    localities = {p.get("locality") for p in inference_providers}
+    if localities == {"cloud"}:
+        mode = "cloud"
+    elif "cloud" in localities:
+        mode = "mixed"
+    else:
+        mode = "local"
+
     routing = {
-        # "local" while every path stays on this machine. Becomes "cloud" or
-        # "mixed" once a remote provider is wired and selected.
-        "mode": "local",
+        "mode": mode,
         "providers": inference_providers,
         "web_search": "enabled" if search_on else "disabled",
         # The honest summary: is there any route off this machine at all?
@@ -384,7 +506,29 @@ def _current_inference(requested_model: str | None) -> dict[str, str | None]:
 @app.post("/chat")
 async def chat(request: ChatRequest):
     """Strangler Fig Endpoint: Routes via ChatRouter."""
-    print(f"[STAGE-7][Python] POST /chat received: text='{request.text[:50]}...' model={request.model} persona={request.persona}")
+    # Which model answers, in precedence order: what this request named, then
+    # what the user chose in Settings, then whatever the provider layer vetted.
+    #
+    # The request used to be the only input, and the frontend hardcoded
+    # `gemma3:latest` into every one of them — a name no interface control ever
+    # changed. So the provider layer's selection, the residency gate and the
+    # data-policy gate all ran and were then overridden by a string literal in
+    # `chatClient.ts`, which is why no routing decision was ever observable.
+    model = _resolve_model(request.model)
+
+    # Web search compensates for what the *answering* model does not know, so
+    # whether to search depends on which model that is — and this is the first
+    # point where it has been resolved. The planner runs downstream, reads the
+    # gate in two places, and has no way to ask.
+    #
+    # Carried in a `ContextVar` rather than a module global or an environment
+    # variable. Both of those are process-wide, and two chat requests with
+    # different models are in flight at once the moment a second window exists:
+    # one would silently decide the other's search policy. A `ContextVar` is
+    # per-task under asyncio, so each request sees its own value and nothing
+    # needs to be restored afterwards.
+    set_search_locality(_locality_of_model(model))
+    print(f"[STAGE-7][Python] POST /chat received: text='{request.text[:50]}...' model={model} persona={request.persona}")
     print(f"[STAGE-7][Python] Full request text length: {len(request.text)} chars")
 
     if hasattr(request, "image") and request.image:
@@ -407,7 +551,7 @@ async def chat(request: ChatRequest):
     # you". The true answer only exists here, so it is handed over rather than
     # left to the weights.
     system_prompt = compose_system_prompt(
-        identity_preamble(**_current_inference(request.model)),
+        identity_preamble(**_current_inference(model)),
         persona_prompt,
     )
 
@@ -417,7 +561,7 @@ async def chat(request: ChatRequest):
 
     return StreamingResponse(
         chat_router.route(
-            final_prompt, request.model, system_prompt, request.session_id,
+            final_prompt, model, system_prompt, request.session_id,
             project_id=request.project_id or None,
         ),
         media_type="text/event-stream"
@@ -714,6 +858,164 @@ async def egress_policy():
         "hosts_seen": seen,
         "hosts_without_a_rule": [h for h in seen if h not in rules and h != "-"],
     }
+
+
+@app.get("/egress/killswitch")
+async def egress_kill_switch():
+    """Whether everything outbound is currently refused.
+
+    Settings promised this control and nothing implemented it, so the row read
+    "not built" — which was at least honest. It lives in `EgressPolicy.decide`
+    rather than in this file, so it covers every caller of the gate: tool
+    traffic, model discovery, an update check somebody adds next year. A kill
+    switch enforced at one call site is a kill switch for that call site, and
+    the whole value of the control is that the user does not have to know how
+    many outbound paths exist.
+    """
+    from core.egress import get_gate
+
+    return {"on": get_gate().policy.kill_switch()}
+
+
+class KillSwitchUpdate(BaseModel):
+    on: bool
+
+
+@app.post("/egress/killswitch")
+async def set_egress_kill_switch(update: KillSwitchUpdate):
+    """Cut, or restore, all outbound traffic in one action.
+
+    Turning it off restores the per-host rules exactly as they were. Loopback is
+    never affected — a request to 127.0.0.1 cannot leave the machine, so there
+    is nothing to cut, and sealing it would stop the local model answering.
+    """
+    from core.egress import get_gate
+
+    return {"on": get_gate().policy.set_kill_switch(update.on)}
+
+
+@app.get("/search/web")
+async def web_search_setting():
+    """Whether questions may reach a search engine, and what still stands in the way.
+
+    Three fields rather than one boolean, because "on" alone would be a
+    misleading answer. Search is `CLAUDE.md`'s *first governed source*: turning
+    it on lets a search step be planned, and the per-host policy still decides
+    whether the request may be sent. A screen that showed only the switch would
+    have the user turn it on, ask a question, get a refusal, and conclude the
+    feature is broken.
+
+    * ``on`` — the gate itself.
+    * ``forced_by_environment`` — ``ZARAM_WEB_SEARCH`` is set, so the toggle is
+      not the authority and the screen must say so rather than showing a
+      control that appears to do nothing.
+    * ``host_policy`` — what would happen to a request to the search engine
+      today, read from the same policy the gate enforces.
+    """
+    from core.egress import get_gate
+    from core.planner import SEARCH_HOST, web_search_enabled
+    from core.user_settings import get_user_settings
+
+    raw = os.getenv("ZARAM_WEB_SEARCH")
+    gate = get_gate()
+
+    settings = get_user_settings()
+    return {
+        "on": web_search_enabled(),
+        "stored": settings.web_search,
+        "scope": settings.search_scope.value,
+        "forced_by_environment": bool(raw is not None and raw.strip()),
+        "host": SEARCH_HOST,
+        "host_policy": gate.policy.rules().get(SEARCH_HOST, "deny"),
+        "kill_switch": gate.policy.kill_switch(),
+    }
+
+
+class WebSearchUpdate(BaseModel):
+    #: Absent leaves the switch alone, which is what lets `scope` be set on its
+    #: own without a client having to resend a value it did not mean to change.
+    on: bool | None = None
+    #: `local_only` or `always`. Absent leaves it alone.
+    scope: str | None = None
+
+
+@app.post("/search/web")
+async def set_web_search_setting(update: WebSearchUpdate):
+    """Turn web search on or off, and say when it is worth running.
+
+    Stores preferences and nothing else — no request is made, and no host
+    policy is changed. Granting the search engine permission to be contacted is
+    a separate, per-item decision, which is rule 5 and is the whole reason
+    search was sequenced behind the policy rather than beside it.
+    """
+    from core.user_settings import SearchScope, get_user_settings
+
+    settings = get_user_settings()
+
+    if update.on is not None:
+        settings.set_web_search(update.on)
+
+    if update.scope is not None:
+        try:
+            settings.set_search_scope(update.scope)
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail=f"scope must be one of: {', '.join(s.value for s in SearchScope)}",
+            )
+
+    return await web_search_setting()
+
+
+@app.get("/routing/preference")
+async def routing_preference():
+    """The second of `CLAUDE.md`'s three tiers of control, and the chosen model.
+
+    Tier one is Zaram deciding; this is the one control in plain language; tier
+    three is per-task assignment behind Advanced. Served together because a
+    screen showing one without the other cannot explain what either does.
+    """
+    from core.user_settings import RoutingPreference, get_user_settings
+
+    settings = get_user_settings()
+    return {
+        **settings.to_dict(),
+        "options": [p.value for p in RoutingPreference],
+    }
+
+
+class RoutingPreferenceUpdate(BaseModel):
+    #: One of `RoutingPreference`. Absent leaves it unchanged.
+    routing_preference: str | None = None
+    #: The model to answer with, or "" to hand the choice back to Zaram.
+    #: `None` leaves it unchanged, which is what lets one endpoint set either
+    #: field without a client having to send both and risk clobbering the one
+    #: it did not mean to touch.
+    default_model: str | None = None
+
+
+@app.post("/routing/preference")
+async def set_routing_preference(update: RoutingPreferenceUpdate):
+    from core.user_settings import RoutingPreference, get_user_settings
+
+    settings = get_user_settings()
+
+    if update.routing_preference is not None:
+        try:
+            settings.set_routing_preference(update.routing_preference)
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "routing_preference must be one of: "
+                    + ", ".join(p.value for p in RoutingPreference)
+                ),
+            )
+
+    if update.default_model is not None:
+        settings.set_default_model(update.default_model)
+
+    return settings.to_dict()
 
 
 class EgressPolicyUpdate(BaseModel):

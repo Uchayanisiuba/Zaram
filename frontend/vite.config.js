@@ -45,6 +45,19 @@ export default defineConfig({
       '/artifacts': { target: BACKEND, changeOrigin: true },
       '/projects': { target: BACKEND, changeOrigin: true },
       '/ingest': { target: BACKEND, changeOrigin: true },
+      // A prefix missing from this list does not 404 — Vite answers with its
+      // own index.html and a 200, so the client parses HTML as JSON and
+      // reports a syntax error naming neither the route nor the proxy. That is
+      // an hour to diagnose and a one-line fix, which is the worst ratio there
+      // is, so `scripts/check-proxy-covers-backend.mjs` now asserts this list
+      // against the backend's real route table instead of trusting a comment.
+      '/providers': { target: BACKEND, changeOrigin: true },
+      '/routing': { target: BACKEND, changeOrigin: true },
+      '/search': { target: BACKEND, changeOrigin: true },
+      // Found by the check above on its first run, and it predates this
+      // session: `/vision/analyze` has been served by the backend and
+      // unreachable from the dev frontend the whole time.
+      '/vision': { target: BACKEND, changeOrigin: true },
     },
   },
 });
