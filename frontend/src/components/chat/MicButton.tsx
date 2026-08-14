@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { Mic, Square } from 'lucide-react';
 import { useMicStore } from '@/stores/micStore';
+import { useSpeechStore } from '@/stores/speechStore';
 import { useIsReducedMotion } from '@/hooks/useReducedMotion';
 
 /**
@@ -52,6 +53,12 @@ export default function MicButton({
       if (text) onTranscript(text);
       return;
     }
+    // Barge-in by microphone, and here it is a correctness requirement rather
+    // than a courtesy: the microphone would otherwise record Zaram's own voice
+    // coming out of the speakers and transcribe it back as if the user had said
+    // it. Stopping first is the difference between listening and a feedback
+    // loop.
+    useSpeechStore.getState().bargeIn();
     await start();
   };
 
@@ -73,7 +80,21 @@ export default function MicButton({
       // The one piece of state a screen reader would otherwise miss: the icon
       // changes, and nothing else announces that Zaram is now listening.
       aria-pressed={recording}
-      className="absolute right-9 top-1/2 -translate-y-1/2 p-1.5 rounded-lg hover:bg-white/5 disabled:opacity-30 transition-colors"
+      // Positioned by its parent, not by itself.
+      //
+      // This used to carry `absolute right-9 top-1/2 -translate-y-1/2`, while
+      // the send button next to it carried `absolute right-2`. Two independent
+      // hand-computed offsets for two controls that must not touch: at
+      // `p-1.5` around a 16px icon each button is 28px wide, so `right-2` spans
+      // 8–36px and `right-9` spans 36–64px — adjacent, with a gap of exactly
+      // zero. Then `whileHover={{ scale: 1.05 }}` grew whichever one the mouse
+      // was over into its neighbour, which is why the overlap only appeared on
+      // hover and looked intermittent.
+      //
+      // A flex row with a real gap removes the arithmetic rather than
+      // correcting it. Nothing here needs to know how wide the other control
+      // is.
+      className="p-1.5 rounded-lg hover:bg-white/5 disabled:opacity-30 transition-colors"
       whileHover={{ scale: 1.05 }}
       whileTap={{ scale: 0.95 }}
     >
