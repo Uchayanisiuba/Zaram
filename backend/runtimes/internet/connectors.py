@@ -6,10 +6,9 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any
 
-try:
-    from duckduckgo_search import DDGS
-except Exception:
-    DDGS = None
+# Prefers `ddgs`; the superseded `duckduckgo_search` returns zero results
+# without raising. See `core/ddgs_import.py`.
+from core.ddgs_import import DDGS  # noqa: F401
 
 try:
     import wikipedia

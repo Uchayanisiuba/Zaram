@@ -85,12 +85,16 @@ class DuckDuckGoConnector(BaseInternetConnector):
         self._init_ddgs()
 
     def _init_ddgs(self):
-        try:
-            from duckduckgo_search import DDGS
-            self._ddgs = DDGS()
-        except ImportError:
+        # See `core/ddgs_import.py`: the superseded package answers
+        # successfully with zero results, which is why this goes through one
+        # shared import rather than naming a package here.
+        from core.ddgs_import import DDGS
+
+        if DDGS is None:
             self._available = False
-            self._last_error = "duckduckgo-search not installed"
+            self._last_error = "no DuckDuckGo package installed (pip install ddgs)"
+            return
+        self._ddgs = DDGS()
 
     async def search(self, query: SearchQuery) -> list[SearchResult]:
         if not self._ddgs:

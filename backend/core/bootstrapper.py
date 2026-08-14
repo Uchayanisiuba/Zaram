@@ -83,7 +83,7 @@ class KernelBootstrapper:
         await self.memory_runtime.initialize()
 
         # 2. Initialize Knowledge Runtime (providers) with Memory Runtime
-        self.knowledge_runtime = self._init_knowledge_runtime(self.memory_runtime)
+        self.knowledge_runtime = await self._init_knowledge_runtime(self.memory_runtime)
 
         # 3. Discover and Register Runtimes
         await self._register_runtimes()
@@ -162,7 +162,7 @@ class KernelBootstrapper:
         print(f"[Bootstrapper] Spine at {spine_path} (embeddings: {backend}/{model}, dim={dim})")
         return runtime
 
-    def _init_knowledge_runtime(self, memory_runtime):
+    async def _init_knowledge_runtime(self, memory_runtime):
         from knowledge.runtime import KnowledgeRuntime
         from knowledge.providers import (
             MemoryProvider, VectorProvider, WikipediaProvider,
@@ -171,7 +171,39 @@ class KernelBootstrapper:
             PlaceholderProvider,
         )
 
-        runtime = KnowledgeRuntime(memory_runtime=memory_runtime)
+        # The internet runtime is where `KnowledgeRuntime.search` gets web
+        # results from, and nothing had ever constructed one.
+        #
+        # **This was the missing link in web search**, and it is the third
+        # instance of one shape in this codebase: a complete, tested component
+        # that nothing wires up. `create_internet_runtime` was defined and
+        # exported and never called; `search()` reads `self._internet_runtime`
+        # and it was always `None`, so the web half of every search silently
+        # returned nothing and the answer came from memory alone. The
+        # `DuckDuckGoProvider` registered a few lines below goes into
+        # `self._providers`, which `search()` does not read — so registering it
+        # looked like wiring and was not.
+        #
+        # Nothing here opens a connection. Connectors are constructed in
+        # `initialize()` and each one consults the egress gate before its first
+        # request, so with web search off, or with no rule for the host, this
+        # costs three objects and no bytes. Rule 7g holds.
+        internet_runtime = None
+        try:
+            from runtimes.internet import create_internet_runtime
+
+            internet_runtime = create_internet_runtime()
+            await internet_runtime.initialize()
+        except Exception:
+            # Knowledge must still work without it. A failure here means no web
+            # results, which is the default state anyway — it must never mean
+            # no memory results.
+            print("[Bootstrapper] Internet runtime unavailable; web search will find nothing")
+            internet_runtime = None
+
+        runtime = KnowledgeRuntime(
+            memory_runtime=memory_runtime, internet_runtime=internet_runtime
+        )
         runtime.register(MemoryProvider(memory_runtime=memory_runtime))
         runtime.register(VectorProvider())
         runtime.register(WikipediaProvider())
@@ -215,6 +247,20 @@ class KernelBootstrapper:
         self.registry.register(models_runtime)
         await models_runtime.initialize()
         register_runtime_for_health(models_runtime)
+        # Held rather than only registered, because connecting a cloud provider
+        # from Settings has to reach *both* halves of the cloud path: the
+        # adapter that discovers, which hangs off the provider runtime, and the
+        # engine that sends, which is built once inside this one.
+        self.models_runtime = models_runtime
+
+        from providers import cloud_config
+
+        cloud_config.attach_runtimes(self.providers_runtime, models_runtime)
+        # A key exported before launch becomes an ordinary connection, so there
+        # is one code path for a configured provider rather than an environment
+        # mechanism running beside a Settings mechanism with its own bugs.
+        # Reads variables only; rule 7g means no network call happens here.
+        cloud_config.seed_from_environment()
 
         # --- Speech Runtime ---
         from runtimes.speech.runtime import SpeechRuntime
