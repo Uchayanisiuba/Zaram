@@ -7,11 +7,55 @@ from .base_engine import ERROR_PREFIX, LLMEngine
 
 logger = logging.getLogger(__name__)
 
+#: How long Ollama holds the weights after a reply. See `stream_response`.
+KEEP_ALIVE = "30m"
+
 
 class OllamaEngine(LLMEngine):
+    """Text generation against a local Ollama server.
+
+    Every request carries `keep_alive`, and `warm()` loads the model without
+    asking it to say anything — together they are why "Warming up" should be a
+    once-per-session state rather than a once-per-message one.
+    """
+
     def __init__(self, base_url: str = "http://127.0.0.1:11434"):
         self.base_url = base_url
         self.default_model = "gemma3:latest"
+
+    def warm(self, model: str | None = None, *, timeout: float = 180.0) -> bool:
+        """Load the model into memory without generating anything.
+
+        An empty prompt with `keep_alive` set is Ollama's documented way to
+        preload: it resolves the model, pulls the weights into VRAM and returns
+        without producing a token. So this costs the load it was always going to
+        cost, moved from the user's first message to the seconds after launch
+        when nobody is waiting.
+
+        Loopback only, so it is not egress and rule 7g does not apply — this is
+        a request to a process on the same machine, the same class as the
+        readiness probe.
+
+        Returns whether the model is now resident. Never raises: Ollama not
+        running is the ordinary state on a machine that has not installed it,
+        and the first-run screen already handles that. A failure here must cost
+        a slower first reply and nothing else.
+        """
+        target = model or self.default_model
+        if not target:
+            return False
+        try:
+            response = requests.post(
+                f"{self.base_url}/api/generate",
+                json={"model": target, "prompt": "", "stream": False, "keep_alive": KEEP_ALIVE},
+                timeout=timeout,
+            )
+            response.raise_for_status()
+            logger.info("[OllamaEngine] %s is resident", target)
+            return True
+        except Exception as exc:
+            logger.info("[OllamaEngine] could not preload %s: %s", target, exc)
+            return False
 
     def stream_response(self, prompt: str, system_prompt: str = "", model: str | None = None) -> Iterator[str]:
         """Stream plain text tokens, per `LLMEngine`.
@@ -30,7 +74,23 @@ class OllamaEngine(LLMEngine):
             "model": model or self.default_model,
             "prompt": prompt,
             "system": system_prompt,
-            "stream": True
+            "stream": True,
+            # How long Ollama keeps the weights resident after answering.
+            #
+            # Nothing set this, so the default of **5 minutes** applied and the
+            # model unloaded during any ordinary pause — reading a reply,
+            # answering the door. The next message then paid a full cold start,
+            # which is why "Warming up" appeared on almost every message rather
+            # than once a session. The state was reported correctly; the model
+            # really was loading again.
+            #
+            # 30 minutes rather than `-1` (forever). Zaram's whole VRAM argument
+            # is that a chat model shares the card with the embedder and with
+            # whatever else the user runs, and pinning weights indefinitely
+            # would make a background app the reason a game or a render will not
+            # start. Half an hour covers a working session; walking away still
+            # gives the memory back.
+            "keep_alive": KEEP_ALIVE,
         }
         logger.debug("OllamaEngine.stream_response: model=%s prompt='%s...'", payload["model"], prompt[:50])
         try:
