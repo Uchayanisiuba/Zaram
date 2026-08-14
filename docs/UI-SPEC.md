@@ -121,6 +121,23 @@ Transitions ≤200ms. No spring physics on list rows. No continuous animation
 anywhere except the orb while actively processing. Respect
 `prefers-reduced-motion` — it disables the orb pulse too.
 
+**Motion must not depend on frame rate.** Every eased value in the embodiment
+renderer used `lerp(a, b, dt * k)`, which covers a different fraction of the
+distance per *second* at each refresh rate — so the avatar moved at visibly
+different speeds depending on the display, and the tuning was only correct on
+the machine it was tuned on. Use the exponential form, `1 - e^(-dt/τ)`
+(`approachRate` in `VrmAvatar.tsx`), where τ is a time constant in seconds and
+the same wall-clock time produces the same progress everywhere. It also cannot
+overshoot, which the linear form does on a long frame — a backgrounded tab
+returning, or a model finishing a load.
+
+**A state change is a transition, not a cut.** The avatar's rim light is its
+state channel and it was assigned absolutely each frame, so idle→thinking swapped
+slate for cyan between two frames. On a surface briefed as calm, an instant
+colour flip is the one motion that reads as a glitch rather than as a state.
+0.22s, which is long enough to read as a transition and short enough that the
+indicator is not still catching up when the thing it indicates has moved on.
+
 ### Component inventory
 
 Build these first; every screen composes from them.
@@ -229,6 +246,18 @@ indexed sources with dot, name, fact count, scope.
 
 Message thread. Assistant replies carry inline `CitationChip`s. Above the input,
 a strip showing 2–3 facts recalled into this reply, each dismissible.
+
+**The user's messages sit right, Zaram's left.** Both used to stack down the
+left edge, which made a long exchange read as one continuous document rather
+than as a conversation — the turn boundaries were there, but you had to read the
+labels to find them. The user's are capped at 85% width and given a quiet
+surface, because right-aligned text with no drawn edge to align *to* reads as a
+layout accident, and a bubble spanning the panel has no visible right edge at
+all — so the cue disappears on exactly the long messages where it helps most.
+
+**The speaker label stays.** Side is a third cue and, like colour, it is one a
+screen reader cannot use. Zaram's replies keep their left rule for the same
+reason.
 
 Header carries a **privacy timer**: cloud off for 15 / 30 / 60 min. One tap,
 with remaining time visible in mono while active.
