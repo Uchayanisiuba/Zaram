@@ -86,12 +86,19 @@ class DuckDuckGoConnector(BaseInternetConnector):
         self._init_ddgs()
 
     def _init_ddgs(self):
-        try:
-            from duckduckgo_search import DDGS
-            self._ddgs = DDGS()
-        except ImportError:
+        # Through `core.ddgs_import`, which prefers `ddgs` over the superseded
+        # `duckduckgo_search`. This connector imported the old name directly and
+        # that package answers *successfully with zero results* against the
+        # current endpoints — so web search ran, left the machine, was logged as
+        # allowed, and produced answers with no web sources in them. See that
+        # module for the measurement.
+        from core.ddgs_import import DDGS
+
+        if DDGS is None:
             self._available = False
-            self._last_error = "duckduckgo-search not installed"
+            self._last_error = "no DuckDuckGo package installed (pip install ddgs)"
+            return
+        self._ddgs = DDGS()
 
     async def search(self, query: SearchQuery) -> list[SearchResult]:
         # DDGS opens its own connection, so the gate cannot carry these bytes.
@@ -330,18 +337,32 @@ class InternetRuntimeImpl(InternetRuntime):
         }
 
     async def initialize(self) -> None:
+        """Register the default connectors. Opens no connection.
+
+        **Three of the four status values used in this class did not exist**,
+        and `initialize` raised `AttributeError: READY` on its last line —
+        after the connectors had registered, so the log showed three successful
+        registrations followed by nothing. Nothing had ever called this: the
+        runtime it belongs to was constructed nowhere, which is why a live
+        crash in shipped code sat here undisturbed.
+        `InternetStatus` is `healthy · degraded · unavailable · initializing ·
+        disabled`, and those are the values used now.
+        """
         self._state = InternetStatus.INITIALIZING
         # Register default connectors
         self.register_connector(DuckDuckGoConnector())
         self.register_connector(WikipediaConnector())
         self.register_connector(GitHubConnector())
-        self._state = InternetStatus.READY
+        self._state = InternetStatus.HEALTHY
         self._initialized = True
         print(f"[InternetRuntime] Initialized with {len(self._connectors)} connectors")
 
     async def shutdown(self) -> None:
-        self._state = InternetStatus.STOPPING
-        self._state = InternetStatus.STOPPED
+        # `UNAVAILABLE` rather than a stopped state, which the enum does not
+        # have either. It is also the more useful answer: anything that asks
+        # after shutdown wants to know it cannot be used, not why.
+        self._state = InternetStatus.UNAVAILABLE
+        self._initialized = False
 
     def get_runtime_id(self) -> str:
         return self._runtime_id
