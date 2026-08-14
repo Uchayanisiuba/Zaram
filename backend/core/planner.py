@@ -16,8 +16,10 @@ import re
 import os
 import time
 import uuid
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from enum import Enum
+from typing import Optional
 from typing import Any
 
 from core.contracts import (
@@ -30,17 +32,107 @@ from core.query_classifier import SEARCH_MARKER, needs_search
 logger = logging.getLogger(__name__)
 
 
+#: Values of ``ZARAM_WEB_SEARCH`` that mean yes. Anything else present means no.
+_TRUTHY = {"1", "true", "yes", "on"}
+
+#: The host a web search is addressed to, and therefore the host whose policy
+#: rule decides whether one may be sent.
+#:
+#: Named here so the Settings screen can show the user the rule that will
+#: actually apply, instead of a switch whose effect depends on a hostname
+#: nobody has told them about. It is *not* the definition — the provider builds
+#: the URL it probes — so `test_search_host_matches_the_provider` asserts the
+#: two agree rather than this comment claiming they do. Asserting the
+#: relationship instead of describing it is the lesson the DuckDuckGo fix cost
+#: this codebase once already.
+SEARCH_HOST = "duckduckgo.com"
+
+
+#: Where the current request's model runs: ``"local"``, ``"cloud"`` or ``None``.
+#:
+#: A `ContextVar`, not a module global, because two chat requests naming
+#: different models are in flight simultaneously the moment a second window
+#: exists — with a global, one would decide the other's search policy. Under
+#: asyncio each task gets its own value and nothing has to be restored.
+#:
+#: ``None`` is the correct default: most callers of the planner are not the
+#: chat route and have no model in hand, and unknown searches.
+_search_locality: ContextVar[Optional[str]] = ContextVar("zaram_search_locality", default=None)
+
+
+def set_search_locality(locality: Optional[str]) -> None:
+    """Record where this request's model runs, for the search decision."""
+    _search_locality.set(locality)
+
+
+def search_applies_to(locality: str | None) -> bool:
+    """Whether a search is worth running for a model that runs *here*.
+
+    **Search compensates for what the answering model does not know.** A local
+    12B carries an older and smaller store of facts than a frontier model, so a
+    live result changes its answer far more often. The maintainer's call, 14
+    August 2026: search on local, skip it on cloud.
+
+    ``locality`` is ``"local"``, ``"cloud"`` or ``None``. **Unknown searches**,
+    which is the deliberate direction: the cost of searching unnecessarily is
+    one extra request to a host the user has already permitted, and the cost of
+    skipping it is a confidently stale answer with nothing indicating why. The
+    asymmetry runs the opposite way from the routing gates next door — there,
+    unknown means "do not send" because the risk is the user's documents
+    leaving. Here nothing of the user's is at stake beyond the question they
+    just typed, which is going to a search engine either way or not at all.
+
+    Does not consult `web_search_enabled`. Two questions — *may we search?* and
+    *is it worth searching?* — and merging them would make a capability gate
+    and a preference indistinguishable, which is the mistake this codebase has
+    now made three times with ranking scores.
+    """
+    try:
+        from core.user_settings import SearchScope, get_user_settings
+
+        if get_user_settings().search_scope is SearchScope.ALWAYS:
+            return True
+    except Exception:
+        return True
+
+    return locality != "cloud"
+
+
 def web_search_enabled() -> bool:
     """Whether a request may reach the public internet.
 
-    Default deny (rule 5). Web search stays off until the egress log and
-    per-source policy exist — see the sequencing commitments in CLAUDE.md.
-    Until then nothing the user can type causes a byte to leave the machine:
-    inference is Ollama on localhost and the Spine is a local file.
+    Default deny (rule 5). `CLAUDE.md` sequenced this deliberately — *egress log
+    → per-source policy → web search as its first governed source* — because
+    bytes cannot be logged retroactively. Both of those now exist and are
+    visible to the user, which is what makes the switch offerable at all.
 
-    Read at call time rather than import time so tests can toggle it.
+    **The environment wins when it is set.** A variable someone exported
+    deliberately, in a launch script or a test, must not be silently overridden
+    by a stored preference — and every test in
+    ``test_outbound_query_invariant.py`` toggles the gate that way. When it is
+    unset, which is the ordinary case for anybody who has not gone looking, the
+    Settings toggle decides.
+
+    **On is not a licence.** The per-host policy still decides each request and
+    its default is refuse, so this returning ``True`` means "a search step may
+    be planned", never "a search may be sent". The gate is what turns search
+    into the first *governed* source rather than the first exception.
+
+    Read at call time rather than at import so both inputs stay live.
     """
-    return os.getenv("ZARAM_WEB_SEARCH", "").strip().lower() in {"1", "true", "yes", "on"}
+    raw = os.getenv("ZARAM_WEB_SEARCH")
+    if raw is not None and raw.strip():
+        return raw.strip().lower() in _TRUTHY
+
+    try:
+        from core.user_settings import get_user_settings
+
+        return get_user_settings().web_search
+    except Exception:  # noqa: BLE001 - see below
+        # A preference file must never be able to *open* the internet by
+        # failing, so an unreadable one falls to the default, which is off.
+        logger.warning("could not read the web search preference; leaving it off", exc_info=True)
+        return False
 
 
 def _document_body_prompt(request: str) -> str:
@@ -208,7 +300,15 @@ class IntentRouter:
         # but nothing leaves the machine until the egress log and per-source
         # policy exist. See web_search_enabled() and CLAUDE.md.
         search_wanted = needs_search(prompt)
-        search_required = search_wanted and web_search_enabled()
+        # Two gates, kept separate: *may* we search (rule 5, the user's switch)
+        # and *is it worth* searching for the model that is about to answer.
+        # Merging them would make a capability gate indistinguishable from a
+        # preference.
+        search_required = (
+            search_wanted
+            and web_search_enabled()
+            and search_applies_to(_search_locality.get())
+        )
         if search_wanted and not search_required:
             logger.debug("Planner: search suppressed — web search is off by policy")
         signals.append(IntentSignal(
@@ -348,7 +448,11 @@ class IntentRouter:
         # classifier may want it, and nothing leaves the machine until the
         # per-source policy exists. Routing more accurately must not become a
         # route around rule 5.
-        requires_search = decision.intent == "search" and web_search_enabled()
+        requires_search = (
+            decision.intent == "search"
+            and web_search_enabled()
+            and search_applies_to(_search_locality.get())
+        )
         if decision.intent == "search" and not requires_search:
             capabilities = ["reasoning.generate"]
 

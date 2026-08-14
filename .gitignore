@@ -87,6 +87,13 @@ backend/egress.db*
 egress-policy.json
 backend/egress-policy.json
 
+# Backend-side user settings — the chosen model and the routing preference.
+# Written beside the egress policy and ignored for the same reason: it is the
+# user's configuration of their own machine, and committing one developer's
+# choice of model would silently become everybody's default.
+settings.json
+backend/settings.json
+
 # Artifact records, and the files they describe. Both are the user's own work —
 # their invoices, proposals and client spreadsheets. The database holds the
 # provenance and the full HTML of every document generated, which makes it as
