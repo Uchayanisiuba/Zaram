@@ -598,10 +598,25 @@ class ExecutionEngine:
         surfacing at the sentence level, and a relevance score is not a reason
         to stop telling someone what left their computer.
 
-        `kind` is normalised to `web` rather than passed through as the
-        provider name. The UI colours by egress, and a chip that said "brave"
-        or "tavily" would make the user learn a vocabulary to answer the only
-        question that matters: did this leave?
+        `kind` is normalised rather than passed through as the provider name.
+        The UI colours by egress, and a chip that said "brave" or "tavily"
+        would make the user learn a vocabulary to answer the only question that
+        matters: did this leave?
+
+        **Normalised is not hardcoded, and it was.** Every result from this
+        step was labelled `web`, and a knowledge search returns the *merged*
+        list — memory records alongside web ones. So the moment the internet
+        runtime was actually wired up, facts recalled from the user's own Spine
+        started arriving in the interface as web citations, with `memory:` URIs
+        and an egress-coloured chip. That is a lie about provenance in a
+        product whose claim is provenance, and rule 2 does not have an
+        exception for it being the safe-looking direction.
+
+        **Unknown resolves to `web`, deliberately.** The two errors are not
+        symmetric: calling a memory a web source over-warns the user about
+        privacy they did not spend, and calling a web source a memory tells
+        them nothing left when something did. Only positive evidence that a
+        result is local downgrades it.
         """
         from core.streaming_events import StreamEvent
 
@@ -609,7 +624,7 @@ class ExecutionEngine:
         for source in sources:
             snippet = " ".join((source.get("snippet") or "").split())
             events.append(StreamEvent.source(
-                kind="web",
+                kind=self._source_kind(source),
                 url=source.get("url"),
                 title=(source.get("title") or "")[:120],
                 excerpt=snippet[: self.EXCERPT_CHARS] or None,
@@ -622,9 +637,40 @@ class ExecutionEngine:
                 # admitting it cannot link.
                 egress_id=source.get("egress_id"),
                 bytes_sent=source.get("bytes_sent"),
-                origin="web",
+                origin=self._source_kind(source),
             ))
         return events
+
+    #: Knowledge providers that read only from this machine. Anything not named
+    #: here is treated as having left it — see `_source_kind`.
+    LOCAL_PROVIDERS = frozenset({"memory", "vector", "graph", "project", "markdown", "pdf"})
+
+    def _source_kind(self, source: dict[str, Any]) -> str:
+        """`memory`, `document` or `web`, decided from the result itself.
+
+        Three independent signals, any one of which is enough to establish that
+        a result did not leave the machine. Read in this order because they
+        vary in how forgeable they are: the URI scheme is structural, the
+        declared type comes from the provider that produced the result, and the
+        provider name is a string.
+
+        Defaults to `web`. See the caller's docstring for why that direction.
+        """
+        url = (source.get("url") or "").strip().lower()
+        if url.startswith("memory:"):
+            return "memory"
+        if url.startswith("file:") or url.startswith("document:"):
+            return "document"
+
+        declared = str(source.get("type") or "").strip().lower()
+        if declared in {"memory", "document"}:
+            return declared
+
+        provider = str(source.get("provider") or "").strip().lower()
+        if provider in self.LOCAL_PROVIDERS:
+            return "memory" if provider in {"memory", "vector", "graph"} else "document"
+
+        return "web"
 
     def _swap_preflight_event(self, model: str) -> Any | None:
         """Announce a model load or swap before generation, or say nothing.
