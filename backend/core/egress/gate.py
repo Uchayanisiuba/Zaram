@@ -186,6 +186,13 @@ class EgressGate:
         here and then use their own client to send. The verdict is still made
         and logged in one place, which is the property that matters.
         """
+        # Loopback returns before the policy is consulted, and that is
+        # deliberate even with the kill switch on. A request to 127.0.0.1
+        # cannot leave the machine, so it is not egress and there is nothing to
+        # cut; sealing it would stop Ollama answering and turn "cut all
+        # outbound traffic" into "stop the product working", which is not what
+        # anyone reaching for that switch means. The switch is about bytes
+        # leaving, and these do not.
         if is_local(url):
             return None
 
