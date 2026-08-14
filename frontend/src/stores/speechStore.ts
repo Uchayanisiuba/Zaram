@@ -83,6 +83,24 @@ interface SpeechStore {
   endSpeech: () => void;
 
   stop: () => void;
+
+  /**
+   * Stop speaking because the user did something, rather than because the
+   * reply ended.
+   *
+   * A separate name from `stop()` on purpose. `stop()` is the mechanism and is
+   * called on every `beginSpeech`, on cancel, on teardown; this is the
+   * *intent*, and separating them means a call site reads as "the user
+   * interrupted" rather than "something reset the audio". They do the same
+   * thing today. When they stop doing the same thing — a resume, a fade rather
+   * than a cut, a record that the user interrupts often — this is the one that
+   * changes, and every barge-in site changes with it for free.
+   *
+   * Cheap when nothing is speaking, so callers may fire it on every keystroke
+   * without checking first. A caller that has to ask "is it speaking?" before
+   * interrupting is a caller that will eventually get the check wrong.
+   */
+  bargeIn: () => void;
 }
 
 /**
@@ -318,6 +336,14 @@ export const useSpeechStore = create<SpeechStore>((set, get) => ({
     consumed = spokenSoFar.length;
     queue.close();
     queue = null;
+  },
+
+  bargeIn: () => {
+    // No-op unless something is actually playing or queued, so the composer can
+    // call this on every keystroke without churning state or clearing an error
+    // the user has not read yet.
+    if (get().audio === null && queue === null) return;
+    get().stop();
   },
 
   stop: () => {
