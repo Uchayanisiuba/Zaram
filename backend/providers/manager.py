@@ -402,20 +402,69 @@ class ProviderManager:
         # must not be left with no default at all — but ranks below a model we
         # positively know fits, so "we could not check" never outranks "it fits".
         candidates = [m for m in candidates if self.model_fits_resident(m) is not False]
+
+        preference = self._routing_preference()
+
+        # `prefer_local` is the one that constrains rather than reorders.
+        # "Prefer" is doing real work here: a ranking nudge would be
+        # indistinguishable from `auto`, since `auto` already ranks local
+        # first — and two settings with identical behaviour are a dead control
+        # wearing a third label. This one means Zaram will not pick a cloud
+        # model on its own at all. Choosing one by hand still works; this
+        # governs what happens when nobody chose.
+        if preference == "prefer_local":
+            local_only = [m for m in candidates if m.locality is CapabilityLocality.LOCAL]
+            # Not `or candidates`. Falling back to a cloud model here would make
+            # the strictest setting the one that silently sends data off-device
+            # on a machine with no local model — the exact inversion rule 5
+            # exists to prevent. No model is the honest answer, and callers
+            # already handle it: `select_default_model` returning None is "say
+            # so", never "substitute something".
+            candidates = local_only
+
         if not candidates:
             return None
 
+        # `prefer_cloud` moves locality the other way and does nothing else.
+        # It cannot promote a model whose terms are unknown, because
+        # `selectable_by_default` already excluded those above and that is a
+        # consent gate, not a ranking one. The Settings screen makes exactly
+        # this claim to the user — "a bias, not a permission" — and this line
+        # is what makes it true.
+        cloud_first = preference == "prefer_cloud"
+
         def rank(model: ModelInfo) -> tuple:
             fits = self.model_fits_resident(model)
+            is_local = model.locality is CapabilityLocality.LOCAL
             return (
                 0 if fits is True else 1,
                 0 if model.is_general_purpose else 1,
-                0 if model.locality is CapabilityLocality.LOCAL else 1,
+                (1 if is_local else 0) if cloud_first else (0 if is_local else 1),
                 -(model.size_bytes or 0),
                 model.id,  # deterministic across equal candidates
             )
 
         return sorted(candidates, key=rank)[0]
+
+    def _routing_preference(self) -> str:
+        """The user's *Prefer local · Auto · Prefer cloud* choice, or ``auto``.
+
+        Read here rather than passed in, because every caller of
+        `select_default_model` wants the user's preference applied and none of
+        them should have to remember to fetch it — the version of this that
+        took it as an argument would be wrong at whichever call site was added
+        last.
+
+        Any failure yields ``auto``, which is the behaviour this method had
+        before the preference existed. A settings file must never be able to
+        change which model answers by being unreadable.
+        """
+        try:
+            from core.user_settings import get_user_settings
+
+            return get_user_settings().routing_preference.value
+        except Exception:
+            return "auto"
 
     def rejected_default_candidates(
         self, *, category: ModelCategory = ModelCategory.LLM

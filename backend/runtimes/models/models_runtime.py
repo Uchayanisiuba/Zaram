@@ -61,6 +61,16 @@ class ModelsRuntime(Runtime):
         #: that is still being connected.
         self._provider_manager = provider_manager
         self._selected_model: Optional[str] = None
+        #: Builds the engine that serves every connected cloud provider, or
+        #: returns ``None`` when none is connected.
+        #:
+        #: Injected by `providers.cloud_config` rather than imported, because
+        #: this runtime must not depend on the provider layer — the same
+        #: constraint `_provider_manager` is typed loosely for. Without it the
+        #: only cloud configuration reachable from here is the pair of
+        #: environment variables read at boot, which cannot express more than
+        #: one provider and cannot change while the process runs.
+        self._cloud_engine_factory: Optional[Any] = None
 
     def get_runtime_id(self) -> str:
         return "models"
@@ -124,12 +134,95 @@ class ModelsRuntime(Runtime):
         variables rather than testing them.
         """
         local = OllamaEngine()
-        cloud = cloud_engine_from_environment()
+
+        # The factory wins when the provider layer has attached one, because it
+        # knows about every connection rather than the single pair of
+        # environment variables. `from_environment` stays as the fallback so
+        # this runtime still works standalone — it is constructed without a
+        # provider layer in several tests, and boot must not start depending on
+        # a layer that is still being connected.
+        cloud = None
+        if self._cloud_engine_factory is not None:
+            try:
+                cloud = self._cloud_engine_factory()
+            except Exception:
+                logger.warning("cloud engine factory failed; falling back", exc_info=True)
+        if cloud is None:
+            cloud = cloud_engine_from_environment()
+
         if cloud is None:
             return local
 
-        logger.info("[ModelsRuntime] Cloud engine available (%s)", cloud.base_url)
+        logger.info("[ModelsRuntime] Cloud engine available (%s)", type(cloud).__name__)
         return RoutedEngine(local=local, cloud=cloud, is_remote=self._is_remote_model)
+
+    def set_cloud_engine_factory(self, factory) -> None:
+        """Tell this runtime how to build its cloud engine. Rebuilds immediately.
+
+        Rebuilding here rather than waiting for the next reload matters at boot:
+        the provider layer attaches after this runtime has already initialised,
+        so without it the first message of every session would be answered by an
+        engine built before the connections were known.
+        """
+        self._cloud_engine_factory = factory
+        if self._service is not None:
+            self.reload_engine()
+
+    async def warm_local_model(self) -> bool:
+        """Load the local model in the background, shortly after boot.
+
+        **"Warming up" was appearing on almost every message**, which read as
+        the product being slow and was in fact the model being unloaded between
+        them: nothing set Ollama's `keep_alive`, so its five-minute default
+        applied and any ordinary pause — reading a reply, answering the door —
+        cost a full cold start on the next question.
+
+        Two halves to the fix and both are needed. `keep_alive` keeps the
+        weights resident once they are loaded; this preloads them so the *first*
+        message does not pay for it either. After this, warming is a state the
+        user sees once per session, at a moment when they are not waiting on an
+        answer.
+
+        Run in a thread: the load blocks for as long as it takes to move several
+        gigabytes onto the card, and doing that on the event loop would freeze
+        every endpoint — the same class of defect as the confirm hook in M10.
+        """
+        engine = getattr(self._service, "engine", None)
+        # `RoutedEngine` wraps the local one. Warming the wrapper would send an
+        # empty prompt down whichever path the router picks, which for a cloud
+        # model is a billed request to a third party — for a preload nobody
+        # asked for. Reach the local engine specifically.
+        local = getattr(engine, "_local", engine)
+        warm = getattr(local, "warm", None)
+        if not callable(warm):
+            return False
+
+        import asyncio
+
+        return await asyncio.to_thread(warm, self._selected_model)
+
+    def reload_engine(self) -> bool:
+        """Rebuild the engine from the current configuration. Returns whether cloud is present.
+
+        The cloud engine is built once, at boot, from environment variables —
+        which was fine while the only way to set them was before launch. A key
+        entered in Settings has to reach the thing that *sends*, or the user
+        gets a screen saying connected and every message answered locally with
+        nothing explaining why.
+
+        The selected model is deliberately carried across rather than
+        re-chosen. Rebuilding is a reaction to a configuration change the user
+        made; silently moving them onto a different model at the same time
+        would be a second change they did not ask for.
+        """
+        engine = self._build_engine()
+        if self._selected_model:
+            engine.default_model = self._selected_model
+        if self._service is None:
+            self._service = ModelsService(engine, knowledge_runtime=self._knowledge_runtime)
+        else:
+            self._service.engine = engine
+        return isinstance(engine, RoutedEngine)
 
     def locality_of(self, model: Optional[str]) -> Optional[str]:
         """Where this model runs: ``"local"``, ``"cloud"``, or ``None``.

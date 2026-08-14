@@ -11,6 +11,7 @@ OpenAI wire format, and it never hardcodes a model name.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from typing import Any, Dict, List, Optional
@@ -93,7 +94,7 @@ class OpenAICompatibleAdapter:
     # --- ModelProviderAdapter surface ---
     async def discover_models(self, *, timeout: float = 2.0) -> List[ModelInfo]:
         try:
-            payload = self._get("/v1/models", timeout=timeout) or {}
+            payload = await asyncio.to_thread(self._get, "/v1/models", timeout=timeout) or {}
         except Exception as exc:
             logger.warning(
                 "%s discovery failed (provider unavailable): %s",
@@ -113,7 +114,7 @@ class OpenAICompatibleAdapter:
 
     async def health(self) -> Dict[str, Any]:
         try:
-            self._get("/v1/models", timeout=2.0)
+            await asyncio.to_thread(self._get, "/v1/models", timeout=2.0)
             return {"available": True, "provider": self.provider_id, "endpoint": self.base_url}
         except Exception as exc:
             return {"available": False, "provider": self.provider_id, "error": str(exc)}
@@ -128,6 +129,17 @@ class OpenAICompatibleAdapter:
 
     # --- internals ---
     def _get(self, path: str, *, timeout: float) -> Optional[Dict[str, Any]]:
+        # Synchronous, and called from a thread by both callers above. That is
+        # not tidiness — it is the M10 freeze, which cost a session to find.
+        #
+        # A host whose policy is *ask* blocks inside the gate on a
+        # `threading.Event` until a browser answers the confirmation. Run that
+        # on the event loop and the backend stops serving, `/egress/pending`
+        # can never be fetched, the dialog can never appear, and the only
+        # reachable outcome is a timeout. Discovery against a cloud provider is
+        # exactly that shape, and it became reachable the moment the per-host
+        # policy was something a user could set to *ask* from Settings.
+        #
         # Through the gate. This discoverer is the one that genuinely cuts both
         # ways: pointed at LM Studio it is loopback and passes through unlogged,
         # pointed at api.openai.com it is egress carrying a bearer token. The
