@@ -279,19 +279,32 @@ export default function VrmAvatar({ px = 320, src = '/avatars/AvatarSample_Z.vrm
     // avatar learns the user's IP and when they opened Zaram.
     //
     // Two layers, deliberately. `inspectAvatar` refuses the file before a
-    // single request is made and can say why; this modifier is the structural
-    // backstop for anything the scan did not recognise as a URI, and it fails
-    // to a broken model rather than to a silent request. Belt and braces on the
-    // one path where the failure is invisible.
-    const manager = new THREE.LoadingManager()
-    manager.setURLModifier((url) => {
+    // single request is made and can say why; the modifier below is the
+    // structural backstop for anything the scan did not recognise as a URI, and
+    // it fails to a broken model rather than to a silent request. Belt and
+    // braces on the one path where the failure is invisible.
+    //
+    // **The two loaders get different managers, and the first version of this
+    // did not.** A `LoadingManager`'s URL modifier applies to *every* URL that
+    // manager resolves — including the avatar's own, which is not a data URI
+    // and was therefore replaced with an empty one. The bundled avatar then
+    // arrived as zero bytes and the gate refused it as unreadable: the guard
+    // blocked the very file it was written to protect. Shipped without looking
+    // at it, which is exactly what the handoff had just finished warning about.
+    //
+    // So the restrictive manager governs *sub-resource resolution during parse*
+    // and nothing else. The top-level fetch is an ordinary load of a path this
+    // component chose, not a URI a stranger's file asked for, and the two must
+    // not be governed by the same rule.
+    const parseManager = new THREE.LoadingManager()
+    parseManager.setURLModifier((url) => {
       if (url.startsWith('data:') || url.startsWith('blob:')) return url
       // eslint-disable-next-line no-console
       console.warn(`[embodiment] refused an external avatar resource: ${url}`)
       return 'data:application/octet-stream;base64,'
     })
 
-    const loader = new GLTFLoader(manager)
+    const loader = new GLTFLoader(parseManager)
     loader.register((parser) => new VRMLoaderPlugin(parser))
 
     const clock = new THREE.Clock()
@@ -304,7 +317,8 @@ export default function VrmAvatar({ px = 320, src = '/avatars/AvatarSample_Z.vrm
     // straight to `loader.load`. Reading the glTF JSON first is the only point
     // at which an external URI can be refused *before* the loader resolves it.
     // `FileLoader` rather than `fetch` so `THREE.Cache` still serves a remount.
-    const bytes = new THREE.FileLoader(manager)
+    // The default manager, deliberately — see the note above `parseManager`.
+    const bytes = new THREE.FileLoader()
     bytes.setResponseType('arraybuffer')
     bytes.load(
       src,

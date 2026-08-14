@@ -273,9 +273,21 @@ In scope:
   **One avatar ships, not three.** A character set is 16 MB each into a 186 MB
   installer against a rule that says never block on a download. The direction
   after one is **bring your own VRM** — the same posture as bring your own key
-  and bring your own model — which needs a loader gate first, because a `.vrm`
-  is a file somebody else wrote and glTF can reference external URIs that the
-  browser would fetch unlogged. An avatar **store** stays where the scope list
+  and bring your own model.
+
+  **An avatar file may reference nothing outside itself.** glTF `buffers` and
+  `images` carry an optional `uri` that the loader fetches, so a `.vrm` can make
+  the browser call out while it loads — a request `EgressGate` cannot see, since
+  that intercepts what the *backend* sends, and `check-no-remote-assets.mjs`
+  cannot see, since that scans *source*. Rule 3 broken by a data file, with
+  nothing anywhere reporting it, and a working beacon into the bargain. The
+  policy is an allow-list of one form — embedded or `data:`, never a blocklist
+  of hosts and never "same origin is fine" — and it **refuses rather than
+  sanitises**, because rewriting somebody's asset produces a file subtly unlike
+  the one they made. `frontend/src/lib/vrmSafety.ts`, built 14 August, which is
+  what unblocks bring-your-own.
+
+  An avatar **store** stays where the scope list
   already puts an extensions marketplace: after v1, and it is the feature that
   drags in accounts, since payment is one of the three things that require them.
   Attaching avatars to **agents** is the direction that replaces embodying a
@@ -306,6 +318,22 @@ In scope:
   **Speech follows the renderer**: avatar selected, replies speak; orb, silent
   unless asked. One decision the user already made by choosing a face, so it
   needs no second setting.
+
+  **Speech keeps pace with the text; it never waits for the reply.** Synthesis
+  starts on the first sentence that will not change again, while the model is
+  still writing the next — measured 14 August, speech began 16.6s before
+  generation finished on one reply, and the gap grows with length. Two failures
+  this rules out, and both are worse than the delay they avoid: waiting for the
+  whole reply, which is silence that scales with how much there is to say; and
+  releasing a sentence that can still be merged into, which puts a pause where
+  the text has none and a listener hears that as a fault rather than as
+  latency. Word-by-word is not the goal and would be worse — a clause is the
+  smallest unit with prosody.
+
+  **Citation markers are grounding, not language.** `[M1]` and `[S2]` reach
+  neither a reader nor a synthesiser, and stripping happens on accumulated text
+  because a marker arrives split across tokens. One function, all callers —
+  there were three and the one that had been missed was the one that spoke.
 
   Both are **local and optional**. `zaram[voice]` speaks (~905 MB), `zaram[mic]`
   listens (81 MB measured — faster-whisper plus every dependency). Split because

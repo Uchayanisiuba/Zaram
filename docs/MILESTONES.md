@@ -74,6 +74,29 @@ backstop. This is the prerequisite for bring-your-own-VRM.
 **The user's messages sit on the right**, capped at 85% width, with the speaker
 label kept because side is a cue a screen reader cannot use.
 
+**The avatar gate blocked the avatar, and a person found it, not a test.** A
+`LoadingManager`'s URL modifier applies to *every* URL that manager resolves,
+and both loaders were given the same one — so the top-level `.vrm` fetch, which
+is not a `data:` URI, was replaced with an empty one. The bundled avatar arrived
+as zero bytes and the gate refused it as unreadable: **the guard blocked the
+only file it was written to protect**, and the landing page showed "Avatar
+unavailable" where a face should be.
+
+Twelve unit tests passed throughout, because every one of them tests
+`inspectAvatar` against bytes handed to it directly — none could see the wiring
+that decided which bytes arrived. Fixed by giving the restrictive manager to
+`GLTFLoader` only: it governs *sub-resource resolution during parse*, and the
+top-level fetch is a path this component chose rather than a URI a stranger's
+file asked for. The two must not be governed by one rule.
+
+**No test was added for it, deliberately.** Nothing short of loading the app
+could have caught it, and a unit test that appeared to cover it would be the
+assertion-free kind this file already warns about. What catches this class is
+looking — which the handoff had just finished saying, one section above, about
+two other changes shipped unseen. It took under an hour for that to cost
+something. Verified fixed by loading it: 14 expressions, all five visemes,
+humanoid rig, 71 textures at anisotropy 16.
+
 **Three of my own claims were wrong first and the tests caught all three** — a
 clamp said to prevent an overshoot the formula cannot have, a divergence figure
 of 1% that measures 0.68%, and a justification for the avatar change that the
