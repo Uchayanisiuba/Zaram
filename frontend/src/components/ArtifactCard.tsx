@@ -13,15 +13,19 @@
  * the transcript at the point it was made and does not animate, expand or
  * demand acknowledgement. Motion has a budget and this is not worth any of it.
  */
+import { useState } from 'react';
+import { AnimatePresence } from 'framer-motion';
 import {
   BarChart3,
   Download,
+  Eye,
   FileSpreadsheet,
   FileText,
   Quote,
   Receipt,
 } from 'lucide-react';
 
+import ArtifactPreview from '@/components/ArtifactPreview';
 import { downloadUrl, type Artifact, type ArtifactKind } from '@/services/artifactsClient';
 
 const KIND_ICON: Record<ArtifactKind, React.ReactNode> = {
@@ -53,6 +57,7 @@ export default function ArtifactCard({
 }) {
   const extension = artifact.filename.split('.').pop()?.toUpperCase() ?? 'FILE';
   const citedCount = artifact.claims?.length ?? 0;
+  const [previewing, setPreviewing] = useState(false);
 
   return (
     <div
@@ -145,15 +150,30 @@ export default function ArtifactCard({
             the backend having stat'd the path, not an assumption that writing
             succeeded. */}
         {artifact.exists ? (
-          <a
-            href={downloadUrl(artifact.id)}
-            download={artifact.filename}
-            className="flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[11px] transition-colors hover:bg-white/5"
-            style={{ border: '1px solid var(--color-border)', color: 'var(--color-text)' }}
-          >
-            <Download size={12} />
-            Download
-          </a>
+          <>
+            {/* Preview sits beside Download, not instead of it. The preview is
+                the HTML the file was built from — `CLAUDE.md` makes HTML the
+                source of truth for every generated document precisely so this
+                cannot drift from what downloads. */}
+            <button
+              type="button"
+              onClick={() => setPreviewing(true)}
+              className="flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[11px] transition-colors hover:bg-white/5"
+              style={{ border: '1px solid var(--color-border)', color: 'var(--color-text)' }}
+            >
+              <Eye size={12} />
+              Preview
+            </button>
+            <a
+              href={downloadUrl(artifact.id)}
+              download={artifact.filename}
+              className="flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[11px] transition-colors hover:bg-white/5"
+              style={{ border: '1px solid var(--color-border)', color: 'var(--color-text)' }}
+            >
+              <Download size={12} />
+              Download
+            </a>
+          </>
         ) : (
           <span
             className="text-[11px]"
@@ -174,6 +194,12 @@ export default function ArtifactCard({
           </button>
         )}
       </div>
+
+      <AnimatePresence>
+        {previewing && (
+          <ArtifactPreview artifact={artifact} onClose={() => setPreviewing(false)} />
+        )}
+      </AnimatePresence>
     </div>
   );
 }

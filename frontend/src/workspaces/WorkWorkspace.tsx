@@ -14,10 +14,12 @@
  * convincing populated lie.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { AnimatePresence } from 'framer-motion';
 import {
   AlertCircle,
   BarChart3,
   Download,
+  Eye,
   FileSpreadsheet,
   FileText,
   MessageSquare,
@@ -27,6 +29,7 @@ import {
   X,
 } from 'lucide-react';
 
+import ArtifactPreview from '@/components/ArtifactPreview';
 import {
   KIND_LABELS,
   downloadUrl,
@@ -415,6 +418,7 @@ function DetailPanel({
 }) {
   const [full, setFull] = useState<Artifact | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
+  const [previewing, setPreviewing] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -628,15 +632,31 @@ function DetailPanel({
             file — the user moved it — the button says so rather than offering a
             download that fails. */}
         {artifact.exists ? (
-          <a
-            href={downloadUrl(artifact.id)}
-            download={artifact.filename}
-            className="w-full flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-xs transition-colors hover:bg-white/5"
-            style={{ border: '1px solid var(--color-border)', color: 'var(--color-text)' }}
-          >
-            <Download size={13} />
-            Download {artifact.filename.split('.').pop()?.toUpperCase()}
-          </a>
+          <>
+            {/* Preview belongs on both surfaces or neither. Work is where a
+                file is *browsed* — the conversation card is where it was made —
+                and a control that exists in one place and not the other is the
+                kind of inconsistency users read as a bug in the surface that
+                lacks it. Same component, so the two cannot drift. */}
+            <button
+              type="button"
+              onClick={() => setPreviewing(true)}
+              className="w-full flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-xs transition-colors hover:bg-white/5"
+              style={{ border: '1px solid var(--color-border)', color: 'var(--color-text)' }}
+            >
+              <Eye size={13} />
+              Preview
+            </button>
+            <a
+              href={downloadUrl(artifact.id)}
+              download={artifact.filename}
+              className="w-full flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-xs transition-colors hover:bg-white/5"
+              style={{ border: '1px solid var(--color-border)', color: 'var(--color-text)' }}
+            >
+              <Download size={13} />
+              Download {artifact.filename.split('.').pop()?.toUpperCase()}
+            </a>
+          </>
         ) : (
           <button
             disabled
@@ -652,6 +672,12 @@ function DetailPanel({
           </button>
         )}
       </div>
+
+      <AnimatePresence>
+        {previewing && (
+          <ArtifactPreview artifact={artifact} onClose={() => setPreviewing(false)} />
+        )}
+      </AnimatePresence>
     </aside>
   );
 }

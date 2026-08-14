@@ -26,6 +26,7 @@ import { useSystemStore } from '@/stores/systemStore';
 import ProjectScopePicker from './ProjectScopePicker';
 import MicButton from './MicButton';
 import CitationSummary from './CitationChips';
+import MessageActions from './MessageActions';
 import SpeakButton from './SpeakButton';
 import CitationPanel from './CitationPanel';
 import {
@@ -370,6 +371,35 @@ export default function ChatSurface() {
                   >
                     {stripMarkers(msg.text)}
                   </p>
+                  {/* Copy, and re-ask. Rendered for both speakers because both
+                      are worth copying, and because "ask again" belongs on the
+                      user's own message — that is the text being re-sent, and
+                      putting the control on the reply would imply the reply is
+                      what gets regenerated.
+                      **Only the retry is withheld while a reply streams**, and
+                      only because it would race the request in flight. Hiding
+                      the whole row was the first attempt and it took copy off
+                      every message in the history for as long as Zaram was
+                      talking — a control disappearing from messages that
+                      finished minutes ago, for a reason the user cannot see. */}
+                  <MessageActions
+                    text={msg.text}
+                    align={msg.role === 'user' ? 'right' : 'left'}
+                    onRetry={
+                      msg.role === 'user' && !isStreaming
+                        ? () => void send(msg.text)
+                        : undefined
+                    }
+                    onEdit={
+                      msg.role === 'user' && !isStreaming
+                        ? () => {
+                            setInputText(msg.text);
+                            inputRef.current?.focus();
+                          }
+                        : undefined
+                    }
+                    retryLabel="Ask again"
+                  />
                   {msg.role === 'assistant' && (
                     <CitationSummary
                       sources={msg.sources}
@@ -464,7 +494,18 @@ export default function ChatSurface() {
             ref={inputRef}
             type="text"
             value={inputText}
-            onChange={(e) => setInputText(e.target.value)}
+            onChange={(e) => {
+              // Barge-in by typing. Talking over someone to stop them is how
+              // interruption works everywhere else, and waiting for Zaram to
+              // finish a paragraph you have already decided against is the
+              // single most irritating thing a talking assistant does.
+              //
+              // On change rather than on focus: clicking into the composer to
+              // read it back is not an interruption, and stopping there would
+              // make the speech feel fragile instead of responsive.
+              useSpeechStore.getState().bargeIn();
+              setInputText(e.target.value);
+            }}
             onKeyDown={handleKeyDown}
             placeholder={
               micStatus === 'recording'
@@ -473,19 +514,28 @@ export default function ChatSurface() {
             }
             aria-label="Message Zaram"
             disabled={isStreaming}
-            className="w-full pl-4 pr-16 py-3 text-sm bg-[var(--color-glass)] border border-white/5 rounded-xl text-slate-200 placeholder-slate-500 outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-colors"
+            // pr-20 rather than pr-16: the two controls plus their gap occupy
+            // 68px, and 64px of padding put the caret underneath the mic.
+            className="w-full pl-4 pr-20 py-3 text-sm bg-[var(--color-glass)] border border-white/5 rounded-xl text-slate-200 placeholder-slate-500 outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-colors"
           />
-          <MicButton onTranscript={appendTranscript} disabled={isStreaming} />
-          <motion.button
-            onClick={handleSend}
-            disabled={isStreaming || !inputText.trim()}
-            aria-label="Send message"
-            className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-lg hover:bg-white/5 disabled:opacity-30 transition-colors"
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.95 }}
-          >
-            <Send size={16} className="text-slate-300" />
-          </motion.button>
+          {/* One positioned container, two ordinary buttons inside it.
+              Each control used to place itself with its own `right-*` offset,
+              which meant the spacing between them was a coincidence of two
+              numbers in two files — and `whileHover` scaling either one closed
+              the gap. See the note in `MicButton`. */}
+          <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
+            <MicButton onTranscript={appendTranscript} disabled={isStreaming} />
+            <motion.button
+              onClick={handleSend}
+              disabled={isStreaming || !inputText.trim()}
+              aria-label="Send message"
+              className="p-1.5 rounded-lg hover:bg-white/5 disabled:opacity-30 transition-colors"
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+            >
+              <Send size={16} className="text-slate-300" />
+            </motion.button>
+          </div>
         </div>
         {/* Voice input's state, in words. A disabled button with a tooltip is
             invisible to a keyboard or touch user, and "why is this greyed out"
