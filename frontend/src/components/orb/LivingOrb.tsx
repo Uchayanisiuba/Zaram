@@ -25,9 +25,10 @@ const PARTICLES = [
   { top: 64, left: 88, delay: 1.3, size: 4,   color: '#818cf8' },
 ];
 
-// Waveform bars for speaking state
-const WAVE_BARS = [0, 1, 2, 3, 4, 5, 6];
-const WAVE_HEIGHTS = [28, 44, 60, 72, 60, 44, 28];
+// The waveform bar constants are gone with the bars they drove. Their being a
+// hardcoded array is the clearest statement of why: a level meter whose levels
+// are `[28, 44, 60, 72, 60, 44, 28]` is a decoration wearing a measurement's
+// clothes. See the note where the bars were rendered.
 
 // Re-exported, not redeclared. This file used to define its own four-member
 // copy of the union, so adding `swapping` to the store left the orb's own
@@ -103,7 +104,11 @@ const STATE_CONFIG: Record<OrbState, StateConfig> = {
     ring1Duration: 22,
     ring2Duration: 14,
     scale: [1, 1.06, 1],
-    scaleDuration: 5,
+    // 8s, up from 5s. Idle has no ripples — the pulse the eye reads as one is
+    // this breath — and on the landing state it runs continuously, forever,
+    // behind whatever the user is actually doing. `UI-SPEC`: calm over
+    // delight, and motion has a budget.
+    scaleDuration: 8,
     filter: 'drop-shadow(0 0 28px rgba(99,102,241,0.45))',
   },
   listening: {
@@ -275,18 +280,38 @@ const LivingOrb = ({
         />
       )}
 
-      {/* Speaking waveform rings emanating outward */}
+      {/* Speaking ripples, emanating outward.
+       *
+       * Calmed on the maintainer's report that they read as blinding and too
+       * busy while Zaram speaks. Three changes, and they are separable so the
+       * next person can tune one without the others:
+       *
+       *   rate    — one ripple every 1.2s rather than every 0.6s. With three
+       *             rings, spacing is `duration / 3`, so the duration and the
+       *             stagger move together or the ring spacing goes uneven.
+       *   reach   — 2.2x rather than 2.8x. At 2.8 the outermost ring was the
+       *             brightest thing on screen and further out than any other
+       *             layer, which is what made it read as a flash rather than
+       *             as a ripple.
+       *   opacity — starts at 0.3 against a 0.28 border, down from 0.7 against
+       *             0.5. `UI-SPEC` puts motion on a budget and this is a
+       *             continuous animation on a surface used all day.
+       *
+       * Not removed. It is the only thing distinguishing speaking from idle on
+       * the orb once the bars are gone, and a state indicator that does not
+       * indicate is worse than a busy one.
+       */}
       <AnimatePresence>
         {state === 'speaking' &&
           [0, 1, 2].map(i => (
             <motion.div
               key={i}
               className="absolute rounded-full pointer-events-none"
-              style={{ width: corePx, height: corePx, border: '1px solid rgba(16,185,129,0.5)' }}
-              initial={{ scale: 1, opacity: 0.7 }}
-              animate={{ scale: 2.8, opacity: 0 }}
+              style={{ width: corePx, height: corePx, border: '1px solid rgba(16,185,129,0.28)' }}
+              initial={{ scale: 1, opacity: 0.3 }}
+              animate={{ scale: 2.2, opacity: 0 }}
               exit={{ opacity: 0 }}
-              transition={{ duration: 1.8, repeat: Infinity, delay: i * 0.6, ease: 'easeOut' }}
+              transition={{ duration: 3.6, repeat: Infinity, delay: i * 1.2, ease: 'easeOut' }}
             />
           ))}
       </AnimatePresence>
@@ -364,32 +389,21 @@ const LivingOrb = ({
           />
         ))}
 
-      {/* Speaking waveform bars below orb (xl only) */}
-      <AnimatePresence>
-        {state === 'speaking' && size === 'xl' && (
-          <motion.div
-            className="absolute flex items-end gap-1 pointer-events-none z-20"
-            style={{ bottom: -88, left: '50%', transform: 'translateX(-50%)' }}
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.3 }}
-          >
-            {WAVE_BARS.map((_, i) => (
-              <motion.div
-                key={i}
-                className="rounded-full"
-                style={{
-                  width: 6,
-                  background: 'linear-gradient(to top, rgba(34,211,238,0.8), rgba(168,85,247,0.8))',
-                }}
-                animate={{ height: [4, WAVE_HEIGHTS[i], 4] }}
-                transition={{ duration: 0.5 + i * 0.05, repeat: Infinity, delay: i * 0.07, ease: 'easeInOut' }}
-              />
-            ))}
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {/* The speaking waveform bars are gone, deliberately.
+       *
+       * Removed on the maintainer's call, and the reasoning is worth keeping
+       * because it is not only taste. **The bars were not driven by the
+       * audio.** Their heights are a fixed array and their timings are
+       * `0.5 + i * 0.05` — a loop that looks like a level meter and measures
+       * nothing. `UI-SPEC` says never render invented values, and an
+       * always-identical waveform beside real speech is exactly that: it
+       * claims to show what Zaram is saying and shows a constant.
+       *
+       * If a level meter returns it has to read `useSpeechStore`'s audio
+       * element, the way the avatar's visemes already do — the seam is there,
+       * and lip sync is scrubbed against `audio.currentTime` for precisely
+       * this reason. Twelve looping divs are not that.
+       */}
     </div>
   );
 };
