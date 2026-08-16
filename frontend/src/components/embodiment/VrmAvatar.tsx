@@ -299,7 +299,6 @@ export default function VrmAvatar({ px = 320, src = '/avatars/AvatarSample_Z.vrm
     const parseManager = new THREE.LoadingManager()
     parseManager.setURLModifier((url) => {
       if (url.startsWith('data:') || url.startsWith('blob:')) return url
-      // eslint-disable-next-line no-console
       console.warn(`[embodiment] refused an external avatar resource: ${url}`)
       return 'data:application/octet-stream;base64,'
     })
@@ -329,7 +328,6 @@ export default function VrmAvatar({ px = 320, src = '/avatars/AvatarSample_Z.vrm
         if (!verdict.ok) {
           setStatus('failed')
           setReason(verdict.reason)
-          // eslint-disable-next-line no-console
           console.warn(`[embodiment] refused ${src}: ${verdict.reason}`, verdict.external)
           return
         }
@@ -377,7 +375,6 @@ export default function VrmAvatar({ px = 320, src = '/avatars/AvatarSample_Z.vrm
         // indistinguishable from a bug in this file.
         const expressions = vrm.expressionManager?.expressions ?? []
         const names = expressions.map((e) => e.expressionName)
-        // eslint-disable-next-line no-console
         console.info(
           `[embodiment] ${src}\n` +
             `  expressions (${names.length}): ${names.join(', ') || 'none'}\n` +
