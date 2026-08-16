@@ -199,7 +199,6 @@ class IngestService:
 
 
 def default_db_path() -> str:
-    return os.getenv(
-        "ZARAM_INGEST_DB",
-        os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "ingest.db"),
-    )
+    from core.paths import in_data_dir
+
+    return in_data_dir("ingest.db", "ZARAM_INGEST_DB")

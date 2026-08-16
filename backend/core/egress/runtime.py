@@ -34,19 +34,15 @@ _pending: PendingConfirmations | None = None
 
 def default_log_path() -> str:
     """Beside the Spine, but a separate file. See ``log.py`` for why."""
-    return os.environ.get(
-        "ZARAM_EGRESS_LOG",
-        os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
-            os.path.abspath(__file__)))), "egress.db"),
-    )
+    from core.paths import in_data_dir
+
+    return in_data_dir("egress.db", "ZARAM_EGRESS_LOG")
 
 
 def default_policy_path() -> str:
-    return os.environ.get(
-        "ZARAM_EGRESS_POLICY",
-        os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
-            os.path.abspath(__file__)))), "egress-policy.json"),
-    )
+    from core.paths import in_data_dir
+
+    return in_data_dir("egress-policy.json", "ZARAM_EGRESS_POLICY")
 
 
 def get_gate() -> EgressGate:

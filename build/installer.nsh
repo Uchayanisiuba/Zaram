@@ -47,9 +47,12 @@ Choose No to keep it all in case you reinstall." \
       ; one point the same way.
       MessageBox MB_YESNO|MB_ICONQUESTION|MB_DEFBUTTON1 \
         "Save a copy to your Desktop first?$\r$\n$\r$\n\
-Zaram will write a single .zip containing everything it holds, in open \
-formats you can read without Zaram installed. Restoring later is a matter of \
-unzipping it back.$\r$\n$\r$\n\
+Zaram will write a single .zip of everything it holds — your memory, the \
+record of what left this machine, and the documents it generated. Restoring \
+later is a matter of unzipping it back.$\r$\n$\r$\n\
+For a copy in plain text and spreadsheet formats, use Settings -> Export \
+everything before uninstalling. This backup keeps Zaram's own database files \
+instead.$\r$\n$\r$\n\
 This is recommended — deleting cannot be undone." \
         /SD IDYES IDYES zaramExport IDNO zaramConfirmDelete
 
