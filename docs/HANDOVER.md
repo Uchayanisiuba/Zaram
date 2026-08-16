@@ -31,39 +31,53 @@ BEFORE RUNNING ANYTHING
 
 MEASURED STATE (16 August, every number from a run)
   backend 2013 passed / 0 failed / 100 skipped · frontend 158 across 20 files ·
-  Electron 34 · typecheck clean · `npm run lint` PASSES (first time in five
-  sessions) · all four build guards pass · 80 commits ahead of origin/main.
+  Electron 48 · typecheck clean · lint passes · all four build guards pass ·
+  the tree is committed, in thirteen pieces.
 
-  The tree is COMMITTED — nine pieces, after re-running the backend suite to
-  confirm it was green on the tree being committed rather than on a memory of
-  one.
+  AN INSTALLER EXISTS: dist-electron/Zaram-0.1.0-x64.exe, 186 MB. Rebuild with
+  `npm run build:desktop -- --config.win.signAndEditExecutable=false` — the
+  flag avoids an electron-builder symlink-privilege failure at the very end.
 
 THE THREE THINGS THAT MATTER MOST
-  1. The packaging blocker is FIXED and UNVERIFIED. The packaged app could never
-     start its backend — 322 .py files were sealed inside app.asar and the
-     launcher spawned python.exe with a working directory inside the archive.
-     Fixed with asarUnpack + a resolver that cannot return an archive path.
-     NOBODY HAS RUN THE INSTALLER ON A CLEAN MACHINE. That is the only step
-     that can prove it, and it cannot be done from a dev shell.
-  2. The local API still has NO AUTHENTICATION. A Host-header guard now refuses
+  1. NOTHING IN THIS REPO HAD EVER RUN electron/main.js — the file every
+     installed copy runs. `npm run dev` starts a DIFFERENT main process
+     (desktop/src/main, 46 lines, no tray/shortcuts/backend launcher/static
+     server). The shipped one is 429 lines and reached only through
+     electron-builder's extraMetadata.main. Its bootstrap was throwing on
+     `windows._mainWindow` — a property WindowManager has never had — so
+     backend.start() never ran and the app sat on a splash for ever. Fixed,
+     and test/bootstrap.test.js now launches the real main process. Merging
+     the two mains is the structural fix and has not been done.
+  2. The local API still has NO AUTHENTICATION. A Host-header guard refuses
      DNS rebinding, so a web page cannot reach it. Any local process still can.
      A per-launch secret from the Electron host is the remaining half.
-  3. The direction is now DAILY DRIVER FIRST. Memory, obligations and domains
-     are all downstream of the app being opened every day. See CLAUDE.md,
-     "The daily driver comes first".
+  3. The direction is DAILY DRIVER FIRST. The ambient surface now exists —
+     hotkey and edge handle, invoked never passive — but it does nothing with
+     what is on the screen. That decision is next.
 
 WHAT TO BUILD, IN ORDER
-  1. Run the installer on a machine that has never seen this repo.
-  2. The ambient surface — global hotkey + screen-edge handle, Electron.
-     Read the "ambient surface" section of CLAUDE.md first: it must be
-     INVOKED, never passive. Passive capture is prohibited at any accuracy.
+  1. Run the installer on a machine that has never seen this repo. It is built;
+     three separate reasons it could not have worked are now fixed.
+  2. Decide how the ambient surface reads a selection — synthesised copy,
+     clipboard, or UI Automation — then build it. Read CLAUDE.md's "ambient
+     surface" section first: INVOKED, never passive, at any accuracy.
   3. The launch secret for the local API.
-  4. Free-tier keys in first run, with the data cost stated on the offer.
-  5. Ingestion by drop, paste and upload — the parsers exist, the Knowledge
+  4. A Settings panel for the character. GET/POST /character are served and
+     nothing calls them.
+  5. Free-tier keys in first run, with the data cost stated on the offer.
+  6. Ingestion by drop, paste and upload — the parsers exist, the Knowledge
      surface cannot reach them.
-  6. Knowledge domains, scoping retrieval.
-  7. Deep-read for web search — the model still only sees 300-char snippets.
-  8. Obligations wired into ingest.
+  7. Knowledge domains, scoping retrieval.
+  8. Deep-read for web search — the model still only sees 300-char snippets.
+  9. Obligations wired into ingest.
+
+TRAPS SPECIFIC TO THE BUILD
+  - `npm run build:desktop` used to overwrite the repo's own package.json,
+    leaving it with dependencies and nothing else. Caused by
+    `directories.app: .`, now removed. If every `npm run` starts reporting
+    "Missing script", that is what happened — `git checkout package.json`.
+  - A backend prefix missing from electron/config.js's apiProxyPrefixes is not
+    a 404 in a packaged build. It is a 200 with index.html.
 
 TRAPS THIS CODEBASE HAS PAID FOR REPEATEDLY
   - A feature's tests can all pass while the feature cannot happen. Eight
@@ -119,7 +133,11 @@ Read this if you are picking the project up and an older document contradicts yo
 | Spine export (rule 7, was unreachable) | `GET /export`, `/export/manifest`, Settings | reuses `test_export.py` |
 | The character — name, manner, voice | `core/identity.py`, `core/user_settings.py`, `GET/POST /character` | 21 |
 | Lint config repair | `frontend/eslint.config.js` | lint passes |
-| Structured extraction — invoice, spreadsheet, deck | `backend/artifacts/extract.py`, `runtimes/documents/runtime.py`, `ollama_engine.read_structured` | 2 new files |
+| Structured extraction — invoice, spreadsheet, deck | `backend/artifacts/extract.py`, `runtimes/documents/runtime.py`, `ollama_engine.read_structured` | `test_structured_documents.py`, `test_extraction_across_models.py` |
+| The shipped main process boots at all | `electron/main.js` | `test/bootstrap.test.js`, mutation-tested |
+| Packaged origin proxies every backend prefix | `electron/config.js`, `check-proxy-covers-backend.mjs` | 2 in `staticServer.test.js`, guard mutation-tested |
+| A build is inspected, from outside the checkout | — | `test/packagedBackend.test.js`, mutation-tested |
+| The ambient surface — hotkey and edge handle | `electron/native/ambient.js`, `frontend/src/surfaces/` | 7 in `test/ambient.test.js` |
 
 ### Numbers worth not re-deriving
 

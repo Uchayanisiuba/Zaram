@@ -2,8 +2,20 @@ appId: ai.zaram.desktop
 productName: Zaram
 copyright: Copyright © 2026 Zaram
 artifactName: Zaram
+# `app:` is deliberately absent.
+#
+# It was `app: .`, which electron-builder itself warns about on every run —
+# "Specified application directory equals to project dir — superfluous or wrong
+# configuration". It is worse than superfluous. With the app directory set to
+# the project directory, the transformed metadata that `extraMetadata` produces
+# is written over the **repository's own `package.json`**: the file came back
+# from a build holding only `dependencies` and `"main": "electron/main.js"`,
+# with all twenty-five scripts gone. Every `npm run` in the project then failed
+# with "Missing script", including the ones that would have rebuilt it.
+#
+# Recovered from git, which is the only reason it was a nuisance rather than a
+# loss. Omitted here so the default applies and nothing rewrites a tracked file.
 directories:
-  app: .
   output: dist-electron
   buildResources: build
 # What goes in the installer.

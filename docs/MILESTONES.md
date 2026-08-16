@@ -13,13 +13,79 @@ accurate — it is the first thing anyone reads.
 
 ## Current state — 16 August 2026
 
-> ### The installer could never have started, and search never compared a result to the question.
+> ### The desktop application never started its backend, and nothing had ever run the file that does.
 >
-> Suites, measured this session: **2013 backend passed / 0 failed**, 100
-> skipped · **158 frontend** across 20 files · **34 Electron** · typecheck clean
-> · **`npm run lint` passes for the first time in five sessions** · all four
-> build guards pass. **Committed 16 August** in nine coherent pieces, after the
-> backend suite was re-run to confirm the tree it was measured against.
+> Suites: **2013 backend passed / 0 failed**, 100 skipped · **158 frontend** ·
+> **48 Electron** · typecheck clean · lint passes · all four build guards pass.
+> Committed in thirteen pieces. An installer exists at
+> `dist-electron/Zaram-0.1.0-x64.exe`, 186 MB.
+>
+> **Three defects, all in the packaged product, all invisible to every test.**
+> The theme of the session is that this repository had never executed
+> `electron/main.js` — the file every installed copy of Zaram runs.
+>
+> 1. **`bootstrap()` threw, so `backend.start()` never ran.**
+>    `windows._mainWindow.on('resize', …)`, a property `WindowManager` has
+>    never had. Its only handler logs the message, so everything below the
+>    throw was skipped: tray, global shortcuts, updater, deep links, the
+>    `backend.onStatus` wiring that loads the interface, and the backend launch
+>    itself. **The app opened a splash screen and waited for a backend nobody
+>    had started.** Inside `if (loadedDesktop && desktopRuntime)`, and
+>    `desktop/dist` ships — so the packaged path was the broken one, the same
+>    asymmetry that hid the asar defect.
+>
+>    **Why nothing caught it: `npm run dev` starts a different main process.**
+>    `desktop/dist/src/main/index.js` is forty-six lines and owns none of the
+>    tray, shortcuts, backend launcher or static server. The shipped main is
+>    `electron/main.js`, 429 lines, reached only through `extraMetadata.main`.
+>    Every developer's machine looked healthy because no developer was running
+>    the program. `test/bootstrap.test.js` now launches the real one and fails
+>    in half a second if bootstrap throws.
+>
+> 2. **The egress log and the exporter were unreachable once packaged.** The
+>    packaged origin proxies through `createStaticServer`, whose prefix list had
+>    ten entries against the dev proxy's twenty-one. A missing prefix is not a
+>    404 — it falls through to the SPA handler and returns **200 with
+>    `index.html`**, which the client hands to `response.json()`. Measured
+>    against the build with no backend running, so 502 means the proxy worked:
+>    `/health` 502, `/chat` 502, `/memory` 502, and `/egress`, `/artifacts`,
+>    `/providers`, `/export`, `/character`, `/routing/preference`, `/projects`
+>    all **200 and a document**. Rules 3 and 7, unreachable in the only build a
+>    stranger runs. The guard that exists to prevent this carried the false
+>    premise "the packaged build does not use the proxy at all" — it now checks
+>    both consumers.
+>
+> 3. **`npm run build:desktop` destroyed the repository's `package.json`.**
+>    `directories.app: .` — which electron-builder warns about on every run —
+>    made it write `extraMetadata` over the tracked file, leaving
+>    `dependencies` and `"main"` and deleting all twenty-five scripts. Every
+>    `npm run` then failed with "Missing script", including the ones that would
+>    have rebuilt it. Recovered from git; the setting is gone.
+>
+> **The packaging blocker is closer to proven.** `test/packagedBackend.test.js`
+> inspects a real build from a temporary directory — chdir out of the repo,
+> because `_resolveBackendDir` lists `process.cwd()` and every machine that
+> could have found the bug was standing in the one directory that hides it. In
+> plain Node, because Electron's patched `fs` reads an asar and `python.exe`
+> does not. Measured: backend resolved outside the archive, `main.py` readable,
+> bundled interpreter chosen, spawn **status 0**. **Still not a clean-machine
+> installer run** — that also exercises NSIS, the shortcut, the data directory
+> and first run.
+>
+> ### The ambient surface landed
+>
+> `Ctrl+Shift+Space` and a 6px handle on the right edge, both created hidden at
+> boot so summoning is a `show()`. `ambient.html` is a second Vite entry —
+> 2.7 kB against the shell's 550 kB plus a 760 kB VRM chunk. **Invoked, never
+> passive, asserted at source level** against the mechanisms by name, because a
+> prohibition in a comment survives until somebody has a good reason. The egress
+> line calls `describeSystem`, so the overlay and the orb cannot disagree.
+> Verified working: a real question answered end to end, and the shipped main
+> reporting `registered: true` with the handle at 6x128.
+>
+> **Selection capture is not built.** How a selection is read — synthesised
+> copy, clipboard, or UI Automation — is a product decision with a different
+> privacy cost per option, and it wants a decision rather than a default.
 >
 > **Three defects that mattered, each invisible to a passing suite.**
 >
@@ -126,13 +192,24 @@ accurate — it is the first thing anyone reads.
 >
 > **Start here, in this order.**
 >
-> 1. **Run the installer on a machine that has never seen this repo.** The
->    blocker is fixed and unverified; this is the only step that can prove it.
-> 2. **Mint the launch secret.** The `Host` guard closed the browser route only.
-> 3. **The ambient surface** — global hotkey and screen-edge handle. Invoked,
->    never passive. It is the highest-leverage item on the daily-driver list.
-> 4. **Ingestion by drop, paste and upload**, then knowledge domains. The
+> 1. **Run `dist-electron/Zaram-0.1.0-x64.exe` on a machine that has never seen
+>    this repo.** An installer now exists and three of the reasons it could not
+>    have worked are fixed. This is still the only step that can prove it.
+> 2. **Decide how the ambient surface reads a selection**, then build it. The
+>    window is there and does nothing with what is on screen yet.
+> 3. **Mint the launch secret.** The `Host` guard closed the browser route only;
+>    any local process still reads the whole Spine.
+> 4. **Give the character a Settings panel.** `GET/POST /character` are served
+>    and no interface calls them.
+> 5. **Ingestion by drop, paste and upload**, then knowledge domains. The
 >    parsers exist and the Knowledge surface cannot reach them.
+>
+> **One structural thing to decide, because it caused two of the three defects
+> above.** There are two Electron main processes: `electron/main.js`, which
+> ships, and `desktop/src/main/`, which is what `npm run dev` runs. Until they
+> are one, development exercises a program nobody installs and everybody
+> installs a program nobody has run. The smoke test makes that survivable; it
+> does not make it right.
 >
 > Full reasoning for the direction — daily driver, free tiers, domains, the
 > character, and the business model — is in `CLAUDE.md`, which was updated this
