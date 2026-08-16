@@ -105,6 +105,13 @@ class UserSettings:
         self._default_model: Optional[str] = None
         self._web_search = False
         self._search_scope = SearchScope.LOCAL_ONLY
+        # The character: what this person calls it, how they want it to write,
+        # and which voice speaks. All three are theirs, all three are optional,
+        # and none of them can change what Zaram says it is — see
+        # `core/identity.py` and `tests/test_identity_stays_truthful.py`.
+        self._assistant_name = ""
+        self._manner = ""
+        self._voice = ""
         self._load()
 
     # ------------------------------------------------------------------ read
@@ -141,12 +148,38 @@ class UserSettings:
         """
         return self._default_model
 
+    @property
+    def assistant_name(self) -> str:
+        """What this person calls it. Empty means "Zaram", which is not a name
+        they chose but the product's own — the difference matters to the
+        interface, which offers to name it only while this is empty."""
+        return self._assistant_name
+
+    @property
+    def manner(self) -> str:
+        """How they want it to write. Style only; see `core/identity.py`."""
+        return self._manner
+
+    @property
+    def voice(self) -> str:
+        """A Kokoro voice id, or empty for the shipped default.
+
+        Not validated here. The installed voice pack is the authority on which
+        ids exist, `/voice/voices` is where that is read, and a settings file
+        that refuses to load because a voice was uninstalled would be a
+        cosmetic choice breaking the whole product.
+        """
+        return self._voice
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "routing_preference": self._routing.value,
             "default_model": self._default_model,
             "web_search": self._web_search,
             "search_scope": self._search_scope.value,
+            "assistant_name": self._assistant_name,
+            "manner": self._manner,
+            "voice": self._voice,
         }
 
     # ----------------------------------------------------------------- write
@@ -188,6 +221,41 @@ class UserSettings:
             self._save()
         return self._default_model
 
+    def set_character(
+        self,
+        *,
+        assistant_name: Optional[str] = None,
+        manner: Optional[str] = None,
+        voice: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Set any of the three. ``None`` leaves a field alone.
+
+        One writer for all three because they are one thing to the user — a
+        character — and three endpoints would let an interface save two of them
+        and fail on the third, leaving a half-applied character nobody chose.
+
+        Bounds are applied on the way in as well as at the prompt, so an
+        oversized value never reaches disk. `identity_preamble` still bounds
+        them independently: this store is not the only path to that function,
+        and a guarantee enforced at one call site is a guarantee for that call
+        site.
+        """
+        from core.identity import MAX_MANNER_CHARS, MAX_NAME_CHARS
+
+        with self._lock:
+            if assistant_name is not None:
+                self._assistant_name = " ".join(assistant_name.split())[:MAX_NAME_CHARS]
+            if manner is not None:
+                self._manner = " ".join(manner.split())[:MAX_MANNER_CHARS]
+            if voice is not None:
+                self._voice = voice.strip()[:64]
+            self._save()
+        return {
+            "assistant_name": self._assistant_name,
+            "manner": self._manner,
+            "voice": self._voice,
+        }
+
     # -------------------------------------------------------------- internals
 
     def _load(self) -> None:
@@ -219,6 +287,24 @@ class UserSettings:
         scope = raw.get("search_scope")
         if scope in {s.value for s in SearchScope}:
             self._search_scope = SearchScope(scope)
+
+        # The character. Read defensively and bounded on the way in: a settings
+        # file is a file, a character is meant to travel as one, and the day
+        # somebody imports a stranger's character is the day this parses hostile
+        # input. Anything that is not a string is ignored rather than coerced.
+        from core.identity import MAX_MANNER_CHARS, MAX_NAME_CHARS
+
+        name = raw.get("assistant_name")
+        if isinstance(name, str):
+            self._assistant_name = " ".join(name.split())[:MAX_NAME_CHARS]
+
+        manner = raw.get("manner")
+        if isinstance(manner, str):
+            self._manner = " ".join(manner.split())[:MAX_MANNER_CHARS]
+
+        voice = raw.get("voice")
+        if isinstance(voice, str):
+            self._voice = voice.strip()[:64]
 
     def _save(self) -> None:
         tmp = self._path + ".tmp"
