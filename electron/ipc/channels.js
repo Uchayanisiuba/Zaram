@@ -14,6 +14,13 @@ const Channels = {
     getInfo: 'app:get-info',
     getVersion: 'app:get-version',
     getPlatform: 'app:get-platform',
+    // This launch's API credential, handed to the renderer over IPC.
+    //
+    // Over IPC specifically, and never through `additionalArguments`: a
+    // renderer's command line is readable by other processes on Windows, and
+    // other processes on this machine are the entire audience this credential
+    // exists to refuse.
+    getApiSecret: 'app:get-api-secret',
   },
   os: {
     getInfo: 'os:get-info',
@@ -138,6 +145,7 @@ const RENDERER_INVOKABLE = [
   Channels.app.getInfo,
   Channels.app.getVersion,
   Channels.app.getPlatform,
+  Channels.app.getApiSecret,
   Channels.os.getInfo,
   Channels.window.minimize,
   Channels.window.maximize,

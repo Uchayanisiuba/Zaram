@@ -281,11 +281,37 @@ class BackendLauncher {
     }, this.config.backend.restartDelayMs);
   }
 
+  /**
+   * The credential this launch's backend was started with.
+   *
+   * Read from `process.env` rather than held as a field: the desktop host sets
+   * it before spawning anything, the backend inherits it through the spawn
+   * environment, and this reads the same one value. Three copies of a secret
+   * are three chances for two of them to differ.
+   *
+   * Empty when there is none — a developer running the backend by hand, which
+   * uses the file fallback instead. Sending no header is then correct, and the
+   * request fails with 401 rather than being silently let through.
+   */
+  _authHeaders() {
+    const secret = process.env.ZARAM_API_SECRET || '';
+    return secret ? { 'X-Zaram-Auth': secret } : {};
+  }
+
   _startPolling() {
     if (this._timer) return;
     this._timer = setInterval(async () => {
       try {
-        const res = await this._check(this.config.backend.baseUrl, this.config.backend.healthPath);
+        // The credential goes on the probe. `/health` is not exempt from
+        // authentication, so a probe without it is a 401, which reads here as
+        // "the backend never started" — a splash screen for ever, in front of
+        // a backend that is running.
+        const res = await this._check(
+          this.config.backend.baseUrl,
+          this.config.backend.healthPath,
+          undefined,
+          this._authHeaders(),
+        );
         console.log('[BackendLauncher] Health check result:', res.ok ? 'OK' : `FAIL(${res.status})`, 'current state:', this.status.state)
         if (res.ok) {
           if (this.status.state !== 'available') {

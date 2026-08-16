@@ -17,6 +17,10 @@ declare global {
   interface Window {
     zaram?: {
       isDesktop?: boolean;
+      app?: {
+        /** This launch's API credential, minted by the main process. */
+        getApiSecret(): Promise<string>;
+      };
       /** The ambient overlay — see `electron/native/ambient.js`. Every member
        *  reports something the user just did; none of them observes. */
       ambient?: {

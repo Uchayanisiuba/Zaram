@@ -31,6 +31,7 @@ const api = {
     getInfo: () => invoke(Channels.app.getInfo),
     getVersion: () => invoke(Channels.app.getVersion),
     getPlatform: () => invoke(Channels.app.getPlatform),
+    getApiSecret: () => invoke(Channels.app.getApiSecret),
   },
   os: {
     getInfo: () => invoke(Channels.os.getInfo),

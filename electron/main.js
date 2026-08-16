@@ -2,6 +2,7 @@
 
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 const { app, ipcMain } = require('electron');
 
 const { createConfig } = require('./config');
@@ -39,6 +40,7 @@ let staticServer = null;
 let tray = null;
 let shortcuts = null;
 let ambient = null;
+let apiSecret = null;
 let updater = null;
 let logStream = null;
 let appLoaded = false;
@@ -166,6 +168,27 @@ async function bootstrap() {
   });
   logger.info('Zaram desktop starting', { version: app.getVersion(), isDev, platform: process.platform });
 
+  // This launch's API credential.
+  //
+  // The backend refuses any caller that cannot present it, which is the half
+  // of the custody problem the `Host` guard did not close: that guard stops a
+  // web page, and nothing stopped a *process*. Minted here because this
+  // process is the parent of the backend and the owner of the renderer, so it
+  // is the only place that can hand the value to both.
+  //
+  // In memory only. It goes to the backend in the spawn environment and to the
+  // renderer over IPC, and it is never written to disk in a packaged build —
+  // `backend/core/api_secret.py` keeps a file fallback for development, where
+  // the two halves are started independently by a person and have no parent
+  // between them.
+  //
+  // **Never logged, and never in a command line.** A renderer's argv is
+  // readable by other processes on Windows, which is precisely the audience
+  // this refuses, so `additionalArguments` is not an option however convenient
+  // a synchronous read would be.
+  apiSecret = crypto.randomBytes(32).toString('base64url');
+  process.env.ZARAM_API_SECRET = apiSecret;
+
   // Deep-link protocol registration (Windows/Linux).
   if (!process.defaultApp) {
     try {
@@ -239,6 +262,7 @@ async function bootstrap() {
     // A getter, because the ambient surface is constructed below with the
     // other native capabilities and this runs first.
     getAmbient: () => ambient,
+    getApiSecret: () => apiSecret,
   });
 
   if (loadedDesktop && desktopRuntime) {
