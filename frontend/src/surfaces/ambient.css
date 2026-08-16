@@ -1,0 +1,171 @@
+/**
+ * The ambient overlay's own stylesheet.
+ *
+ * Standalone rather than importing `index.css`: that file carries the shell's
+ * fonts, resets and workspace layout, and the whole argument for a second entry
+ * point is that this surface stays small. The handful of tokens the panel
+ * needs are restated here — the same values, so the overlay looks like the rest
+ * of Zaram, and none of the weight.
+ *
+ * `docs/UI-SPEC.md` assigns the state colours, and they are not negotiable
+ * here: cyan is local, violet is cloud. A panel that floats over somebody's
+ * contract is the last place to improvise a palette, because the one thing it
+ * has to communicate at a glance is whether what they type can leave.
+ */
+
+:root {
+  --ambient-surface: rgba(13, 15, 22, 0.86);
+  --ambient-border: rgba(255, 255, 255, 0.1);
+  --ambient-text: #e2e4ee;
+  --ambient-muted: #6b7099;
+  --ambient-indigo: #818cf8;
+  --ambient-cyan: #22d3ee;
+  --ambient-violet: #8b5cf6;
+  --ambient-red: #f87171;
+  --ambient-font: 'Inter Variable', 'Inter', system-ui, sans-serif;
+}
+
+/* Transparent, because the window is. The rounded panel below is the only
+   thing that paints, so the corners fall away against the user's document
+   instead of sitting on a black square. */
+.ambient-body {
+  margin: 0;
+  background: transparent;
+  font-family: var(--ambient-font);
+  color: var(--ambient-text);
+  overflow: hidden;
+  /* The overlay is dragged nowhere and selected nowhere; it is typed into.
+     Text selection on the chrome makes an accidental drag look like a fault. */
+  user-select: none;
+}
+
+.ambient {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 8px;
+  padding: 14px 16px;
+  border: 1px solid var(--ambient-border);
+  border-radius: 14px;
+  background: var(--ambient-surface);
+  backdrop-filter: blur(24px);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.45);
+}
+
+.ambient__input {
+  width: 100%;
+  min-height: 28px;
+  max-height: 120px;
+  padding: 0;
+  border: 0;
+  outline: none;
+  resize: none;
+  background: transparent;
+  color: var(--ambient-text);
+  font: inherit;
+  font-size: 1rem;
+  line-height: 1.5;
+  user-select: text;
+}
+
+.ambient__input::placeholder {
+  color: var(--ambient-muted);
+}
+
+.ambient__reply {
+  max-height: 240px;
+  overflow-y: auto;
+  padding-top: 10px;
+  border-top: 1px solid var(--ambient-border);
+  user-select: text;
+}
+
+.ambient__text {
+  margin: 0;
+  font-size: 0.9375rem;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+.ambient__error {
+  margin: 0;
+  color: var(--ambient-red);
+  font-size: 0.875rem;
+}
+
+/* A caret rather than a spinner. The reply is already arriving token by token,
+   so a separate "loading" indicator would be a second answer to a question the
+   text is answering better. */
+.ambient__caret {
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  background: var(--ambient-indigo);
+  animation: ambient-caret 1s steps(2) infinite;
+}
+
+@keyframes ambient-caret {
+  50% { opacity: 0; }
+}
+
+/* Motion has a budget, and someone who has asked for less of it has asked
+   about this surface too. */
+@media (prefers-reduced-motion: reduce) {
+  .ambient__caret { animation: none; }
+}
+
+.ambient__status {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 0.6875rem;
+}
+
+.ambient__label {
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.ambient__detail {
+  color: var(--ambient-muted);
+}
+
+.ambient__status--local .ambient__label { color: var(--ambient-cyan); }
+.ambient__status--cloud .ambient__label { color: var(--ambient-violet); }
+.ambient__status--busy .ambient__label { color: var(--ambient-indigo); }
+.ambient__status--offline .ambient__label { color: var(--ambient-red); }
+
+/* ------------------------------------------------------------ edge handle */
+
+.edge-handle {
+  display: block;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 6px 0 0 6px;
+  background: rgba(129, 140, 248, 0.35);
+  cursor: pointer;
+  transition: background 140ms ease;
+}
+
+.edge-handle--hovered,
+.edge-handle:hover {
+  background: rgba(129, 140, 248, 0.7);
+}
+
+/* Visible at six pixels wide, which is the only width that matters at rest. */
+.edge-handle__grip {
+  display: block;
+  width: 2px;
+  height: 40%;
+  margin: 0 auto;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.55);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .edge-handle { transition: none; }
+}
