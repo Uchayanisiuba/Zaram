@@ -1,12 +1,64 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
 const BACKEND = 'http://127.0.0.1:8420';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-export default defineConfig({
+/**
+ * The API credential, for development only.
+ *
+ * The backend refuses callers that cannot present it. In a packaged build the
+ * desktop host mints one per launch and hands it to the renderer over IPC, and
+ * nothing touches the disk. In a checkout there is no host: the backend and
+ * this dev server are two programs a person starts independently, so they meet
+ * at a file — `backend/core/api_secret.py` writes it, and this reads it.
+ *
+ * Deliberately **read, never created.** Whichever side generates it must be
+ * the side that enforces it, or a race at first run leaves two different
+ * secrets and a 401 that looks like a bug in the credential rather than in the
+ * order things were started. Absent simply means the backend has not run yet;
+ * start it, restart the dev server.
+ *
+ * This value only exists while serving. It is not defined for `vite build`, so
+ * a development secret can never be baked into a shipped bundle.
+ */
+function devApiSecret() {
+  const explicit = (process.env.ZARAM_API_SECRET || '').trim();
+  if (explicit) return explicit;
+
+  // The same resolution `core/paths.py` performs: a checkout that already
+  // holds databases keeps its data beside the backend, otherwise the platform
+  // location. Both are checked rather than guessed at.
+  const candidates = [
+    path.resolve(__dirname, '..', 'backend', 'api-secret'),
+    process.platform === 'win32'
+      ? path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), 'Zaram', 'api-secret')
+      : process.platform === 'darwin'
+        ? path.join(os.homedir(), 'Library', 'Application Support', 'Zaram', 'api-secret')
+        : path.join(process.env.XDG_DATA_HOME || path.join(os.homedir(), '.local', 'share'), 'zaram', 'api-secret'),
+  ];
+
+  for (const file of candidates) {
+    try {
+      const value = fs.readFileSync(file, 'utf8').trim();
+      if (value) return value;
+    } catch {
+      /* not there is not an error — the next candidate, or none */
+    }
+  }
+  return '';
+}
+
+export default defineConfig(({ command }) => ({
+  // Serving only. `vite build` leaves this undefined, so the packaged bundle
+  // has no secret in it and falls through to asking the desktop host.
+  define: command === 'serve'
+    ? { 'import.meta.env.VITE_ZARAM_API_SECRET': JSON.stringify(devApiSecret()) }
+    : {},
   plugins: [react()],
   optimizeDeps: {
     force: true,
@@ -81,4 +133,4 @@ export default defineConfig({
       '/character': { target: BACKEND, changeOrigin: true },
     },
   },
-});
+}));

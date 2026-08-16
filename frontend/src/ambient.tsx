@@ -15,10 +15,17 @@
 import ReactDOM from 'react-dom/client';
 import AmbientPanel from './surfaces/AmbientPanel';
 import EdgeHandle from './surfaces/EdgeHandle';
+import { installApiCredential } from './services/apiCredential';
 import './surfaces/ambient.css';
 
 const isHandle = window.location.hash === '#handle';
 
-ReactDOM.createRoot(document.getElementById('root')!).render(
-  isHandle ? <EdgeHandle /> : <AmbientPanel />,
-);
+// The overlay is a second entry point, so it installs the credential itself.
+// This is exactly the "one more client forgets the header" problem the wrapper
+// exists to prevent, appearing one level up — the wrapper is per document, and
+// this is a second document.
+void installApiCredential().then(() => {
+  ReactDOM.createRoot(document.getElementById('root')!).render(
+    isHandle ? <EdgeHandle /> : <AmbientPanel />,
+  );
+});

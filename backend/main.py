@@ -57,6 +57,75 @@ app = FastAPI()
 # improvement rather than the complete one.
 # --------------------------------------------------------------------------- #
 from fastapi.middleware.trustedhost import TrustedHostMiddleware  # noqa: E402
+from core.api_secret import HEADER as AUTH_HEADER, matches as _secret_matches  # noqa: E402
+
+
+class RequireApiSecret:
+    """The other half: who this process will talk to, not merely from where.
+
+    The `Host` guard above closes the browser-borne route. It does nothing
+    about a *process*, and there was no authentication of any kind — so
+    anything running as this user could read the whole Spine, the whole egress
+    log, or set a destination to allow. That is the half that was left open,
+    and this is it.
+
+    **Plain ASGI, not `BaseHTTPMiddleware`.** The decorator form wraps the
+    response body, and `/chat` streams NDJSON token by token — the entire point
+    of it being NDJSON. A middleware that buffers would hold every reply until
+    the model finished and turn the product's most visible behaviour into a
+    long pause. Nothing here touches the body.
+
+    **Innermost, deliberately.** Middlewares added later run further out, so
+    declaring this before `TrustedHostMiddleware` and CORS puts it last in the
+    chain. Both orderings matter: a rebound host must still be refused with 400
+    by the host guard rather than 401 by this, since the reason it was refused
+    is the more useful thing to say; and a CORS preflight must be answered by
+    `CORSMiddleware` before reaching here, because a browser cannot put a
+    custom header on an `OPTIONS` preflight and this would reject every
+    cross-origin request the product itself makes.
+
+    **Nothing is exempt, including `/health`.** It was tempting to leave it
+    open so the desktop host can poll for readiness without a credential, but
+    it reports capabilities, configured providers, model names and speech
+    state — a description of the user's setup, which is information. The host
+    mints the secret, so it can present it, and default-deny is the rule.
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+
+        presented = None
+        wanted = AUTH_HEADER.lower().encode()
+        for name, value in scope.get("headers") or []:
+            if name.lower() == wanted:
+                presented = value.decode("latin-1")
+                break
+
+        if not _secret_matches(presented):
+            body = (
+                b'{"detail":"Zaram\'s API requires the credential this machine\'s '
+                b'Zaram was started with. Loopback is a network boundary, not an '
+                b'identity one."}'
+            )
+            await send({
+                "type": "http.response.start",
+                "status": 401,
+                "headers": [
+                    (b"content-type", b"application/json"),
+                    (b"content-length", str(len(body)).encode()),
+                ],
+            })
+            await send({"type": "http.response.body", "body": body})
+            return
+
+        await self.app(scope, receive, send)
+
+
+app.add_middleware(RequireApiSecret)
 
 #: `testserver` is what Starlette's TestClient sends. Included so the guard is
 #: exercised by the suite rather than switched off in it — a check the tests

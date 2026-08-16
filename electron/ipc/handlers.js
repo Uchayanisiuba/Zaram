@@ -47,6 +47,15 @@ function registerHandlers(ipcMain, ctx) {
   handle(Channels.app.getVersion, () => app.getVersion());
   handle(Channels.app.getPlatform, () => process.platform);
 
+  // The renderer cannot reach the backend without this, and it is the only
+  // way it gets it. Resolved through a getter for the same reason as the
+  // ambient surface: handlers are registered before the value some of them
+  // need has been assigned, and capturing `undefined` once would produce a
+  // renderer that is permanently 401 against a backend that is running.
+  handle(Channels.app.getApiSecret, () => (
+    typeof ctx.getApiSecret === 'function' ? ctx.getApiSecret() : null
+  ));
+
   handle(Channels.os.getInfo, () => ({
     platform: process.platform,
     arch: os.arch(),

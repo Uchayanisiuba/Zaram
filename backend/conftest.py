@@ -16,6 +16,50 @@ if str(_BACKEND_ROOT) not in sys.path:
 
 
 @pytest.fixture(autouse=True, scope="session")
+def _test_client_presents_the_credential():
+    """Every `TestClient` request carries the API credential.
+
+    The API now refuses anything that does not, so the alternative to this was
+    editing two thousand call sites — or exempting the test client in the
+    middleware, which is the same mistake as an `ALLOWED_HOSTS` entry that
+    switches the host guard off in the suite. A check the tests bypass is a
+    check nobody runs. This makes the credential *present* rather than the
+    check absent, so the guard executes on every one of those requests and a
+    change that broke it would be caught.
+
+    `setdefault`, so a test that sets the header itself still wins — which is
+    how `test_api_requires_the_credential.py` is able to send a wrong one and
+    assert the refusal.
+
+    The environment variable is set before anything reads it, because
+    `api_secret()` caches on first call and a fixture that ran afterwards
+    would be measuring a value from a file in the developer's own data
+    directory.
+    """
+    import os
+
+    from starlette.testclient import TestClient
+
+    import core.api_secret as api_secret
+
+    os.environ[api_secret.SECRET_ENV] = "test-credential-not-a-real-secret"
+    api_secret.reset_cache()
+
+    original = TestClient.request
+
+    def request(self, method, url, **kwargs):
+        headers = dict(kwargs.pop("headers", None) or {})
+        headers.setdefault(api_secret.HEADER, api_secret.api_secret())
+        return original(self, method, url, headers=headers, **kwargs)
+
+    TestClient.request = request
+    try:
+        yield
+    finally:
+        TestClient.request = original
+
+
+@pytest.fixture(autouse=True, scope="session")
 def _isolate_user_settings(tmp_path_factory):
     """No test reads the developer's own settings file.
 
