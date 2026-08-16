@@ -135,6 +135,33 @@ class TestTheSecretItself:
         finally:
             api_secret.reset_cache()
 
+    def test_startup_writes_the_file_before_anyone_asks(self, monkeypatch, tmp_path):
+        """The deadlock, asserted.
+
+        `matches()` returns False for an absent header without resolving
+        anything, so a backend that only ever sees unauthenticated requests
+        would never write the file the dev server has to read — and could
+        therefore never be authenticated against. Observed live: 401 to
+        everything, and no `api-secret` on disk.
+        """
+        monkeypatch.delenv(api_secret.SECRET_ENV, raising=False)
+        monkeypatch.setenv("ZARAM_DATA_DIR", str(tmp_path))
+        api_secret.reset_cache()
+        try:
+            assert not (tmp_path / api_secret.SECRET_FILENAME).exists()
+            # The thing an unauthenticated request does, and only that.
+            assert api_secret.matches(None) is False
+            assert not (tmp_path / api_secret.SECRET_FILENAME).exists(), (
+                "a failed comparison should not mint anything"
+            )
+
+            api_secret.ensure_resolved()
+            assert (tmp_path / api_secret.SECRET_FILENAME).exists(), (
+                "startup did not leave a credential the dev server could read"
+            )
+        finally:
+            api_secret.reset_cache()
+
     def test_the_fallback_is_stable_across_readers(self, monkeypatch, tmp_path):
         """The dev server and the backend are started independently and must
         agree. Whichever creates the file, the other reads it."""

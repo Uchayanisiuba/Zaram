@@ -94,6 +94,16 @@ backend/egress-policy.json
 settings.json
 backend/settings.json
 
+# The API credential's development fallback.
+#
+# A packaged build never writes this — the desktop host mints one per launch
+# and passes it in the environment. In a checkout the backend and the Vite dev
+# server are separate programs that have to agree on a value, so they meet at
+# this file. Committing it would publish a credential and, worse, give every
+# clone the *same* one.
+api-secret
+backend/api-secret
+
 # Artifact records, and the files they describe. Both are the user's own work —
 # their invoices, proposals and client spreadsheets. The database holds the
 # provenance and the full HTML of every document generated, which makes it as

@@ -57,7 +57,17 @@ app = FastAPI()
 # improvement rather than the complete one.
 # --------------------------------------------------------------------------- #
 from fastapi.middleware.trustedhost import TrustedHostMiddleware  # noqa: E402
-from core.api_secret import HEADER as AUTH_HEADER, matches as _secret_matches  # noqa: E402
+from core.api_secret import (  # noqa: E402
+    HEADER as AUTH_HEADER,
+    ensure_resolved as _resolve_api_secret,
+    matches as _secret_matches,
+)
+
+# At import, not on first use. `matches()` never resolves the credential for a
+# request that carries none, so a backend that only ever sees unauthenticated
+# requests would never write the file the dev server reads — and could never
+# then be authenticated against. See `ensure_resolved`.
+_resolve_api_secret()
 
 
 class RequireApiSecret:

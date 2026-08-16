@@ -105,6 +105,29 @@ def api_secret() -> str:
     return _cached
 
 
+def ensure_resolved() -> None:
+    """Mint and persist the credential at startup, before anyone asks.
+
+    **Not optional, and the reason is a deadlock.** `matches()` returns `False`
+    immediately for an absent header — correctly, there is nothing to compare —
+    which means it never calls `api_secret()`. So on a machine where every
+    request arrives without a credential, the credential is never resolved and
+    the development fallback file is never written. The dev server cannot
+    present a secret until the file exists, and the file does not exist until
+    something presents a secret.
+
+    Observed exactly that way: the backend answered 401 to everything while
+    `backend/api-secret` did not exist, and calling `api_secret()` by hand in
+    another process created a *different* value — so a file that finally
+    appeared would have disagreed with the running process anyway. Lazy
+    resolution of a value two programs have to share is the bug.
+
+    Called once at import in `main.py`. Costs a file write in development and
+    nothing at all in a packaged build, where the environment supplies it.
+    """
+    api_secret()
+
+
 def matches(presented: str | None) -> bool:
     """Whether a presented value is the credential.
 
