@@ -9,10 +9,48 @@ Everything flows into one knowledge base on their machine. Any model can recall 
 user sees what was recalled, can correct it, controls what leaves the device, and puts
 the result to work through tools.
 
-**The product is horizontal; the wedge is not.** Obligation extraction works identically
-for a contractor's quote expiry, a landlord's lease renewal and a researcher's grant
-deadline. We start with freelancers and one-person businesses because that is where it
-can be proven fastest.
+**The product is horizontal, and as of 16 August 2026 the entry point is too.**
+
+The earlier line was *"the product is horizontal; the wedge is not — we start with
+freelancers because that is where it can be proven fastest."* That was right about
+obligation extraction and wrong about the product, and the daily-driver work is what
+exposed it. **What earns the daily open is universal**: an assistant one keystroke away
+that is fast, remembers you, reads your documents, and sends nothing anywhere. That
+serves anyone who types on a computer. Only the *obligations* layer is freelance-shaped.
+
+So the shape is now: **a universal base, with verticals as packs.** The freelance
+business layer — invoices, quotes, expenses, obligations — stops being the wedge and
+becomes **the first pack**, which is what the pack section below already describes and
+what makes the abstraction real rather than imagined.
+
+Who the architecture genuinely serves, and each of these is a pack rather than a rebuild:
+
+| Who | What the base gives them | The pack |
+|---|---|---|
+| Freelancers, one-person businesses | memory of clients and terms | invoices, obligations |
+| Researchers, academics | a library they can cite from | grant deadlines, submissions |
+| Students | textbooks and papers as domains | study, revision |
+| Writers, authors | long-project memory, their own research | manuscript, continuity |
+| Developers | code that never leaves the machine | repositories, review |
+| Consultants, agencies | what was decided, per client | SOW milestones |
+| Anyone with confidential documents | local inference, nothing uploaded | — |
+
+**Two audiences the architecture serves better than anyone has noticed.**
+
+*People whose documents cannot leave.* Therapists, accountants, lawyers, HR, clinicians
+handling notes. They are told to use AI and forbidden to upload. Local inference is not a
+preference for them, it is the only permitted option — and provenance plus an egress log
+is what a compliance conversation actually needs. Note the existing prohibitions still
+hold: documents and drafting, never diagnosis or legal advice.
+
+*People for whom cloud AI is expensive or unreliable.* Metered data, intermittent
+connectivity, and subscriptions priced in USD against a local wage. A resident model
+costs nothing per question and works with the connection down. This is a structural
+advantage, not a philosophical one, and it is the market the maintainer is closest to.
+
+**The wedge that remains is a demonstration, not a segment**: point Zaram at a folder and
+have it say something true you did not know. That works for a freelancer's invoices, a
+researcher's grant letters and a student's reading list without changing a line.
 
 Full rationale: `docs/VISION.md`. Interface: `docs/UI-SPEC.md`. Sequence and
 acceptance criteria: `docs/MILESTONES.md`. External framing: `docs/PITCH.md`. Read
@@ -152,6 +190,35 @@ after v1 ships. It is not a sub-app and it does not get a menu item.
 7g. **No network call occurs before the user has consented to one** — not for model
    recommendations, not for telemetry, not for update checks. Refreshing anything from
    the network is an explicit action, gated and logged like any other egress.
+
+   **Amended 16 August 2026: update checks are asked for once, at first run,
+   and default to yes.** The original wording made Zaram unpatchable. If a
+   vulnerability is found in a product holding people's contracts, invoices and
+   client correspondence, *silence forever* is not the privacy-preserving
+   option — it is the dangerous one, and the rule was protecting the principle
+   rather than the person. The check sends a version string and nothing else,
+   which is a smaller disclosure than any single chat message, and it is still
+   consented, still refusable, and still logged like any other egress. Telemetry
+   is unchanged and stays prohibited: knowing a patch exists serves the user,
+   and knowing how they use the product serves us.
+
+7j. **Consent given deliberately for a destination is consent.** Connecting a
+   cloud provider — choosing it, pasting a key for it, pressing Connect — *is*
+   rule 5's explicit per-item decision about that provider's host. Requiring a
+   second, separate host rule afterwards asks the same question twice and reads
+   as the product being broken: it happened to the maintainer, on their own
+   build, with nothing on screen explaining why. This does not weaken rule 5. A
+   host nobody named is still denied, the rule is still per-item, still visible
+   in Settings, and still revocable there.
+
+   The same principle bounds confirm-before-send, which cannot survive daily use
+   as a per-request dialog — forty dialogs a day is a product nobody opens on
+   day two. **Confirm once per destination and data class, then remember**, with
+   the egress log and the orb carrying it afterwards. Rule 6 says autonomy is
+   granted by the user and never defaulted; granting it once, by name, for a
+   named class of data, is the user granting it. Keep the hard stop for the case
+   that earns one: the first time facts recalled from the Spine go to a
+   destination that has not had them before.
 7h. **Offer at the moment of doubt; never make the user choose in advance.** Always-on
    dual answers, always-on search prompts and always-on briefs tax every interaction to
    serve a minority of them. Contextual offers cost nothing when unneeded.
@@ -179,6 +246,38 @@ after v1 ships. It is not a sub-app and it does not get a menu item.
    every case, so **the refusal path exists alongside it and is not optional**.
    Generation is the one place where the product's ordinary failure mode does its
    most damage, so it is the one place that must rather stop than guess.
+
+## Custody, not only consent
+
+**The effort went into consent and not into custody, and that balance was the
+wrong way round.** Dialogs, per-host rules and refusals are what a privacy
+policy is made of. Custody is what actually keeps a user's contracts safe, and
+it is the half a technical reviewer checks first.
+
+**Loopback is a network boundary, not an identity one.** Binding to 127.0.0.1
+closed the loud hole — the API had been published on every interface with no
+authentication. It did not close the quiet one: a page the user visits can point
+a hostname it controls at 127.0.0.1 and reach port 8420 with *same-origin*
+requests, so CORS never runs. DNS rebinding, against `GET /memory`, `GET /egress`
+and `PUT /egress/policy`. Measured 16 August: the same request returned **200 and
+the whole Spine** without a guard and **400** with one.
+
+A `Host` header check now refuses a rebound hostname —
+`tests/test_host_header_guard.py`. **It is half the fix and must not be
+described as the whole one.** There is still no authentication, so any *process*
+on this machine can read every stored fact. The remaining half is a per-launch
+secret minted at boot and handed to the frontend by the desktop host, and it
+belongs before a stranger installs this.
+
+**`X-Zaram-Client` is a label, not a credential.** It is sent by the interface
+and enforced nowhere. Never reason as though it were a check.
+
+**The user's data lives in the user's data directory.** Every store used to
+resolve to the backend *source* directory, which is correct in a checkout and
+unwritable in an install. `core/paths.py` owns the one answer;
+`ZARAM_DATA_DIR` moves all of it; a checkout that already holds databases keeps
+them, because silently relocating somebody's Spine is indistinguishable from
+losing it.
 
 ## Tool risk tiers
 
@@ -221,10 +320,123 @@ badly-written tool description becomes privilege escalation. Same rule for a doc
 excerpt or a search result: relevance is not consent, and nothing retrieved may widen
 what a tool is allowed to do.
 
+## The daily driver comes first
+
+**Everything else is hinged on this, and it was not written down.** A memory
+product only works if the thing it attaches to is opened every day. Obligations
+give someone a reason to open Zaram in week one; they give nobody a reason to
+open it on a Tuesday in month three. Without the habit there is no memory worth
+having, no knowledge worth expanding and no invoice worth chasing, because
+nothing went in.
+
+The order is: **usable daily → useful because it remembers → indispensable
+because it acts.** Skipping the first step builds the second and third for
+nobody.
+
+Consumer AI use collapses into eight jobs, and **five of them a local 8–14B
+already does well**: writing, editing, summarising, rewriting, translating. Two
+are adequate (explaining, coding) and one is not bridgeable locally (hard
+reasoning). So the daily driver does not need frontier capability. It needs the
+five to be fast and frictionless and the rest to route somewhere without the
+user thinking about it.
+
+### The ambient surface — the highest-leverage thing on this list
+
+**Proximity beats capability for habit.** An app you have to find loses to a
+browser tab that is already open. A global hotkey and a screen-edge handle that
+appear over whatever the user is already looking at compete with nothing,
+because there is nothing to switch to.
+
+The pattern is proven and the market leader is **Superhuman Go** (Grammarly,
+which acquired Superhuman in 2025): a tab docked to the screen edge that opens
+on hover and offers to act on what you are typing, in any application. It is
+the correct interaction and it is worth copying closely.
+
+**What must not be copied is how it works.** Superhuman Go reads what you type
+across applications and sends that text to their servers to process it. The
+documented critique is exactly the one this product exists to answer: an
+Incogni study in January 2026 recorded website content, personal communications
+and user activity including keystrokes; Grammarly's defence that it excludes
+"sensitive fields" is contested on the grounds that **HTML has no standard way
+to mark a field sensitive**, so the exclusion is best-effort by construction.
+
+That is the opening, and it is the sharpest one available:
+
+> **The same ambient assistant, reading the same thing, sending none of it
+> anywhere.** Grammarly structurally cannot ship this — their business is the
+> server. Zaram can, because the model is already on the machine.
+
+**Invoked, never passive — and this is a rule, not a caution.** Zaram reads the
+selection *when asked*: a hotkey, a click on the edge handle, a drag. It does
+not watch what is typed. That gives essentially all of the value and none of the
+problem, and it sidesteps the failure above rather than promising to mitigate
+it — Zaram makes no claim about detecting a password field because it is never
+reading one. A passive-capture mode is prohibited, at any accuracy.
+
+Three properties, each of which must hold:
+
+* **Opt-in per application**, with the list visible and editable.
+* **Nothing is retained** unless the user acts on it. Rule 7d already says
+  entering the Spine is a decision the system makes; a glanced-at selection is
+  working state, not memory.
+* **The egress indicator is on the surface itself.** If a selection would go to
+  a cloud model, that is stated on the panel before it goes — this is the one
+  place where being ambient makes the disclosure more important, not less.
+
+**Speed is the other half, and it is structurally available.** Superhuman's
+whole thesis is that every interaction lands in under 100 ms, and people pay
+$30/month for an email client because of it. A resident local model answers with
+no network round trip at all, so for the five jobs local already does well
+**Zaram can be the fastest AI a person has used** — not the smartest, the
+fastest. Nobody has taken that position, and it is the one the architecture
+gives away for free. It also composes with the surface above: ambient plus
+instant is a habit; ambient plus slow is an irritation.
+
+**Free API tiers are that route, and they are rule 1 exactly as written** — the
+user brings the key, Zaram never pays. Gemini, Groq, OpenRouter's `:free`
+models, Cerebras and GitHub Models all issue keys without a card. **Driving the
+consumer web apps is prohibited**: it breaks the providers' terms, requires
+defeating bot detection, shatters on every UI change, and would make the
+product's one non-negotiable claim depend on a dishonest mechanism.
+
+**Every free tier is paid for with the user's data, and Zaram is the only
+product that can say so.** `DataPolicy.LOGGED_AND_TRAINED_ON` already exists
+with that comment, and `selectable_by_default` already refuses to auto-route to
+it — *free is not a good enough reason to make that choice on a user's behalf*.
+Those are right and unchanged. What is missing is the **offer**: a first-run
+path that says "add a free Gemini key — your prompts train Google, and Zaram
+will tell you every time one goes."
+
+That is also the strongest acquisition story available. The pitch stops being "a
+private local assistant", which asks someone to give something up, and becomes
+**everything you already use, in one place, and it tells you the truth about
+each one.** Nobody is asked to trade capability for privacy, which is the trade
+that has capped every privacy product at a niche.
+
 ## Scope for v1
 
 In scope:
 - Ingest a folder into the Spine
+- **Ingest by drop, paste and upload.** The parsers already exist — `pdf`,
+  `office`, `plaintext`, and `docling` behind the OCR extra — and the Knowledge
+  surface has no way to reach them. Folder scanning as the only path in is what
+  makes a knowledge base a folder scanner.
+- **Knowledge domains.** A named, described collection of sources that a project
+  can link to. A local 12B with a curated library beats a local 12B alone, and
+  often beats a frontier model with none, because one is reading and the other
+  is recalling training data. Four properties, each load-bearing:
+  a domain is a **retrieval scope**, not a folder — if it only groups files it
+  is a filter, and it has to change answers; **many-to-many, never a tree**,
+  since a contract is Clients *and* Legal and a hierarchy is rule 7h smuggled
+  back in; every domain carries a **one-line description**, so routing knows
+  when to reach for it and the reply can say *"answered from your Investing
+  domain"*; and **a domain is the shareable unit**, which makes it the thing
+  that syncs, that a team shares, and that a pack eventually is.
+  **No seventh node.** Sources already live inside Knowledge and a domain is how
+  Knowledge organises them.
+  **One memory, many domains.** Domains scope retrieval; they never fragment the
+  Spine into per-domain silos, which is the trap custom GPTs fell into and the
+  reason nothing compounds there.
 - Chat routed to at least two providers (one cloud, one local)
 - Recall across providers with visible provenance
 - Correct or delete a fact and see answers change
@@ -254,9 +466,60 @@ In scope:
 
 - **The 3D embodiment — moved into scope 9 August 2026.** A VRM renderer beside
   the orb, chosen by a toggle, both reading one state so neither knows the other
-  exists. It embodies **what the system is doing** — **not a personality**: no
-  name, no pronoun, no wandering gaze, no expression not derived from system
-  state. The landing default stays the orb.
+  exists. It embodies **what the system is doing**: no wandering gaze, no
+  expression not derived from system state. The landing default stays the orb.
+
+  **The no-name rule was reversed on 16 August 2026, and the reasoning is worth
+  keeping because the reversal is narrow.** This section used to read "not a
+  personality: no name, no pronoun". That prohibition was fixing two failures
+  with one ban, and it only ever fixed one of them.
+
+  The failure it fixed is real: a model asked what it is answers from training
+  data — *"I am Qwen, made by Alibaba"* — and the eight named personas made it
+  worse by supplying a third answer. The failure it claimed to fix, and does
+  not, is parasocial attachment. **Attachment comes from being remembered, not
+  from a name.** A system that knows the client's rate, that March was bad, and
+  what was decided about the Northwind job feels like something to its user
+  whether it is called Zaram or Ada. The ban was paying a very large product
+  cost — personalisation is the strongest retention mechanism available here —
+  for a protection it does not deliver.
+
+  **So: a user may name it, style it, voice it and bring their own VRM. It may
+  never deny what it is when asked directly.** The rule that replaced the ban is
+  one sentence and it is enforced by test rather than by judgement, which is
+  what stops it being re-argued every time a personality feature is proposed.
+
+  The distinction that makes it safe is **additive versus substitutive**, and it
+  is the same one `core/identity.py` already draws. *"You are Baba, a wise and
+  analytical AI assistant"* replaces the truth and stays removed. *"You are
+  Zaram. This person calls you Ada."* is a **fact the system supplies** — it
+  lives in `user_settings`, not in the weights, exactly like the model name and
+  the locality beside it. One answer, layered:
+
+  > "I'm Ada — that's the name you gave me. Underneath I'm Zaram, and right now
+  > qwen2.5:14b is answering, on your machine."
+
+  **A manner is third-party text.** Characters are meant to travel as files, so
+  a manner can arrive from a stranger, and the tool-description rule applies
+  unchanged: nothing supplied from outside may widen what is permitted. The
+  enforcement is **order, not filtering** — a blocklist of hostile phrasings is
+  guessed rather than known, so instead the user's name and manner are placed
+  *before* the rules about self-description, and the last instruction a model
+  reads is the true one. `tests/test_identity_stays_truthful.py` asserts that
+  ordering against hostile manners directly.
+
+  Four guardrails come with it, and they are cheap: truthful when asked; never
+  claims feelings it does not have (a manner is a register, not an inner life);
+  **no engagement mechanics ever** — no streaks, no re-engagement prompts, no
+  "you haven't talked to me in a while", since Zaram speaks first only when it
+  has something real; and the character stays removable, because if personality
+  ever becomes load-bearing for the utility something has gone wrong.
+
+  **The state channel is still Zaram's.** The character is the user's — any VRM,
+  any name, any voice — and the rim light still reports idle, working,
+  listening, speaking, swapping, and still never reports routing. Bring your own
+  VRM threatens none of that, because state comes from `useEmbodimentState` and
+  the avatar only renders it.
 
   **It does not embody which model answered — narrowed 13 August 2026.** The
   earlier line was "which model is answering and what it is doing", and `local`
@@ -274,6 +537,50 @@ In scope:
   installer against a rule that says never block on a download. The direction
   after one is **bring your own VRM** — the same posture as bring your own key
   and bring your own model.
+
+  **The one that ships is a character, and it is also the mascot — 15 August
+  2026.** A helmeted robot with a dot-matrix LED face behind a black visor.
+  Two things follow and they must not be confused.
+
+  *Mascot and renderer are two jobs for one asset.* On the site, the installer,
+  the README and the icon it is a mascot and may smile — the reference art does.
+  Inside the product it is the embodiment, and the rule above is unchanged:
+  states only, no expression not derived from one. The rest face is `sil`, a
+  flat line, not a smile. Nothing in the rule forbids key art; it forbids the
+  *status indicator* being a someone, and keeping the smile in the marketing
+  costs nothing to do.
+
+  *The landing default is still the orb.* "Default character" means the avatar
+  you get when you choose the avatar renderer, not what Zaram shows on launch.
+
+  **The face is driven by texture transforms, not morph targets.** A VRM 1.0
+  expression binds three kinds of thing and only one of them is a blend shape;
+  `textureTransformBinds` slides a UV window across a sprite atlas, which is
+  what a screen face needs and what `@pixiv/three-vrm` already implements. Two
+  consequences the driver must respect, both read off
+  `VRMExpressionTextureTransformBind.applyWeight`: weights are **binary**,
+  because a fractional weight lands *between* atlas cells; and exactly **one
+  expression per material** may be non-zero, because binds are additive and two
+  of them sum into a cell that does not exist. Morph-rigged avatars keep the
+  existing eased lerp — the two paths are told apart by the bind type, never by
+  which avatar happens to be loaded, or bring-your-own breaks.
+
+  **The face carries no state, which is what makes its colour safe.** It is a
+  constant `#818cf8` and the state channel stays the rim light: slate at rest,
+  cyan while working. The reference art glows violet, and violet is the one
+  colour it could not have — `docs/UI-SPEC.md` assigns `#8B7FD4` to **cloud**,
+  so a permanently violet face would put *"your data left the device"* on the
+  indicator whose entire job is to be trusted, permanently and falsely. That is
+  the 13 August failure with the sign reversed: there, a face reported routing
+  it should not have; here it would report routing that was not happening.
+  Indigo sits near the reference, is already the implementation's own accent,
+  and is nobody's state.
+
+  The sprite governs the **face panel only** — two quads on the visor, black
+  base colour, atlas on `emissiveMap`. It does not extend to the shell, the ear
+  rings or the body. Moving the state channel onto the ear rings was considered
+  and **not built**: the rim light already works, needs no geometry, and reads
+  on any VRM the user brings, which a character-specific mesh does not.
 
   **An avatar file may reference nothing outside itself.** glTF `buffers` and
   `images` carry an optional `uri` that the loader fetches, so a `.vrm` can make
@@ -458,6 +765,48 @@ have a type, chosen once at creation, and that choice activates the pack. This i
 lets capability grow while the navigation stays at six nodes. **Project is where that
 type is chosen** — creation is the only honest moment to ask, and it is the one thing
 the user genuinely cannot be asked later without guessing.
+
+**Premium pricing is available, and Superhuman is the evidence.** They charge
+**$30/user/month** for an email client, against Gmail at zero, and what they
+sell is speed, craft and feel rather than capability. The lesson is not to copy
+the number — their buyers are salespeople and executives whose hour is expensive,
+and the freelance wedge is more price-sensitive — but to stop assuming the
+ceiling is low. A product that feels like a made object supports a price a
+feature list does not, and Zaram's design discipline is already at that level.
+Test the price; do not assume it.
+
+**Give personalisation away; charge for continuity — settled 16 August 2026.**
+Name, manner, voice, bring-your-own-VRM, memory, domains, documents,
+obligations: free forever, one person, one machine, no caps. Personalisation is
+the **retention** engine, not the revenue engine, and that is worth more —
+putting the stickiest asset behind a paywall converts it into a conversion
+barrier on a product whose pitch is that it is not extractive.
+
+The paid rung is **their Zaram, everywhere**: end-to-end encrypted sync across
+the user's own devices, plus encrypted backup. It is rule "charge for the
+inconvenience the architecture creates" applied literally — the inconvenience
+local-first creates is not the second person, it is the **second device**, which
+every freelancer has and hits in week one. The earlier "pay for the second
+person" answer aimed the paid tier at users the wedge explicitly excludes.
+Multiplayer stays the rung above it.
+
+**The margin is the point, and it follows from rule 1.** Every competing AI
+product pays 40–70% of revenue back out as tokens. Zaram's cost of goods is
+approximately zero, and a relay passing encrypted text deltas does not scale
+with usage — someone who chats ten times more does not sync ten times more. That
+is what makes a genuinely uncapped free tier permanent rather than promotional.
+
+**Do not build an avatar marketplace.** VRM already has a creator economy —
+VRoid Hub, Booth, thousands of artists. Supporting import inherits all of it for
+free, with no moderation liability, no payments, no cross-border payouts and no
+accounts. A curated *directory* that links outward is the most that should ever
+be built; the storefront is a second company.
+
+**Voice cloning is refused.** Kokoro's 54 voices are Apache 2.0 and sufficient.
+Cloning from a sample is a consent and impersonation problem that would put
+Zaram on the wrong side of the one argument it is winning. If it is ever built:
+the user's own voice only, with a spoken consent phrase recorded at enrolment,
+and never a sample supplied from elsewhere.
 
 **Zaram never sells access to anything.** If a pack is ever priced, what is sold
 is domain knowledge that runs on the user's machine — parsers that handle real
@@ -678,13 +1027,21 @@ so `core/identity.py` composes it and puts it in front of every request:
 what Zaram is, which model is answering, and where that model runs.
 
 **This is identity, not personality, and the distinction is the whole point.**
-The embodiment rule refuses a *someone* — no name, no pronoun, no expression not
-derived from system state. It does not refuse the product describing itself; a
-status indicator that cannot say what it is is not calm, it is broken. What is
-refused is a character: the eight named personas that each opened "You are Baba,
-a wise and analytical AI assistant" were removed on 13 August 2026 and replaced
-with tone-only presets, because each one made a competing identity claim and
-gave the model a third candidate answer about itself.
+It does not refuse the product describing itself; a status indicator that cannot
+say what it is is not calm, it is broken. What is refused is a **competing**
+claim: the eight named personas that each opened "You are Baba, a wise and
+analytical AI assistant" were removed on 13 August 2026 because each one made a
+rival identity claim and gave the model a third candidate answer about itself.
+
+**A user's own name for it is not a competing claim — revised 16 August 2026.**
+`assistant_name`, `manner` and `voice` live in `user_settings` and reach
+`identity_preamble` as facts, in an order that is the guarantee: what Zaram is,
+what the person calls it, what is answering, *their manner*, then how to answer
+about itself. The user's text comes before the truthful rules so the rules
+answer it rather than the other way round. Bounded on the way in and again at
+the prompt — an unbounded manner is the cheapest attack on the guarantee, since
+it needs no cleverness, only length. Full reasoning under the embodiment section
+above.
 
 **Never hide the model.** The temptation, once the assistant stops naming
 somebody else's, is to have it name none. That forfeits routing legibility and

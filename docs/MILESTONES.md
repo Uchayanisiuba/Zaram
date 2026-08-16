@@ -11,7 +11,134 @@ accurate — it is the first thing anyone reads.
 
 ---
 
-## Current state — 15 August 2026
+## Current state — 16 August 2026
+
+> ### The installer could never have started, and search never compared a result to the question.
+>
+> Suites, measured this session: **2013 backend passed / 0 failed**, 100
+> skipped · **158 frontend** across 20 files · **34 Electron** · typecheck clean
+> · **`npm run lint` passes for the first time in five sessions** · all four
+> build guards pass. **Committed 16 August** in nine coherent pieces, after the
+> backend suite was re-run to confirm the tree it was measured against.
+>
+> **Three defects that mattered, each invisible to a passing suite.**
+>
+> 1. **The packaged app could not start its backend.** All 322 backend `.py`
+>    files were sealed inside `app.asar`, with no `asarUnpack` anywhere.
+>    `_resolveBackendDir` checked `appPath/backend` first — inside the archive —
+>    and Electron's patched `fs` said it existed, because that check runs in
+>    Electron. It then spawned the bundled `python.exe` with that as its working
+>    directory. Proven with plain Node: same executable, `cwd` inside the asar →
+>    **ENOENT**; `cwd` on the real filesystem → **exit 0**. Every machine holding
+>    a checkout fell through to `process.cwd()/backend` and worked, which is why
+>    nobody who could have seen it did. Fixed with `asarUnpack`, a resolver that
+>    can never return an archive path, `original-fs` for the existence check,
+>    four tests, and a payload guard that was mutation-tested.
+>
+> 2. **Every database wrote into the install directory.** All five store paths
+>    resolved to `os.path.dirname(__file__)/..` — correct in a checkout,
+>    unwritable under Program Files. `build/installer.nsh` had already been
+>    written against the fix, offering to export or delete `%APPDATA%\Zaram`, a
+>    directory Zaram never wrote to. `core/paths.py` now owns the one answer; a
+>    checkout that already holds data keeps it. 10 tests.
+>
+> 3. **Nothing in the live search path compared the query to the result.**
+>    `_rank_results` sorted on `r.score` — a constant each connector stamps on
+>    everything it returns, Wikipedia 0.8, GitHub 0.7, DuckDuckGo 0.6 — then on
+>    a second copy of the same prior. **The order was identical for every
+>    question ever asked**, which is the complete explanation for an election
+>    query returning a junk GitHub repo. Those constants reached the citation
+>    chips as relevance, which `UI-SPEC` forbids outright. `ranker.py` held a
+>    second implementation that did compare terms, was unreachable, and would
+>    have raised `FrozenInstanceError` on its first result.
+>
+>    `runtimes/internet/relevance.py` replaces it: content-only relevance with
+>    light stemming, **selection on relevance alone**, ordering by RRF so no
+>    fused magnitude can be compared against the floor, query-dependent
+>    freshness weighting, and per-host diversity. Measured on the reported case
+>    — junk repo **0.052 dropped**, Reuters article **0.448 cited**, floor 0.18.
+>    24 tests.
+>
+> **A security hole, found while checking whether privacy was over-implemented.**
+> Loopback stopped the café network; it did not stop a web page. DNS rebinding
+> reached `/memory`, `/egress` and `PUT /egress/policy` as *same-origin*
+> requests, so CORS never ran. Measured: **200 and the whole Spine** without a
+> guard, **400** with one. A `Host` check now refuses it — 9 tests. **Half the
+> fix**: there is still no authentication, so any local process can read
+> everything. A per-launch secret is the remaining half and belongs before
+> strangers.
+>
+> **Rule 7 stopped being dead.** `core/export.py` was complete with twenty test
+> assertions, no caller, no route and no control. `GET /export` and
+> `/export/manifest` now exist, with a Settings button.
+>
+> **Lint was a config bug, not 157 defects.** Core ESLint's `no-undef` and
+> `no-unused-vars` were running on TypeScript with no plugin, so every warning
+> was false — `RequestInit` and `JSX` reported as undefined globals, 114 type-only
+> usages reported as unused. Replaced with typescript-eslint's rules. **This is a
+> repair, not a threshold change.**
+>
+> ### The character landed, and the no-name rule was reversed
+>
+> **`assistant_name`, `manner` and `voice` are user settings**, carried into
+> `identity_preamble` as facts. The 13 August prohibition was fixing two
+> failures with one ban and only ever fixed one: attachment comes from being
+> remembered, not from a name.
+>
+> **The test was written before the feature**, deliberately, and that ordering
+> is the point — 21 assertions including five hostile manners of the kind a
+> downloaded character file would carry. The guarantee is **order, not
+> filtering**: the user's name and manner sit *before* the rules about
+> self-description, so the last instruction a model reads is the true one.
+> `tests/test_identity_stays_truthful.py` asserts that index comparison
+> directly, so an edit that reverses it fails.
+>
+> **And it is reachable by nothing.** `GET/POST /character` are served, tested
+> and called by no interface — the same shape as the five dead features found
+> on 15 August, recorded at commit time rather than left to be rediscovered. A
+> user cannot name it until Settings can.
+>
+> ### An invoice that is an invoice
+>
+> `ArtifactService` could already build a real invoice, spreadsheet and deck,
+> and `POST /artifacts/generate` reached all three. **The conversation reached
+> none of them.** `DocumentsRuntime` called `create_document` for every kind, so
+> "make me an invoice" produced a `.docx` of prose with *invoice* in the
+> filename and "make me a PowerPoint" produced a `.docx`, because DECK was not
+> among the words that pick a kind. Reported by the maintainer as "Zaram simply
+> creates an unformatted document" — the tenth instance of the shape.
+>
+> `artifacts/extract.py` reads the answer already produced into fields. It reads
+> rather than re-writes, because the file must be the answer the user approved
+> of; it **refuses rather than fills in**, naming each missing field back while
+> there is still a conversation to have it in (rule 9); and **arithmetic never
+> comes from the model** — only descriptions, quantities and unit prices are
+> read, and `total_of` does the multiplication, because the total is the one
+> number a client checks.
+>
+> `OllamaEngine.read_structured` constrains decoding to JSON at temperature 0.
+> Measured: **7 of 8 installed models** extracted an invoice correctly that way,
+> while the same model refused through the chat path, which samples. Reached by
+> `getattr`, so an engine without it degrades rather than breaks. It runs
+> against the **local** engine specifically — re-reading an answer the user has
+> already seen is not worth billing, and a document step quietly becoming egress
+> would be a rule 5 surprise on a generative tool.
+>
+> **Start here, in this order.**
+>
+> 1. **Run the installer on a machine that has never seen this repo.** The
+>    blocker is fixed and unverified; this is the only step that can prove it.
+> 2. **Mint the launch secret.** The `Host` guard closed the browser route only.
+> 3. **The ambient surface** — global hotkey and screen-edge handle. Invoked,
+>    never passive. It is the highest-leverage item on the daily-driver list.
+> 4. **Ingestion by drop, paste and upload**, then knowledge domains. The
+>    parsers exist and the Knowledge surface cannot reach them.
+>
+> Full reasoning for the direction — daily driver, free tiers, domains, the
+> character, and the business model — is in `CLAUDE.md`, which was updated this
+> session rather than left to drift.
+
+## Superseded — 15 August 2026
 
 > ### Settings became real, and five dead features were found behind it.
 >
@@ -102,6 +229,55 @@ accurate — it is the first thing anyone reads.
 > For search: it is on, `duckduckgo.com` is allowed, and the question has to
 > actually look like it needs live information — `needs_search()` decides.
 > "Are you connected to the cloud?" is not such a question, so no search runs.
+>
+> ### The avatar became a character, and the character became the mascot
+>
+> **Decided 15 August 2026.** The shipped VRM is a helmeted robot with a
+> dot-matrix LED face, and it is also Zaram's mascot. Rules written into
+> `CLAUDE.md` and `docs/EMBODIMENT-SPIKE.md`; palette into `docs/UI-SPEC.md`.
+> The short version, so the next session does not re-argue it:
+>
+> - **Mascot and renderer are two jobs for one asset.** It smiles in key art;
+>   inside the product its rest face is `sil`. The embodiment rule governs the
+>   status indicator, not the marketing.
+> - **The landing default is still the orb.** Unchanged.
+> - **The face uses `textureTransformBinds`, not morph targets** — a UV window
+>   over a sprite atlas. Weights must be **binary** and only **one expression
+>   per material** may be non-zero, both read off
+>   `VRMExpressionTextureTransformBind.applyWeight`, not assumed. The existing
+>   eased lerp in `VrmAvatar.tsx` is correct for morph rigs and would smear a
+>   sprite mouth across cells.
+> - **The face carries no state.** Constant `#818cf8`. Violet was rejected
+>   because `UI-SPEC` assigns `#8B7FD4` to *cloud*, and a permanently violet
+>   face states falsely that data left the device.
+>
+> **Assets: done and verified, 15 August 2026.** `Zaram_LED_Face_Sprites.zip`
+> at the repo root — two 3×2 atlases at 768×512, 256px cells, 32×32 lattice at
+> 8px pitch, plus a `manifest.json` carrying the UV table as data. Verified by
+> measurement rather than by reading its README: all 12 cells cropped at the
+> manifest's own `repeat`/`offset` matched their standalone frames byte for
+> byte, every frame sits on the same dot lattice, and the minimum cell gutter is
+> 32px — which is why `applyTextureFiltering` needs **no** exemption and
+> `NearestFilter` would be wrong here. The dots are anti-aliased, not hard
+> pixels.
+>
+> **What is not done, in order.**
+>
+> 1. **Nothing consumes the atlases yet.** They are not in the repo, only in a
+>    zip at the root, and no test asserts they match `visemes.ts`. The manifest
+>    is a spec nothing enforces — write that test first; it needs no model and
+>    no renderer.
+> 2. **The model work is unstarted**: two quads on the visor, separate material
+>    slots, full 0–1 UVs, black base with the atlas on `emissiveMap`, exported
+>    with the manifest's binds.
+> 3. **The driver change is unstarted**: snap-not-lerp gated on bind type, plus
+>    mutual exclusion per material.
+> 4. **Two known asset gaps.** The mouth frames are narrower than the eye span,
+>    where the reference has them about equal — both quads must be the same
+>    world size for the dot pitch to match, so this is fixed by redrawing, not
+>    by scaling. And `eyes_spare.png` is genuinely empty; if `warming` is bound
+>    to that cell before a frame is drawn, the face goes dark during a cold
+>    start and reads as a crash.
 >
 > ### Old current-state block — 14 August 2026
 >

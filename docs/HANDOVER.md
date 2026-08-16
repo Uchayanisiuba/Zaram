@@ -1,6 +1,10 @@
-# Handover — 15 August 2026
+# Handover — 16 August 2026
 
 Paste the block below into a new session. It is written to be read cold.
+
+The direction changed materially this session. `CLAUDE.md` was updated rather than
+left to drift, so it remains the authority — but read the *What changed* section
+at the bottom of this file before assuming anything from an older session still holds.
 
 ---
 
@@ -9,192 +13,133 @@ You are continuing work on Zaram (C:\Zaram), on branch Zaram-V0.1.
 
 READ FIRST, IN THIS ORDER
   1. CLAUDE.md — the contract. Rules, scope, vocabulary. Authority on rules.
-  2. docs/MILESTONES.md — the handoff. Read "Current state — 15 August 2026"
-     at the top, then "What this session built — 15 August" and
-     "What is next — reordered 15 August". Older blocks below are still true
-     about packaging, signing, the API binding and the installer.
+     Several rules CHANGED on 16 August. Read the embodiment section, rule 7g,
+     the new rule 7j, "Custody, not only consent", and "The daily driver comes
+     first" — all are new or reversed.
+  2. docs/MILESTONES.md — "Current state — 16 August 2026" at the top.
   3. docs/UI-SPEC.md — the interface.
 
 BEFORE RUNNING ANYTHING
-  - Run pytest as `.venv\Scripts\python.exe -m pytest` from the repo root.
+  - Run pytest as `backend\venv\Scripts\python.exe -m pytest` from the repo root.
     Bare `python` on PATH is a broken shim and reports phantom failures.
   - Whatever is on port 8420 is probably stale. Confirm build.commit_short
     matches `git rev-parse --short HEAD` before believing any response.
-    Restart: kill the listener on 8420, then `backend/start.bat`.
   - The frontend dev server is on 5173 and binds IPv6 — use `localhost:5173`,
     not `127.0.0.1:5173`, or it will look down when it is up.
+  - `npm run check:all` at the root now runs lint, typecheck, guards, payload
+    check and both suites. It passes. If it does not, that is a regression.
 
-MEASURED STATE (15 August, all from a run)
-  backend 1987 passed / 0 failed / 9 skipped · frontend 155 across 20 files ·
-  typecheck clean · drive-settings.mjs 14/14 · drive-composer.mjs 9/9 ·
-  64 commits ahead of origin/main.
+MEASURED STATE (16 August, every number from a run)
+  backend 2013 passed / 0 failed / 100 skipped · frontend 158 across 20 files ·
+  Electron 34 · typecheck clean · `npm run lint` PASSES (first time in five
+  sessions) · all four build guards pass · 80 commits ahead of origin/main.
 
-THE FIRST THING TO DO
-  **Nothing from the 15 August session is committed.** 44 changed or new files.
-  Read "What this session built" and commit in coherent pieces. Do not commit
-  backend/settings.json — it is gitignored alongside the egress policy.
+  The tree is COMMITTED — nine pieces, after re-running the backend suite to
+  confirm it was green on the tree being committed rather than on a memory of
+  one.
 
-WHAT THE LAST SESSION DID
-  Settings became operable: kill switch, per-source egress rules, web search
-  with scope, routing preference, model choice, several cloud providers at
-  once, speech, renderer. Web search now returns real results. The local model
-  preloads at launch so "Warming up" is once per session. Chat gained copy,
-  edit and ask-again; generated files gained Preview beside Download.
+THE THREE THINGS THAT MATTER MOST
+  1. The packaging blocker is FIXED and UNVERIFIED. The packaged app could never
+     start its backend — 322 .py files were sealed inside app.asar and the
+     launcher spawned python.exe with a working directory inside the archive.
+     Fixed with asarUnpack + a resolver that cannot return an archive path.
+     NOBODY HAS RUN THE INSTALLER ON A CLEAN MACHINE. That is the only step
+     that can prove it, and it cannot be done from a dev shell.
+  2. The local API still has NO AUTHENTICATION. A Host-header guard now refuses
+     DNS rebinding, so a web page cannot reach it. Any local process still can.
+     A per-launch secret from the Electron host is the remaining half.
+  3. The direction is now DAILY DRIVER FIRST. Memory, obligations and domains
+     are all downstream of the app being opened every day. See CLAUDE.md,
+     "The daily driver comes first".
 
-  Getting there found FIVE features that were complete, tested, and could not
-  happen — the unmounted /providers router, a hardcoded model in chatClient.ts
-  that overrode every routing decision, a KnowledgeRuntime with no internet
-  runtime, a live AttributeError in InternetRuntimeImpl.initialize(), and a
-  routing preference control that was read by nothing. Plus one worse: web
-  search APPEARED to work, because duckduckgo_search returns an empty list
-  without raising. All six are written up in MILESTONES.
+WHAT TO BUILD, IN ORDER
+  1. Run the installer on a machine that has never seen this repo.
+  2. The ambient surface — global hotkey + screen-edge handle, Electron.
+     Read the "ambient surface" section of CLAUDE.md first: it must be
+     INVOKED, never passive. Passive capture is prohibited at any accuracy.
+  3. The launch secret for the local API.
+  4. Free-tier keys in first run, with the data cost stated on the offer.
+  5. Ingestion by drop, paste and upload — the parsers exist, the Knowledge
+     surface cannot reach them.
+  6. Knowledge domains, scoping retrieval.
+  7. Deep-read for web search — the model still only sees 300-char snippets.
+  8. Obligations wired into ingest.
 
-HOW TO WORK HERE
-  - Verify by seeing it work. A feature's tests can all pass while the feature
-    cannot happen; that has now cost this project ten times, five of them in
-    one day. Use the drive-*.mjs scripts in frontend/scripts — they run a real
-    browser and they have caught what unit tests could not.
-  - When a doc and the codebase disagree, the codebase wins — say so.
-  - A failing test is fixed or deleted, never left. A test that asserts nothing
-    is worse than no test.
-  - Never write a number you have not measured. A fabricated number is worse
-    than a stale one, because nothing about it looks old.
-  - Do not handle the maintainer's API keys. They paste them; you tell them
-    where to put them. A key pasted into chat should be rotated.
-
-NEXT, IN ORDER (see "What is next — reordered 15 August")
-  0a. Name the model that answered, on every reply. CLAUDE.md requires it,
-      nothing does it, and the maintainer has asked twice. Highest value left.
-  0b. Voice selection, male by default. Read /voice/voices before choosing —
-      do not hardcode a voice that may not be installed.
-  0c. Persist cloud keys with Electron safeStorage.
-  0d. Task-based routing across providers. Project type supplies a PRIOR, never
-      a decision, and must never cause a silent cloud route.
-  0e. Gemini's URL normalisation (small) and an Anthropic adapter (bounded).
-  0f. Search relevance — every question currently also queries GitHub.
-
-SPEECH — the maintainer's north star, set 15 August
-  "Speech follows the text without lag. The user never waits. Zaram responds as
-  fast as it can, and the user can interrupt by typing or by microphone."
-  Full architecture, measurements and open questions: docs/SPEECH-ARCHITECTURE.md
-  Barge-in is DONE. Still open, in the order I would take them:
-   - Per-phoneme timings from Kokoro's `pred_dur` (currently a word's phonemes
-     are distributed evenly across its span). DECIDE THIS WITH TWO VIDEOS AT
-     320px, not with a duration table — the pointer-gaze lesson applies exactly.
-   - Resume mid-utterance after a barge-in. The unit of playback is a sentence,
-     so an interruption discards the current one. Whether that matters is a
-     question about people, not architecture.
-   - /voice/stream (SSE) exists and is unused. Note Kokoro is NOT a streaming
-     model — those chunks are chunks of a finished clip, so moving chunking
-     backend-side changes where the split happens, not when the first sound
-     arrives. Do not "fix" this without checking that first.
-
-UNVERIFIED BY HUMAN EYES (this shell can screenshot via
-frontend/scripts/*.mjs, so there is no excuse — but these specific ones were
-built late and only measured)
-   - The artifact Preview panel over the orb/avatar area. Geometry probe is
-     scripts/probe-preview-geometry.mjs; it SKIPS when the browser profile
-     shows no artifacts, which is what happened on the last run. Generate a
-     document, re-run, look at scripts/drive-shots/preview-over-orb.png.
-   - Barge-in. No script drives it yet.
-
-STILL UNVERIFIED BY A HUMAN
-  A real cloud round trip. LM Studio on loopback proves the connect path
-  without a credential; nobody has connected a live key, selected a cloud
-  model and watched a reply arrive.
-
-THE BLOCKER CLAUDE.md NAMES, UNCHANGED
-  "A stranger cannot install this." Packaging, not capability. None of the
-  above moves it.
+TRAPS THIS CODEBASE HAS PAID FOR REPEATEDLY
+  - A feature's tests can all pass while the feature cannot happen. Eight
+    complete, tested, unreachable modules have been found. Before believing a
+    feature works, check something calls it and a route serves it.
+  - A score built for ranking is not a score for deciding. Membership,
+    ordering and citation are three questions. Never merge them.
+  - Never render an invented value. A constant standing in for a measurement
+    reaches the UI and becomes a lie.
+  - Verify by seeing it work, not by a passing suite.
 ```
 
 ---
 
-## Testing cloud and web search
+## What changed on 16 August, in brief
 
-The non-obvious part, which cost the maintainer an afternoon:
+Read this if you are picking the project up and an older document contradicts you.
 
-**Connecting a provider does not permit it.** The key is stored; the
-destination still has no egress rule, and the default is refuse. So *Look for
-models* is denied, the list comes back empty, and no cloud model can be
-selected — with nothing on screen explaining why. The Cloud section now names
-the host and offers a one-click **Allow**, but the sequence is:
+### Rules that changed
 
-1. Settings → Cloud providers → choose provider, paste key, **Connect**
-2. **Allow** its host when the amber line offers it
-3. Models → **Look for models** — this is the network call
-4. Choose one under *Which model answers*
+| Rule | Was | Now |
+|---|---|---|
+| Embodiment | "not a personality: no name, no pronoun" | A user may name it, style it, voice it, bring their own VRM. It may never deny what it is when asked. Enforced by test. |
+| 7g | No network call before consent, including update checks | Update checks asked once at first run, default yes. An unpatchable product holding contracts is not the safe option. Telemetry still prohibited. |
+| 7j (new) | — | Connecting a provider *is* per-item consent for its host. Confirm-before-send is once per destination and data class, not per request. |
+| Audience | "the wedge is freelancers" | Universal base, verticals as packs. The freelance layer is the *first pack*, not the wedge. |
 
-Until step 4, Zaram answers locally and says so truthfully.
+### New sections in `CLAUDE.md`
 
-> *"No, nothing in this conversation has left the device to reach the model,
-> gemma4:12b."*
+- **Custody, not only consent** — the DNS rebinding hole, what the `Host` guard
+  does and does not fix, `X-Zaram-Client` is a label not a credential, and
+  `core/paths.py` owning the data directory.
+- **The daily driver comes first** — five of eight daily jobs are already
+  local-solvable; free API tiers are the bridge and are rule 1 as written;
+  driving the consumer web apps is prohibited.
+- **The ambient surface** — global hotkey and screen-edge handle, modelled on
+  Superhuman Go, with the opposite data model. **Invoked, never passive.**
+- **Business model** — give personalisation away, charge for continuity
+  (encrypted sync across the user's own devices). Cost of goods is ~zero, which
+  is what makes an uncapped free tier permanent. No avatar marketplace; no voice
+  cloning.
+- **Knowledge domains** — a retrieval scope, many-to-many, described, shareable.
+  No seventh node. One memory, many domains.
 
-That reply is **correct** while `default_model` is null. It is `core/identity.py`
-working, not a bug.
+### Code that landed
 
-For web search: it is on, `duckduckgo.com` is allowed, and the question must
-actually look like it needs live information — `needs_search()` decides.
-"Are you connected to the cloud?" is not such a question, so no search runs and
-nothing leaves.
+| What | Where | Tests |
+|---|---|---|
+| asar unpack + safe backend resolution | `electron/backend/backendLauncher.js`, `electron-builder.yml`, `scripts/check-installer-payload.mjs` | 4, guard mutation-tested |
+| One data directory | `backend/core/paths.py` + six stores | 10 |
+| Search relevance, RRF, diversity, temporality | `backend/runtimes/internet/relevance.py` | 24 |
+| DNS rebinding guard | `backend/main.py` | 9 |
+| Spine export (rule 7, was unreachable) | `GET /export`, `/export/manifest`, Settings | reuses `test_export.py` |
+| The character — name, manner, voice | `core/identity.py`, `core/user_settings.py`, `GET/POST /character` | 21 |
+| Lint config repair | `frontend/eslint.config.js` | lint passes |
+| Structured extraction — invoice, spreadsheet, deck | `backend/artifacts/extract.py`, `runtimes/documents/runtime.py`, `ollama_engine.read_structured` | 2 new files |
 
-## Prompt for generating the robot's LED face sprite sheet
+### Numbers worth not re-deriving
 
-For ChatGPT's image tool, Nano Banana, or any image model. Written against the
-VRM constraint that actually governs it — see the note after the prompt.
+- Junk GitHub repo on an election query: relevance **0.052**, dropped. The
+  correct Reuters article: **0.448**, cited. Floor **0.18**.
+- Packaged spawn with `cwd` inside `app.asar`: **ENOENT**. Same exe, real cwd:
+  **exit 0**.
+- DNS rebinding without the `Host` guard: **200 and the whole Spine**. With it:
+  **400**.
+- Lint: **157 warnings → 0**, and all 157 were false — core ESLint rules running
+  on TypeScript with no plugin.
 
-```
-A sprite sheet for a robot character's LED face panel, drawn as flat vector
-emissive graphics on a pure black background.
+### Still open, deliberately
 
-Layout: a 4 x 3 grid, 12 equal cells, 2048 x 1536 px total (each cell 512 x 512).
-No gutters, no padding, no labels, no grid lines — cells must tile exactly edge
-to edge so a UV offset lands cleanly on each one.
-
-Every cell shows only eyes and mouth as glowing cyan (#78DCF0) shapes on black.
-No face outline, no head, no nose, no shading, no gradients, no texture, no
-3D rendering. Think a dot-matrix or OLED panel: simple, bold, high contrast,
-readable at 200 px.
-
-The 12 cells, in reading order (left to right, top to bottom):
- 1. neutral — two horizontal ovals, mouth a short flat line
- 2. blink — two horizontal lines, mouth unchanged
- 3. happy — eyes as upward arcs, mouth a wide upward curve
- 4. thinking — eyes narrowed, one slightly higher, mouth a small flat line
- 5. listening — eyes wide circles, mouth a small neutral dot
- 6. speaking A — mouth a wide open oval, eyes neutral
- 7. speaking E — mouth a wide flat rectangle, eyes neutral
- 8. speaking I — mouth a narrow flat slit, eyes neutral
- 9. speaking O — mouth a round circle, eyes neutral
-10. speaking U — mouth a small tight oval, eyes neutral
-11. surprised — eyes large circles, mouth a small round o
-12. sleeping — eyes two downward arcs, mouth a flat line
-
-Keep eye position and size identical across every cell except where the
-expression requires a change, so the face does not appear to shift between
-frames. Consistent stroke weight throughout. Pure black (#000000) background.
-```
-
-**Why 12 cells and why those.** VRM 1.0 expressions bind to a material's UV
-**offset and scale** via `textureTransformBind` — the spec's own example is
-blink as a UV shift. So each expression selects a cell. Five of the twelve are
-the visemes `aa ee ih oh ou` that `src/lib/visemes.ts` already drives, which is
-why the mouth shapes are named that way rather than by emotion.
-
-**Two constraints that will bite if they are not designed in.**
-
-- **The LED panel must be its own material.** The bind applies the same offset
-  to *every* UV-sampling texture on the target material, so if the face shares a
-  material with the body, expressions will slide the body texture too.
-- **Drive the weight to 0 or 1, never in between.** The weight interpolates the
-  offset, so a half-weight lands between two cells and shows two half-faces.
-  This matters concretely: `VrmAvatar.tsx` currently *eases* visemes with
-  `approachRate(dt, 1/15)`, because a snapped morph target reads as a puppet.
-  For a sprite-sheet face that easing produces garbage mid-frames, so the mouth
-  path needs a hard cut for a robot avatar. Worth knowing before commissioning
-  the asset rather than after.
-
-**Also true, and awkward:** an image model will not reliably produce an exactly
-aligned 4x3 grid. Expect to composite the cells into the sheet by hand, or
-generate each cell separately at 512x512 and assemble them. Ask for the cells
-individually if the grid comes back uneven — that is the more reliable route.
+- `GET/POST /character` are served and no interface calls them. A user cannot
+  name it until Settings can — found at commit time, not left to be discovered.
+- Obligations extract but nothing calls them. Still the differentiator.
+- `core/pairing.py` (device pairing) has no caller but its own test.
+- `knowledge/retrieval.py::_hybrid` blends `vector * 0.7 + bm25 * 0.3` and
+  truncates on the blend — the same bug class fixed elsewhere, not yet fixed
+  there. Check whether it is reachable before spending time on it.
+- The uninstaller zips raw SQLite rather than calling the real exporter. The
+  wording was corrected; a CLI exporter would be the proper fix.

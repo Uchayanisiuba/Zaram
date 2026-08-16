@@ -37,6 +37,18 @@ So: narrow the wedge, never the vision. "Zaram is for freelancers" is wrong and
 limiting. "Zaram starts with freelancers because that is where we prove it fastest,
 and the mechanism is universal" is accurate and it is what gets funded.
 
+> **Sharpened 16 August 2026.** Even that is now too narrow, and the daily-driver
+> work is what showed it. The wedge is **not a segment, it is a demonstration**:
+> point Zaram at a folder and have it tell you something true you did not know.
+> That lands identically on a freelancer's invoices, a researcher's grant letters
+> and a student's reading list, and it does not require picking one of them.
+>
+> The pitch that follows from it: **"every AI you use, in one place, that
+> remembers you and sends nothing anywhere."** Universal, demonstrable in ten
+> seconds, and structurally unavailable to any lab whose business is that your
+> words leave. The invoice layer is the first *pack* on top — it is what proves
+> the pack abstraction, not what defines the audience. See `CLAUDE.md`.
+
 ## The pain
 
 > A working freelancer loses **___ hours a month** to unpaid admin and carries
