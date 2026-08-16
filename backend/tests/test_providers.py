@@ -742,6 +742,18 @@ def test_providers_runtime_initialize_registers_providers(monkeypatch):
     monkeypatch.setattr("providers.runtime.OllamaAdapter", lambda *a, **k: fake_ollama)
     monkeypatch.setattr("providers.runtime.LMStudioAdapter", lambda *a, **k: fake_lm)
 
+    # `_register_default_providers` adds OpenRouter and a custom OpenAI endpoint
+    # *conditionally on the environment*, and this test patched neither. So it
+    # counted two providers on a bare machine and three on a configured one —
+    # it went red the moment the maintainer put a real key in their shell, which
+    # is to say it broke on success.
+    #
+    # An environment-conditional branch has to be pinned in both directions.
+    # Absent is the case under test here; `test_a_key_in_the_environment_adds_a
+    # _provider` below is the other half.
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.delenv("ZARAM_OPENAI_ENDPOINT", raising=False)
+
     runtime = ProvidersRuntime()
     assert runtime.get_runtime_id() == RUNTIME_ID
     assert runtime.get_version() == RUNTIME_VERSION
@@ -755,6 +767,32 @@ def test_providers_runtime_initialize_registers_providers(monkeypatch):
     assert runtime.manager.catalog.count() == 1
     hc = runtime.health_check()
     assert hc["registered_services"] == 2
+    asyncio.run(runtime.shutdown())
+
+
+def test_a_key_in_the_environment_adds_a_provider(monkeypatch):
+    """The other half of the branch above, asserted rather than encountered.
+
+    OpenRouter registers only when a key exists — keyless it would discover a
+    catalogue of models that cannot be called, which is a list of things Zaram
+    appears to offer and does not. That conditional was previously covered by
+    accident, in the sense that it silently changed another test's answer.
+    """
+    fake_ollama = FakeModelProvider("ollama", models=[make_sample_model()])
+    fake_lm = FakeModelProvider("lm_studio")
+    monkeypatch.setattr("providers.runtime.OllamaAdapter", lambda *a, **k: fake_ollama)
+    monkeypatch.setattr("providers.runtime.LMStudioAdapter", lambda *a, **k: fake_lm)
+    monkeypatch.setattr(
+        "providers.runtime.OpenRouterAdapter",
+        lambda *a, **k: FakeModelProvider("openrouter"),
+    )
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-test-not-a-real-key")
+    monkeypatch.delenv("ZARAM_OPENAI_ENDPOINT", raising=False)
+
+    runtime = ProvidersRuntime()
+    asyncio.run(runtime.initialize())
+
+    assert runtime.registry.count_model_providers() == 3
     asyncio.run(runtime.shutdown())
 
 
