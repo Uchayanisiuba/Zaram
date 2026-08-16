@@ -31,6 +31,40 @@ from services.conversation_manager import ConversationManager
 print("Starting Zaram Backend...")
 app = FastAPI()
 
+# --------------------------------------------------------------------------- #
+# Who may talk to this process.
+#
+# Binding to 127.0.0.1 stopped the API being published to the café network,
+# which was the loud hole. **It does not stop a web page.** A site the user
+# visits can point a hostname it controls at 127.0.0.1 and then reach port 8420
+# with ordinary *same-origin* requests — DNS rebinding — and CORS is no defence
+# because the browser considers those requests same-origin. From there,
+# `GET /memory` is the entire Spine, `GET /egress` is every question ever asked,
+# and `PUT /egress/policy` sets a destination to `allow`.
+#
+# The check is the `Host` header: a rebinding request carries the attacker's
+# hostname, because that is what the browser was told to fetch. A real local
+# client carries `127.0.0.1` or `localhost`. That one comparison closes the
+# browser-borne half of the problem for the cost of a middleware.
+#
+# **It does not close the other half**, and that is worth stating rather than
+# implying: any *process* on this machine can still call the API, because there
+# is no authentication anywhere. Loopback is a network boundary, not an
+# identity one. `X-Zaram-Client` is sent by the interface and enforced by
+# nothing, so it is a label rather than a credential. The fix is a per-launch
+# secret minted here and handed to the frontend by the desktop host — see
+# `docs/MILESTONES.md`. Until that exists, this middleware is the honest
+# improvement rather than the complete one.
+# --------------------------------------------------------------------------- #
+from fastapi.middleware.trustedhost import TrustedHostMiddleware  # noqa: E402
+
+#: `testserver` is what Starlette's TestClient sends. Included so the guard is
+#: exercised by the suite rather than switched off in it — a check the tests
+#: bypass is a check nobody runs.
+ALLOWED_HOSTS = ["127.0.0.1", "localhost", "testserver", "127.0.0.1:8420", "localhost:8420"]
+
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=ALLOWED_HOSTS)
+
 # CORS Setup
 app.add_middleware(
     CORSMiddleware,
