@@ -25,49 +25,62 @@ not developers building products.
 
 ## Status
 
-**Pre-v1.** It runs from source, on one machine, against a local model. There is no
-installer yet, so do not expect a working product from a clone alone.
+**Pre-v1**, and further along than this file said until 16 August 2026 — it claimed
+there was no egress log, no cloud provider, no folder ingest and no installer, all of
+which had stopped being true. Corrected rather than quietly rewritten, because a status
+section that understates a project is the same defect as one that overstates it, and it
+sits on the one page a stranger reads first.
 
 What has been observed working, rather than merely written:
 
-- The recall loop, end to end. The Spine persists to SQLite with Ollama `bge-m3`
+- **The recall loop, end to end.** The Spine persists to SQLite with Ollama `bge-m3`
   embeddings, the index rebuilds on boot, and a fact stored in one session is recalled
   in the next — verified across a process restart.
-- Every recalled fact arrives with provenance the interface displays and can open.
-- Deleting a fact changes the answers that depended on it.
-- The frontend talks to the backend over NDJSON streaming on port 8420.
+- **Every recalled fact arrives with provenance** the interface displays and can open.
+  Correcting or deleting one changes the answers that depended on it.
+- **The egress log.** Append-only, hash-chained, viewable, with the literal text of what
+  left. Per-host policy, default deny, and a kill switch that lives in the policy rather
+  than in a route, so it covers tool traffic and model discovery too.
+- **Confirm before send**, verified against a live provider: preview, log and wire were
+  byte-identical at 1650 bytes, with a struck fact absent from all three.
+- **Cloud providers and web search**, several connections at once, routed per model.
+- **Folder ingest**, with per-source privacy policy.
+- **Generated documents** — .docx, .xlsx, .pdf, .md, .csv, charts — with preview.
+- **Speech both directions**, local and optional, keeping pace with the text.
+- **An installer**: `Zaram-0.1.0-x64.exe`, 186 MB, plus a portable build.
+- **Export.** Everything Zaram holds, as JSONL and CSV in one .zip.
 
 What is not built:
 
-- **No egress log**, so no cloud provider is wired and web search is switched off.
-  Rule 3 says the log comes first; that ordering is deliberate and is why the
-  discovery runtime sits unreachable behind it.
-- One provider only — local Ollama. The second, cloud provider is the next milestone.
-- No folder ingest.
-- Packaging is unproven.
-
-Current milestone — the recall demo:
-
-> Ask model A something. Ask model B about it later. Get a cited answer. Delete the
-> fact. Watch the answer change. Open the egress log and see what left.
-
-Four of those six steps work today. The two involving a second model and the egress log
-do not. Everything outside this list waits.
+- **Obligation extraction is not wired.** The extractor reads payment, deliverable,
+  expiry and renewal clauses with the sentence each came from, and nothing calls it.
+  This is the differentiator and it is the next real feature.
+- **Knowledge domains**, and ingestion by drop, paste or upload. The parsers exist; the
+  way in does not.
+- **The local API has no authentication.** A `Host` check refuses DNS rebinding, so a
+  web page cannot reach it — but any process on this machine still can.
+- **The installer has not been run on a machine that has never seen this repo.** Until
+  that happens, treat "a stranger can install this" as unproven.
 
 ## v1 scope
 
 In scope:
 
-- Ingest a folder into the Spine
-- Chat routed to at least two providers (one cloud, one local)
+- Ingest a folder, a dropped file, or pasted text into the Spine
+- Knowledge domains, linkable to projects
+- Chat routed across local and cloud providers, including free tiers, with the data
+  policy of each stated before it is chosen
 - Recall across providers, with visible provenance
 - Correct or delete a fact and see answers change
-- Viewable egress log
-- Per-source privacy policy
+- Viewable egress log, per-source privacy policy, export
+- The business base layer: invoices, quotes, receipts, expenses
+- Obligation extraction, surfaced before it lapses
+- Generative documents, and read-only MCP for Unreal and Blender
+- The character: your own name, manner, voice and VRM for it
 
 Explicitly out of scope until v1 ships and has been tested with real users: agents, IDE
-integration, extensions marketplace, updates feed, voice, document generation,
-multi-user, and any additional workspace.
+integration, extensions marketplace, mutative tools, multi-user, and any additional
+workspace.
 
 ## Layout
 

@@ -65,6 +65,58 @@ emotional expressions not derived from system state, and voice lines. It rules
 *in*: the same four-to-six states the orb has, rendered with a face instead of a
 glow.
 
+### The shipped avatar is also the mascot — 15 August 2026
+
+A helmeted robot with a dot-matrix LED face. It is the default avatar and the
+product's mascot, and the second of those is a collision with the line above
+worth stating rather than glossing: the reference art smiles, and a smile is not
+a system state.
+
+**It resolves because mascot and renderer are two jobs, and only one of them is
+governed here.** The rule says the *status indicator* may not be a someone. It
+does not say the product may not have key art. So the character smiles on the
+site, the installer, the README and the icon; inside the product its rest face
+is `sil`, a flat line. Same asset, two contexts, and the split costs nothing —
+a smiling render sells just as well when the running app is honest.
+
+The pressure this document predicted — *"from anything that sells or
+personalises characters"* — is now arriving from the product's own marketing
+rather than from an avatar store, which is the harder direction to refuse.
+Hence writing it down.
+
+### A screen face is not a blendshape face
+
+The LED panel is driven by VRM 1.0 `textureTransformBinds`, which slide a UV
+window across a sprite atlas, rather than by morph targets. `@pixiv/three-vrm`
+implements them (`VRMExpressionTextureTransformBind`), so the driver's shape is
+unchanged — `setValue('aa', 1)` still selects a mouth. What changes is how the
+value behaves, and both differences were read off `applyWeight` rather than
+assumed:
+
+- **Weights are binary.** `applyWeight` scales the UV delta linearly, so a
+  fractional weight lands *between* two atlas cells and renders a sliced
+  composite of both. The eased mouth lerp in `VrmAvatar.tsx` is correct for
+  morph rigs and wrong for this one.
+- **One expression per material.** Binds are additive (`offset.add`), so two
+  simultaneous non-zero mouth expressions sum into a cell that does not exist.
+
+The two paths are told apart by **bind type**, never by which avatar is loaded.
+Special-casing the bundled character would break bring-your-own on the first
+sprite-faced VRM a user supplies, which is the whole reason `vrmSafety.ts`
+exists.
+
+Eyes and mouth are **separate materials** so blinking stays independent of
+speech; a single combined atlas would need a cell per combination. The face
+panel is the only thing the sprite touches — black base colour, atlas on
+`emissiveMap`, two quads on the visor, full 0–1 UVs with cell selection done
+entirely by `repeat` and `offset`.
+
+State stays on the **rim light**, not on the face. Moving it to the character's
+ear rings was considered and not built: the rim already works, needs no
+geometry, and reads on any VRM. The face's colour is therefore a constant
+(`--face-led`, `#818cf8`) and asserts nothing — see `docs/UI-SPEC.md` for why it
+is neither accent, and specifically why it is not violet.
+
 ---
 
 ## Question 1 — can the TTS path emit phoneme timings?

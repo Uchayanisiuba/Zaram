@@ -29,9 +29,27 @@ Build this as one pass before any screen.
 --accent       #5EE7DC    active, local, primary state
 --accent-2     #8B7FD4    cloud, secondary emphasis
 --warn         #E5A44C
+
+--face-led     #818cf8    the avatar's LED face. Constant; carries no state.
 ```
 
 One accent per screen region. Never both competing in the same area.
+
+**`--face-led` is deliberately neither accent — 15 August 2026.** The shipped
+avatar's face is a dot-matrix panel that is lit whenever the avatar is
+rendered, so whatever colour it takes, it wears permanently. Both accents above
+already mean something, and `--accent-2` means *cloud* — a permanently violet
+face would state, on the one indicator whose whole job is to be trusted, that
+data had left the device. Indigo is close to the character reference, is
+distinct from both accents at a glance, and asserts nothing.
+
+**This palette has drifted and the drift is recorded rather than fixed.**
+`VrmAvatar.tsx` uses `#78DCF0` where this file says `#5EE7DC`, and
+`index.css` carries an indigo ramp (`#6366f1` / `#818cf8`) that appears
+nowhere above while being used throughout the frontend. `--face-led` pins to
+that ramp because it is what the product actually looks like. Reconciling the
+other two is a separate job; doing it here, as a side effect of an avatar
+change, would be a palette rewrite nobody asked for and nobody could review.
 
 Radii: 12px cards and panels, 8px controls, pill only for chips.
 

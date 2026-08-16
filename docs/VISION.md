@@ -67,7 +67,18 @@ The shape is identical across every business type; only the nouns change.
 | Researcher | grant deadlines, submission dates, ethics renewals |
 | Production | delivery dates, review rounds, render windows |
 
-One mechanism, every vertical. **The product is horizontal; the wedge is not.** We
+One mechanism, every vertical.
+
+> **Revised 16 August 2026 — read `CLAUDE.md` first.** The paragraph below argues
+> for a freelance wedge, and that is now only half right. Obligation extraction
+> genuinely is freelance-shaped, and it is now **the first pack** rather than the
+> entry point. What earns the daily open is universal — an assistant one keystroke
+> away that is fast, remembers you, reads your documents and sends nothing
+> anywhere — and that serves students, researchers, writers, developers,
+> consultants, and anyone whose documents are not allowed to leave. The section
+> below is kept because everything it says about the *mechanism* still holds.
+
+**The product is horizontal; the wedge is not.** We
 start with freelancers and one-person businesses because that is the sharpest version
 of the pain, reachable without a sales team, decided by one person, and felt
 personally. See `docs/PITCH.md`.
