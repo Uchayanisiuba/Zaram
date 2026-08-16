@@ -20,6 +20,13 @@ function registerHandlers(ipcMain, ctx) {
   const { services, app, config, backend, logger } = ctx;
   const log = logger || console;
 
+  // Resolved on each call rather than captured. Handlers are registered before
+  // the native capabilities are constructed, so reading `ctx.ambient` once here
+  // would bind `null` forever and every dismissal would silently do nothing —
+  // the same shape as the dead switches this project keeps finding, and it
+  // would have looked exactly like the overlay working.
+  const ambient = () => (typeof ctx.getAmbient === 'function' ? ctx.getAmbient() : null);
+
   function handle(channel, fn) {
     ipcMain.handle(channel, async (_event, ...args) => {
       try {
@@ -48,6 +55,26 @@ function registerHandlers(ipcMain, ctx) {
     totalMemory: os.totalmem(),
     freeMemory: os.freemem(),
   }));
+
+  // The ambient overlay. `ambient` is absent when the surface is switched off
+  // in settings, and a disabled overlay answering "nothing happened" is better
+  // than a renderer whose calls reject — the panel is not on screen to see the
+  // rejection, so it would go nowhere and be reported nowhere.
+  handle(Channels.ambient.dismiss, () => {
+    const surface = ambient();
+    if (surface) surface.dismiss();
+    return { dismissed: Boolean(surface) };
+  });
+  handle(Channels.ambient.hover, (hovered) => {
+    const surface = ambient();
+    if (surface) surface.setHandleHovered(hovered);
+    return { hovered: Boolean(hovered) };
+  });
+  handle(Channels.ambient.summon, () => {
+    const surface = ambient();
+    if (surface) surface.summon();
+    return { summoned: Boolean(surface) };
+  });
 
   handle(Channels.window.minimize, () => services.window.minimize());
   handle(Channels.window.maximize, () => services.window.maximize());

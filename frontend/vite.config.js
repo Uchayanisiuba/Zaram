@@ -17,6 +17,25 @@ export default defineConfig({
       '@': path.resolve(__dirname, 'src'),
     },
   },
+  // Two entry points, not one.
+  //
+  // `ambient.html` is the overlay Electron summons on a global hotkey. It gets
+  // its own entry so it gets its own bundle: the shell's is 550 kB plus a
+  // 760 kB VRM chunk, and the overlay's entire claim is that it is the fastest
+  // thing on the machine. A route inside the shell would have made the
+  // smallest surface pay for the largest one.
+  //
+  // Declaring `main` explicitly is required — naming any input replaces Vite's
+  // default of `index.html` rather than adding to it, so omitting it here
+  // would build the overlay and ship no application.
+  build: {
+    rollupOptions: {
+      input: {
+        main: path.resolve(__dirname, 'index.html'),
+        ambient: path.resolve(__dirname, 'ambient.html'),
+      },
+    },
+  },
   server: {
     port: 5173,
     // Fail rather than drift. Electron's dev window loads localhost:5173 as a
