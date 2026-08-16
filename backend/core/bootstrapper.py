@@ -289,6 +289,37 @@ class KernelBootstrapper:
         await self.documents_runtime.initialize()
         register_runtime_for_health(self.documents_runtime)
 
+        # An invoice is a table of line items, not paragraphs, so the documents
+        # runtime needs a way to read an answer into fields. It is handed a
+        # callable rather than the models runtime: the artifacts layer must not
+        # acquire a dependency on the model layer, the same constraint
+        # `cloud_config` and `wire_name` are injected under.
+        #
+        # Runs against the *local* engine specifically. Reading an answer the
+        # user has already been shown is not a question worth sending to a
+        # billed provider, and a document step silently becoming egress would
+        # be a rule 5 surprise attached to a generative tool.
+        models_runtime = getattr(self, "models_runtime", None)
+
+        def _read_into_fields(prompt: str, system: str) -> str:
+            engine = getattr(getattr(models_runtime, "_service", None), "engine", None)
+            local = getattr(engine, "_local", engine)
+            if local is None:
+                raise RuntimeError("no local engine")
+            # Constrained decoding where the engine offers it. Ollama's
+            # `format: json` plus temperature 0 is the difference between an
+            # extraction that works and one that works most times — the first
+            # live run refused on a model the suite had just measured as
+            # capable, because the chat path samples. `getattr` rather than a
+            # protocol method: an engine without it still works, less reliably.
+            structured = getattr(local, "read_structured", None)
+            if callable(structured):
+                return structured(prompt, system)
+            return "".join(local.stream_response(prompt, system))
+
+        if models_runtime is not None:
+            self.documents_runtime.set_extractor(_read_into_fields)
+
     async def shutdown(self):
         print("[Bootstrapper] Shutting down Zaram Kernel...")
         if self.speech_runtime:
