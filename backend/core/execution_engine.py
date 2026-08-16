@@ -623,13 +623,36 @@ class ExecutionEngine:
         events = []
         for source in sources:
             snippet = " ".join((source.get("snippet") or "").split())
+            kind = self._source_kind(source)
+
+            # **A local result reached through search is judged the same way it
+            # is through recall.** A knowledge search returns the merged list,
+            # so a fact from the user's own Spine arrives here — and `cited`
+            # was `True` for everything. The same fact was therefore cited when
+            # a search step happened to run and not cited when recall reached
+            # it directly, at identical relevance. Two answers to one question,
+            # which is the shape this codebase keeps paying for.
+            #
+            # Web stays always-cited, and that asymmetry is deliberate rather
+            # than an oversight: bytes left the machine to fetch it, so it is
+            # disclosed regardless. It is also no longer a loophole — since
+            # `InternetRuntimeImpl._rank_results` began measuring relevance
+            # against the query, an irrelevant page does not reach this
+            # function at all. The filter moved to where the evidence is,
+            # instead of being skipped because disclosure had to happen anyway.
+            relevance = source.get("score")
+            if kind == "web" or relevance is None:
+                cited = True
+            else:
+                cited = float(relevance) >= self.MIN_CITATION_SCORE
+
             events.append(StreamEvent.source(
-                kind=self._source_kind(source),
+                kind=kind,
                 url=source.get("url"),
                 title=(source.get("title") or "")[:120],
                 excerpt=snippet[: self.EXCERPT_CHARS] or None,
-                relevance=source.get("score"),
-                cited=True,
+                relevance=relevance,
+                cited=cited,
                 # The link that makes the citation and the egress log the same
                 # object viewed twice. None when the search path did not report
                 # one — shown as absent rather than faked, because a citation

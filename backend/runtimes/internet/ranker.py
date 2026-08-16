@@ -1,75 +1,40 @@
+"""Superseded by `relevance.py`. Kept only as a re-export.
+
+`InternetRankerImpl` lived here and was never constructed by anything — an
+eighth complete, tested-looking, unreachable module. It would also have raised
+`FrozenInstanceError` on its first result if something had called it, because
+it assigned to `result.score` and `SearchResult` is a frozen dataclass. So the
+codebase held two rankers: this one, which compared query terms to results and
+could not run, and `InternetRuntimeImpl._rank_results`, which ran and compared
+nothing.
+
+Deleting rather than repairing, because the repair is `relevance.py` and two
+implementations of one decision is how they came to disagree in the first
+place. `CLAUDE.md`: a failing test is fixed or deleted, never left — the same
+applies to a module nothing calls.
+
+The names below are re-exported so an import of this path keeps working and
+lands on the implementation that is actually wired up.
+"""
+
 from __future__ import annotations
 
-import time
-from typing import Any
+from .relevance import (  # noqa: F401
+    MIN_WEB_RELEVANCE,
+    authority_of,
+    connectors_for,
+    fuse,
+    relevance_of,
+    relevant,
+    scored,
+)
 
-from .contracts import InternetRanker, SearchResult, SearchQuery
-
-
-class InternetRankerImpl(InternetRanker):
-    """Ranks internet search results by relevance, source trust, and recency."""
-
-    def __init__(self):
-        self._connector_priorities = {
-            "wikipedia": 0.9,
-            "github": 0.8,
-            "duckduckgo": 0.6,
-            "rss": 0.5,
-        }
-        self._stats = {"total_rankings": 0, "total_latency_ms": 0.0}
-
-    async def rank(self, results: list[SearchResult], query: SearchQuery) -> list[SearchResult]:
-        start = time.time()
-        self._stats["total_rankings"] += 1
-
-        if not results:
-            return []
-
-        query_terms = set(query.query.lower().split())
-
-        for result in results:
-            score = result.score
-
-            # Connector priority
-            connector_priority = self._connector_priorities.get(result.connector, 0.5)
-
-            # Title match
-            title_match = len(query_terms & set(result.title.lower().split())) / max(len(query_terms), 1)
-
-            # Snippet match
-            snippet_match = len(query_terms & set(result.snippet.lower().split())) / max(len(query_terms), 1)
-
-            # Recency (if metadata has date)
-            recency = 0.5
-            if "published" in result.metadata:
-                try:
-                    from dateutil import parser
-                    pub_date = parser.parse(result.metadata["published"])
-                    age_days = (time.time() - pub_date.timestamp()) / 86400
-                    recency = 1.0 / (1.0 + age_days / 30.0)
-                except Exception:
-                    pass
-
-            # Combine scores
-            combined = (
-                0.35 * score +
-                0.25 * connector_priority +
-                0.20 * title_match +
-                0.15 * snippet_match +
-                0.05 * recency
-            )
-            result.score = combined
-
-        results.sort(key=lambda r: r.score, reverse=True)
-
-        latency = (time.time() - start) * 1000
-        self._stats["total_latency_ms"] += latency
-        return results[: query.max_results]
-
-    def health_check(self) -> dict[str, Any]:
-        return {
-            "status": "healthy",
-            "stats": self._stats,
-            "avg_latency_ms": self._stats["total_latency_ms"] / max(self._stats["total_rankings"], 1),
-            "connector_priorities": self._connector_priorities,
-        }
+__all__ = [
+    "MIN_WEB_RELEVANCE",
+    "authority_of",
+    "connectors_for",
+    "fuse",
+    "relevance_of",
+    "relevant",
+    "scored",
+]
