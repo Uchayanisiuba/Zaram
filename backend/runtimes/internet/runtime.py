@@ -414,19 +414,34 @@ class InternetRuntimeImpl(InternetRuntime):
         return hashlib.md5(key.encode()).hexdigest()
 
     def _select_connectors(self, query: SearchQuery) -> list[InternetConnector]:
+        """Which sources are worth asking, given what was asked.
+
+        Every query used to reach every connector, so a question about an
+        election queried GitHub. Routing narrows it, and narrowing what is
+        fetched is also less egress for the same answer — a rule 5 improvement
+        arriving as a side effect of a relevance fix.
+
+        General web search is never dropped. It is the connector with no domain
+        assumption, so a misclassification costs a slightly wider search rather
+        than an empty answer.
+        """
         if query.connector_types:
-            selected = [
+            return [
                 c for c in self._connectors.values()
                 if c.get_connector_type() in query.connector_types and c.is_available()
             ]
-        else:
-            selected = []
-            for ctype in self._connector_order:
-                for conn in self._connectors.values():
-                    if conn.get_connector_type() == ctype and conn.is_available():
-                        selected.append(conn)
-                        break
-        return selected
+
+        selected = []
+        for ctype in self._connector_order:
+            for conn in self._connectors.values():
+                if conn.get_connector_type() == ctype and conn.is_available():
+                    selected.append(conn)
+                    break
+
+        from .relevance import connectors_for
+
+        wanted = set(connectors_for(query.query, [c.get_connector_id() for c in selected]))
+        return [c for c in selected if c.get_connector_id() in wanted]
 
     async def _search_connector(self, connector: InternetConnector, query: SearchQuery) -> list[SearchResult]:
         last_error = None
@@ -445,22 +460,43 @@ class InternetRuntimeImpl(InternetRuntime):
         return []
 
     def _rank_results(self, results: list[SearchResult], query: SearchQuery) -> list[SearchResult]:
-        priority_map = {
-            InternetConnectorType.WIKIPEDIA: 100,
-            InternetConnectorType.GITHUB: 90,
-            InternetConnectorType.DUCKDUCKGO: 70,
-            InternetConnectorType.RSS: 60,
-        }
+        """Score against the question, keep what is relevant, order by fusion.
 
-        def rank_key(r: SearchResult):
-            return (
-                -r.score,
-                -priority_map.get(r.connector_type, 50),
-                -r.retrieved_at,
+        **This used to compare nothing to the query.** It sorted on `r.score`,
+        which is a constant each connector stamps on everything it returns —
+        Wikipedia 0.8, GitHub and RSS 0.7, DuckDuckGo 0.6 — then on a second
+        copy of the same prior, then on retrieval time. The resulting order was
+        identical for every question ever asked: Wikipedia, GitHub, DuckDuckGo.
+        That is the entire explanation for an election query coming back with a
+        GitHub repository, and those constants reached the citation chips as
+        relevance, which `UI-SPEC` forbids outright.
+
+        Three separate questions now, kept separate, which is the lesson
+        `CLAUDE.md` records as this codebase's most expensive recurring bug:
+
+        1. **Score** — `relevance_of`, content against content, nothing else.
+        2. **Membership** — a floor on that relevance and on nothing else.
+        3. **Order** — rank fusion over relevance, authority and recency, whose
+           output is on no scale anybody could compare against the floor.
+
+        A search that finds nothing relevant returns nothing. That is the
+        honest answer and `_format_search_results` already handles it by
+        falling back to the plain question — far better than handing the model
+        four irrelevant pages and an instruction to trust them over its own
+        training.
+        """
+        from .relevance import fuse, relevant, scored
+
+        measured = scored(query.query, results)
+        keep = relevant(measured)
+
+        if results and not keep:
+            print(
+                f"[InternetRuntime] {len(results)} result(s) fetched, none relevant "
+                f"to '{query.query[:60]}' — answering without web sources."
             )
 
-        ranked = sorted(results, key=rank_key)
-        return ranked[:query.max_results]
+        return fuse(keep, query=query.query, limit=query.max_results)
 
     async def search(self, query: SearchQuery) -> list[SearchResult]:
         start = time.time()

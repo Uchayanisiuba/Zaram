@@ -4,7 +4,7 @@ import time
 import math
 from typing import Any
 
-from .contracts import MemoryQuery, MemoryRanker, MemoryResult, Origin
+from .contracts import MemoryQuery, MemoryRanker, MemoryRecord, MemoryResult, Origin
 
 
 class MemoryRankerImpl(MemoryRanker):
