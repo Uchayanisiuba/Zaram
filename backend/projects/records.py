@@ -304,7 +304,6 @@ def _type_or_general(value: str) -> ProjectType:
 
 
 def default_db_path() -> str:
-    return os.getenv(
-        "ZARAM_PROJECTS_DB",
-        os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), DEFAULT_DB_NAME),
-    )
+    from core.paths import in_data_dir
+
+    return in_data_dir(DEFAULT_DB_NAME, "ZARAM_PROJECTS_DB")

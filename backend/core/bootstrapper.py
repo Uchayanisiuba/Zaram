@@ -136,12 +136,13 @@ class KernelBootstrapper:
         import os
         from runtimes.memory import create_memory_runtime
 
-        # The Spine lives on disk next to the backend, and survives restarts.
-        # ZARAM_SPINE_PATH overrides the location (used by the desktop host).
-        spine_path = os.getenv(
-            "ZARAM_SPINE_PATH",
-            os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "spine.db"),
-        )
+        # The Spine lives in the user's data directory and survives restarts.
+        # ZARAM_SPINE_PATH overrides the location (used by the desktop host);
+        # `core.paths` decides the default, which is the backend directory in a
+        # checkout and %APPDATA%\Zaram — or its equivalent — once installed.
+        from core.paths import in_data_dir
+
+        spine_path = in_data_dir("spine.db", "ZARAM_SPINE_PATH")
 
         # Real semantic embeddings via Ollama. bge-m3 produces 1024-dim vectors.
         # Falls back to the hash backend if Ollama or the model is unavailable —

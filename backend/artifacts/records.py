@@ -327,7 +327,6 @@ def _kind(value: str) -> ArtifactKind:
 
 def default_db_path() -> str:
     """Beside the other stores, overridable for tests and packaging."""
-    override = os.getenv("ZARAM_ARTIFACTS_DB")
-    if override:
-        return override
-    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", DEFAULT_DB_NAME)
+    from core.paths import in_data_dir
+
+    return in_data_dir(DEFAULT_DB_NAME, "ZARAM_ARTIFACTS_DB")
