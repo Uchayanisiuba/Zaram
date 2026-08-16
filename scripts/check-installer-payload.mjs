@@ -57,6 +57,8 @@ function readConfig() {
   return {
     includes: entries.filter((e) => !e.startsWith('!')),
     excludes: entries.filter((e) => e.startsWith('!')).map((e) => e.slice(1)),
+    asar: cfg.asar !== false,
+    asarUnpack: (cfg.asarUnpack ?? []).map(String),
   };
 }
 
@@ -92,7 +94,28 @@ function walk(dir, out) {
   }
 }
 
-const { includes, excludes } = readConfig();
+const { includes, excludes, asar, asarUnpack } = readConfig();
+
+// The backend must be reachable by a process that is not Electron.
+//
+// This check exists because the previous one could not see the defect it was
+// written to prevent. It graded what the globs *include*, and the backend was
+// included — sealed inside `app.asar`, where the main process reads it happily
+// and the spawned `python.exe` cannot reach it at all. The installer built,
+// the payload was correct, and the product could not start on any machine
+// without a checkout of this repo.
+//
+// An archive is fine for JavaScript that Electron itself loads. It is never
+// fine for something handed to another program.
+if (asar && !asarUnpack.some((p) => minimatch('backend/main.py', p, MATCH))) {
+  console.error(
+    '\n  The backend would be sealed inside app.asar.\n' +
+      '  Electron can read an asar; a spawned python.exe cannot — it fails\n' +
+      '  with ENOENT on the working directory and blames the interpreter.\n' +
+      '  Add `asarUnpack: ["backend/**"]` to electron-builder.yml.\n',
+  );
+  process.exit(1);
+}
 
 if (includes.includes('backend')) {
   console.error(

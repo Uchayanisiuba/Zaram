@@ -74,7 +74,42 @@ function resolvePythonCommand({ cwd, resourcesPath, env, platform }) {
 }
 
 function fsExistsSync(p) {
-  try { return require('fs').existsSync(p); } catch (_) { return false; }
+  try { return realFs().existsSync(p); } catch (_) { return false; }
+}
+
+/**
+ * A filesystem that cannot see inside `app.asar`.
+ *
+ * Electron patches `fs` in the main process so archive contents look like
+ * ordinary files. That is convenient for `require` and a trap for anything
+ * that hands a path to another process: `existsSync` says yes, `spawn` says
+ * ENOENT, and the two disagree because only one of them is running inside
+ * Electron. `original-fs` is Electron's unpatched copy and is what every check
+ * on this path must use — the whole defect lives in the gap between the two.
+ *
+ * Outside Electron the module is absent and plain `fs` is already unpatched,
+ * so the fallback is the same filesystem by a different name.
+ */
+function realFs() {
+  try { return require('original-fs'); } catch (_) { return require('fs'); }
+}
+
+/** True for a path that lies inside the archive itself, unpacked tree aside. */
+function insideArchive(p) {
+  if (typeof p !== 'string') return false;
+  return /app\.asar(?!\.unpacked)($|[\\/])/.test(p);
+}
+
+/**
+ * The same location in the unpacked tree beside the archive.
+ *
+ * `asarUnpack` in `electron-builder.yml` writes `backend/**` to
+ * `resources/app.asar.unpacked/backend`, but `app.getAppPath()` keeps naming
+ * the archive. Translating is what connects the two.
+ */
+function unpackedTwin(p) {
+  if (!insideArchive(p)) return p;
+  return p.replace(/app\.asar($|[\\/])/, 'app.asar.unpacked$1');
 }
 
 function buildArgs() {
@@ -89,12 +124,16 @@ function buildArgs() {
  * are pushed to subscribers.
  */
 class BackendLauncher {
-  constructor({ config, logger, spawnImpl, checkHealthImpl, fsImpl, platform }) {
+  constructor({ config, logger, spawnImpl, checkHealthImpl, fsImpl, realFsImpl, platform }) {
     this.config = config;
     this.logger = logger || console;
     this._spawn = spawnImpl || require('child_process').spawn;
     this._check = checkHealthImpl || checkHealth;
     this._fs = fsImpl || require('fs');
+    // Separate from `_fs` on purpose — see `realFs`. A test injecting one
+    // filesystem means it, so an injected `fsImpl` stands in for both unless
+    // the test distinguishes them.
+    this._realFs = realFsImpl || fsImpl || realFs();
     this._platform = platform || process.platform;
     this.child = null;
     this.status = { state: 'starting', url: config.backend.baseUrl, lastCheckedAt: 0 };
@@ -139,20 +178,49 @@ class BackendLauncher {
     return true;
   }
 
+  /**
+   * Where `main.py` lives, as a path another process can actually enter.
+   *
+   * Two rules, and the first one is the fix for a packaged app that could
+   * never start:
+   *
+   * 1. **A path inside `app.asar` is never returned**, however convincingly it
+   *    exists. It exists to Electron and to nothing else, and handing it to
+   *    `spawn` as a working directory fails on the cwd rather than on the
+   *    command — an ENOENT that names the interpreter and blames the wrong
+   *    thing. Each candidate is translated to its unpacked twin first, and the
+   *    archive form is then discarded rather than kept as a fallback.
+   * 2. **Existence is checked against `original-fs`.** Checking with the
+   *    patched `fs` is what made rule 1 necessary and invisible at the same
+   *    time.
+   */
   _resolveBackendDir() {
-    const candidates = [
-      path.join(this.config.appPath, 'backend'),
+    const roots = [
       this.config.appPath,
-      path.join(process.cwd(), 'backend'),
-      path.join(this.config.resourcesPath || process.cwd(), 'backend'),
-    ];
+      process.cwd(),
+      this.config.resourcesPath || process.cwd(),
+    ].filter(Boolean);
+
+    const candidates = [];
+    for (const root of roots) {
+      for (const c of [path.join(root, 'backend'), root]) {
+        const real = unpackedTwin(c);
+        if (insideArchive(real)) continue;
+        if (!candidates.includes(real)) candidates.push(real);
+      }
+    }
+
     for (const c of candidates) {
       try {
-        if (this._fs.existsSync(path.join(c, 'main.py'))) return c;
+        if (this._realFs.existsSync(path.join(c, 'main.py'))) return c;
       } catch (_) { /* ignore */ }
     }
-    // Fall back to appPath/backend even if not found; the spawn error will surface.
-    return path.join(this.config.appPath, 'backend');
+
+    // Nothing was found. Return the unpacked location rather than the archive:
+    // the spawn will still fail, but it fails naming a path a person can go
+    // and look at, which the archive path never was.
+    this.logger.error('No backend directory found', { candidates });
+    return unpackedTwin(path.join(this.config.appPath, 'backend'));
   }
 
   _spawnBackend() {
@@ -282,4 +350,6 @@ module.exports = {
   buildArgs,
   bundledPython,
   BUNDLED_RUNTIME_DIR,
+  insideArchive,
+  unpackedTwin,
 };

@@ -5,7 +5,14 @@ const assert = require('node:assert');
 const path = require('node:path');
 const { EventEmitter } = require('node:events');
 const { createConfig } = require('../electron/config');
-const { BackendLauncher, resolvePythonCommand, buildArgs, bundledPython } = require('../electron/backend/backendLauncher');
+const {
+  BackendLauncher,
+  resolvePythonCommand,
+  buildArgs,
+  bundledPython,
+  insideArchive,
+  unpackedTwin,
+} = require('../electron/backend/backendLauncher');
 
 function fakeChild() {
   const c = new EventEmitter();
@@ -177,6 +184,94 @@ test('BackendLauncher: reports error when interpreter missing', async () => {
   });
   assert.strictEqual(got.state, 'error');
   launcher.stop();
+});
+
+// --------------------------------------------------------------------------
+// The archive boundary.
+//
+// A path inside `app.asar` exists to Electron's patched `fs` and to nothing
+// else on the machine. The packaged app resolved its backend directory to
+// exactly such a path, passed the existence check because that check runs in
+// Electron, and then handed it to `spawn` as a working directory — which
+// failed with ENOENT on the cwd while naming the interpreter.
+//
+// Every machine holding a checkout fell through to `process.cwd()/backend`
+// and worked, so the defect was invisible to everyone who could have seen it.
+// These tests fail if a backend directory inside the archive is ever
+// selectable again.
+// --------------------------------------------------------------------------
+
+test('insideArchive: the archive is inside, the unpacked tree beside it is not', () => {
+  assert.ok(insideArchive('/r/resources/app.asar'));
+  assert.ok(insideArchive('/r/resources/app.asar/backend'));
+  assert.ok(insideArchive('C:\\r\\resources\\app.asar\\backend'));
+
+  assert.ok(!insideArchive('/r/resources/app.asar.unpacked/backend'));
+  assert.ok(!insideArchive('C:\\r\\resources\\app.asar.unpacked\\backend'));
+  // A directory that merely starts with the same letters is not the archive.
+  assert.ok(!insideArchive('/r/app.asarge/backend'));
+  assert.ok(!insideArchive('/home/me/zaram/backend'));
+});
+
+test('unpackedTwin: translates the archive path, leaves everything else alone', () => {
+  assert.strictEqual(
+    unpackedTwin('/r/resources/app.asar/backend'),
+    '/r/resources/app.asar.unpacked/backend',
+  );
+  assert.strictEqual(
+    unpackedTwin('C:\\r\\resources\\app.asar\\backend'),
+    'C:\\r\\resources\\app.asar.unpacked\\backend',
+  );
+  assert.strictEqual(unpackedTwin('/home/me/zaram/backend'), '/home/me/zaram/backend');
+  // Idempotent — translating twice must not produce `app.asar.unpacked.unpacked`.
+  const once = unpackedTwin('/r/resources/app.asar/backend');
+  assert.strictEqual(unpackedTwin(once), once);
+});
+
+test('BackendLauncher: never spawns with a working directory inside app.asar', () => {
+  // The filesystem Electron would present: everything exists, including the
+  // archive interior. This is precisely the lie that hid the defect.
+  const everythingExists = { existsSync: () => true };
+  const cfg = createConfig({
+    isDev: false,
+    appPath: path.join('/r', 'resources', 'app.asar'),
+    userDataPath: '/data',
+  });
+  const launcher = new BackendLauncher({
+    config: cfg,
+    spawnImpl: () => fakeChild(),
+    checkHealthImpl: async () => ({ ok: true }),
+    fsImpl: everythingExists,
+    realFsImpl: everythingExists,
+    platform: 'linux',
+  });
+
+  const dir = launcher._resolveBackendDir();
+  assert.ok(
+    !insideArchive(dir),
+    `resolved ${dir}, which no process outside Electron can enter`,
+  );
+  assert.strictEqual(dir, path.join('/r', 'resources', 'app.asar.unpacked', 'backend'));
+});
+
+test('BackendLauncher: falls back to a real path, not the archive, when nothing is found', () => {
+  const nothingExists = { existsSync: () => false };
+  const cfg = createConfig({
+    isDev: false,
+    appPath: path.join('/r', 'resources', 'app.asar'),
+    userDataPath: '/data',
+  });
+  const launcher = new BackendLauncher({
+    config: cfg,
+    spawnImpl: () => fakeChild(),
+    checkHealthImpl: async () => ({ ok: true }),
+    fsImpl: nothingExists,
+    realFsImpl: nothingExists,
+    logger: { info() {}, warn() {}, error() {}, debug() {} },
+    platform: 'linux',
+  });
+
+  assert.ok(!insideArchive(launcher._resolveBackendDir()));
 });
 
 test('BackendLauncher: child exit triggers unavailable and reconnect attempt', async () => {

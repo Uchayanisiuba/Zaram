@@ -72,6 +72,27 @@ files:
   - "!**/__pycache__"
   - "!**/*.pyc"
   - "!**/node_modules"
+# The backend, unpacked beside the archive rather than sealed inside it.
+#
+# **A native process cannot read an asar.** The archive is an Electron format;
+# the main process gets a patched `fs` that reads it transparently and nothing
+# else on the machine does. So `backend/` went into `app.asar`, the launcher's
+# `existsSync` check passed — because that check runs in Electron — and the
+# spawned `python.exe` was then given a working directory that does not exist
+# on the real filesystem. It failed with ENOENT on the cwd, not on the
+# interpreter, which is why the error named neither.
+#
+# Every machine with a checkout fell through to `process.cwd()/backend` and
+# worked. A machine that had never seen the repo had nothing to fall through
+# to, and that is the single acceptance criterion M11 could never test here.
+#
+# `asarUnpack` rather than `extraResources` deliberately: the allow-list above
+# is the thing that keeps the maintainer's Spine out of the installer, and it
+# has already been wrong once. Unpacking reuses it. `extraResources` would mean
+# writing those exclusions a second time in a different syntax, where a missing
+# one publishes private data again.
+asarUnpack:
+  - "backend/**"
 # The Python runtime, unpacked beside the app rather than inside app.asar.
 #
 # An archived file cannot be executed, and a bundled CPython has to be — so it
