@@ -144,6 +144,58 @@ def _refuse_by_default(_: EgressRequest) -> bool:
     return False
 
 
+@dataclass(frozen=True)
+class SearchReadGrant:
+    """Permission to read a named set of pages a search has just returned.
+
+    **Why a capability and not a rule.** Reading a search result means fetching
+    a host the *search engine* chose. The user cannot predict it and so cannot
+    pre-allow it, and under default-deny every page is therefore refused —
+    which is how "who won the Osun state election" came to be answered from a
+    headline embedded in a URL while the article sat unread. Asking per host
+    would ask the same question forty times to answer one question, which is
+    the failure rule 7j was written about: consent once per destination *and
+    data class*, then remember.
+
+    **Why not a `source` label.** The first attempt at this keyed the exemption
+    off ``source="internet.deep_read"`` — a string the caller supplies about
+    itself. That is `X-Zaram-Client` again: a label enforced as a credential,
+    and it would have let any present or future call site skip default-deny by
+    naming itself correctly. This module's own docstring already forbids the
+    shape: a caller that can declare its own request exempt has put rule 3 back
+    into the realm of convention.
+
+    So the grant carries **the exact URLs**, normalised, and permits nothing
+    else. A caller cannot widen it by describing itself differently; it can
+    only widen it by already holding the URL, which is not an escalation
+    because it had to come from somewhere.
+
+    What this deliberately does not claim
+    -------------------------------------
+    It does not prove the URLs came from a search — the gate cannot know that,
+    and pretending otherwise would be a second label. What it buys is that the
+    exemption is **explicit at the call site and narrow in scope**: constructing
+    one is a deliberate act that reads as one in review, rather than something a
+    new call site inherits by accident.
+
+    Only `GET`, and only with no body — asserted in `permits`, not promised.
+    Nothing derived from the Spine can travel on one of these, because there is
+    no field for it to travel in. Rule 8 stays structural.
+    """
+
+    #: Exact URLs, as they will be requested.
+    urls: frozenset[str]
+
+    @staticmethod
+    def of(urls: Any) -> "SearchReadGrant":
+        return SearchReadGrant(frozenset(str(u) for u in urls if u))
+
+    def permits(self, request: EgressRequest) -> bool:
+        if request.method.upper() != "GET" or request.body:
+            return False
+        return request.url in self.urls
+
+
 class EgressGate:
     """The chokepoint. Hold one of these; do not open sockets anywhere else."""
 
@@ -175,7 +227,8 @@ class EgressGate:
     # ----------------------------------------------------------------- check
 
     def check(self, url: str, *, method: str = "GET", body: str | None = None,
-              source: str = "unknown") -> EgressRequest | None:
+              source: str = "unknown",
+              grant: "SearchReadGrant | None" = None) -> EgressRequest | None:
         """Decide and log, without performing the request.
 
         Returns the approved :class:`EgressRequest`, or ``None`` when the
@@ -200,6 +253,35 @@ class EgressGate:
         req = EgressRequest(host=host, method=method.upper(), url=url,
                             body=body, source=source)
         decision = self._policy.decide(host)
+
+        # A page a search has already returned, permitted by the grant the
+        # caller is holding rather than by anything it says about itself.
+        #
+        # Placed after the policy is consulted so an *explicit* rule still
+        # wins: a host the user has deliberately denied stays denied even if it
+        # turns up in a search result, because that decision was made by a
+        # person about a destination and this was not. Only the default-deny
+        # case — a host nobody has an opinion about — is covered. See
+        # `SearchReadGrant`.
+        #
+        # The kill switch is checked explicitly, and **called**. `decide`
+        # collapses it into the same `DENY` as an unknown host, so without this
+        # a grant would sail straight through "cut all outbound traffic" — the
+        # one control that must have no exceptions at all. `kill_switch` is a
+        # method rather than a property, and `not self._policy.kill_switch` is
+        # therefore always False: written that way this clause disabled the
+        # grant entirely, and written the other way round it would have
+        # disabled the kill switch. A test caught it; the parentheses are the
+        # whole difference.
+        if (
+            grant is not None
+            and decision.mode is Mode.DENY
+            and not self._policy.kill_switch()
+            and not self._policy.has_rule(host)
+            and grant.permits(req)
+        ):
+            self._record(req, "allowed", "reading a page from a search you enabled")
+            return req
 
         if decision.mode is Mode.DENY:
             entry = self._record(req, "denied", decision.reason)
@@ -236,6 +318,7 @@ class EgressGate:
         method: str = "GET",
         body: str | None = None,
         source: str = "unknown",
+        grant: "SearchReadGrant | None" = None,
     ) -> str:
         """Fold ``params`` into the URL, check it, and return the final URL.
 
@@ -254,7 +337,7 @@ class EgressGate:
                 {k: v for k, v in params.items() if v is not None}
             )
             final = f"{url}{'&' if urllib.parse.urlparse(url).query else '?'}{encoded}"
-        self.check(final, method=method, body=body, source=source)
+        self.check(final, method=method, body=body, source=source, grant=grant)
         return final
 
     def _record(self, req: EgressRequest, decision: str, reason: str):

@@ -535,6 +535,27 @@ class InternetRuntimeImpl(InternetRuntime):
         # Rank and deduplicate
         ranked = self._rank_results(all_results, query)
 
+        # Then read the survivors properly.
+        #
+        # **After ranking, never before.** Fetching pages is the expensive and
+        # the disclosing half, so it must happen only for results that are
+        # already known to be relevant. Doing it first would download the junk
+        # GitHub repository that ranking exists to drop — more egress, more
+        # latency, for a page nobody was going to be shown.
+        #
+        # Without this the model's entire evidence base is the 300-character
+        # description each connector returns, which contains the answer only
+        # when the question is prominent. See `deep_read`.
+        try:
+            from .deep_read import read_pages
+
+            await read_pages(ranked)
+        except Exception as error:
+            # Depth is an improvement, not a dependency. A failure here returns
+            # the search to exactly what it did before and must never lose the
+            # results themselves.
+            print(f"[InternetRuntime] Deep read unavailable: {error}")
+
         # Cache results
         await self._cache.set(cache_key, ranked, self._cache_ttl)
 

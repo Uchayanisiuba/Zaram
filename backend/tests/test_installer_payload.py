@@ -180,6 +180,14 @@ class TestEveryRealFileIsAccountedFor:
                     continue  # user data, excluded on purpose and tested above
                 if suffix in {".bat", ".md", ".log", ".pyc"}:
                     continue  # tooling and notes; not needed at runtime
+                if name == "api-secret":
+                    # The API credential's development fallback. It has no
+                    # extension deliberately, so the allow-list cannot carry it
+                    # and it can never reach an installer — which is the
+                    # correct outcome, not an oversight: a packaged build mints
+                    # a fresh one per launch, and shipping this would give
+                    # every user on earth the same credential.
+                    continue
                 surprises.append(str(Path(root, name).relative_to(REPO_ROOT)))
 
         assert not surprises, (

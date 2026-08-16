@@ -32,9 +32,15 @@ class GatedSession:
     as it is today.
     """
 
-    def __init__(self, *, headers: dict[str, str] | None = None, source: str = "unknown"):
+    def __init__(self, *, headers: dict[str, str] | None = None, source: str = "unknown",
+                 grant: Any = None):
         self._headers = headers
         self._source = source
+        # A capability, not a label. See `SearchReadGrant` in `gate.py`: it
+        # names the exact URLs this session may read past default-deny, so a
+        # session cannot widen its own permissions by describing itself
+        # differently. None, as here by default, means ordinary policy only.
+        self._grant = grant
         self._session: Any = None
 
     async def _ensure(self) -> Any:
@@ -48,7 +54,8 @@ class GatedSession:
                  body: str | None):
         """Check first. Returns the resolved URL, or raises ``EgressDenied``."""
         return get_gate().resolve(
-            url, params=params, method=method, body=body, source=self._source
+            url, params=params, method=method, body=body, source=self._source,
+            grant=self._grant,
         )
 
     def get(self, url: str, *, params: dict[str, Any] | None = None, **kwargs: Any):
@@ -111,6 +118,11 @@ class _Ctx:
 
 
 def gated_session(*, headers: dict[str, str] | None = None,
-                  source: str = "unknown") -> GatedSession:
-    """Build a session that checks every request. Use instead of aiohttp."""
-    return GatedSession(headers=headers, source=source)
+                  source: str = "unknown", grant: Any = None) -> GatedSession:
+    """Build a session that checks every request. Use instead of aiohttp.
+
+    `grant` is an optional `SearchReadGrant` naming exact URLs this session may
+    read past default-deny. Omit it — as every existing call site does — and
+    the session is bound by the per-host policy alone.
+    """
+    return GatedSession(headers=headers, source=source, grant=grant)
