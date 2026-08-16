@@ -444,17 +444,46 @@ class IntentRouter:
             decision.intent, ["reasoning.generate"]
         )
 
-        # Search stays gated the same way it is for the keyword path: the
-        # classifier may want it, and nothing leaves the machine until the
-        # per-source policy exists. Routing more accurately must not become a
-        # route around rule 5.
+        # **Wanting live information is a property of the question, not a rival
+        # intent.** This read `decision.intent == "search"` alone, and because
+        # `classify` returns the moment this method returns non-None, the
+        # keyword classifier was never consulted on the semantic path at all.
+        # So a question could be time-sensitive, say so unambiguously, and be
+        # answered from training data.
+        #
+        # Measured, which is how it was found: "Who is the current president of
+        # the United States?" routes to **`conversation` at 0.022 confidence**,
+        # while `needs_search` matches it on three separate patterns — "who
+        # is", "current", and "president". Zaram answered "Joe Biden", with web
+        # search switched on, `duckduckgo.com` allowed, and no search step in
+        # the plan and no source in the stream. Nothing reported a failure,
+        # because from the planner's point of view nothing failed.
+        #
+        # The two classifiers are not alternatives here. `conversation` and
+        # `search` are not exclusive: "who is the current president" is a
+        # perfectly conversational question whose answer changes. So the
+        # signals are unioned rather than switched between — the intent decides
+        # *what kind of work* the request is, and this decides whether that
+        # work needs facts newer than the weights.
+        #
+        # Gating is unchanged and stays after the union: routing more
+        # accurately must never become a route around rule 5.
+        wants_search = decision.intent == "search" or needs_search(prompt)
         requires_search = (
-            decision.intent == "search"
+            wants_search
             and web_search_enabled()
             and search_applies_to(_search_locality.get())
         )
         if decision.intent == "search" and not requires_search:
             capabilities = ["reasoning.generate"]
+        elif requires_search and "knowledge.search" not in capabilities:
+            # `create_plan` builds the steps from `requires_search` directly, so
+            # this does not change the plan. It keeps the reported capabilities
+            # honest for `create_plan_from_intent` and for anything reading the
+            # classification to explain the routing decision — a classification
+            # that requires a search and does not list it is the kind of
+            # near-truth that costs an afternoon later.
+            capabilities = ["knowledge.search", *capabilities]
 
         return IntentClassification(
             intent_type=intent_type,
