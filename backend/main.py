@@ -667,8 +667,23 @@ async def chat(request: ChatRequest):
     # Qwen, made by Alibaba" ends up being the product's answer to "what are
     # you". The true answer only exists here, so it is handed over rather than
     # left to the weights.
+    # The character the user chose, carried into the preamble as *facts* — the
+    # same kind of statement as the model name beside it. A name is additive
+    # ("this person calls you Ada"), never substitutive ("you are Ada"), which
+    # is the distinction the eight removed personas got wrong.
+    try:
+        from core.user_settings import get_user_settings
+
+        _character = get_user_settings()
+        _named, _manner = _character.assistant_name, _character.manner
+    except Exception:
+        # A settings file must never be able to stop chat working.
+        _named, _manner = "", ""
+
     system_prompt = compose_system_prompt(
-        identity_preamble(**_current_inference(model)),
+        identity_preamble(
+            **_current_inference(model), assistant_name=_named, manner=_manner
+        ),
         persona_prompt,
     )
 
@@ -1095,6 +1110,55 @@ async def set_web_search_setting(update: WebSearchUpdate):
             )
 
     return await web_search_setting()
+
+
+@app.get("/character")
+async def get_character():
+    """What this person calls it, how they want it to write, which voice speaks.
+
+    **Three fields, one object, because it is one thing to the user.** A name, a
+    manner and a voice are a character; splitting them across three endpoints
+    would let an interface save two and fail on the third, leaving a
+    half-applied character nobody chose.
+
+    None of it can change what Zaram says it is. `identity_preamble` places the
+    user's name and manner *before* the rules about self-description, so the
+    last instruction a model reads is the true one — the guarantee is the
+    ordering, and `tests/test_identity_stays_truthful.py` asserts it against
+    hostile input rather than trusting it.
+    """
+    from core.user_settings import get_user_settings
+
+    settings = get_user_settings()
+    return {
+        "assistant_name": settings.assistant_name,
+        "manner": settings.manner,
+        "voice": settings.voice,
+        # What it is called when the user has not named it. Sent so the
+        # interface never has to hardcode the product's own name to render a
+        # placeholder — the same reason `default_model` of null is meaningful.
+        "default_name": "Zaram",
+    }
+
+
+class CharacterUpdate(BaseModel):
+    #: Absent leaves a field alone; empty string clears it back to the default.
+    #: The two are different intentions and must stay distinguishable, which is
+    #: why every field is `str | None` rather than `str`.
+    assistant_name: str | None = None
+    manner: str | None = None
+    voice: str | None = None
+
+
+@app.post("/character")
+async def set_character(update: CharacterUpdate):
+    from core.user_settings import get_user_settings
+
+    return get_user_settings().set_character(
+        assistant_name=update.assistant_name,
+        manner=update.manner,
+        voice=update.voice,
+    )
 
 
 @app.get("/routing/preference")
