@@ -58,6 +58,8 @@ export default defineConfig({
       // session: `/vision/analyze` has been served by the backend and
       // unreachable from the dev frontend the whole time.
       '/vision': { target: BACKEND, changeOrigin: true },
+      '/export': { target: BACKEND, changeOrigin: true },
+      '/character': { target: BACKEND, changeOrigin: true },
     },
   },
 });

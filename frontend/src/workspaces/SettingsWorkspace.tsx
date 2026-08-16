@@ -49,6 +49,7 @@ import {
   Loader2,
   ExternalLink,
   AlertTriangle,
+  Download,
 } from 'lucide-react';
 import { useSystemStore } from '@/stores/systemStore';
 import { useEmbodimentStore } from '@/stores/embodimentStore';
@@ -56,8 +57,10 @@ import {
   SettingsError,
   connectCloudProvider,
   disconnectCloudProvider,
+  downloadExport,
   fetchCloudStatus,
   fetchEgressPolicy,
+  fetchExportManifest,
   fetchKillSwitch,
   fetchModels,
   fetchProviderCatalogue,
@@ -74,6 +77,7 @@ import {
   type DiscoveredModel,
   type EgressMode,
   type EgressPolicy,
+  type ExportManifest,
   type RoutingPreference,
   type RoutingSettings,
   type WebSearchStatus,
@@ -303,6 +307,21 @@ function Button({
   );
 }
 
+/**
+ * "3 facts", "1 fact", or "an unknown number of facts".
+ *
+ * The last case is why this exists. The backend answers `-1` for a store it
+ * could not count, and rendering that as `0` would tell somebody deciding
+ * whether they can leave that Zaram holds nothing of theirs — a confident
+ * claim built on a failed read. Same rule as `vram_bytes` returning `None`
+ * rather than `0`, applied to a sentence instead of a number.
+ */
+function countLabel(count: number, singular: string, plural = ''): string {
+  const many = plural || `${singular}s`;
+  if (count < 0) return `an unknown number of ${many}`;
+  return `${count} ${count === 1 ? singular : many}`;
+}
+
 /** A failure shown in the user's terms, using the backend's own sentence. */
 function Problem({ message }: { message: string | null }) {
   if (!message) return null;
@@ -338,6 +357,8 @@ export default function SettingsWorkspace() {
   const [policy, setPolicy] = useState<EgressPolicy | null>(null);
   const [models, setModels] = useState<DiscoveredModel[] | null>(null);
   const [search, setSearch] = useState<WebSearchStatus | null>(null);
+  const [exportManifest, setExportManifest] = useState<ExportManifest | null>(null);
+  const [exported, setExported] = useState<string | null>(null);
 
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -371,7 +392,7 @@ export default function SettingsWorkspace() {
   const loadLocalState = useCallback(async () => {
     setError(null);
 
-    const [cat, cloudStatus, routingState, kill, egressPolicy, webSearch] =
+    const [cat, cloudStatus, routingState, kill, egressPolicy, webSearch, manifest] =
       await Promise.allSettled([
         fetchProviderCatalogue(),
         fetchCloudStatus(),
@@ -379,6 +400,9 @@ export default function SettingsWorkspace() {
         fetchKillSwitch(),
         fetchEgressPolicy(),
         fetchWebSearch(),
+        // Counting what an export would hold is a local read, not a network
+        // call, so rule 7g does not apply and it can run on mount.
+        fetchExportManifest(),
       ]);
 
     if (cat.status === 'fulfilled') {
@@ -390,6 +414,7 @@ export default function SettingsWorkspace() {
     if (kill.status === 'fulfilled') setKillSwitchState(kill.value);
     if (egressPolicy.status === 'fulfilled') setPolicy(egressPolicy.value);
     if (webSearch.status === 'fulfilled') setSearch(webSearch.value);
+    if (manifest.status === 'fulfilled') setExportManifest(manifest.value);
 
     // Named, and only the ones that actually failed. "Something went wrong"
     // over a screen that is now half-populated is worse than either a working
@@ -647,6 +672,60 @@ export default function SettingsWorkspace() {
                   anything; that stays a separate decision.
                 </p>
               )}
+            </div>
+          </Row>
+
+          {/*
+            Rule 7, made reachable. The exporter and its tests had existed for
+            weeks behind no route and no control, so "the Spine is exportable,
+            no lock-in" was a true statement about a module and a false one
+            about the product.
+
+            It sits inside Privacy rather than in a section of its own because
+            it answers the same question as everything above it: what happens
+            to my data. The counts come first — a download button with no idea
+            what is behind it asks the user to take the claim on faith, which
+            is the posture this whole screen exists to avoid.
+          */}
+          <Row
+            label="Take everything with you"
+            value={exportManifest ? 'ready' : undefined}
+            state="good"
+            detail={
+              exportManifest
+                ? `${countLabel(exportManifest.facts, 'fact')}, ` +
+                  `${countLabel(exportManifest.egressEntries, 'egress entry', 'egress entries')} and ` +
+                  `${countLabel(exportManifest.generatedDocuments, 'generated document')}, ` +
+                  `as ${exportManifest.formats.join(', ')} inside one .zip. ` +
+                  exportManifest.note
+                : 'Everything Zaram holds, in formats that open without Zaram installed.'
+            }
+          >
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
+                <Button
+                  busy={busy === 'export'}
+                  onClick={() =>
+                    run('export', async () => {
+                      setExported(null);
+                      const filename = await downloadExport();
+                      setExported(filename);
+                    })
+                  }
+                >
+                  <Download size={12} />
+                  Export everything
+                </Button>
+                {exported && (
+                  <span className="text-[11px]" style={{ color: 'var(--color-emerald)' }}>
+                    Saved as {exported}
+                  </span>
+                )}
+              </div>
+              <p className="text-[11px] leading-relaxed" style={{ color: 'var(--color-text-faint)' }}>
+                Nothing is deleted and nothing changes — this is a copy. Checking that you could
+                leave should not cost you anything.
+              </p>
             </div>
           </Row>
         </Section>

@@ -373,3 +373,68 @@ export async function setEgressPolicyForHost(host: string, mode: EgressMode): Pr
 export async function forgetEgressPolicyForHost(host: string): Promise<void> {
   await send(`/egress/policy/${encodeURIComponent(host)}`, 'DELETE');
 }
+
+// ------------------------------------------------------------------ export
+//
+// Rule 7 — the Spine is exportable in an open format, no lock-in. The exporter
+// and its tests were complete for weeks with no route in front of them, so the
+// rule was true of the code and false of the product.
+
+export interface ExportManifest {
+  formatVersion: number;
+  /** `-1` means the store could not be counted, which is not the same as zero.
+   *  A zero here is a claim that the user has nothing, and it must be earned. */
+  facts: number;
+  egressEntries: number;
+  generatedDocuments: number;
+  formats: string[];
+  note: string;
+}
+
+export async function fetchExportManifest(): Promise<ExportManifest> {
+  const raw = (await get('/export/manifest')) as Record<string, unknown>;
+  return {
+    formatVersion: Number(raw.format_version ?? 0),
+    facts: Number(raw.facts ?? -1),
+    egressEntries: Number(raw.egress_entries ?? -1),
+    generatedDocuments: Number(raw.generated_documents ?? -1),
+    formats: (raw.formats ?? []) as string[],
+    note: String(raw.note ?? ''),
+  };
+}
+
+/**
+ * Download everything Zaram holds, as one .zip.
+ *
+ * Fetched as a blob and handed to the browser rather than pointed at with a
+ * plain `<a href>`. Two reasons, and the second is the one that matters: a
+ * link cannot report a failure, so a backend that is down produces a broken
+ * download with no message — on the one control whose entire purpose is
+ * reassuring somebody that leaving is possible.
+ */
+export async function downloadExport(): Promise<string> {
+  const response = await fetch(`${API_BASE}/export`, { headers: CLIENT_HEADER });
+  if (!response.ok) {
+    throw new SettingsError(
+      `The export could not be built (HTTP ${response.status}). Nothing was changed.`,
+      response.status,
+    );
+  }
+
+  const blob = await response.blob();
+  // The backend names the file, so the timestamp in it is the moment the
+  // export was *built* rather than the moment the browser saved it.
+  const disposition = response.headers.get('Content-Disposition') ?? '';
+  const named = /filename="([^"]+)"/.exec(disposition);
+  const filename = named?.[1] ?? 'zaram-export.zip';
+
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+  return filename;
+}

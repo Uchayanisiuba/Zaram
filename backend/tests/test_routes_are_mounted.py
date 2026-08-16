@@ -47,6 +47,14 @@ EXPECTED_GET_ROUTES = [
     "/routing/preference",
     "/readiness",
     "/health",
+    # Rule 7. `core/export.py` was complete and tested for weeks with no route
+    # in front of it, so "the Spine is exportable" was true of the code and
+    # false of the product.
+    "/export",
+    "/export/manifest",
+    # The character: name, manner, voice. Served together because they are one
+    # thing to the user.
+    "/character",
 ]
 
 

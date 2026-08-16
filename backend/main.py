@@ -2241,6 +2241,167 @@ async def set_artifact_remember(artifact_id: str, body: RememberBody):
     return {"id": artifact_id, "remember_override": body.remember}
 
 
+# --------------------------------------------------------------------------- #
+# Export — rule 7, which had been written and could not be reached.
+#
+# `core/export.py` builds the whole thing: facts as JSONL with their correction
+# history, the egress log, obligations, a manifest naming what is absent and
+# why. Twenty assertions cover it in `tests/test_export.py`. It had **no
+# caller, no route, and no control in Settings** — the sixth complete, tested,
+# unreachable feature this repo has found, and the one that mattered most,
+# because rule 7 is the promise that leaving is cheap.
+#
+# A .zip rather than a directory: one file is a thing a person can move to a
+# drive, and it is what `build/installer.nsh` hands back on uninstall. That
+# uninstall path used to zip the raw SQLite files — technically an open format,
+# and not what "in open formats you can read without Zaram installed" means to
+# somebody who opens it and finds four databases.
+# --------------------------------------------------------------------------- #
+
+
+@app.get("/export")
+async def export_everything():
+    """Hand back everything Zaram holds, in formats that outlive it.
+
+    Streams a .zip. Nothing is deleted and nothing changes — export is a read,
+    and a user checking whether they *could* leave must not have to risk
+    anything to find out.
+
+    **A section that cannot be built is named, not omitted.** A missing file in
+    an export reads as "Zaram has nothing of mine there", which on a memory
+    product is the one wrong impression worth engineering against. Each store
+    is asked separately and a failure adds a line to the manifest rather than
+    failing the export — a Spine that exports without its egress log is far
+    better than no export at all.
+    """
+    import io
+    import zipfile
+
+    from core.export import build_export
+
+    facts: list[Any] = []
+    egress_entries: list[Dict[str, Any]] = []
+    obligations: list[Dict[str, Any]] = []
+    generated_files: list[str] = []
+    unavailable: list[str] = []
+
+    try:
+        if kernel.memory_runtime is None:
+            raise RuntimeError("memory runtime not available")
+        # include_superseded: the corrections are the point. An export of only
+        # what Zaram currently believes discards the record of where it was
+        # wrong and the user said so, which is rule 4's more interesting half.
+        facts = await kernel.memory_runtime._store.all_records(include_superseded=True)
+    except Exception:
+        unavailable.append("Stored facts — the memory runtime could not be read")
+
+    try:
+        from core.egress import get_gate
+
+        gate = get_gate()
+        egress_entries = [
+            {
+                "at": e.at,
+                "host": e.host,
+                "method": e.method,
+                "url": e.url,
+                "bytes": e.byte_count,
+                "decision": e.decision,
+                "reason": e.reason,
+                "source": e.source,
+            }
+            for e in gate.log.entries(limit=gate.log.count() or 1, offset=0)
+        ]
+    except Exception:
+        unavailable.append("Egress log — the record of what left could not be read")
+
+    try:
+        generated_files = [
+            a.path for a in artifact_service.records.list(limit=10_000) if a.path
+        ]
+    except Exception:
+        unavailable.append("Generated documents — the artifact records could not be read")
+
+    # Obligations have no store yet, so this is honest rather than empty: the
+    # manifest says the section is absent and why, instead of shipping a CSV of
+    # headers that reads as "you have no deadlines".
+    unavailable.append(
+        "Obligations — extracted per document, not yet persisted, so there is "
+        "nothing to export"
+    )
+
+    documents = build_export(
+        facts=facts,
+        egress_entries=egress_entries,
+        obligations=obligations,
+        generated_files=generated_files,
+        unavailable=unavailable,
+    )
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        for document in documents:
+            archive.writestr(document.name, document.content)
+    buffer.seek(0)
+
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    return StreamingResponse(
+        buffer,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f'attachment; filename="zaram-export-{stamp}.zip"',
+        },
+    )
+
+
+@app.get("/export/manifest")
+async def export_manifest():
+    """What an export would contain, without building one.
+
+    Settings shows this before the download so the button is not a leap. It is
+    also what makes "obligations are not exportable yet" visible at the moment
+    somebody is deciding whether they can leave, rather than after they have
+    unzipped the file.
+    """
+    from core.export import EXPORT_FORMAT_VERSION
+
+    facts = 0
+    try:
+        if kernel.memory_runtime is not None:
+            records = await kernel.memory_runtime._store.all_records(include_superseded=True)
+            facts = len(records)
+    except Exception:
+        facts = -1
+
+    entries = 0
+    try:
+        from core.egress import get_gate
+
+        entries = get_gate().log.count()
+    except Exception:
+        entries = -1
+
+    documents = 0
+    try:
+        documents = artifact_service.records.count()
+    except Exception:
+        documents = -1
+
+    return {
+        "format_version": EXPORT_FORMAT_VERSION,
+        # -1 means "could not be counted", which is not zero. A zero on this
+        # screen is a claim that the user has nothing.
+        "facts": facts,
+        "egress_entries": entries,
+        "generated_documents": documents,
+        "formats": ["JSONL", "CSV", "JSON"],
+        "note": (
+            "Everything is written in open formats. JSONL and CSV open in any "
+            "text editor or spreadsheet, with no Zaram installed."
+        ),
+    }
+
+
 # --- Ingest -------------------------------------------------------------- #
 #
 # Knowledge reads these. The service already produced a reason and a remedy per
