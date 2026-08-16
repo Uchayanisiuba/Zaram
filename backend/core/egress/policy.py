@@ -161,6 +161,22 @@ class EgressPolicy:
             return Decision(Mode.ASK, f"you asked to confirm each request to {host}")
         return Decision(Mode.DENY, f"you blocked requests to {host}")
 
+    def has_rule(self, host: str) -> bool:
+        """Whether the user has expressed an opinion about this host.
+
+        The distinction `decide` cannot make: it collapses "denied because you
+        blocked it" and "denied because nobody has said" into the same `DENY`,
+        which is right for the request and wrong for anything asking whether a
+        *decision* exists. A search-result grant may cover the second and must
+        never override the first — a host somebody deliberately blocked stays
+        blocked when it turns up in a search result.
+
+        The kill switch is deliberately not consulted. It is a state, not a
+        rule about a host, and it is checked ahead of this by `decide`.
+        """
+        with self._lock:
+            return host.lower() in self._rules
+
     def rules(self) -> dict[str, str]:
         """Every rule, for the privacy pane."""
         with self._lock:
