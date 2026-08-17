@@ -116,7 +116,20 @@ export const REGISTRY: Shortcut[] = [
     id: 'chat',
     label: 'Toggle Chat',
     group: 'window',
-    keys: { meta: true, key: 'c' },
+    // **Not Ctrl+C.** `useShortcuts` calls `preventDefault()` on every match
+    // outside a text field, so this chord was eating Copy on all six surfaces
+    // — measured with a live selection. Memory, Knowledge and Activity exist
+    // to show facts, citations and egress rows, and copying one of them is an
+    // ordinary thing to want; a product whose pitch is that the interface
+    // tells you the truth should not silently swallow the most universal
+    // keystroke there is.
+    //
+    // Alt keeps the C mnemonic and collides with nothing: the window sets
+    // `autoHideMenuBar`, so no menu claims Alt+letter, and the browser does
+    // not use it either. Bare Shift+C was considered and refused — that is a
+    // capital letter, not a chord, and it is one un-exempted focusable element
+    // away from firing at somebody typing.
+    keys: { alt: true, key: 'c' },
     action: { type: 'chat' },
   },
   {
@@ -162,9 +175,32 @@ export function chordTokens(shortcut: Shortcut, platform: Platform): string {
  *  restating the set and drifting from it. */
 export const SHIFTED_KEYS = new Set(['?', '!', '@', '#', '$', '%', '^', '&', '*', '(', ')', '+', '{', '}', '|', '<', '>', '~', ':', '"']);
 
+/** True when `event` is the physical key this shortcut names.
+ *
+ * **`event.key` is the character produced, not the key pressed, and Option
+ * changes it.** On macOS ⌥C emits `key: "ç"` — so an Alt chord compared on
+ * `event.key` is printed on the keycap, shown in the help overlay, and never
+ * fires. That is the same shape as the Ctrl+K/Win+K defect recorded below:
+ * the interface advertising a chord the matcher does not answer to.
+ *
+ * So an Alt chord on a letter is matched by physical position instead, which
+ * is what the user actually pressed and is stable across layouts. Everything
+ * else keeps `event.key`, because `code` would break `?` — a shifted Slash on
+ * a US layout and a different key entirely elsewhere.
+ */
+function hitsTheKey(event: KeyboardEvent, shortcut: Shortcut): boolean {
+  const { alt, key } = shortcut.keys;
+  if (alt && /^[a-z]$/i.test(key)) {
+    // `code` is absent on a synthetic event that did not set it; falling back
+    // keeps such an event matchable rather than silently unmatchable.
+    return event.code ? event.code === `Key${key.toUpperCase()}` : event.key === key;
+  }
+  return event.key === key;
+}
+
 export function matches(event: KeyboardEvent, shortcut: Shortcut, platform: Platform): boolean {
   const { meta, ctrl, alt, shift, key } = shortcut.keys;
-  if (event.key !== key) return false;
+  if (!hitsTheKey(event, shortcut)) return false;
 
   const needsShift = !!shift || SHIFTED_KEYS.has(key);
   if (event.shiftKey !== needsShift) return false;
