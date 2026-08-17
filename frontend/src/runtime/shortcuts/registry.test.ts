@@ -23,20 +23,46 @@ import {
   type Shortcut,
 } from './registry';
 
-/** Build the event a keyboard would emit for a rendered chord. Shift is taken
- *  from the chord *and* from the character itself — "?" is unreachable without
- *  Shift on a standard layout, whether or not the chord spells it out. */
-function eventFor(chord: string): KeyboardEvent {
+/** What macOS actually emits for ⌥ + letter.
+ *
+ *  Option is a compose key there: it does not decorate the character, it
+ *  *replaces* it. Only the entries this registry needs are listed — a full
+ *  table would be a second source of truth about a keyboard. */
+const MAC_OPTION_COMPOSES: Record<string, string> = { c: 'ç' };
+
+/** Build the event a keyboard would emit for a rendered chord.
+ *
+ *  Shift is taken from the chord *and* from the character itself — "?" is
+ *  unreachable without Shift on a standard layout, whether or not the chord
+ *  spells it out.
+ *
+ *  **`platform` is not decoration.** This helper is the only thing standing
+ *  between the registry and a chord that is printed on a keycap and cannot be
+ *  pressed, so it has to emit what the platform's keyboard emits rather than
+ *  what the chord looks like. A Mac holding Option sends `key: "ç"` for ⌥C,
+ *  and `code` is the only field that still says which key was struck — so an
+ *  idealised `key: "c"` here would have passed while the real shortcut was
+ *  dead on every Mac. That is the failure this file's header warns about,
+ *  committed by the file itself. */
+function eventFor(chord: string, platform: Platform = 'win'): KeyboardEvent {
   const parts = chord.split(' ');
   const printed = parts.pop() as string;
-  const key = printed.length === 1 ? printed.toLowerCase() : printed;
+  const typed = printed.length === 1 ? printed.toLowerCase() : printed;
   const held = (...tokens: string[]) => tokens.some((t) => parts.includes(t));
+  const altHeld = held('Alt', '⌥');
+
+  const key =
+    platform === 'mac' && altHeld && MAC_OPTION_COMPOSES[typed]
+      ? MAC_OPTION_COMPOSES[typed]
+      : typed;
+
   return new KeyboardEvent('keydown', {
     key,
+    code: /^[a-z]$/.test(typed) ? `Key${typed.toUpperCase()}` : '',
     metaKey: held('⌘'),
     ctrlKey: held('Ctrl', '⌃'),
-    altKey: held('Alt', '⌥'),
-    shiftKey: held('Shift', '⇧') || SHIFTED_KEYS.has(key),
+    altKey: altHeld,
+    shiftKey: held('Shift', '⇧') || SHIFTED_KEYS.has(typed),
   });
 }
 
@@ -50,7 +76,7 @@ describe('keyboard shortcuts', () => {
         for (const shortcut of REGISTRY) {
           const chord = chordTokens(shortcut, platform);
           expect(
-            matches(eventFor(chord), shortcut, platform),
+            matches(eventFor(chord, platform), shortcut, platform),
             `${shortcut.id} is shown as "${chord}" and does not respond to it`,
           ).toBe(true);
         }
@@ -86,6 +112,36 @@ describe('keyboard shortcuts', () => {
     // Ctrl+Shift+K belongs to the browser's console, not to us.
     const ctrlShiftK = new KeyboardEvent('keydown', { key: 'k', ctrlKey: true, shiftKey: true });
     expect(matches(ctrlShiftK, command, 'win')).toBe(false);
+  });
+
+  it('leaves Copy, Paste, Cut, Save and Select All to the operating system', () => {
+    /**
+     * `useShortcuts` calls `preventDefault()` on any match outside a text
+     * field, so claiming one of these does not merely shadow it — it deletes
+     * it. Copy was claimed by Toggle Chat, and Memory, Knowledge and Activity
+     * are screens whose whole job is showing facts, citations and egress rows
+     * that a person will want to copy.
+     *
+     * Asserted against the whole registry rather than against the one chord
+     * that was wrong, because the next shortcut added is the one that would
+     * take Ctrl+V.
+     */
+    const universal = ['c', 'v', 'x', 'a', 'z'];
+    for (const platform of platforms) {
+      for (const key of universal) {
+        const event = new KeyboardEvent('keydown', {
+          key,
+          code: `Key${key.toUpperCase()}`,
+          ctrlKey: platform === 'win',
+          metaKey: platform === 'mac',
+        });
+        const claimed = REGISTRY.find((s) => matches(event, s, platform));
+        expect(
+          claimed,
+          `${claimed?.id} answers to the ${platform} Copy/Paste family key "${key}"`,
+        ).toBeUndefined();
+      }
+    }
   });
 
   it('gives every shortcut a distinct chord on each platform', () => {
