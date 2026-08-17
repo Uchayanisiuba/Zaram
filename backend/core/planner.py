@@ -65,13 +65,62 @@ def set_search_locality(locality: Optional[str]) -> None:
     _search_locality.set(locality)
 
 
-def search_applies_to(locality: str | None) -> bool:
+#: Question shapes no model can answer from its weights, whatever its size.
+#:
+#: These are the markers of *recency* specifically, not of factuality. A
+#: frontier model plausibly knows the capital of Portugal better than a 12B
+#: does; neither of them knows what happened last week, because both have a
+#: training cutoff and the event fell after it. Size does not help here and
+#: never will.
+_RECENCY_RE = re.compile(
+    r"\b(today|yesterday|tonight|this\s+(?:week|month|year|morning)|"
+    r"currently|current|right\s+now|just\s+(?:happened|announced|released)|"
+    r"latest|newest|most\s+recent|recently|breaking|so\s+far|"
+    r"last\s+(?:week|month|night)|"
+    r"(?:a\s+)?few\s+(?:days|weeks|months)\s+ago|"
+    r"in\s+the\s+(?:past|last)\s+(?:few\s+)?(?:days|weeks|months))\b",
+    re.IGNORECASE,
+)
+
+
+def is_time_sensitive(prompt: str) -> bool:
+    """Whether the answer changes with the calendar.
+
+    Separate from `needs_search` deliberately. That one asks *should we look
+    this up*, and matches factual shapes like "who is" and topic words like
+    "election" — plenty of which a large model answers perfectly well from its
+    weights. This asks the narrower question that overrides the economy below:
+    **could any model possibly know this?**
+    """
+    return bool(_RECENCY_RE.search(prompt or ""))
+
+
+def search_applies_to(locality: str | None, prompt: str = "") -> bool:
     """Whether a search is worth running for a model that runs *here*.
 
-    **Search compensates for what the answering model does not know.** A local
-    12B carries an older and smaller store of facts than a frontier model, so a
-    live result changes its answer far more often. The maintainer's call, 14
-    August 2026: search on local, skip it on cloud.
+    **Recency outranks the economy, and that is the correction.** This used to
+    be a blanket switch — search on local, skip on cloud — on the reasoning
+    that a frontier model carries a bigger store of facts so a live result
+    changes its answer less often. That holds for general knowledge and fails
+    completely for the one category where search matters most: *every* model
+    has a training cutoff, and none of them knows what happened last week.
+
+    The visible cost was a silent one. Selecting a cloud model did not merely
+    change who answered — it removed the search step from the plan entirely, so
+    "what's the latest in AI" came back from a cutoff with no source, no
+    indication that nothing had been looked up, and nothing in the interface
+    saying why. The user's report was that Zaram "switched to a cloud model" to
+    answer it; the switch was theirs, and the suppression was ours.
+
+    So a time-sensitive question searches on any model. The local/cloud economy
+    survives for everything else, which is what it was actually reasoning about.
+
+    **What the economy is still for.** Where the answer does not turn on the
+    calendar, search compensates for what the answering model does not know: a
+    local 12B carries a smaller store of facts than a frontier model, so a live
+    result changes its answer far more often. That was the maintainer's call on
+    14 August 2026 and it stands for exactly that case — it was only ever wrong
+    where it was applied to questions no model could answer.
 
     ``locality`` is ``"local"``, ``"cloud"`` or ``None``. **Unknown searches**,
     which is the deliberate direction: the cost of searching unnecessarily is
@@ -87,6 +136,10 @@ def search_applies_to(locality: str | None) -> bool:
     and a preference indistinguishable, which is the mistake this codebase has
     now made three times with ranking scores.
     """
+    # No model knows this, so which model is answering is not the question.
+    if is_time_sensitive(prompt):
+        return True
+
     try:
         from core.user_settings import SearchScope, get_user_settings
 
@@ -307,7 +360,7 @@ class IntentRouter:
         search_required = (
             search_wanted
             and web_search_enabled()
-            and search_applies_to(_search_locality.get())
+            and search_applies_to(_search_locality.get(), prompt)
         )
         if search_wanted and not search_required:
             logger.debug("Planner: search suppressed — web search is off by policy")
@@ -472,7 +525,7 @@ class IntentRouter:
         requires_search = (
             wants_search
             and web_search_enabled()
-            and search_applies_to(_search_locality.get())
+            and search_applies_to(_search_locality.get(), prompt)
         )
         if decision.intent == "search" and not requires_search:
             capabilities = ["reasoning.generate"]
