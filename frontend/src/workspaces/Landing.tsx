@@ -190,6 +190,42 @@ export default function Landing({ onNavigate, onOrbTap }: LandingProps) {
       // painting its own.
       style={{ fontFamily: 'var(--font-display), var(--font-sans), sans-serif' }}
     >
+      {/* The mark, in the corner it occupies on every other surface.
+
+          `ZaramMark` argues it should be absent here — the landing is already
+          the brand moment and a second mark competes with the orb — and that
+          argument is what shapes this rather than what excludes it. So it is
+          answered instead of overridden: small, dimmed, and outside the scaled
+          orbital container, which puts it far enough from the orb that the two
+          are never read together.
+
+          Not `ZaramMark` itself, and not a button. That component's job is the
+          route home, and on the landing you are home — a control that looks
+          live and does nothing is the lie TopNav's own comments argue against.
+          This is the same silhouette doing a different job: telling you which
+          application you are looking at while nothing else on screen does.
+
+          It also gives the landing somewhere to put the locality line, which
+          at rest currently reports nowhere. */}
+      <div
+        className="absolute left-8 top-7 z-20 pointer-events-none select-none"
+        style={{ opacity: panelsOpen ? 0.25 : 0.55, transition: 'opacity 0.35s ease' }}
+        aria-hidden
+        data-testid="landing-mark"
+      >
+        <img
+          src="/brand/zaram-mark.svg"
+          alt=""
+          width={28}
+          height={28}
+          // The asset may not exist yet — see `public/brand/README.md`. A
+          // broken image icon in the corner of the landing would be worse than
+          // no mark at all, so a failure removes it rather than showing the
+          // browser's placeholder.
+          onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
+        />
+      </div>
+
       {/* Orbital system — keeps the same shell; only the orbital motion is gated. */}
       <div
         className="relative w-full h-full flex items-center justify-center"
