@@ -91,10 +91,19 @@ class HybridMemoryRetriever(MemoryRetriever):
         # project's fact walked straight past the filter, and only the keyword
         # path was ever scoped. A privacy boundary with one enforcement point
         # per code path is a boundary with a hole in it per code path.
+        # Domain narrowing rides with the scope check, at the same single
+        # point, for the same reason. `only_ids` is `None` when the question
+        # was not asked inside a domain; an **empty set is a real answer** —
+        # a domain holding no sources yet can answer from nothing — so the test
+        # is `is not None` and never truthiness. Treating empty as "no filter"
+        # would silently widen a scope the user chose, which is the failure
+        # mode this whole boundary exists to prevent.
+        allowed = query.only_ids
         candidates = [
             (record, score, reason)
             for record, score, reason in all_candidates.values()
             if _in_scope(record, query.scope)
+            and (allowed is None or record.id in allowed)
         ]
 
         results = [

@@ -29,6 +29,8 @@ import {
   X,
 } from 'lucide-react';
 import SurfaceHeader from '../components/common/SurfaceHeader';
+import DomainList from '../components/knowledge/DomainList';
+import { fetchDomains, type KnowledgeDomain } from '../services/domainsClient';
 import {
   fetchOutcomes,
   fetchSources,
@@ -87,6 +89,7 @@ const STATUS_COLOR: Record<string, string> = {
 
 export default function KnowledgeWorkspace() {
   const [sources, setSources] = useState<IngestSource[]>([]);
+  const [domains, setDomains] = useState<KnowledgeDomain[]>([]);
   const [outcomes, setOutcomes] = useState<IngestOutcome[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -109,14 +112,26 @@ export default function KnowledgeWorkspace() {
   const load = useCallback(async () => {
     try {
       setError(null);
-      const [nextSources, nextOutcomes] = await Promise.all([
+      // `allSettled`, so a domains store that is unavailable does not blank the
+      // sources list beside it. Same principle as Settings: one thing being
+      // unavailable is a reason to say so about *that* one.
+      const [nextSources, nextOutcomes, nextDomains] = await Promise.allSettled([
         fetchSources(),
         fetchOutcomes(),
+        fetchDomains(),
       ]);
-      setSources(nextSources);
-      setOutcomes(nextOutcomes);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not reach Zaram.');
+      if (nextSources.status === 'fulfilled') setSources(nextSources.value);
+      if (nextOutcomes.status === 'fulfilled') setOutcomes(nextOutcomes.value);
+      if (nextDomains.status === 'fulfilled') setDomains(nextDomains.value);
+
+      const failed = [nextSources, nextOutcomes, nextDomains].find(
+        (r) => r.status === 'rejected',
+      );
+      if (failed && failed.status === 'rejected') {
+        setError(
+          failed.reason instanceof Error ? failed.reason.message : 'Could not reach Zaram.',
+        );
+      }
     } finally {
       setLoading(false);
     }
@@ -672,6 +687,12 @@ export default function KnowledgeWorkspace() {
             ))}
           </div>
         )}
+
+        {/* --- domains ------------------------------------------------------ */}
+        {/* Below the sources, because a domain groups sources that already
+            exist — offering to make one before there is anything to put in it
+            asks the user to decide in advance, which rule 7h is against. */}
+        {!loading && <DomainList domains={domains} sources={sources} onChanged={load} />}
 
         {/* --- what needs attention ----------------------------------------- */}
         {problems.length > 0 && (
