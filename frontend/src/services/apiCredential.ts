@@ -60,16 +60,31 @@ function sameOrigin(input: RequestInfo | URL): boolean {
  * indistinguishable, in the interface, from a backend that is down.
  */
 export async function installApiCredential(): Promise<void> {
-  credential = FROM_VITE ?? null;
-
+  // **The desktop host wins, and the order here is the whole fix.**
+  //
+  // This used to read `FROM_VITE ?? null` first and consult the bridge only
+  // when that was empty. Both are present at once in the case nobody had run
+  // — the *real* `electron/main.js` loading the Vite dev server — and they do
+  // not agree: `main.js` mints a fresh secret per launch and hands it over
+  // IPC, while Vite baked in whatever `backend/api-secret` happened to hold
+  // when the dev server booted, which is a file the backend no longer writes
+  // once `ZARAM_API_SECRET` is set. The stale one won, every request came back
+  // 401, and the interface reported **"Zaram engine not running"** — a backend
+  // that was up, healthy, and answering the launcher's own health check 200.
+  //
+  // The bridge is authoritative because the process on the other end is the
+  // one that minted the value. Vite's injection is the fallback for the case
+  // it was written for: a browser tab with no desktop host at all.
   const bridge = window.zaram?.app?.getApiSecret;
-  if (!credential && typeof bridge === 'function') {
+  if (typeof bridge === 'function') {
     try {
       credential = (await bridge()) || null;
     } catch {
       credential = null;
     }
   }
+
+  if (!credential) credential = FROM_VITE ?? null;
 
   const original = window.fetch.bind(window);
   window.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
