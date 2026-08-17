@@ -1,11 +1,14 @@
 # backend/main.py
 import asyncio
 import json
+import logging
 import os
 import time
 from typing import Any, Dict
 
-from fastapi import FastAPI, HTTPException, Request
+from pathlib import Path
+
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
@@ -2633,8 +2636,22 @@ class IngestBody(BaseModel):
     path: str
 
 
+class PasteBody(BaseModel):
+    text: str
+    name: str = ""
+
+
 class PolicyBody(BaseModel):
     policy: str
+
+
+#: The largest single file a drop or upload will accept, per file.
+#:
+#: A cap rather than a truncation. Reading the first 100 MB of a 400 MB file
+#: and indexing it would produce a source that answers confidently from half a
+#: document, which is rule 9's failure arriving by the back door — the document
+#: is *there*, so nothing looks missing. Refusing names the problem instead.
+MAX_UPLOAD_BYTES = 100 * 1024 * 1024
 
 
 @app.post("/ingest")
@@ -2655,6 +2672,116 @@ async def start_ingest(body: IngestBody):
             yield json.dumps(event) + "\n"
 
     return StreamingResponse(_stream(), media_type="application/x-ndjson")
+
+
+async def _read_capped(upload: UploadFile) -> bytes:
+    """Read one uploaded file, refusing rather than buffering without a bound.
+
+    Chunked so that the cap is enforced on the way in. `await upload.read()`
+    with no argument would hold the whole body in memory *before* anything got
+    to check how big it was, which makes the limit decorative.
+    """
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = await upload.read(1 << 20)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > MAX_UPLOAD_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail=(
+                    f"{upload.filename or 'That file'} is larger than "
+                    f"{MAX_UPLOAD_BYTES // (1024 * 1024)} MB. Point Zaram at the "
+                    "folder it lives in instead."
+                ),
+            )
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+def _stream_paths(paths: list[Path]):
+    """The NDJSON body for a drop, a paste or an upload.
+
+    One shape for all three, and the same shape `/ingest` already emits, so the
+    interface parses one stream format rather than three.
+    """
+    ingest_service.attach_memory(getattr(kernel, "memory_runtime", None))
+
+    def _generate():
+        for event in ingest_service.stream_ingest_paths(paths):
+            yield json.dumps(event) + "\n"
+
+    return StreamingResponse(_generate(), media_type="application/x-ndjson")
+
+
+@app.post("/ingest/upload")
+async def ingest_upload(files: list[UploadFile] = File(...)):
+    """Dropped or chosen files, kept and indexed.
+
+    **The bytes are written before a single event is streamed.** A
+    `StreamingResponse` body runs after the endpoint returns, by which point
+    the request — and the temporary files behind `UploadFile` — may be gone.
+    Reading inside the generator would work on a small local test and lose
+    files under any real load, which is the class of bug this codebase keeps
+    paying for.
+
+    They land in one uploads directory rather than beside wherever they came
+    from, because a source row is a *place* and rule 5 asks about a place once.
+    See `UPLOADS_DIRNAME`.
+    """
+    if not files:
+        raise HTTPException(status_code=400, detail="No files were sent.")
+
+    saved: list[Path] = []
+    try:
+        for upload in files:
+            data = await _read_capped(upload)
+            try:
+                saved.append(ingest_service.save_upload(upload.filename or "", data))
+            except OSError as exc:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Could not keep {upload.filename or 'the file'}: {exc.strerror or exc}",
+                ) from exc
+    except HTTPException:
+        # **All or none.** The tenth file being too large would otherwise leave
+        # the first nine on disk with nothing recording them — bytes in the
+        # uploads directory that no source row mentions, no answer can cite and
+        # no "delete this source" can reach, and a re-drop would land beside
+        # them as "invoice (2).pdf". Only this request's own writes are undone.
+        for path in saved:
+            try:
+                path.unlink()
+            except OSError:
+                logging.warning("Ingest: could not clean up %s", path)
+        raise
+
+    return _stream_paths(saved)
+
+
+@app.post("/ingest/text")
+async def ingest_text(body: PasteBody):
+    """Pasted text, written as a file and read by the same parser as any other.
+
+    It could go straight into the Spine without touching the disk. It does not,
+    because that would be a second ingest path with its own chunking and its
+    own way of going wrong — and because a fact whose provenance is "something
+    pasted once" cannot be shown, corrected at source, or removed with its
+    source under rule 4.
+    """
+    if not body.text.strip():
+        raise HTTPException(status_code=400, detail="There was nothing in that.")
+
+    try:
+        path = ingest_service.save_text(body.text, body.name)
+    except OSError as exc:
+        raise HTTPException(
+            status_code=500, detail=f"Could not keep that text: {exc.strerror or exc}"
+        ) from exc
+
+    return _stream_paths([path])
 
 
 @app.get("/ingest/sources")
