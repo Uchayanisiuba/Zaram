@@ -18,6 +18,7 @@
  * says it is right.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import SurfaceHeader from '../components/common/SurfaceHeader';
 import {
   Brain,
   Search,
@@ -215,15 +216,7 @@ export default function MemoryWorkspace() {
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
-      <div className="px-8 pt-6 pb-4 flex items-center gap-3">
-        <Brain size={20} style={{ color: 'var(--color-indigo-light)' }} />
-        <h1
-          className="text-lg font-semibold"
-          style={{ fontFamily: 'var(--font-display)', color: 'var(--color-text)' }}
-        >
-          Memory
-        </h1>
-        <div className="flex-1" />
+      <SurfaceHeader icon={Brain} title="Memory" iconColor="var(--color-indigo-light)">
         <button
           onClick={() => void load(query)}
           aria-label="Refresh memory"
@@ -231,7 +224,7 @@ export default function MemoryWorkspace() {
         >
           <RefreshCw size={15} className={loading ? 'animate-spin' : ''} />
         </button>
-      </div>
+      </SurfaceHeader>
 
       {/* Measured counts only. */}
       <div className="px-8 flex gap-3">

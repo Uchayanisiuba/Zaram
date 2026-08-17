@@ -50,7 +50,9 @@ import {
   ExternalLink,
   AlertTriangle,
   Download,
+  Settings as SettingsIcon,
 } from 'lucide-react';
+import SurfaceHeader from '../components/common/SurfaceHeader';
 import { useSystemStore } from '@/stores/systemStore';
 import { useEmbodimentStore } from '@/stores/embodimentStore';
 import {
@@ -459,14 +461,7 @@ export default function SettingsWorkspace() {
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
-      <div className="px-8 pt-6 pb-4 flex items-center gap-3">
-        <h1
-          className="text-lg font-semibold"
-          style={{ fontFamily: 'var(--font-display)', color: 'var(--color-text)' }}
-        >
-          Settings
-        </h1>
-        <div className="flex-1" />
+      <SurfaceHeader icon={SettingsIcon} title="Settings">
         <button
           onClick={() => {
             void refresh();
@@ -477,7 +472,7 @@ export default function SettingsWorkspace() {
         >
           <RefreshCw size={15} />
         </button>
-      </div>
+      </SurfaceHeader>
 
       <div className="flex-1 overflow-y-auto px-8 pb-8 max-w-3xl">
         {error && (
