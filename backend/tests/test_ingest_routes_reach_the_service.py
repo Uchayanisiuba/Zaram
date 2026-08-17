@@ -224,6 +224,142 @@ class TestPaste:
         assert not uploads(tmp_path).exists() or not list(uploads(tmp_path).iterdir())
 
 
+class TestWithdrawing:
+    """*"Forget this folder and everything Zaram learned from it"* has to be true.
+
+    It was not. The facts went, the rows went, and every dropped document stayed
+    on disk — unreachable by any other route, because the row naming it had just
+    been deleted. Four files had to be removed by hand after one session's
+    verification.
+
+    The distinction these tests exist to protect is **whose file it is**. A
+    staged copy is Zaram's; a scanned folder holds the user's originals, and
+    deleting those would be unrecoverable.
+    """
+
+    def test_withdrawing_uploads_deletes_the_copies_zaram_made(self, client, tmp_path):
+        client.post(
+            "/ingest/upload",
+            files=[
+                ("files", ("one.txt", b"A document worth keeping for now.", "text/plain")),
+                ("files", ("two.txt", b"Another document, also worth keeping.", "text/plain")),
+            ],
+        )
+        assert len(list(uploads(tmp_path).iterdir())) == 2
+
+        source_id = client.get("/ingest/sources").json()["sources"][0]["id"]
+        body = client.delete(f"/ingest/sources/{source_id}").json()
+
+        assert body["files_deleted"] == 2
+        assert list(uploads(tmp_path).iterdir()) == []
+        assert client.get("/ingest/sources").json()["sources"] == []
+        assert client.get("/ingest/outcomes").json()["outcomes"] == []
+
+    def test_withdrawing_a_scanned_folder_never_touches_the_users_files(
+        self, client, tmp_path
+    ):
+        """The half that must not regress.
+
+        These are the user's originals, in their own folder. Withdrawing a
+        *source* is a statement about Zaram's memory, never about their disk.
+        """
+        folder = tmp_path / "Contracts"
+        folder.mkdir()
+        (folder / "northwind.txt").write_text("The agreed day rate is 450.", encoding="utf-8")
+        (folder / "osun.txt").write_text("Delivery moves to September.", encoding="utf-8")
+
+        client.post("/ingest", json={"path": str(folder)})
+        source_id = client.get("/ingest/sources").json()["sources"][0]["id"]
+
+        body = client.delete(f"/ingest/sources/{source_id}").json()
+
+        assert body["files_deleted"] == 0
+        assert sorted(p.name for p in folder.iterdir()) == ["northwind.txt", "osun.txt"]
+        assert client.get("/ingest/sources").json()["sources"] == []
+
+    def test_a_stored_path_pointing_elsewhere_is_refused(self, client, tmp_path):
+        """An outcome's `path` is stored data, not a promise.
+
+        Following it to a delete without checking where it lands is how "Zaram
+        deleted my file" happens. The row is rewritten here to point outside the
+        uploads directory — the shape a traversal or a tampered database would
+        take — and the file it names must survive.
+        """
+        client.post(
+            "/ingest/upload",
+            files=[("files", ("staged.txt", b"A perfectly ordinary staged note.", "text/plain"))],
+        )
+
+        precious = tmp_path / "the-users-real-contract.txt"
+        precious.write_text("Not Zaram's to delete.", encoding="utf-8")
+
+        main = importlib.import_module("main")
+        records = main.ingest_service.records
+        outcome_id = client.get("/ingest/outcomes").json()["outcomes"][0]["id"]
+        with records._connect() as connection:  # noqa: SLF001 — rewriting a row on purpose
+            connection.execute(
+                "UPDATE outcomes SET path = ? WHERE id = ?", (str(precious), outcome_id)
+            )
+
+        source_id = client.get("/ingest/sources").json()["sources"][0]["id"]
+        body = client.delete(f"/ingest/sources/{source_id}").json()
+
+        assert body["files_deleted"] == 0
+        assert precious.exists(), "a stored path outside the uploads directory was followed"
+
+    def test_a_file_already_gone_does_not_fail_the_withdrawal(self, client, tmp_path):
+        client.post(
+            "/ingest/upload",
+            files=[("files", ("vanishing.txt", b"Here now, gone in a moment.", "text/plain"))],
+        )
+        (uploads(tmp_path) / "vanishing.txt").unlink()
+
+        source_id = client.get("/ingest/sources").json()["sources"][0]["id"]
+        response = client.delete(f"/ingest/sources/{source_id}")
+
+        assert response.status_code == 200
+        assert response.json()["files_deleted"] == 0
+        assert client.get("/ingest/sources").json()["sources"] == []
+
+    def test_withdrawing_something_unknown_is_a_404(self, client):
+        assert client.delete("/ingest/sources/src-nothing").status_code == 404
+
+    def test_sources_say_which_ones_hold_zarams_own_copies(self, client, tmp_path):
+        """`staged` is what makes the interface warn before deleting documents.
+
+        If it were wrong in either direction the failure would be silent: the
+        warning never appears on a source that deletes files, or it appears on a
+        scanned folder and teaches the user to click through it.
+        """
+        folder = tmp_path / "Contracts"
+        folder.mkdir()
+        (folder / "a.txt").write_text("A document of the user's own.", encoding="utf-8")
+
+        client.post("/ingest", json={"path": str(folder)})
+        client.post(
+            "/ingest/upload",
+            files=[("files", ("dropped.txt", b"A document Zaram copied.", "text/plain"))],
+        )
+
+        staged = {s["name"]: s["staged"] for s in client.get("/ingest/sources").json()["sources"]}
+        assert staged == {"Contracts": False, "uploads": True}
+
+    def test_a_users_folder_merely_named_uploads_is_not_staged(self, client, tmp_path):
+        """Not inferred from the name. Someone's own `uploads` folder is theirs."""
+        decoy = tmp_path / "Pictures" / "uploads"
+        decoy.mkdir(parents=True)
+        (decoy / "photo-notes.txt").write_text("Notes beside some photos.", encoding="utf-8")
+
+        client.post("/ingest", json={"path": str(decoy)})
+        source = client.get("/ingest/sources").json()["sources"][0]
+
+        assert source["name"] == "uploads"
+        assert source["staged"] is False, "a folder of the user's own was marked as Zaram's"
+
+        client.delete(f"/ingest/sources/{source['id']}")
+        assert (decoy / "photo-notes.txt").exists()
+
+
 def test_the_stream_shape_matches_the_folder_scan(client, tmp_path):
     """One NDJSON vocabulary for every way in.
 

@@ -66,6 +66,12 @@ export interface IngestSource {
   counts: Partial<Record<IngestStatus, number>>;
   total: number;
   problems: number;
+  /** True when this source is Zaram's own uploads directory — the files in it
+   *  are copies Zaram wrote when documents were dropped or pasted, so
+   *  withdrawing it deletes them. A scanned folder holds the user's originals
+   *  and withdrawing it never touches the disk. The backend answers this; it is
+   *  deliberately not inferred from the folder's name. */
+  staged: boolean;
 }
 
 /** One event from the ingest stream. Progress is per file, never a percentage:
@@ -116,7 +122,9 @@ export async function setSourcePolicy(
   });
 }
 
-export async function removeSource(sourceId: string): Promise<{ facts_removed: number }> {
+export async function removeSource(
+  sourceId: string,
+): Promise<{ facts_removed: number; facts_recorded: number; files_deleted: number }> {
   return json(`/ingest/sources/${sourceId}`, { method: 'DELETE' });
 }
 

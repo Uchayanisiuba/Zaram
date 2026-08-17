@@ -2786,8 +2786,17 @@ async def ingest_text(body: PasteBody):
 
 @app.get("/ingest/sources")
 async def list_ingest_sources():
-    """Every folder the user has pointed at, with its counts."""
-    return {"sources": ingest_service.records.sources()}
+    """Every folder the user has pointed at, with its counts.
+
+    `staged` says whether this source is Zaram's own uploads directory, so the
+    interface can warn that withdrawing it deletes documents. Answered here
+    rather than inferred from the folder's name in the frontend — a source
+    called "uploads" somewhere on the user's disk is not this one.
+    """
+    sources = ingest_service.records.sources()
+    for source in sources:
+        source["staged"] = ingest_service.is_staged_source(source["root"])
+    return {"sources": sources}
 
 
 @app.get("/ingest/outcomes")
@@ -2829,13 +2838,24 @@ async def set_ingest_policy(source_id: str, body: PolicyBody):
 
 @app.delete("/ingest/sources/{source_id}")
 async def remove_ingest_source(source_id: str):
-    """Withdraw a folder, and take its facts out of the Spine with it.
+    """Withdraw a folder: its facts out of the Spine, and Zaram's own copies off
+    the disk.
 
     Rule 4: the user can delete any stored fact and the affected answers
     change. Removing the folder while leaving its facts recallable would be the
     rule failing quietly, which is worse than not offering removal at all.
+
+    **`files_deleted` counts only copies Zaram made.** A dropped or pasted
+    document is staged under the uploads directory, and that copy is Zaram's —
+    the user's original is wherever they dragged it from. A scanned folder holds
+    their originals and nothing there is ever touched. `IngestService.withdraw`
+    is where that distinction lives and why.
     """
-    fact_ids = ingest_service.records.remove_source(source_id)
+    outcome = ingest_service.withdraw(source_id)
+    if outcome is None:
+        raise HTTPException(status_code=404, detail="No such source")
+
+    fact_ids = outcome["fact_ids"]
     forgotten = 0
     runtime = getattr(kernel, "memory_runtime", None)
     if runtime is not None:
@@ -2845,7 +2865,12 @@ async def remove_ingest_source(source_id: str):
                     forgotten += 1
             except Exception:
                 print(f"[Ingest] could not forget {fact_id}")
-    return {"id": source_id, "facts_removed": forgotten, "facts_recorded": len(fact_ids)}
+    return {
+        "id": source_id,
+        "facts_removed": forgotten,
+        "facts_recorded": len(fact_ids),
+        "files_deleted": outcome["files_deleted"],
+    }
 
 
 AUDIO_CACHE_DIR = os.path.abspath("audio_cache")
