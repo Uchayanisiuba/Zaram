@@ -99,6 +99,8 @@ export default function KnowledgeWorkspace() {
    *  starting an ingest clears the error, and a drop of a folder *and* some
    *  files would otherwise lose the one thing the user needs to be told. */
   const [notice, setNotice] = useState<string | null>(null);
+  /** The staged source awaiting a yes before its documents are deleted. */
+  const [confirming, setConfirming] = useState<string | null>(null);
   const [pasted, setPasted] = useState<string | null>(null);
   const [pasteName, setPasteName] = useState('');
   const abortRef = useRef<AbortController | null>(null);
@@ -337,9 +339,32 @@ export default function KnowledgeWorkspace() {
     );
   }, []);
 
+  /**
+   * Withdraw a source.
+   *
+   * **A staged source is asked about first, because withdrawing it deletes
+   * documents.** The files under Zaram's uploads directory are copies it wrote
+   * when things were dropped or pasted, and taking the source out now takes
+   * them with it — otherwise the button's own promise, "everything Zaram
+   * learned from it", is not kept and the bytes become unreachable. That makes
+   * it irreversible, and CLAUDE.md is explicit that deleting something holding
+   * facts and files is never one button.
+   *
+   * A scanned folder is not asked about: nothing on disk is touched, its facts
+   * are removable by design under rule 4, and a confirmation on every removal
+   * would be the tax rule 7h warns against.
+   */
   const onRemove = useCallback(async (source: IngestSource) => {
-    await removeSource(source.id);
+    const result = await removeSource(source.id);
     if (selected === source.id) setSelected(null);
+    setConfirming(null);
+    if (result.files_deleted > 0) {
+      setNotice(
+        result.files_deleted === 1
+          ? 'Forgotten, and the copy Zaram kept was deleted. Your original is untouched.'
+          : `Forgotten, and the ${result.files_deleted} copies Zaram kept were deleted. Your originals are untouched.`,
+      );
+    }
     await load();
   }, [selected, load]);
 
@@ -591,14 +616,58 @@ export default function KnowledgeWorkspace() {
                   {source.policy === 'local_only' ? 'Local only' : 'Cloud allowed'}
                 </button>
 
-                <button
-                  onClick={(e) => { e.stopPropagation(); void onRemove(source); }}
-                  title="Forget this folder and everything Zaram learned from it"
-                  className="shrink-0 opacity-60 hover:opacity-100"
-                  data-testid={`remove-${source.id}`}
-                >
-                  <Trash2 size={13} style={{ color: 'var(--color-text-dim, #64748b)' }} />
-                </button>
+                {confirming === source.id ? (
+                  // Named consequences, not "are you sure?". The count is the
+                  // part that decides, and so is the sentence saying the
+                  // originals survive — that is the thing a person is actually
+                  // afraid of here.
+                  <div
+                    className="shrink-0 flex items-center gap-2"
+                    onClick={(e) => e.stopPropagation()}
+                    data-testid={`confirm-${source.id}`}
+                  >
+                    <span className="text-[11px]" style={{ color: 'var(--color-amber, #d97706)' }}>
+                      Delete {source.total} {source.total === 1 ? 'document' : 'documents'} Zaram
+                      copied here? Your originals stay.
+                    </span>
+                    <button
+                      onClick={() => void onRemove(source)}
+                      className="text-[11px] px-2 py-1 rounded-md"
+                      style={{ border: '1px solid var(--color-rose, #e11d48)', color: 'var(--color-rose, #e11d48)' }}
+                      data-testid={`confirm-yes-${source.id}`}
+                    >
+                      Delete
+                    </button>
+                    <button
+                      onClick={() => setConfirming(null)}
+                      className="text-[11px] px-2 py-1 rounded-md"
+                      style={{ color: 'var(--color-text-dim, #64748b)' }}
+                      data-testid={`confirm-no-${source.id}`}
+                    >
+                      Keep
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      // Staged sources hold Zaram's own copies, so withdrawing
+                      // deletes files and has to be asked. A scanned folder
+                      // touches no disk and is not worth a dialog.
+                      if (source.staged) setConfirming(source.id);
+                      else void onRemove(source);
+                    }}
+                    title={
+                      source.staged
+                        ? 'Forget these documents and delete the copies Zaram kept'
+                        : 'Forget this folder and everything Zaram learned from it'
+                    }
+                    className="shrink-0 opacity-60 hover:opacity-100"
+                    data-testid={`remove-${source.id}`}
+                  >
+                    <Trash2 size={13} style={{ color: 'var(--color-text-dim, #64748b)' }} />
+                  </button>
+                )}
               </div>
             ))}
           </div>

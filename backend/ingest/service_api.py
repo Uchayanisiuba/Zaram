@@ -149,13 +149,34 @@ class IngestService:
 
     # -- drop, paste and upload --------------------------------------------- #
 
-    def uploads_dir(self) -> Path:
-        """The staging directory, created on demand."""
+    def uploads_path(self) -> Path:
+        """Where staged files belong, without creating anything.
+
+        Separate from `uploads_dir` because listing sources has to ask *"is this
+        the staging directory?"*, and a read should not leave an empty folder
+        behind as a side effect.
+        """
         from core.paths import data_dir
 
-        directory = Path(data_dir()) / UPLOADS_DIRNAME
+        return Path(data_dir()) / UPLOADS_DIRNAME
+
+    def uploads_dir(self) -> Path:
+        """The staging directory, created on demand."""
+        directory = self.uploads_path()
         directory.mkdir(parents=True, exist_ok=True)
         return directory
+
+    def is_staged_source(self, root: str) -> bool:
+        """True when this source is Zaram's staging directory rather than a
+        folder of the user's own files.
+
+        The interface needs this to know whether withdrawing will delete
+        documents, and it must not be guessed from the folder's name.
+        """
+        try:
+            return Path(root).resolve() == self.uploads_path().resolve()
+        except OSError:
+            return False
 
     @staticmethod
     def safe_name(name: str) -> str:
@@ -261,6 +282,68 @@ class IngestService:
         self._records.merge_outcomes(source_id, list(report.outcomes))
 
         yield {"type": "done", "source_id": source_id, **report.to_dict()}
+
+    # -- withdrawing a source ------------------------------------------------ #
+
+    def withdraw(self, source_id: str) -> dict[str, Any] | None:
+        """Take a source out, and take Zaram's own copies of its files with it.
+
+        **Which files are Zaram's is the whole question, and the answer is not
+        "the ones in this source".** A scanned folder's files are the user's
+        originals, sitting in their Documents folder; deleting those because
+        they withdrew a *source* would be unrecoverable and is exactly the
+        surprise rule 4 exists to prevent. A file under the uploads directory is
+        a copy Zaram wrote when they dropped or pasted something — their
+        original is still wherever they dragged it from.
+
+        So the rows and the facts go in both cases, and only the copies are
+        deleted. Before this existed, pressing *"Forget this folder and
+        everything Zaram learned from it"* left every dropped document on disk:
+        the promise on the button was not kept, and the bytes were unreachable
+        by any other route because the row naming them had just been deleted.
+
+        Three conditions, all required, and the third is not a formality — an
+        outcome's `path` is stored data, and following it to a delete without
+        checking where it lands is how "Zaram deleted my file" happens.
+        """
+        root = self._records.source_root(source_id)
+        if root is None:
+            return None
+
+        paths = [str(outcome["path"]) for outcome in self._records.outcomes(source_id=source_id)]
+        fact_ids = self._records.remove_source(source_id)
+        deleted = self._delete_own_copies(root, paths)
+        return {"fact_ids": fact_ids, "files_deleted": deleted}
+
+    def _delete_own_copies(self, root: str, paths: list[str]) -> int:
+        """Delete the staged copies belonging to a withdrawn uploads source."""
+        if not self.is_staged_source(root):
+            # A scanned folder. Its files are the user's; nothing is deleted.
+            return 0
+        uploads = self.uploads_path().resolve()
+
+        deleted = 0
+        for raw in paths:
+            try:
+                candidate = Path(raw).resolve()
+            except OSError:
+                continue
+            # Containment, checked after resolving. A symlink inside the uploads
+            # directory pointing at a real document resolves *outside* it and is
+            # refused here — which leaves a dangling link and keeps the
+            # document, the right way round for an irreversible operation.
+            if not candidate.is_relative_to(uploads) or candidate == uploads:
+                logger.warning("refusing to delete %s: outside the uploads directory", raw)
+                continue
+            try:
+                candidate.unlink()
+                deleted += 1
+            except FileNotFoundError:
+                # Already gone. Withdrawing still succeeded.
+                pass
+            except OSError as exc:
+                logger.warning("could not delete %s: %s", candidate, exc)
+        return deleted
 
     def retry(self, outcome_id: str) -> dict[str, Any] | None:
         """Re-read one file. What the retry button on a failure does.

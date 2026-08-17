@@ -362,6 +362,20 @@ class IngestRecords:
             )
             return cursor.rowcount > 0
 
+    def source_root(self, source_id: str) -> str | None:
+        """The absolute path this source stands for, or None if unknown.
+
+        Needed because *where* a source is decides what withdrawing it may
+        delete: files under the uploads directory are copies Zaram made, and a
+        scanned folder holds the user's own originals. The caller makes that
+        judgement — this only reports the place.
+        """
+        with self._lock, self._connect() as connection:
+            row = connection.execute(
+                "SELECT root FROM sources WHERE id = ?", (source_id,)
+            ).fetchone()
+        return str(row["root"]) if row else None
+
     def remove_source(self, source_id: str) -> list[str]:
         """Forget a folder. Returns the fact ids its files produced.
 
