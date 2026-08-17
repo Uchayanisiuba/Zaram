@@ -241,10 +241,33 @@ def test_citation_markers_are_not_leaked_to_the_user():
     assert "Never print the [M1] markers" in injected
 
 
-def test_exchange_is_stored_after_answering():
-    """Recall is only possible if the exchange was committed."""
+def test_a_stated_fact_is_stored_after_answering():
+    """The storage path runs once an answer has been produced.
+
+    **This used to assert that "a new question" was stored**, which is rule 7d
+    inverted — conversation is ephemeral, and a question is traffic. It passed
+    because the door check was a blocklist that only caught recognised question
+    shapes, and it would have kept passing while the Spine filled with the
+    user's own prompts. It did exactly that: `GET /memory` on 16 August held
+    "Say the single word: ping" and "WHars your name" as durable facts.
+
+    The intent behind the test is sound and is kept — a fact the user states
+    must reach the store, or recall can never find it. Only the fixture
+    changes, from a question to something a person actually told Zaram.
+    """
+    engine, _, memory = _build_engine(["prior fact"])
+    _run(engine, "My day rate for Harbour Lane is 425,000 naira.")
+
+    assert memory.remembered, "the fact was never stored"
+    assert "Harbour Lane" in memory.remembered[0]
+
+
+def test_a_question_is_not_stored_after_answering():
+    """The other half, and the one the old test made impossible to write."""
     engine, _, memory = _build_engine(["prior fact"])
     _run(engine, "a new question")
 
-    assert memory.remembered, "the exchange was never stored"
-    assert "a new question" in memory.remembered[0]
+    assert not memory.remembered, (
+        "a question was stored as a durable fact; it will be recalled and "
+        "cited back to the user as though it were a source"
+    )
