@@ -15,7 +15,7 @@ accurate — it is the first thing anyone reads.
 
 > ### Documents can be dropped in, and the second drop used to delete the first.
 >
-> Suites: **2146 backend passed / 0 failed**, 102 skipped · **184 frontend** ·
+> Suites: **2146 backend passed / 0 failed**, 102 skipped · **178 frontend** ·
 > **48 Electron** · typecheck clean · lint passes · guards pass.
 >
 > Run the Electron suite with **no Zaram running**: `electron/main.js` takes a
@@ -117,14 +117,17 @@ accurate — it is the first thing anyone reads.
 > composite repeats every **8s** instead of never. The pulse is unchanged for
 > anyone who has not asked for less motion.
 >
-> **Eleven of the fifteen orb components are imported by nothing** — `OrbCore`,
-> `Aura`, `Halo`, `FloatingParticles`, `Pulse`, `RippleLayer`, `ThinkingGlow`,
-> `WaveformBars`, `WaveformRings`, `FocusRing`, `OrbitalNode`. Only `LivingOrb`,
-> `OrbStatus`, `OrbStatusLabel` and `OrbHint` are live. This produced a wrong
-> finding in a written assessment — "the core of the orb is the cloud accent at
-> rest" is true of `OrbCore`'s source and false on screen, because it never
-> mounts. Config was read and assumed to render. **Deleting them is the next
-> cheap win.**
+> **Eleven of the fifteen orb components were imported by nothing, and are now
+> deleted** — 464 lines. Only `LivingOrb`, `OrbStatus`, `OrbStatusLabel` and
+> `OrbHint` ever rendered. This had already produced a wrong finding in a
+> written assessment: "the core of the orb is the cloud accent at rest" is true
+> of `OrbCore`'s source and false on screen, because it never mounted. Config
+> was read and assumed to render — this repository's signature failure applied
+> to its own analysis rather than to a feature. Dead code that looks live is not
+> inert; it is a standing invitation to reason about the wrong file.
+>
+> `settle` and `settleAll` went with them rather than becoming two dead
+> functions in place of eleven dead components.
 >
 > Two colour findings stand and are unfixed, both in `STATE_CONFIG`, which does
 > render: **speaking and listening are 29° apart** in hue (emerald against cyan,
@@ -153,11 +156,9 @@ accurate — it is the first thing anyone reads.
 >
 > **Start here, in this order.**
 >
-> 1. **Delete the eleven dead orb components.** ~500 lines that read as live and
->    have already caused one wrong conclusion.
-> 2. **Knowledge domains**, scoping retrieval.
-> 3. **The session/memory split** — the structural fix rule 7d actually needs.
-> 4. **Run the installer on a clean machine.** Unchanged, and still only the
+> 1. **Knowledge domains**, scoping retrieval.
+> 2. **The session/memory split** — the structural fix rule 7d actually needs.
+> 3. **Run the installer on a clean machine.** Unchanged, and still only the
 >    maintainer can. Note the current build predates the ingestion routes.
 
 ## Superseded — 17 August 2026

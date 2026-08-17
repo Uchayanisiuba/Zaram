@@ -39,7 +39,7 @@ BEFORE RUNNING ANYTHING
     real one with `node_modules/.bin/electron electron/main.js`.
 
 MEASURED STATE (18 August, every number from a run)
-  backend 2146 passed / 0 failed / 102 skipped · frontend 184 · Electron 48 ·
+  backend 2146 passed / 0 failed / 102 skipped · frontend 178 · Electron 48 ·
   typecheck clean · lint passes · guards pass.
   Run the Electron suite with NO ZARAM RUNNING. electron/main.js takes a
   single-instance lock, so the two bootstrap tests spawn an instance that
@@ -64,24 +64,16 @@ THE THREE THINGS THAT MATTER MOST
      tested and uncalled. The API itself has authentication.
 
 WHAT TO BUILD, IN ORDER
-  1. Delete the eleven dead orb components (see the gap list). ~500 lines that
-     read as live; reading their config as though it rendered already produced
-     one wrong written finding.
-  2. Knowledge domains, scoping retrieval.
-  3. The session/memory split — the structural fix rule 7d actually needs.
+  1. Knowledge domains, scoping retrieval.
+  2. The session/memory split — the structural fix rule 7d actually needs.
      The door check in ExecutionEngine._carries_new_information is a heuristic
      standing in for it and says so in its own docstring.
-  4. Obligations wired into ingest. Still the differentiator.
-  5. The ambient surface's selection capture. ASK THE MAINTAINER FIRST:
+  3. Obligations wired into ingest. Still the differentiator.
+  4. The ambient surface's selection capture. ASK THE MAINTAINER FIRST:
      synthesised Ctrl+C, clipboard-only, or UI Automation. Each carries a
      different privacy cost and it is their call, not a default to pick.
 
 KNOWN OPEN GAPS, DELIBERATELY
-  - ELEVEN OF FIFTEEN ORB COMPONENTS ARE IMPORTED BY NOTHING: OrbCore, Aura,
-    Halo, FloatingParticles, Pulse, RippleLayer, ThinkingGlow, WaveformBars,
-    WaveformRings, FocusRing, OrbitalNode. Only LivingOrb, OrbStatus,
-    OrbStatusLabel and OrbHint render. Reading their config and assuming it
-    renders already produced one wrong finding in a written assessment.
   - The orb's colours: speaking and listening are 29 degrees apart in hue, and
     idle and thinking are the same two hues with dominance swapped. All five
     states sit in a 111 degree arc. Proposed fix is to stop using hue as the
@@ -238,11 +230,13 @@ same and settles. Every live idle period is now a multiple of 4s and the
 composite repeats every **8s** instead of never. `ring1Duration` and
 `ring2Duration` were deleted — set in all five states and read by nothing.
 
-**Eleven of fifteen orb components are imported by nothing.** This produced a
-wrong finding in a written assessment: "the core of the orb is the cloud accent
-at rest" is true of `OrbCore`'s source and false on screen, because `OrbCore`
-never mounts. Config was read and assumed to render — the trap this file has
-warned about for two sessions, walked into while writing about it.
+**Eleven of fifteen orb components were imported by nothing, and are deleted**
+— 464 lines. This had produced a wrong finding in a written assessment: "the
+core of the orb is the cloud accent at rest" is true of `OrbCore`'s source and
+false on screen, because `OrbCore` never mounted. Config was read and assumed to
+render — the trap this file has warned about for two sessions, walked into while
+writing about it. `settle` and `settleAll` went with them rather than becoming
+two dead functions in place of eleven dead components.
 
 Two colour findings stand, both in `STATE_CONFIG`, which does render: speaking
 and listening are **29° apart** in hue, and idle and thinking are the same two
