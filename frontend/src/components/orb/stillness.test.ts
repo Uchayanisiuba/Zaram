@@ -6,77 +6,19 @@
  * `prefers-reduced-motion` is an operating-system setting. There is no way to
  * exercise this path by driving the app, so the only honest proof that it works
  * is a test of the transform itself. That is the whole reason this file exists:
- * `docs/UI-SPEC.md` has required the gate all along, four orb components never
- * had one, and nothing anywhere would have noticed.
+ * `docs/UI-SPEC.md` has required the gate all along, `LivingOrb` never had one,
+ * and nothing anywhere would have noticed.
  *
- * The three properties that matter are the three that would each fail silently:
- * movement actually stops, colour is *not* stripped with it, and the resting
- * pose is the one the animation pauses at rather than a frame from mid-breath.
+ * The properties that matter are the ones that would each fail silently:
+ * movement actually stops, the resting pose is the one the animation pauses at
+ * rather than a frame from mid-breath, and the periods the orb loops on share a
+ * factor so the composite resolves.
+ *
+ * The `settle`/`settleAll` suites went with the helpers, which went with the
+ * three variant-driven components that were imported by nothing.
  */
 import { describe, it, expect } from 'vitest';
-import { SETTLE_SECONDS, frames, loop, settle, settleAll } from './stillness';
-
-describe('settle', () => {
-  it('collapses a keyframe array to its resting value', () => {
-    const still = settle({ scale: [1, 1.06, 1] }) as { scale: number };
-    expect(still.scale).toBe(1);
-  });
-
-  it('keeps colour, because reduced motion means less movement not less meaning', () => {
-    const still = settle({
-      scale: [1, 1.05, 1],
-      backgroundColor: 'rgba(99, 102, 241, 0.2)',
-    }) as { backgroundColor: string };
-
-    expect(still.backgroundColor).toBe('rgba(99, 102, 241, 0.2)');
-  });
-
-  it('drops the repeat rather than leaving an infinite loop behind', () => {
-    const still = settle({
-      scale: [1, 1.05, 1],
-      transition: { duration: 4, repeat: Infinity, ease: 'easeInOut' },
-    }) as { transition: { duration: number; repeat?: number } };
-
-    expect(still.transition.repeat).toBeUndefined();
-    // Still a transition, not a cut: UI-SPEC calls an instant colour flip a
-    // glitch rather than a state, and 0.22s is the figure it settled on.
-    expect(still.transition.duration).toBe(SETTLE_SECONDS);
-  });
-
-  it('parks rotation at 0 rather than at a residual 360', () => {
-    const still = settle({ rotate: 360, borderColor: 'rgba(99,102,241,0.4)' }) as {
-      rotate: number;
-      borderColor: string;
-    };
-    expect(still.rotate).toBe(0);
-    expect(still.borderColor).toBe('rgba(99,102,241,0.4)');
-  });
-
-  it('leaves a variant with no movement alone', () => {
-    const still = settle({ scale: 1.14, backgroundColor: 'rgba(34,211,238,0.3)' }) as {
-      scale: number;
-    };
-    expect(still.scale).toBe(1.14);
-  });
-});
-
-describe('settleAll', () => {
-  it('settles every state, so no state keeps animating by omission', () => {
-    const settled = settleAll({
-      idle: { scale: [1, 1.05, 1], transition: { duration: 4, repeat: Infinity } },
-      listening: { scale: 1.14 },
-      thinking: { scale: 1.1 },
-      speaking: { scale: 1.2 },
-      swapping: { scale: [1, 1.03, 1], transition: { duration: 4, repeat: Infinity } },
-    });
-
-    for (const [state, variant] of Object.entries(settled)) {
-      const v = variant as { scale: number; transition?: { repeat?: number } };
-      expect(Array.isArray(v.scale), `${state} still holds keyframes`).toBe(false);
-      expect(v.transition?.repeat, `${state} still repeats`).toBeUndefined();
-    }
-  });
-});
+import { SETTLE_SECONDS, frames, loop } from './stillness';
 
 describe('loop', () => {
   it('repeats forever when motion is allowed', () => {
