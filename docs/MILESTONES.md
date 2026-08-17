@@ -13,10 +13,11 @@ accurate — it is the first thing anyone reads.
 
 ## Current state — 18 August 2026
 
-> ### Documents can be dropped in, and the second drop used to delete the first.
+> ### Documents go in three ways now, domains scope what comes back out, and one of this session's own written findings was wrong.
 >
 > Suites: **2184 backend passed / 0 failed**, 102 skipped · **178 frontend** ·
-> **48 Electron** · typecheck clean · lint passes · guards pass.
+> **48 Electron** · typecheck clean · lint passes · guards pass. HEAD `3d9db72`,
+> working tree clean, **16 commits ahead of `origin/Zaram-V0.1` and not pushed**.
 >
 > Run the Electron suite with **no Zaram running**: `electron/main.js` takes a
 > single-instance lock, so the two bootstrap tests spawn an instance that quits

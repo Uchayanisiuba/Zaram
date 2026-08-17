@@ -12,63 +12,76 @@ You are continuing work on Zaram (C:\Zaram), on branch Zaram-V0.1.
 
 READ FIRST, IN THIS ORDER
   1. CLAUDE.md — the contract. Rules, scope, vocabulary. Authority on rules.
-  2. docs/HANDOVER.md — "What changed on 18 August".
+  2. docs/HANDOVER.md — "What changed on 18 August", below the block.
   3. docs/MILESTONES.md — "Current state — 18 August 2026" at the top.
   4. docs/UI-SPEC.md — the interface.
 
 BEFORE RUNNING ANYTHING
   - pytest as `backend\venv\Scripts\python.exe -m pytest` from the repo root.
     Bare `python` is a broken shim that reports phantom failures.
-  - STOP ANY RUNNING BACKEND BEFORE RUNNING THE SUITE. A live backend holds
-    the SQLite lock on the real spine.db and the suite stalls on
-    test_memory_scope_api instead of failing. Measured: ~4m with no backend,
-    34m with one. It looks exactly like a slow test and it is not.
-  - THE API REQUIRES A CREDENTIAL. Any curl against 8420 needs
-    -H "X-Zaram-Auth: $(cat backend/api-secret)" or it answers 401.
+  - STOP ANY RUNNING BACKEND BEFORE THE PYTHON SUITE. A live backend holds the
+    SQLite lock on the real spine.db and the suite stalls on
+    test_memory_scope_api instead of failing. Measured: ~3m clean, 34m with a
+    backend up. It looks exactly like a slow test and it is not.
+  - STOP ZARAM BEFORE THE ELECTRON SUITE. electron/main.js takes a
+    single-instance lock, so the two bootstrap tests spawn an instance that
+    quits immediately and assert against an empty log. Two failures that look
+    like a regression and are not.
   - `npm run check:all` runs lint, typecheck, four guards, the payload check
     and all three suites. It passes. If it does not, that is a regression.
-  - Frontend dev server binds IPv6 AND pins 5173 with strictPort — use
+  - Frontend dev server binds IPv6 and pins 5173 with strictPort — use
     localhost:5173, and expect a named failure rather than a drift to 5174.
-  - Whatever is on port 8420 may be stale. Check build.commit_short against
-    `git rev-parse --short HEAD` before believing any response.
-  - THERE ARE TWO ELECTRON MAIN PROCESSES. `npm run dev` runs a 46-line
-    desktop/src/main/index.ts; the packaged app runs the 429-line
-    electron/main.js. Everything in the latter — tray, global shortcuts,
-    backend launcher, static server, ambient surface — is never exercised in
-    development, which is how a boot crash reached a shipped build. Run the
-    real one with `node_modules/.bin/electron electron/main.js`.
+
+THE CREDENTIAL TRAP — this cost more time than any bug this session
+  The desktop app MINTS A FRESH API SECRET EVERY LAUNCH and passes it to its
+  renderer over IPC. So:
+  - A browser tab at localhost:5173 401s on everything, and the interface
+    correctly reports "Zaram engine not running" about a perfectly healthy
+    backend. Nothing is broken. Test in the Electron window.
+  - curl against 8420 needs -H "X-Zaram-Auth: $(cat backend/api-secret)", and
+    that file only matches when the backend was started STANDALONE
+    (`cd backend && venv/Scripts/python.exe main.py`). Against the Electron
+    app's backend the file is stale and every curl 401s.
+  - To drive the real UI in a browser: run the backend standalone, not via
+    Electron. To exercise tray / shortcuts / ambient / packaging: run Electron.
+  - Whatever is on 8420 may be stale code — it does not hot-reload. Restart it
+    after backend edits, and check build.commit_short before believing it.
+
+TWO ELECTRON MAIN PROCESSES
+  `npm run dev` runs a 46-line desktop/src/main/index.ts; the packaged app runs
+  the 429-line electron/main.js. Everything in the latter — tray, global
+  shortcuts, backend launcher, static server, ambient surface — is never
+  exercised in development, which is how a boot crash reached a shipped build.
+  Run the real one: `node_modules/.bin/electron electron/main.js`.
 
 MEASURED STATE (18 August, every number from a run)
   backend 2184 passed / 0 failed / 102 skipped · frontend 178 · Electron 48 ·
   typecheck clean · lint passes · guards pass.
-  Run the Electron suite with NO ZARAM RUNNING. electron/main.js takes a
-  single-instance lock, so the two bootstrap tests spawn an instance that
-  quits instantly and assert against an empty log. Looks like a regression.
+  HEAD 3d9db72, working tree clean.
+  16 COMMITS AHEAD OF origin/Zaram-V0.1 AND NOT PUSHED. Ask before pushing.
 
 THE THREE THINGS THAT MATTER MOST
   1. The installer is BUILT and UNVERIFIED on a clean machine —
      dist-electron/Zaram-0.1.0-x64.exe. Four separate reasons it could never
-     have started are now fixed. Only a machine that has never seen this repo
-     can prove it, and that is the maintainer's action, not yours. Do not
-     claim packaging is done. NOTE: that build predates the ingestion routes,
-     so drop and paste are not in it — rebuild before testing them installed.
-  2. Documents can be dropped, pasted and uploaded into Knowledge, and
-     withdrawing a staged source now deletes the copies Zaram made after asking
-     first. Both halves were verified in the running product, not by the suite.
-     THE DESKTOP APP MINTS A FRESH API CREDENTIAL EVERY LAUNCH. A browser tab
-     at localhost:5173 therefore 401s on everything and the interface reports
-     "Zaram engine not running" about a healthy backend. That is correct
-     behaviour in a tab and it cost the most time this session — test in the
-     Electron window, launched with node_modules/.bin/electron electron/main.js.
+     have started are fixed. Only a machine that has never seen this repo can
+     prove it, and that is the maintainer's action, not yours. Do not claim
+     packaging is done. That build PREDATES everything below — rebuild before
+     testing any of it installed.
+  2. Knowledge domains narrow recall, and /chat cannot ask inside one yet.
+     The scope works and is proven at the retriever; the conversation has no
+     picker, so nothing in the chat path passes `only_ids`. Configurable, not
+     yet usable from a question. This is item 1 below.
   3. core/pairing.py — the credential a second DEVICE needs — is complete,
      tested and uncalled. The API itself has authentication.
 
 WHAT TO BUILD, IN ORDER
-  1. Let a question be asked inside a knowledge domain. Domains exist, narrow
-     recall, and are proven at the retriever — but /chat does not yet offer to
-     ask inside one. `only_ids` is already a parameter on `retrieve`, so this
-     is a picker in the conversation plus the reply saying which domain it read
-     from. `describe()` already writes that phrase.
+  1. Let a question be asked inside a knowledge domain. Small: `only_ids` is
+     already a parameter on MemoryRuntimeImpl.retrieve, and
+     knowledge/domain_recall.py::describe already writes the phrase a reply
+     ends with ("answered from your Investing domain"). Needs a picker in the
+     conversation and the reply saying which domain it read from. Rule:
+     disabled capabilities are visible, not silent — a question answered from
+     one domain did not look at the rest, and must say so.
   2. The session/memory split — the structural fix rule 7d actually needs.
      The door check in ExecutionEngine._carries_new_information is a heuristic
      standing in for it and says so in its own docstring.
@@ -78,31 +91,51 @@ WHAT TO BUILD, IN ORDER
      different privacy cost and it is their call, not a default to pick.
 
 KNOWN OPEN GAPS, DELIBERATELY
-  - The orb's colours: speaking and listening are 29 degrees apart in hue, and
-    idle and thinking are the same two hues with dominance swapped. All five
-    states sit in a 111 degree arc. Proposed fix is to stop using hue as the
-    state channel, since cyan and violet already mean local and cloud, and let
-    motion character carry state. Not started.
-  - Ctrl+S and Ctrl+O are still swallowed by the orb debug shortcuts, the same
-    bug class as the Ctrl+C one that was fixed.
+  - /chat cannot ask inside a domain. Item 1 above.
+  - The orb's colours. Speaking and listening are 29 degrees apart in hue
+    (emerald against cyan — the pair that alternates fastest in a voice
+    exchange), and idle and thinking are the same two hues with dominance
+    swapped, so "is it working?" is carried by rate alone. All five states sit
+    inside a 111 degree arc. Proposed fix: stop using hue as the state channel
+    — cyan and violet already mean local and cloud — and let motion character
+    carry state instead. Inward ripple for listening, outward pulse for
+    speaking, churn for thinking, near-still for idle. NEEDS A GPU MEASUREMENT
+    FIRST: a shader would run permanently beside a resident model and that cost
+    is unmeasured. Not started.
+  - Ctrl+S and Ctrl+O are still swallowed by the orb debug shortcuts, which
+    force an orb state by hand. Same bug class as the Ctrl+C defect that was
+    fixed: useShortcuts calls preventDefault() on every match outside a text
+    field, so it deletes Save and Open rather than shadowing them.
   - /character has routes, tests, and no interface. A user cannot name it yet.
-  - relevance: 0.0 on every web citation chip while being cited. Observed,
-    not investigated. Suspected to be ranking-versus-deciding again, in the
-    reporting layer this time.
+  - relevance: 0.0 on every web citation chip while being cited. Observed, not
+    investigated. Suspected ranking-versus-deciding again, in the reporting
+    layer this time.
   - knowledge/retrieval.py::_hybrid blends vector*0.7 + bm25*0.3 and truncates
-    on the blend — the bug class fixed elsewhere. Check it is reachable first.
+    on the blend — the bug class fixed elsewhere. Check it is reachable first;
+    this repo has a habit of hiding dead code that looks live.
   - The uninstaller zips raw SQLite rather than calling the real exporter.
 
 TRAPS THIS CODEBASE HAS PAID FOR REPEATEDLY
   - A feature's tests can all pass while the feature cannot happen. Twelve
-    complete, tested, unreachable modules have now been found. Before
-    believing a feature works, check something calls it and a route serves it.
+    complete, tested, unreachable modules have been found, and eleven dead orb
+    components were deleted this session. Before believing a feature works,
+    check something calls it and a route serves it.
+  - THIS APPLIES TO YOUR OWN ANALYSIS. A written assessment this session
+    claimed the orb's core was painted with the cloud accent at rest. True of
+    OrbCore's source; false on screen, because OrbCore never mounted. Config
+    was read and assumed to render.
+  - An empty set is not an absent one. frozenset() is falsy, so `if only_ids`
+    widens a domain holding nothing to the entire Spine. Use `is not None`
+    wherever "none selected" and "nothing matches" are different answers.
+  - An operation correct for a whole source is wrong for part of one.
+    "Replace this source's rows" is right for a folder scan and destroyed an
+    earlier drop's rows — and with them the fact ids rule 4 needs.
+  - A boundary enforced per code path has a hole per code path. Scope and
+    domain filters both live at ONE point in runtimes/memory/retrieval.py,
+    after every strategy, because _vector_search bypasses the store's filters.
   - A blocklist fails open. Require positive evidence instead.
   - A score built for ranking is not a score for deciding. Membership,
     ordering and citation are three questions; never merge them.
-  - An operation that is correct for a whole source is wrong for part of one.
-    "Replace this source's rows" is right for a folder scan and destroyed an
-    earlier drop's rows — and with them the fact ids rule 4 needs.
   - Never render an invented value.
   - A test can assert a rule violation and pass for months.
   - Verify by seeing it work, not by a passing suite.
@@ -112,150 +145,111 @@ TRAPS THIS CODEBASE HAS PAID FOR REPEATEDLY
 
 ## What changed on 18 August
 
-### Ingestion by drop, paste and upload — the routes exist now
+Sixteen commits. Two features, five defects, one deletion — and one wrong claim
+of my own, corrected below because it is the most useful thing here.
+
+### Ingestion by drop, paste and upload
 
 `backend/ingest/service_api.py` had carried `save_upload`, `save_text` and
-`stream_ingest_paths` — complete, commented, called by nothing. Two routes
-close it:
+`stream_ingest_paths` — complete, commented, called by nothing. Two routes close
+it:
 
 | Route | Body | Notes |
 |---|---|---|
 | `POST /ingest/upload` | multipart, repeated `files` | Bytes written **before** the stream starts; a `StreamingResponse` body runs after the request is gone |
 | `POST /ingest/text` | `{text, name}` | Written as a `.txt` and read by the same parser, so there is one chunker and one grader |
 
-Both stream the NDJSON the folder scan already emits. A second event shape
-would be a second set of split-chunk bugs, and `consume()` in `ingestClient.ts`
-is now the single reader for all three ways in.
+Both stream the NDJSON the folder scan already emits, and `consume()` in
+`ingestClient.ts` is the single reader for all three ways in — a second event
+shape would be a second set of split-chunk bugs.
 
-Uploads land in one `uploads` directory under `data_dir()`, so they are one
-source with one policy — rule 5 asks about a *place* once, not once per file.
+Knowledge gained a drop zone, a *Choose files* button and a paste handler. Rule
+7h shapes the paste: files on the clipboard go straight in, because the user
+copied a file and there is nothing to decide; text is **offered**, with the real
+text shown back and a 40-character floor, since a short paste is far more often
+a path meant for the folder field.
 
-### The defect this found: a second drop deleted the first
+A dropped **folder** resolves its real filesystem path and goes to the folder
+route the text field already uses. `desktopPathOf` is the single place that knows
+how to ask, so Electron 32 removing `File.path` changes one function.
 
-`record_outcomes` replaces a source's rows wholesale. That is right for a
-folder scan, which saw every file in its source. Every drop lands in the same
-shared uploads directory, so the second drop deleted the first drop's row —
-and `fact_ids` live on that row.
+### Two defects the routes exposed
 
-The consequence is a rule 4 failure, not an inconvenience: the user presses
-*"Forget this folder and everything Zaram learned from it"*, is told it worked,
-and every fact from every earlier drop stays in the Spine, still recallable,
-with nothing anywhere able to reach it.
+**A second drop deleted the first.** `record_outcomes` replaces a source's rows
+wholesale — right for a folder scan, wrong for a drop, since every drop lands in
+one shared uploads directory. `fact_ids` live on those rows, so the user would
+press *"Forget this folder and everything Zaram learned from it"*, be told it
+worked, and every fact from every earlier drop would stay in the Spine, still
+recallable, unreachable. `merge_outcomes` records per path.
 
-`merge_outcomes` records per *path*. Re-reading one file still replaces its own
-row, so "what is wrong now" holds per file; every other row survives with its
-fact ids. Found by the second assertion of a route test — two files kept, one
-file listed.
+**Withdrawing uploads left the documents on disk.** The facts went, the rows
+went, the copies stayed — four had to be deleted by hand after one verification.
+Now three conditions guard the delete: the outcome belongs to the withdrawn
+source, that source *is* the uploads directory, and the stored path **resolves
+inside it**. The third is not a formality — an outcome's `path` is stored data,
+and following it to a delete without checking where it lands is how "Zaram
+deleted my file" happens. A staged source asks before deleting; a scanned folder
+is never touched and is not asked about.
 
-A refused upload is now **all or none** for the same reason: nine saved files
-and a 413 on the tenth would leave bytes nothing records, nothing can cite and
-no deletion can reach.
+### Knowledge domains
 
-### Verified in the running product
+A named retrieval scope over the user's own sources. `domain_recall.py` resolves
+domain → sources → outcomes → fact ids, and `MemoryQuery.only_ids` narrows recall
+to that set — enforced at the same single point as rule 7i's scope, with a test
+that fakes a vector hit to prove it did not get its own hole.
 
-Live backend, `localhost:5173`, through the interface rather than by curl:
+Many-to-many and never a tree; a required one-line description because routing
+reads it; one memory, many domains, so deleting a domain deletes a lens and not
+facts. Withdrawing a source unlinks it from every domain that held it.
 
-- a file **dropped** onto Knowledge → indexed, listed with its character count
-- a **paste** → the offer appeared with the real text shown back, was named
-  *client minutes*, and became `client minutes.txt`, 108 characters, indexed
-- a **folder** dropped → *"A folder can't be dropped in yet — put its path in
-  the field below and press Index"*, nothing indexed
-- four documents under one `uploads` source, reporting **Local only**
-- *Forget this folder* → the Spine went from 17 records back to **13**, its
-  state before the session, and the source row disappeared
+Verified live: a domain created through the interface resolved to exactly **one
+reachable fact out of a 13-record Spine**.
 
-That last step is the merge fix demonstrated: the three earlier drops' facts
-came out, which is exactly what the bug would have prevented.
+**It is not wired into `/chat`.** See item 1.
 
-### The gap it opened, and it is deliberate
+### The interface said the engine was down while it answered 200
 
-Forgetting the uploads source leaves **Zaram's copies of the documents on
-disk**. Four files had to be deleted by hand after the verification above.
-
-For a scanned folder, not deleting is correct — those are the user's originals.
-For uploads it is not: the file is a copy Zaram made, and the button promises
-"everything Zaram learned from it". Fixing it means deleting document files, so
-it is not a change to make quietly in passing. It is the first item in the list.
-
-### Interface
-
-`KnowledgeWorkspace` gained the drop target, a *Choose files* button and a
-paste handler on the surface. Shaped by rule 7h: files on the clipboard go
-straight in, because the user copied a file and there is nothing to decide;
-text is **offered**, with the real text shown back and a 40-character floor,
-because a short paste is far more often a path meant for the folder field. The
-paste listener ignores inputs, textareas and contenteditable, so pasting a path
-into the folder field does not also offer to index the path.
-
-### The interface reported the engine down while it answered 200
-
-`installApiCredential` resolved Vite's build-time value first and consulted the
-desktop host only when that was empty. Both are present at once in the case
-nobody had run — the real `electron/main.js` loading the Vite dev server — and
-they disagree: `main.js` mints a fresh secret per launch and passes it over IPC,
-while Vite baked in whatever `backend/api-secret` held at boot, a file the
-backend stops writing once `ZARAM_API_SECRET` is set. The stale one won.
-
-Measured: **401 on everything** before, **zero 401s** after. The bridge is
-authoritative because the process on the other end minted the value.
-
-**A browser tab still shows this, and correctly** — it has no host to ask. This
-is now the most expensive misunderstanding in the repo; test in the Electron
-window.
+`installApiCredential` resolved Vite's build-time value first and asked the
+desktop host only if that was empty. Both exist at once when the real
+`electron/main.js` loads the Vite dev server, and they disagree. The stale one
+won and everything 401'd. Zero 401s after. See THE CREDENTIAL TRAP above — this
+is the single most confusing behaviour in the repo, and it is now correct rather
+than fixed.
 
 ### Ctrl+C was deleting Copy, not shadowing it
 
 `useShortcuts` calls `preventDefault()` on every match outside a text field, and
 Toggle Chat was bound to Ctrl+C — so Copy did not work on any of the six
-surfaces, including the three whose whole job is showing facts and citations
-someone would want to copy. Now **Alt+C**.
+surfaces, including the three whose whole job is showing facts and citations.
+Now **Alt+C**, matched on physical position because macOS Option is a compose
+key: ⌥C emits `key: "ç"`, so a chord compared on `event.key` would have been
+printed on the keycap and never fired.
 
-Alt chords match on physical position, because macOS Option is a compose key:
-⌥C emits `key: "ç"`, so a chord compared on `event.key` would have been printed
-on the keycap and never fired — the Ctrl+K/Win+K defect the matcher already
-carries a comment about, arriving by a second route. The test helper was
-synthesising an idealised event and would have passed either way; it now emits
-what the platform's keyboard emits.
+### The orb, and a wrong claim of mine
 
-`Ctrl+S` and `Ctrl+O` remain claimed by the orb debug shortcuts. Same bug class,
-left for a decision.
+`UI-SPEC` requires a `prefers-reduced-motion` gate and `LivingOrb` had none
+across seven infinite animations. Fixed, with colour still transitioning —
+reduced motion means less movement, not less information.
 
-### The orb: reduced motion, and periods that could never resolve
+The restlessness was arithmetic: ten particles ran at `3.5 + p.delay`, ten
+distinct periods, so the field never repeated. Every live idle period is now a
+multiple of 4s and the composite repeats every **8s** instead of never. The pulse
+is unchanged for anyone who has not asked for less motion.
 
-`UI-SPEC` requires the gate and `LivingOrb` had none across seven infinite
-animations. Colour still transitions under reduced motion — less movement, not
-less information — and resting poses are the value each loop pauses at, so the
-listening ring holds at 0.7 rather than the array's 0.
+**Eleven of fifteen orb components were imported by nothing, and are deleted** —
+464 lines. Before deleting them I wrote an assessment claiming the orb's core was
+painted with the cloud accent at rest. That is true of `OrbCore`'s source and
+false on screen, because `OrbCore` never mounted. I read config and assumed it
+rendered — this repository's signature failure, committed against its own
+analysis rather than against a feature. `settle`/`settleAll` went with them
+rather than becoming two dead functions in place of eleven dead components.
 
-The busy feeling was arithmetic, not speed: ten particles ran at
-`3.5 + p.delay`, ten distinct periods, so the field drifted through every phase
-relationship and never repeated. One 8s period with staggered delays looks the
-same and settles. Every live idle period is now a multiple of 4s and the
-composite repeats every **8s** instead of never. `ring1Duration` and
-`ring2Duration` were deleted — set in all five states and read by nothing.
-
-**Eleven of fifteen orb components were imported by nothing, and are deleted**
-— 464 lines. This had produced a wrong finding in a written assessment: "the
-core of the orb is the cloud accent at rest" is true of `OrbCore`'s source and
-false on screen, because `OrbCore` never mounted. Config was read and assumed to
-render — the trap this file has warned about for two sessions, walked into while
-writing about it. `settle` and `settleAll` went with them rather than becoming
-two dead functions in place of eleven dead components.
-
-Two colour findings stand, both in `STATE_CONFIG`, which does render: speaking
-and listening are **29° apart** in hue, and idle and thinking are the same two
-hues with dominance swapped. Proposed fix under the orb entry in `MILESTONES`.
+Two colour findings stand and are unfixed; see the gap list.
 
 ### Also landed
 
 One `SurfaceHeader` for all six surfaces, replacing six copies that had drifted
 to `pb-3` against `pb-4` with Project's title in the wrong typeface. The Zaram
-mark on the landing, quiet and inert. `useIsReducedMotion` returning a real
-boolean.
-
-### Still open from 17 August, unchanged
-
-`/character` has no interface · `core/pairing.py` has no caller ·
-`knowledge/retrieval.py::_hybrid` truncates on a blend · `relevance: 0.0` on
-web citation chips · the uninstaller zips raw SQLite · two Electron main
-processes.
+mark on the landing, quiet and inert — `ZaramMark` argues it should be absent,
+and that argument shaped it rather than excluding it. `useIsReducedMotion`
+returning a real boolean instead of `boolean | null`.
