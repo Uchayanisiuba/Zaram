@@ -11,7 +11,147 @@ accurate — it is the first thing anyone reads.
 
 ---
 
-## Current state — 17 August 2026
+## Current state — 18 August 2026
+
+> ### Documents can be dropped in, and the second drop used to delete the first.
+>
+> Suites: **2139 backend passed / 0 failed**, 102 skipped · **184 frontend** ·
+> **48 Electron** · typecheck clean · lint passes · guards pass.
+>
+> Run the Electron suite with **no Zaram running**: `electron/main.js` takes a
+> single-instance lock, so the two bootstrap tests spawn an instance that quits
+> instantly and asserts against an empty log. It looks like a regression and is
+> not.
+>
+> **The ingestion service layer now has routes**, so drop, paste and upload are
+> reachable rather than merely implemented — the twelfth instance of this
+> repository's signature failure, and the first one closed by adding the route
+> the code was already written for. `POST /ingest/upload` (multipart) and
+> `POST /ingest/text` (JSON), both streaming the same NDJSON the folder scan
+> emits, so the interface parses one stream shape rather than three.
+>
+> **Verified in the running product, not by the suite.** A file dropped onto
+> Knowledge, a folder path, and a paste offer accepted, all through the
+> interface at `localhost:5173` against a live backend: four documents indexed
+> under one `uploads` source, each listed with its character count, the source
+> reporting **Local only**. Then *Forget this folder* — the Spine went from 17
+> records back to **13**, its state before the session, and the source row
+> disappeared.
+>
+> That last number is the interesting one, because it is what a real defect
+> looked like when it was fixed.
+>
+> **`record_outcomes` replaces a source's rows wholesale, and every drop lands
+> in one shared uploads directory.** Correct for a folder scan, which saw every
+> file in its source and is entitled to overwrite the lot; wrong for a drop,
+> which saw only what was dropped. The second drop therefore deleted the first
+> drop's outcome row — and `fact_ids` live on that row, so it also deleted the
+> only route rule 4 has back to those facts. The user would have pressed
+> *"Forget this folder and everything Zaram learned from it"* and been told it
+> worked, while every fact from every earlier drop stayed in the Spine, still
+> recallable, with nothing anywhere able to reach it.
+>
+> Found by the second assertion in a route test — two files kept, one file
+> listed. `merge_outcomes` records per *path*, so re-reading one file still
+> replaces its own row and the "what is wrong now" property holds per file,
+> while every other row survives with its fact ids.
+>
+> **A refused drop is now all-or-none.** The tenth file being too large would
+> otherwise leave the first nine on disk with nothing recording them: bytes in
+> the uploads directory that no source row mentions, no answer can cite and no
+> deletion can reach — the same orphaning as above, arriving by a second route.
+>
+> **The known gap this opened, and it is in the delete path.** Removing the
+> uploads source forgets its facts and its rows, and leaves *Zaram's copies of
+> the documents on disk*. For a scanned folder that is correct — those are the
+> user's originals and Zaram must not delete them. For uploads it is not: the
+> file there is a copy Zaram made, the button promises "everything Zaram learned
+> from it", and four files had to be removed by hand after verification.
+> Deciding this is deleting user documents, so it is not a change to make
+> quietly. **This is the next thing to fix in ingest.**
+>
+> **Rule 7h is what shapes the paste.** Files on the clipboard go straight in —
+> the user copied a file and there is nothing to decide. Text is *offered*,
+> with the real text shown back and a 40-character floor, because a short paste
+> is far more often a path meant for the folder field. A dropped folder is
+> named rather than swallowed: the browser hands it over as a zero-byte file
+> that would be indexed as an empty document, and "I can't do that yet" is the
+> true answer where that would be a wrong one.
+>
+> ### The interface said the engine was down while the engine was answering 200
+>
+> Reported as "Zaram engine not running", and it was a real defect rather than a
+> slow start. `installApiCredential` resolved Vite's build-time value first and
+> asked the desktop host only if that was empty. Both exist at once in the case
+> nobody had run — the *real* `electron/main.js` loading the Vite dev server —
+> and they disagree: `main.js` mints a fresh secret per launch and passes it over
+> IPC, while Vite baked in whatever `backend/api-secret` held at boot, a file the
+> backend stops writing once `ZARAM_API_SECRET` is set. The stale one won.
+> Measured: 401 on everything before, **zero 401s** after.
+>
+> **A browser tab at `localhost:5173` will still show this, correctly** — it has
+> no desktop host to ask. Test in the Electron window. This is the trap that cost
+> the most time this session.
+>
+> ### Ctrl+C was not copying
+>
+> Toggle Chat was bound to Ctrl+C and `useShortcuts` calls `preventDefault()` on
+> every match outside a text field — so it did not shadow Copy, it deleted it, on
+> all six surfaces. Measured with a live selection. Now **Alt+C**.
+>
+> Alt chords match on physical position, because macOS Option is a compose key:
+> ⌥C emits `key: "ç"`, so a chord compared on `event.key` would have been printed
+> on the keycap and never fired — the Ctrl+K/Win+K defect the matcher already
+> carries a comment about. `Ctrl+S` and `Ctrl+O` are **still** swallowed by the
+> orb debug shortcuts; same bug class, left for a decision.
+>
+> ### The orb ignored reduced motion, and its restlessness was arithmetic
+>
+> `UI-SPEC` requires the gate. `LivingOrb` — the only orb that renders — had none
+> across seven infinite animations. Fixed, with colour still transitioning,
+> because reduced motion means less movement rather than less information.
+>
+> The busy feeling had a cause: ten particles ran at `3.5 + p.delay`, ten
+> distinct periods, so the field never repeated. Cycles sharing no common factor
+> cannot resolve. Every live idle period is now a multiple of 4s and the
+> composite repeats every **8s** instead of never. The pulse is unchanged for
+> anyone who has not asked for less motion.
+>
+> **Eleven of the fifteen orb components are imported by nothing** — `OrbCore`,
+> `Aura`, `Halo`, `FloatingParticles`, `Pulse`, `RippleLayer`, `ThinkingGlow`,
+> `WaveformBars`, `WaveformRings`, `FocusRing`, `OrbitalNode`. Only `LivingOrb`,
+> `OrbStatus`, `OrbStatusLabel` and `OrbHint` are live. This produced a wrong
+> finding in a written assessment — "the core of the orb is the cloud accent at
+> rest" is true of `OrbCore`'s source and false on screen, because it never
+> mounts. Config was read and assumed to render. **Deleting them is the next
+> cheap win.**
+>
+> Two colour findings stand and are unfixed, both in `STATE_CONFIG`, which does
+> render: **speaking and listening are 29° apart** in hue (emerald against cyan,
+> the pair that alternates fastest in a voice exchange), and **idle and thinking
+> are the same two hues with dominance swapped** — so "is it working?" is carried
+> by rate alone. All five states sit inside a 111° arc. The proposed fix is to
+> stop using hue as the state channel at all, since cyan and violet already mean
+> local and cloud, and let the orb's *motion character* carry state instead.
+>
+> ### Also landed
+>
+> One `SurfaceHeader` replaces six hand-rolled copies — `pb-3` against `pb-4`,
+> and Project's title in the wrong typeface. The Zaram mark now appears on the
+> landing, quiet and inert. `useIsReducedMotion` returns a real boolean.
+>
+> **Start here, in this order.**
+>
+> 1. **The uploads delete path**, above. Small, and it is a rule 4 promise the
+>    product breaks today.
+> 2. **Delete the eleven dead orb components.** ~500 lines that read as live and
+>    have already caused one wrong conclusion.
+> 3. **Knowledge domains**, scoping retrieval.
+> 4. **The session/memory split** — the structural fix rule 7d actually needs.
+> 5. **Run the installer on a clean machine.** Unchanged, and still only the
+>    maintainer can. Note the current build predates the ingestion routes.
+
+## Superseded — 17 August 2026
 
 > ### Web search was unreliable for four separate reasons, and none of them was the search.
 >
