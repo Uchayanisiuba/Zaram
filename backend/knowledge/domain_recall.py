@@ -74,13 +74,17 @@ def fact_ids_for(
     return frozenset(fact_ids)
 
 
-def describe(domains: _Domains, all_domains: list[dict[str, Any]], domain_ids: list[str]) -> str:
+def describe(all_domains: list[dict[str, Any]], domain_ids: list[str]) -> str:
     """One phrase naming where an answer was allowed to come from.
 
     Written for the end of a sentence — *"answered from your Investing
     domain"* — because a reply that narrowed its own sources has to say so.
     Rule: disabled capabilities are visible, not silent, and a question answered
     from one domain is a question that did not look at the rest.
+
+    Takes the domain records rather than the store: naming what was chosen is a
+    question about the rows in hand, and a second parameter the body never read
+    made the call site pass the same object twice with one of them ignored.
     """
     chosen = [d["name"] for d in all_domains if d["id"] in set(domain_ids)]
     if not chosen:

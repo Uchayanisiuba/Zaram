@@ -194,23 +194,23 @@ class TestSayingWhereAnAnswerCameFrom:
 
     def test_one_domain(self, domains: KnowledgeDomains):
         investing = domains.create("Investing", "Funds and positions I track.")
-        assert describe(domains, domains.all(), [investing["id"]]) == "your Investing domain"
+        assert describe(domains.all(),[investing["id"]]) == "your Investing domain"
 
     def test_two_domains(self, domains: KnowledgeDomains):
         a = domains.create("Clients", "Who I work for.")
         b = domains.create("Legal", "Contracts and terms.")
-        phrase = describe(domains, domains.all(), [a["id"], b["id"]])
+        phrase = describe(domains.all(),[a["id"], b["id"]])
         assert phrase == "your Clients and Legal domains"
 
     def test_three_domains_read_as_a_list(self, domains: KnowledgeDomains):
         a = domains.create("Clients", "Who I work for.")
         b = domains.create("Legal", "Contracts and terms.")
         c = domains.create("Research", "Papers I am reading.")
-        phrase = describe(domains, domains.all(), [a["id"], b["id"], c["id"]])
+        phrase = describe(domains.all(),[a["id"], b["id"], c["id"]])
         assert phrase == "your Clients, Legal and Research domains"
 
     def test_no_domain_says_nothing(self, domains: KnowledgeDomains):
-        assert describe(domains, domains.all(), []) == ""
+        assert describe(domains.all(),[]) == ""
 
 
 class TestRenaming:

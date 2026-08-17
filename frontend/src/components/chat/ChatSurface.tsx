@@ -24,6 +24,7 @@ import { useSourceStore } from '@/stores/sourceStore';
 import { useOrbStore } from '@/stores';
 import { useSystemStore } from '@/stores/systemStore';
 import ProjectScopePicker from './ProjectScopePicker';
+import DomainScopePicker from './DomainScopePicker';
 import MicButton from './MicButton';
 import CitationSummary from './CitationChips';
 import MessageActions from './MessageActions';
@@ -574,9 +575,16 @@ export default function ChatSurface() {
         )}
         {/* Under the input rather than over it: the scope is context for what
             you are about to write, and it must not compete with the thing you
-            came here to do. */}
-        <div className="mt-2 px-1">
+            came here to do.
+
+            Two scopes side by side because they are two different questions —
+            which work this belongs to, and which library it may read from —
+            and a question sits inside both at once. The domain picker removes
+            itself when no domains exist, so this is one control until the user
+            has made a reason for the second. */}
+        <div className="mt-2 px-1 flex items-center gap-3 flex-wrap">
           <ProjectScopePicker />
+          <DomainScopePicker />
         </div>
       </motion.div>
         </>

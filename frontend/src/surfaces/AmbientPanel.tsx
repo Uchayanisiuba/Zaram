@@ -39,6 +39,7 @@ export default function AmbientPanel() {
   const backendOnline = useSystemStore((s) => s.backendOnline);
   const routing = useSystemStore((s) => s.routing);
   const refresh = useSystemStore((s) => s.refresh);
+  const cloudAnsweredAt = useSystemStore((s) => s.cloudAnsweredAt);
 
   // Asked once when the panel is created, which happens at boot. The window is
   // kept warm and hidden, so this is not on the summon path — polling here
@@ -118,6 +119,10 @@ export default function AmbientPanel() {
     backendOnline,
     routing,
     activity: asking ? 'thinking' : 'idle',
+    // The ambient surface is the one place a selection can leave the machine
+    // without the main window open, so its egress statement must be the same
+    // one the orb makes rather than a quieter version of it.
+    cloudAnsweredAt,
   });
 
   return (

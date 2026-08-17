@@ -59,7 +59,11 @@ export default function OrbStatus({
 
   useEffect(() => startPolling(), [startPolling]);
 
-  const { label, detail, tone } = describeSystem({ backendOnline, routing, activity });
+  const cloudAnsweredAt = useSystemStore((s) => s.cloudAnsweredAt);
+
+  const { label, detail, tone } = describeSystem({
+    backendOnline, routing, activity, cloudAnsweredAt,
+  });
   const accent = TONE_COLOR[tone] ?? 'var(--color-indigo)';
   const busy = activity === 'thinking';
 

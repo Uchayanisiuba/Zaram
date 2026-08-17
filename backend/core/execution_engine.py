@@ -170,6 +170,7 @@ class ExecutionEngine:
         system_prompt: str = "",
         session_id: str = "default",
         project_id: str | None = None,
+        only_ids: frozenset[str] | None = None,
     ) -> Iterator[Any]:
         """End-to-end execution: Recall -> Plan -> Route -> Dispatch -> Stream.
 
@@ -186,6 +187,11 @@ class ExecutionEngine:
 
         None means no project is active, and that is a real answer rather than
         a missing one: a question asked outside any project is not about one.
+
+        `only_ids` narrows recall to a knowledge domain, resolved to fact ids by
+        the API layer. ``None`` is unrestricted; an **empty set is not** — it is
+        a domain holding nothing, and the two must stay distinguishable the
+        whole way down. Nothing on this path may test it for truthiness.
         """
         logger.debug("Engine: execute prompt='%s...' model=%s", prompt[:50], model)
 
@@ -220,7 +226,7 @@ class ExecutionEngine:
             return event
 
         # --- Recall: what does the Spine already know that bears on this? ---
-        recalled = self._recall(prompt, session_id, project_id)
+        recalled = self._recall(prompt, session_id, project_id, only_ids)
         if recalled:
             system_prompt = self._augment_system_prompt(system_prompt, recalled)
             for event in self._provenance_events(recalled):
@@ -785,7 +791,11 @@ class ExecutionEngine:
         return gate
 
     def _recall(
-        self, prompt: str, session_id: str, project_id: str | None = None
+        self,
+        prompt: str,
+        session_id: str,
+        project_id: str | None = None,
+        only_ids: frozenset[str] | None = None,
     ) -> list[Any]:
         """Retrieve prior context relevant to this prompt.
 
@@ -840,6 +850,13 @@ class ExecutionEngine:
                 # client's terms. `None` means every scope, which is right when
                 # no project is active and is what the Memory surface wants.
                 scope=_scope_for(project_id),
+                # The knowledge domain this question was asked inside, already
+                # resolved to fact ids. A separate axis from scope: one is
+                # about whose work a fact belongs to, the other about which
+                # library the user chose to read from, and a question sits
+                # inside both at once. `None` is unrestricted; `frozenset()` is
+                # a domain with nothing in it, and is honoured as such.
+                only_ids=only_ids,
             ))
         except Exception as exc:
             logger.warning("Engine: recall failed: %s: %s", type(exc).__name__, exc)

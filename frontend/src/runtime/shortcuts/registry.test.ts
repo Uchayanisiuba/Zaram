@@ -114,7 +114,7 @@ describe('keyboard shortcuts', () => {
     expect(matches(ctrlShiftK, command, 'win')).toBe(false);
   });
 
-  it('leaves Copy, Paste, Cut, Save and Select All to the operating system', () => {
+  it('leaves the reflexive OS chords — copy, paste, cut, save, open, print — alone', () => {
     /**
      * `useShortcuts` calls `preventDefault()` on any match outside a text
      * field, so claiming one of these does not merely shadow it — it deletes
@@ -125,8 +125,17 @@ describe('keyboard shortcuts', () => {
      * Asserted against the whole registry rather than against the one chord
      * that was wrong, because the next shortcut added is the one that would
      * take Ctrl+V.
+     *
+     * **This test was named for Save and did not test Save.** The list held
+     * `c/v/x/a/z` — copy, paste, cut, select-all, undo — while the title
+     * claimed a guarantee one letter wider, and `Ctrl+S` and `Ctrl+O` were
+     * meanwhile being deleted by the four orb debug shortcuts. A test that
+     * reports coverage it does not have is worse than no test, because the
+     * name is what the next person reads. The list is now what the name says
+     * plus the rest of the reflexive set: open, save, print, find, new and
+     * close.
      */
-    const universal = ['c', 'v', 'x', 'a', 'z'];
+    const universal = ['c', 'v', 'x', 'a', 'z', 's', 'o', 'p', 'f', 'n', 'w'];
     for (const platform of platforms) {
       for (const key of universal) {
         const event = new KeyboardEvent('keydown', {

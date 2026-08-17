@@ -119,6 +119,15 @@ export interface ChatRequest {
    *  means none is active, which scopes recall to everything and captures
    *  facts as `global` — a question asked outside a project is not about one. */
   projectId?: string | null;
+  /** The knowledge domains this question is asked inside. Empty or undefined
+   *  means all of them, which is the ordinary case.
+   *
+   *  A separate axis from `projectId`: scope is about whose work a fact
+   *  belongs to, a domain is about which library the user chose to read from,
+   *  and a question can sit inside both at once. Sent as a list because the
+   *  backend unions them — asking across *Clients* and *Legal* means either —
+   *  even though the control currently offers one at a time. */
+  domainIds?: string[];
 }
 
 /** A failure that should be shown to the user, with the cause preserved. */
@@ -171,6 +180,7 @@ export async function* streamChat(
         persona: req.persona ?? 'zaram_prime',
         session_id: req.sessionId ?? 'default',
         project_id: req.projectId ?? '',
+        domain_ids: req.domainIds ?? [],
       }),
       signal,
     });
