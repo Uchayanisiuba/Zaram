@@ -20,6 +20,7 @@
  * so it says what a project is *for* rather than showing an empty table.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import SurfaceHeader from '../components/common/SurfaceHeader';
 import {
   Layers,
   Plus,
@@ -81,17 +82,15 @@ export default function ProjectWorkspace() {
   }, [load]);
 
   return (
-    <div className="flex-1 overflow-y-auto px-8 py-7" style={{ color: 'var(--color-text)' }}>
-      <header className="flex items-start justify-between gap-6 mb-7">
-        <div>
-          <h1 className="text-lg font-semibold flex items-center gap-2">
-            <Layers size={18} aria-hidden />
-            Project
-          </h1>
-          <p className="mt-1 text-xs" style={{ color: 'var(--color-text-muted)' }}>
-            How your work is grouped. Files live in Work; this decides what belongs where.
-          </p>
-        </div>
+    <div className="flex-1 overflow-y-auto pb-7" style={{ color: 'var(--color-text)' }}>
+      {/* Was the one surface whose title carried neither `font-display` nor an
+          explicit colour, so it rendered in a different typeface from the
+          other five. Nobody chose that. */}
+      <SurfaceHeader
+        icon={Layers}
+        title="Project"
+        description="How your work is grouped. Files live in Work; this decides what belongs where."
+      >
         <button
           type="button"
           onClick={() => setCreating(true)}
@@ -101,13 +100,14 @@ export default function ProjectWorkspace() {
           <Plus size={13} aria-hidden />
           New project
         </button>
-      </header>
+      </SurfaceHeader>
 
-      {error && (
-        <p className="mb-4 text-[11px]" style={{ color: '#fca5a5' }}>
-          {error}
-        </p>
-      )}
+      <div className="px-8">
+        {error && (
+          <p className="mb-4 text-[11px]" style={{ color: '#fca5a5' }}>
+            {error}
+          </p>
+        )}
 
       {creating && <CreateRow onDone={() => setCreating(false)} />}
 
@@ -131,9 +131,10 @@ export default function ProjectWorkspace() {
         </ul>
       )}
 
-      {confirming && (
-        <DeleteDialog project={confirming} onClose={() => setConfirming(null)} />
-      )}
+        {confirming && (
+          <DeleteDialog project={confirming} onClose={() => setConfirming(null)} />
+        )}
+      </div>
     </div>
   );
 }

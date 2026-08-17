@@ -24,6 +24,7 @@
  * displays is transparency theatre.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import SurfaceHeader from '../components/common/SurfaceHeader';
 import {
   ShieldCheck,
   ShieldAlert,
@@ -274,14 +275,7 @@ export default function ActivityWorkspace() {
       {/* The log.                                                          */}
       {/* ---------------------------------------------------------------- */}
       <div className="flex-1 flex flex-col overflow-hidden">
-        <div className="px-8 pt-6 pb-3 flex items-center gap-3">
-          <h1
-            className="text-lg font-semibold"
-            style={{ fontFamily: 'var(--font-display)', color: 'var(--color-text)' }}
-          >
-            Activity
-          </h1>
-          <div className="flex-1" />
+        <SurfaceHeader icon={ShieldCheck} title="Activity">
           <button
             onClick={() => void killSwitch()}
             disabled={busy || hosts.length === 0}
@@ -302,7 +296,7 @@ export default function ActivityWorkspace() {
           >
             <RefreshCw size={15} className={busy ? 'animate-spin' : undefined} />
           </button>
-        </div>
+        </SurfaceHeader>
 
         {/* The summary line. */}
         <div className="px-8 pb-4 flex items-baseline gap-6 flex-wrap">

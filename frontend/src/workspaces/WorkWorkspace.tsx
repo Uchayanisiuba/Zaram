@@ -30,6 +30,7 @@ import {
 } from 'lucide-react';
 
 import ArtifactPreview from '@/components/ArtifactPreview';
+import SurfaceHeader from '@/components/common/SurfaceHeader';
 import {
   KIND_LABELS,
   downloadUrl,
@@ -162,30 +163,31 @@ export default function WorkWorkspace({ onOpenConversation }: WorkWorkspaceProps
   return (
     <div className="flex-1 flex overflow-hidden">
       <div className="flex-1 flex flex-col overflow-hidden">
-        <div className="px-8 pt-6 pb-3">
-          <div className="flex items-baseline gap-3">
-            <h1
-              className="text-lg font-semibold"
-              style={{ fontFamily: 'var(--font-display)', color: 'var(--color-text)' }}
-            >
-              Work
-            </h1>
+        <SurfaceHeader
+          icon={FileText}
+          title="Work"
+          meta={
             <span
               className="text-xs"
               style={{ fontFamily: 'var(--font-mono)', color: 'var(--color-text-muted)' }}
             >
               {loading ? 'loading…' : `${visible.length} of ${artifacts.length}`}
             </span>
-            <button
-              onClick={() => void load()}
-              disabled={loading}
-              aria-label="Refresh"
-              className="ml-auto p-1 rounded-md text-slate-500 hover:text-slate-200 hover:bg-white/5 transition-colors disabled:opacity-40"
-            >
-              <RefreshCw size={13} className={loading ? 'animate-spin' : undefined} />
-            </button>
-          </div>
+          }
+        >
+          <button
+            onClick={() => void load()}
+            disabled={loading}
+            aria-label="Refresh"
+            className="p-1 rounded-md text-slate-500 hover:text-slate-200 hover:bg-white/5 transition-colors disabled:opacity-40"
+          >
+            <RefreshCw size={13} className={loading ? 'animate-spin' : undefined} />
+          </button>
+        </SurfaceHeader>
 
+        {/* The filter block keeps the header's horizontal rhythm; the vertical
+            padding above it now belongs to SurfaceHeader. */}
+        <div className="px-8 pb-3">
           {error && (
             <div
               className="mt-3 flex items-start gap-2 rounded-lg px-3 py-2 text-[11px] leading-relaxed"
