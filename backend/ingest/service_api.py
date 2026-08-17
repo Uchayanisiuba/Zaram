@@ -250,8 +250,15 @@ class IngestService:
         # One source for the staging directory, as with a scanned folder, and
         # recorded only once the run finished — a row written up front would
         # claim files were indexed if the stream were abandoned halfway.
+        #
+        # **Merged, not replaced.** A folder scan sees every file in its source
+        # and is entitled to overwrite the lot; a drop sees the files that were
+        # dropped, and the uploads directory is one shared source. Replacing
+        # here deleted every earlier drop's row on the second drop — and with
+        # it the `fact_ids` that are the only route rule 4 has to take those
+        # facts back out of the Spine.
         source_id = self._records.upsert_source(report.root, seconds=report.seconds)
-        self._records.record_outcomes(source_id, list(report.outcomes))
+        self._records.merge_outcomes(source_id, list(report.outcomes))
 
         yield {"type": "done", "source_id": source_id, **report.to_dict()}
 

@@ -133,39 +133,68 @@ class IngestRecords:
             )
             return source_id
 
+    _INSERT_OUTCOME = (
+        "INSERT INTO outcomes (id, source_id, path, name, status, parser, chars,"
+        " pages, fact_ids, reason, remedy, seconds, recorded_at)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    )
+
+    @staticmethod
+    def _row(source_id: str, outcome: IngestOutcome, now: float) -> tuple[Any, ...]:
+        return (
+            f"out-{uuid.uuid4().hex[:12]}",
+            source_id,
+            outcome.path,
+            outcome.name,
+            outcome.status.value,
+            outcome.parser,
+            outcome.chars,
+            outcome.pages,
+            json.dumps(list(outcome.fact_ids)),
+            outcome.reason,
+            outcome.remedy,
+            outcome.seconds,
+            now,
+        )
+
     def record_outcomes(self, source_id: str, outcomes: list[IngestOutcome]) -> None:
         """Replace this source's outcomes with the ones from the latest run.
 
         Replace rather than append: a list showing yesterday's failure beside
         today's success for the same file cannot be read, and the user's
         question is always "what is wrong *now*".
+
+        **Only correct when the run saw the whole source.** A folder scan does;
+        a drop of two files into the shared uploads directory does not, and
+        calling this for one would delete the other forty files' rows — losing
+        their `fact_ids` and with them the only route rule 4 has to take those
+        facts back out of the Spine. `merge_outcomes` is that case.
         """
         now = time.time()
         with self._lock, self._connect() as connection:
             connection.execute("DELETE FROM outcomes WHERE source_id = ?", (source_id,))
             connection.executemany(
-                "INSERT INTO outcomes (id, source_id, path, name, status, parser, chars,"
-                " pages, fact_ids, reason, remedy, seconds, recorded_at)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                [
-                    (
-                        f"out-{uuid.uuid4().hex[:12]}",
-                        source_id,
-                        outcome.path,
-                        outcome.name,
-                        outcome.status.value,
-                        outcome.parser,
-                        outcome.chars,
-                        outcome.pages,
-                        json.dumps(list(outcome.fact_ids)),
-                        outcome.reason,
-                        outcome.remedy,
-                        outcome.seconds,
-                        now,
-                    )
-                    for outcome in outcomes
-                ],
+                self._INSERT_OUTCOME,
+                [self._row(source_id, outcome, now) for outcome in outcomes],
             )
+
+    def merge_outcomes(self, source_id: str, outcomes: list[IngestOutcome]) -> None:
+        """Record these files' outcomes, leaving the source's others alone.
+
+        For a run that saw only part of a source — a drop, a paste, an upload.
+        Per *path* rather than wholesale, so re-reading one file still replaces
+        its own row and the "what is wrong now" property holds per file; every
+        other row survives, along with the fact ids that make its facts
+        removable.
+        """
+        now = time.time()
+        with self._lock, self._connect() as connection:
+            for outcome in outcomes:
+                connection.execute(
+                    "DELETE FROM outcomes WHERE source_id = ? AND path = ?",
+                    (source_id, outcome.path),
+                )
+                connection.execute(self._INSERT_OUTCOME, self._row(source_id, outcome, now))
 
     def sources(self) -> list[dict[str, Any]]:
         """Every folder, with its counts. What Knowledge lists."""
