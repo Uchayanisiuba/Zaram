@@ -75,7 +75,10 @@ def _search_is_permitted(monkeypatch):
     """Rule 5's gates are a separate question and are asserted separately
     below. Here they are open, so a failure means the planner and not policy."""
     monkeypatch.setattr("core.planner.web_search_enabled", lambda: True)
-    monkeypatch.setattr("core.planner.search_applies_to", lambda _locality: True)
+    # Takes the prompt too: `search_applies_to` gained it when recency was made
+    # to outrank the local/cloud economy, and a stub with the old arity fails
+    # with a TypeError that names neither the change nor this line.
+    monkeypatch.setattr("core.planner.search_applies_to", lambda _locality, _prompt="": True)
 
 
 @pytest.mark.parametrize("question", TIME_SENSITIVE)
@@ -152,6 +155,6 @@ class TestPolicyStillDecides:
         assert planner.classify_intent(TIME_SENSITIVE[0]).requires_search is False
 
     def test_locality_being_local_only_wins(self, monkeypatch):
-        monkeypatch.setattr("core.planner.search_applies_to", lambda _locality: False)
+        monkeypatch.setattr("core.planner.search_applies_to", lambda _locality, _prompt="": False)
         planner = IntentPlanner(semantic_router=_RouterSaying("conversation", 0.022))
         assert planner.classify_intent(TIME_SENSITIVE[0]).requires_search is False
