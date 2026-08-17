@@ -15,7 +15,7 @@ accurate — it is the first thing anyone reads.
 
 > ### Documents can be dropped in, and the second drop used to delete the first.
 >
-> Suites: **2139 backend passed / 0 failed**, 102 skipped · **184 frontend** ·
+> Suites: **2146 backend passed / 0 failed**, 102 skipped · **184 frontend** ·
 > **48 Electron** · typecheck clean · lint passes · guards pass.
 >
 > Run the Electron suite with **no Zaram running**: `electron/main.js` takes a
@@ -142,13 +142,22 @@ accurate — it is the first thing anyone reads.
 >
 > **Start here, in this order.**
 >
-> 1. **The uploads delete path**, above. Small, and it is a rule 4 promise the
->    product breaks today.
-> 2. **Delete the eleven dead orb components.** ~500 lines that read as live and
+> ### The uploads delete path is closed
+>
+> *"Forget this folder and everything Zaram learned from it"* now is true.
+> Withdrawing a staged source deletes the copies Zaram wrote and asks first,
+> naming the count; withdrawing a scanned folder still never touches the user's
+> originals. Three conditions guard the delete, and the third — that the stored
+> path resolves *inside* the uploads directory — is what stops an outcome row
+> from being followed anywhere it likes.
+>
+> **Start here, in this order.**
+>
+> 1. **Delete the eleven dead orb components.** ~500 lines that read as live and
 >    have already caused one wrong conclusion.
-> 3. **Knowledge domains**, scoping retrieval.
-> 4. **The session/memory split** — the structural fix rule 7d actually needs.
-> 5. **Run the installer on a clean machine.** Unchanged, and still only the
+> 2. **Knowledge domains**, scoping retrieval.
+> 3. **The session/memory split** — the structural fix rule 7d actually needs.
+> 4. **Run the installer on a clean machine.** Unchanged, and still only the
 >    maintainer can. Note the current build predates the ingestion routes.
 
 ## Superseded — 17 August 2026

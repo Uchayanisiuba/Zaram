@@ -39,7 +39,7 @@ BEFORE RUNNING ANYTHING
     real one with `node_modules/.bin/electron electron/main.js`.
 
 MEASURED STATE (18 August, every number from a run)
-  backend 2139 passed / 0 failed / 102 skipped · frontend 184 · Electron 48 ·
+  backend 2146 passed / 0 failed / 102 skipped · frontend 184 · Electron 48 ·
   typecheck clean · lint passes · guards pass.
   Run the Electron suite with NO ZARAM RUNNING. electron/main.js takes a
   single-instance lock, so the two bootstrap tests spawn an instance that
@@ -64,12 +64,9 @@ THE THREE THINGS THAT MATTER MOST
      tested and uncalled. The API itself has authentication.
 
 WHAT TO BUILD, IN ORDER
-  1. Forgetting the uploads source must delete Zaram's own copies of the
-     files. It currently forgets the facts and the rows and leaves the
-     documents on disk. Correct for a scanned folder — those are the user's
-     originals — and wrong for uploads, where the file is a copy Zaram made
-     and the button says "everything Zaram learned from it". Small, and it is
-     a promise the product is currently breaking.
+  1. Delete the eleven dead orb components (see the gap list). ~500 lines that
+     read as live; reading their config as though it rendered already produced
+     one wrong written finding.
   2. Knowledge domains, scoping retrieval.
   3. The session/memory split — the structural fix rule 7d actually needs.
      The door check in ExecutionEngine._carries_new_information is a heuristic
@@ -80,7 +77,6 @@ WHAT TO BUILD, IN ORDER
      different privacy cost and it is their call, not a default to pick.
 
 KNOWN OPEN GAPS, DELIBERATELY
-  - Forgetting the uploads source leaves the files. Item 1 above.
   - ELEVEN OF FIFTEEN ORB COMPONENTS ARE IMPORTED BY NOTHING: OrbCore, Aura,
     Halo, FloatingParticles, Pulse, RippleLayer, ThinkingGlow, WaveformBars,
     WaveformRings, FocusRing, OrbitalNode. Only LivingOrb, OrbStatus,
