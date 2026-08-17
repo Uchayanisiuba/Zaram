@@ -21,6 +21,12 @@ declare global {
         /** This launch's API credential, minted by the main process. */
         getApiSecret(): Promise<string>;
       };
+      shell?: {
+        /** Hand a URL to the user's real browser. Never opened in-app: a page
+         *  rendered inside Zaram would run third-party script beside the Spine
+         *  and its egress would be invisible to the gate. */
+        openExternal(url: string): Promise<unknown>;
+      };
       /** The ambient overlay — see `electron/native/ambient.js`. Every member
        *  reports something the user just did; none of them observes. */
       ambient?: {
