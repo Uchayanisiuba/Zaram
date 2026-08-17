@@ -52,9 +52,9 @@ THE THREE THINGS THAT MATTER MOST
      can prove it, and that is the maintainer's action, not yours. Do not
      claim packaging is done. NOTE: that build predates the ingestion routes,
      so drop and paste are not in it — rebuild before testing them installed.
-  2. Documents can now be dropped, pasted and uploaded into Knowledge, and it
-     was verified in the running product rather than by the suite. One gap it
-     opened is listed below and is a rule 4 promise.
+  2. Documents can be dropped, pasted and uploaded into Knowledge, and
+     withdrawing a staged source now deletes the copies Zaram made after asking
+     first. Both halves were verified in the running product, not by the suite.
      THE DESKTOP APP MINTS A FRESH API CREDENTIAL EVERY LAUNCH. A browser tab
      at localhost:5173 therefore 401s on everything and the interface reports
      "Zaram engine not running" about a healthy backend. That is correct
