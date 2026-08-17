@@ -656,17 +656,81 @@ In scope:
   imports from `legacy/`, which still contains it. Asserting the quarantine
   rather than describing it is the lesson the DuckDuckGo fix cost.
 
+- **Images, both directions — moved into scope by the maintainer, 17 August
+  2026.** Upload an image and have Zaram read it; ask for one and have it
+  routed to a provider that can draw. The brief is the reason: *a user should
+  be able to spend a whole day in Zaram without feeling short-changed*, and an
+  assistant that cannot look at a screenshot fails that on the first morning.
+
+  **The shape was already settled and does not change.** Zaram ships no image
+  or video weights, ever. It routes to a provider, logs the egress, carries
+  project context, and shows what left. What changed is the schedule, and one
+  fact underneath it: the objection recorded here was that image generation
+  "cannot ship before the cloud engine exists, which is still a failing v1
+  scope line". **The cloud engine landed.** `core/bootstrapper.py` wires
+  `cloud_config` → `CloudFanout` → `RoutedEngine`, with `EgressGate` in the
+  path. That blocker is spent.
+
+  Four things follow, and the third is the one that will be got wrong:
+
+  *Reading an image can be local, and that is the demonstration.* Ollama serves
+  vision models and `core/planner.py` already routes a `vision` intent. A photo
+  of a receipt or a contract that never leaves the machine is the product's
+  whole thesis in one interaction, and every competitor must upload it. It is
+  also a prerequisite the scope list already owes: **receipt capture and
+  extraction cannot work without it.**
+
+  *Deterministic manipulation is not AI and needs no model.* Crop, rotate,
+  resize, convert — Pillow is already a dependency. Like every generated file
+  these write somewhere new and never overwrite, so they are **generative
+  tier** and need no undo, confirm or sandbox.
+
+  *Modality is a capability gate, never a ranking.* "Which model writes better"
+  is a similarity question and may use a blend. **"Can this model accept an
+  image, or emit one?" is binary and is a precondition** — it filters the
+  candidate set, and task similarity then orders what survives. Letting a score
+  decide modality gets a text model asked to draw, answering with confident
+  prose about a picture it did not make: rule 9's failure in a new medium, and
+  the membership-versus-ordering error this codebase has already paid for three
+  times.
+
+  **Corrected 18 August 2026, and the correction is the useful part.** This
+  paragraph first said "`ProviderEntry` carries no modality field today; that
+  is the first piece of work". Both halves were wrong, and reading the code
+  rather than the note is what found it. `ProviderEntry` is a *provider*
+  record — id, endpoint, auth, key URL — and holds no models at all, so
+  modality was never going to live there. Modality belongs on **`ModelInfo`**,
+  which already carries `supports_vision`, `capabilities`, and a
+  `ModelCategory` whose members already include `VISION`, `IMAGE` and `VIDEO`;
+  Ollama discovery already populates the flag from `/api/show`. The vocabulary
+  mostly exists.
+
+  Two things are genuinely missing, and neither is the field that was asked
+  for. **There is no way to say a model *emits* an image.**
+  `orchestrator/capabilities.py` maps `ModelCategory.IMAGE` to
+  `Capability.VISION: 1.0` — the same score a model that *reads* images gets —
+  so "can see" and "can draw" are one number, and asking for one can return
+  the other. And **nothing gates**: modality exists only as a 0..1 score built
+  for ranking, which is this section's own warning already realised in code.
+
+  *An image is its own consent class.* A chat message is ~2KB and an image is
+  1–5MB, far more personal, and rule 7j grants consent per destination **and
+  data class**. Connecting a provider for text is not consent to send it a
+  photograph — that is asked once more, per provider, and then remembered.
+  `selectable_by_default` already refuses to auto-route to
+  `LOGGED_AND_TRAINED_ON`, and that must hold hardest here: a free image tier
+  training on a user's uploaded photo is the worst version of the trade this
+  product exists to refuse.
+
+  **Video stays out.** Nothing above argues for it, the file sizes are another
+  order of magnitude, and no part of the day-in-Zaram brief needs it.
+
 Out of scope until v1 ships and is tested with real users:
 - Any mutative tool (file edits, VS Code, Blender writes, Unreal writes)
 - Web search — see sequencing below
 - Agents, extensions marketplace, updates feed, multi-user, sharing
-- **Image and video generation — post-v1, and via cloud routing only.** The
-  original objection was VRAM and grounding, and the VRAM half is answered by
-  the existing rule that VRAM limits *route* a task rather than reject a
-  vertical. So the shape is settled even though the schedule is not: Zaram ships
-  no image or video weights, ever. It routes to a provider, logs the egress,
-  carries project context, and shows what left. It cannot ship before the cloud
-  engine exists, which is still a failing v1 scope line.
+- **Video generation.** See the images entry above for why it separates from
+  image generation rather than travelling with it.
 
 ## Sequencing
 
