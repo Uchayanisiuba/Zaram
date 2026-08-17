@@ -579,11 +579,37 @@ class ExecutionEngine:
         lines += [
             "",
             "INSTRUCTIONS:",
-            "- Answer from these sources where they are relevant, naming them in plain",
-            "  words. Never print the [S1] markers themselves — they are internal",
-            "  labels and mean nothing to the user.",
+            # **Answer the question; do not review the reading list.** The
+            # previous wording said "answer from these sources where they are
+            # relevant, naming them in plain words", and a model asked to name
+            # its sources names them: a live question about AI news came back
+            # as "You mentioned a few sources that might contain the latest AI
+            # news. Let's review them:" followed by a bulleted description of
+            # each one. Every fact in it was correct and freshly fetched, and
+            # the reply still answered nothing. Deep-read had made the evidence
+            # good and the framing was spending it on a bibliography.
+            "- Answer the question directly. The first sentence must be the answer",
+            "  itself, never a description of what these sources are.",
+            "- Do not list, introduce, review or summarise the sources one by one.",
+            "  They are evidence for your answer, not the subject of it.",
+            # **Markers are emitted, not suppressed.** This used to read "never
+            # print the [S1] markers — they are internal labels". They are
+            # internal, and that is precisely why they must be produced: they
+            # are how a claim is traced to the source behind it.
+            # `frontend/src/lib/markers.ts` removes them before a reader or a
+            # synthesiser ever sees one. Forbidding them here asked the model to
+            # break the grounding mechanism, and it obeyed inconsistently — which
+            # is the worst of both, since a missing marker is a claim with no
+            # traceable source in a product whose whole pitch is provenance.
+            "- Put [S1] immediately after the claim it supports, using the number",
+            "  above. The interface removes these before anyone reads them; they",
+            "  exist so a claim can be traced back to what produced it.",
             "- Prefer them over your training data where they conflict.",
-            "- If they do not answer the question, say so rather than inventing detail.",
+            # Rule 9, at the one point where the model is most tempted to guess:
+            # it has been handed material that looks authoritative and may
+            # simply not contain the answer.
+            "- If they do not answer the question, say that plainly and say what they",
+            "  do cover. Never fill the gap from memory.",
             "=" * 43,
             "",
         ]
