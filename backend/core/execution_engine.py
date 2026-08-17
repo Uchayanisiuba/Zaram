@@ -1053,6 +1053,46 @@ class ExecutionEngine:
         "test", "testing", "ping",
     }
 
+    #: What a statement about the user or their work looks like.
+    #:
+    #: The shapes are drawn from what a freelancer actually tells an assistant:
+    #: a rate, a term, a client's habit, a preference, a deadline. Each branch
+    #: needs a **subject and a copula or a money/agreement verb**, so an
+    #: instruction that happens to contain "is" — "explain what a good invoice
+    #: is" — does not qualify on that alone, because its subject is not the
+    #: user or a named thing they own.
+    #:
+    #: Deliberately not exhaustive. It is the half of the decision that can be
+    #: made from evidence, and it is allowed to miss: the cost of a miss is the
+    #: user repeating themselves, and the cost of a false positive is a
+    #: permanent record they have to find and delete.
+    _ASSERTION_RE = re.compile(
+        r"(?:"
+        # "my day rate is …", "our terms are …", "their deadline was …"
+        r"\b(?:my|our|his|her|their|its)\b[^.?!]{0,80}?\b(?:is|are|was|were|will\s+be|costs?|charges?|pays?|owes?|remains?)\b"
+        r"|"
+        # "i charge …", "we bill …", "i prefer …", "i work …"
+        r"\b(?:i|we)\b\s+(?:always\s+|usually\s+|never\s+|generally\s+)?"
+        r"(?:charge|bill|invoice|prefer|use|work|owe|need|want|pay|paid|earn|quote|deliver|agreed|signed|started|finished)\b"
+        r"|"
+        # "the deadline is …", "payment terms are …", "the rate for X is …"
+        r"\b(?:deadline|due\s+date|rate|fee|retainer|terms?|budget|invoice|balance|milestone|contract|scope)\b"
+        r"[^.?!]{0,60}?\b(?:is|are|was|were|will\s+be)\b"
+        r"|"
+        # "the launch is 14 November", "the API key lives in the vault" — a
+        # definite subject and something asserted about it. Broader than the
+        # business nouns above because a fact about the user's work is not
+        # confined to a vocabulary anyone can enumerate; the determiner plus a
+        # stative verb is the structure that makes it a statement.
+        r"\b(?:the|this|that|these|those)\b[^.?!]{0,60}?"
+        r"\b(?:is|are|was|were|will\s+be|lives?|sits?|holds?|runs?|expires?|renews?|starts?|ends?|belongs?)\b"
+        r"|"
+        # "Harbour Lane pays late" — a named party and something they do.
+        r"\b(?:pays?|paid|owes?|owed|agreed|signed|renewed|cancelled|canceled)\b"
+        r")",
+        re.IGNORECASE,
+    )
+
     def _carries_new_information(self, prompt: str) -> bool:
         """Whether a message tells us something, as opposed to asking for something.
 
@@ -1101,7 +1141,38 @@ class ExecutionEngine:
 
         # Too short to be a fact worth keeping. Three words is enough for
         # "deadline is Friday" and excludes most stray input.
-        return len(stripped.split()) >= 3
+        if len(stripped.split()) < 3:
+            return False
+
+        # **Positive evidence, not absence of a question mark.**
+        #
+        # Everything above this line is a blocklist, and a blocklist fails
+        # open: a message that matched none of the known shapes was stored.
+        # Measured on the maintainer's own Spine, which held
+        # "Say the single word: ping", "Reply with exactly the word: alive",
+        # "WHars your name" and "In three or four full sentences, explain what
+        # makes a good invoice" — none of them a question, none of them a fact,
+        # all of them permanent records sitting beside real ones like
+        # "My day rate for Harbour Lane is 425,000 naira."
+        #
+        # That is rule 7d inverted. Working state, clarifications and false
+        # starts were entering the Spine, and the visible cost is exactly what
+        # the rule predicts: they come back as citations and as recall, so the
+        # user sees their own old prompts surfacing in new answers.
+        #
+        # The forms below are the same argument the manner blocklist lost: a
+        # list of bad phrasings is *guessed*, a list of asserting shapes is
+        # *known*. So this now requires a message to look like a statement
+        # about the user or their work before it is kept.
+        #
+        # Conservative in the recoverable direction, deliberately. A missed
+        # fact costs the user saying it again; a stored instruction is a
+        # permanent record that only a human deleting it by hand removes.
+        #
+        # This remains a heuristic patching a structural problem — see above.
+        # It fails closed instead of open, which is the most a door check can
+        # do; the real fix is still a session store that recall never reads.
+        return bool(self._ASSERTION_RE.search(stripped))
 
     def _already_known(self, runtime: Any, prompt: str) -> bool:
         """True when the Spine already holds this almost word for word.
