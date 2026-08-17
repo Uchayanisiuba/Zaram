@@ -11,7 +11,105 @@ accurate — it is the first thing anyone reads.
 
 ---
 
-## Current state — 16 August 2026
+## Current state — 17 August 2026
+
+> ### Web search was unreliable for four separate reasons, and none of them was the search.
+>
+> Suites: **2120 backend passed / 0 failed**, 102 skipped · **158 frontend** ·
+> **48 Electron** · typecheck clean · lint passes · guards pass. Working tree
+> clean; `Zaram-V0.1` pushed to origin.
+>
+> **Run the suite with no backend running.** A live backend holds the SQLite
+> lock on the real `spine.db` and the suite stalls on `test_memory_scope_api`
+> rather than failing. Measured: **3m20s** clean, **34m** with a backend up.
+>
+> The maintainer reported that Zaram answered confidently and wrongly about the
+> world — "Joe Biden" for the current president, a wrong Osun State result, "I
+> don't know" about South Africa, while the American election and the World Cup
+> came back right. Four defects, each measured, none of them in the search
+> connector:
+>
+> 1. **The semantic router bypassed the keyword classifier entirely.**
+>    `classify` returns the moment the semantic path answers, and that path
+>    decided search by `intent == "search"` alone. "Who is the current president
+>    of the United States?" routes to **`conversation` at 0.022 confidence**
+>    while `needs_search` matches it on three patterns. The error is treating
+>    `search` as a rival intent to `conversation`: a question can be perfectly
+>    conversational and still have an answer that changes.
+>
+> 2. **300 characters was the entire evidence base.** Every connector truncates
+>    to 300 chars and nothing fetched a page body, so the model was handed three
+>    sentences that frequently did not contain the answer and filled the gap from
+>    its weights. Prominent questions were right and regional ones wrong — not a
+>    harder question, a **less quoted** one. `deep_read.py` fetches the top three
+>    pages in parallel.
+>
+> 3. **Choosing a cloud model silently deleted the search step.**
+>    `search_applies_to` was a blanket local/cloud switch, reasoned as "a
+>    frontier model knows more so a live result matters less". True for general
+>    knowledge, false for the one category where search matters most: every model
+>    has a cutoff. Recency now outranks the economy. Nothing routes *to* cloud
+>    because of a search — model selection runs first and search follows.
+>
+> 4. **The prompt told the model to name its sources.** With all three fixed,
+>    the reply was *"You mentioned a few sources that might contain the latest AI
+>    news. Let's review them:"* and a bibliography. Every fact correct and freshly
+>    fetched; nothing answered. Deep-read had made the evidence good and the
+>    framing was spending it on a reading list. It also forbade the `[S1]`
+>    markers, which are the grounding mechanism — `lib/markers.ts` strips them
+>    before a reader sees one, so suppressing them at the source breaks
+>    provenance for no gain.
+>
+> Verified end to end after all four: *"What is the latest happening in AI this
+> week?"* → **"Anthropic announced Claude 3 models this week. [S5]"** with five
+> web sources cited, against a bibliography and no answer before.
+>
+> **Deep-read forced an egress question.** Reading a result means fetching a host
+> the *search engine* chose, which the user cannot pre-allow, so default-deny
+> refuses every page. The first attempt keyed the exemption off
+> `source="internet.deep_read"` — a string the caller supplies about itself,
+> which is `X-Zaram-Client` again. `SearchReadGrant` carries the exact URLs
+> instead, GET only and no body, consulted *after* the policy so an explicit
+> denial still wins.
+>
+> ### The API had no authentication, and now it does
+>
+> Any process on this machine could read the whole Spine. `ZARAM_API_SECRET`
+> wins and packaged builds use only that — minted per launch, passed to the
+> backend in the spawn environment and to the renderer over IPC, never in a
+> command line. A file under `data_dir()` is the development fallback and is
+> documented as weaker rather than glossed. Measured: **401** without, **200**
+> with. Two follow-on defects found by running it — a resolution deadlock, and
+> the file not being gitignored.
+>
+> `core/pairing.py`, the credential a second *device* needs, still has no caller.
+>
+> ### Rule 7d — the Spine held the user's own prompts
+>
+> "Say the single word: ping", "Reply with exactly: OK", "WHars your name",
+> stored as durable facts beside real ones, and **being recalled into new
+> answers**: three of the ten sources behind a live AI-news reply were the
+> user's old prompts. The door check was a blocklist and failed open. It now
+> requires positive evidence that a message asserts something.
+>
+> `GET /memory/traffic` reviews what got in before the fix; it proposes and never
+> applies. **9 records deleted with explicit authorisation, 17 August.** The
+> Spine now holds 13 and reports 0 traffic.
+>
+> One existing test asserted the violation — `test_exchange_is_stored_after_
+> answering` required that "a new question" be stored, and passed throughout.
+>
+> **Start here, in this order.**
+>
+> 1. **Ingestion routes and the Knowledge drop zone.** The service layer is
+>    committed and labelled unreachable; nothing calls it.
+> 2. **Knowledge domains**, scoping retrieval.
+> 3. **The session/memory split** — the structural fix rule 7d actually needs.
+>    The door check is a heuristic standing in for it and says so.
+> 4. **Run the installer on a clean machine.** Four reasons it could not have
+>    worked are fixed; only that run proves it, and only the maintainer can.
+
+## Superseded — 16 August 2026
 
 > ### The desktop application never started its backend, and nothing had ever run the file that does.
 >
