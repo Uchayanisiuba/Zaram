@@ -39,7 +39,7 @@ BEFORE RUNNING ANYTHING
     real one with `node_modules/.bin/electron electron/main.js`.
 
 MEASURED STATE (18 August, every number from a run)
-  backend 2146 passed / 0 failed / 102 skipped · frontend 178 · Electron 48 ·
+  backend 2184 passed / 0 failed / 102 skipped · frontend 178 · Electron 48 ·
   typecheck clean · lint passes · guards pass.
   Run the Electron suite with NO ZARAM RUNNING. electron/main.js takes a
   single-instance lock, so the two bootstrap tests spawn an instance that
@@ -64,7 +64,11 @@ THE THREE THINGS THAT MATTER MOST
      tested and uncalled. The API itself has authentication.
 
 WHAT TO BUILD, IN ORDER
-  1. Knowledge domains, scoping retrieval.
+  1. Let a question be asked inside a knowledge domain. Domains exist, narrow
+     recall, and are proven at the retriever — but /chat does not yet offer to
+     ask inside one. `only_ids` is already a parameter on `retrieve`, so this
+     is a picker in the conversation plus the reply saying which domain it read
+     from. `describe()` already writes that phrase.
   2. The session/memory split — the structural fix rule 7d actually needs.
      The door check in ExecutionEngine._carries_new_information is a heuristic
      standing in for it and says so in its own docstring.

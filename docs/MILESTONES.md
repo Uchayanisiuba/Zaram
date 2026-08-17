@@ -15,7 +15,7 @@ accurate — it is the first thing anyone reads.
 
 > ### Documents can be dropped in, and the second drop used to delete the first.
 >
-> Suites: **2146 backend passed / 0 failed**, 102 skipped · **178 frontend** ·
+> Suites: **2184 backend passed / 0 failed**, 102 skipped · **178 frontend** ·
 > **48 Electron** · typecheck clean · lint passes · guards pass.
 >
 > Run the Electron suite with **no Zaram running**: `electron/main.js` takes a
@@ -154,9 +154,44 @@ accurate — it is the first thing anyone reads.
 > path resolves *inside* the uploads directory — is what stops an outcome row
 > from being followed anywhere it likes.
 >
+> ### Knowledge domains scope retrieval
+>
+> A named set of sources Zaram can answer from on purpose.
+> `knowledge/domain_recall.py` resolves domain → sources → outcomes → fact ids,
+> and `MemoryQuery.only_ids` narrows recall to that set.
+>
+> **The filter sits where the scope filter sits, and that is the design.**
+> `retrieval.py` enforces rule 7i once, after every strategy, because
+> `_vector_search` never passes through the store's filters — "a boundary
+> enforced per code path is a boundary with a hole in it per code path". Domain
+> narrowing rides with it, and a test fakes a vector hit to prove it did not get
+> its own hole.
+>
+> **An empty domain is not an absent one.** `frozenset()` is falsy, so testing
+> `if only_ids` would widen a domain holding nothing to the entire Spine. The
+> check is `is not None`; weakening it to truthiness was tried against the suite
+> and the empty-domain test fails, as it should.
+>
+> Many-to-many, never a tree — a contract is Clients *and* Legal, and a parent
+> column would be rule 7h smuggled back in. One memory, many domains: deleting a
+> domain deletes a lens, not facts, which matters because the button beside it
+> withdraws a source and *does* delete documents. Withdrawing a source unlinks
+> it from every domain that held it.
+>
+> Verified live: a domain created through the interface resolved to exactly **1
+> reachable fact out of a 13-record Spine**, with the phrase *"your Investing
+> domain"* for the reply to end on.
+>
+> **Not yet wired into `/chat`.** The scope exists and is proven at the
+> retriever; the conversation does not yet let the user pick a domain to ask
+> inside. That is the next piece and it is small — `only_ids` is already a
+> parameter on `retrieve`.
+>
 > **Start here, in this order.**
 >
-> 1. **Knowledge domains**, scoping retrieval.
+> 1. **Let a question be asked inside a domain.** The plumbing is done; the
+>    conversation needs a picker and the reply needs to say which domain it read
+>    from.
 > 2. **The session/memory split** — the structural fix rule 7d actually needs.
 > 3. **Run the installer on a clean machine.** Unchanged, and still only the
 >    maintainer can. Note the current build predates the ingestion routes.
