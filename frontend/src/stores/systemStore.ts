@@ -61,9 +61,18 @@ interface SystemState {
    *  an invented value, and this file's own rule is that a fabricated signal is
    *  worse than no signal because it would be trusted. */
   swappingTo: string | null;
-  /** Timestamp of the last confirmed egress, for the Orb's pulse. Nothing can
-   *  leave today, so this stays null until web search is governed and enabled. */
-  lastEgressAt: number | null;
+  /** When a cloud model last actually answered, or null if none has.
+   *
+   *  **The difference between this and `routing.providers` is the whole point
+   *  of the indicator.** A connected provider is a *capability* — something
+   *  that could answer. This is an *event* — something that did, observed from
+   *  the backend's `answering` report, which is resolved from the routing that
+   *  really happened rather than from what is configured.
+   *
+   *  It replaces `lastEgressAt`, which was declared with a `noteEgress` action
+   *  beside it and never called by anything: a signal that could only ever read
+   *  null, on the one indicator that must not be decorative. */
+  cloudAnsweredAt: number | null;
 
   setActivity: (a: OrbActivity) => void;
   /** Enter the swap state, naming the model being loaded, and move the orb with
@@ -73,7 +82,9 @@ interface SystemState {
   beginModelSwap: (model: string) => void;
   /** Leave the swap for whatever comes next, clearing the model name. */
   endModelSwap: (next?: OrbActivity) => void;
-  noteEgress: () => void;
+  /** Record that a cloud model answered. Called from the chat stream when the
+   *  backend reports `locality: 'cloud'` — an observation, never a setting. */
+  noteCloudAnswer: () => void;
   refresh: () => Promise<void>;
   startPolling: (intervalMs?: number) => () => void;
 }
@@ -84,7 +95,7 @@ export const useSystemStore = create<SystemState>((set, get) => ({
   speech: null,
   activity: 'idle',
   swappingTo: null,
-  lastEgressAt: null,
+  cloudAnsweredAt: null,
 
   // Clears `swappingTo` on every transition, so the name cannot outlive the
   // state that explains it.
@@ -103,7 +114,7 @@ export const useSystemStore = create<SystemState>((set, get) => ({
     useOrbStore.getState().setOrbState(next === 'warming' ? 'thinking' : next);
   },
 
-  noteEgress: () => set({ lastEgressAt: Date.now() }),
+  noteCloudAnswer: () => set({ cloudAnsweredAt: Date.now() }),
 
   refresh: async () => {
     try {
@@ -162,6 +173,11 @@ export function describeSystem(s: {
   routing: RoutingState | null;
   activity: OrbActivity;
   swappingTo?: string | null;
+  /** When a cloud model actually answered. Optional so existing callers keep
+   *  working, and absent reads as "none has", which is the safe direction:
+   *  a caller that forgets to pass it understates egress rather than
+   *  inventing it. */
+  cloudAnsweredAt?: number | null;
 }): { label: string; detail: string; tone: 'local' | 'cloud' | 'offline' | 'busy' } {
   if (!s.backendOnline) {
     return {
@@ -202,21 +218,38 @@ export function describeSystem(s: {
     const where = s.routing?.mode === 'local' ? 'on this machine' : 'remotely';
     return { label: 'Thinking', detail: `Working ${where}.`, tone: 'busy' };
   }
-  // Two different claims, previously collapsed into one. "Cloud enabled" says
-  // a cloud model is answering your questions. `canLeaveDevice` only says some
-  // route off the machine exists — allowing a single search host used to flip
-  // the Orb to "Cloud enabled" while every answer was still generated locally.
-  // On the one indicator whose entire job is to be trusted, that is the worst
-  // thing to be wrong about.
-  const cloudInference = (s.routing?.providers ?? []).some(
+  // **Capability is not activity, and the colour must track activity.**
+  //
+  // An earlier fix split these two claims apart in *words* — "Cloud enabled"
+  // against "Local · can send" — and left both of them returning `tone:
+  // 'cloud'`, which `OrbStatusLabel` paints amber, the same colour this
+  // product uses for a warning. So connecting a provider, or allowing one
+  // search host, lit a standing amber warning that never went out, while every
+  // answer was still being generated on the machine. Half the fix: the labels
+  // were corrected and the signal a user actually reads at a glance was not.
+  //
+  // Colour now follows what *happened*. Words carry what is *possible*, since
+  // a capability is worth stating and is not worth alarming about.
+  if (s.cloudAnsweredAt) {
+    return {
+      label: 'Cloud used',
+      detail: 'A cloud model answered in this session. Activity shows what left.',
+      tone: 'cloud',
+    };
+  }
+
+  // Observed from `routing.providers`, which is configuration: these two say a
+  // route *exists*, never that anything took it.
+  const cloudAvailable = (s.routing?.providers ?? []).some(
     (p) => p.locality && p.locality !== 'local',
   );
 
-  if (cloudInference) {
+  if (cloudAvailable) {
     return {
-      label: 'Cloud enabled',
-      detail: 'A cloud model can answer your questions. Check Activity for what left.',
-      tone: 'cloud',
+      label: 'Local · cloud ready',
+      detail:
+        'Answers are running on this machine. A cloud model is connected, and Zaram names it before it answers.',
+      tone: 'local',
     };
   }
   if (s.routing?.canLeaveDevice) {
@@ -224,7 +257,7 @@ export function describeSystem(s: {
       label: 'Local · can send',
       detail:
         'Answers are generated on this machine. Something else is allowed to send — see Activity.',
-      tone: 'cloud',
+      tone: 'local',
     };
   }
   return {

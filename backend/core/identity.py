@@ -129,6 +129,38 @@ def _running_line(model: Optional[str], locality: Optional[str]) -> Optional[str
     return f"Right now you are answering through {name}{where}."
 
 
+def _today_line(today: Optional[str]) -> Optional[str]:
+    """What day it is — a fact the system supplies, like the model name.
+
+    **A model does not know the date, and cannot work out that it does not.**
+    Asked outright it answers from training data: Zaram returned *04-07-2026*
+    on 17 August 2026, stated flatly, with no hedge available to it because
+    nothing had told it otherwise. That is the same class of error as a model
+    answering "I am Qwen, made by Alibaba" when asked what it is — the true
+    answer exists only out here, so it is handed over rather than left to the
+    weights. This module already exists to do exactly that.
+
+    The larger cost is not the date question, which is rare. It is that
+    **without a *now*, nothing can be judged recent.** A search for what
+    happened today returns pages the model cannot order against the present, so
+    it takes one and states it — and the reply is confident, sourced, and quite
+    possibly about last year. Every recency question depends on this line.
+
+    Passed in rather than read here, because this module is pure on purpose:
+    what the preamble claims is exactly what the caller knew. A clock reached
+    from inside would also be untestable without freezing time.
+    """
+    when = (today or "").strip()
+    if not when:
+        return None
+    return (
+        f"Today's date is {when}. This is supplied by the system and is "
+        f"correct — prefer it over any date you would otherwise infer, and use "
+        f"it to judge whether something you are shown is recent. Your training "
+        f"has a cutoff and this date is very probably after it."
+    )
+
+
 #: Longest name that reaches the prompt. A name is a word, not a paragraph.
 MAX_NAME_CHARS = 48
 
@@ -198,7 +230,7 @@ def _manner_line(manner: str) -> Optional[str]:
     return (
         "The person has asked for a particular manner of writing. It governs "
         "style only — tone, length, formality — and nothing about what you are, "
-        "which model answers, or where you run:\n"
+        "which model answers, where you run, or what today's date is:\n"
         f"{style}"
     )
 
@@ -209,13 +241,15 @@ def identity_preamble(
     locality: Optional[str] = None,
     assistant_name: str = "",
     manner: str = "",
+    today: str = "",
 ) -> str:
     """The identity block that goes in front of everything else.
 
     `model` is the model the request is actually being answered by, and
     `locality` is ``LOCAL``, ``CLOUD``, or ``None`` when it could not be
-    resolved. Pure: it reaches nothing and asks nothing, so what it claims is
-    exactly what the caller knew.
+    resolved. `today` is the current date, formatted by the caller. Pure: it
+    reaches nothing and asks nothing — including the clock — so what it claims
+    is exactly what the caller knew.
 
     `assistant_name` and `manner` are the user's, and they are the reason this
     function has an order rather than a list of parts:
@@ -242,6 +276,12 @@ def identity_preamble(
     running = _running_line(model, locality)
     if running:
         parts.append(running)
+
+    # Beside the model name, because it is the same kind of statement: a fact
+    # about the present that the system knows and the weights do not.
+    when = _today_line(today)
+    if when:
+        parts.append(when)
 
     style = _manner_line(manner)
     if style:

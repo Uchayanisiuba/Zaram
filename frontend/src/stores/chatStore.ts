@@ -101,11 +101,22 @@ interface ChatState {
    *  `recalled_in` can accumulate the evidence that later argues for promoting
    *  one to global. Null is a real answer, not a missing one. */
   projectId: string | null;
+  /** The knowledge domains questions are asked inside. Empty means all of
+   *  them, which is unrestricted and is the ordinary case.
+   *
+   *  An array even though the control offers one at a time, because the
+   *  backend unions them and the wire format is already a list — so multiple
+   *  selection is a control change later, not a protocol change. */
+  domainIds: string[];
 
   send: (text: string, opts?: Partial<ChatRequest>) => Promise<void>;
   /** Change the active project. Survives across replies; cleared only by the
    *  user, never inferred from what was asked. */
   setProject: (projectId: string | null) => void;
+  /** Change which domains questions are asked inside. Same posture as the
+   *  project: a working context that survives replies and is cleared only by
+   *  the user. */
+  setDomains: (domainIds: string[]) => void;
   cancel: () => void;
   clear: () => void;
 }
@@ -127,6 +138,26 @@ function loadProject(): string | null {
   }
 }
 
+/** Where the chosen knowledge domains are remembered between launches.
+ *
+ *  Persisted for the same reason the project is — it is a working context, not
+ *  a per-message choice. The fallback on any failure is the *empty* list, which
+ *  means unrestricted: a storage error must never silently narrow what Zaram is
+ *  allowed to read, because the user would see thinner answers with nothing on
+ *  screen explaining why. */
+const DOMAINS_KEY = 'zaram.activeDomains';
+
+function loadDomains(): string[] {
+  try {
+    const raw = localStorage.getItem(DOMAINS_KEY);
+    if (!raw) return [];
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((d): d is string => typeof d === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
 /** Cancels the in-flight request. Module-level so `cancel()` can reach it
  *  without putting a non-serialisable object in the store. */
 let inFlight: AbortController | null = null;
@@ -145,6 +176,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   connectionError: null,
   sessionId: `session-${newId()}`,
   projectId: loadProject(),
+  domainIds: loadDomains(),
 
   setProject: (projectId) => {
     set({ projectId });
@@ -153,6 +185,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
       else localStorage.removeItem(PROJECT_KEY);
     } catch {
       // The scope still applies to this session; only persistence is lost.
+    }
+  },
+
+  setDomains: (domainIds) => {
+    set({ domainIds });
+    try {
+      if (domainIds.length) localStorage.setItem(DOMAINS_KEY, JSON.stringify(domainIds));
+      else localStorage.removeItem(DOMAINS_KEY);
+    } catch {
+      // The narrowing still applies to this session; only persistence is lost.
     }
   },
 
@@ -241,7 +283,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
         // `opts` spreads last so a caller can override the project for one
         // message, but the store's value is the default — the scope is a
         // working context, not something each call site decides afresh.
-        { text: trimmed, sessionId: get().sessionId, projectId: get().projectId, ...opts },
+        {
+          text: trimmed,
+          sessionId: get().sessionId,
+          projectId: get().projectId,
+          domainIds: get().domainIds,
+          ...opts,
+        },
         inFlight.signal,
       )) {
         switch (event.type) {
@@ -324,6 +372,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
               chosenBy: event.chosenBy,
             };
             set({ streamingAnsweredBy: answeredBy });
+            // The orb's cloud state is fed from here and from nowhere else.
+            // It reports that a cloud model *answered*, which is an event, and
+            // never that one is *connected*, which is a setting — the previous
+            // version lit an amber warning for the second and had no way to
+            // observe the first. Only an explicit `cloud` counts: `null` means
+            // the backend could not place the model, and treating unresolved
+            // as cloud would claim an egress that may not have happened.
+            if (event.locality === 'cloud') {
+              useSystemStore.getState().noteCloudAnswer();
+            }
             break;
           }
 

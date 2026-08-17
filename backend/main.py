@@ -444,6 +444,79 @@ class ChatRequest(BaseModel):
     #: project genuinely is not about one, and facts captured from it stay
     #: `global`. Inventing a project here would be a value nobody entered.
     project_id: str = ""
+    #: The knowledge domains this question is asked inside, or [] for all.
+    #:
+    #: A separate axis from `project_id`, and deliberately so: scope is about
+    #: *whose work* a fact belongs to, a domain is about *which library* the
+    #: user chose to read from, and a question can sit inside both at once.
+    #: Empty means unrestricted — the ordinary case — which is not the same as
+    #: a chosen domain that happens to hold nothing. See `_domain_scope`.
+    domain_ids: list[str] = []
+
+
+def _domain_scope(domain_ids: list[str]) -> tuple[frozenset[str] | None, str]:
+    """Turn the domains a question was asked inside into a recall filter.
+
+    Returns ``(only_ids, notice)``. ``only_ids`` is ``None`` when no domain was
+    chosen — unrestricted — and a ``frozenset`` otherwise, **including an empty
+    one**. `frozenset()` is falsy, so anything testing truthiness along this
+    chain would widen a domain holding nothing to the entire Spine; every hop
+    from here to `retrieval.py` compares against ``None`` instead.
+
+    The notice is the other half, and it is not decoration. A question answered
+    inside one domain did not look at the rest, and *disabled capabilities are
+    visible, not silent* — so the restriction is stated whether or not it
+    happened to find anything. Stating it matters most in the case that looks
+    like a failure: an empty domain otherwise produces a confident answer built
+    on no files at all, with nothing on screen explaining why.
+
+    Resolution lives here rather than in the engine because the engine has no
+    knowledge stores and should not grow any. It is handed a resolved set,
+    exactly as it is handed a resolved scope string.
+
+    `knowledge_domains` and `ingest_service` are created further down this
+    module. That is deliberate and not a latent bug: both names are looked up
+    when a request arrives, long after import has finished.
+    """
+    from knowledge.domain_recall import describe, fact_ids_for
+
+    chosen = [d for d in (domain_ids or []) if d]
+    if not chosen:
+        return None, ""
+
+    # A domain that cannot be resolved must not quietly answer from everything.
+    # That is the opposite of what was asked for, and the user has no way to
+    # see that it happened — so the failure narrows to nothing and says so.
+    unreadable = (
+        frozenset(),
+        "Zaram could not read the knowledge domain you chose, "
+        "so this answer used no facts from your files.",
+    )
+    try:
+        only_ids = fact_ids_for(knowledge_domains, ingest_service.records, chosen)
+        phrase = describe(knowledge_domains.all(), chosen)
+    except Exception as exc:
+        logging.getLogger(__name__).warning(
+            "Domain scope failed to resolve: %s: %s", type(exc).__name__, exc
+        )
+        return unreadable
+    if not phrase:
+        # Ids naming no domain that exists. Same reasoning, same answer.
+        return unreadable
+
+    if only_ids:
+        count = len(only_ids)
+        notice = (
+            f"Answering inside {phrase} — {count} "
+            f"{'fact' if count == 1 else 'facts'} in scope. "
+            "Nothing else in your Spine was read."
+        )
+    else:
+        notice = (
+            f"Nothing is indexed in {phrase} yet, "
+            "so this answer used no facts from your files."
+        )
+    return only_ids, notice
 
 
 # --- API ENDPOINTS ---
@@ -762,9 +835,21 @@ async def chat(request: ChatRequest):
         # A settings file must never be able to stop chat working.
         _named, _manner = "", ""
 
+    # The date, read here rather than inside the preamble, which is pure by
+    # design. Local time and not UTC: "what happened today" means the user's
+    # today, and on the wrong side of midnight UTC those are different days.
+    # Spelled out in full — "17 August 2026" cannot be read as 8 May the way
+    # 08/17/2026 and 17/08/2026 read as each other's dates.
+    from datetime import datetime as _datetime
+
+    _today = _datetime.now().strftime("%d %B %Y")
+
     system_prompt = compose_system_prompt(
         identity_preamble(
-            **_current_inference(model), assistant_name=_named, manner=_manner
+            **_current_inference(model),
+            assistant_name=_named,
+            manner=_manner,
+            today=_today,
         ),
         persona_prompt,
     )
@@ -781,11 +866,26 @@ async def chat(request: ChatRequest):
     # sent me looking. Ahead of the stream for the reason `model_load` is ahead
     # of it: an attribution that arrives after the answer is a footnote, and
     # the question is asked while reading.
+    # Which knowledge domains this question may read from, resolved to fact ids
+    # here because this is the layer that holds the knowledge stores.
+    from core.streaming_events import StreamEvent
+
+    only_ids, domain_notice = _domain_scope(request.domain_ids)
+
     async def _stream_with_attribution():
         yield _answering_event(model, request.model).to_ipc() + "\n"
+        # Before the answer rather than after it, unlike the ingest notice.
+        # This one is a *frame* for what follows rather than housekeeping: if
+        # the domain turned out to be empty, that has to be readable before a
+        # confident answer built on no files is, not underneath it afterwards.
+        if domain_notice:
+            yield StreamEvent.notice(
+                domain_notice, kind="domain", action="knowledge"
+            ).to_ipc() + "\n"
         async for chunk in chat_router.route(
             final_prompt, model, system_prompt, request.session_id,
             project_id=request.project_id or None,
+            only_ids=only_ids,
         ):
             yield chunk
 

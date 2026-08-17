@@ -84,32 +84,46 @@ export const NAV_SHORTCUTS: Shortcut[] = surfaceOrder.map((id, i) => ({
 
 export const REGISTRY: Shortcut[] = [
   ...NAV_SHORTCUTS,
+  // **These four were on Ctrl+O, Ctrl+L, Ctrl+S and Ctrl+T**, and this is the
+  // Ctrl+C defect again rather than a near miss of it: `useShortcuts` calls
+  // `preventDefault()` on every match outside a text field, so they did not
+  // shadow Open, Save and the rest — they deleted them. Two of the four are
+  // among the most reflexive keystrokes a person has, and the registry's own
+  // guard test was named for Save while testing only `c/v/x/a/z`, so the
+  // assertion that should have caught this reported a coverage it did not
+  // have. The test now checks what its name claims.
+  //
+  // Alt for the reason Toggle Chat took Alt: the window sets `autoHideMenuBar`
+  // so no menu claims Alt+letter, and the browser does not use it. Matched on
+  // **physical position**, because macOS Option is a compose key — ⌥S emits
+  // "ß" and ⌥L emits "¬", so a chord compared on `event.key` would be printed
+  // on the keycap and never fire.
   {
     id: 'orb.idle',
     label: 'Orb · Idle',
     group: 'orb',
-    keys: { meta: true, key: 'o' },
+    keys: { alt: true, key: 'o' },
     action: { type: 'orb', target: 'idle' },
   },
   {
     id: 'orb.listening',
     label: 'Orb · Listening',
     group: 'orb',
-    keys: { meta: true, key: 'l' },
+    keys: { alt: true, key: 'l' },
     action: { type: 'orb', target: 'listening' },
   },
   {
     id: 'orb.speaking',
     label: 'Orb · Speaking',
     group: 'orb',
-    keys: { meta: true, key: 's' },
+    keys: { alt: true, key: 's' },
     action: { type: 'orb', target: 'speaking' },
   },
   {
     id: 'orb.thinking',
     label: 'Orb · Thinking',
     group: 'orb',
-    keys: { meta: true, key: 't' },
+    keys: { alt: true, key: 't' },
     action: { type: 'orb', target: 'thinking' },
   },
   {

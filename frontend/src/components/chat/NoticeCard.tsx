@@ -12,13 +12,31 @@
  * this product cannot afford to blur. It is also not an error: nothing failed
  * in this exchange, and red would train the user to dread a message that is
  * usually just housekeeping.
+ *
+ * **`kind` was carried and ignored, and that stopped being harmless with the
+ * second case.** Every notice drew an amber warning triangle, which is right
+ * for a file that could not be read and wrong for *"answering inside your
+ * Investing domain"* — a statement about scope the user themselves chose.
+ * Warning the user about their own setting is how an indicator gets trained
+ * away, and the amber one has real work to do.
  */
-import { AlertTriangle, ArrowRight } from 'lucide-react';
+import { AlertTriangle, ArrowRight, Library } from 'lucide-react';
 import type { ChatNotice } from '../../stores/chatStore';
 
 const DESTINATIONS: Record<string, { node: string; label: string }> = {
   knowledge: { node: 'knowledge', label: 'Open Sources' },
 };
+
+/** How a notice presents itself. Keyed on `kind`, which the backend sends.
+ *
+ *  The default is the warning, not the neutral form: an unrecognised kind is
+ *  more likely to be something gone wrong than something routine, and under-
+ *  stating a problem is the worse of the two failures. */
+const TONES: Record<string, { Icon: typeof AlertTriangle; color: string }> = {
+  domain: { Icon: Library, color: 'var(--color-text-muted, #94a3b8)' },
+};
+
+const DEFAULT_TONE = { Icon: AlertTriangle, color: 'var(--color-amber, #d97706)' };
 
 interface Props {
   notice: ChatNotice;
@@ -27,6 +45,7 @@ interface Props {
 
 export default function NoticeCard({ notice, onOpen }: Props) {
   const destination = DESTINATIONS[notice.action];
+  const { Icon, color } = TONES[notice.kind] ?? DEFAULT_TONE;
 
   return (
     <div
@@ -36,12 +55,9 @@ export default function NoticeCard({ notice, onOpen }: Props) {
         background: 'var(--color-glass)',
       }}
       data-testid="chat-notice"
+      data-kind={notice.kind || 'default'}
     >
-      <AlertTriangle
-        size={13}
-        className="mt-0.5 shrink-0"
-        style={{ color: 'var(--color-amber, #d97706)' }}
-      />
+      <Icon size={13} className="mt-0.5 shrink-0" style={{ color }} />
       <div className="flex-1 min-w-0">
         <p className="text-xs leading-relaxed text-slate-300">{notice.content}</p>
         {destination && onOpen && (

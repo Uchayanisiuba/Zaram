@@ -45,6 +45,7 @@ class ChatRouter:
         system_prompt: str = "",
         session_id: str = "default",
         project_id: str | None = None,
+        only_ids: frozenset[str] | None = None,
     ) -> AsyncGenerator:
         """Returns the correct generator based on the feature flag.
 
@@ -52,10 +53,17 @@ class ChatRouter:
         (rule 7i). None means no project is active, which is a real answer:
         facts captured then stay `global` rather than being assigned to a
         project nobody chose.
+
+        `only_ids` narrows recall to a knowledge domain, already resolved to
+        fact ids by the API layer — a separate axis from scope, since one is
+        about whose work a fact belongs to and the other about which library
+        the user chose to read from. ``None`` is unrestricted; an **empty set
+        is not**, and means a domain holding nothing. Never test it for
+        truthiness anywhere along this chain.
         """
         if USE_NEW_KERNEL:
             return self._kernel_stream(
-                request_text, model, system_prompt, session_id, project_id
+                request_text, model, system_prompt, session_id, project_id, only_ids
             )
         else:
             return self._legacy_stream(request_text, model, system_prompt)
@@ -67,6 +75,7 @@ class ChatRouter:
         system_prompt: str = "",
         session_id: str = "default",
         project_id: str | None = None,
+        only_ids: frozenset[str] | None = None,
     ) -> AsyncGenerator:
         """Streams structured StreamEvent lines from the new Execution Engine.
 
@@ -81,7 +90,8 @@ class ChatRouter:
         try:
             yield StreamEvent.start().to_ipc() + "\n"
             async for item in iterate_in_threadpool(self.execution_engine.execute(
-                text, model, system_prompt, session_id, project_id=project_id
+                text, model, system_prompt, session_id,
+                project_id=project_id, only_ids=only_ids,
             )):
                 if isinstance(item, StreamEvent):
                     yield item.to_ipc() + "\n"

@@ -17,18 +17,40 @@ class RetrievalResult:
 
 
 class SemanticRetrieval:
-    """Top K, hybrid search, similarity, MMR, and context window optimization."""
+    """Top K, MMR, and context window optimization.
+
+    **There was a `_hybrid` here and it was deleted, 18 August 2026.** It read
+    `vector * 0.7 + bm25 * 0.3` and then truncated the candidate list on that
+    blend — selecting on a ranking score, which is the membership-versus-
+    ordering error this codebase has paid for three times. It was flagged for
+    review on the suspicion that it was live.
+
+    It was not. The function was *reached*, so it looked live, but its first
+    statement was `if not objects: return vector_result` and the only
+    production caller — `KnowledgeRuntime.retrieve`, one level up — never
+    passed `objects`. So the blend never executed, no test covered it, and the
+    "hybrid" strategy has always been pure vector search. Reachable function,
+    unreachable defect.
+
+    It is deleted rather than corrected because `CLAUDE.md` has already decided
+    what replaces it: when lexical retrieval is genuinely built, the two
+    rankers fuse by **reciprocal rank** and not by a weighted sum, precisely so
+    there is no blended magnitude that *could* be compared against a threshold.
+    Repairing the arithmetic here would have preserved the shape the contract
+    rejected. The result honestly reports `top_k`, which is what it does.
+    """
 
     def __init__(self, vector_store: Any, embedding_runtime: Any):
         self._store = vector_store
         self._embed = embedding_runtime
 
-    def retrieve(self, request: KnowledgeRequest, objects: list[Any] | None = None) -> RetrievalResult:
-        strategy = request.strategy or "hybrid"
-        if strategy == "mmr":
+    def retrieve(self, request: KnowledgeRequest) -> RetrievalResult:
+        # "hybrid" remains the default request value and resolves here to
+        # vector search, which is what it has always done. Left as the default
+        # rather than renamed: the string reaches this from stored requests,
+        # and the result reports `top_k`, so nothing tells the user otherwise.
+        if (request.strategy or "hybrid") == "mmr":
             return self._mmr(request)
-        if strategy == "hybrid":
-            return self._hybrid(request, objects)
         return self._top_k(request)
 
     def _top_k(self, request: KnowledgeRequest) -> RetrievalResult:
@@ -66,38 +88,6 @@ class SemanticRetrieval:
             selected.append(chunk)
             selected_scores.append(best_score)
         return RetrievalResult(chunks=selected, scores=selected_scores, strategy="mmr", query_tokens=len(request.query.split()))
-
-    def _hybrid(self, request: KnowledgeRequest, objects: list[Any] | None = None) -> RetrievalResult:
-        vector_result = self._top_k(request)
-        if not objects:
-            return vector_result
-        scored: dict[str, tuple[KnowledgeChunk, float]] = {}
-        for chunk, score in zip(vector_result.chunks, vector_result.scores):
-            scored[chunk.id] = (chunk, score * 0.7)
-        for obj in objects:
-            text = getattr(obj, "content", "") or getattr(obj, "snippet", "")
-            if not text:
-                continue
-            query_lower = request.query.lower()
-            text_lower = text.lower()
-            overlap = sum(1 for term in query_lower.split() if term in text_lower)
-            if overlap > 0:
-                bm25 = overlap / (len(query_lower.split()) + 1.0)
-                key = getattr(obj, "id", text)
-                if key in scored:
-                    prev = scored[key][1]
-                    scored[key] = (scored[key][0], prev + bm25 * 0.3)
-                else:
-                    chunk_text = text[: self._estimate_chunk_size()]
-                    chunk = KnowledgeChunk(text=chunk_text, token_count=len(chunk_text.split()))
-                    scored[key] = (chunk, bm25 * 0.3)
-        ranked = sorted(scored.values(), key=lambda x: x[1], reverse=True)
-        chunks = [r[0] for r in ranked[: request.max_results]]
-        scores = [r[1] for r in ranked[: request.max_results]]
-        return RetrievalResult(chunks=chunks, scores=scores, strategy="hybrid", query_tokens=len(request.query.split()))
-
-    def _estimate_chunk_size(self) -> int:
-        return 512 * 4
 
     def optimize_context_window(self, chunks: list[KnowledgeChunk], max_tokens: int = 4096) -> KnowledgeContext:
         total = 0
