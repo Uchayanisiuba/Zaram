@@ -1,6 +1,9 @@
+import { useMemo } from 'react';
 import { motion, type Variants } from 'framer-motion';
 import { useOrbStore } from '@/stores';
+import { useIsReducedMotion } from '@/hooks/useReducedMotion';
 import type { OrbState } from '@/stores/orbStore';
+import { settleAll } from './stillness';
 
 // `Record<OrbState, …>`, so a new orb state fails the build here rather than
 // animating to nothing at runtime. framer-motion resolves an unknown variant
@@ -8,7 +11,12 @@ import type { OrbState } from '@/stores/orbStore';
 const auraVariants: Record<OrbState, Variants[string]> = {
   idle: {
     scale: [1, 1.05, 1],
-    backgroundColor: 'rgba(139, 92, 246, 0.2)', // Indigo
+    // Indigo, and it now is. The comment said Indigo and the value was
+    // `#8b5cf6` — violet, which `docs/UI-SPEC.md` assigns to **cloud**. Three
+    // components carried that same mislabelled pair, so at rest the orb was
+    // tinted with the one colour that means "data left the device". Idle is
+    // the state where nothing has.
+    backgroundColor: 'rgba(99, 102, 241, 0.2)',
     transition: {
       duration: 4,
       repeat: Infinity,
@@ -31,7 +39,12 @@ const auraVariants: Record<OrbState, Variants[string]> = {
     scale: [1, 1.03, 1],
     backgroundColor: 'rgba(100, 116, 139, 0.18)', // Slate — resident to neither
     transition: {
-      duration: 3.4,
+      // 4s, was 3.4. Every looping period in the orb is now a whole multiple of
+      // four seconds. Cycles that share no common factor never re-align, so the
+      // composite of ten of them never repeats and the eye keeps finding fresh
+      // change — which is what reads as restless even when each animation is
+      // individually slow.
+      duration: 4,
       repeat: Infinity,
       ease: 'easeInOut',
     } as const,
@@ -40,11 +53,16 @@ const auraVariants: Record<OrbState, Variants[string]> = {
 
 const Aura = () => {
   const { orbState } = useOrbStore();
+  const reduced = useIsReducedMotion();
+  const variants = useMemo(
+    () => (reduced ? settleAll(auraVariants) : auraVariants),
+    [reduced],
+  );
 
   return (
     <motion.div
       className="absolute w-[320px] h-[320px] rounded-full blur-2xl"
-      variants={auraVariants}
+      variants={variants}
       animate={orbState}
     />
   );
