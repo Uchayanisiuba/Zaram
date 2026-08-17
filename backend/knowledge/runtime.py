@@ -249,7 +249,18 @@ class KnowledgeRuntime:
             for r in internet_results:
                 result = KnowledgeResult(
                     title=r.title, url=r.url, snippet=r.snippet, provider=r.connector,
-                    confidence=r.score, type=__import__("knowledge.protocol", fromlist=["ResultType"]).ResultType.WEB,
+                    confidence=r.score,
+                    # **`score` was never set here, so it kept its 0.0 default** —
+                    # and `score` is the field the citation layer reads and
+                    # renders as *relevance*. Every web chip therefore displayed
+                    # 0.0 while being cited, which is a rendered value that is
+                    # not true. The number existed the whole way down:
+                    # `relevance.scored()` measures query against content and
+                    # writes it to `SearchResult.score`, and `fuse` orders by
+                    # rank without touching it. It was dropped in this one hop,
+                    # by being assigned to `confidence` and to nothing else.
+                    score=r.score,
+                    type=__import__("knowledge.protocol", fromlist=["ResultType"]).ResultType.WEB,
                     metadata=r.metadata, retrieved_at=r.retrieved_at,
                 )
                 result = self._authority.apply_to_result(result)
@@ -281,6 +292,25 @@ class KnowledgeRuntime:
                     snippet=r.record.content[:300],
                     provider="memory",
                     confidence=r.score,
+                    # **Not `r.score` — that is the ranking blend.** A
+                    # `MemoryResult` carries two numbers: `score` mixes
+                    # importance, recency, access count and session membership
+                    # for *ordering*, while `relevance` is the similarity
+                    # retrieval measured. This field is rendered to the user as
+                    # relevance and is compared against a citation floor
+                    # measured as a cosine, so feeding it the blend is the
+                    # error `CLAUDE.md` records as this codebase's most
+                    # expensive recurring bug — it once cited a fact whose true
+                    # similarity was 0.20 on recency alone.
+                    #
+                    # Falls back to `score` only where `relevance` is absent,
+                    # mirroring `ExecutionEngine._relevance_of`, because several
+                    # tests pass plain stand-ins that carry one number.
+                    score=float(
+                        getattr(r, "relevance", None)
+                        if getattr(r, "relevance", None) is not None
+                        else getattr(r, "score", 0.0) or 0.0
+                    ),
                     type=__import__("knowledge.protocol", fromlist=["ResultType"]).ResultType.MEMORY,
                     metadata={"memory_type": r.record.memory_type.value, "match_reason": r.match_reason},
                     retrieved_at=r.record.created_at,
