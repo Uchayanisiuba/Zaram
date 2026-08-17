@@ -945,6 +945,70 @@ async def memory_maintenance_status():
     }
 
 
+@app.get("/memory/traffic")
+async def memory_traffic():
+    """Records the Spine holds that today's door check would refuse.
+
+    **Why this is needed at all.** The check that decides what enters the Spine
+    was a blocklist — store unless it looks like a question — and it failed
+    open, so instructions and false starts became durable facts. Read out of a
+    real Spine: "Say the single word: ping", "Reply with exactly: OK", "WHars
+    your name". The door is fixed; this is for what got through before it was.
+
+    They are not harmless once stored. Recall reaches them, so they arrive as
+    citations in new answers — measured on a live question about AI news, where
+    three of the ten sources behind the reply were the user's own old prompts.
+
+    **Read-only, and that is deliberate.** It proposes and never applies. Rule
+    4 gives the user authority over stored facts, and a background job that
+    quietly deleted them would be the wrong shape even when every deletion is
+    correct — the same reasoning `/memory/maintenance` already states about
+    promotion. Removal is `DELETE /memory/{id}`, one fact at a time, by them.
+
+    The classification is `ExecutionEngine._carries_new_information`, the very
+    predicate the door uses. Reusing it rather than re-describing it is what
+    stops the sweep and the gate disagreeing — two answers to one question is
+    the failure this codebase keeps paying for, and a second copy of this rule
+    would be exactly that.
+    """
+    if kernel.memory_runtime is None:
+        raise HTTPException(status_code=503, detail="Memory runtime not available")
+
+    from core.execution_engine import ExecutionEngine
+
+    records = await kernel.memory_runtime._store.all_records()
+    traffic = []
+    for record in records or []:
+        content = (record.content or "").strip()
+        if not content:
+            continue
+        # A parsed document is not conversation and is never judged by a check
+        # built for prompts. An invoice's text would fail it comprehensively.
+        origin = (getattr(record, "metadata", None) or {}).get("origin")
+        if origin == "user_document":
+            continue
+        if ExecutionEngine._carries_new_information(ExecutionEngine, content):
+            continue
+        traffic.append({
+            "id": record.id,
+            "content": content[:300],
+            "created_at": getattr(record, "created_at", None),
+            "access_count": getattr(record, "access_count", 0),
+        })
+
+    return {
+        "traffic": traffic,
+        "total_records": len(records or []),
+        # Said in words because a count alone invites a "delete all" button,
+        # and that button is what rule 4 exists to prevent.
+        "note": (
+            "These look like instructions or false starts rather than facts. "
+            "Nothing has been changed. Remove any of them with "
+            "DELETE /memory/{id}."
+        ),
+    }
+
+
 @app.get("/memory/stats")
 async def memory_stats():
     """Counts for the Memory surface. Every number is measured, none estimated."""
