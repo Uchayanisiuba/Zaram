@@ -405,6 +405,7 @@ class MemoryRuntimeImpl(MemoryRuntime):
         user_id: str | None = None,
         filters: dict[str, Any] | None = None,
         scope: str | None = None,
+        only_ids: frozenset[str] | None = None,
     ) -> list[MemoryResult]:
         """Recall, optionally narrowed to one project plus global (rule 7i).
 
@@ -412,6 +413,12 @@ class MemoryRuntimeImpl(MemoryRuntime):
         — it shows the user everything they have. The engine passes the current
         project, so a question asked inside one draws on that project and on
         what is true about the user generally, and on nothing else.
+
+        `only_ids` narrows to a knowledge domain and is a separate axis: scope
+        is about *whose work* a fact belongs to, a domain is about *which
+        library* the user chose to read from, and a question can be inside both
+        at once. `None` is unrestricted; an empty set means a domain with
+        nothing in it and is honoured as such.
         """
         start = time.time()
         try:
@@ -427,6 +434,7 @@ class MemoryRuntimeImpl(MemoryRuntime):
                 strategy=strategy,
                 filters=filters or {},
                 scope=scope,
+                only_ids=only_ids,
                 session_id=session_id,
                 user_id=user_id,
                 metadata=query_metadata,

@@ -175,6 +175,12 @@ class MemoryQuery:
     #: Restrict to this scope plus `global`. ``None`` means every scope, which
     #: only the Memory surface wants — it shows the user everything they have.
     scope: str | None = None
+    #: Restrict to these fact ids, for a question asked inside a knowledge
+    #: domain. ``None`` is unrestricted; an **empty set is not** — it means a
+    #: domain that can answer from nothing yet, and collapsing the two would
+    #: silently widen a scope the user chose. Resolved by
+    #: `knowledge/domain_recall.py`, which is where the reasoning lives.
+    only_ids: frozenset[str] | None = None
     session_id: str | None = None
     user_id: str | None = None
     time_range: tuple[float, float] | None = None

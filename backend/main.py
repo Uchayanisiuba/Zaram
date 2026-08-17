@@ -2855,6 +2855,11 @@ async def remove_ingest_source(source_id: str):
     if outcome is None:
         raise HTTPException(status_code=404, detail="No such source")
 
+    # A withdrawn source leaves every domain that held it. Without this a
+    # domain keeps pointing at something that no longer exists, and the count
+    # beside its name counts a source that is gone.
+    knowledge_domains.forget_source(source_id)
+
     fact_ids = outcome["fact_ids"]
     forgotten = 0
     runtime = getattr(kernel, "memory_runtime", None)
@@ -2871,6 +2876,86 @@ async def remove_ingest_source(source_id: str):
         "facts_recorded": len(fact_ids),
         "files_deleted": outcome["files_deleted"],
     }
+
+
+# --- Knowledge domains ---------------------------------------------------- #
+#
+# A named retrieval scope over the user's own sources. Not a folder: `CLAUDE.md`
+# is explicit that if it only groups files it is a filter, and it has to change
+# answers. `knowledge/domain_recall.py` is where that happens.
+#
+# No seventh node. Sources already live inside Knowledge and a domain is how
+# Knowledge organises them.
+
+from knowledge.domains import (  # noqa: E402
+    DomainError,
+    KnowledgeDomains,
+    default_db_path as domains_db_path,
+)
+
+knowledge_domains = KnowledgeDomains(domains_db_path())
+
+
+class DomainBody(BaseModel):
+    name: str
+    description: str = ""
+
+
+@app.get("/knowledge/domains")
+async def list_domains():
+    """Every domain, with the sources in each."""
+    return {"domains": knowledge_domains.all()}
+
+
+@app.post("/knowledge/domains")
+async def create_domain(body: DomainBody):
+    try:
+        return knowledge_domains.create(body.name, body.description)
+    except DomainError as exc:
+        # The store's message is written for a person and names what to fix.
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.put("/knowledge/domains/{domain_id}")
+async def rename_domain(domain_id: str, body: DomainBody):
+    try:
+        changed = knowledge_domains.rename(domain_id, body.name, body.description)
+    except DomainError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not changed:
+        raise HTTPException(status_code=404, detail="No such domain")
+    return knowledge_domains.get(domain_id)
+
+
+@app.delete("/knowledge/domains/{domain_id}")
+async def remove_domain(domain_id: str):
+    """Delete a domain. **Its sources and their facts stay exactly where they are.**
+
+    One memory, many domains. A domain is a way of looking at what is already
+    there, so removing one removes a lens — the opposite of withdrawing a
+    source, which does take facts with it. The two sit on the same screen, so
+    the difference is worth being explicit about in both places.
+    """
+    if not knowledge_domains.remove(domain_id):
+        raise HTTPException(status_code=404, detail="No such domain")
+    return {"id": domain_id, "facts_removed": 0, "sources_removed": 0}
+
+
+@app.post("/knowledge/domains/{domain_id}/sources/{source_id}")
+async def add_source_to_domain(domain_id: str, source_id: str):
+    """Put a source in a domain. A source may be in any number at once."""
+    if not knowledge_domains.link(domain_id, source_id):
+        raise HTTPException(status_code=404, detail="No such domain")
+    return knowledge_domains.get(domain_id)
+
+
+@app.delete("/knowledge/domains/{domain_id}/sources/{source_id}")
+async def remove_source_from_domain(domain_id: str, source_id: str):
+    knowledge_domains.unlink(domain_id, source_id)
+    domain = knowledge_domains.get(domain_id)
+    if domain is None:
+        raise HTTPException(status_code=404, detail="No such domain")
+    return domain
 
 
 AUDIO_CACHE_DIR = os.path.abspath("audio_cache")
