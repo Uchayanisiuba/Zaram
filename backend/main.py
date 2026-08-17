@@ -976,7 +976,15 @@ async def memory_traffic():
 
     from core.execution_engine import ExecutionEngine
 
-    records = await kernel.memory_runtime._store.all_records()
+    # Everything the user can see, superseded rows included.
+    #
+    # `all_records()` hides superseded ones by default, and the sweep then
+    # reported 12 records while `GET /memory` listed 14 — so two entries were
+    # invisible to the only tool offering to clean them up, including a
+    # "Write any simple python code" the predicate classifies as traffic. A
+    # review surface that cannot see what the user sees is one that quietly
+    # claims to be finished when it is not.
+    records = await kernel.memory_runtime._store.all_records(include_superseded=True)
     traffic = []
     for record in records or []:
         content = (record.content or "").strip()
