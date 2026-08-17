@@ -1,14 +1,23 @@
+import { useMemo } from 'react';
 import { motion, type Variants } from 'framer-motion';
 import { useOrbStore } from '@/stores';
+import { useIsReducedMotion } from '@/hooks/useReducedMotion';
 import type { OrbState } from '@/stores/orbStore';
+import { settleAll } from './stillness';
 
 // Total map — see the note in Aura.tsx.
+//
+// Every duration here is a whole multiple of four seconds. See the note on
+// `Aura.swapping` for why: periods sharing no common factor never re-align, so
+// the composite never resolves and the orb reads as restless rather than calm.
 const haloVariants: Record<OrbState, Variants[string]> = {
   idle: {
     rotate: 360,
-    borderColor: 'rgba(139, 92, 246, 0.4)', // Indigo
+    // Indigo. Was `#8b5cf6` — violet, the cloud accent — under a comment
+    // saying Indigo. See `Aura.idle`.
+    borderColor: 'rgba(99, 102, 241, 0.4)',
     transition: {
-      duration: 30,
+      duration: 32, // was 30
       repeat: Infinity,
       ease: 'linear',
     } as const,
@@ -17,7 +26,7 @@ const haloVariants: Record<OrbState, Variants[string]> = {
     rotate: 360,
     borderColor: 'rgba(34, 211, 238, 0.6)', // Cyan
     transition: {
-      duration: 10,
+      duration: 12, // was 10
       repeat: Infinity,
       ease: 'linear',
     } as const,
@@ -26,7 +35,7 @@ const haloVariants: Record<OrbState, Variants[string]> = {
     rotate: 360,
     borderColor: 'rgba(168, 85, 247, 0.5)', // Purple
     transition: {
-      duration: 7.5,
+      duration: 8, // was 7.5
       repeat: Infinity,
       ease: 'linear',
     } as const,
@@ -55,11 +64,16 @@ const haloVariants: Record<OrbState, Variants[string]> = {
 
 const Halo = () => {
   const { orbState } = useOrbStore();
+  const reduced = useIsReducedMotion();
+  const variants = useMemo(
+    () => (reduced ? settleAll(haloVariants) : haloVariants),
+    [reduced],
+  );
 
   return (
     <motion.div
       className="absolute w-[320px] h-[320px] rounded-full border-2"
-      variants={haloVariants}
+      variants={variants}
       animate={orbState}
     />
   );

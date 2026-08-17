@@ -8,8 +8,10 @@
  */
 import { motion, AnimatePresence } from 'framer-motion';
 import { useOrbStore } from '@/stores';
+import { useIsReducedMotion } from '@/hooks/useReducedMotion';
 import type { OrbState } from '@/stores/orbStore';
 import globeImage from '@/assets/living-orb-globe.png';
+import { frames, loop } from './stillness';
 
 // Deterministic particle positions
 const PARTICLES = [
@@ -81,8 +83,12 @@ interface StateConfig {
   glowColor2: string;
   ring1Color: string;
   ring2Color: string;
-  ring1Duration: number;
-  ring2Duration: number;
+  // `ring1Duration` / `ring2Duration` were here, set in all five states, and
+  // read by nothing: both rings render `animate={{ rotate: 0 }}` with a fixed
+  // 0.3s transition and are labelled STATIC where they are drawn. Ten numbers
+  // maintained across five states for no effect — the same shape as this
+  // repository's unreachable modules, in config rather than in code. Removed
+  // from the type first, so the compiler named every state that had to change.
   scale: number[];
   scaleDuration: number;
   filter: string;
@@ -101,8 +107,6 @@ const STATE_CONFIG: Record<OrbState, StateConfig> = {
     glowColor2: 'rgba(168,85,247,0.18)',
     ring1Color: 'rgba(34,211,238,0.18)',
     ring2Color: 'rgba(168,85,247,0.28)',
-    ring1Duration: 22,
-    ring2Duration: 14,
     scale: [1, 1.06, 1],
     // 8s, up from 5s. Idle has no ripples — the pulse the eye reads as one is
     // this breath — and on the landing state it runs continuously, forever,
@@ -116,8 +120,6 @@ const STATE_CONFIG: Record<OrbState, StateConfig> = {
     glowColor2: 'rgba(6,182,212,0.28)',
     ring1Color: 'rgba(34,211,238,0.40)',
     ring2Color: 'rgba(99,102,241,0.35)',
-    ring1Duration: 14,
-    ring2Duration: 8,
     scale: [1.08, 1.14, 1.08],
     scaleDuration: 2,
     filter: 'drop-shadow(0 0 36px rgba(34,211,238,0.65))',
@@ -127,8 +129,6 @@ const STATE_CONFIG: Record<OrbState, StateConfig> = {
     glowColor2: 'rgba(99,102,241,0.32)',
     ring1Color: 'rgba(168,85,247,0.40)',
     ring2Color: 'rgba(34,211,238,0.35)',
-    ring1Duration: 8,
-    ring2Duration: 5,
     scale: [1, 1.05, 1.02, 1.07, 1],
     scaleDuration: 1.6,
     filter: 'drop-shadow(0 0 40px rgba(168,85,247,0.65))',
@@ -138,10 +138,8 @@ const STATE_CONFIG: Record<OrbState, StateConfig> = {
     glowColor2: 'rgba(34,211,238,0.28)',
     ring1Color: 'rgba(16,185,129,0.35)',
     ring2Color: 'rgba(34,211,238,0.30)',
-    ring1Duration: 16,
-    ring2Duration: 10,
     scale: [1, 1.04, 1.08, 1.04, 1],
-    scaleDuration: 0.9,
+    scaleDuration: 1,
     filter: 'drop-shadow(0 0 32px rgba(16,185,129,0.55))',
   },
   // Dimmer and slower than every other state, deliberately.
@@ -161,10 +159,8 @@ const STATE_CONFIG: Record<OrbState, StateConfig> = {
     glowColor2: 'rgba(71,85,105,0.20)',
     ring1Color: 'rgba(148,163,184,0.22)',
     ring2Color: 'rgba(100,116,139,0.28)',
-    ring1Duration: 30,
-    ring2Duration: 24,
     scale: [1, 1.03, 1],
-    scaleDuration: 3.4,
+    scaleDuration: 4,
     filter: 'drop-shadow(0 0 20px rgba(100,116,139,0.35))',
   },
 };
@@ -180,6 +176,13 @@ const LivingOrb = ({
   const { orbState } = useOrbStore();
   const state = orbState as OrbState;
   const cfg = STATE_CONFIG[state];
+
+  // `docs/UI-SPEC.md`: "Respect `prefers-reduced-motion` — it disables the orb
+  // pulse too." This component is the orb, and it had no gate across seven
+  // infinite animations. `loop` and `frames` hold each one at its resting
+  // value; colour still transitions, because reduced motion means less
+  // movement rather than less information. See `stillness.ts`.
+  const reduced = useIsReducedMotion();
 
   /** Amplify existing glow via brightness � no new colors */
   const orbBrightness = emphasis ? ' brightness(1.4)' : '';
@@ -226,8 +229,11 @@ const LivingOrb = ({
           background: `radial-gradient(circle, ${cfg.glowColor} 0%, ${cfg.glowColor2} 45%, transparent 70%)`,
           filter: `blur(24px)${emphasis ? ' brightness(1.8)' : ''}`,
         }}
-        animate={{ scale: scaleKeyframes, opacity: state === 'idle' ? [0.7, 1, 0.7] : [0.8, 1, 0.8] }}
-        transition={{ duration: cfg.scaleDuration, repeat: Infinity, ease: 'easeInOut' }}
+        animate={{
+          scale: frames(scaleKeyframes, reduced),
+          opacity: frames(state === 'idle' ? [0.7, 1, 0.7] : [0.8, 1, 0.8], reduced),
+        }}
+        transition={loop(cfg.scaleDuration, reduced)}
       />
 
       {/* Thinking multi-color pulse overlay */}
@@ -247,7 +253,7 @@ const LivingOrb = ({
               ],
             }}
             exit={{ opacity: 0 }}
-            transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
+            transition={loop(4, reduced)}
           />
         )}
       </AnimatePresence>
@@ -309,9 +315,11 @@ const LivingOrb = ({
               className="absolute rounded-full pointer-events-none"
               style={{ width: corePx, height: corePx, border: '1px solid rgba(16,185,129,0.28)' }}
               initial={{ scale: 1, opacity: 0.3 }}
-              animate={{ scale: 2.2, opacity: 0 }}
+              animate={reduced ? { scale: 1, opacity: 0.3 } : { scale: 2.2, opacity: 0 }}
               exit={{ opacity: 0 }}
-              transition={{ duration: 3.6, repeat: Infinity, delay: i * 1.2, ease: 'easeOut' }}
+              // 4s, was 3.6, and the stagger goes to 4/3 so the three ripples
+              // stay evenly spaced within one period.
+              transition={{ ...loop(4, reduced, 'easeOut'), delay: reduced ? 0 : i * (4 / 3) }}
             />
           ))}
       </AnimatePresence>
@@ -323,9 +331,14 @@ const LivingOrb = ({
             className="absolute rounded-full pointer-events-none"
             style={{ width: corePx + 32, height: corePx + 32, border: '2px solid rgba(34,211,238,0.55)' }}
             initial={{ scale: 1, opacity: 0 }}
-            animate={{ scale: [1, 1.25, 1.5], opacity: [0.7, 0.4, 0] }}
+            animate={{
+              scale: frames([1, 1.25, 1.5], reduced),
+              // Held at 0.7 rather than the array's 0, or a still ring would be
+              // an invisible one and listening would lose its only marker.
+              opacity: reduced ? 0.7 : [0.7, 0.4, 0],
+            }}
             exit={{ opacity: 0 }}
-            transition={{ duration: 1.4, repeat: Infinity, ease: 'easeOut' }}
+            transition={loop(2, reduced, 'easeOut')}
           />
         )}
       </AnimatePresence>
@@ -345,12 +358,14 @@ const LivingOrb = ({
           filter: `${cfg.filter}${state === 'swapping' ? '' : orbBrightness}`,
         }}
         animate={{
-          scale: scaleKeyframes,
+          scale: frames(scaleKeyframes, reduced),
           // The globe fades toward half-present rather than holding steady:
           // the model backing it is, at this moment, genuinely not there.
-          opacity: state === 'swapping' ? [0.85, 0.5, 0.85] : 1,
+          // Still, it holds at 0.85 — dimmer than resident, which is the part
+          // that carries meaning without moving.
+          opacity: state === 'swapping' ? frames([0.85, 0.5, 0.85], reduced) : 1,
         }}
-        transition={{ duration: cfg.scaleDuration, repeat: Infinity, ease: 'easeInOut' }}
+        transition={loop(cfg.scaleDuration, reduced)}
       />
 
       {/* Inner pulse dot. Shown by rendered diameter rather than preset name:
@@ -365,8 +380,13 @@ const LivingOrb = ({
             // hard edge.
             boxShadow: `0 0 ${Math.max(4, Math.round(coreDotPx * 1.2))}px rgba(255,255,255,0.9)`,
           }}
-          animate={{ opacity: [0.35, 0.9, 0.35], scale: [0.8, 1.2, 0.8] }}
-          transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
+          animate={{
+            // Rests bright rather than at the array's 0.35: the dot is the
+            // orb's centre, and a still one at a third opacity looks broken.
+            opacity: reduced ? 0.9 : [0.35, 0.9, 0.35],
+            scale: reduced ? 1 : [0.8, 1.2, 0.8],
+          }}
+          transition={loop(4, reduced)}
         />
       )}
 
@@ -384,8 +404,19 @@ const LivingOrb = ({
               background: p.color,
               boxShadow: `0 0 4px ${p.color}`,
             }}
-            animate={{ y: [0, -24, 0], x: [0, 12, 0], opacity: [0.2, 0.9, 0.2] }}
-            transition={{ duration: 3.5 + p.delay, repeat: Infinity, delay: p.delay, ease: 'easeInOut' }}
+            animate={{
+              y: frames([0, -24, 0], reduced),
+              x: frames([0, 12, 0], reduced),
+              opacity: reduced ? 0.55 : [0.2, 0.9, 0.2],
+            }}
+            // **One period, offset by delay — not ten periods.**
+            // This was `3.5 + p.delay`, which gave the ten particles ten
+            // different durations (3.5s to 5.5s). Ten cycles sharing no common
+            // factor is the largest single source of the orb's restlessness:
+            // they drift through every possible phase relationship and the
+            // field never repeats. A shared 8s with staggered starts looks the
+            // same at a glance and settles into one rhythm.
+            transition={{ ...loop(8, reduced), delay: reduced ? 0 : p.delay }}
           />
         ))}
 
