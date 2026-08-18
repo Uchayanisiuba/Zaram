@@ -51,10 +51,17 @@ import {
   AlertTriangle,
   Download,
   Settings as SettingsIcon,
+  UserRound,
 } from 'lucide-react';
 import SurfaceHeader from '../components/common/SurfaceHeader';
 import { useSystemStore } from '@/stores/systemStore';
 import { useEmbodimentStore } from '@/stores/embodimentStore';
+import {
+  fetchCharacter,
+  saveCharacter,
+  fetchVoices,
+  type Character,
+} from '@/services/characterClient';
 import {
   SettingsError,
   connectCloudProvider,
@@ -362,6 +369,14 @@ export default function SettingsWorkspace() {
   const [exportManifest, setExportManifest] = useState<ExportManifest | null>(null);
   const [exported, setExported] = useState<string | null>(null);
 
+  const [character, setCharacter] = useState<Character | null>(null);
+  const [voices, setVoices] = useState<string[]>([]);
+  // Drafts, so a half-typed name is not saved on every keystroke.
+  // Null means "not being edited" and falls back to the stored value —
+  // distinct from an empty string, which is a deliberate clear.
+  const [nameDraft, setNameDraft] = useState<string | null>(null);
+  const [mannerDraft, setMannerDraft] = useState<string | null>(null);
+
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -442,6 +457,33 @@ export default function SettingsWorkspace() {
   useEffect(() => {
     void loadLocalState();
   }, [loadLocalState]);
+
+  /**
+   * The character, read on its own rather than folded into `loadLocalState`.
+   *
+   * Same reasoning as the `allSettled` above, applied one level out: this is a
+   * seventh independent reading of the system, and a backend without the voice
+   * extra installed must not be able to blank the provider list. `fetchVoices`
+   * never throws for that reason — an absent voice list is the ordinary state
+   * of a base install and is not a failure worth reporting anywhere.
+   */
+  useEffect(() => {
+    const stop = new AbortController();
+    void (async () => {
+      try {
+        const [loaded, available] = await Promise.all([
+          fetchCharacter(stop.signal),
+          fetchVoices(stop.signal),
+        ]);
+        setCharacter(loaded);
+        setVoices(available);
+      } catch {
+        // Leaves `character` null, which the section renders as "unavailable"
+        // rather than as an empty form that would silently save nothing.
+      }
+    })();
+    return () => stop.abort();
+  }, []);
 
   const run = async (name: string, work: () => Promise<void>) => {
     setBusy(name);
@@ -1049,6 +1091,156 @@ export default function SettingsWorkspace() {
                     '    python -m spacy download en_core_web_sm'
             }
           />
+        </Section>
+
+        {/* ----------------------------------------------------- Character */}
+        {/* Free, forever, on one machine: CLAUDE.md makes personalisation the
+            retention engine rather than the revenue one.
+
+            The reversal underneath it is worth remembering, because it was
+            narrow. This used to be forbidden — "not a personality: no name, no
+            pronoun" — and that ban fixed two failures with one rule. It fixed
+            the first: a model asked what it is answers from training data, and
+            eight named personas made that worse by supplying a third answer.
+            It never fixed the second, parasocial attachment, because
+            attachment comes from being *remembered*, not from being named. So
+            the ban paid a large product cost for a protection it did not
+            deliver, and what replaced it is one sentence enforced by test: a
+            user may name it, and it may never deny what it is when asked. */}
+        <Section
+          title="Character"
+          icon={<UserRound size={14} style={{ color: 'var(--color-indigo-light)' }} />}
+        >
+          {character === null ? (
+            <Row
+              label="Character"
+              value="unavailable"
+              state="absent"
+              detail="Zaram could not read these settings from the backend. Nothing is shown rather than an empty form, which would look editable and save nothing."
+            />
+          ) : (
+            <>
+              <Row
+                label="Name"
+                value={character.assistantName || character.defaultName}
+                state={character.assistantName ? 'good' : 'neutral'}
+                detail={
+                  'What you call it. Additive, never substitutive — it is still Zaram underneath ' +
+                  'and will say so if you ask what it is. Clear the field to use the default.'
+                }
+              >
+                <div className="flex items-center gap-2">
+                  <input
+                    value={nameDraft ?? character.assistantName}
+                    onChange={(e) => setNameDraft(e.target.value)}
+                    placeholder={character.defaultName}
+                    aria-label="What to call your assistant"
+                    maxLength={48}
+                    className="w-36 px-2 py-1 text-xs rounded-lg bg-transparent outline-none"
+                    style={{
+                      border: '1px solid var(--color-border-subtle)',
+                      color: 'var(--color-text)',
+                    }}
+                  />
+                  <button
+                    disabled={busy === 'name' || nameDraft === null}
+                    onClick={() =>
+                      void run('name', async () => {
+                        // The stored value comes back, not the submitted one.
+                        // The backend collapses whitespace and bounds length,
+                        // so echoing what was typed could show a name Zaram
+                        // will not actually use.
+                        setCharacter(await saveCharacter({ assistantName: nameDraft ?? '' }));
+                        setNameDraft(null);
+                      })
+                    }
+                    className="text-[11px] px-2 py-1 rounded-lg disabled:opacity-40"
+                    style={{ color: 'var(--color-cyan-light)' }}
+                  >
+                    {busy === 'name' ? <Loader2 size={12} className="animate-spin" /> : 'Save'}
+                  </button>
+                </div>
+              </Row>
+
+              <Row
+                label="Manner"
+                value={character.manner ? 'set' : 'default'}
+                state={character.manner ? 'good' : 'neutral'}
+                detail={
+                  'How it should write — tone, length, formality. Style only: it cannot change ' +
+                  'what Zaram says it is, which model answered, where that model runs, or the ' +
+                  'date. Your words are placed before those rules deliberately, so the last ' +
+                  'instruction the model reads is the true one.'
+                }
+              >
+                <div className="flex flex-col items-end gap-2">
+                  <textarea
+                    value={mannerDraft ?? character.manner}
+                    onChange={(e) => setMannerDraft(e.target.value)}
+                    placeholder="Brief and plain. No preamble."
+                    aria-label="How your assistant should write"
+                    maxLength={600}
+                    rows={3}
+                    className="w-56 px-2 py-1 text-xs rounded-lg bg-transparent outline-none resize-none"
+                    style={{
+                      border: '1px solid var(--color-border-subtle)',
+                      color: 'var(--color-text)',
+                    }}
+                  />
+                  <button
+                    disabled={busy === 'manner' || mannerDraft === null}
+                    onClick={() =>
+                      void run('manner', async () => {
+                        setCharacter(await saveCharacter({ manner: mannerDraft ?? '' }));
+                        setMannerDraft(null);
+                      })
+                    }
+                    className="text-[11px] px-2 py-1 rounded-lg disabled:opacity-40"
+                    style={{ color: 'var(--color-cyan-light)' }}
+                  >
+                    {busy === 'manner' ? <Loader2 size={12} className="animate-spin" /> : 'Save'}
+                  </button>
+                </div>
+              </Row>
+
+              <Row
+                label="Voice"
+                value={voices.length === 0 ? 'not installed' : character.voice || 'default'}
+                state={voices.length === 0 ? 'absent' : 'neutral'}
+                detail={
+                  voices.length === 0
+                    ? 'Voices come with the speech extra, which is not installed — see Speech ' +
+                      'above. A picker over an empty list would be a control that does nothing.'
+                    : 'Which voice speaks replies. Replies are spoken when the avatar is showing, ' +
+                      'which is a decision you already made by choosing a face.'
+                }
+              >
+                {voices.length > 0 && (
+                  <select
+                    value={character.voice}
+                    aria-label="Which voice speaks replies"
+                    onChange={(e) =>
+                      void run('voice', async () => {
+                        setCharacter(await saveCharacter({ voice: e.target.value }));
+                      })
+                    }
+                    className="px-2 py-1 text-xs rounded-lg bg-transparent outline-none cursor-pointer"
+                    style={{
+                      border: '1px solid var(--color-border-subtle)',
+                      color: 'var(--color-text)',
+                    }}
+                  >
+                    <option value="">Default</option>
+                    {voices.map((v) => (
+                      <option key={v} value={v}>
+                        {v}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </Row>
+            </>
+          )}
         </Section>
 
         {/* ---------------------------------------------------- Appearance */}
