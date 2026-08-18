@@ -341,10 +341,46 @@ class ModelsRuntime(Runtime):
         default. That is deliberate: this wiring is new and the chat path is
         not, so a provider layer that is absent, unscannable or offline must
         degrade to the previous behaviour rather than take chat down with it.
+
+        **That promise was written and then only half-kept, for two weeks.**
+        The ``try`` below covered the two provider calls and stopped there, so
+        the block that logs *which* models were excluded sat outside it — and
+        an `AttributeError` in that block escaped through kernel boot, erroring
+        53 tests at app startup with a traceback that named a logging line
+        rather than the model layer. A guarantee that covers the part expected
+        to fail, and not the part nobody thought about, is the shape of every
+        bug this function exists to prevent.
+
+        So the whole body is now inside the guarantee rather than the first two
+        statements of it. `tests/test_choosing_a_model_never_takes_boot_down.py`
+        asserts it against shapes the provider layer should never return,
+        because the contract is about *failure* and cannot be satisfied by
+        handling one more shape correctly.
         """
         if self._provider_manager is None:
             return None
 
+        try:
+            return await self._choose_model_inner()
+        except Exception as exc:
+            # Deliberately broad. Anything at all beats taking chat down, and
+            # the engine default is a working fallback rather than a degraded
+            # one — see the docstring.
+            logger.warning(
+                "[ModelsRuntime] Choosing a default model failed, using engine "
+                "default: %s: %s",
+                type(exc).__name__,
+                exc,
+            )
+            return None
+
+    async def _choose_model_inner(self) -> Optional[str]:
+        """The body of `_choose_model`, which owns the failure guarantee.
+
+        Split out so that guarantee is one ``try`` around everything rather
+        than a ``try`` a later edit can append past — which is exactly how the
+        logging block came to sit outside it.
+        """
         try:
             await self._provider_manager.ensure_scanned()
             model = self._provider_manager.select_default_model()
@@ -357,13 +393,31 @@ class ModelsRuntime(Runtime):
         if model is None:
             # Not an error. It is the correct outcome when the only models
             # present are ones we may not choose on the user's behalf.
+            #
+            # **This line used to crash the backend on startup.**
+            # `rejected_default_candidates()` returns `list[tuple[ModelInfo,
+            # str]]` — the model *and why it was rejected* — and this read
+            # `m.id for m in rejected`, so it raised `AttributeError: 'tuple'
+            # object has no attribute 'id'` inside kernel boot. Not a logging
+            # nicety: a user whose installed models are all unselectable could
+            # not start Zaram at all, and the traceback named a log line rather
+            # than the model layer.
+            #
+            # It also threw away the reason it was handed. The docstring on the
+            # producing function says why that matters — "a user told 'no
+            # default model' deserves to know whether that was their data
+            # policy or their VRAM, since only one of those is something they
+            # can act on" — while this message asserted *data policy* for every
+            # rejection, so a model excluded for not fitting alongside the
+            # embedder was reported as a privacy decision. Two different
+            # remedies, one wrong sentence.
             rejected = self._provider_manager.rejected_default_candidates()
             if rejected:
                 logger.info(
                     "[ModelsRuntime] No default model: %d available model(s) excluded "
-                    "by data policy (%s). The user must choose one deliberately.",
+                    "(%s). The user must choose one deliberately.",
                     len(rejected),
-                    ", ".join(sorted(m.id for m in rejected)),
+                    ", ".join(sorted(f"{m.id}: {reason}" for m, reason in rejected)),
                 )
             return None
 
