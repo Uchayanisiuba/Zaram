@@ -102,18 +102,44 @@ function pythonImports(source, fromFile) {
   // guard nobody would have read twice.
   const pkg = path.dirname(rel(fromFile)).replace(/^backend\/?/, '').split('/').filter(Boolean);
 
-  for (const line of source.split('\n')) {
-    // Absolute: `from a.b import c` / `import a.b`
-    let m = /^\s*from\s+([A-Za-z_][\w.]*)\s+import\b/.exec(line)
-      || /^\s*import\s+([A-Za-z_][\w.]*)/.exec(line);
-    if (m) found.add(m[1]);
+  // `from x import a, b as c` -> ['a', 'b']. A name imported from a package is
+  // a submodule as often as it is a symbol: `from artifacts import extract` and
+  // `from . import _reader` both name a *module*, and reading only the part
+  // before `import` is what reported five live modules as dead. Adding `x.a`
+  // for every name over-approximates whenever a symbol shares a sibling
+  // module's name, and that is the safe direction — a missed find costs a line
+  // of report, a wrong find costs somebody deleting something load-bearing.
+  const importedNames = (clause) =>
+    clause
+      .replace(/[()\\]/g, ' ')
+      .split(',')
+      .map((part) => part.trim().split(/\s+as\s+/)[0].trim())
+      .filter((name) => /^[A-Za-z_]\w*$/.test(name));
 
-    // Relative: `from .retrieval import X` / `from ..core import Y`
-    const r = /^\s*from\s+(\.+)([\w.]*)\s+import\b/.exec(line);
+  // Split on `\r?\n`, not `\n`. Every Python file in this checkout is CRLF, so
+  // splitting on `\n` alone leaves a `\r` at the end of every line — and JS `.`
+  // does not match `\r`, so a pattern anchored with `$` matches nothing at all.
+  // That turned this check from 25 findings into 59, all of the new ones alive.
+  for (const line of source.split(/\r?\n/)) {
+    // Absolute: `from a.b import c` / `import a.b`
+    let m = /^\s*from\s+([A-Za-z_][\w.]*)\s+import\b(.*)$/.exec(line);
+    if (m) {
+      found.add(m[1]);
+      for (const name of importedNames(m[2])) found.add(`${m[1]}.${name}`);
+    } else {
+      m = /^\s*import\s+([A-Za-z_][\w.]*)/.exec(line);
+      if (m) found.add(m[1]);
+    }
+
+    // Relative: `from .retrieval import X` / `from ..core import Y` /
+    // `from . import _reader`
+    const r = /^\s*from\s+(\.+)([\w.]*)\s+import\b(.*)$/.exec(line);
     if (r) {
       const up = r[1].length - 1;
       const base = pkg.slice(0, pkg.length - up);
-      found.add([...base, ...(r[2] ? r[2].split('.') : [])].join('.'));
+      const prefix = [...base, ...(r[2] ? r[2].split('.') : [])];
+      found.add(prefix.join('.'));
+      for (const name of importedNames(r[3])) found.add([...prefix, name].join('.'));
     }
 
     // Late/dynamic: `__import__("knowledge.protocol", fromlist=[...])`, which
@@ -218,36 +244,61 @@ function checkRoutes() {
   return findings;
 }
 
+/* ------------------------------------------------------- exported for tests */
+
+/**
+ * `pythonImports` is exported so `test/reachability.test.js` can assert the
+ * forms it must recognise. A checker with no test of its own has now been
+ * wrong twice — once resolving relative imports against the repo root, and
+ * once failing on CRLF — and both times the output looked plausible enough to
+ * act on. This one reports what a person will delete; it does not get to be
+ * the only unverified thing in the build.
+ */
+export { pythonImports };
+
 /* ------------------------------------------------------------------ report */
 
-const modules = checkPythonModules();
-const routes = checkRoutes();
+function report() {
+  const modules = checkPythonModules();
+  const routes = checkRoutes();
 
-const line = (s = '') => process.stdout.write(`${s}\n`);
+  const line = (s = '') => process.stdout.write(`${s}\n`);
 
-line('');
-line('Reachability — what is finished and reached by nothing');
-line('='.repeat(60));
+  line('');
+  line('Reachability — what is finished and reached by nothing');
+  line('='.repeat(60));
 
-line('');
-line(`A. Python modules no other module imports  (${modules.length})`);
-if (modules.length === 0) line('   none');
-for (const m of modules) line(`   ${m.file}`);
+  line('');
+  line(`A. Python modules no other module imports  (${modules.length})`);
+  if (modules.length === 0) line('   none');
+  for (const m of modules) line(`   ${m.file}`);
 
-line('');
-line(`B. Backend routes no frontend file mentions  (${routes.length})`);
-if (routes.length === 0) line('   none');
-for (const r of routes) line(`   ${r.method.padEnd(6)} ${r.pathSpec}   (${r.file})`);
+  line('');
+  line(`B. Backend routes no frontend file mentions  (${routes.length})`);
+  if (routes.length === 0) line('   none');
+  for (const r of routes) line(`   ${r.method.padEnd(6)} ${r.pathSpec}   (${r.file})`);
 
-line('');
-line('Neither check sees a dead branch inside a live function, an unused');
-line('export, or a component that is mounted but should not be. Those need');
-line('different instruments; this file does not claim them.');
-line('');
+  line('');
+  line('Neither check sees a dead branch inside a live function, an unused');
+  line('export, or a component that is mounted but should not be. Those need');
+  line('different instruments; this file does not claim them.');
+  line('');
 
-const total = modules.length + routes.length;
-if (STRICT && total > 0) {
-  line(`FAIL: ${total} unreachable item(s). Wire it, allowlist it with a reason, or delete it.`);
-  process.exit(1);
+  return modules.length + routes.length;
 }
-process.exit(0);
+
+// Only when run as a command. Importing this file must not print a report or
+// exit the process — the test does exactly that.
+const invokedDirectly =
+  process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+
+if (invokedDirectly) {
+  const total = report();
+  if (STRICT && total > 0) {
+    process.stdout.write(
+      `FAIL: ${total} unreachable item(s). Wire it, allowlist it with a reason, or delete it.\n`,
+    );
+    process.exit(1);
+  }
+  process.exit(0);
+}
