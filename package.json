@@ -54,7 +54,7 @@
     "lint": "cd frontend && npm run lint",
     "typecheck": "cd frontend && npm run typecheck",
     "check:guards": "cd frontend && npm run check:assets && npm run check:speech && npm run check:visemes && npm run check:proxy",
-    "check:all": "npm run lint && npm run typecheck && npm run check:guards && npm run check:payload && npm run test && npm run test:backend",
+    "check:all": "npm run lint && npm run typecheck && npm run check:guards && npm run check:reachability && npm run check:payload && npm run test && npm run test:backend",
     "check:payload": "node scripts/check-installer-payload.mjs",
     "check:signing": "node scripts/check-signing.mjs",
     "check:release": "npm run check:payload && npm run check:runtime && npm run check:signing",
@@ -65,6 +65,7 @@
     "install:desktop": "cd desktop && npm install",
     "postinstall": "npm run install:desktop",
     "build:runtime": "node scripts/build-python-runtime.mjs",
-    "check:runtime": "node scripts/check-runtime.mjs"
+    "check:runtime": "node scripts/check-runtime.mjs",
+    "check:reachability": "node scripts/check-reachability.mjs"
   }
 }
