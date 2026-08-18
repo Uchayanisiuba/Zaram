@@ -978,6 +978,28 @@ spent rebuilding the former is an hour not spent on the latter.
 
 - Read before you write. Verify against the code, not the docs.
 - Verify by seeing it work. Do not report progress that has not been observed.
+- **Assume unreachable until the caller is seen.** Parts of Zaram were built
+  with Kilo Code and Trae, which produce a plausible, well-commented, fully
+  tested whole and cannot check that anything calls it — and the tests they
+  write assert the scaffolding rather than the contract. **Fifteen complete,
+  tested, unreachable subsystems have been found**, including the
+  prompt-injection defence and a 1,261-line model-ranking engine. This is the
+  base rate here, not pessimism, and it is why "tests green" has repeatedly
+  meant nothing. `npm run check:reachability` reports two of the shapes and is
+  explicit that it misses three more — a dead branch inside a live function, an
+  unused export, and a component mounted that should not be.
+- **Say which environment you measured in, because it changes the result.**
+  With Ollama running the backend suite takes ~4 minutes; with it down, ~20 —
+  and more importantly it executes *different code*. A crash that stopped the
+  backend booting hid for two weeks behind a green suite because its branch
+  only runs when models are discovered and every one is unselectable: never
+  with Ollama up, always on a stranger's machine. A number without its
+  condition is not a measurement.
+- **Check the instrument before reading its output.** The reachability guard's
+  first run reported 183 dead modules that were all alive, and a written
+  assessment once claimed the orb's core was painted with the cloud accent
+  when that component never mounted. A tool built to find wrong things is not
+  exempt from being wrong.
 - Wire one surface to real data, then make it beautiful. The reverse produces
   interfaces that look finished and do nothing.
 - When a plan and the codebase disagree, the codebase wins — say so.

@@ -11,7 +11,133 @@ accurate — it is the first thing anyone reads.
 
 ---
 
-## Current state — 18 August 2026
+## Current state — 19 August 2026
+
+> ### The backend could not start on a machine without Ollama, and a green suite had said otherwise for two weeks.
+>
+> Suites: **2207 backend passed / 0 failed**, 95 skipped — measured with
+> **Ollama down**, 21m43s · **198 frontend** · **48 Electron** ·
+> typecheck clean · lint passes · guards pass. HEAD `61d6e36`, working tree
+> clean, everything pushed to `origin/Zaram-V0.1`.
+>
+> **Say which condition you measured in.** With Ollama running the backend
+> suite takes ~4 minutes; with it down, ~20, because every provider probe waits
+> for a timeout. It also changes *which code paths execute*. The old
+> "2184 passed / 0 failed" was measured with Ollama up and is not the number a
+> clean machine produces — measured with it down on 18 August, before the fix
+> below, it was 1 failed and 53 errors.
+>
+> ### The crash
+>
+> `models_runtime.py` read `m.id for m in rejected` while
+> `rejected_default_candidates()` returns `list[tuple[ModelInfo, str]]`. The
+> `AttributeError` escaped through kernel boot — **53 tests errored at app
+> startup**, with a traceback naming a logging line rather than the model layer.
+>
+> This is an installer-class defect rather than a logging nit. The branch runs
+> only when models are discovered and *every one* is unselectable: a machine
+> with no Ollama, which is every machine a stranger installs this on.
+>
+> **Why it survived.** The *producer* is tested twice and both tests unpack the
+> tuple correctly, so the type was never in doubt. The *consumer* had no test
+> at all, and its branch does not execute with Ollama up. Nothing was hidden by
+> cleverness — it was hidden by an environment condition no previous run
+> happened to be in.
+>
+> The function had promised since 4 August that "every failure here returns
+> None… must degrade rather than take chat down with it", and its `try` covered
+> its first two statements only. The guarantee now wraps the whole body, split
+> into `_choose_model_inner` so a later edit cannot append past it, and the test
+> asserts *failure* — strings, bare objects, short tuples, nulls, an exploding
+> manager — rather than one more correct shape.
+>
+> ### Why this codebase is the way it is
+>
+> **Zaram was partly built with Kilo Code and Trae**, which the maintainer
+> confirmed on 18 August. It explains the dominant failure mode precisely:
+> complete, well-commented, fully-tested subsystems that nothing calls.
+> **Fifteen found so far.** Those tools produce a plausible whole and cannot
+> check that anything reaches it, and the tests they write assert the
+> scaffolding rather than the contract — which is why "tests green" has
+> repeatedly meant nothing here. Assume unreachable until the caller is seen.
+>
+> `npm run check:reachability` now reports two of the shapes: Python modules
+> nothing imports, and backend routes no frontend file calls. It is honest
+> about what it misses — a dead branch inside a live function, an unused
+> export, a component mounted that should not be. Three of this session's six
+> finds were invisible to it.
+>
+> Report-only in `check:all`; 25 modules and 4 routes are outstanding and
+> `--strict` would fail the build today. **Triaging that list is the next piece
+> of work** — each is wire, allowlist with a reason, or delete.
+>
+> **The worst thing it found: `core/untrusted.py` is called by nothing.**
+> `Provenance`, `may_instruct` and `scan` — the prompt-injection defence — are
+> complete, tested and attached to no code path. Its own docstring names the
+> exposure it was written for: *"a hostile invoice is a way to put a deadline in
+> someone's week, or a different bank account on their letterhead."* Written
+> for the features now being built, never wired to them. **Obligation
+> extraction must not ship without it.**
+>
+> ### Verified in the running product, not by the suite
+>
+> Backend standalone, then the Vite dev server, driven in a browser. That order
+> matters — Vite bakes the API secret in at boot, so starting it first is what
+> produces the "engine not running" report about a healthy backend.
+>
+> - **The orb.** Against a backend reporting an OpenRouter provider and
+>   `can_leave_device: true` — the exact state that used to paint amber — the
+>   label read **"Local · cloud ready"** at computed `rgb(16,185,129)`, emerald,
+>   against amber `#f59e0b`. Read off `getComputedStyle`, which is the check the
+>   previous session's orb assessment skipped.
+> - **The character pane.** Typed `"  Ada    Lovelace  "`; the backend stored
+>   `"Ada Lovelace"`, `settings.json` agreed, and the input rendered the
+>   *stored* value rather than the typed one.
+> - **Domains in chat.** `POST /chat` with an empty domain emitted, before the
+>   answer, *"Nothing is indexed in your Investing domain yet, so this answer
+>   used no facts from your files."*
+> - **The landing.** Six nodes and the orb, nothing else — a panel reading
+>   "EMBODIMENT SPIKE — NOT SHIPPED UI" had been mounted there unconditionally.
+>
+> **Not verified, and why:** the domain picker's own rendering and the date in
+> the system prompt. With no model installed the conversation shows the
+> first-run gate instead of the composer, so no composer control renders at all.
+> Both stay test-covered until a model exists.
+>
+> ### Two corrections of my own work, which are the useful part
+>
+> **A wrong claim reached CLAUDE.md.** The modality paragraph said
+> "`ProviderEntry` carries no modality field today; that is the first piece of
+> work". Both halves were wrong: `ProviderEntry` is a *provider* record holding
+> no models, and modality belongs on `ModelInfo`, which already carries
+> `supports_vision` and a `ModelCategory` including `VISION`, `IMAGE` and
+> `VIDEO`. Written from a note instead of from the code.
+>
+> **The reachability guard's first run reported 183 dead modules that were all
+> alive** — it resolved relative imports against the repo root. Fixed, then
+> sampled five by hand: five true positives. Check the instrument before
+> reading its output.
+>
+> ### Also decided
+>
+> **Image generation moved into v1** by the maintainer. Shape unchanged — Zaram
+> ships no image weights, routes to a provider, logs the egress — and the
+> recorded objection is spent, because the cloud engine it was waiting for has
+> landed. An image is **its own consent class** under rule 7j.
+>
+> **Start here, in this order.**
+>
+> 1. **Triage the reachability report.** 25 modules, 4 routes. Where the
+>    remaining unknown risk is concentrated before an alpha.
+> 2. **Wire `core/untrusted.py`.** Security, and a prerequisite for obligations.
+> 3. **Conversation persistence, as the session/memory split.** There is no
+>    conversation history at all — close Zaram and yesterday is gone. Guardrail,
+>    enforced by test: the store is readable by the user and invisible to recall.
+> 4. **The maintainer's two decisions**, both blocking: delete or revive
+>    `backend/orchestrator/` (1,261 lines, no importers, no tests), and rebuild
+>    the installer before testing it on a clean machine.
+
+## Superseded — 18 August 2026
 
 > ### Documents go in three ways now, domains scope what comes back out, and one of this session's own written findings was wrong.
 >
