@@ -3,7 +3,6 @@ import { motion } from 'framer-motion'
 import { Brain, BookOpen, FileText, Layers, Settings, ShieldCheck } from 'lucide-react'
 import { ORB_BEHAVIOUR } from '../components/orb/LivingOrb'
 import Embodiment from '@/components/embodiment/Embodiment'
-import EmbodimentSpikeControls from '@/components/embodiment/EmbodimentSpikeControls'
 import OrbStatusLabel from '../components/orb/OrbStatusLabel'
 import OrbHint from '../components/orb/OrbHint'
 import { useEmbodimentStore } from '@/stores/embodimentStore'
@@ -493,11 +492,6 @@ export default function Landing({ onNavigate, onOrbTap }: LandingProps) {
           status label above. */}
       <OrbHint offsetX={visualShiftX} />
 
-      {/* Spike scaffolding. Drives the states by hand because nothing else
-          can yet: `swapping` is set by the backend pre-flight, `speaking` by a
-          TTS path that is out of scope, and `cloud` by an engine that does not
-          exist. Without this the avatar can only ever be observed idle. */}
-      <EmbodimentSpikeControls />
     </div>
   )
 }
