@@ -26,6 +26,20 @@
  * have is the exact defect that let Ctrl+S be deleted for weeks by a guard
  * named for Save that tested c/v/x/a/z.
  *
+ * **A fourth thing it misses, found 19 August: dead modules vouch for each
+ * other.** Check A asks "does any module import this", not "is this reachable
+ * from an entry point", so a ring of unreachable files keeps itself off the
+ * report. `runtimes/internet/connectors/base.py` — itself dead — imported
+ * `.contracts`, and the prefix of that name marked `connectors.py` reached.
+ * `connectors.py` could not even be imported; it raised `NameError` at module
+ * scope. Both are deleted, which removes this instance and not the class.
+ *
+ * The real fix is a transitive walk from the entry points rather than a flat
+ * "is it mentioned" set, and it is worth doing. It is not done here because it
+ * changes what the whole report means and this file has already been wrong
+ * twice; a rewrite belongs in its own change, with the eight parser tests in
+ * `test/reachability.test.js` extended to cover it.
+ *
  * **Reports, never deletes.** Unreachable is evidence, not a verdict: a route
  * may be waiting on an interface that is genuinely next, and `core/pairing.py`
  * is deliberately complete-and-uncalled. Both lists take an allowlist with a
@@ -89,6 +103,31 @@ const MODULE_ALLOW = new Map([
   ['frontend/src/main.tsx', 'the Vite entry point'],
   ['frontend/src/ambient.tsx', 'the ambient surface entry point'],
   ['backend/core/pairing.py', 'complete and uncalled on purpose — the credential a second device needs, waiting on sync'],
+
+  // Triaged 19 August. Everything below is uncalled *and* meant to be, which
+  // is a different claim from "nothing found a caller yet" — the four
+  // extractors are waiting on a caller that has to supply something only it
+  // knows, and the scaffold is meant to be copied rather than imported. The
+  // date matters: an exemption whose reason has quietly expired is how this
+  // repository's worst waivers were granted, so each of these is a claim to
+  // re-check, not a permanent pass.
+  ['backend/obligations/extract.py', 'M9a — the extractor is complete and deliberately uncalled: direction stays UNKNOWN until ingest supplies it via rule 7b origin. Wire it with core/untrusted.py, never before'],
+  ['backend/artifacts/template_profile.py', 'reads a company identity out of a document the user already sends; returns a proposal a person confirms, so it needs the confirmation surface before a caller'],
+  ['backend/runtimes/memory/conflicts.py', 'detection only, by design — it surfaces a contradiction and resolves nothing. Waiting on the surface that asks the user, since auto-resolving is what it exists to refuse'],
+  ['backend/runtimes/memory/valid_time.py', 'answers "what was true then"; waiting on the same recall path as conflicts.py, and on an invoice question that needs a rate as at a date'],
+  ['backend/templates/runtime_scaffold.py', 'a copy-me scaffold for a new runtime, not a call site — uncalled by construction'],
+
+  // Blocked on the maintainer, not on work. 1,261 lines, no importers, no
+  // tests; the question is delete or revive as the routing engine, and it
+  // gates the modality gate the images scope needs. Listed here rather than
+  // reported so `--strict` can be turned on before the answer arrives — the
+  // reminder is `docs/MILESTONES.md`, which is where a decision belongs.
+  ['backend/orchestrator/capabilities.py', 'blocked on the maintainer: delete or revive backend/orchestrator/ (asked 19 August)'],
+  ['backend/orchestrator/events.py', 'blocked on the maintainer: delete or revive backend/orchestrator/ (asked 19 August)'],
+  ['backend/orchestrator/policies.py', 'blocked on the maintainer: delete or revive backend/orchestrator/ (asked 19 August)'],
+  ['backend/orchestrator/preferences.py', 'blocked on the maintainer: delete or revive backend/orchestrator/ (asked 19 August)'],
+  ['backend/orchestrator/profiles.py', 'blocked on the maintainer: delete or revive backend/orchestrator/ (asked 19 August)'],
+  ['backend/orchestrator/scoring.py', 'blocked on the maintainer: delete or revive backend/orchestrator/ (asked 19 August)'],
 ]);
 
 /** Import statements only — never free text, so a mention in a comment cannot
@@ -191,6 +230,23 @@ const ROUTE_ALLOW = new Map([
   ['/docs', 'FastAPI serves it'],
   ['/openapi.json', 'FastAPI serves it'],
   ['/redoc', 'FastAPI serves it'],
+
+  // Triaged 19 August. Two of the four found were exempted and two were not,
+  // and the split is the useful part. A route is allowlisted when *nothing in
+  // the interface should call it*. A route whose own purpose is to show the
+  // user something stays reported until it does, because that is the finding
+  // this check exists for — an endpoint finished ahead of the interface and
+  // then forgotten is what "configurable, not usable" has meant every time.
+  ['/voice/health', 'an operational health check; the interface reads speech capability from /health, not from this'],
+  ['/artifacts/generate', 'its own docstring: "Not yet reachable from natural language… this endpoint is the thing that capability will call". It is called by a router capability, not by a screen'],
+
+  // NOT exempted, on purpose: GET /memory/maintenance and GET /memory/traffic.
+  // Both are written to give the user sight of what the Spine is doing to
+  // their facts — "authority without visibility is not authority" is
+  // `/memory/maintenance`'s own words — and no screen renders either, so the
+  // visibility they describe does not exist. That is a product gap, not a
+  // deliberate exemption, and allowlisting it would file the gap under
+  // "expected".
 ]);
 
 function backendRoutes() {
