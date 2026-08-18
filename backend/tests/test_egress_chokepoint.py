@@ -83,17 +83,17 @@ NETWORK_LIBRARIES = {
 #: decision. What must stay true is that nothing *reachable* acquires an entry
 #: here — a reachable module needs the gate, which is the list after this one.
 NETWORK_LIBRARY_DORMANT = {
-    # **Both reasons here were "internet runtime does not boot" and that stopped
-    # being true on 14 August**, when the runtime was finally constructed by the
-    # bootstrapper — `KnowledgeRuntime.search` reads web results from it and
-    # nothing had ever built one, so the web half of every search returned
-    # nothing. These two files survive the change because they are a superseded
-    # parallel copy of the connectors: the live `DuckDuckGoConnector` is defined
-    # in `runtimes/internet/runtime.py`, and nothing in the product imports
-    # either of these. Checked by grep, not assumed — an exemption whose reason
-    # has quietly expired is how the Kokoro entry below came to be wrong.
-    "runtimes/internet/connectors.py": "superseded copy; no production module imports it",
-    "runtimes/internet/connectors/base.py": "superseded copy; no production module imports it",
+    # `runtimes/internet/connectors.py` and `runtimes/internet/connectors/base.py`
+    # were exempted here as "superseded copy; no production module imports it",
+    # with a comment saying deleting them was a separate decision. That decision
+    # was taken on 19 August and they are gone — `connectors.py` raised
+    # `NameError` on import, which is the strongest possible evidence that
+    # nothing was using it, and `connectors/base.py` was shadowed by it and
+    # imported a `.contracts` that did not exist beside it. Their entries are
+    # removed with them, which `test_no_exemption_outlives_the_file_it_excuses`
+    # requires:
+    # an exemption keyed by a path outlives the file and silently covers
+    # whatever is written there next.
     "runtime/discovery/providers/duckduckgo.py": "discovery is unreachable from chat",
 }
 
