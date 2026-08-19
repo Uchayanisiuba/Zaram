@@ -145,6 +145,14 @@ NETWORK_LIBRARY_GATED = {
     # sat at False and a test asserted dormancy. Same remedy as Whisper: try the
     # cache offline first, ask the gate only when weights are genuinely absent.
     "voice/providers/kokoro.py": "asks get_gate().check() before any weight download; loads cached weights offline",
+    # Same posture as the torch provider above, with one addition worth naming.
+    # The ONNX pipeline loads a *voice* lazily, at synthesis time, from inside
+    # __call__ — which is outside the window KokoroProvider._ensure_pipeline
+    # wraps. So every fetch it makes (graph, voices, vocabulary) goes through one
+    # helper that tries the cache offline first and asks the gate only when there
+    # is genuinely something to download. The torch path still has that hole:
+    # KPipeline.load_voice downloads a .pt on first use with nothing asked.
+    "voice/providers/kokoro_onnx.py": "asks get_gate().check() before any weight, voice or vocab download; loads cached files offline",
 }
 
 NETWORK_LIBRARY_EXEMPT = {

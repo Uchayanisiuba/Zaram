@@ -163,9 +163,32 @@ _LANG_NAMES = {
 
 
 def _default_pipeline_factory(
-    *, repo_id: str, lang_code: str, device: Optional[str]
+    *,
+    repo_id: str,
+    lang_code: str,
+    device: Optional[str],
+    backend: str = "torch",
+    onnx_variant: str = "model_fp16",
 ) -> Any:
-    """Build a real Kokoro ``KPipeline`` (lazy import keeps kokoro optional)."""
+    """Build the pipeline for the configured backend.
+
+    Both return the same shape — called as ``pipeline(text, voice=...)``, yielding
+    results with ``.audio`` and ``.tokens`` — so :meth:`KokoroProvider._run_synthesis`
+    never learns which one it got. That is the seam ``VoiceProvider`` was written
+    for, and it is why swapping the tensor library underneath Kokoro is an
+    implementation rather than a rewrite.
+
+    Imports stay lazy on both branches. ``kokoro`` drags in torch and
+    ``kokoro_onnx`` drags in onnxruntime; a top-level import of either would make
+    this module unimportable on a base install, which is the exact failure that
+    once stopped the provider being constructed even to report itself
+    unavailable.
+    """
+    if backend == "onnx":
+        from voice.providers.kokoro_onnx import OnnxKokoroPipeline
+
+        return OnnxKokoroPipeline(lang_code=lang_code, variant=onnx_variant, device=device)
+
     from kokoro import KPipeline
 
     return KPipeline(lang_code=lang_code, repo_id=repo_id, model=True, device=device)
@@ -228,6 +251,8 @@ class KokoroProvider(VoiceProvider):
             repo_id=self.config.repo_id,
             lang_code=self.config.lang_code,
             device=self.config.device,
+            backend=self.config.backend,
+            onnx_variant=self.config.onnx_variant,
         )
 
     def _ensure_pipeline(self) -> Any:

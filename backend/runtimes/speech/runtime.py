@@ -471,12 +471,16 @@ class SpeechRuntime(Runtime):
 
         logger.info("Executive requested speech: persona=%s, text=%s...", persona, text[:50])
 
-        # Map persona to voice (future: use voice registry)
+        # Map persona to voice. The fallback is imported rather than spelled:
+        # this map held a third copy of `"af_heart"`, so changing the default
+        # voice anywhere else would have left this path speaking the old one.
+        from voice.config import DEFAULT_VOICE
+
         voice_map = {
-            "zaram_prime": "af_heart",
+            "zaram_prime": DEFAULT_VOICE,
             "zaram_alt": "am_michael",
         }
-        selected_voice = voice or voice_map.get(persona, "af_heart")
+        selected_voice = voice or voice_map.get(persona, DEFAULT_VOICE)
 
         request_id = f"exec-{uuid.uuid4().hex[:8]}"
         self._active_syntheses[request_id] = {

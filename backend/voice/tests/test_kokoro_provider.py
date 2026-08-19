@@ -81,7 +81,10 @@ def make_provider(tmp_path: Path, *, fail_pipeline: bool = False, cache=None, di
     )
     pipeline = FakePipeline(fail=fail_pipeline, sample_rate=config.sample_rate)
 
-    def factory(*, repo_id: str, lang_code: str, device):
+    # `**_` absorbs backend/onnx_variant: this double stands in for the
+    # pipeline, not for the factory's signature, and the provider is what is
+    # under test here.
+    def factory(*, repo_id: str, lang_code: str, device, **_):
         return pipeline
 
     provider = KokoroProvider(
