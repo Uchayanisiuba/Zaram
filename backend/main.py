@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import time
+from dataclasses import dataclass
 from typing import Any, Dict
 
 from pathlib import Path
@@ -30,6 +31,19 @@ from runtimes.memory.maintenance import SpineMaintenance
 # built by hand at a call site is rule 7i's privacy boundary written twice.
 from runtimes.memory.contracts import project_scope
 from services.conversation_manager import ConversationManager
+
+# Which voice speaks by default, imported rather than spelled. `voice/config.py`
+# owns the answer and carries the reasoning; six copies of the literal is what
+# this replaces. Nothing heavy loads with it — the module is stdlib only, and
+# Kokoro itself is still behind the optional extra.
+from voice.config import DEFAULT_VOICE
+
+#: The preset every request carries when the user has chosen none.
+#:
+#: Named so `_resolve_voice` can tell "the user picked this tone" from "nobody
+#: picked anything", which is the distinction that decides whether a preset's
+#: voice outranks the user's own setting.
+DEFAULT_PERSONA = "zaram_prime"
 
 print("Starting Zaram Backend...")
 app = FastAPI()
@@ -317,54 +331,145 @@ def _format_search_results(query: str, search_result: Dict[str, Any]) -> str:
 
 
 # --- REQUEST MODELS ---
-def _resolve_model(requested: str | None) -> str | None:
-    """Which model should answer: the request, then Settings, then Zaram's own pick.
+@dataclass(frozen=True)
+class _ModelChoice:
+    """Which model answers this message, and what decided that.
 
-    ``None`` is a real answer and the best one when nobody has chosen — it means
-    "use the engine default", which is the provider layer's vetted selection
-    with the residency and data-policy gates already applied. Substituting a
-    hardcoded name here would defeat both, which is exactly what the frontend's
-    ``gemma3:latest`` did from the other end.
+    One object rather than two functions, because the two used to be
+    `_resolve_model` and `_who_chose` and each re-derived the other's
+    precedence from scratch. That is the failure `_answering_event`'s docstring
+    warns about, one level up: if they ever disagreed, the reply named a source
+    that had not decided. They cannot disagree now.
+    """
+
+    model: str | None
+    chosen_by: str
+
+
+def _task_requirements(prompt: str) -> tuple[bool, str | None]:
+    """``(requires_vision, specialisation)`` for ``prompt``, or nothing known.
+
+    Asks the kernel's own planner, so this classifies by the same wired
+    semantic router the plan will use. A fresh `IntentRouter` built here would
+    have no router attached, fall back to keywords, and could route the message
+    to one intent while the plan routed it to another.
+
+    Every failure returns "nothing known", which selects exactly the behaviour
+    that existed before this function: Zaram's untasked default. Classification
+    decides *which* model answers and must never decide *whether* one does.
+    """
+    if not (prompt or "").strip():
+        return False, None
+    try:
+        from core.planner import INTENT_SPECIALISATION
+
+        classification = kernel.execution_engine.classify(prompt)
+        return (
+            bool(classification.requires_vision),
+            INTENT_SPECIALISATION.get(classification.intent_type),
+        )
+    except Exception:
+        logging.getLogger(__name__).debug(
+            "Task classification unavailable; using the untasked default"
+        )
+        return False, None
+
+
+def _task_model(requires_vision: bool, specialisation: str | None) -> str | None:
+    """The provider layer's pick for a request with these requirements.
+
+    Returns the **display name** — the provider-native one — because that is
+    what `ModelsRuntime._choose_model` returns and what the chat path speaks.
+    Returning the catalogue id here would send ``ollama:qwen2.5-coder:14b`` to
+    `/api/generate`, which is a 400 this repository has already paid for once.
+    """
+    manager = getattr(getattr(kernel, "providers_runtime", None), "manager", None)
+    if manager is None:
+        return None
+    try:
+        model = manager.select_model_for_task(
+            requires_vision=requires_vision, specialisation=specialisation
+        )
+    except Exception:
+        logging.getLogger(__name__).debug(
+            "Task-aware selection failed; using the untasked default"
+        )
+        return None
+    return model.display_name if model is not None else None
+
+
+def _resolve_model(requested: str | None, prompt: str = "") -> _ModelChoice:
+    """Which model answers: the request, then Settings, then Zaram's own pick.
+
+    ``model=None`` is a real answer and the best one when nobody has chosen and
+    the task says nothing — it means "use the engine default", which is the
+    provider layer's vetted selection with the residency and data-policy gates
+    already applied. Substituting a hardcoded name here would defeat both,
+    which is exactly what the frontend's ``gemma3:latest`` did from the other
+    end.
+
+    **The task decides only in the branch where nobody else did.** An explicit
+    choice — this message, or Settings — is returned untouched even when the
+    question looks like one another model would serve better. Overriding a
+    person's stated preference because a classifier disagreed is a product that
+    argues with its user, and the classifier is a similarity judgement rather
+    than a fact.
+
+    That leaves one case this deliberately does *not* handle yet: a chosen
+    model that cannot see, asked to read an image. It is not reachable today —
+    `ChatRequest` carries no image, so `requires_vision` is inferred from
+    wording alone, and re-routing off the word "screenshot" would be worse than
+    the gap. When image input lands, that becomes a refusal rather than a
+    silent substitution, because answering blind is rule 9's failure.
     """
     named = (requested or "").strip()
     if named:
-        return named
+        return _ModelChoice(named, "request")
 
     try:
         from core.user_settings import get_user_settings
 
-        return get_user_settings().default_model
+        settings_default = get_user_settings().default_model
     except Exception:
         # A preference file must never be able to stop chat working.
-        return None
+        settings_default = None
+
+    if settings_default:
+        return _ModelChoice(settings_default, "settings")
+
+    requires_vision, specialisation = _task_requirements(prompt)
+
+    # Nothing known about the task is not the same as a task with no
+    # preference: only the second is worth a round trip through the provider
+    # layer, and only it may report itself as a routing decision. Without this
+    # guard every ordinary message would claim to have been routed.
+    if requires_vision or specialisation is not None:
+        routed = _task_model(requires_vision, specialisation)
+
+        # **Only a pick that differs from the untasked one is a routing
+        # decision.** On a machine with one general model installed, a coding
+        # question resolves to that same model — nothing was routed, and
+        # reporting `task` there would put "matched to this question" under a
+        # reply that would have been identical either way. That is a rendered
+        # value nobody measured, which the UI principles forbid, and it is the
+        # more dangerous kind because it is true often enough to look right.
+        if routed is not None and routed != _task_model(False, None):
+            return _ModelChoice(routed, "task")
+
+    return _ModelChoice(None, "zaram")
 
 
-def _who_chose(requested: str | None) -> str:
-    """`request`, `settings`, or `zaram` — where this message's model came from.
-
-    The honest version of `CLAUDE.md`'s "routed to qwen2.5-coder — coding
-    task". Routing has no task classifier yet, so the reason that exists is
-    where the choice was made, and a task label would be a rendered value
-    nobody measured. Mirrors `_resolve_model`'s precedence exactly; if the two
-    ever disagree the reply names a source that did not decide.
-    """
-    if (requested or "").strip():
-        return "request"
-    try:
-        from core.user_settings import get_user_settings
-
-        return "settings" if get_user_settings().default_model else "zaram"
-    except Exception:
-        return "zaram"
-
-
-def _answering_event(model: str | None, requested: str | None):
+def _answering_event(choice: _ModelChoice):
     """The event that tells the user which model is about to speak.
 
     Built here rather than in `ChatRouter` because this is where the model is
     resolved, and rebuilding that resolution one layer down is how two places
     come to disagree about which model answered — the exact failure the
     hardcoded ``gemma3:latest`` in the transport was.
+
+    Takes the whole `_ModelChoice` for the same reason: the name and the reason
+    it was chosen are one decision, and passing them separately is how a reply
+    comes to name a model beside an explanation of a different choice.
 
     Every field degrades to ``None`` independently. A name Zaram cannot place
     still gets reported *as a name*, with no locality and no provider beside
@@ -373,6 +478,7 @@ def _answering_event(model: str | None, requested: str | None):
     """
     from core.streaming_events import StreamEvent
 
+    model = choice.model
     name: str | None = model
     locality: str | None = None
     provider: str | None = None
@@ -406,7 +512,7 @@ def _answering_event(model: str | None, requested: str | None):
     return StreamEvent.answering(
         name,
         locality,
-        chosen_by=_who_chose(requested),
+        chosen_by=choice.chosen_by,
         provider=provider,
     )
 
@@ -435,8 +541,12 @@ class ChatRequest(BaseModel):
     #: a default that silently answered on behalf of a user who had chosen
     #: nothing, and overrode a Settings choice they had.
     model: str = ""
-    personality: str = "af_heart"
-    persona: str = "zaram_prime"
+    # `personality: str = "af_heart"` stood here and is deleted. It was a
+    # *personality* field defaulting to a **voice id**, read by nothing, sent
+    # by nothing, and sitting one line above the `persona` field that actually
+    # carries the preset. Left alone it is a trap for whoever reads this class
+    # next and concludes that a voice belongs on a chat request.
+    persona: str = DEFAULT_PERSONA
     session_id: str = "default"
     #: Which project this exchange belongs to, or "" for none (rule 7i).
     #:
@@ -786,7 +896,12 @@ async def chat(request: ChatRequest):
     # changed. So the provider layer's selection, the residency gate and the
     # data-policy gate all ran and were then overridden by a string literal in
     # `chatClient.ts`, which is why no routing decision was ever observable.
-    model = _resolve_model(request.model)
+    #
+    # The question itself is the fourth input and the last one consulted: it
+    # decides only when nobody else has, and only when its intent asks for a
+    # model Zaram would not otherwise have picked.
+    choice = _resolve_model(request.model, request.text)
+    model = choice.model
 
     # Web search compensates for what the *answering* model does not know, so
     # whether to search depends on which model that is — and this is the first
@@ -873,7 +988,7 @@ async def chat(request: ChatRequest):
     only_ids, domain_notice = _domain_scope(request.domain_ids)
 
     async def _stream_with_attribution():
-        yield _answering_event(model, request.model).to_ipc() + "\n"
+        yield _answering_event(choice).to_ipc() + "\n"
         # Before the answer rather than after it, unlike the ingest notice.
         # This one is a *frame* for what follows rather than housekeeping: if
         # the domain turned out to be empty, that has to be readable before a
@@ -3095,13 +3210,66 @@ async def get_audio(filename: str):
 class VoiceSynthesizeRequest(BaseModel):
     text: str
     voice: str = ""
-    persona: str = "zaram_prime"
+    #: `DEFAULT_PERSONA` rather than the literal, because `_resolve_voice`
+    #: compares against it. Spelled here, the two could drift — and the day
+    #: they did, every request that named no preset would look like a preset
+    #: the user deliberately chose, so its voice would outrank the one they
+    #: actually set. The coupling is asserted in `test_voice_resolution.py`.
+    persona: str = DEFAULT_PERSONA
 
 
 class VoiceStreamRequest(BaseModel):
     text: str
     voice: str = ""
-    persona: str = "zaram_prime"
+    #: Same coupling as above.
+    persona: str = DEFAULT_PERSONA
+
+
+def _resolve_voice(requested: str, persona: str) -> str:
+    """Which voice speaks, in the order the user would expect.
+
+    **The user's chosen voice was stored and then ignored — found 19 August
+    2026.** `user_settings.voice` is written by the character pane and read
+    back by `GET /character`, and nothing else in the product ever consulted
+    it: this resolution was `request.voice or PERSONAS[...] or` a hardcoded
+    default, and both frontend callers speak with no voice argument at all.
+    So a setting the interface offers, stores, and renders back had no effect
+    on any sound the user heard.
+
+    That is this repository's signature failure wearing a settings control
+    rather than a module, and it is why the order below is written out rather
+    than left implicit:
+
+    1. What this request asked for. A per-utterance override still wins.
+    2. What the user chose in Settings. Their standing answer.
+    3. The tone preset's voice, if this request named a preset that is not
+       the default one — a preset the user picked is also a choice.
+    4. `DEFAULT_VOICE`, which is the only place a literal lives.
+
+    Step 3 is deliberately narrow. Taking the preset before the user's setting
+    would mean the default preset — which every request carries when nobody
+    chose one — silently outranked the only voice the user actually picked.
+    """
+    from core.user_settings import get_user_settings
+
+    if requested:
+        return requested
+
+    try:
+        chosen = (get_user_settings().voice or "").strip()
+    except Exception:
+        # Settings failing to load must not take speech down with it; the
+        # default below is always a real voice.
+        chosen = ""
+    if chosen:
+        return chosen
+
+    if persona and persona != DEFAULT_PERSONA:
+        preset = PERSONAS.get(persona, {}).get("voice", "")
+        if preset:
+            return preset
+
+    return DEFAULT_VOICE
 
 
 @app.post("/voice/synthesize")
@@ -3109,10 +3277,9 @@ async def voice_synthesize(request: VoiceSynthesizeRequest):
     """Synthesize speech for a single utterance."""
     if not kernel.speech_runtime:
         raise HTTPException(status_code=503, detail="Speech runtime not available")
-    
-    # Resolve voice from persona if not explicitly provided
-    voice = request.voice or PERSONAS.get(request.persona, {}).get("voice", "af_heart")
-    
+
+    voice = _resolve_voice(request.voice, request.persona)
+
     result = await kernel.speech_runtime.execute("speech.tts", {
         "text": request.text,
         "voice": voice,
@@ -3129,9 +3296,9 @@ async def voice_stream(request: VoiceStreamRequest):
     """Stream speech synthesis as Server-Sent Events."""
     if not kernel.speech_runtime:
         raise HTTPException(status_code=503, detail="Speech runtime not available")
-    
-    voice = request.voice or PERSONAS.get(request.persona, {}).get("voice", "af_heart")
-    
+
+    voice = _resolve_voice(request.voice, request.persona)
+
     async def event_generator():
         try:
             result = await kernel.speech_runtime.execute("speech.stream", {
@@ -3316,7 +3483,11 @@ PERSONAS = {
         # `core/identity.py` on every request; a default that added tone on top
         # would make the plain case the only one nobody chose.
         "system_prompt": "",
-        "voice": "af_heart",
+        # The default preset takes the default voice, by reference. Spelling it
+        # here is how the two drifted apart before: this entry and
+        # `voice/config.py` are the same decision, and only one of them may
+        # hold the answer.
+        "voice": DEFAULT_VOICE,
     },
     "baba": {
         "name": "Considered",

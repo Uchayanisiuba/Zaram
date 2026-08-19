@@ -48,7 +48,7 @@ class ExecutionDispatcher:
     def execute_step(
         self,
         step: ExecutionStep,
-        model: str = "gemma3:latest",
+        model: str | None = None,
         system_prompt: str = "",
     ) -> Iterator[str]:
         """Resolves the capability and executes the service with graceful error handling.
@@ -164,7 +164,7 @@ class ExecutionDispatcher:
         self,
         step: ExecutionStep,
         context: ExecutionContext,
-        model: str = "gemma3:latest",
+        model: str | None = None,
         system_prompt: str = "",
     ) -> Any:
         """Dispatch a step asynchronously using an ExecutionContext.
@@ -202,7 +202,7 @@ class ExecutionDispatcher:
         self,
         step: ExecutionStep,
         context: ExecutionContext,
-        model: str = "gemma3:latest",
+        model: str | None = None,
         system_prompt: str = "",
     ) -> Iterator[str]:
         """Dispatch a step with streaming output using an ExecutionContext."""

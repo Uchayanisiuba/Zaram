@@ -391,6 +391,78 @@ class ProviderManager:
         Size-first selection is what picked a 9 GB coding model on a 12 GB card
         for general chat: largest wins, and both of the criteria that should
         have vetoed it were absent.
+
+        This is `select_model_for_task` with nothing known about the task,
+        which is a real case and not a degenerate one: the answer to "what
+        should Zaram use when it knows nothing about the question" is what
+        Settings displays and what the models runtime loads at boot.
+        """
+        return self.select_model_for_task(category=category)
+
+    def select_model_for_task(
+        self,
+        *,
+        requires_vision: bool = False,
+        specialisation: Optional[str] = None,
+        category: ModelCategory = ModelCategory.LLM,
+    ) -> Optional[ModelInfo]:
+        """The same selection, with this request's own requirements applied.
+
+        Two arguments, and **they are deliberately different kinds of thing**:
+
+        - ``requires_vision`` is a **gate**. A model that cannot accept an
+          image is not a worse answer to "what is in this screenshot", it is
+          not an answer at all — so it is removed before ranking rather than
+          scored down inside it.
+        - ``specialisation`` is a **preference**. "A coding model is better at
+          this" is a judgement, and the general model stays a real answer when
+          no specialist is installed.
+
+        Merging the two is this codebase's most expensive recurring bug in its
+        modality form, and the dead `orchestrator` package contains it ready to
+        run: `scoring.py` records a *missing required capability* as a warning
+        and ranks the candidate anyway. That is how a text-only model comes to
+        be asked to read a picture and answers with confident prose about an
+        image it never saw — rule 9's failure in a new medium.
+
+        Returns ``None`` when the gate empties the field, and callers must not
+        substitute: no vision-capable model installed means Zaram cannot answer
+        that question, not that it should answer it blind.
+        """
+        preference = self._routing_preference()
+        candidates = self._auto_candidates(category, preference)
+
+        # The gate. Before the ranking, never inside it.
+        if requires_vision:
+            candidates = [m for m in candidates if m.supports_vision]
+
+        if not candidates:
+            return None
+
+        # `prefer_cloud` moves locality and does nothing else. It cannot
+        # promote a model whose terms are unknown, because
+        # `selectable_by_default` already excluded those and that is a consent
+        # gate, not a ranking one. The Settings screen makes exactly this claim
+        # to the user — "a bias, not a permission" — and this is what makes it
+        # true.
+        cloud_first = preference == "prefer_cloud"
+
+        return sorted(
+            candidates,
+            key=lambda m: self._rank_key(
+                m, cloud_first=cloud_first, specialisation=specialisation
+            ),
+        )[0]
+
+    def _auto_candidates(
+        self, category: ModelCategory, preference: str
+    ) -> List[ModelInfo]:
+        """Models Zaram may pick on its own, before the task is considered.
+
+        Consent and residency only. Every filter here answers "may this model
+        be used at all", which is why it is shared by every caller rather than
+        recomputed per task — a task-specific filter that quietly dropped one
+        of these would be a consent gate with an exception in it.
         """
         candidates = [
             m
@@ -403,8 +475,6 @@ class ProviderManager:
         # positively know fits, so "we could not check" never outranks "it fits".
         candidates = [m for m in candidates if self.model_fits_resident(m) is not False]
 
-        preference = self._routing_preference()
-
         # `prefer_local` is the one that constrains rather than reorders.
         # "Prefer" is doing real work here: a ranking nudge would be
         # indistinguishable from `auto`, since `auto` already ranks local
@@ -413,38 +483,59 @@ class ProviderManager:
         # model on its own at all. Choosing one by hand still works; this
         # governs what happens when nobody chose.
         if preference == "prefer_local":
-            local_only = [m for m in candidates if m.locality is CapabilityLocality.LOCAL]
             # Not `or candidates`. Falling back to a cloud model here would make
             # the strictest setting the one that silently sends data off-device
             # on a machine with no local model — the exact inversion rule 5
             # exists to prevent. No model is the honest answer, and callers
-            # already handle it: `select_default_model` returning None is "say
-            # so", never "substitute something".
-            candidates = local_only
+            # already handle it: returning None is "say so", never
+            # "substitute something".
+            candidates = [
+                m for m in candidates if m.locality is CapabilityLocality.LOCAL
+            ]
 
-        if not candidates:
-            return None
+        return candidates
 
-        # `prefer_cloud` moves locality the other way and does nothing else.
-        # It cannot promote a model whose terms are unknown, because
-        # `selectable_by_default` already excluded those above and that is a
-        # consent gate, not a ranking one. The Settings screen makes exactly
-        # this claim to the user — "a bias, not a permission" — and this line
-        # is what makes it true.
-        cloud_first = preference == "prefer_cloud"
+    def _rank_key(
+        self,
+        model: ModelInfo,
+        *,
+        cloud_first: bool,
+        specialisation: Optional[str],
+    ) -> tuple:
+        """Order among models that are all permitted and all capable.
 
-        def rank(model: ModelInfo) -> tuple:
-            fits = self.model_fits_resident(model)
-            is_local = model.locality is CapabilityLocality.LOCAL
-            return (
-                0 if fits is True else 1,
-                0 if model.is_general_purpose else 1,
-                (1 if is_local else 0) if cloud_first else (0 if is_local else 1),
-                -(model.size_bytes or 0),
-                model.id,  # deterministic across equal candidates
-            )
+        Fit stays first, ahead of the task match, and that ordering is load
+        bearing: a specialist that forces an eviction costs seconds on this
+        exchange *and* on the next one that swaps back, which is a worse
+        answer than a general model that is already resident.
+        `test_fit_outranks_general_purpose` asserts the untasked half of it.
+        """
+        fits = self.model_fits_resident(model)
+        is_local = model.locality is CapabilityLocality.LOCAL
+        return (
+            0 if fits is True else 1,
+            self._specialisation_rank(model, specialisation),
+            (1 if is_local else 0) if cloud_first else (0 if is_local else 1),
+            -(model.size_bytes or 0),
+            model.id,  # deterministic across equal candidates
+        )
 
-        return sorted(candidates, key=rank)[0]
+    @staticmethod
+    def _specialisation_rank(model: ModelInfo, wanted: Optional[str]) -> int:
+        """0 is best. Three tiers, and the third is why this is not a boolean.
+
+        With no task in hand a general model wins — the existing behaviour, and
+        the reason a coding fine-tune stopped answering general questions. With
+        a task in hand the specialist for *that* task wins, the general model
+        is second, and a specialist for a *different* task is last: a maths
+        fine-tune is a worse answer to a coding question than a general model
+        is, and a two-way split has no way to say so.
+        """
+        if wanted is None:
+            return 0 if model.is_general_purpose else 1
+        if model.specialisation == wanted:
+            return 0
+        return 1 if model.is_general_purpose else 2
 
     def _routing_preference(self) -> str:
         """The user's *Prefer local · Auto · Prefer cloud* choice, or ``auto``.

@@ -88,6 +88,24 @@ INTENT_EXEMPLARS: Dict[str, List[str]] = {
         "summarise what we agreed",
         "remind me what the client said about the deadline",
     ],
+    #: Written to sit clear of its two neighbours, which is the whole
+    #: difficulty here. `tool` is *acting on* a repository — committing,
+    #: running tests — while these are questions *about code*, and
+    #: `conversation` already owns "explain how that works", so an exemplar
+    #: like "explain this" would land between the two and be discarded as
+    #: ambiguous by the router's separation floor. Every phrasing below
+    #: therefore carries something only a coding question carries: a stack
+    #: trace, a function, a refactor, a language.
+    "code": [
+        "why does this function return None",
+        "write a python script that renames these files",
+        "refactor this class so it is easier to test",
+        "what does this stack trace mean",
+        "fix the bug in this loop",
+        "add type hints to this module",
+        "how do I write this as a SQL query",
+        "is there a cleaner way to write this code",
+    ],
 }
 
 
