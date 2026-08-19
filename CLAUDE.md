@@ -56,6 +56,12 @@ Full rationale: `docs/VISION.md`. Interface: `docs/UI-SPEC.md`. Sequence and
 acceptance criteria: `docs/MILESTONES.md`. External framing: `docs/PITCH.md`. Read
 before proposing product changes; none are auto-imported.
 
+Two more, both written 19 August 2026 because their contents existed only as
+behaviour and had to be re-derived from source every time somebody asked:
+`docs/SPEECH.md` — what speaks, when, who may interrupt it, and who owns the
+`speaking` state — and `docs/RUNNING.md`, which is how to start the real app
+and the four ways it fails to start that look like something else.
+
 **Starting a session: read `docs/MILESTONES.md` first.** Its Current state block
 is the handoff — what is done, what is in flight, which decisions are already
 taken, and which gaps are deliberate and time-boxed. It is maintained for that
