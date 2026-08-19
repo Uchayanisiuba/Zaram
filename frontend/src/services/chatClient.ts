@@ -77,6 +77,14 @@ export function sourceLeftDevice(source: ChatSource): boolean {
 
 export type ChatEvent =
   | { type: 'token'; content: string }
+  /** The model's working, from a `<think>` block, with the tags removed.
+   *
+   *  Its own event rather than a flag on `token` because the destinations
+   *  differ: `token` accumulates into `streamingText`, which is committed to
+   *  the transcript and read by `pushSpeech`. Before the backend split these,
+   *  a reasoning model's working *was* the answer as far as this client knew —
+   *  rendered as the reply, and spoken aloud by Kokoro in avatar mode. */
+  | { type: 'reasoning'; content: string }
   | { type: 'source'; source: ChatSource }
   /** A file Zaram made. The same record Work draws a row from, so the card in
    *  the conversation and the row in Work cannot disagree about what exists. */
@@ -309,6 +317,9 @@ function parseLine(line: string): ChatEvent | null {
   switch (evt.type) {
     case 'token':
       return { type: 'token', content: String(data.content ?? '') };
+
+    case 'reasoning':
+      return { type: 'reasoning', content: String(data.content ?? '') };
 
     case 'source': {
       // An unrecognised kind is dropped rather than coerced. The kind decides

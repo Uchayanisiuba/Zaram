@@ -66,6 +66,32 @@ afterEach(() => {
 });
 
 describe('parsing', () => {
+  it('keeps model thinking off the answer channel', async () => {
+    // Not a rendering preference. `token` events accumulate into
+    // `streamingText`, which is what gets committed to the transcript and what
+    // `pushSpeech` hands to Kokoro — so a reasoning event arriving as a token
+    // would be the model's working read aloud in avatar mode. The two must stay
+    // separate all the way down.
+    mockFetch(() =>
+      streamingResponse([
+        line({ type: 'reasoning', data: { content: 'The rate is 400.' } }),
+        token('Your day rate is 400.'),
+        done(),
+      ]),
+    );
+
+    const events = await collect(streamChat({ text: 'what is my rate' }));
+    expect(events.map((e) => e.type)).toEqual(['reasoning', 'token', 'done']);
+    expect(events[0]).toMatchObject({ content: 'The rate is 400.' });
+
+    const spoken = events
+      .filter((e): e is Extract<ChatEvent, { type: 'token' }> => e.type === 'token')
+      .map((e) => e.content)
+      .join('');
+    expect(spoken).toBe('Your day rate is 400.');
+    expect(spoken).not.toContain('The rate is 400.');
+  });
+
   it('yields tokens and sources in arrival order', async () => {
     mockFetch(() =>
       streamingResponse([
