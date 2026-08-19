@@ -13,12 +13,353 @@ accurate — it is the first thing anyone reads.
 
 ## Current state — 19 August 2026
 
-> ### The backend could not start on a machine without Ollama, and a green suite had said otherwise for two weeks.
+> ### Kokoro lost torch and kept its timings — 662 MB, measured
 >
-> Suites: **2207 backend passed / 0 failed**, 95 skipped — measured with
-> **Ollama down**, 21m43s · **198 frontend** · **48 Electron** ·
-> typecheck clean · lint passes · guards pass. HEAD `61d6e36`, working tree
-> clean, everything pushed to `origin/Zaram-V0.1`.
+> The open question this file recorded — *"whether to move Kokoro off torch"* —
+> is answered, built and tested. `KokoroConfig.backend` selects `torch` or
+> `onnx`; both go through the `_default_pipeline_factory` seam that already
+> existed, both yield `.audio` and `.tokens`, and `_run_synthesis` is unchanged
+> and cannot tell which it got. `VoiceProvider` did the job it was written for.
+>
+> **The saving is 662 MB, not the ~590 estimated here**, because torch drags
+> sympy (79 MB) and networkx (19 MB) behind it and nobody had counted them.
+> Dropped: torch 528, transformers 109, sympy 79, networkx 19, and 20 more in
+> tokenizers/safetensors/mpmath/kokoro/functorch/torchgen. Added: onnxruntime 45,
+> onnx 48. `backend/requirements-voice-onnx.txt` is the install.
+>
+> **The blocker was real and it was word timings, exactly as this file said.**
+> The community export emits `waveform` and nothing else — measured, not
+> assumed — so a naive swap would have shipped a smaller installer and a shut
+> mouth, one session after the shut mouth was fixed.
+>
+> **`pred_dur` is still computed inside the graph; the export just never wired
+> it to an output.** Walking back from the encoder's `CumSum` recovers
+> `KModel.forward` line for line, so `/encoder/Gather_output_0` *is* `pred_dur`.
+> Adding an existing internal tensor to `graph.output` is local surgery on a file
+> already on disk: no re-export from torch, no second set of weights, nothing to
+> host. Cached after the first run, and **refused loudly** when absent — arriving
+> at empty timings by accident is precisely how lip sync dies with everything
+> green.
+>
+> **Against torch, five sentences, `am_michael`: word timings are bit-identical
+> — 0.000000 s drift, same words, same order — and audio length matches to the
+> sample.** Magnitude spectra correlate at 0.984. One difference is real: ONNX is
+> ~3 dB louder (best-fit gain 1.4385, sd 0.0155), flat across the spectrum, which
+> reads as an iSTFT normalisation convention in the export rather than lost
+> precision. Not corrected by a constant in code — the number has no derivation,
+> and an unexplained scalar on the audio path is the same class of error as a
+> ranking blend used as a threshold. A full-scale guard is in code, because
+> `soundfile` clips silently and clipping is the one difference a listener would
+> hear as a fault rather than a level.
+>
+> **fp16 was measured and rejected.** Correlation against torch starts at 0.963
+> and falls to **0.601** by the end of a five-second sentence, per-window gain
+> swinging 1.43 to 0.86 — error accumulating through the decoder, and the
+> sinusoidal source generator's `CumSum` is the obvious culprit. The worst
+> available defect shape: invisible in a short test, audible at the end of a long
+> reply. fp32 holds 0.960 over the same final second.
+>
+> **The default is still `torch`, and that is the one thing outstanding.** Every
+> objective measure says equivalent; one says 3 dB; nobody has *heard* them side
+> by side. CLAUDE.md's fifth integration test is that the maintainer judges
+> whether output is good, and no measurement above is that judgement. Three WAVs
+> were produced for exactly that A/B. A test asserts the default, so flipping it
+> trips a named assertion rather than sliding through a diff.
+>
+> **Proven torch-free in a clean virtualenv**, not inferred from metadata: with
+> torch, `kokoro` and `spacy-curated-transformers` absent, it synthesised 4.25 s
+> with 11 timed words and `torch` never entered `sys.modules`.
+>
+> **Two guards caught real defects in this work, and both were right.**
+> `test_installer_payload` found the patched 326 MB graph being written into
+> `backend/` — `in_data_dir` resolves to the backend *source* directory in a
+> checkout, correctly for the Spine and disastrously for a regenerable blob that
+> would have gone into the installer. `test_egress_chokepoint` found
+> `huggingface_hub` reached without the gate. Both fixed; every ONNX fetch now
+> tries the cache offline first and asks the gate only when there is genuinely
+> something to download.
+>
+> **A hole in the torch path is now named rather than fixed:**
+> `KPipeline.load_voice` downloads a `.pt` on first use of a voice, at synthesis
+> time, with nothing asked and nothing logged. The ONNX path routes its voice
+> loads through the gate because they happen in the same place — inside
+> `__call__`, outside the window `_ensure_pipeline` wraps.
+>
+> **One trap worth carrying forward.** spaCy loads plugin entry points from
+> whatever is installed; `spacy-curated-transformers` is such a plugin and
+> imports torch at module scope; spaCy raises rather than skipping a plugin it
+> cannot import. One contaminated virtualenv therefore drags 494 MB back through
+> a package nobody asked for, invisibly to any requirements file. Same shape as
+> the misaki/spaCy lesson, with the edge running the other way.
+>
+> ### Three interface changes, asked for the same day
+>
+> **Text is typed rather than dumped.** It always streamed; what it did not do
+> was *read* like it, because tokens arrive in clumps. `lib/typewriter.ts` holds
+> the rule as a pure function — floor rate, plus a share of the backlog, so it
+> types steadily on a trickle and catches up on a burst instead of queueing.
+> Measured: a 1200-character lump is absorbed in ~0.93 s; a fixed 45 c/s reveal
+> would have taken 26 s and still been typing after the answer, the speech and
+> the next question. **Display only**: `streamingText` remains the truth and is
+> what `pushSpeech` reads, so the voice never waits on an animation. Skipped
+> entirely under `prefers-reduced-motion`.
+>
+> **The hook around it shipped broken and was caught by re-reading it, not by a
+> test.** Keying the effect on `text` meant every token tore it down and reset
+> `last = performance.now()`, so at the next paint `elapsed` was measured from
+> the most recent token rather than the previous frame — the reveal ran about
+> twelve times slow exactly while it was being watched. Measured with the fault
+> reintroduced: **38 characters of 1800 after six frames, against 450+ fixed.**
+> Every test of the reveal arithmetic passed throughout, because all of them
+> call the pure function directly. Same shape as the visemes.
+>
+> **Two attempts at the regression test were themselves vacuous**, and that is
+> the more useful lesson. The first stubbed `cancelAnimationFrame` as a no-op;
+> the second rerendered with an identical string, so React skipped the effect
+> and the defect could not occur. Both passed against the broken hook. **A test
+> for a regression is not finished until it has been watched to fail** — and the
+> first diagnosis written down here, that cancellation starved the loop, was
+> also wrong: frames scheduled repeatedly within one paint interval still run.
+>
+> **The model's thinking is shown, and — more importantly — kept out of the
+> answer.** `core/reasoning.py` splits `<think>` blocks into their own
+> `reasoning` event. This is a defect fix before it is a feature: nothing looked
+> for those tags, so on a reasoning model the working *was* the answer as far as
+> this backend was concerned — rendered as the reply, committed to the
+> transcript, and handed to `pushSpeech`, which means Kokoro read the model's
+> internal monologue aloud in avatar mode. The splitter buffers, because a tag
+> arrives split across tokens exactly as `[M1]` does, and a half-recognised tag
+> does not merely render oddly — it files the rest of the reply under the wrong
+> heading.
+>
+> **A sixteenth unreachable module.** `hooks/useStreamingText.ts` sits in the
+> live hooks directory and is imported only by `src/legacy/`, which is
+> quarantined. It is also the wrong shape: `startStreaming(fullText)` replays a
+> string that already exists, so it can never consume a stream. Flagged, not
+> deleted — that touches quarantine policy.
+>
+> ### What was not verified, and why
+>
+> **The app was not run.** Ports 5173 and 8420 were both held by a running
+> instance, `LISTEN_PORT` is a hardcoded constant and the Host guard pins
+> `127.0.0.1:8420`, so a parallel stack would have meant editing shipped code to
+> test it — and stopping somebody's running app is not a call to make silently.
+> The suites are green (backend, frontend 219, typecheck clean) and the changed
+> speech path is display-only, but **that is not the same as having watched the
+> mouth move**, and this file's own standard is the screenshot. It is the first
+> thing to do next.
+
+
+> ### Speech was installed into the wrong half of the machine.
+>
+> Continuing the voice session below. The maintainer asked for speech
+> **installed and working** during development, to be removed before the
+> installer ships. It is now installed and verified, and there is nothing to
+> remove.
+>
+> **The listening half was dark because there are two virtualenvs.**
+> `backend/venv` and `C:\Zaram\.venv` both exist and are both complete
+> backends. Diffed, they were identical but for the mic extra — `av`,
+> `ctranslate2`, `faster-whisper`, `onnxruntime` present in the root `.venv`,
+> absent from `backend/venv`. And `docs/RUNNING.md` told you to launch with
+> `ZARAM_PYTHON` pointing at `backend/venv`: the half that could not listen.
+>
+> **`docs/RUNNING.md` was wrong about why, and the correction is the useful
+> part.** It said the launcher "finds nothing" because this repository has
+> `venv` rather than `.venv`. It does not find nothing: `cwd` is the backend
+> directory, so `../.venv` resolves to `C:\Zaram\.venv`, which **exists**. An
+> unset `ZARAM_PYTHON` therefore does not fail — it silently starts a
+> *different* interpreter, which is precisely the failure that file's own PATH
+> argument warns about, arriving by the route nobody was watching. Corrected
+> there; **reconciling the two venvs is a triage decision**, the same shape as
+> the two Electron trees.
+>
+> **The suite was skipping, not passing.** `tests/test_speech_roundtrip.py`
+> requires both extras and both weight caches, and 8 skipped reads much like 8
+> passed in a summary line. That is how the listening half went a whole session
+> unverified while the speaking half worked. With `backend/venv` completed:
+> **45 passed** across roundtrip, voice-resolution and recogniser suites, and
+> **59 passed** in `voice/tests/`. The roundtrip tests skip when the recogniser
+> reports itself unavailable, so their *running* is the evidence the mic button
+> is offered. **A guard that fails when these skip on a machine holding both
+> extras is worth writing** — otherwise the next silent skip costs another
+> session.
+>
+> **Nothing leaks into the installer**, checked rather than assumed:
+> `scripts/build-python-runtime.mjs` downloads a fresh interpreter and installs
+> **only** `backend/requirements.txt`, never consulting a dev venv, and
+> `check-installer-payload.mjs` has `venv/` and `.venv/` in FORBIDDEN. Two
+> independent guards, so "remove it before shipping" needs no action.
+>
+> ### Kokoro is light; its runtime is not
+>
+> Measured on disk, because the two get confused: the `kokoro` package is
+> **~1 MB**, the weights 315 MB, and the 905 MB is **torch at 494 MB** plus
+> transformers at 96 and the spaCy stack at 125. The 82M parameters really are
+> small. `kokoro-onnx` would drop torch and transformers — ~590 MB — and
+> onnxruntime is *already in the tree* at 43 MB because faster-whisper pulled
+> it. The open question is G2P, and the constraint that decides any swap is not
+> size but **word timings**: `SpeechTiming` is the lip-sync seam and an engine
+> that cannot emit timings costs the viseme chain. Options and caveats in
+> `docs/SPEECH.md`; none tested.
+>
+> ### One defect found and left for the maintainer
+>
+> `backend/requirements.txt:45` pins `en_core_web_sm` — a spaCy *model* — into
+> the **base** install. Nothing in the repository imports spaCy (checked
+> repo-wide); it is useless without spaCy, which is not in base; and it is
+> pinned as a GitHub release URL, the exact pattern
+> `requirements-voice.txt`'s own header says "fails the entire install when a
+> connection drops". On the 22 kB/s link measured during this session that is a
+> real installer-build failure mode. Not changed — it alters the shipping base.
+>
+> ### The voice nobody could choose, and the mouth that never opened.
+>
+> Suites: **2290 backend passed / 0 failed**, 43 skipped — measured with
+> **Ollama up**, 3m09s · **206 frontend** · **56 Electron** · typecheck clean ·
+> lint passes · guards pass · reachability 2 modules and 2 routes, each a named
+> piece of work.
+>
+> **That backend number is not comparable to the 2207 below**, which was
+> measured with Ollama *down*. Both are real and they run different code. Take
+> the Ollama-down run before shipping anything, because that is the machine a
+> stranger installs onto.
+>
+> ### The avatar's mouth never opened, and the cause was two writers to one state
+>
+> Asked for by the maintainer on 19 August: speech automatic in avatar mode,
+> with lip sync and animation working. Two of the three were already built —
+> `chatStore` gates speech on `renderer === 'avatar'`, and `VrmAvatar` drives
+> visemes from Kokoro's own phoneme timings scrubbed against `audio.currentTime`.
+> The mouth still never moved.
+>
+> **`ChatSurface` and `speechStore` both wrote `orbStore`, and only one of them
+> guarded.** Speech sets `speaking`; the chat effect set `thinking` while the
+> request was in flight and `idle` the moment it finished. Speech starts on the
+> first sentence that will not change again and outlives the stream **by
+> design**, so that `idle` landed on top of `speaking` on every reply, and the
+> avatar — which opens its mouth only in `speaking` — sat shut through the whole
+> answer.
+>
+> **Nothing looked broken, which is why it lasted.** The rim light is the same
+> cyan for `thinking` and for `speaking`, so the only renderer that could show
+> the difference was the mouth, and a still mouth reads as "lip sync is
+> unfinished" rather than as a state bug. The viseme code, the mapping test and
+> `check:visemes` were all green and all correct.
+>
+> `speaking` is now set where it is true — the moment a clip starts playing, not
+> when the queue opens, which claimed sound seconds before any existed — and
+> `preserveSpeaking` stops chat activity overwriting it. `lib/orbActivity.ts`,
+> with the rule as a function so a test asserts it rather than a component
+> having to be rendered to find out.
+>
+> **Measured in a browser, before and after, because this is a visual claim.**
+> Driven with Playwright against the system Edge: avatar mode, a real reply from
+> a local model, `am_michael` clip fetched and playing. Before: `currentTime`
+> advancing 0 → 8.1s, `paused` false throughout, and the mouth shut in all 40
+> frames. After: mouth wide open at frame 3, closed at frame 7, four clips
+> playing in sequence as the reply streamed. That is the standard the pointer
+> gaze failure set — *"if it returns, it returns with a screenshot"* — applied
+> to the mouth.
+>
+> **What this says about the instrument, again.** `check:reachability` sees a
+> module nothing imports. It cannot see two modules that both import the same
+> store and disagree about who owns a field. That is now the second shape found
+> this session that the report is blind to, after a settings control nothing
+> downstream read.
+>
+> ### The speech behaviour is now written down, because it was only in the code
+>
+> The maintainer asked what the voice was, whether it was male, and whether
+> speech was automatic in avatar mode with lip sync working. Every answer
+> existed only as behaviour — no document held the contract, so each question
+> had to be answered by reading source. That is now `docs/SPEECH.md`: the two
+> modes and why there is no third, the voice resolution order, streaming
+> granularity, barge-in, the viseme chain, and who owns `speaking`.
+>
+> **Confirmed rather than assumed**, since three of the four were already
+> built: orb mode offers a **Speak** button per reply and is otherwise silent;
+> avatar mode speaks automatically; barge-in works by **typing** (composer
+> `onChange`) and by **microphone** (before `start()`, where it is a
+> correctness requirement — the mic would otherwise transcribe Zaram's own
+> voice back). Only lip sync was broken, and it was the state bug above.
+>
+> **Word-by-word speech was asked for and is not built.** `CLAUDE.md` rules it
+> out in the same paragraph that requires the streaming — *"a clause is the
+> smallest unit with prosody"* — and per-word synthesis would give every word
+> the intonation of a complete sentence. What is built already speaks
+> *alongside* the streaming text rather than after it, which is probably the
+> real intent. Recorded as an open maintainer decision in
+> `docs/NEXT-SESSION.md` rather than silently declined.
+>
+> **`docs/RUNNING.md` is new and is the other thing that only existed as
+> folklore.** Launching the real app cost four separate failures in one
+> session: `npm run dev:desktop` launches `desktop/src/main/index.ts` while the
+> installer ships `electron/main.js`; `ELECTRON_RUN_AS_NODE` is set inside every
+> VSCode terminal and makes Electron run the main as plain Node, with a
+> `TypeError` naming a line in `main.js`; `backendLauncher` looks for
+> `backend/.venv` while this repository has `backend/venv`; and a browser tab
+> reports "engine not running" correctly, because it has no desktop host to ask
+> for the per-launch secret.
+>
+> **Two Electron trees is now a triage item.** `electron/main.js` is what
+> `electron-builder.yml` packages and what `test/*.test.js` covers.
+> `desktop/src/main/index.ts` is a parallel TypeScript implementation with its
+> own builder config and its own tests. Both are internally consistent, which
+> is why no guard sees it. One is dead weight; deciding which is somebody's
+> next job.
+>
+> ### The voice defect
+>
+> `user_settings.voice` was written by the character pane, read back by
+> `GET /character`, rendered in Settings — and consulted by **nothing**.
+> `/voice/synthesize` resolved `request.voice or PERSONAS[persona]["voice"] or`
+> a literal, and both frontend callers speak with no voice argument at all. So
+> a setting the interface offers, stores and renders back had no effect on any
+> sound the user heard.
+>
+> This is the signature failure wearing a **settings control** rather than a
+> module, and `check:reachability` cannot see it: the route *is* called, the
+> setting *is* read. What was missing is the one hop between them — a shape the
+> instrument does not claim. The answer is a test that asks what the user would
+> ask, which is what `backend/tests/test_voice_resolution.py` does.
+>
+> `_resolve_voice` now orders it explicitly: this request, then the user's
+> setting, then a deliberately-chosen preset, then `DEFAULT_VOICE`. Step three
+> is narrow on purpose — every request carries `persona="zaram_prime"` whether
+> or not anybody picked it, so taking the preset first would mean the preset
+> nobody chose silently outranked the only voice the user did. Both voice
+> request models take that default *by reference*, and a test asserts it,
+> because the day they drift is the day the defect returns by a second route.
+>
+> **One spelling.** `"af_heart"` was written in six places, including a
+> `ChatRequest.personality` field defaulting to a *voice id* that nothing read
+> or sent. `voice/config.py` owns it now, and a scan test fails if a live module
+> spells it again — the same disease as the two TTS text cleaners and the two
+> rankers this repository has already paid for.
+>
+> **The default is `am_michael`**, male, asked for by the maintainer on
+> 19 August. Asserted on the id's own convention (`<language><gender>_<name>`),
+> so another male voice keeps it green and a female one does not.
+>
+> **Verified in the running product, not by the suite.** Backend on a scratch
+> `ZARAM_DATA_DIR`. With nothing chosen, `POST /voice/synthesize` returned
+> `voice: "am_michael"` and a 108 KB clip. Chose `bm_george` through
+> `POST /character`; the *same* request, still naming no voice, returned
+> `voice: "bm_george"` and a 122 KB clip. That is the hop that did not exist.
+>
+> **Speech-out failures also said the wrong thing.** The message was "Speech is
+> not installed." sitting under a comment claiming it named "the fix and its
+> size the way the OCR extra does". It named neither. Now:
+> *"pip install -r backend/requirements-voice.txt (905 MB, one time)"* — the
+> size is the half that decides on a metered connection. The test asserts the
+> *properties*, a command and a number, so rephrasing stays free and hollowing
+> it out does not.
+>
+> ### The backend could not start on a machine without Ollama, and a green suite had said otherwise for two weeks
+>
+> Measured then: **2207 backend passed / 0 failed**, 95 skipped, Ollama
+> **down**, 21m43s, at HEAD `61d6e36`.
 >
 > **Say which condition you measured in.** With Ollama running the backend
 > suite takes ~4 minutes; with it down, ~20, because every provider probe waits
@@ -127,15 +468,24 @@ accurate — it is the first thing anyone reads.
 >
 > **Start here, in this order.**
 >
-> 1. **Triage the reachability report.** 25 modules, 4 routes. Where the
->    remaining unknown risk is concentrated before an alpha.
-> 2. **Wire `core/untrusted.py`.** Security, and a prerequisite for obligations.
-> 3. **Conversation persistence, as the session/memory split.** There is no
+> 1. **Wire `core/untrusted.py`.** Security, and a prerequisite for obligations.
+>    It is one of the two modules the reachability report still names, and the
+>    only one on that list that is a defence rather than a gap.
+> 2. **Conversation persistence, as the session/memory split.** There is no
 >    conversation history at all — close Zaram and yesterday is gone. Guardrail,
 >    enforced by test: the store is readable by the user and invisible to recall.
-> 4. **The maintainer's two decisions**, both blocking: delete or revive
+> 3. **The maintainer's two decisions**, both blocking: delete or revive
 >    `backend/orchestrator/` (1,261 lines, no importers, no tests), and rebuild
 >    the installer before testing it on a clean machine.
+>
+> **Done since that list was written.** The reachability report is triaged —
+> 25 modules and 4 routes down to 2 and 2, each of the four a named piece of
+> work rather than an unknown. What the voice defect adds is the report's
+> boundary: a *wired* module whose one useful hop is missing looks identical to
+> a healthy one from the outside. `check:reachability` is honest about missing
+> three shapes, and this is a fourth. The cheap counter is not another scanner —
+> it is asking, of each control the interface offers, whether anything downstream
+> reads what it stores.
 
 ## Superseded — 18 August 2026
 
@@ -1534,10 +1884,16 @@ everything it covers.
    message. This is the last missing piece of routing legibility and the
    cheapest remaining trust win.
 
-0b. **Voice selection, male by default.** Kokoro ships 54 voices, `/voice/voices`
-   serves them, and the default is `af_heart` (female). **Read what that endpoint
-   actually returns before choosing** — hardcoding a name that is not in the
-   installed pack is the failure this file keeps warning about.
+0b. **Voice selection, male by default — done 19 August 2026.** The default is
+   `am_michael`, decided in `voice/config.py` and nowhere else. The caution here
+   was right and was honoured the strongest way available: rather than reading
+   `/voice/voices` and trusting the list, the running backend was asked to
+   synthesise with it and returned a 108 KB clip, so the name is one this
+   machine is known to make sound with.
+
+   The larger half was not the default at all. `user_settings.voice` — the
+   control the *user* sets — reached no synthesis path, so voice "selection"
+   existed only as a stored string. See the current state block at the top.
 
 0c. **Persist cloud keys with Electron `safeStorage`.** Connections live in
    memory, so a restart forgets them. `CLAUDE.md` names the shape: DPAPI at
