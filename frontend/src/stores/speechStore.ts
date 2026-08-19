@@ -157,6 +157,18 @@ let consumed = 0;
  *  speaking cannot have its audio interleaved by the older one's callbacks. */
 let generation = 0;
 
+/**
+ * What the user is told when speech is not installed.
+ *
+ * The command and the size, in that order, because "install the extra" is not
+ * a decision somebody on metered data can make without the megabytes. Exported
+ * so the assertion in the test names the same string the user sees rather than
+ * a copy of it — a test that hardcodes the wording passes after the wording
+ * stops saying anything.
+ */
+export const SPEECH_NOT_INSTALLED =
+  'Speech is not installed: pip install -r backend/requirements-voice.txt (905 MB, one time).';
+
 async function synthesise(
   text: string,
   voice: string | undefined,
@@ -171,12 +183,18 @@ async function synthesise(
     });
     if (!res.ok) {
       // 503 is the honest and common case: the voice extra is not installed.
-      // Reported rather than swallowed, so the UI can name the fix and its
-      // size the way the OCR extra does.
+      //
+      // The comment here used to say this was reported "so the UI can name the
+      // fix and its size the way the OCR extra does", above a string that did
+      // neither — it said only "Speech is not installed." A reader learns from
+      // that that speech is broken, not that it is one command away, and on a
+      // metered connection the size is the half that decides. Now it reads
+      // like `ingest/quality.py`'s OCR line, which is the shape this was
+      // always describing.
       return {
         error:
           res.status === 503
-            ? 'Speech is not installed.'
+            ? SPEECH_NOT_INSTALLED
             : `Speech failed (${res.status}).`,
       };
     }
@@ -248,7 +266,13 @@ export const useSpeechStore = create<SpeechStore>((set, get) => ({
     consumed = 0;
 
     set({ error: null });
-    useOrbStore.getState().setOrbState('speaking');
+    // Deliberately *not* `setOrbState('speaking')` here — corrected 19 August
+    // 2026. This runs before the first token exists, and synthesis takes
+    // seconds, so it claimed sound that had not started. It also fought the
+    // stream: `ChatSurface` writes `thinking` as soon as the request is in
+    // flight, so the eager claim was overwritten anyway and the state was a
+    // lie in both directions. The state is now set where it is true — at the
+    // moment a clip begins to play, below.
 
     // Drives itself. The caller pushes text and walks away, because speech is
     // an accompaniment to the reply and must never be something the reply has
@@ -296,6 +320,11 @@ export const useSpeechStore = create<SpeechStore>((set, get) => ({
         }
 
         set({ audio: current.audio, track: current.track });
+        // Sound is about to come out, so now it is true. The avatar reads this
+        // to open its mouth and reads `audio.currentTime` to decide the shape;
+        // both need the clip in the store *before* the state says speaking, or
+        // the first frames scrub against the previous utterance.
+        setOrbState('speaking');
         await playToEnd(current.audio);
         URL.revokeObjectURL(current.objectUrl);
 

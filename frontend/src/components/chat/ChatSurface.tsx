@@ -17,6 +17,7 @@ import ArtifactCard from '@/components/ArtifactCard';
 import NoticeCard from '@/components/chat/NoticeCard';
 import FirstRunPanel from '@/components/firstrun/FirstRunPanel';
 import { useReadiness, setupToOffer } from '@/hooks/useReadiness';
+import { useTypedText } from '@/hooks/useTypedText';
 import { stripCitationMarkers } from '@/lib/markers';
 import { useConversationStore } from '@/stores/conversationStore';
 import { useChatStore } from '@/stores/chatStore';
@@ -30,6 +31,7 @@ import CitationSummary from './CitationChips';
 import MessageActions from './MessageActions';
 import { AnsweredBy } from './AnsweredBy';
 import SpeakButton from './SpeakButton';
+import ReasoningPanel from './ReasoningPanel';
 import CitationPanel from './CitationPanel';
 import {
   useLayoutStore,
@@ -40,6 +42,7 @@ import {
 import { useChatModeStore } from '@/stores/chatModeStore';
 import { useMicStore } from '@/stores/micStore';
 import { useSpeechStore } from '@/stores/speechStore';
+import { preserveSpeaking, chatActivity } from '@/lib/orbActivity';
 import ResizeHandle from '@/components/common/ResizeHandle';
 import { useIsReducedMotion } from '@/hooks/useReducedMotion';
 import { useViewport } from '@/hooks/useViewport';
@@ -57,6 +60,7 @@ export default function ChatSurface() {
 
   const messages = useChatStore((s) => s.messages);
   const streamingText = useChatStore((s) => s.streamingText);
+  const streamingReasoning = useChatStore((s) => s.streamingReasoning);
   const streamingSources = useChatStore((s) => s.streamingSources);
   const streamingArtifacts = useChatStore((s) => s.streamingArtifacts);
   const streamingNotices = useChatStore((s) => s.streamingNotices);
@@ -67,6 +71,17 @@ export default function ChatSurface() {
   const isStreaming = useChatStore((s) => s.isStreaming);
   const connectionError = useChatStore((s) => s.connectionError);
   const send = useChatStore((s) => s.send);
+
+  // Typed out at a steady cadence rather than in the clumps tokens arrive in.
+  //
+  // **Display only, and that is load-bearing.** `streamingText` in the store is
+  // still the truth, and it is what `chatStore` hands to `pushSpeech` — so the
+  // voice starts on the first sentence that will not change again no matter how
+  // much of it has been drawn. Speech must never wait on an animation.
+  //
+  // Markers are stripped *before* the reveal, not after, so `[M1]` disappearing
+  // mid-flight cannot make the line jump backwards.
+  const typedText = useTypedText(stripMarkers(streamingText), !isStreaming);
 
   const { setOrbState } = useOrbStore((s) => ({ setOrbState: s.setOrbState }));
   const setActivity = useSystemStore((s) => s.setActivity);
@@ -141,7 +156,7 @@ export default function ChatSurface() {
   const figureNotice = useMicStore((s) => s.figureNotice);
 
   // Speech *out* failures were rendered nowhere. `speechStore` sets a careful
-  // named reason for each one — "Speech is not installed.", "Playback was
+  // named reason for each one — `SPEECH_NOT_INSTALLED`, "Playback was
   // blocked.", "The audio could not be played." — and no component read it, so
   // every synthesised utterance 404'd for as long as the feature has existed
   // and the only symptom was silence. Same rule as the mic: a disabled
@@ -183,12 +198,20 @@ export default function ChatSurface() {
   }, [messages, streamingText]);
 
   // The Orb reports system state; it does not perform. Thinking while the
-  // request is in flight, idle otherwise.
+  // request is in flight, idle otherwise — but never over the top of speech.
   useEffect(() => {
     // Both orbs read the same activity, so the small one in the top bar and the
     // large one on the landing can never disagree about what is happening.
-    setOrbState(isStreaming ? 'thinking' : 'idle');
-    setActivity(isStreaming ? 'thinking' : 'idle');
+    //
+    // `preserveSpeaking` is what stops this effect clobbering the one state it
+    // does not own. Speech begins on the first finished sentence and outlives
+    // the stream by design, so the `idle` written here when generation ends
+    // used to land on top of `speaking` on every single reply — which is why
+    // the avatar's mouth never moved. Read with `getState()` rather than a
+    // subscription: this must react to the stream changing, not to speech
+    // changing, or it re-runs itself.
+    setOrbState(preserveSpeaking(useOrbStore.getState().orbState, chatActivity(isStreaming)));
+    setActivity(preserveSpeaking(useSystemStore.getState().activity, chatActivity(isStreaming)));
   }, [isStreaming, setOrbState, setActivity]);
 
   const handleSend = () => {
@@ -345,6 +368,12 @@ export default function ChatSurface() {
                   >
                     {msg.role === 'user' ? 'You' : 'Zaram'}
                   </p>
+                  {/* Above the answer, because that is the order it happened in
+                      and because a reader scanning back for *why* should not
+                      have to pass the conclusion to reach the working. */}
+                  {msg.role === 'assistant' && msg.reasoning && (
+                    <ReasoningPanel text={msg.reasoning} streaming={false} />
+                  )}
                   <p
                     className="text-sm leading-relaxed whitespace-pre-wrap"
                     style={{
@@ -441,6 +470,12 @@ export default function ChatSurface() {
                   shown as soon as they land. */}
               {isStreaming && (
                 <div>
+                  {/* Arrives before the answer does, and on a reasoning model it
+                      is the only thing on screen for the first several seconds.
+                      Same argument as the `model_load` event: a wait that shows
+                      its cause is explicable, and one that shows nothing reads
+                      as a hang. */}
+                  <ReasoningPanel text={streamingReasoning} streaming />
                   {streamingText && (
                     <>
                       <p
@@ -460,7 +495,7 @@ export default function ChatSurface() {
                           paddingLeft: 10,
                         }}
                       >
-                        {stripMarkers(streamingText)}
+                        {typedText}
                       </p>
                     </>
                   )}

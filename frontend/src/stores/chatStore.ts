@@ -51,6 +51,12 @@ export interface ChatMessage {
    *  the model can change between replies — that is the product's argument, not
    *  an edge case, and a single label would be wrong the moment it happened. */
   answeredBy?: ChatAttribution | null;
+  /** What the model worked through before answering, if it showed its
+   *  working. Kept on the message so it survives the reply rather than
+   *  vanishing when the stream closes — the reason a claim was made is worth
+   *  more after the answer than during it. Never part of `text`, so it is
+   *  never spoken and never committed as something the model said. */
+  reasoning?: string;
   /** Set when this reply failed or was cut short. Any text already received is
    *  kept — a partial answer is still worth showing, provided it is labelled. */
   error?: string;
@@ -80,6 +86,8 @@ interface ChatState {
   messages: ChatMessage[];
   /** Text arriving for the in-flight reply. Not yet committed to messages. */
   streamingText: string;
+  /** The model's working so far, for the panel above the reply. */
+  streamingReasoning: string;
   /** Sources for the in-flight reply. They arrive before the tokens do. */
   streamingSources: ChatSource[];
   /** Files made during the in-flight reply. Arrive after the tokens, since a
@@ -168,6 +176,7 @@ const newId = () =>
 export const useChatStore = create<ChatState>((set, get) => ({
   messages: [],
   streamingText: '',
+  streamingReasoning: '',
   streamingSources: [],
   streamingArtifacts: [],
   streamingNotices: [],
@@ -219,6 +228,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         },
       ],
       streamingText: '',
+      streamingReasoning: '',
       streamingSources: [],
       streamingAnsweredBy: null,
       isStreaming: true,
@@ -258,6 +268,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const seen = new Set<string>();
     let replyError: string | undefined;
     let answeredBy: ChatAttribution | null = null;
+    let reasoning_ = '';
 
     // A cold local model can take many seconds to load before its first token.
     // Left unexplained that silence reads as a hang, so it is named instead.
@@ -306,6 +317,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
             // this is safe to call on every token and the first one is being
             // synthesised while the model is still writing the third.
             if (speaking) useSpeechStore.getState().pushSpeech(text_);
+            break;
+
+          case 'reasoning':
+            // Deliberately not fed to `pushSpeech`. Speech reads the answer,
+            // and reading a model's working aloud is what this event exists
+            // to stop. It also never joins `text_`, so it cannot be committed
+            // to the transcript as something the model said.
+            reasoning_ += event.content;
+            set({ streamingReasoning: reasoning_ });
             break;
 
           case 'source': {
@@ -424,7 +444,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     // backend genuinely produced would be worse than showing it labelled.
     set((s) => ({
       messages:
-        text_ || replyError || artifacts.length || notices.length
+        text_ || replyError || artifacts.length || notices.length || reasoning_
           ? [
               ...s.messages,
               {
@@ -436,11 +456,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 notices,
                 timestamp: Date.now(),
                 answeredBy,
+                reasoning: reasoning_ || undefined,
                 error: replyError,
               },
             ]
           : s.messages,
       streamingText: '',
+      streamingReasoning: '',
       streamingSources: [],
       streamingArtifacts: [],
       streamingNotices: [],
@@ -479,6 +501,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set({
       isStreaming: false,
       streamingText: '',
+      streamingReasoning: '',
       streamingSources: [],
       streamingNotices: [],
       streamingAnsweredBy: null,
@@ -491,6 +514,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set({
       messages: [],
       streamingText: '',
+      streamingReasoning: '',
       streamingSources: [],
       streamingArtifacts: [],
       streamingNotices: [],
