@@ -86,7 +86,12 @@ class ChatRouter:
         block for a long time inside one `next()`, and while it does, the loop
         has to keep serving the endpoints that end the wait.
         """
+        from core.reasoning import ReasoningSplitter
         from core.streaming_events import StreamEvent, EventType
+        # One splitter per reply. Reusing one across replies would carry an
+        # unclosed <think> from a truncated answer into the next question, and
+        # that answer would vanish into the thinking panel.
+        splitter = ReasoningSplitter()
         try:
             yield StreamEvent.start().to_ipc() + "\n"
             async for item in iterate_in_threadpool(self.execution_engine.execute(
@@ -96,7 +101,10 @@ class ChatRouter:
                 if isinstance(item, StreamEvent):
                     yield item.to_ipc() + "\n"
                 else:
-                    yield StreamEvent.token(item).to_ipc() + "\n"
+                    for line in _token_events(splitter, item):
+                        yield line
+            for line in _flush_events(splitter):
+                yield line
             yield StreamEvent.status("complete").to_ipc() + "\n"
         except Exception as exc:
             yield StreamEvent.error(str(exc)).to_ipc() + "\n"
@@ -111,8 +119,10 @@ class ChatRouter:
         and leaving one of the two chat paths able to freeze the server is the
         kind of asymmetry that gets found by a user rather than by a test.
         """
+        from core.reasoning import ReasoningSplitter
         from core.streaming_events import StreamEvent, EventType
         import json
+        splitter = ReasoningSplitter()
         try:
             yield StreamEvent.start().to_ipc() + "\n"
             async for event in iterate_in_threadpool(
@@ -121,7 +131,8 @@ class ChatRouter:
                 if isinstance(event, dict):
                     etype = event.get("type")
                     if etype == "token":
-                        yield StreamEvent.token(event.get("content", "")).to_ipc() + "\n"
+                        for line in _token_events(splitter, event.get("content", "")):
+                            yield line
                     elif etype == "audio":
                         yield StreamEvent.source("audio", event.get("url")).to_ipc() + "\n"
                     elif etype == "error":
@@ -131,8 +142,36 @@ class ChatRouter:
                     elif etype == "done":
                         pass
                 elif isinstance(event, str):
-                    yield StreamEvent.token(event).to_ipc() + "\n"
+                    for line in _token_events(splitter, event):
+                        yield line
+            for line in _flush_events(splitter):
+                yield line
             yield StreamEvent.done().to_ipc() + "\n"
         except Exception as exc:
             yield StreamEvent.error(str(exc)).to_ipc() + "\n"
             yield StreamEvent.done().to_ipc() + "\n"
+
+
+def _token_events(splitter, text: str):
+    """Yield the NDJSON lines one model token becomes, thinking split out.
+
+    One helper, every caller. `docs/SPEECH.md` records what the alternative
+    costs: marker stripping lived in three copies, and the one that had been
+    missed was the one that spoke.
+    """
+    from core.reasoning import REASONING as _REASONING
+    from core.streaming_events import StreamEvent
+
+    for kind, chunk in splitter.feed(text):
+        event = StreamEvent.reasoning(chunk) if kind == _REASONING else StreamEvent.token(chunk)
+        yield event.to_ipc() + "\n"
+
+
+def _flush_events(splitter):
+    """Whatever the splitter still holds at end of stream. Never dropped."""
+    from core.reasoning import REASONING as _REASONING
+    from core.streaming_events import StreamEvent
+
+    for kind, chunk in splitter.flush():
+        event = StreamEvent.reasoning(chunk) if kind == _REASONING else StreamEvent.token(chunk)
+        yield event.to_ipc() + "\n"
