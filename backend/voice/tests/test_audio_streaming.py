@@ -61,7 +61,10 @@ async def _ready_manager(tmp_path, *, fail_pipeline: bool = False, pipeline_cls=
     config = KokoroConfig.load(cache_directory=str(tmp_path / "audio_cache"), default_voice="af_heart")
     pipeline = pipeline_cls(fail=fail_pipeline, sample_rate=config.sample_rate)
 
-    def factory(*, repo_id: str, lang_code: str, device):
+    # `**_` absorbs backend/onnx_variant: this double stands in for the
+    # pipeline, not for the factory's signature, and the provider is what is
+    # under test here.
+    def factory(*, repo_id: str, lang_code: str, device, **_):
         return pipeline
 
     provider = KokoroProvider(
