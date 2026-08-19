@@ -25,6 +25,10 @@ import type { ChatNotice } from '../../stores/chatStore';
 
 const DESTINATIONS: Record<string, { node: string; label: string }> = {
   knowledge: { node: 'knowledge', label: 'Open Sources' },
+  // A notice that names a switch the user can flip should be one click from
+  // the switch. Search being off is the first case: telling someone their
+  // answer is stale and leaving them to find the setting is half a disclosure.
+  settings: { node: 'settings', label: 'Open Settings' },
 };
 
 /** How a notice presents itself. Keyed on `kind`, which the backend sends.

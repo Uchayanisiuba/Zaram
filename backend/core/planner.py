@@ -224,7 +224,29 @@ class IntentType(Enum):
     MULTI_STEP = "multi_step"
     #: "Write that up as a proposal." Produces a file, generative tier.
     DOCUMENT = "document"
+    #: "Why does this function return None." Answered by `reasoning.generate`
+    #: like an ordinary question — this intent exists to select a *model*, not
+    #: a capability, which is the one thing no other intent here does.
+    CODE = "code"
     UNKNOWN = "unknown"
+
+
+#: Intent → the model specialisation that serves it best, or absent for the
+#: intents any general model answers.
+#:
+#: A **preference**, and the type says so: `specialisation` is compared against
+#: `ModelInfo.specialisation`, which `TASK_MARKERS` derives from the model's
+#: name. Nothing here is a requirement — a machine with no coding model still
+#: answers coding questions, with the general model, which is the correct
+#: outcome and not a degraded one.
+#:
+#: Modality is the opposite kind of thing and is deliberately not in this map.
+#: "Can this model accept an image" gates the candidate set in
+#: `ProviderManager.select_model_for_task`; keeping the two in one table is how
+#: they end up as one number.
+INTENT_SPECIALISATION: dict[IntentType, str] = {
+    IntentType.CODE: "code",
+}
 
 
 @dataclass
@@ -236,6 +258,15 @@ class IntentClassification:
     requires_search: bool = False
     requires_vision: bool = False
     requires_speech: bool = False
+    #: The question wanted live information and the policy refused it.
+    #:
+    #: Not the negation of `requires_search` — that is false for every ordinary
+    #: question too, and the difference between "did not need search" and
+    #: "needed it and was denied" is the whole point. `CLAUDE.md`: *disabled
+    #: capabilities are visible, not silent*. Without this the reply is answered
+    #: from the weights alone with nothing on screen saying so, which is the
+    #: most confidently wrong answer the product can give.
+    search_suppressed: bool = False
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
@@ -283,7 +314,24 @@ class IntentRouter:
     _SPEECH_KEYWORDS = {"speak", "say", "voice", "audio", "talk", "pronounce", "read aloud",
                         "out loud", "aloud"}
     _FILESYSTEM_KEYWORDS = {"file", "open", "read", "search", "find", "directory", "folder"}
-    _TOOL_KEYWORDS = {"git", "commit", "push", "code", "terminal", "run", "execute"}
+    #: "code" is deliberately absent, and its removal is the point.
+    #:
+    #: Tool intent is *acting on* a repository — committing, running, executing.
+    #: "code" names a subject, not an action, so it sent "is there a cleaner way
+    #: to write this code" to `tool.terminal`. Harmless while no coding intent
+    #: existed; actively wrong once one did, because the keyword path is what
+    #: runs when the embedder is unavailable — exactly the machine where a
+    #: coding question most needs to reach a coding model rather than a
+    #: terminal.
+    _TOOL_KEYWORDS = {"git", "commit", "push", "terminal", "run", "execute"}
+
+    #: Chosen for precision over reach, because this set only runs when
+    #: semantic routing is unavailable and a false positive here sends an
+    #: ordinary question to a coding fine-tune — the category error
+    #: `is_general_purpose` exists to prevent, arriving by another road.
+    #: Every word below is one that a non-coding question rarely contains.
+    _CODE_KEYWORDS = {"code", "function", "bug", "refactor", "debug", "syntax",
+                      "compile", "exception", "traceback", "stack trace"}
 
     #: Compiled word-boundary matchers, keyed by the keyword set itself.
     #:
@@ -363,6 +411,9 @@ class IntentRouter:
             and search_applies_to(_search_locality.get(), prompt)
         )
         if search_wanted and not search_required:
+            # Also carried on the classification, because a debug line is not a
+            # disclosure. This log stays for the developer; `search_suppressed`
+            # is what reaches the person who asked.
             logger.debug("Planner: search suppressed — web search is off by policy")
         signals.append(IntentSignal(
             name="search_required",
@@ -411,6 +462,16 @@ class IntentRouter:
             detail=f"Tool keywords found: {tool_hits}",
         ))
 
+        # Check for coding keywords
+        code_hits = self._matches(prompt_lower, self._CODE_KEYWORDS)
+        code_matched = bool(code_hits)
+        signals.append(IntentSignal(
+            name="code_keywords",
+            weight=0.4,
+            matched=code_matched,
+            detail=f"Coding keywords found: {code_hits}",
+        ))
+
         # Determine intent type based on signals
         if vision_matched:
             intent_type = IntentType.VISION
@@ -432,6 +493,18 @@ class IntentRouter:
             intent_type = IntentType.MULTI_STEP
             confidence = 0.80
             capabilities = ["knowledge.search", "reasoning.generate"]
+        elif code_matched:
+            # Below search, above conversation. A coding question that also
+            # wants current information needs the search more than it needs the
+            # specialist — the model can reason about code it is shown, and
+            # cannot reason about a release it has never heard of.
+            #
+            # Confidence is the lowest here on purpose: this branch exists only
+            # as the fallback for a machine with no embedder, and the exemplars
+            # are the path that should normally answer.
+            intent_type = IntentType.CODE
+            confidence = 0.60
+            capabilities = ["reasoning.generate"]
         else:
             intent_type = IntentType.CONVERSATION
             confidence = 0.90
@@ -444,6 +517,7 @@ class IntentRouter:
             requires_search=search_required,
             requires_vision=vision_matched,
             requires_speech=speech_matched,
+            search_suppressed=search_wanted and not search_required,
             metadata={
                 "signals": [s.__dict__ for s in signals],
                 "prompt_length": len(prompt),
@@ -461,6 +535,10 @@ class IntentRouter:
         "tool": ["tool.terminal"],
         "search": ["knowledge.search", "reasoning.generate"],
         "conversation": ["reasoning.generate"],
+        #: Same capability as conversation, on purpose. A coding question is
+        #: answered by generating text; what differs is which model generates
+        #: it, and that is decided by `INTENT_SPECIALISATION`, not here.
+        "code": ["reasoning.generate"],
     }
 
     def _classify_semantically(self, prompt: str) -> IntentClassification | None:
@@ -545,6 +623,7 @@ class IntentRouter:
             requires_search=requires_search,
             requires_vision=decision.intent == "vision",
             requires_speech=decision.intent == "speech",
+            search_suppressed=wants_search and not requires_search,
             metadata={
                 "router": "semantic",
                 # The legible half. CLAUDE.md: show routing decisions in plain
@@ -567,6 +646,7 @@ class IntentRouter:
             IntentType.FILESYSTEM: "filesystem.search",
             IntentType.TOOL: "tool.terminal",
             IntentType.MULTI_STEP: "knowledge.search",
+            IntentType.CODE: "reasoning.generate",
         }
         return mapping.get(intent, "reasoning.generate")
 

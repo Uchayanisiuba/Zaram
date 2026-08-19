@@ -23,10 +23,13 @@
  * `vram_bytes` keeps by returning `None` rather than `0`.
  *
  * **Why, honestly.** `chosenBy` says where the choice came from — this message,
- * Settings, or Zaram — because that is what is known. `CLAUDE.md`'s example
- * phrasing is "routed to qwen2.5-coder — coding task", and task classification
- * does not exist yet; rendering a task label would be an invented value, which
- * the UI principles forbid outright.
+ * Settings, the question itself, or Zaram's usual pick. `CLAUDE.md`'s example
+ * phrasing is "routed to qwen2.5-coder — coding task"; the backend now sends
+ * `task` when the message was classified against the intent exemplars and the
+ * intent asked for a model specialisation that is installed. It stays a label
+ * for *that* decision only — an ordinary message still reads "Zaram's pick",
+ * because claiming every reply was routed would be the invented value this
+ * note was originally written to forbid.
  */
 import type { ChatAttribution } from '@/stores/chatStore';
 
@@ -36,6 +39,7 @@ import type { ChatAttribution } from '@/stores/chatStore';
 const CHOSEN_BY: Record<string, string> = {
   request: 'asked for on this message',
   settings: 'your choice in Settings',
+  task: 'matched to this question',
   zaram: "Zaram's pick",
 };
 
