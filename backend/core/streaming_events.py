@@ -21,6 +21,15 @@ from core.contracts import ExecutionToken
 class EventType(str, Enum):
     START = "start"
     TOKEN = "token"
+    #: The model's working, not its answer.
+    #:
+    #: A separate event rather than a flag on TOKEN because the two have
+    #: different destinations: TOKEN accumulates into `streamingText`, which is
+    #: what gets committed to the transcript and what `pushSpeech` reads. Before
+    #: this existed, a reasoning model's `<think>` block *was* the answer as far
+    #: as this backend was concerned — rendered as the reply and read aloud by
+    #: Kokoro. Keeping it off that channel is the fix; showing it is the feature.
+    REASONING = "reasoning"
     STATUS = "status"
     SOURCE = "source"
     ERROR = "error"
@@ -95,6 +104,16 @@ class StreamEvent:
     def token(content: str, seq: int = 0, correlation_id: str = "") -> StreamEvent:
         return StreamEvent(
             type=EventType.TOKEN,
+            data={"content": content},
+            seq=seq,
+            correlation_id=correlation_id,
+        )
+
+    @staticmethod
+    def reasoning(content: str, seq: int = 0, correlation_id: str = "") -> StreamEvent:
+        """One piece of the model's working, tags already removed."""
+        return StreamEvent(
+            type=EventType.REASONING,
             data={"content": content},
             seq=seq,
             correlation_id=correlation_id,
@@ -222,12 +241,16 @@ class StreamEvent:
         confident false claim on the one thing the product asks to be trusted
         for; the interface renders nothing for a ``None`` instead.
 
-        `chosen_by` is `request`, `settings` or `zaram`, and it is the honest
-        version of `CLAUDE.md`'s "routed to qwen2.5-coder — coding task". Task
-        classification does not exist yet, so the reason available is *where
-        the choice came from*, and inventing a task label would be a rendered
-        value nobody measured. When routing gains task exemplars this field
-        gains their answer; until then it says the true thing.
+        `chosen_by` is `request`, `settings`, `task` or `zaram` — the honest
+        version of `CLAUDE.md`'s "routed to qwen2.5-coder — coding task".
+
+        `task` is the one that was promised here and is now real: the message
+        was classified against the intent exemplars, the intent named a model
+        specialisation, and the provider layer had one installed. It is
+        deliberately the narrowest of the four. Nobody having chosen is still
+        `zaram`, because "Zaram picked its usual model" and "Zaram picked this
+        model *for this question*" are different claims and only the second is
+        a routing decision.
         """
         return StreamEvent(
             type=EventType.ANSWERING,
