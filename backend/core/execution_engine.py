@@ -372,6 +372,46 @@ class ExecutionEngine:
                 step.input_data.setdefault("session_id", session_id)
                 step.input_data["context_resolved"] = context_resolved
 
+            # **The seam web search was falling through.** The planner puts a
+            # `knowledge.search` step in front of this one and expresses the
+            # link as `depends_on=[0]` — but nothing acted on that. The search
+            # ran, left the machine, was recorded in the egress log, and its
+            # output sat in `step_results` while this step was dispatched with
+            # `input_data["prompt"]` still holding the bare question.
+            #
+            # The result was the worst shape of failure available: the user
+            # paid the latency and the egress for a search whose answer was
+            # then discarded, and the model replied from its training data with
+            # nothing anywhere indicating that was what happened. Every layer
+            # reported success, which is why it survived several attempts to
+            # fix it — the search layer was the one part working.
+            #
+            # Mirrors the document injection above deliberately. Both exist
+            # because the planner cannot know a later step's input at the time
+            # it builds the plan, and both belong at the one point that does.
+            if step.capability_id == "reasoning.generate":
+                searched = step_results.get("knowledge.search")
+                if searched:
+                    from core.search_context import result_count, search_prompt
+
+                    step.input_data = dict(step.input_data or {})
+                    original = step.input_data.get("prompt", "") or prompt
+                    step.input_data["prompt"] = search_prompt(original, searched)
+
+                    # A search that ran and found nothing is indistinguishable
+                    # from one that never ran, and the answer that follows is
+                    # from the weights in both cases. `None` is not zero here:
+                    # it means the output could not be read, which is not a
+                    # statement about the web and must not be reported as one.
+                    if result_count(searched) == 0:
+                        yield StreamEvent.notice(
+                            "Web search ran but returned no results, so this "
+                            "answer comes only from what the model already "
+                            "knows.",
+                            kind="search",
+                            action="settings",
+                        )
+
             try:
                 for token in self._dispatcher.execute_step(step, model, system_prompt):
                     step_output += token

@@ -96,7 +96,7 @@ class TestClassifier:
 
 class TestPromptFormatting:
     def test_format_search_results_creates_structured_block(self):
-        from main import _format_search_results
+        from core.search_context import format_search_results as _format_search_results
         search_result = {
             "query": "test query",
             "total_results": 2,
@@ -125,7 +125,7 @@ class TestPromptFormatting:
         assert "User Question:" in formatted
 
     def test_format_empty_results(self):
-        from main import _format_search_results
+        from core.search_context import format_search_results as _format_search_results
         formatted = _format_search_results("test query", {"total_results": 0, "results": []})
         assert formatted == "test query"
 
