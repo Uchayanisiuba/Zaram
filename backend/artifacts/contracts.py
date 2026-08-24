@@ -32,7 +32,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 
 
 class ArtifactKind(str, Enum):
@@ -135,6 +135,100 @@ class Claim:
             "source_revision": self.source_revision,
             "verified_at": self.verified_at,
         }
+
+
+# --------------------------------------------------------------------------- #
+# The document's content model.
+#
+# `render_document` used to take `Sequence[str | Claim]` and wrap **every**
+# member in `<p>`, escaping it on the way. There was no way to express a
+# heading, a list or a table, so a model asked for a proposal produced markdown
+# that came out as literal text: a paragraph reading `## Scope of Work`, another
+# reading `- Discovery`, and a table rendered as one mangled block of pipes.
+#
+# That was the whole reason generated documents read as basic. The page design
+# was never the problem — the A4 page box, the serif measure, the masthead and
+# the table rules were all already here. **The vocabulary to reach them was
+# missing at the one end that writes.**
+#
+# It was missing only at that end. `export/_reader.py` already parses
+# `h1, h2, h3, p, li` plus `table/caption/tr/td/th`, and `export/docx.py`
+# already maps headings to Word heading styles and `li` to "List Bullet". The
+# readers were built for a document that the writer could not produce, which is
+# this repository's signature shape arriving from the far side.
+#
+# So these types are deliberately **not a new format**. Each one names markup
+# the exporters already understand, and nothing here invents a tag they would
+# have to learn.
+# --------------------------------------------------------------------------- #
+
+
+@dataclass(frozen=True)
+class Heading:
+    """A section heading.
+
+    ``level`` is 2 or 3. There is no level 1: `<h1>` is the document title, set
+    once by the masthead, and a second one would give the .docx two competing
+    Title styles and the PDF outline two roots.
+    """
+
+    text: str
+    level: int = 2
+
+    def __post_init__(self) -> None:
+        if self.level not in (2, 3):
+            raise ValueError("heading level must be 2 or 3; h1 is the title")
+
+
+@dataclass(frozen=True)
+class BulletList:
+    """A list. ``ordered`` picks `<ol>` over `<ul>`.
+
+    Items may be Claims, so a cited fact can sit in a list rather than being
+    forced into prose to keep its anchor — which is what the old model made a
+    caller do.
+    """
+
+    items: Sequence[Any] = ()
+    ordered: bool = False
+
+
+@dataclass(frozen=True)
+class TableBlock:
+    """A table inside a prose document.
+
+    Distinct from an `ArtifactKind.SPREADSHEET`, which *is* a table. This is a
+    table **in** a document — a fee schedule inside a proposal, a milestone list
+    inside a statement of work.
+
+    ``numeric_columns`` carries the `.num` class the stylesheet already defines
+    for right-aligned tabular figures. It is passed by the caller rather than
+    guessed from cell contents, for the reason `_TABLE_STYLE` records: a
+    heuristic reading digits would right-align a reference number.
+    """
+
+    header: Sequence[str] = ()
+    rows: Sequence[Sequence[str]] = ()
+    caption: str = ""
+    numeric_columns: Sequence[int] = ()
+
+
+@dataclass(frozen=True)
+class PageBreak:
+    """Start the next block on a new page.
+
+    Carries no content. Present because a covering letter and the document it
+    covers are one file, and the break between them is a decision the author
+    makes rather than a consequence of how the text happened to flow.
+    """
+
+
+#: Everything `render_document` accepts as a member of ``blocks``.
+#:
+#: `str` and `Claim` stay first and stay supported unchanged: every existing
+#: caller keeps working, which is what let this land without touching the
+#: invoice, deck or spreadsheet paths.
+DocumentBlock = Any
 
 
 @dataclass

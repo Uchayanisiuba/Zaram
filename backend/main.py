@@ -2401,11 +2401,112 @@ class GenerateSlide(BaseModel):
     bullets: list[str] = []
 
 
+def _document_block(block: Any, by_id: dict[str, Any]) -> Any:
+    """One request block as something `render_document` understands.
+
+    The vocabulary is deliberately the one `export/_reader.py` already parses —
+    `h2`/`h3`, `li`, `table` — so a structured document exports to .docx and
+    .pptx through the readers that were built for it and were, until now, being
+    fed nothing but paragraphs.
+
+    Three shapes, and the order matters:
+
+    * a **string** is a paragraph, unchanged, and is the common case;
+    * an object carrying `claim_id` is a cited sentence, unchanged;
+    * an object carrying `type` is structure.
+
+    An unrecognised `type` is a 400 rather than a paragraph. Silently rendering
+    a block the caller meant as a table into a line of prose produces a
+    document that is wrong in a way its author cannot see — which is the
+    failure rule 9 exists to prevent, arriving through the request body instead
+    of through the model.
+    """
+    from artifacts.contracts import BulletList, Heading, PageBreak, TableBlock
+
+    if not isinstance(block, dict):
+        return str(block)
+
+    kind = block.get("type")
+    if kind is None:
+        claim_id = block.get("claim_id") or block.get("id")
+        if claim_id not in by_id:
+            raise HTTPException(
+                status_code=400,
+                detail=f"block cites claim {claim_id!r}, which is not in claims",
+            )
+        return by_id[claim_id]
+
+    if kind in ("paragraph", "p", "text"):
+        return str(block.get("text", ""))
+
+    if kind in ("heading", "h2", "h3"):
+        level = block.get("level", 3 if kind == "h3" else 2)
+        try:
+            return Heading(text=str(block.get("text", "")), level=int(level))
+        except (ValueError, TypeError) as exc:
+            # `Heading` refuses level 1 by construction: h1 is the title. The
+            # message it raises is written for a person and goes back unchanged.
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    if kind in ("list", "ul", "ol"):
+        items = [
+            by_id[i["claim_id"]]
+            if isinstance(i, dict) and i.get("claim_id") in by_id
+            else str(i.get("text", "") if isinstance(i, dict) else i)
+            for i in block.get("items", [])
+        ]
+        return BulletList(items=items, ordered=bool(block.get("ordered", kind == "ol")))
+
+    if kind == "table":
+        return TableBlock(
+            header=[str(h) for h in block.get("header", [])],
+            rows=[[str(c) for c in row] for row in block.get("rows", [])],
+            caption=str(block.get("caption", "")),
+            numeric_columns=[int(i) for i in block.get("numeric_columns", [])],
+        )
+
+    if kind in ("pagebreak", "page_break"):
+        return PageBreak()
+
+    raise HTTPException(
+        status_code=400,
+        detail=(
+            f"unknown block type {kind!r}. Known types: paragraph, heading, "
+            "list, table, pagebreak"
+        ),
+    )
+
+
+class GenerateMeta(BaseModel):
+    """One label/value pair in the scan-first block under the masthead.
+
+    A list of pairs rather than named fields, for the reason `_meta_block`
+    records: the fields differ by document and by country, and a schema written
+    here would be wrong somewhere.
+    """
+
+    label: str = ""
+    value: str = ""
+
+
 class GenerateBody(BaseModel):
     title: str
-    #: Prose. A string is a plain paragraph; an object with a matching claim id
-    #: is a sentence traceable to a fact and gets an anchor in the output.
+    #: The document's content, in order.
+    #:
+    #: A string is a plain paragraph. An object with a matching claim id is a
+    #: sentence traceable to a fact and gets an anchor. An object with a
+    #: `type` is structure — see `_document_block` for the vocabulary.
     blocks: list[Any] = []
+    #: Label/value pairs under the masthead: reference, dates, parties.
+    meta: list[GenerateMeta] = []
+    #: What kind of document this is, set small and uppercase opposite the
+    #: letterhead: "Proposal", "Report", "Statement of Work".
+    kind_label: str = ""
+    #: Print the Sources section into the file itself. Off by default, because
+    #: a document is written for its recipient and a client has no use for
+    #: `memory:55b6` at the foot of it. On for the genres where citation is
+    #: part of the form.
+    include_provenance: bool = False
     kind: str = "document"
     fmt: str | None = None
     filename: str = ""
@@ -2587,21 +2688,21 @@ async def generate_artifact(body: GenerateBody):
             # rejected rather than silently written as plain prose — an
             # unanchored sentence that was meant to be cited is the failure the
             # whole provenance chain exists to prevent.
-            blocks: list[Any] = []
-            for block in body.blocks:
-                if isinstance(block, dict):
-                    claim_id = block.get("claim_id") or block.get("id")
-                    if claim_id not in by_id:
-                        raise HTTPException(
-                            status_code=400,
-                            detail=f"block cites claim {claim_id!r}, which is not in claims",
-                        )
-                    blocks.append(by_id[claim_id])
-                else:
-                    blocks.append(str(block))
+            blocks: list[Any] = [_document_block(b, by_id) for b in body.blocks]
 
             artifact = artifact_service.create_document(
-                blocks=blocks, kind=kind, fmt=body.fmt, **common
+                blocks=blocks,
+                kind=kind,
+                fmt=body.fmt,
+                letterhead=(
+                    Letterhead(name=body.from_name, lines=body.from_lines)
+                    if (body.from_name or body.from_lines)
+                    else None
+                ),
+                meta=[(m.label, m.value) for m in body.meta if m.label and m.value],
+                kind_label=body.kind_label,
+                include_provenance=body.include_provenance,
+                **common,
             )
     except HTTPException:
         raise

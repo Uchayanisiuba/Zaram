@@ -29,7 +29,14 @@ from __future__ import annotations
 import html as html_escape
 from typing import Iterable, List, Sequence
 
-from .contracts import ArtifactSource, Claim
+from .contracts import (
+    ArtifactSource,
+    BulletList,
+    Claim,
+    Heading,
+    PageBreak,
+    TableBlock,
+)
 from .invoice import LineItem, Totals, format_money
 from .letterhead import Letterhead
 
@@ -58,6 +65,68 @@ def claim_span(claim: Claim) -> str:
         f'<span {CLAIM_ATTR}="{_esc(claim.id)}" '
         f'{SOURCE_ATTR}="{_esc(claim.source_id)}">{_esc(claim.excerpt)}</span>'
     )
+
+
+def _list_item(item: "str | Claim") -> str:
+    """One `<li>`, keeping a Claim's anchor intact inside a list."""
+    return f"<li>{claim_span(item) if isinstance(item, Claim) else _esc(item)}</li>"
+
+
+def _table_block(table: TableBlock) -> str:
+    """A table in prose, using the rules `_TABLE_STYLE` already defines.
+
+    `<thead>` is emitted only when there is a header, because the stylesheet's
+    repeating-header rule and the header underline both hang off it, and an
+    empty one would draw a rule above nothing.
+    """
+    num = set(table.numeric_columns)
+
+    def cell(tag: str, text: str, idx: int) -> str:
+        cls = ' class="num"' if idx in num else ""
+        return f"<{tag}{cls}>{_esc(text)}</{tag}>"
+
+    parts = ["<table>"]
+    if table.caption:
+        parts.append(f"<caption>{_esc(table.caption)}</caption>")
+    if table.header:
+        head = "".join(cell("th", str(h), i) for i, h in enumerate(table.header))
+        parts.append(f"<thead><tr>{head}</tr></thead>")
+    rows = "".join(
+        "<tr>" + "".join(cell("td", str(c), i) for i, c in enumerate(row)) + "</tr>"
+        for row in table.rows
+    )
+    parts.append(f"<tbody>{rows}</tbody></table>")
+    return "".join(parts)
+
+
+def render_block(block: object) -> str:
+    """One member of ``blocks`` as HTML.
+
+    The `str` and `Claim` cases are first and are unchanged — they are the
+    common path and every caller that predates the structured types still takes
+    exactly the route it always did.
+
+    An unrecognised object falls through to `str()` and is escaped, which is
+    what the old code did to everything. That degradation is deliberate: a
+    document that renders an unexpected block as a visible paragraph is
+    correctable by the person reading it, where one that drops it silently is
+    a document with a hole the author cannot see.
+    """
+    if isinstance(block, Claim):
+        return f"<p>{claim_span(block)}</p>"
+    if isinstance(block, str):
+        return f"<p>{_esc(block)}</p>"
+    if isinstance(block, Heading):
+        tag = f"h{block.level}"
+        return f"<{tag}>{_esc(block.text)}</{tag}>"
+    if isinstance(block, BulletList):
+        tag = "ol" if block.ordered else "ul"
+        return f"<{tag}>{''.join(_list_item(i) for i in block.items)}</{tag}>"
+    if isinstance(block, TableBlock):
+        return _table_block(block)
+    if isinstance(block, PageBreak):
+        return '<div class="pagebreak"></div>'
+    return f"<p>{_esc(str(block))}</p>"
 
 
 def render_document(
@@ -107,19 +176,14 @@ def render_document(
     WeasyPrint consumes — an external stylesheet would make the two diverge, and
     would be a remote asset in a product that forbids them.
     """
-    body: List[str] = []
-    for block in blocks:
-        if isinstance(block, Claim):
-            body.append(f"<p>{claim_span(block)}</p>")
-        else:
-            body.append(f"<p>{_esc(block)}</p>")
+    body = [render_block(block) for block in blocks]
 
     return "\n".join(
         [
             "<!DOCTYPE html>",
             '<html lang="en"><head><meta charset="utf-8">',
             f"<title>{_esc(title)}</title>",
-            f"<style>{_STYLE}</style>",
+            f"<style>{_STYLE}{_TABLE_STYLE}</style>",
             "</head><body>",
             # One wrapper so the screen preview can draw a sheet of paper around
             # the content while print leaves the page box to do it.
@@ -369,7 +433,7 @@ def render_invoice(
             "<!DOCTYPE html>",
             '<html lang="en"><head><meta charset="utf-8">',
             f"<title>{_esc(title)}</title>",
-            f"<style>{_STYLE}</style>",
+            f"<style>{_STYLE}{_TABLE_STYLE}</style>",
             "</head><body>",
             '<div class="sheet">',
             _masthead(title, letterhead, "Invoice"),
@@ -597,7 +661,19 @@ _STYLE = (
     "h1,h2,h3{break-after:avoid;page-break-after:avoid}"
     f"h2{{font:600 9pt/1.3 {_SANS};text-transform:uppercase;letter-spacing:.12em;"
     "color:var(--muted);margin:26px 0 8px}"
+    f"h3{{font:600 11.5pt/1.35 {_SERIF};color:var(--ink);margin:18px 0 6px}}"
     "p{margin:0 0 .85em;orphans:3;widows:3}"
+    # Lists. `padding-left` in em so the indent tracks the type size, and
+    # `break-inside:avoid` on the item so a two-line bullet is not split
+    # across a page — the same rule `_TABLE_STYLE` applies to a table row,
+    # and for the same reason.
+    "ul,ol{margin:0 0 .95em;padding-left:1.35em}"
+    "li{margin-bottom:.35em;break-inside:avoid;page-break-inside:avoid}"
+    "li>ul,li>ol{margin:.35em 0 0}"
+    # An author-decided page break. Zero-height so it adds no space when
+    # the preview scrolls continuously, and inert on screen where there
+    # are no pages to break.
+    "@media print{.pagebreak{break-before:page;page-break-before:always;height:0}}"
     # The metadata block: reference, dates, parties. Scanned, not read, so it is
     # set in the sans face and in columns rather than as prose.
     f".meta{{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));"

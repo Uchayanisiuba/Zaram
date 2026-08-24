@@ -89,10 +89,35 @@ class ArtifactService:
         conversation_title: str = "",
         sources: Sequence[ArtifactSource] = (),
         claims: Sequence[Claim] = (),
+        #: The user's branding, and the two blocks that sit under it.
+        #:
+        #: `render_document` has accepted all three since the letterhead work
+        #: landed, and this — the only caller that makes a prose document —
+        #: passed none of them. So every proposal, report and letter Zaram
+        #: generated rendered `<header class="masthead"><div></div></header>`:
+        #: the masthead was there, correctly styled, and empty, while the
+        #: invoice path three methods down passed a letterhead and looked like
+        #: a real document. The capability was reachable from one caller out of
+        #: two, which is why it read as a design gap rather than as a bug.
+        letterhead: Optional[Letterhead] = None,
+        meta: Sequence[tuple[str, str]] = (),
+        kind_label: str = "",
+        #: Print the Sources section into the file. Off by default, and the
+        #: default is deliberate — see `render_document`. On for the genres
+        #: where citation is part of the form: a report, a research brief, a
+        #: proposal that argues from evidence.
+        include_provenance: bool = False,
     ) -> Artifact:
         """Prose with claims in it. The common case."""
         html = render_document(
-            title=title, blocks=list(blocks), sources=sources, claims=claims
+            title=title,
+            blocks=list(blocks),
+            sources=sources,
+            claims=claims,
+            letterhead=letterhead,
+            meta=meta,
+            kind_label=kind_label,
+            include_provenance=include_provenance,
         )
         return self._persist(
             html=html,
