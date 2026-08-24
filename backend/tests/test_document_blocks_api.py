@@ -122,3 +122,42 @@ class TestRefusals:
             json={"title": "P", "kind": "document", "blocks": [{"claim_id": "nope"}]},
         )
         assert response.status_code == 400
+
+
+class TestMarkdownThroughTheWire:
+    """The form a model actually produces, through the real route."""
+
+    def test_markdown_becomes_a_structured_document(self, client):
+        html = _html(
+            client,
+            title="Proposal",
+            markdown=(
+                "# Proposal\n\n## Scope\n\nA **three-phase** rollout.\n\n"
+                "- Discovery\n- Build\n\n| Phase | Amount |\n|---|---|\n"
+                "| Build | 1,020,000 |"
+            ),
+        )
+        assert "<h2>Scope</h2>" in html
+        assert "<strong>three-phase</strong>" in html
+        assert "<ul><li>Discovery</li><li>Build</li></ul>" in html
+        assert "<th>Phase</th>" in html
+        assert "<h2>Proposal</h2>" not in html
+
+    def test_raw_html_in_markdown_cannot_reach_the_stored_document(self, client):
+        html = _html(client, markdown="Hello <script>alert(1)</script>")
+        assert "<script>" not in html
+
+    def test_sending_both_markdown_and_blocks_is_refused(self, client):
+        # A caller that sent both had two intentions, and picking one by
+        # precedence silently discards the other.
+        response = client.post(
+            "/artifacts/generate",
+            json={
+                "title": "P",
+                "kind": "document",
+                "markdown": "## A",
+                "blocks": ["B"],
+            },
+        )
+        assert response.status_code == 400
+        assert "not both" in response.text

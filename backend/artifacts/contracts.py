@@ -164,6 +164,35 @@ class Claim:
 
 
 @dataclass(frozen=True)
+class RichText:
+    """Inline HTML that has already been made safe, and is not escaped again.
+
+    Every other piece of text in a document goes through `_esc`. This one does
+    not, so the *only* thing permitted to construct it is a converter that
+    guarantees two properties, and `markdown_blocks.py` is currently the only
+    one:
+
+    * text content is escaped;
+    * the tag set is exactly `strong`, `em`, `code` and `br` — the inline
+      vocabulary `export/_reader.py` parses, and nothing else.
+
+    That second bound is the load-bearing one and it is narrower than "safe
+    HTML". A tag the readers do not know is not a security problem, it is a
+    *silent* problem: it survives into the HTML, looks correct in the preview,
+    and vanishes on export to .docx with nothing reporting it. Restricting the
+    set to what the readers already handle is what makes the preview and the
+    exported file agree.
+
+    `img` is dropped rather than passed through, and its alt text kept. A
+    markdown image points at a URL, and a document that fetches one is a remote
+    asset — the class `check-no-remote-assets.mjs` exists to keep out, arriving
+    inside a data file where that check cannot see it.
+    """
+
+    html: str
+
+
+@dataclass(frozen=True)
 class Heading:
     """A section heading.
 

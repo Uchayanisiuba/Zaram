@@ -2497,6 +2497,14 @@ class GenerateBody(BaseModel):
     #: sentence traceable to a fact and gets an anchor. An object with a
     #: `type` is structure — see `_document_block` for the vocabulary.
     blocks: list[Any] = []
+    #: The document body as markdown, which is what a model writes when asked
+    #: for a proposal. Converted to the same blocks `blocks` carries, so this
+    #: is a second *input* form and not a second document model.
+    #:
+    #: Mutually exclusive with `blocks`: supplying both is refused rather than
+    #: resolved by precedence, because a caller that sent both had two
+    #: intentions and picking one silently discards the other.
+    markdown: str = ""
     #: Label/value pairs under the masthead: reference, dates, parties.
     meta: list[GenerateMeta] = []
     #: What kind of document this is, set small and uppercase opposite the
@@ -2688,7 +2696,23 @@ async def generate_artifact(body: GenerateBody):
             # rejected rather than silently written as plain prose — an
             # unanchored sentence that was meant to be cited is the failure the
             # whole provenance chain exists to prevent.
-            blocks: list[Any] = [_document_block(b, by_id) for b in body.blocks]
+            if body.markdown and body.blocks:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "send either `markdown` or `blocks`, not both — they "
+                        "are two ways of saying the same thing"
+                    ),
+                )
+
+            if body.markdown:
+                from artifacts.markdown_blocks import blocks_from_markdown
+
+                blocks: list[Any] = blocks_from_markdown(
+                    body.markdown, title=body.title
+                )
+            else:
+                blocks = [_document_block(b, by_id) for b in body.blocks]
 
             artifact = artifact_service.create_document(
                 blocks=blocks,

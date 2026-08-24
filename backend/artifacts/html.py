@@ -35,6 +35,7 @@ from .contracts import (
     Claim,
     Heading,
     PageBreak,
+    RichText,
     TableBlock,
 )
 from .invoice import LineItem, Totals, format_money
@@ -47,6 +48,18 @@ SOURCE_ATTR = "data-zaram-source"
 
 def _esc(text: str) -> str:
     return html_escape.escape(text, quote=True)
+
+
+def _text(value: object) -> str:
+    """Text for the page: escaped, unless it is already-safe inline HTML.
+
+    The `RichText` branch is the only place in this module where a string
+    reaches the output without `_esc`, which is why that type documents its
+    two guarantees and why only `markdown_blocks` constructs it.
+    """
+    if isinstance(value, RichText):
+        return value.html
+    return _esc(str(value))
 
 
 def claim_entry_id(claim_id: str) -> str:
@@ -69,7 +82,7 @@ def claim_span(claim: Claim) -> str:
 
 def _list_item(item: "str | Claim") -> str:
     """One `<li>`, keeping a Claim's anchor intact inside a list."""
-    return f"<li>{claim_span(item) if isinstance(item, Claim) else _esc(item)}</li>"
+    return f"<li>{claim_span(item) if isinstance(item, Claim) else _text(item)}</li>"
 
 
 def _table_block(table: TableBlock) -> str:
@@ -81,18 +94,18 @@ def _table_block(table: TableBlock) -> str:
     """
     num = set(table.numeric_columns)
 
-    def cell(tag: str, text: str, idx: int) -> str:
+    def cell(tag: str, text: object, idx: int) -> str:
         cls = ' class="num"' if idx in num else ""
-        return f"<{tag}{cls}>{_esc(text)}</{tag}>"
+        return f"<{tag}{cls}>{_text(text)}</{tag}>"
 
     parts = ["<table>"]
     if table.caption:
         parts.append(f"<caption>{_esc(table.caption)}</caption>")
     if table.header:
-        head = "".join(cell("th", str(h), i) for i, h in enumerate(table.header))
+        head = "".join(cell("th", h, i) for i, h in enumerate(table.header))
         parts.append(f"<thead><tr>{head}</tr></thead>")
     rows = "".join(
-        "<tr>" + "".join(cell("td", str(c), i) for i, c in enumerate(row)) + "</tr>"
+        "<tr>" + "".join(cell("td", c, i) for i, c in enumerate(row)) + "</tr>"
         for row in table.rows
     )
     parts.append(f"<tbody>{rows}</tbody></table>")
@@ -114,11 +127,11 @@ def render_block(block: object) -> str:
     """
     if isinstance(block, Claim):
         return f"<p>{claim_span(block)}</p>"
-    if isinstance(block, str):
-        return f"<p>{_esc(block)}</p>"
+    if isinstance(block, (str, RichText)):
+        return f"<p>{_text(block)}</p>"
     if isinstance(block, Heading):
         tag = f"h{block.level}"
-        return f"<{tag}>{_esc(block.text)}</{tag}>"
+        return f"<{tag}>{_text(block.text)}</{tag}>"
     if isinstance(block, BulletList):
         tag = "ol" if block.ordered else "ul"
         return f"<{tag}>{''.join(_list_item(i) for i in block.items)}</{tag}>"
