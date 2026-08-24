@@ -142,3 +142,57 @@ class TestHeadingDepth:
         styles = [p.style.name for p in _word(html).paragraphs if p.text.strip()]
         assert "Heading 2" in styles
         assert "Heading 3" in styles
+
+
+class TestSpannedCellsLandInTheRightColumn:
+    """`colspan` decides which column later cells fall into.
+
+    Ignoring it does not lose a cell — it shifts every later cell in the row
+    leftwards. On an invoice that was visible and wrong in the way that matters:
+    the markup is `<td colspan="3">Total due</td><td class="num">NGN
+    340,000.00</td>`, so the total landed in the **Qty** column, and a client
+    opening the .docx saw the amount they owe sitting under a quantity heading.
+    """
+
+    def _invoice_rows(self):
+        items = [
+            LineItem(
+                description="Design days",
+                quantity=Decimal("4"),
+                unit_price=Decimal("85000"),
+            )
+        ]
+        html = render_invoice(
+            title="Invoice INV-014",
+            items=items,
+            totals=total_of(items),
+            currency="NGN",
+            bill_to=["Northwind Studios"],
+        )
+        return _cells(_word(html).tables[0])
+
+    def test_the_total_sits_under_the_amount_column(self):
+        rows = self._invoice_rows()
+        header = rows[0]
+        amount_column = header.index("Amount")
+        total_row = next(r for r in rows if r[0] == "Total due")
+        assert "340,000" in total_row[amount_column]
+
+    def test_the_total_is_not_under_the_quantity_column(self):
+        rows = self._invoice_rows()
+        quantity_column = rows[0].index("Qty")
+        total_row = next(r for r in rows if r[0] == "Total due")
+        assert total_row[quantity_column] == ""
+
+    def test_every_row_is_the_width_of_the_header(self):
+        rows = self._invoice_rows()
+        assert {len(row) for row in rows} == {len(rows[0])}
+
+    def test_a_malformed_colspan_does_not_fail_the_export(self):
+        # One column is the value that changes nothing.
+        from artifacts.export._reader import read
+
+        table = read(
+            "<table><tr><td colspan='oops'>A</td><td>B</td></tr></table>"
+        ).tables[0]
+        assert table.rows[0] == ["A", "B"]
