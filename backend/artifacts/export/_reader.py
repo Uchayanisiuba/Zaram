@@ -73,6 +73,20 @@ class Table:
     caption: str = ""
     header: List[str] = field(default_factory=list)
     rows: List[List[str]] = field(default_factory=list)
+    #: How many blocks had been read when this table opened.
+    #:
+    #: `blocks` and `tables` are two flat lists, so on their own they say what
+    #: a document contains and not what order it is in. The spreadsheet
+    #: exporters do not care — a .xlsx *is* the table. A prose exporter does:
+    #: without this, a fee table can only be written before or after the whole
+    #: body, never where the author put it.
+    #:
+    #: Recorded as a position rather than by interleaving a placeholder into
+    #: `blocks`, because every existing consumer iterates `body_blocks()` and
+    #: expects only `h1, h2, h3, p, li`. A new tag in that stream would have
+    #: each of them render something unintended, which is a wide change to make
+    #: for a narrow need.
+    after_block: int = 0
 
 
 @dataclass
@@ -133,7 +147,7 @@ class _Reader(HTMLParser):
             return
 
         if tag == "table":
-            self._table = Table()
+            self._table = Table(after_block=len(self.doc.blocks))
             return
         if tag == "caption" and self._table is not None:
             self._cell = []

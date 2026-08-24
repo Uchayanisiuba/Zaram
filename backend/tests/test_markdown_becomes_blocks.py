@@ -190,3 +190,47 @@ class TestItReachesThePage:
         html = render_document(title="P", blocks=blocks_from_markdown("a **b**"))
         runs = [r for b in read_document(html).body_blocks() for r in b.runs]
         assert any(r.bold for r in runs), runs
+
+
+class TestModelsThatFenceTheirOutput:
+    """Found by running a real model, which is why the class exists.
+
+    Asked to "output only the Markdown document", `qwen2.5-coder:14b` returned
+    the whole statement of work wrapped in ```markdown. Every heading, list and
+    table then parsed as *the contents of one code block* — the document
+    collapsed into a single monospace paragraph, a worse version of the failure
+    this module was written to fix.
+
+    No hand-written test markdown would have produced that. gemma4:12b does not
+    do it; the coder model does it every time. "All local models" is not one
+    behaviour, and the adapter has to absorb the difference.
+    """
+
+    def test_a_whole_document_in_a_markdown_fence_is_unwrapped(self):
+        blocks = blocks_from_markdown(
+            "```markdown\n# Title\n\n## Scope\n\n- a\n- b\n```"
+        )
+        assert _kinds(blocks) == ["Heading", "Heading", "BulletList"]
+
+    def test_an_unlabelled_fence_around_the_whole_document_is_unwrapped(self):
+        # A model that fences its whole reply often labels it with nothing.
+        blocks = blocks_from_markdown("```\n## Scope\n\n- a\n```")
+        assert _kinds(blocks) == ["Heading", "BulletList"]
+
+    def test_a_code_sample_inside_a_document_stays_code(self):
+        # The bound is narrow on purpose: this unwraps only when the fence *is*
+        # the document.
+        blocks = blocks_from_markdown("Intro.\n\n```python\nx = 1\n```")
+        assert len(blocks) == 2
+        assert "<code>" in blocks[1].html
+
+    def test_a_lone_code_sample_in_a_real_language_stays_code(self):
+        blocks = blocks_from_markdown("```python\nx = 1\n```")
+        assert "<code>" in blocks[0].html
+        assert "x = 1" in blocks[0].html
+
+    def test_a_fenced_table_survives_unwrapping(self):
+        blocks = blocks_from_markdown(
+            "```markdown\n## Fees\n\n| P | A |\n|---|---|\n| x | 1 |\n```"
+        )
+        assert _kinds(blocks) == ["Heading", "TableBlock"]

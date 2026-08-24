@@ -78,14 +78,30 @@ class DocxExporter:
             if block.anchor and block.anchor.startswith("claim-")
         }
 
-        for block in doc.body_blocks():
+        # Tables, keyed by where they opened. `blocks` and `tables` are two
+        # flat lists, so a table's position has to be carried explicitly or a
+        # fee table can only be written before or after the whole body — never
+        # where its author put it.
+        tables_after: Dict[int, list] = {}
+        for table in doc.tables:
+            tables_after.setdefault(table.after_block, []).append(table)
+
+        for index, block in enumerate(doc.blocks):
+            for table in tables_after.pop(index, ()):
+                _add_table(word, table)
+
+            if block.in_sources:
+                continue
             if block.tag == "h1" and block.text.strip() == doc.title.strip():
                 continue  # already the document heading
             if not block.text.strip():
                 continue
 
             if block.tag in ("h1", "h2", "h3"):
-                word.add_heading(block.text.strip(), level=2)
+                # h3 is a real sub-level. Collapsing it into Heading 2 flattens
+                # the outline, and Word's navigation pane and the PDF bookmark
+                # tree are both built from exactly this.
+                word.add_heading(block.text.strip(), level=2 if block.tag != "h3" else 3)
                 continue
 
             paragraph = word.add_paragraph(
@@ -98,6 +114,11 @@ class DocxExporter:
                     )
                 else:
                     _add_styled_run(paragraph, run)
+
+        # A table that opened after the last block still belongs in the file.
+        for index in sorted(tables_after):
+            for table in tables_after[index]:
+                _add_table(word, table)
 
         source_blocks = doc.source_blocks()
         if source_blocks:
@@ -128,6 +149,52 @@ class DocxExporter:
         buffer = io.BytesIO()
         word.save(buffer)
         return buffer.getvalue()
+
+
+
+def _add_table(word, table) -> None:
+    """One table, header emboldened, written where the author put it.
+
+    **The Word exporter had no table handling at all.** `_reader` parsed them
+    and `csv`, `pptx`, `text` and `xlsx` all consumed them; this module did
+    not, so every table in every prose document was dropped on export with
+    nothing reporting it.
+
+    That was not a latent gap waiting for structured documents to arrive. It
+    was live: `render_invoice` emits the line items as a table, so an invoice
+    exported to .docx arrived at the client carrying its title, "Billed to" and
+    the client's name — and **no line items, no amounts and no total.** Measured
+    that way before this existed.
+
+    "Table Grid" is one of the styles python-docx's default template ships, so
+    it needs no template of ours. Without a style the table is drawn with no
+    rules at all, which reads as columns of text that happen to line up.
+    """
+    width = max([len(table.header)] + [len(row) for row in table.rows] or [0])
+    if not width:
+        return
+
+    word_table = word.add_table(rows=0, cols=width)
+    try:
+        word_table.style = "Table Grid"
+    except KeyError:  # pragma: no cover - template without the built-in style
+        pass
+
+    if table.header:
+        cells = word_table.add_row().cells
+        for column, text in enumerate(table.header[:width]):
+            cells[column].text = text
+            for paragraph in cells[column].paragraphs:
+                for run in paragraph.runs:
+                    run.bold = True
+
+    for row in table.rows:
+        cells = word_table.add_row().cells
+        for column, text in enumerate(row[:width]):
+            cells[column].text = text
+
+    if table.caption:
+        word.add_paragraph(table.caption)
 
 
 def _bookmark_name(anchor: str) -> str:
