@@ -13,6 +13,105 @@ accurate — it is the first thing anyone reads.
 
 ## Current state — 19 August 2026
 
+> ### Web search was running, leaving the machine, and being thrown away
+>
+> The symptom was reported repeatedly as *"web search does nothing with local
+> models"*, and every previous attempt looked at the search layer. **The search
+> layer was the one part working.** The egress log proves it: `duckduckgo.com`
+> allowed, `en.wikipedia.org`, and `internet.deep_read` pulling real pages. The
+> toggle was on, `duckduckgo.com` was `allow`, the kill switch off, and `ddgs
+> 9.14.4` installed in both virtualenvs and preferred over the dead package.
+>
+> The break was one layer downstream, in the seam between two steps of a plan.
+> `execution_engine` wrote the search step's output into `step_results` and
+> **no line ever read it**. The only consumers were the `document.*` injection
+> and `reasoning.generate`'s own result. So the reasoning step was dispatched
+> with `input_data["prompt"]` still holding the bare question, and the model
+> answered from its weights — having just been paid for a search.
+>
+> **`main._format_search_results` built exactly the block that was missing, and
+> had no caller outside its own two tests.** Another complete, correct, tested,
+> unreachable subsystem, in the documented shape: the tests asserted the
+> *formatting* and nothing asserted that anything *used* it.
+>
+> Fixed by moving it to `core/search_context.py` — the engine is its only
+> consumer and the kernel boundary runs one way — and injecting before the
+> reasoning step, mirroring the document injection ten lines above. Three
+> details that were not obvious: the search step yields a JSON **string** and
+> the engine accumulates step output as text, so the original `(query, dict)`
+> signature could never have been called with what the engine holds; `0` and
+> `None` are kept apart by `result_count`, because `if not count` would
+> announce "the web had nothing" about a search that errored; and the block
+> still ends with the user's question, on the same ordering argument
+> `identity.py` makes about a hostile manner.
+>
+> **The tests were verified to fail without the fix**, by disabling the
+> injection and watching two of them go red. `_format_search_results` had two
+> passing tests for the entire time it was reaching nothing, which is the whole
+> reason that check is worth making.
+>
+> ### Routing now asks what the question is, and modality gates rather than ranks
+>
+> `_who_chose` said it outright — *"routing has no task classifier yet"* — and
+> the models runtime chose one model at boot and used it for every capability,
+> including `vision.analyze`. `ProviderManager.select_model_for_task` takes a
+> **gate** and a **preference** and keeps them apart: `requires_vision` filters
+> the candidate set before ranking, and returns `None` when it empties rather
+> than the closest permitted thing; `specialisation` orders survivors in three
+> tiers, since a maths fine-tune is a worse answer to a coding question than a
+> general model is. The dead `orchestrator` still contains the merged version —
+> `scoring.py` records a missing *required* capability as a warning and ranks
+> the candidate anyway.
+>
+> `IntentType.CODE` with eight exemplars written to sit clear of `tool` and
+> `conversation`; `_TOOL_KEYWORDS` loses `"code"`, which was sending "is there a
+> cleaner way to write this code" to `tool.terminal` on exactly the machine
+> where the embedder is down and nothing else would catch it. `_resolve_model`
+> and `_who_chose` become one `_ModelChoice`, and `chosen_by: task` is reported
+> **only when the routed pick differs from the untasked one** — on a
+> single-model machine nothing was routed, and saying otherwise is a rendered
+> value nobody measured.
+>
+> ### The model set, decided by measurement
+>
+> Six superseded models removed. **`gemma4:12b` is the daily driver** — 7.6 GB,
+> fits the ~9.1 GB budget beside `bge-m3`, 262144 context, and `ollama show`
+> reports `vision` and `audio`, so it covers images with no swap and no code
+> change. The plan that came into the session had it marked for deletion in
+> favour of `qwen3:14b`, which is 9.3 GB and therefore **fails the residency
+> gate it was chosen to satisfy** — and is a generation behind, since Qwen's
+> current line has no dense model under 27B.
+>
+> **`qwen3.8:27b` pulled and measured, not estimated: 1.45 tok/s.** Ollama
+> reports 18.70 GB loaded, **8.59 GB on the GPU and 10.11 GB in system RAM** —
+> more than half the model on the CPU. The 3–5 tok/s figure quoted from other
+> people's numbers was roughly three times optimistic. It is correctly excluded
+> from auto-selection by `model_fits_resident`, so it is reachable only by being
+> named. A 3060 owner reported ~9.7 tok/s on this model with llama.cpp using
+> Q4_K_S, a quantised KV cache, selective FFN offload and MTP speculative
+> decoding — **6.7× what Ollama does**, and none of those flags are reachable
+> through Ollama.
+>
+> ### Two disclosures that were missing, and one that was already there
+>
+> Search suppression is now visible. `search_suppressed` is a separate field
+> from `not requires_search`, which is false for every ordinary question too;
+> the only trace used to be a `logger.debug` line. A search that runs and
+> returns nothing now says so as well, since otherwise it is indistinguishable
+> from one that never ran.
+>
+> `core/untrusted.py` is wired at the recall boundary, where it was always
+> needed: recall folds passages into the **system prompt**, and those passages
+> are often written by whoever sent the user the file.
+>
+> **And the README was understating the product.** It said *"the local API has
+> no authentication"*. `RequireApiSecret` is installed as middleware at
+> `main.py:155`, a per-launch secret is minted at boot, and
+> `test_api_requires_the_credential.py` asserts no-credential refused, wrong
+> credential refused, health not exempt, and `X-Zaram-Client` explicitly *not* a
+> credential. That gap closed and the status page did not notice — the same
+> defect the file already records itself having had, in the same direction.
+>
 > ### Kokoro lost torch and kept its timings — 662 MB, measured
 >
 > The open question this file recorded — *"whether to move Kokoro off torch"* —
