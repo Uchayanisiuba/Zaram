@@ -102,6 +102,40 @@ def inline_html(markdown: str) -> RichText:
     return RichText("".join(parser.out))
 
 
+#: Info strings on a whole-document fence that mean "this is the document",
+#: not "this is a code sample". An empty info string counts: a model that
+#: fences its whole reply often labels it with nothing.
+_DOCUMENT_FENCES = {"", "markdown", "md", "text", "plaintext"}
+
+
+def _unfence(markdown: str) -> str:
+    """Unwrap a document that a model wrapped entirely in a code fence.
+
+    **Found by running a real model, and it is the reason that test exists.**
+    Asked to "output only the Markdown document", `qwen2.5-coder:14b` returned
+    the whole statement of work inside ```` ```markdown ````. Every heading,
+    list and table then parsed as the *contents of one code block* — the
+    document collapsed to a single monospace paragraph, which is a worse
+    version of the original failure this module was written to fix, and no
+    amount of hand-written test markdown would ever have produced it.
+
+    The bound is narrow on purpose: this unwraps only when the fence **is** the
+    document — one fence, nothing outside it, and an info string that is not a
+    programming language. A document containing a code sample keeps it as code,
+    which is why the check is on the token stream rather than on whether the
+    text happens to start with a backtick.
+    """
+    tokens = [t for t in _md().parse(markdown) if t.level == 0]
+    if len(tokens) != 1:
+        return markdown
+    fence = tokens[0]
+    if fence.type != "fence":
+        return markdown
+    if (fence.info or "").strip().lower() not in _DOCUMENT_FENCES:
+        return markdown
+    return fence.content
+
+
 def blocks_from_markdown(
     markdown: str, *, base_level: int = 2, title: str = ""
 ) -> List[Any]:
@@ -129,7 +163,7 @@ def blocks_from_markdown(
     masthead, and `Heading` refuses level 1 outright.
     """
     md = _md()
-    tokens = md.parse(markdown or "")
+    tokens = md.parse(_unfence(markdown or ""))
     blocks: List[Any] = []
 
     i = 0
