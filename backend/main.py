@@ -18,9 +18,10 @@ from pydantic import BaseModel
 from core.bootstrapper import KernelBootstrapper
 from core.chat_router import ChatRouter
 from core.identity import compose_system_prompt, identity_preamble
-# `_format_search_results` has referenced this without importing it: a
-# NameError latent only because web search is off by default.
-from core.query_classifier import SEARCH_MARKER
+# `SEARCH_MARKER` was imported here for `_format_search_results`, which has
+# moved to `core/search_context.py` — the engine is its only consumer and the
+# kernel boundary runs one way. It had a latent `NameError` before that, which
+# only stayed latent because web search was off by default.
 # Per-request, and set before the planner runs. See the call site in `chat`.
 from core.planner import set_search_locality
 
@@ -292,42 +293,6 @@ def _stream_error(message: str):
         yield StreamEvent.error(message).to_ipc() + "\n"
         yield StreamEvent.done().to_ipc() + "\n"
     return _gen()
-
-
-def _format_search_results(query: str, search_result: Dict[str, Any]) -> str:
-    results = search_result.get('results') or []
-    if not results:
-        return query
-    parts = [SEARCH_MARKER]
-    parts.append(f"Query: {query}")
-    parts.append("")
-    for idx, r in enumerate(results[:6], start=1):
-        url = r.get('url') or ''
-        title = (r.get('title') or '').strip()
-        snippet = (r.get('snippet') or '').strip()
-        published = (r.get('published') or '').strip()
-        parts.append(f"Source {idx}:")
-        if title:
-            parts.append(f"Title: {title}")
-        if url:
-            parts.append(f"URL: {url}")
-        if published:
-            parts.append(f"Published: {published}")
-        if snippet:
-            parts.append(f"Snippet: {snippet}")
-        parts.append("")
-    parts.append("=" * len(SEARCH_MARKER))
-    parts.append("")
-    parts.append("INSTRUCTIONS:")
-    parts.append("- Answer the user's question using ONLY the information from the sources above.")
-    parts.append("- If the sources conflict with your training data, ALWAYS trust the live sources.")
-    parts.append("- Do NOT mention your training data cutoff.")
-    parts.append("- Do NOT say you don't have real-time access.")
-    parts.append("- If sources don't fully answer the question, say so based only on what IS in the sources.")
-    parts.append("")
-    parts.append("User Question:")
-    parts.append(query)
-    return "\n".join(parts)
 
 
 # --- REQUEST MODELS ---
