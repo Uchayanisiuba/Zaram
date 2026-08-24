@@ -81,11 +81,59 @@ _SVC = ("3D generalist services", "motion design", "compositing", "colour gradin
 _SVC2 = ("product film", "explainer", "sizzle reel", "brand ident")
 _MONTHS = ("January", "March", "May", "July", "September", "November")
 
+#: Working preferences, and they exist because the corpus had none.
+#:
+#: `TestTheDistractorsAreActuallyNear` measured the nearest filler document to
+#: each target and found four of five above 73% content-word overlap and the
+#: fifth at **zero**. The fifth is `note` — the preference document, the
+#: global-vs-project case from rule 7i — so *"How should I write to clients?"*
+#: was graded against a thousand invoices, briefs and NDAs. It won on
+#: vocabulary alone. Recalling it proved nothing, and the eval counted it as a
+#: pass.
+#:
+#: That is the title-sequence failure with the sign reversed. There, filler
+#: answered the question and a correct retrieval read as a miss. Here nothing
+#: came near it and a weak retrieval read as a success. The second is the
+#: quieter one and had no incident behind it, which is why it was worth
+#: asserting before one.
+#:
+#: These are the same *shape* as `note` — a standing preference about how this
+#: person works, with no client, no date and no amount — and about anything
+#: except how to write to a client. `TestTheCorpusIsFitToMeasureWith` enforces
+#: that second half.
+#:
+#: A twelfth of the filler being preferences is more than a real Spine holds.
+#: Deliberate: the alternative measured zero, and a distractor that never
+#: appears grades nothing.
+_PREFERENCES = (
+    "Prefer to keep every project file under the client folder, and never "
+    "archive a document until the final invoice has cleared.",
+    "Always render previews at half resolution first. Never commit a final "
+    "pass without a summary of what changed since the last one.",
+    "Prefer morning calls for a new brief. Anything that needs a decision goes "
+    "out the evening before, never on the day itself.",
+    "Keep a backup of every delivered file for two years. Prefer an external "
+    "drive over cloud storage for anything under a signed agreement.",
+    # The closest of the four, and deliberately so. It shares `note`'s subject
+    # — a standing rule about anything client-facing — and answers a different
+    # question about it: what to send and what to call it, never how to write
+    # it. Without one this near, `note` sat at 33% against 75% for every other
+    # target, which is a floor cleared rather than a distractor competing.
+    "Prefer to send anything client-facing as a PDF, and never leave a "
+    "document without a filename that says what it is.",
+)
+
 
 def _filler(n: int, seed: int = 7) -> list[str]:
     rng = random.Random(seed)
     out = []
     for i in range(n):
+        # Every twelfth document is a standing preference rather than a
+        # transaction. See `_PREFERENCES` for why the proportion is
+        # unrealistic on purpose.
+        if i % 12 == 11:
+            out.append(rng.choice(_PREFERENCES))
+            continue
         client = rng.choice(_CLIENTS)
         out.append(rng.choice(_TEMPLATES).format(
             c=client[:4].upper(), C=client, n=i, d=rng.randint(1, 28),
@@ -590,3 +638,104 @@ class TestMarginAtScale:
 
         print(f"\n[{CORPUS_SIZE} docs] mean recall latency: {per_query:.0f} ms")
         assert per_query < 10_000, "recall has become unusable, not merely slow"
+
+
+class TestTheDistractorsAreActuallyNear:
+    """The other half of "near the target without answering it".
+
+    `TestTheCorpusIsFitToMeasureWith` asserts the filler does not *answer* the
+    eval questions. Nothing asserted the filler is *near* them, and both halves
+    are load bearing in opposite directions:
+
+    * filler that answers the question makes a correct retrieval look like a
+      miss — the title-sequence failure, three measurement cycles, nearly
+      bought a cross-encoder;
+    * filler that is far away makes a weak retrieval look like a success. A
+      thousand documents about gardening would pass the existing test while
+      grading nothing, because every target would win on vocabulary alone.
+
+    The second is the quieter failure and has no incident behind it yet, which
+    is exactly why it is worth asserting before one.
+
+    Arithmetic on the generator. No model, no Ollama, no opt-in — it guards
+    every number the rest of this file prints, and it must run whether or not
+    anyone sets `ZARAM_SCALE_EVAL`.
+    """
+
+    #: Words that carry no domain signal, so counting them would let filler
+    #: look near a target on grammar alone.
+    _STOP = frozenset({
+        "the", "and", "for", "with", "are", "from", "that", "this", "then",
+        "than", "there", "these", "those", "into", "onto", "after", "before",
+        "without", "within", "which", "while", "your", "yours", "have", "has",
+        "was", "were", "been", "being", "will", "would", "should", "could",
+    })
+
+    @classmethod
+    def _content_words(cls, text: str) -> set[str]:
+        import re
+
+        words = re.findall(r"[a-z']+", text.lower())
+        return {w for w in words if len(w) > 3 and w not in cls._STOP}
+
+    @classmethod
+    def _nearest(cls, target: str, filler_sets: list[set[str]]) -> float:
+        """The best overlap any filler document achieves with ``target``.
+
+        Proportion of the *target's* content words that some single filler
+        document also carries. Directional on purpose: what matters is how much
+        of the target a distractor could impersonate, not how much of a long
+        distractor the short target covers.
+        """
+        wanted = cls._content_words(target)
+        if not wanted:
+            return 0.0
+        return max((len(wanted & f) / len(wanted) for f in filler_sets), default=0.0)
+
+    def test_every_answerable_question_contributes_terms_to_the_collision_check(self):
+        """The existing guard skips a question that yields no terms, silently.
+
+        `TestTheCorpusIsFitToMeasureWith` drops any case whose question has no
+        word longer than four characters — `if not terms: continue`. Every
+        question today clears that bar, and a future one need not: *"What is
+        the day rate?"* is five words and not one of them qualifies. It would
+        be skipped, report no collision, and be indistinguishable from a
+        question that was checked and passed.
+
+        A guard that silently declines to check something is the shape this
+        repository has been bitten by most.
+        """
+        skipped = [
+            case.question
+            for case in CASES
+            if case.expected
+            and not {w for w in case.question.lower().strip("?").split() if len(w) > 4}
+        ]
+        assert not skipped, (
+            f"these questions are silently skipped by the collision check: "
+            f"{skipped}. They contribute no terms longer than four characters, "
+            f"so the check passes them without looking. Lower the length bound "
+            f"or give the check a stopword list instead."
+        )
+
+    def test_each_target_has_a_near_miss_among_the_filler(self):
+        filler_sets = [self._content_words(d) for d in _filler(1000)]
+
+        scores = {
+            doc_id: self._nearest(text, filler_sets)
+            for doc_id, text in CORPUS.items()
+        }
+        for doc_id, score in sorted(scores.items(), key=lambda kv: kv[1]):
+            print(f"\n  {doc_id:18} nearest filler shares {score:.0%} of its content words")
+
+        #: Below this a "distractor" is not competing with the target at all,
+        #: and the question it guards is being graded against an easy corpus.
+        #: Set from the measured spread rather than chosen in advance.
+        floor = 0.30
+        far = {k: round(v, 2) for k, v in scores.items() if v < floor}
+        assert not far, (
+            f"these targets have no near-miss in the filler: {far}. A question "
+            f"answered by one of them is being graded against a corpus that "
+            f"cannot crowd it out, so recalling it proves nothing. Add a filler "
+            f"template of the same shape that does not answer the question."
+        )
