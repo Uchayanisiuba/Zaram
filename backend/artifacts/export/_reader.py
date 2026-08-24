@@ -124,6 +124,7 @@ class _Reader(HTMLParser):
         self._row: Optional[List[str]] = None
         self._cell: Optional[List[str]] = None
         self._cell_is_header = False
+        self._cell_span = 1
 
     # -- structure ---------------------------------------------------------
 
@@ -159,6 +160,17 @@ class _Reader(HTMLParser):
         if tag in ("td", "th") and self._table is not None:
             self._cell = []
             self._cell_is_header = tag == "th"
+            # `colspan` decides which *column* the cells after this one land
+            # in, so ignoring it does not lose a cell — it moves every later
+            # cell in the row leftwards. On an invoice that put the total under
+            # "Qty": the markup is `<td colspan="3">Total due</td><td>NGN
+            # 340,000.00</td>`, which without this reads as a two-column row.
+            try:
+                self._cell_span = max(1, int(attr.get("colspan", 1)))
+            except (TypeError, ValueError):
+                # A malformed span is not worth failing an export over. One
+                # column is the value that changes nothing.
+                self._cell_span = 1
             return
 
         if tag in _BLOCK_TAGS:
@@ -192,7 +204,13 @@ class _Reader(HTMLParser):
             return
         if tag in ("td", "th") and self._cell is not None and self._row is not None:
             self._row.append("".join(self._cell).strip())
+            # Padding rather than a span on the cell itself: a spanned cell is
+            # a *layout* fact, and the two consumers of this — Word and a
+            # spreadsheet — both want a grid. Empty columns put the following
+            # cell under the right heading in both, which is the whole point.
+            self._row.extend([""] * (self._cell_span - 1))
             self._cell = None
+            self._cell_span = 1
             return
         if tag == "tr" and self._row is not None and self._table is not None:
             # The header is the first row that was made of <th>. A table whose
