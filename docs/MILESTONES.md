@@ -11,7 +11,255 @@ accurate — it is the first thing anyone reads.
 
 ---
 
-## Current state — 19 August 2026
+## Current state — 26 August 2026
+
+> ### Documents stopped being a text dump, and an invoice stopped losing its money
+>
+> The complaint was that generated documents "do not meet the standard of
+> templates you can get online". The page design was never the problem — the A4
+> page box, the serif measure, the masthead, the tabular figures and the row
+> hairlines were all already written and tested. **The vocabulary to reach them
+> was missing at the one end that writes.**
+>
+> `render_document` took `Sequence[str | Claim]` and wrapped every member in
+> `<p>`, escaping it on the way, so a model asked for a proposal produced
+> markdown that came out as literal text: a paragraph reading `## Scope of
+> Work`, another reading `- Discovery`, a fee table as one mangled block of
+> pipes. There was no way to express a heading, a list or a table.
+>
+> It was missing only at that end. `export/_reader.py` has always parsed
+> `h1, h2, h3, p, li` plus `table/caption/tr/td/th`, and `export/docx.py` has
+> always mapped headings to Word heading styles and `li` to "List Bullet". The
+> readers were built for a document the writer could not produce — this
+> repository's signature shape, arriving from the far side.
+>
+> So: `Heading`, `BulletList`, `TableBlock`, `PageBreak` and `RichText` in
+> `artifacts/contracts.py`, dispatched by `render_block`. `str` and `Claim`
+> are unchanged and first, so every caller that predates them takes exactly the
+> route it always did.
+>
+> **`create_document` also passed none of the masthead arguments it had.**
+> `letterhead`, `meta` and `kind_label` had been accepted by `render_document`
+> since the letterhead work landed, and the only caller that makes a prose
+> document passed none of them — so every proposal and report rendered
+> `<header class="masthead"><div></div></header>`: present, correctly styled,
+> and empty, while the invoice path three methods down looked like a real
+> document. Reachable from one caller out of two is why it read as a design gap
+> rather than as a bug, and it is the shape `npm run check:reachability` is
+> explicit about missing.
+>
+> ### The model writes markdown, so Zaram now reads markdown
+>
+> The block types are an API, and a language model does not assemble JSON.
+> `markdown-it-py` (CommonMark + GFM tables, MIT, already installed) parses;
+> `artifacts/markdown_blocks.py` maps its tokens onto the block types and
+> enforces two bounds a general-purpose renderer has no reason to enforce.
+>
+> **Raw HTML is disabled, and that is not the default.**
+> `MarkdownIt("commonmark")` sets `html: True` — measured, not assumed — so the
+> naive construction passes a `<script>` tag from a model's reply into a file
+> the user sends to a client.
+>
+> **The inline tag set is exactly what `_reader.py` parses**: strong, em, code,
+> br. Narrower than "safe HTML", and the reason is not security — a tag the
+> readers do not know survives into the preview looking correct and vanishes on
+> export with nothing reporting it. `img` is dropped to its alt text, because a
+> markdown image names a URL and a document that fetches one is a remote asset
+> arriving inside a data file, where `check-no-remote-assets.mjs` cannot see it.
+>
+> ### Not all local models produce the same document, and the adapter absorbs it
+>
+> Measured, same prompt, same task:
+>
+> | | fenced? | parsed |
+> |---|---|---|
+> | `gemma4:12b`, plain prompt | no | 7 headings, 8 paragraphs, 4 lists, 1 table |
+> | `qwen2.5-coder:14b`, plain prompt | **yes** | **1 block** — a monospace blob |
+> | `qwen2.5-coder:14b`, format rules | no | 9 headings, 5 paragraphs, 4 lists, 3 tables |
+>
+> The coder model wraps its whole answer in a fenced markdown block every time;
+> gemma4 never does. No hand-written test markdown would have produced that.
+> **The answer is two layers**: a format contract in the prompt removes most
+> variance, and the adapter absorbs the rest. Neither is sufficient alone — a
+> prompt is a request, not a guarantee.
+>
+> Three classes are handled: relative heading depth (the shallowest heading
+> becomes h2, so a `#` opener and a `##` opener produce the same document),
+> title restatement, and whole-document fencing. **One known and unhandled**: a
+> model that opens with "Sure! Here's the statement of work:" leaves a stray
+> paragraph. Untested, flagged rather than claimed.
+>
+> This is also why the answer to "should we just tell users to use cloud" is
+> no. It was never a capability failure — qwen wrote a perfectly good statement
+> of work and then wrapped it in backticks.
+>
+> ### An invoice exported to Word had no line items, no amounts, no total
+>
+> `docx.py` had **no table handling at all**. `_reader` parsed tables and
+> `csv`, `pptx`, `text` and `xlsx` all consumed them; the Word exporter never
+> mentioned them. Not a latent gap waiting for structured documents — live, on
+> the flagship document. Measured that way before the fix: title, "Billed to",
+> the client's name, and nothing else. A missing citation is embarrassing; a
+> missing charge is unpaid work.
+>
+> Then, one layer in: `colspan` was ignored, which does not lose a cell but
+> shifts every later cell leftwards. The totals block spans three columns, so
+> the amount owed printed **under a heading reading Qty**. Worse than missing,
+> because nobody doubts it.
+>
+> Position is carried on `Table.after_block` rather than by interleaving a
+> placeholder into `blocks`, because every existing consumer iterates
+> `body_blocks()` and expects only `h1, h2, h3, p, li`. `h3` also stopped
+> collapsing into Word Heading 2, which had been flattening the outline that
+> Word's navigation pane and the PDF bookmark tree are both built from.
+>
+> ### The user's own records were being handed to the model as web results
+>
+> `knowledge.search` fans out across providers and returns web results and
+> Spine records in **one list**, each carrying `provider` and `type`.
+> `format_search_results` read only `title`, `url`, `snippet` and `published`,
+> dropping the field that tells them apart, and printed the lot under the
+> INTERNET SEARCH RESULTS marker with "ALWAYS trust the live sources."
+>
+> Measured on a live question about the day's news: **five of six "internet
+> search results" were the user's own Spine records** — one a stored
+> conversation turn, three near-duplicates of the same old prompt — and the
+> single genuine web result ranked last of six.
+>
+> Rule 2 broken (a `memory:` id printed on a `URL:` line is a web address that
+> does not exist and cannot be checked), rule 7d broken (a conversation turn
+> presented as research, alongside copies of itself), and the instruction
+> simply wrong for most of the block.
+>
+> `Origin` now classifies each result and the label prints beside the source
+> number; a non-web source gets `Reference:` and never `URL:`; the instructions
+> are assembled from what is actually in the block. `origin_of` defaults to
+> *local record* for anything unrecognised — calling a web page a local record
+> understates a source, while the reverse is the rule 2 failure. When in doubt,
+> claim less.
+>
+> `SEARCH_MARKER` is unchanged and asserted to be: `needs_search` suppresses a
+> second search on it and `planner` splits the user's question out of it, so
+> rewording the header would have broken both. The honesty sits beside the
+> sentinel.
+>
+> **Left for the maintainer**: whether `conversation`-type memories belong in
+> `knowledge.search` results at all is a rule 7d question. Labelling them
+> correctly is not the same as deciding they should be there.
+>
+> ### The recall eval was grading its most important question against nothing
+>
+> Step zero before touching retrieval: check the instrument.
+> `TestTheCorpusIsFitToMeasureWith` already asserted filler does not *answer*
+> the eval questions — the title-sequence lesson. **Nothing asserted the filler
+> was near them**, and CLAUDE.md's rule is *near the target without answering
+> it*. Only the second clause was enforced.
+>
+>     note               nearest filler shares  0% of its content words
+>     harbour-brief      nearest filler shares 75%
+>     nda                nearest filler shares 75%
+>     century-invoice    nearest filler shares 77%
+>     harbour-invoice    nearest filler shares 80%
+>
+> `note` is the preference document — the global-vs-project case from rule 7i,
+> the most product-specific question in the eval. It was graded against a
+> thousand invoices, briefs and NDAs and won on vocabulary alone. **Recalling
+> it proved nothing, and the eval had been counting it as a pass.** The
+> title-sequence failure with the sign reversed: there, filler answered and
+> correct retrieval read as a miss; here nothing came near and weak retrieval
+> read as a success.
+>
+> Fixed with preference-shaped filler. `note` now sits at 58%, and the scale
+> eval's target ranks moved from a trivial all-1 to **[1, 1, 1, 1, 2]**, the 2
+> being "How should I write to clients?". Recall still holds at rank 2 of 100
+> inside a shortlist of 6.
+>
+> ### Bitemporality is stored and never queried — the seventeenth
+>
+> Found on 26 August while answering whether Zaram's memory is comparable to
+> the state of the art. `MemoryRecord` carries `valid_from` / `valid_until` —
+> **valid time**, when the world changed — kept distinct from `superseded_at`,
+> which is **recorded time**, when the user said so. That separation is
+> genuinely strong and is precisely what Zep/Graphiti markets as its headline
+> differentiator.
+>
+> `runtimes/memory/valid_time.py` implements the queries over it —
+> `in_force_at`, `history_of`, `explain` — and **is imported by exactly one
+> file: its own test.** The field is written, persisted and exported; nothing
+> in recall filters by it. So the differentiator is not real yet: Zaram can
+> store that the day rate was 500 until June and 600 after, and cannot answer
+> "what was it in May" through any live path.
+>
+> This is the seventeenth complete, tested, unreachable subsystem, and it is
+> the one that most directly undercuts a claim worth making. **Do not repeat
+> the bitemporality claim until something calls `in_force_at`.**
+>
+> ### Whether the memory is state of the art: unanswerable, by our own standard
+>
+> CLAUDE.md says *"Benchmark against LoCoMo / LongMemEval, not by feel."* That
+> has never been done. The only three places those names appear in the repo are
+> CLAUDE.md, this file, and the first line of `test_recall_eval.py` — which
+> says explicitly *"Not a benchmark against LoCoMo or LongMemEval."*
+>
+> What exists is 5 questions over a 5-document corpus, plus an opt-in scale
+> test at 100. Those numbers are now trustworthy (see the corpus repair above)
+> and they are not a benchmark. Mem0, Zep and Letta all publish figures; Zaram
+> publishes none, so *comparable to state of the art* is unsupported in either
+> direction and should not be claimed.
+>
+> **The architecture is the strong half.** `MemoryRecord` carries no provider
+> and no model field, so it is cross-model by construction rather than by
+> adapter, and one shared embedder means one index serves every provider.
+> `superseded_by` keeps correction history instead of deleting. Provenance,
+> origin tagging and `global`/`project:<id>` scope are all present.
+>
+> **Cross-vendor has never been observed on this machine.** `settings.json` has
+> no cloud key, `default_model` is null, routing is `prefer_local`, and
+> `/health` reports openrouter with `model: null`. Cross-*model* within Ollama
+> (gemma4 and qwen2.5-coder) is demonstrable; cross-*vendor* is not. The
+> current milestone — ask model A, ask model B later, get a cited answer —
+> still has one working provider.
+>
+> ### What was measured, and in what condition
+>
+> Suite **2481 passed, 21 skipped, 0 failed**, Ollama up. The document and
+> search work is covered by 20 new tests, each confirmed to fail without its
+> fix by disabling the fix and watching them go red.
+>
+> `gemma4:12b` writes at **30.3 tok/s** fully resident (8.4 GB, 100% GPU).
+> `qwen3.8:27b` is 18.7 GB against 12 GB of VRAM — 45% on GPU, 55% on CPU,
+> **1.85 tok/s**, 95.6 s cold load. Nineteen times slower, and no Ollama flag
+> fixes a 10 GB shortfall. On a 12 GB card the ceiling is a 14B fully resident.
+>
+> **Unexplained and worth instrumenting**: the suite ran in 2:53, 3:48, 4:50
+> and **20:46** on the same machine with Ollama up in every case. No stale
+> backend on 8420, Ollama answering 200. The mechanism CLAUDE.md already blames
+> for the 4-vs-20 split is provider-probe timeouts, and that is where to look.
+>
+> ### Routing: the classifier is cheap, the swap is not
+>
+> `_rank_key` says fit is ordered first because *"a specialist that forces an
+> eviction costs seconds on this exchange and on the next one that swaps
+> back"*. What it ranks on is `model_fits_resident`, which is
+> `size_bytes <= budget` — **a static capacity check with no reference to what
+> Ollama currently has loaded.** Two different questions: *could this fit* and
+> *is it loaded right now*. Only the first is asked.
+>
+> So a coding question routes to `qwen2.5-coder:14b` (9.0 GB) while
+> `gemma4:12b` (7.6 GB) sits loaded, paying a full unload and reload. Both
+> clear the ~9.1 GB budget, so both tie at tier 0 and specialisation breaks the
+> tie. The docstring describes a protection the code does not implement.
+>
+> `INTENT_SPECIALISATION` maps exactly one intent — `CODE` to `"code"` — so
+> that single entry is the only thing that can trigger a swap today. Measured,
+> qwen2.5-coder ran at 10.8 tok/s against gemma4's 30.3. **Deleting that one
+> mapping would remove every swap in the product**, and the open question of
+> whether the coder model is even better at code is still open and needs three
+> real coding questions judged by a human.
+
+---
+
+## Previous state — 19 August 2026
 
 > ### Web search was running, leaving the machine, and being thrown away
 >
