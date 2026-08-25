@@ -137,11 +137,32 @@ and states the licence decision below.
 
 ## What to do next
 
-1. **Ask the running Zaram something the weights cannot know.** The search fix
-   is proven with fakes and has never been seen working against a real
-   DuckDuckGo result and a real local model. "What happened this week" should
-   now come back with sources. This is the check no test in this repo can make,
-   and it is the check that has repeatedly mattered.
+**This list is from 19 August and has been overtaken.** `docs/MILESTONES.md`
+Current state — 26 August — is the handoff and is the authority. What follows
+is kept because most of it is still open; items struck as DONE are recorded so
+nobody re-does them.
+
+0. **~~Ask the running Zaram something the weights cannot know.~~ DONE,
+   26 August.** Run twice against a real DuckDuckGo result and a real local
+   model. It worked, and it found two further defects that no test could have:
+   the search block was labelling the user's own Spine records as internet
+   results, and five of six "sources" on a news question were local. Both
+   fixed. See MILESTONES Current state.
+
+0b. **~~Write the `LICENSE` file.~~ DONE, 26 August.** Source-available, all
+   rights reserved, matching the README section it was drawn from.
+
+1. **Wire obligation extraction.** Promoted to first because it is now
+   unambiguously the largest gap between built and reachable.
+   `backend/obligations/` — `contracts.py` and `extract.py` — is imported by
+   **nothing but its own test file**, which makes it the eighteenth complete,
+   tested, unreachable subsystem. Its CLAUDE.md precondition is satisfied:
+   `untrusted.py` is wired into `core/execution_engine.py` and
+   `test_untrusted_reaches_recall.py` asserts the seam rather than the module.
+   The extractor already carries the source sentence for every clause, which is
+   what rule 2 and "every obligation shows its source clause" require. What is
+   missing is a caller, a surface, and the correction path. **Never silently
+   create a commitment.**
 2. **Run the app and watch the mouth move.** Carried over untouched from the
    previous handoff. Nothing from the voice session has been seen in the
    product. Speech on the Speak button in orb mode, speech automatic and
@@ -155,7 +176,7 @@ and states the licence decision below.
    extractor reads payment, deliverable, expiry and renewal clauses with the
    sentence each came from, and nothing outside its own tests imports it. It
    must not ship without `untrusted.py`, which is now wired.
-5. **Write the `LICENSE` file.** The decision is taken and only the README
+5. **~~Write the `LICENSE` file.~~ DONE — see item 0b.** Original note: The decision is taken and only the README
    carries it; tools and scanners look for the file. Note that GitHub's terms
    permit viewing and forking *within GitHub* for any public repo — that cannot
    be prevented while the repo is public, only the use of what is copied.

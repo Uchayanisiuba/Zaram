@@ -1,0 +1,54 @@
+Zaram
+Copyright (c) 2026 Anisiuba Uche. All rights reserved.
+
+SOURCE-AVAILABLE. THIS IS NOT OPEN SOURCE.
+
+The source is published so that the central claim can be checked: that
+inference runs locally, that the index is on disk, and that nothing leaves the
+machine without a logged, consented decision. That claim cannot be
+substantiated by a closed binary, and reading the code is how you verify it.
+Auditability is the whole reason this repository is public.
+
+WHAT IS PERMITTED
+
+  You may read, audit, evaluate and privately compile this software for the
+  purpose of satisfying yourself as to what it does.
+
+WHAT IS NOT GRANTED
+
+  No licence is granted to copy, modify, merge, publish, distribute,
+  sublicense, or sell copies of this software, or to run it as part of another
+  product or service, whether or not for a fee. All rights not expressly
+  granted above are reserved by the copyright holder under copyright law.
+
+  Absence of a permissive licence is deliberate. It is not an oversight, and it
+  is not an invitation to assume permission.
+
+GITHUB
+
+  Publishing on GitHub grants other GitHub users the ability to view and fork
+  this repository within GitHub itself, under GitHub's Terms of Service. That
+  is a condition of public hosting. It is not a licence to use, run, or
+  redistribute what you copy, and nothing in those Terms extends the
+  permissions above.
+
+THIRD-PARTY COMPONENTS
+
+  This software depends on third-party packages distributed under their own
+  licences, which are unaffected by this file and continue to govern those
+  components. Every dependency is licence-checked before it lands, and no
+  AGPL-licensed component is used.
+
+IF YOU WANT TO USE ANY OF THIS
+
+  Ask. The answer is often yes.
+
+NO WARRANTY
+
+  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+  FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+  IN THE SOFTWARE.
