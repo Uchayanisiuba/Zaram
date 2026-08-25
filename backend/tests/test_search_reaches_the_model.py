@@ -121,16 +121,28 @@ class TestFormattingStillHolds:
     def test_sources_are_numbered_and_labelled(self):
         built = format_search_results(QUESTION, json.loads(PAYLOAD))
 
-        assert "Source 1:" in built
+        # The label now names the origin. This payload carries no `type` and no
+        # `provider` — the shape every caller predating that field produces —
+        # and its `https://` reference is what classifies it as web.
+        assert "Source 1 — from the web:" in built
         assert "Title: A thing happened" in built
         assert "Published: 2026-08-18" in built
 
     def test_the_model_is_told_to_prefer_live_sources(self):
         """Without this the model reconciles sources against its weights and
-        hedges about a cutoff the user has just paid egress to get past."""
+        hedges about a cutoff the user has just paid egress to get past.
+
+        **The instruction is now scoped to web sources, and this test used to
+        assert the bug.** It said `ALWAYS trust the live sources`, printed over
+        every source in the block — including the user's own notes and their own
+        earlier messages, which `knowledge.search` returns in the same list.
+        Measured live, five of six were local. See
+        `test_search_sources_are_labelled.py`.
+        """
         built = format_search_results(QUESTION, json.loads(PAYLOAD))
 
-        assert "ALWAYS trust the live sources" in built
+        assert "trust the web source" in built
+        assert "ALWAYS trust the live sources" not in built
 
 
 # --------------------------------------------------------------------------- #

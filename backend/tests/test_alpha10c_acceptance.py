@@ -117,7 +117,10 @@ class TestPromptFormatting:
         }
         formatted = _format_search_results("test query", search_result)
         assert SEARCH_MARKER in formatted
-        assert "Source 1:" in formatted
+        # Sources now name their origin. Both fixtures above are `https://`
+        # references with no `type`, so both classify as web — which is the
+        # case every payload predating the origin field produces.
+        assert "Source 1 — from the web:" in formatted
         assert "Title: Test Title" in formatted
         assert "URL: https://example.com" in formatted
         assert "Published: 2026-07-22" in formatted
