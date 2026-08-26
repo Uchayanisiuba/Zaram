@@ -105,7 +105,21 @@ class WindowManager {
 
   loadApp() {
     if (!this.mainWindow) this.createMainWindow();
-    this.mainWindow.loadURL(this.config.renderer.url);
+    const url = this.config.renderer.url;
+    // Named, and its failure reported. `loadURL` returns a promise that
+    // rejects when the page cannot be reached; nothing was awaiting it, so a
+    // renderer that failed to load produced an empty window in silence — and
+    // in dev the URL is a dev server that may not be listening, which is the
+    // likeliest single cause of exactly that.
+    const done = this.mainWindow.loadURL(url);
+    if (done && typeof done.catch === 'function') {
+      done.catch((err) => {
+        if (this.logger && this.logger.error) {
+          this.logger.error('Renderer failed to load', { url, error: err && err.message });
+        }
+      });
+    }
+    if (this.logger && this.logger.info) this.logger.info('Loading renderer', { url });
   }
 
   loadError(info) {

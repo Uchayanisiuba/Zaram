@@ -42,7 +42,14 @@ function createConfig(options) {
       baseUrl: `http://127.0.0.1:${backendPort}`,
       port: backendPort,
       healthPath: '/health',
-      startupTimeoutMs: 30000,
+      // Measured, not chosen: a cold boot on a developer machine with a
+      // populated Spine took 148 s on 26 August 2026 — 13 s to reindex, then
+      // 131 s in semantic intent routing, which logs nothing while it runs.
+      // At 30,000 ms the window showed `error.html` every time and read as a
+      // black screen. This is deliberately well clear of the measurement
+      // rather than just above it, because the slow step scales with the
+      // number of routing exemplars and nothing caps it.
+      startupTimeoutMs: 240000,
       pollIntervalMs: 2000,
       restartDelayMs: 3000,
     },
