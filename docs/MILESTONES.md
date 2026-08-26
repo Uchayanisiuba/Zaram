@@ -13,6 +13,168 @@ accurate — it is the first thing anyone reads.
 
 ## Current state — 26 August 2026
 
+*Several sessions ran on this date. The latest work is first.*
+
+> ### A file dropped into a message, and an honest account of what was read
+>
+> Zaram could ingest a document into Knowledge and had no way to ask a
+> question about one. Every other assistant has a paperclip and this had none.
+>
+> `backend/attachments/` is **working state, never the Spine**, and rule 7d is
+> the reason rather than tidiness. Someone asking one question about a contract
+> has not decided to add it to their knowledge base, and indexing it because
+> they asked would fill the Spine with things they looked at once — which is
+> the store that stops being worth searching.
+> `POST /chat/attachments/{id}/keep` is the only place the two meet, and only
+> because the user said so.
+>
+> **`compose.py` is the part worth having.** LM Studio does the same job —
+> whole document into context when it fits, retrieval when it does not — and
+> its own documentation declines to say which happened or where the threshold
+> sits. A silently-summarised document is worse than a refused one, because the
+> answer looks complete. So the block the model sees and the sentence the user
+> reads are built together from one decision, and **the notice is emitted even
+> when nothing was left out**: a disclosure that appears only on the lossy path
+> teaches the reader that silence means "all of it", which makes the one time
+> it fails to fire unreadable.
+>
+> The budget is measured. `/api/ps` reports `gemma4:12b` loaded at
+> `context_length: 4096` while `/api/show` declares 262144, so the declared
+> maximum is the wrong number and using it would overflow the context on almost
+> every real document. About 5,400 characters — two pages — go in whole.
+>
+> Selection keeps **membership, ordering and presentation** apart, which this
+> repository has paid three times for merging. Every passage is a candidate;
+> ranking is by rare-term overlap *within the document*, so a term appearing in
+> every passage scores zero and no stopword list has to be guessed at; and
+> whatever survives is restored to **document order**, because a contract read
+> out of order is a different contract.
+>
+> Measured against a live model rather than a fixture. A 601-character
+> statement of work: *"Read sow.txt in full"*, and `gemma4:12b` answered
+> "30 days from the invoice date" and "2 October 2026", both correct. A
+> 23,315-character agreement of 120 clauses: *"too long to read at once, so
+> Zaram searched it and used 28 of its 120 sections"* — and it found clause 90,
+> the one passage that answers, where the other 119 share most of the
+> question's words.
+>
+> ### A photograph Zaram reads on this machine, and refuses to send anywhere
+>
+> Attach an image and ask about it. A 7 KB PNG of an invoice, `gemma4:12b`,
+> *"The amount due is 8,400 GBP and the due date is 14 September 2026"* — both
+> correct, nothing uploaded. That is the product's thesis in one exchange, and
+> every competitor has to upload the picture to answer it.
+>
+> **`/vision/analyze` was the only image path and could not have done it — the
+> nineteenth.** It builds its own `OllamaEngine`, hardcodes `qwen2.5vl:7b`
+> (not installed here), and bypasses routing, `EgressGate`, the identity
+> preamble and memory. Its own error string says *"attach an image first"*,
+> naming a control nobody had built. Images now travel the ordinary chain:
+> `/chat` → `ChatRouter` → `ExecutionEngine` → `Dispatcher` → `ModelsService` →
+> engine, one optional argument beside `model` at every layer.
+>
+> **The gate already existed, and `CLAUDE.md` is stale about it.** That file
+> says modality "exists only as a 0..1 score built for ranking" and that
+> "nothing gates". `ProviderManager.select_model_for_task` has filtered on
+> `supports_vision` *before* ranking for some time, with a docstring explaining
+> why merging it into the ranking would be wrong. What was missing was a
+> **caller**: `requires_vision` was inferred from wording, so the gate was
+> never asked in earnest. An attached image is now a fact rather than a guess.
+>
+> Three refusals, each a different sentence because each has a different fix:
+> this model cannot see; nothing here can see; this is a cloud model and Zaram
+> does not send pictures off the device. The last is **rule 7j** rather than a
+> missing feature — a chat message is ~2 KB and a photograph is megabytes of
+> something far more personal, and connecting a provider for text is not
+> consent to send it one. Refused rather than stripped: an answer built with
+> the picture quietly removed is the same failure the local gate exists to
+> stop, arriving by the cloud route.
+>
+> **Two defects found by wiring it up.** The vision check read an *unscanned*
+> catalogue and reported "no model on this machine can read images" on the
+> first request after a boot, on a machine with two vision-capable models
+> installed — a check failing closed on missing information and announcing it
+> as a fact about the user's hardware. Every uncertainty now proceeds; only
+> "models were found and none can see" refuses. And the read timeout was 120 s
+> against a **measured 158.9 s** for a cold vision projector, so Ollama
+> answered correctly and Zaram threw the answer away.
+>
+> ### Four reasons the desktop window opened black, three of them silent
+>
+> Reported as "electron launched and a black screen". It was `error.html`:
+> dark, nearly empty, and correct that something was wrong.
+>
+> **`broadcastViewport` was declared inside a conditional block and called
+> outside it.** A `function` declaration in a block is scoped to that block, so
+> every backend state change threw `ReferenceError` — into a bare
+> `catch (_) {}` in the subscriber loop. The renderer loaded and was never told
+> its own size. The comment directly above that function already describes the
+> previous incarnation of the same shape, one scope out.
+>
+> **`startupTimeoutMs` was 30,000 against a cold boot measured at 148 s** — 13 s
+> to reindex the Spine, then **131 s in semantic intent routing, which logs
+> nothing while it runs**. Now 240,000, with the measurement recorded beside it.
+>
+> **One aborted 3 s health probe tore down the loaded app.** A single failure
+> moved the launcher to `unavailable`, which reloads the error page over a
+> working renderer. Not hypothetical: a cold model load takes 95 s here, so
+> testing a large model would have destroyed the window it was being tested in.
+> The fix is not a longer probe — **the probe answers readiness and the child
+> process answers liveness**, and only the second is evidence the backend has
+> gone.
+>
+> The fourth is why the other three took so long to find: the launcher logged
+> no state transitions and swallowed subscriber errors. Both now report.
+>
+> ### The desktop holds most of the GPU, and it may explain the suite mystery
+>
+> Measured with `nvidia-smi --query-compute-apps`, **no model loaded**:
+> Explorer, Edge, WebView2, WhatsApp, PhoneExperienceHost, SearchHost and the
+> start menu together hold **~8.8 GB of this 12 GB card**.
+>
+> That leaves ~3.4 GB. `gemma4:12b` needs 7.5 GB, so it **spills to CPU** —
+> measured at 1.8 GB of 8.95 GB resident. Any test performing a real inference
+> then runs at processor speed. The backend suite hung at 51% twice in that
+> state and completed in **4:51** once the card was quieter.
+>
+> This file records an unexplained 2:53-versus-20:46 split and blames
+> provider-probe timeouts. **This is a better candidate**, and checking it is
+> cheap. Two consequences: the **30.3 tok/s "fully resident"** figure was taken
+> on a quiet machine and does not hold on a working desktop; and
+> `resident_budget_bytes` subtracts the embedder and a KV reserve from *total*
+> VRAM without subtracting the desktop, so the residency gate is optimistic by
+> several gigabytes in exactly the case that matters.
+>
+> ### A module that deleted its own source
+>
+> `AttachmentStore` swept its scratch directory with `shutil.rmtree`.
+> `data_dir()` resolves to `C:\Zaram\backend` in a checkout that already holds
+> databases — correct and deliberate — and the directory was called
+> `attachments`. So the root came out as `backend/attachments`, the package's
+> own directory, and importing `main.py` removed it.
+>
+> The rename to `chat-attachments` closes that route, since a hyphen cannot be
+> a module name. **The rename is the smaller half.** A recursive delete rooted
+> at a path derived from configuration has a blast radius somebody else
+> chooses, and `ZARAM_DATA_DIR` is a value somebody can set. The sweep now
+> unlinks only files matching its own prefix and never removes a directory.
+>
+> ### What was measured, and in what condition
+>
+> Backend **2554 passed, 22 skipped, 0 failed**, Ollama up, 4:51. Frontend 268
+> passed. Electron 56/56 with nothing running. Twenty mutations run across two
+> passes; **five came back green and were fixed** — a fixture that ranked in
+> document order anyway, filler sharing no words with the question, a budget
+> assertion measuring the block header, a gap marker the header explains by
+> using, and a detach test whose single file made the id under test also
+> `attachments[0]`.
+>
+> One flake, not from this work:
+> `test_an_engine_failure_becomes_an_error_event_and_still_terminates` fails
+> under load and passes alone. The log shows the error *was* caught and
+> printed, so the event races the consumer's completion — a real defect in the
+> legacy `ConversationManager` path.
+
 > ### Obligations reach the screen, and the proxy never carried them
 >
 > `GET /obligations` had been live since earlier today and **no frontend file
