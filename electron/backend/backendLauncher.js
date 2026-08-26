@@ -123,6 +123,13 @@ function buildArgs() {
  * health endpoint and reconnecting on failure. Event-driven: status changes
  * are pushed to subscribers.
  */
+/** Consecutive unanswered probes tolerated from a *running* backend.
+ *
+ *  At the 2 s poll interval this is roughly two minutes, chosen to clear the
+ *  95 s cold load of a model larger than VRAM. See `_shouldGiveUp`.
+ */
+const UNANSWERED_LIMIT = 60;
+
 class BackendLauncher {
   constructor({ config, logger, spawnImpl, checkHealthImpl, fsImpl, realFsImpl, platform }) {
     this.config = config;
@@ -141,6 +148,26 @@ class BackendLauncher {
     this._timer = null;
     this._stopping = false;
     this._restartTimer = null;
+    // Consecutive failed health probes. Reset by any success.
+    //
+    // A single failure is not evidence the backend has gone. `checkHealth`
+    // aborts after 3 s, and the backend does not answer promptly while a cold
+    // model load is in flight — measured at 95 s for a 17 GB model. Tearing
+    // the app down on one abort meant that loading a large model destroyed
+    // the window it was being loaded from.
+    this._failures = 0;
+  }
+
+  /** Whether the backend process is still there.
+   *
+   *  Liveness, as distinct from readiness. The probe says whether the backend
+   *  can answer *right now*; this says whether it exists. Only the second is
+   *  grounds for telling the user it has gone — and an exit is already
+   *  reported separately by the `close` handler, so this is the belt to that
+   *  set of braces rather than the only check.
+   */
+  _childAlive() {
+    return Boolean(this.child && this.child.exitCode === null && !this.child.killed);
   }
 
   onStatus(cb) {
@@ -152,6 +179,12 @@ class BackendLauncher {
     return Object.assign({}, this.status);
   }
 
+  /** Announce a state change and tell the log.
+   *
+   *  Logged here rather than at each call site so no transition can be added
+   *  without one. A launcher that does not say when it changed state leaves
+   *  "the window never appeared" to be diagnosed by counting HTTP requests.
+   */
   _emit(state, error) {
     this.status = {
       state,
@@ -159,8 +192,21 @@ class BackendLauncher {
       lastCheckedAt: Date.now(),
       error: error || undefined,
     };
+    if (this.logger && this.logger.info) {
+      this.logger.info('Backend state', { state, subscribers: this._subscribers.size, error: error || undefined });
+    }
     for (const cb of this._subscribers) {
-      try { cb(this.getStatus()); } catch (_) { /* ignore subscriber errors */ }
+      // **A subscriber that throws is reported, not swallowed.** This was a
+      // bare `catch (_) {}`, and the one subscriber that matters is the
+      // handler in `main.js` that loads the renderer — so any error on that
+      // path produced a window that never loaded and a log that said nothing.
+      try {
+        cb(this.getStatus());
+      } catch (err) {
+        if (this.logger && this.logger.error) {
+          this.logger.error('Backend status subscriber failed', { state, error: err && err.message });
+        }
+      }
     }
   }
 
@@ -314,23 +360,49 @@ class BackendLauncher {
         );
         console.log('[BackendLauncher] Health check result:', res.ok ? 'OK' : `FAIL(${res.status})`, 'current state:', this.status.state)
         if (res.ok) {
+          this._failures = 0;
           if (this.status.state !== 'available') {
-            console.log('[BackendLauncher] Emitting available')
             this._emit('available')
           }
         } else if (this.status.state === 'available') {
-          console.log('[BackendLauncher] Emitting unavailable - status:', res.status)
+          // A status code is an answer, so the backend is up and saying no.
+          // That is a real fault and is reported at once.
+          this.logger.warn('Backend health check returned', { status: res.status });
           this._emit('unavailable', `Health check returned status ${res.status}`);
         }
       } catch (err) {
-        console.log('[BackendLauncher] Health check error:', err.message, 'current state:', this.status.state)
-        if (this.status.state === 'available') {
-          console.log('[BackendLauncher] Emitting unavailable - error')
+        // No answer at all — a refused connection, or the 3 s probe aborting.
+        // Only meaningful if it keeps happening *and* the process has gone.
+        this._failures += 1;
+        if (this.status.state === 'available' && this._shouldGiveUp()) {
+          this.logger.warn('Backend stopped answering', {
+            failures: this._failures,
+            childAlive: this._childAlive(),
+            error: err.message,
+          });
           this._emit('unavailable', err.message);
         }
       }
     }, this.config.backend.pollIntervalMs);
     if (this._timer.unref) this._timer.unref();
+  }
+
+  /** Whether silence has gone on long enough to tell the user.
+   *
+   *  A dead process is reported immediately: there is nothing to wait for, and
+   *  `close` will usually have said so already. A *live* process that is not
+   *  answering is busy, and the app stays up — the orb already reports that
+   *  Zaram is working, which is the honest thing to show while it is.
+   *
+   *  The grace period is generous on purpose. `UNANSWERED_LIMIT` probes at
+   *  `pollIntervalMs` is about two minutes, which clears the 95 s cold model
+   *  load measured on this machine. Being slow to report a hang costs a
+   *  spinner; being quick to report one costs the user their window and
+   *  whatever was on screen.
+   */
+  _shouldGiveUp() {
+    if (!this._childAlive()) return true;
+    return this._failures >= UNANSWERED_LIMIT;
   }
 
   _stopPolling() {

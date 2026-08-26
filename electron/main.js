@@ -57,6 +57,33 @@ function pushToRenderer(channel, payload) {
   }
 }
 
+/** Tell the renderer how big it is.
+ *
+ *  **At module scope, and that is the fix rather than the style.** This was a
+ *  `function` declaration inside `if (loadedDesktop && desktopRuntime)`, called
+ *  from the `backend.onStatus` handler outside it — so every backend state
+ *  change threw `ReferenceError: broadcastViewport is not defined`, and the
+ *  subscriber loop discarded it. The window loaded and the viewport was never
+ *  broadcast.
+ *
+ *  It belongs here for the same reason `pushToRenderer` does: it needs
+ *  `windows` and `MAIN_EVENTS`, and nothing from the desktop runtime. Putting
+ *  it inside that block tied a renderer concern to whether an optional runtime
+ *  happened to load.
+ */
+function broadcastViewport() {
+  const win = windows && windows.getMainWindow();
+  if (win && !win.isDestroyed()) {
+    const bounds = win.getBounds();
+    const dpr = win.webContents.getZoomFactor() || 1;
+    pushToRenderer(MAIN_EVENTS.presenceViewport, {
+      width: bounds.width,
+      height: bounds.height,
+      scaleFactor: dpr,
+    });
+  }
+}
+
 function hardenWindow(win) {
   // Prevent the renderer from opening new windows / navigating off-app.
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
@@ -308,19 +335,6 @@ async function bootstrap() {
     if (presenceFrameTimer) {
       clearInterval(presenceFrameTimer)
       presenceFrameTimer = null
-    }
-  }
-
-  function broadcastViewport() {
-    const win = windows && windows.getMainWindow();
-    if (win && !win.isDestroyed()) {
-      const bounds = win.getBounds();
-      const dpr = win.webContents.getZoomFactor() || 1;
-      pushToRenderer(MAIN_EVENTS.presenceViewport, {
-        width: bounds.width,
-        height: bounds.height,
-        scaleFactor: dpr,
-      });
     }
   }
 
