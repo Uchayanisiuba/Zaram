@@ -2934,8 +2934,210 @@ async def export_manifest():
 from ingest.records import IngestRecords  # noqa: E402
 from ingest.service_api import IngestService, default_db_path as ingest_db_path  # noqa: E402
 
-ingest_service = IngestService(IngestRecords(ingest_db_path()))
+from obligations.records import (  # noqa: E402
+    ObligationRecords,
+    default_db_path as obligations_db_path,
+)
 
+#: Commitments read out of the documents the user ingests.
+#:
+#: Built here rather than inside `IngestService` so that a build without it
+#: still indexes. Indexing a document and reading its deadlines are two
+#: capabilities, and doing the half you can beats doing neither.
+obligation_records = ObligationRecords(obligations_db_path())
+
+ingest_service = IngestService(
+    IngestRecords(ingest_db_path()), obligations=obligation_records
+)
+
+
+# --------------------------------------------------------------------------- #
+# Obligations — commitments read out of the user's own documents.
+#
+# The extractor and its contracts had 28 green tests and no caller outside
+# them. These routes plus the ingest seam are what make the package reachable;
+# without them it is the eighteenth complete, tested, unreachable subsystem.
+#
+# Two rules shape every endpoint below, and both come from CLAUDE.md.
+#
+# **Never silently create a commitment.** A missed deadline is bad and an
+# invented one is worse, because the user reorganises their week around it and
+# only discovers it was never in the contract when they go looking for the
+# clause. So every obligation returned carries its source clause, and a clause
+# that could not be dated is returned as a *question* rather than anchored to
+# a guess.
+#
+# **It is not a calendar.** These endpoints report and correct. Nothing here
+# schedules, notifies, or writes to anything outside the obligations store.
+# --------------------------------------------------------------------------- #
+
+
+@app.get("/obligations")
+async def list_obligations(scope: str = "", include_closed: bool = False):
+    """Live commitments, soonest first, each with the clause it was read from.
+
+    `include_closed` returns dismissed and met ones as well. That is not an
+    administrative nicety: a product that claims to be correctable has to be
+    able to show the user what they corrected, or "you can dismiss this" is a
+    promise with no way to audit it.
+    """
+    records = (
+        obligation_records.all_obligations()
+        if include_closed
+        else obligation_records.open_obligations(scope=scope)
+    )
+    return {
+        "obligations": records,
+        "questions": obligation_records.open_questions(),
+    }
+
+
+@app.get("/obligations/{obligation_id}")
+async def get_obligation(obligation_id: str):
+    record = obligation_records.get(obligation_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="No such obligation")
+    return record
+
+
+class ObligationCorrection(BaseModel):
+    """What the user is changing. Absent fields are left alone.
+
+    The source clause is deliberately not among them. A correction says Zaram
+    read the sentence wrongly, not that the sentence was different, and letting
+    a caller rewrite the clause would break the one guarantee this package
+    makes.
+    """
+
+    #: ISO date.
+    due: str | None = None
+    summary: str | None = None
+    #: A string, not a float. JSON has one number type and it is a double, so
+    #: `0.1` arrives as 0.1000000000000000055 — the same reasoning the invoice
+    #: line items already follow.
+    amount: str | None = None
+    currency: str | None = None
+    #: `owed_by_user` or `owed_to_user`. This is the field the extractor
+    #: deliberately refuses to guess, so it is the one a user most often sets.
+    direction: str | None = None
+
+
+@app.post("/obligations/{obligation_id}/correct")
+async def correct_obligation(obligation_id: str, body: ObligationCorrection):
+    """Replace an obligation with a corrected one. Rule 4.
+
+    The original is superseded rather than deleted and stays readable, so "what
+    did Zaram think last week" remains answerable and the correction is a
+    visible event rather than a field changing underneath the interface.
+    """
+    from datetime import date as _date
+    from decimal import Decimal, InvalidOperation
+
+    from obligations.contracts import Direction
+
+    parsed_due = None
+    if body.due:
+        try:
+            parsed_due = _date.fromisoformat(body.due)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=400, detail=f"due must be an ISO date: {exc}"
+            ) from exc
+
+    parsed_amount = None
+    if body.amount:
+        try:
+            parsed_amount = Decimal(body.amount)
+        except (InvalidOperation, ValueError) as exc:
+            raise HTTPException(
+                status_code=400, detail=f"amount is not a number: {body.amount!r}"
+            ) from exc
+
+    parsed_direction = None
+    if body.direction:
+        try:
+            parsed_direction = Direction(body.direction)
+        except ValueError as exc:
+            allowed = ", ".join(d.value for d in Direction)
+            raise HTTPException(
+                status_code=400, detail=f"direction must be one of: {allowed}"
+            ) from exc
+
+    corrected = obligation_records.correct(
+        obligation_id,
+        due=parsed_due,
+        summary=body.summary,
+        amount=parsed_amount,
+        currency=body.currency,
+        direction=parsed_direction,
+    )
+    if corrected is None:
+        raise HTTPException(
+            status_code=404, detail="No such obligation, or it was already superseded"
+        )
+    return corrected
+
+
+@app.post("/obligations/{obligation_id}/dismiss")
+async def dismiss_obligation(obligation_id: str):
+    """Say this was never an obligation.
+
+    Stored, not deleted. Deleting would mean the next ingest of the same
+    document extracts the same clause and asks again, which teaches the user
+    that correcting Zaram does not stick.
+    """
+    if not obligation_records.dismiss(obligation_id):
+        raise HTTPException(
+            status_code=404, detail="No such obligation, or it was already superseded"
+        )
+    return obligation_records.get(obligation_id)
+
+
+@app.post("/obligations/{obligation_id}/met")
+async def complete_obligation(obligation_id: str):
+    """Mark it done. Distinct from dismissing: it was real, and it happened."""
+    if not obligation_records.mark_met(obligation_id):
+        raise HTTPException(
+            status_code=404, detail="No such obligation, or it was already superseded"
+        )
+    return obligation_records.get(obligation_id)
+
+
+class QuestionAnswer(BaseModel):
+    #: The date the relative term counts from — an invoice's issue date, a
+    #: contract's signature date. ISO.
+    anchor: str
+
+
+@app.post("/obligations/questions/{question_id}/answer")
+async def answer_obligation_question(question_id: str, body: QuestionAnswer):
+    """Supply what was missing, and turn a clause into a dated commitment.
+
+    This is the shape of rule 9 in this feature. Extraction that cannot pin a
+    date down neither drops the clause nor guesses at it — it asks, and this is
+    where the answer arrives. A 409 means the anchor was accepted and still did
+    not settle it, so the question stays open rather than being closed on a
+    date nobody could produce.
+    """
+    from datetime import date as _date
+
+    try:
+        anchor = _date.fromisoformat(body.anchor)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400, detail=f"anchor must be an ISO date: {exc}"
+        ) from exc
+
+    created = obligation_records.answer_question(question_id, anchor=anchor)
+    if created is None:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "That date did not resolve the clause, so it has been left as a "
+                "question rather than closed on a guess."
+            ),
+        )
+    return created
 
 class IngestBody(BaseModel):
     path: str

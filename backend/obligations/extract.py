@@ -402,7 +402,25 @@ def extract_obligations(
 
     for sentence, start, end in _sentences(text):
         kind = _classify(sentence)
-        if kind is None or not _COMMITMENT.search(sentence):
+        if kind is None:
+            continue
+
+        # A relative term is itself a commitment, and requiring `_COMMITMENT`
+        # as well silently lost the single most common clause on a real
+        # invoice. **"Payment terms: 30 days from the invoice date"** carries
+        # none of `due`, `by`, `within` or `net`, so it was dropped at this
+        # gate — classified as a payment, its thirty days parsed, and then
+        # discarded with no obligation and no unresolved question. That exact
+        # sentence is what `tests/test_recall_eval.py` uses as its sample
+        # invoice, so the repository's own canonical example was the one it
+        # could not read.
+        #
+        # Checking `_relative_days` rather than widening the regex keeps the
+        # gate tight. The regex exists so that "we met on 3 March" does not
+        # become a deadline, and adding a word like "terms" to it would let
+        # every sentence mentioning terms through. A parsed span of days plus a
+        # payment or delivery cue is a deadline by construction.
+        if not _COMMITMENT.search(sentence) and _relative_days(sentence) is None:
             continue
 
         clause = Clause(text=sentence, start=start, end=end)
