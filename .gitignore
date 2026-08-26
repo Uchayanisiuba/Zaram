@@ -172,6 +172,20 @@ backend/projects.db
 backend/projects.db-wal
 backend/projects.db-shm
 
+# Commitments read out of the user's own documents. Their contracts and
+# deadlines — never in the repository.
+backend/obligations.db
+backend/obligations.db-wal
+backend/obligations.db-shm
+
+# Knowledge domains. **This was tracked**, committed empty by accident in
+# c07177b, which meant the first domain the user created would have shown up as
+# a modified file ready to be committed with it. Untracked on 26 August; the
+# history is clean because the file never held a row.
+backend/domains.db
+backend/domains.db-wal
+backend/domains.db-shm
+
 # Code signing material. A committed certificate is a revoked certificate:
 # once the private key is in git history it is compromised, and the only
 # remedy is reissuing — paid for again, and re-validated from scratch.
