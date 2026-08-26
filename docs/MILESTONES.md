@@ -13,6 +13,78 @@ accurate — it is the first thing anyone reads.
 
 ## Current state — 26 August 2026
 
+> ### Obligations reach the product — the eighteenth, wired
+>
+> `backend/obligations/` had `contracts.py`, `extract.py` and 28 green tests,
+> and was imported by nothing but that test file. CLAUDE.md calls it the
+> freelance pack's entry point and the reason someone opens Zaram in week one.
+> Three things were missing: somewhere to put a commitment, a caller, and a way
+> to correct one.
+>
+> **`obligations/records.py`** is append-and-supersede only. A correction
+> writes a new row and points the old one at it, the same shape
+> `MemoryRecord.superseded_by` uses for facts — rule 4 says the affected
+> answers must change, not that the previous belief should vanish. A dismissal
+> is stored rather than deleted, because deleting means the next ingest of the
+> same document extracts the clause and asks again, which teaches the user that
+> correcting Zaram does not stick. Identity is a hash of document, clause, kind
+> and date, so re-ingesting a file is a no-op.
+>
+> **The seam is `_ingest_one`**, injected the way `store_fact` already is, so
+> `ingest/service.py` stays testable without a Spine or an obligations
+> database. Obligations are read from the **whole parsed document**, never the
+> chunks: `chunk()` splits on size and a clause is a sentence, so half of
+> "payment is due within 30 days of the invoice date" is a fragment rather than
+> a commitment. Extraction failure is caught and logged — a commitment Zaram
+> could not read is bad, a document that failed to ingest because of one is
+> worse.
+>
+> **Two refusals, both deliberate.** No anchor date is supplied at the ingest
+> layer, because the parsers return text and not fields, so "30 days from the
+> invoice date" is stored *unresolved with the question that would settle it*.
+> Passing today's date would turn "I do not know when this was issued" into a
+> confident wrong deadline the user plans their week around. `direction` stays
+> UNKNOWN for the same reason: the sentence reads identically on an invoice
+> sent and one received, and guessing tells a freelancer they owe money they
+> are in fact owed.
+>
+> **A defect found by wiring it up, on the canonical case.** `_COMMITMENT`
+> gates every sentence before a date in it is read as a deadline, and
+>
+>     Payment terms: 30 days from the invoice date.
+>
+> carries none of `due`, `by`, `within` or `net` — so it was dropped at that
+> gate with **no obligation and no unresolved question**. Classified as a
+> payment, its thirty days parsed, then discarded silently. That is the
+> commonest clause on a real invoice and the exact sentence
+> `test_recall_eval.py` uses as its sample invoice: the repository's own
+> canonical example was the one the extractor could not read. Fixed by treating
+> a parsed relative term as commitment evidence rather than by widening the
+> regex, which keeps "we met on 3 March" out — asserted directly.
+>
+> Routes: `GET /obligations` (with the open questions beside them), read one,
+> correct, dismiss, mark met, and `POST /obligations/questions/{id}/answer`.
+> The source clause is not on the correction model at all — a correction says
+> Zaram read the sentence wrongly, not that the sentence was different.
+> Answering with a date that still does not resolve the clause returns 409 and
+> leaves the question open rather than closing it on a guess.
+>
+> **What is not built**: any interface. The obligations exist, are correctable
+> and are reachable over HTTP, and nothing on screen shows them. That is the
+> next piece and it is where CLAUDE.md's constraint bites — *Zaram surfaces
+> obligations in context and drafts the response; it is not a calendar and must
+> not become one.*
+>
+> ### Two user databases that should never have been in the repository
+>
+> `backend/domains.db` was committed in `c07177b` and tracked since. Empty, so
+> nothing leaked and the history is clean — but tracked means the first
+> knowledge domain the user creates turns it into a modified file in
+> `git status`, ready to be committed with real content. `backend/obligations.db`
+> is new and holds the deadlines and payment terms read out of the user's own
+> contracts, which is the most sensitive store in the product after the Spine.
+> Neither was ignored. Both are now.
+
 > ### Documents stopped being a text dump, and an invoice stopped losing its money
 >
 > The complaint was that generated documents "do not meet the standard of
@@ -222,7 +294,7 @@ accurate — it is the first thing anyone reads.
 >
 > ### What was measured, and in what condition
 >
-> Suite **2481 passed, 21 skipped, 0 failed**, Ollama up. The document and
+> Suite **2512 passed, 21 skipped, 0 failed**, Ollama up. The document and
 > search work is covered by 20 new tests, each confirmed to fail without its
 > fix by disabling the fix and watching them go red.
 >
