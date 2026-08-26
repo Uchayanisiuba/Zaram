@@ -9,7 +9,7 @@ from typing import Any, Dict
 
 from pathlib import Path
 
-from fastapi import FastAPI, File, HTTPException, Request, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
@@ -527,6 +527,17 @@ class ChatRequest(BaseModel):
     #: Empty means unrestricted — the ordinary case — which is not the same as
     #: a chosen domain that happens to hold nothing. See `_domain_scope`.
     domain_ids: list[str] = []
+    #: Files attached to *this message*, by id from `POST /chat/attachments`.
+    #:
+    #: A third axis again, and the narrowest. A project says whose work this
+    #: is, a domain says which library to read from, and this says "the
+    #: document in front of us right now" — which is working state and never
+    #: enters the Spine unless the user separately decides it should (rule 7d).
+    #:
+    #: Ids rather than text, so the decision about how much of a document fits
+    #: is made where the model's budget is known. A frontend that inlined the
+    #: text would be choosing on behalf of a context length it cannot see.
+    attachment_ids: list[str] = []
 
 
 def _domain_scope(domain_ids: list[str]) -> tuple[frozenset[str] | None, str]:
@@ -883,16 +894,12 @@ async def chat(request: ChatRequest):
     print(f"[STAGE-7][Python] POST /chat received: text='{request.text[:50]}...' model={model} persona={request.persona}")
     print(f"[STAGE-7][Python] Full request text length: {len(request.text)} chars")
 
-    if hasattr(request, "image") and request.image:
-        return StreamingResponse(
-            _stream_error("Image input is not supported on this endpoint. Use /vision/analyze for image analysis."),
-            media_type="text/event-stream"
-        )
-    if hasattr(request, "images") and request.images:
-        return StreamingResponse(
-            _stream_error("Image input is not supported on this endpoint. Use /vision/analyze for image analysis."),
-            media_type="text/event-stream"
-        )
+    # Two `hasattr(request, "image")` guards stood here and are deleted.
+    # `ChatRequest` has no `image` field and never had one, so both conditions
+    # were constant `False` — a refusal that could not fire, reading as a
+    # protection that was in place. The honest version of that check belongs on
+    # the attachment path, where an image genuinely can arrive and is genuinely
+    # refused with a sentence saying why: see `attachments/store.py`.
 
     persona_data = PERSONAS.get(request.persona, PERSONAS.get("zaram_prime", {}))
     persona_prompt = persona_data.get("system_prompt", "") if persona_data else ""
@@ -938,6 +945,19 @@ async def chat(request: ChatRequest):
     # The API layer passes the raw prompt through without independent search.
     final_prompt = request.text
 
+    # Files attached to this message, composed against the model's budget.
+    #
+    # Here rather than in the kernel because this is the layer that holds the
+    # session stores, and *before* the stream starts because what was read has
+    # to be sayable before the answer built on it — the same reasoning the
+    # domain notice already follows.
+    attached, missing_attachments = attachment_store.resolve(
+        request.session_id, request.attachment_ids
+    )
+    composition = compose_attachments(attached, request.text, missing=missing_attachments)
+    if composition.block:
+        final_prompt = f"{composition.block}\n\n{request.text}"
+
     # Who is answering, said before the first token rather than after the last.
     #
     # `CLAUDE.md` requires every reply to name the model that answered, and
@@ -961,6 +981,20 @@ async def chat(request: ChatRequest):
         if domain_notice:
             yield StreamEvent.notice(
                 domain_notice, kind="domain", action="knowledge"
+            ).to_ipc() + "\n"
+        # How much of each attached file the model actually saw.
+        #
+        # **Always, not only when something was left out.** "Read it in full"
+        # and "searched it and used 3 of 41 sections" are different answers to
+        # the same question, and a disclosure that appears only in the second
+        # case teaches the user that silence means everything was read — which
+        # makes the one time it is missing indistinguishable from the one time
+        # it did not fire. LM Studio switches between these two modes and
+        # documents neither; this is the whole of the difference.
+        attachment_notice = composition.notice()
+        if attachment_notice:
+            yield StreamEvent.notice(
+                attachment_notice, kind="attachment"
             ).to_ipc() + "\n"
         async for chunk in chat_router.route(
             final_prompt, model, system_prompt, request.session_id,
@@ -2939,6 +2973,19 @@ from obligations.records import (  # noqa: E402
     default_db_path as obligations_db_path,
 )
 
+from attachments import (  # noqa: E402
+    AttachmentError,
+    AttachmentStore,
+    compose as compose_attachments,
+)
+
+#: Files attached to a conversation. Working state, cleared at startup.
+#:
+#: Deliberately not built from `IngestRecords` and deliberately not sharing a
+#: store with the Spine. Rule 7d: entering long-term memory is a decision the
+#: system makes, and dragging a file onto a message box is not that decision.
+attachment_store = AttachmentStore()
+
 #: Commitments read out of the documents the user ingests.
 #:
 #: Built here rather than inside `IngestService` so that a build without it
@@ -2949,6 +2996,124 @@ obligation_records = ObligationRecords(obligations_db_path())
 ingest_service = IngestService(
     IngestRecords(ingest_db_path()), obligations=obligation_records
 )
+
+
+# --------------------------------------------------------------------------- #
+# Attachments — the files one message is about.
+#
+# Separate from `/ingest` on purpose, and the separation is rule 7d rather than
+# tidiness. `/ingest` adds a document to the Spine, where it is indexed,
+# recalled and cited for as long as the user keeps it. These routes hold a file
+# for the conversation it was dropped into and no longer: parsed, used, and
+# then offered. Someone asking one question about a contract has not decided to
+# add it to their knowledge base, and treating those as the same act fills the
+# Spine with things people looked at once — which is the store that stops being
+# worth searching.
+#
+# `POST /chat/attachments/{id}/keep` is where the two meet, and it is the only
+# place they do: it hands the same bytes to the ordinary ingest path and
+# produces an ordinary source, with the user having said so.
+# --------------------------------------------------------------------------- #
+
+
+@app.post("/chat/attachments")
+async def add_chat_attachments(
+    session_id: str = Form("default"),
+    files: list[UploadFile] = File(...),
+):
+    """Parse files for this conversation and hold them.
+
+    The bytes are read here rather than inside a streamed body, for the reason
+    `/ingest/upload` records: a `StreamingResponse` runs after the endpoint
+    returns, by which point the temporary files behind `UploadFile` may be
+    gone. This one answers in a single response anyway — a composer chip needs
+    the whole result before it can be drawn.
+
+    Refusals are per file and do not fail the request. Dropping four files of
+    which one is a screenshot should attach three and say why the fourth did
+    not, rather than refusing all four and naming none of them.
+    """
+    if not files:
+        raise HTTPException(status_code=400, detail="No files were sent.")
+
+    attached: list[dict] = []
+    refused: list[dict] = []
+    evicted: list[dict] = []
+
+    for upload in files:
+        name = upload.filename or ""
+        try:
+            data = await _read_capped(upload)
+        except HTTPException as exc:
+            refused.append({"name": name, "reason": str(exc.detail)})
+            continue
+        try:
+            item, dropped = attachment_store.add(session_id, name, data)
+        except AttachmentError as exc:
+            refused.append({"name": name, "reason": str(exc)})
+            continue
+        except OSError as exc:
+            refused.append({"name": name, "reason": f"Could not keep that file: {exc}"})
+            continue
+        attached.append(item.to_dict())
+        evicted.extend(d.to_dict() for d in dropped)
+
+    return {
+        "attached": attached,
+        "refused": refused,
+        # What was dropped to make room, named rather than silent. An
+        # attachment that disappeared without being mentioned would leave the
+        # user believing a document is in scope when it is not.
+        "evicted": evicted,
+    }
+
+
+@app.get("/chat/attachments")
+async def list_chat_attachments(session_id: str = "default"):
+    """What this conversation currently holds."""
+    return {"attachments": [a.to_dict() for a in attachment_store.for_session(session_id)]}
+
+
+@app.delete("/chat/attachments/{attachment_id}")
+async def remove_chat_attachment(attachment_id: str):
+    """Detach one. The bytes go with it — this was never storage."""
+    if not attachment_store.remove(attachment_id):
+        raise HTTPException(status_code=404, detail="That file is not attached.")
+    return {"removed": attachment_id}
+
+
+@app.post("/chat/attachments/{attachment_id}/keep")
+async def keep_chat_attachment(attachment_id: str):
+    """Add an attached file to Knowledge, because the user said so.
+
+    Rule 7d's other half. The file goes through the ordinary ingest path and
+    becomes an ordinary source — indexed, policied, correctable, removable —
+    rather than being promoted by some second mechanism that would then need
+    its own correction loop.
+
+    It stays attached afterwards. The question being asked about it is not
+    over, and detaching it as a side effect of keeping it would take the
+    document out of the conversation at the moment the user said it mattered.
+    """
+    item = attachment_store.get(attachment_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="That file is not attached.")
+
+    source = Path(item.path)
+    if not source.exists():
+        raise HTTPException(
+            status_code=409,
+            detail="The file is no longer on disk, so it cannot be kept. Attach it again.",
+        )
+
+    try:
+        saved = ingest_service.save_upload(item.name, source.read_bytes())
+    except OSError as exc:
+        raise HTTPException(
+            status_code=500, detail=f"Could not keep that file: {exc.strerror or exc}"
+        ) from exc
+
+    return _stream_paths([saved])
 
 
 # --------------------------------------------------------------------------- #
