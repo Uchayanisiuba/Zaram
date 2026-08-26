@@ -1,7 +1,7 @@
 # Next session — start here
 
-A prompt and a state snapshot. Written 19 August 2026 at the end of the model
-routing, web search and packaging session.
+A prompt and a state snapshot. Rewritten 26 August 2026 at the end of the
+documents, search-labelling and obligations session.
 
 **This file is a pointer, not a second handoff.** `docs/MILESTONES.md` Current
 state is the handoff and stays the authority on status; `CLAUDE.md` stays the
@@ -14,47 +14,52 @@ is stale — say so and fix it.
 
 Paste this into a new session:
 
-> Read `CLAUDE.md`, then `docs/MILESTONES.md` Current state, then
-> `docs/NEXT-SESSION.md`. For anything touching voice read `docs/SPEECH.md`;
-> before launching the app read `docs/RUNNING.md`, which has four failure modes
-> that each look like something else.
+> Read `CLAUDE.md`, then `docs/MILESTONES.md` Current state — 26 August — then
+> this file. For anything touching voice read `docs/SPEECH.md`; before
+> launching the app read `docs/RUNNING.md`, which has four failure modes that
+> each look like something else.
 >
 > State you are inheriting:
 >
-> - Five commits are pushed on branch `Zaram-V0.1` (PR #2, open, base `main`).
-> - Three logical commits sit uncommitted in the working tree: a web search
->   fix, a rewritten README, and the two handoff documents. The files for each
->   are listed below.
-> - Zaram may still be running from the previous session. It holds port 8420
->   and a single-instance lock, and a stale instance will not have rescanned
->   models.
+> - Branch `Zaram-V0.1`. **The working tree is clean and everything is
+>   committed.** Ten commits landed on 26 August; `git log --oneline -10` is
+>   the list.
+> - Nothing is running. Ollama may or may not be up — check, because it
+>   changes what the suite executes and how long it takes.
 >
 > How this repository fails, so you can recognise it:
 >
-> - **Sixteen** complete, tested, unreachable subsystems have been found. The
->   sixteenth was web search: every layer reported success and the results were
->   discarded in the seam between two steps. Assume unreachable until you have
->   seen the caller.
-> - A green suite has meant nothing on at least six occasions. Before you trust
->   a new test, disable the thing it tests and watch it go red.
+> - **Eighteen** complete, tested, unreachable subsystems have been found. The
+>   seventeenth was bitemporal memory: the field is written, persisted and
+>   exported, and `valid_time.py` — which queries it — is imported by nothing
+>   but its own test. The eighteenth was obligation extraction, wired this
+>   session. **Assume unreachable until you have seen the caller.**
+> - A green suite has meant nothing on at least seven occasions. Before you
+>   trust a new test, disable the thing it tests and watch it go red — and then
+>   read *which* tests survived. Three of mine passed with the feature disabled
+>   because they iterated an empty list and asserted nothing.
 > - Verify against the code, not the documentation. When the two disagree the
->   code wins, and say so. The README was understating a shipped feature this
->   week; a status page that understates is the same defect as one that
->   overstates.
-> - Say which environment you measured in. The backend suite takes ~4 minutes
->   with Ollama up and ~20 with it down, and it executes different code.
+>   code wins, and say so.
+> - Say which environment you measured in. The backend suite has taken 2:53 and
+>   20:43 on this machine with Ollama up in both cases, unexplained.
 >
 > Environment specifics that have each cost time:
 >
 > - Python is `backend/venv/Scripts/python.exe`. There are two other
->   interpreters on this machine and both have been launched by accident.
-> - Launch with the command below, Vite on 5173 first. Delete
->   `ELECTRON_RUN_AS_NODE`, never blank it.
-> - `curl http://127.0.0.1:8420/health` returning **401** is success.
+>   interpreters here and both have been launched by accident; a bare `python`
+>   on PATH is broken and reports a missing install path.
+> - Run tests from `backend/`. Scripts outside it need
+>   `PYTHONPATH=C:/Zaram/backend`, and `PYTHONIOENCODING=utf-8` or printing a
+>   document will die on cp1252.
+> - `curl http://127.0.0.1:8420/health` returning **401** is success. The auth
+>   header is `X-Zaram-Auth`, not `X-Zaram-Client`, which is a label enforced
+>   nowhere.
 > - **`gh` is not installed**, so anything needing the GitHub CLI must be
 >   handed back rather than attempted.
-> - **Do not read a command's exit code through a pipe.** `ollama pull … | tail`
->   reported success for a pull that had failed, and it was believed.
+> - **Do not read a command's exit code through a pipe.**
+> - Bash heredocs choke on document content containing backticks and
+>   apostrophes. Write the file with the Write tool and splice it in with a
+>   short Python script instead of fighting the quoting.
 >
 > Start on item 1 under "What to do next" unless I say otherwise. Before
 > reporting anything as working, run it and watch it happen.
@@ -73,196 +78,174 @@ consistent, so no guard sees either.
 | Python | `backend/venv` | `C:\Zaram\.venv` — also complete |
 | Electron | `electron/main.js` | `desktop/src/main/index.ts` |
 
-A third Python appeared this session: the instance running before the restart
-had been launched with `AppData\Local\Programs\Python\Python311\python.exe`,
-i.e. with `ZARAM_PYTHON` unset. Set it.
-
 Launch, from the repo root, with Vite already listening on 5173:
 
 ```bash
-env -u ELECTRON_RUN_AS_NODE \
-    ZARAM_PYTHON="C:/Zaram/backend/venv/Scripts/python.exe" \
-    node_modules/.bin/electron electron/main.js
+env -u ELECTRON_RUN_AS_NODE ZARAM_PYTHON="C:/Zaram/backend/venv/Scripts/python.exe" node_modules/.bin/electron electron/main.js
 ```
 
-Success looks like `curl http://127.0.0.1:8420/health` returning **401** — the
-per-launch secret is enforced and you do not have it. A 200 means the guard is
-off. `ELECTRON_RUN_AS_NODE` must be **deleted, never blanked**; Electron tests
-for its presence.
+`ELECTRON_RUN_AS_NODE` must be **deleted, never blanked**; Electron tests for
+its presence.
+
+To drive the backend directly instead — which is how the search and obligation
+work was verified — start it with a known secret and call it with that header:
+
+```bash
+cd backend && ZARAM_API_SECRET=dev-secret venv/Scripts/python.exe main.py
+```
+
+```bash
+curl -s -H 'X-Zaram-Auth: dev-secret' http://127.0.0.1:8420/obligations
+```
 
 ---
 
 ## What is uncommitted right now
 
-Two logical commits, independent of each other.
-
-**1. Web search reaches the model.** The fix described at the top of
-`MILESTONES.md` Current state.
-
-* `backend/core/search_context.py` — **new**. `format_search_results`,
-  `search_prompt`, `result_count`. Moved out of `main.py` because the engine is
-  its only consumer and `main` imports from `core`, never the reverse.
-* `backend/core/execution_engine.py` — injects the search output into the
-  `reasoning.generate` step; emits a notice when a search returns nothing.
-* `backend/main.py` — dead `_format_search_results` and its now-unused
-  `SEARCH_MARKER` import removed.
-* `backend/tests/test_search_reaches_the_model.py` — **new**, 18 tests, six of
-  which drive the real engine and assert on the prompt the model was handed.
-* `backend/tests/test_alpha10c_acceptance.py` — two imports repointed.
-
-**2. The README, rewritten.** Adds *Who this is for* and *Why this is hard to
-copy*, both previously absent; re-verifies the Status section against the code;
-and states the licence decision below.
-
-**3. These two documents** — this file and the new Current state entry in
-`docs/MILESTONES.md`. They travel together with whichever commit lands last.
+**Nothing.** The tree is clean.
 
 ---
 
 ## Decisions taken this session
 
-* **`gemma4:12b` is the daily driver.** `qwen3:14b` was rejected: 9.3 GB fails
-  the ~9.1 GB residency budget it was chosen to satisfy.
-* **`qwen3.8:27b` is background-tier only**, at a measured 1.45 tok/s.
-* **The repository is source-available, all rights reserved — not open
-  source.** Reading and auditing are welcome; copying, modifying and
-  redistributing are not granted. This reverses the README's earlier line that
-  an OSI licence was required before public release, and the reconciliation is
-  that the concern underneath that line was *auditability*, which readable
-  source satisfies without forkability.
-* **Do not revive `backend/orchestrator/`.** The live replacement now exists,
-  and that package still contains the merged gate/ranking bug.
+* **Documents are structured, and markdown is the input form.** `Heading`,
+  `BulletList`, `TableBlock`, `PageBreak`, `RichText` in
+  `artifacts/contracts.py`; `artifacts/markdown_blocks.py` converts. `str` and
+  `Claim` are unchanged, so every older caller works untouched.
+* **Model variance is absorbed by the adapter, not by requiring a better
+  model.** A format contract in the prompt removes most of it; the adapter
+  handles the rest. Documents do **not** need cloud models — that was never a
+  capability failure.
+* **The licence file exists**: source-available, all rights reserved.
+* **`origin_of` defaults to *local record*, never *web*.** Calling a web page a
+  local record understates a source; the reverse is a false claim of
+  provenance, which is rule 2.
+* **Do not repeat the bitemporality claim** until something calls
+  `in_force_at`. See MILESTONES, the seventeenth.
+* **"Comparable to state of the art" is unsupported in either direction** and
+  should not be claimed. The LoCoMo/LongMemEval benchmark CLAUDE.md asks for
+  has never been run.
 
 ---
 
 ## What to do next
 
-**This list is from 19 August and has been overtaken.** `docs/MILESTONES.md`
-Current state — 26 August — is the handoff and is the authority. What follows
-is kept because most of it is still open; items struck as DONE are recorded so
-nobody re-does them.
-
-0. **~~Ask the running Zaram something the weights cannot know.~~ DONE,
-   26 August.** Run twice against a real DuckDuckGo result and a real local
-   model. It worked, and it found two further defects that no test could have:
-   the search block was labelling the user's own Spine records as internet
-   results, and five of six "sources" on a news question were local. Both
-   fixed. See MILESTONES Current state.
-
-0b. **~~Write the `LICENSE` file.~~ DONE, 26 August.** Source-available, all
-   rights reserved, matching the README section it was drawn from.
-
-1. **Wire obligation extraction.** Promoted to first because it is now
-   unambiguously the largest gap between built and reachable.
-   `backend/obligations/` — `contracts.py` and `extract.py` — is imported by
-   **nothing but its own test file**, which makes it the eighteenth complete,
-   tested, unreachable subsystem. Its CLAUDE.md precondition is satisfied:
-   `untrusted.py` is wired into `core/execution_engine.py` and
-   `test_untrusted_reaches_recall.py` asserts the seam rather than the module.
-   The extractor already carries the source sentence for every clause, which is
-   what rule 2 and "every obligation shows its source clause" require. What is
-   missing is a caller, a surface, and the correction path. **Never silently
+1. **Give obligations a surface.** The backend is done — extracted on ingest,
+   stored, correctable, and reachable over HTTP — and **nothing on screen shows
+   any of it**, which is the same "reachable only from Python" state the
+   package was in yesterday, moved one layer up. `GET /obligations` returns the
+   commitments and the open questions together; both need showing. CLAUDE.md's
+   constraint is the design brief: *Zaram surfaces obligations in context and
+   drafts the response — it is not a calendar and must not become one.* Every
+   obligation shows its source clause and is correctable; **never silently
    create a commitment.**
-2. **Run the app and watch the mouth move.** Carried over untouched from the
-   previous handoff. Nothing from the voice session has been seen in the
-   product. Speech on the Speak button in orb mode, speech automatic and
-   streaming in avatar mode, visemes moving with it.
-3. **Listen to the three WAVs and decide the Kokoro backend.** `a-torch`,
-   `b-onnx-fp32`, `c-onnx-fp16`. If b is indistinguishable from a bar the
-   level, flip `DEFAULT_BACKEND` to `"onnx"` — the assertion in
-   `test_default_backend_is_the_one_a_human_has_heard` makes that a deliberate
-   edit. Human ears are the only instrument for this one.
-4. **Wire obligation extraction.** Now unambiguously the next real feature: the
-   extractor reads payment, deliverable, expiry and renewal clauses with the
-   sentence each came from, and nothing outside its own tests imports it. It
-   must not ship without `untrusted.py`, which is now wired.
-5. **~~Write the `LICENSE` file.~~ DONE — see item 0b.** Original note: The decision is taken and only the README
-   carries it; tools and scanners look for the file. Note that GitHub's terms
-   permit viewing and forking *within GitHub* for any public repo — that cannot
-   be prevented while the repo is public, only the use of what is copied.
-6. **Fix the GitHub repo description.** It reads *"Multi-Ai Operating system
-   for domain experts"*. `AI operating system` is on CLAUDE.md's retired
-   vocabulary list, and "domain experts" narrows to a segment the vision
-   widened away from on 16 August. Suggested: *"The memory and control layer
-   for people who use more than one AI. Runs on your machine, cites its
-   sources, and logs every byte that leaves."* Needs the GitHub settings page —
-   **`gh` is not installed on this machine**, so it cannot be done from a
-   session.
-7. **Conversation persistence, as the session/memory split.** There is no
-   history at all — close Zaram and yesterday is gone. Guardrail, enforced by
-   test: readable by the user, invisible to recall (rule 7d).
-8. **`KPipeline.load_voice` is an ungated download.** It fetches a `.pt` at
+
+2. **Wire `in_force_at` into recall — the seventeenth.**
+   `runtimes/memory/valid_time.py` implements `in_force_at`, `history_of` and
+   `explain` over the bitemporal fields and is imported by exactly one file:
+   its own test. The field is written, persisted and exported; nothing filters
+   recall by it. So Zaram can store that the day rate was £500 until June and
+   £600 after, and cannot answer "what was it in May" through any live path.
+   Small, and it makes a real claim true — it is the axis that distinguishes
+   this memory from Mem0's.
+
+3. **The FTS5 work, step 1.** Step 0 is done and the corpus is now trustworthy.
+   The design constraint is the whole job: **membership** is the union of each
+   retriever's top-K, **ordering** is RRF (`Σ 1/(k + rank)`, fused by rank
+   position so no blended magnitude exists to compare against a cosine floor),
+   and **citation** stays on measured relevance, untouched. The deleted
+   `_hybrid` did `vector*0.7 + bm25*0.3` and truncated on the blend; doing that
+   again by a new route is the thing to avoid. **The delete path is the part
+   that matters** — rule 4 promises that correcting a fact changes the answers,
+   and a lexical index not kept in sync breaks that silently.
+
+4. **Settle whether `qwen2.5-coder:14b` earns its swap.** `INTENT_SPECIALISATION`
+   maps exactly one intent — `CODE` — and that single entry is the only thing
+   that can trigger a model swap. Measured: qwen2.5-coder 10.8 tok/s against
+   gemma4 30.3, and they cannot be co-resident in ~9.1 GB. Deleting the mapping
+   would remove every swap in the product. Needs three real coding questions
+   judged by a human.
+
+5. **Make `_rank_key` ask the question its docstring claims.** It orders on
+   `model_fits_resident`, which is `size_bytes <= budget` — a static capacity
+   check with no reference to what Ollama has loaded *right now*. Add a
+   residency term read from `/api/ps`, as a **preference and never a gate**, so
+   a required capability still wins.
+
+6. **The markdown preamble case.** A model that opens with "Sure! Here's the
+   statement of work:" leaves a stray paragraph. The last known model-variance
+   gap; small.
+
+7. **Document kinds** — proposal, report, meeting notes, letter, CV. Now just
+   presets over structure that exists, and what actually delivers "the most
+   popular docs people create with AI".
+
+8. **Conversation persistence, as the session/memory split.** There is still no
+   history — close Zaram and yesterday is gone. Guardrail, enforced by test:
+   readable by the user, invisible to recall (rule 7d).
+
+9. **`KPipeline.load_voice` is an ungated download.** It fetches a `.pt` at
    synthesis time with nothing asked and nothing logged. The ONNX path routes
-   the same fetch through the gate; the torch path still does not.
-9. **Reconcile the two Electron trees and the two venvs.** Triage decisions
-   nobody has taken, invisible to every guard because each side is internally
-   consistent.
+   the same fetch through the gate; the torch path still does not. Rules 3
+   and 7g.
+
 10. **Delete `backend/orchestrator/`.** 1,261 lines, no importers, no tests,
     and it contains the membership-versus-ranking bug ready to be revived.
-11. **Rebuild the installer and run it on a machine that has never seen this
+    Pure subtraction.
+
+11. **Reconcile the two Electron trees and the two venvs.** Triage nobody has
+    done, invisible to every guard because each side is internally consistent.
+
+12. **Rebuild the installer and run it on a machine that has never seen this
     repo.** Still the actual blocker.
-
----
-
-## Two loose ends nobody has explained
-
-* **The egress gate reports "7 host policies"; `backend/egress-policy.json`
-  holds 35.** Observed at boot on 19 August. There is no second policy file
-  anywhere on disk — checked. Either the count means something other than
-  hosts, or there is a store nobody knows about. It sits under rule 5, so it is
-  worth an hour.
-* **The suite skip count went from 24 to 27** in the run after the search fix,
-  which added no skips. The likely cause is that Zaram was running and holding
-  resources during that run — CLAUDE.md's own warning that the suite *executes
-  different code* depending on conditions. Confirm with `pytest -rs` rather
-  than assuming; a silently skipping suite has already cost this repository
-  once, and it reads exactly like passing.
 
 ---
 
 ## Open questions for the maintainer
 
-* **Is `qwen2.5-coder:14b` still worth keeping?** `gemma4:12b` scores 72 on
-  LiveCodeBench (vendor-reported); the entire Qwen2.5-Coder generation was
-  scoring in the low thirties on that benchmark's earlier versions. Version
-  differences make the subtraction unrigorous, but if the general model is
-  better at code then the `code` intent added this session routes to the
-  *worse* model **and pays a full swap to do it** — 7.6 GB and 9.0 GB cannot be
-  co-resident in ~9.1 GB. The test is three real coding questions from this
-  repo, judged by a human. If gemma4 wins, drop the coder and delete the
-  specialisation mapping.
-* **Should Zaram expose an MCP server?** Kilo Code, Cline, Claude Code and
-  Cursor are all MCP *clients*. Exposing `recall`, `search_spine` and
-  `get_provenance` read-only would let the agents people already use read from
-  the Spine — most of the value of "Zaram has agents" without building one,
-  without opening the mutative tier, and without adopting a framework whose own
-  memory abstraction would compete with the product. Prerequisite: the API
-  secret, which now exists.
+* **Should `conversation`-type memories be in `knowledge.search` results at
+  all?** They are now labelled honestly — the model is told which sources are
+  the user's own past remarks rather than research — but labelling is not the
+  same as deciding they belong. Rule 7d says conversation is ephemeral and
+  entering the Spine is a decision the system makes. Five of six sources on a
+  live news question were local records, three of them near-duplicates of one
+  another.
+* **Is `qwen3.8:27b` worth keeping installed?** 17 GB on disk, 18.7 GB loaded
+  against 12 GB of VRAM, 1.85 tok/s, 95.6 s cold load. It is background-tier by
+  measurement, and nothing currently routes to it.
+* **The suite timing.** 2:53 and 20:43 on the same machine, Ollama up in both,
+  no stale backend. CLAUDE.md blames provider-probe timeouts for the
+  4-versus-20 split; that is where to look, and it is worth an hour because
+  every measurement in this repository is quoted with a condition that assumes
+  it is stable.
 * **`en_core_web_sm` in the base install.** Unchanged and still open. misaki
-  downloads it at runtime when absent — unlogged and ungated — so the pin looks
-  deliberate; its *location* is still wrong, since spaCy is not in base.
-* **Word-by-word speech.** Unchanged. CLAUDE.md rules it out — *"a clause is
-  the smallest unit with prosody"* — and what is built already speaks alongside
-  the streaming text rather than after it.
+  downloads it at runtime when absent — unlogged and ungated.
+* **Should Zaram expose an MCP server?** Read-only `recall`, `search_spine`,
+  `get_provenance` would let Claude Code, Cursor and Cline read from the Spine.
+  Prerequisite — the API secret — now exists.
 
 ---
 
 ## What this session learned about the instruments
 
-**The search layer was healthy and the product was broken.** Every diagnostic a
-person would reach for — the toggle, the package, the egress policy, the host
-gate, the log — reported success, because each of them *was* succeeding. The
-failure was in a seam between two components, which is the one place no
-component's own tests look. `check:reachability` cannot see it either: both
-sides are live, and the missing thing is a line that was never written.
+**A test can pass by asserting nothing, and disabling the feature is how you
+find out.** Three obligation tests iterated `store.open_obligations()` and
+asserted per item. With the ingest seam disabled they iterated an empty list
+and passed. Disabling the feature and reading *which tests survived* — not just
+counting the failures — is what caught it.
 
-**A test that passes proves nothing until you have seen it fail.**
-`_format_search_results` carried two green tests for its entire unreachable
-life. The fix's tests were verified by disabling the fix and watching them go
-red, which took two minutes and is the difference between a guard and a
-decoration.
+**Wiring a subsystem up is how its defects are found.** The obligation
+extractor had 28 green tests and could not read the commonest clause on an
+invoice — the exact sentence the repo's own eval corpus uses. Nothing short of
+running it against a real file would have shown that.
 
-**Re-verify a status page against the code before believing its gaps.** The
-README's headline gap — no API authentication — had been closed by work nobody
-had updated it for. A status section that understates a project is the same
-defect as one that overstates it, which that file already says about itself.
+**Run the real model, not a fixture.** `qwen2.5-coder` wraps every answer in a
+fenced block and `gemma4` never does. One line of difference collapsed a whole
+document into a single code block, and no hand-written test markdown would have
+produced it.
+
+**Check the instrument before reading its output — including the half nobody
+wrote.** The recall corpus guard asserted distractors do not *answer* the
+questions and never asserted they are *near* them. The most product-specific
+question in the eval was being graded against a corpus containing nothing like
+its target, and passing.
