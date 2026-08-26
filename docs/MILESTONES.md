@@ -13,6 +13,133 @@ accurate — it is the first thing anyone reads.
 
 ## Current state — 26 August 2026
 
+> ### Obligations reach the screen, and the proxy never carried them
+>
+> `GET /obligations` had been live since earlier today and **no frontend file
+> contained the word**. `check:reachability` said so — eight backend routes
+> unreached at the start of this session, six of them obligations — and so did
+> a second guard nobody had run: `check:proxy` was **already failing**, because
+> `/obligations` was in neither `frontend/vite.config.js` nor
+> `electron/config.js`. A missing prefix does not 404. Vite answers with its
+> own `index.html` and a 200, so the first thing the new client reported was
+> `Unexpected token '<', "<!doctype "... is not valid JSON` — a sentence naming
+> neither the route nor the proxy. The packaged list was missing it too, and
+> that half breaks only in a build.
+>
+> **Commitments is a view inside Memory, not a seventh node.** `CLAUDE.md`
+> fixes the count at six and says a pack *"adds no screens"*; obligations are
+> the first pack. The division it does draw is that Memory holds derived facts
+> about the user and Knowledge holds the documents those came from — and an
+> obligation is a derived, correctable claim carrying provenance back to a
+> source. Same store of belief, same correction loop, a different shape of
+> record. `Facts | Commitments`, with the live count on the tab.
+>
+> **It is not a calendar, and the shape is where that is enforced.** No grid,
+> no month, no week. A list in the order things fall due, and every action on
+> it is *report* or *correct*: nothing schedules, notifies or writes anywhere
+> but the obligations store.
+>
+> **The clause is in the collapsed row, never behind a disclosure.** A clause
+> one click away is a clause nobody opens, and a date somebody reorganises
+> their week around with the evidence hidden is a date they will trust without
+> checking — which is what the rule exists to prevent. **The questions are
+> above the commitments** for the same reason: a document read incompletely
+> must not look cleanly read.
+>
+> **Who owes it is one click**, because it is the field the extractor
+> deliberately refuses to guess and therefore the one the user most often sets.
+>
+> Verified against a live backend on a scratch `ZARAM_DATA_DIR`, driving the
+> real routes: ingest a statement of work, answer *"when was it issued?"* with
+> 15 August and watch `net 30` become **14 September**; correct the deliverable
+> from 2 October to 9 October and watch the original appear under *Settled and
+> corrected*, struck through, dated, pointing at its replacement; mark one met,
+> dismiss one, and see the counts move 5 → 4 → 3.
+>
+> **What is deliberately not built: a way to dismiss a question.** There is no
+> backend route for it. A clause the user cannot date — because they do not
+> know the issue date, or because it is not really a commitment — sits in
+> *Needs a date* forever, and a permanent item nobody can clear is the shape of
+> an engagement mechanic the product forbids. It wants `POST
+> /obligations/questions/{id}/dismiss`, stored rather than deleted, exactly as
+> a dismissed obligation is.
+>
+> ### Two defects the interface exposed, both in extraction, both unfixed
+>
+> Measured directly against `extract_obligations`, not inferred from the
+> screen:
+>
+> **A real deadline is dropped with no obligation and no question.**
+>
+>     The first round of concepts is due by 14 September 2026.   ->  nothing
+>
+> It clears `_COMMITMENT` — *due*, *by* — and carries an unambiguous date, and
+> `_classify` returns `None` because no word in it names a payment, a
+> deliverable, an expiry or a renewal. This is the same failure that was fixed
+> this morning for *"Payment terms: 30 days from the invoice date"*, arriving
+> by the other gate: there the kind was known and the commitment gate dropped
+> it; here the commitment is known and the kind gate drops it. Both discard
+> silently, which is the part that matters.
+>
+> **A newline shreds a sentence, and the fragment is shown as the evidence.**
+> `_TERMINATOR` is `[.!?;](?!\d)|[\r\n]+`, so a soft wrap ends a clause:
+>
+>     Final artwork must be
+>     delivered by 2 October 2026.        ->  clause: "delivered by 2 October 2026."
+>
+>     The image licence renews on 5 January 2027 and will continue at the then
+>     current rate unless cancelled beforehand.
+>                                        ->  clause: cut at "at the then"
+>
+> Both are on screen now, and wrapped text is the *normal* case for plaintext
+> and for PDF extraction — so this weakens the one guarantee the package makes
+> on most real documents. The date is still right; the citation is a fragment.
+>
+> Breaking on a newline cannot simply be removed: a headed list
+> (`Due: 1 September 2026`) has no punctuation and the newline is its only
+> boundary. The rule that separates the two is whether the wrap lands
+> mid-sentence — lowercase before it and lowercase after — and that is a
+> heuristic with real failure modes, which is why it belongs in its own pass
+> with its own tests rather than at the end of a session about the interface.
+> **Extraction accuracy is "the whole thing"; it should not be amended in
+> passing.**
+>
+> ### What the tests were made to prove, by breaking the code
+>
+> 31 new tests, and each of the nine things they claim to cover was disabled in
+> turn and the *named* survivors read — not the failure count. All nine went
+> red, in the tests that claim them: the clause hidden behind the disclosure
+> fails *"is on the row before anything is expanded"*; the questions dropped
+> from the view fails four, including the ordering test; `daysUntil` switched
+> from calendar days to instants fails *"is zero all day on the due date"* and
+> nothing else, which is the one that guards the evening.
+>
+> The harness itself was wrong first and said so loudly: passing two test paths
+> as one argv string ran **zero** tests and printed nine confident
+> `GREEN — NOTHING CAUGHT IT` lines. *Check the instrument before reading its
+> output.*
+>
+> **One live defect was found by a test asserting a property rather than a
+> type.** `correctObligation` spread the caller's object into the request body,
+> so a plain object carrying `source_clause` would have posted a rewritten
+> clause to the one endpoint whose whole design is that the clause is not
+> editable. The backend ignores the field today, which is exactly what makes it
+> quiet — it would start mattering the day someone widens
+> `ObligationCorrection` there. The body is now assembled field by field.
+>
+> Also fixed while looking at it: the row printed *"Payment of GBP 1,200.00 due
+> · GBP 1200"*, one figure twice in two spellings, because the backend's
+> `_summarise` already writes the money into the summary; and a settled row
+> printed a countdown — *"September 20, 2026 · in 25 days · done"* — to a
+> deadline that had stopped mattering when the user said so.
+>
+> **Not called, and the reachability guard now says otherwise.**
+> `GET /obligations/{obligation_id}` has no client function; the listing
+> carries everything the surface needs. The guard stopped reporting it because
+> its path matching is loose enough to be satisfied by the identifiers around
+> it — worth knowing before trusting a shrinking count from that instrument.
+
+
 > ### Obligations reach the product — the eighteenth, wired
 >
 > `backend/obligations/` had `contracts.py`, `extract.py` and 28 green tests,
