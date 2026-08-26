@@ -20,7 +20,7 @@
  * Warning the user about their own setting is how an indicator gets trained
  * away, and the amber one has real work to do.
  */
-import { AlertTriangle, ArrowRight, Library } from 'lucide-react';
+import { AlertTriangle, ArrowRight, FileText, Library } from 'lucide-react';
 import type { ChatNotice } from '../../stores/chatStore';
 
 const DESTINATIONS: Record<string, { node: string; label: string }> = {
@@ -38,6 +38,11 @@ const DESTINATIONS: Record<string, { node: string; label: string }> = {
  *  stating a problem is the worse of the two failures. */
 const TONES: Record<string, { Icon: typeof AlertTriangle; color: string }> = {
   domain: { Icon: Library, color: 'var(--color-text-muted, #94a3b8)' },
+  // How much of an attached file the model actually saw. Neutral, because
+  // "Read brief.txt in full" is the good outcome and the commonest one - an
+  // amber warning triangle on it would be the exact failure the note above
+  // describes, arriving through a third case.
+  attachment: { Icon: FileText, color: 'var(--color-text-muted, #94a3b8)' },
 };
 
 const DEFAULT_TONE = { Icon: AlertTriangle, color: 'var(--color-amber, #d97706)' };

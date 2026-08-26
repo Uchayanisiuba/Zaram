@@ -12,8 +12,17 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence, type Variants } from 'framer-motion';
-import { Send } from 'lucide-react';
+import { Paperclip, Send } from 'lucide-react';
 import ArtifactCard from '@/components/ArtifactCard';
+import AttachmentChips from '@/components/chat/AttachmentChips';
+import {
+  attachFiles,
+  detachAttachment,
+  keepAttachment,
+  listAttachments,
+  type ChatAttachment,
+  type RefusedAttachment,
+} from '@/services/attachmentsClient';
 import NoticeCard from '@/components/chat/NoticeCard';
 import FirstRunPanel from '@/components/firstrun/FirstRunPanel';
 import { useReadiness, setupToOffer } from '@/hooks/useReadiness';
@@ -82,6 +91,23 @@ export default function ChatSurface() {
   // Markers are stripped *before* the reveal, not after, so `[M1]` disappearing
   // mid-flight cannot make the line jump backwards.
   const typedText = useTypedText(stripMarkers(streamingText), !isStreaming);
+
+  // Files attached to the message being composed. Working state in the
+  // truest sense — it lives here rather than in `chatStore`, because
+  // `chatStore` holds the conversation and these are not part of it until
+  // they are sent (rule 7d, one layer up).
+  const sessionId = useChatStore((s) => s.sessionId);
+  const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
+  const [refused, setRefused] = useState<RefusedAttachment[]>([]);
+  const [kept, setKept] = useState<string[]>([]);
+  const [attachBusy, setAttachBusy] = useState<string | null>(null);
+  const [attachError, setAttachError] = useState<string | null>(null);
+  const [dragging, setDragging] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  // Depth counter, not a boolean. `dragleave` fires when the pointer crosses
+  // into a *child* element, so a boolean flickers the overlay off every time
+  // the cursor passes over the composer or a message.
+  const dragDepth = useRef(0);
 
   const { setOrbState } = useOrbStore((s) => ({ setOrbState: s.setOrbState }));
   const setActivity = useSystemStore((s) => s.setActivity);
@@ -214,11 +240,88 @@ export default function ChatSurface() {
     setActivity(preserveSpeaking(useSystemStore.getState().activity, chatActivity(isStreaming)));
   }, [isStreaming, setOrbState, setActivity]);
 
+  // What the backend already holds for this conversation.
+  //
+  // Read on mount because the backend clears attachments when it restarts:
+  // chips drawn from local state alone would outlive the documents behind
+  // them, and the user would ask a question about a file that is not there.
+  useEffect(() => {
+    let live = true;
+    void listAttachments(sessionId)
+      .then((held) => {
+        if (live) setAttachments(held);
+      })
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [sessionId]);
+
+  const takeFiles = useCallback(
+    async (files: File[]) => {
+      if (files.length === 0) return;
+      setAttachError(null);
+      setAttachBusy('*');
+      try {
+        const result = await attachFiles(files, sessionId);
+        setAttachments((current) => [...current, ...result.attached]);
+        // Refusals accumulate rather than replace: dropping a second batch
+        // must not erase the explanation for the first.
+        setRefused((current) => [...current, ...result.refused]);
+        if (result.evicted.length > 0) {
+          // Eviction is reported because the alternative is a document
+          // silently leaving scope while its chip is still on screen.
+          const names = result.evicted.map((e) => e.name).join(', ');
+          setAttachError(`Removed ${names} to make room — a conversation holds eight files.`);
+          const gone = new Set(result.evicted.map((e) => e.id));
+          setAttachments((current) => current.filter((a) => !gone.has(a.id)));
+        }
+      } catch (err) {
+        setAttachError(err instanceof Error ? err.message : 'Could not attach that.');
+      } finally {
+        setAttachBusy(null);
+      }
+    },
+    [sessionId],
+  );
+
+  const handleDetach = useCallback((id: string) => {
+    // Removed from the composer first. The request is the authority on the
+    // server's state, but the user asked for the chip to go, and leaving it
+    // there until a round trip finishes reads as the button not working.
+    setAttachments((current) => current.filter((a) => a.id !== id));
+    setKept((current) => current.filter((k) => k !== id));
+    void detachAttachment(id).catch(() => undefined);
+  }, []);
+
+  const handleKeep = useCallback(async (id: string) => {
+    setAttachBusy(id);
+    setAttachError(null);
+    try {
+      await keepAttachment(id);
+      setKept((current) => [...current, id]);
+    } catch (err) {
+      setAttachError(err instanceof Error ? err.message : 'Could not keep that file.');
+    } finally {
+      setAttachBusy(null);
+    }
+  }, []);
+
   const handleSend = () => {
     const text = inputText.trim();
     if (!text || isStreaming) return;
     setInputText('');
-    void send(text);
+    const ids = attachments.map((a) => a.id);
+    // **The chips stay.** An attached file belongs to the conversation, not to
+    // one message: "and what about clause 4" is the second question about the
+    // same document, not a reason to upload it again. The backend scopes
+    // attachments by session for exactly that, so clearing them here would
+    // leave the files held and unreachable — the document silently out of
+    // scope while the user believes Zaram is still reading it.
+    //
+    // Refusals do go, because they explain a drop that has now been read.
+    setRefused([]);
+    void send(text, ids.length > 0 ? { attachmentIds: ids } : {});
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -265,7 +368,60 @@ export default function ChatSurface() {
       // Width follows the cursor exactly while dragging; springing it would make
       // the edge lag behind the pointer.
       transition={isResizing ? { duration: 0 } : undefined}
+      // The whole panel is the drop target, not just the composer. Aiming at a
+      // 40px-tall box is a precision task, and the thing being aimed at is the
+      // conversation.
+      //
+      // `dragDepth` is a counter rather than a boolean because `dragleave`
+      // fires whenever the pointer crosses into a child element — over a
+      // message, over the composer — so a boolean flickers the overlay off
+      // mid-drag.
+      onDragEnter={(e) => {
+        if (!e.dataTransfer?.types?.includes('Files')) return;
+        dragDepth.current += 1;
+        setDragging(true);
+      }}
+      onDragOver={(e) => {
+        if (e.dataTransfer?.types?.includes('Files')) e.preventDefault();
+      }}
+      onDragLeave={() => {
+        dragDepth.current = Math.max(0, dragDepth.current - 1);
+        if (dragDepth.current === 0) setDragging(false);
+      }}
+      onDrop={(e) => {
+        if (!e.dataTransfer?.types?.includes('Files')) return;
+        // Prevented, always. Without this the browser navigates away to the
+        // dropped file and the conversation is simply gone.
+        e.preventDefault();
+        dragDepth.current = 0;
+        setDragging(false);
+        void takeFiles(Array.from(e.dataTransfer.files ?? []));
+      }}
     >
+      {dragging && (
+        <div
+          className="absolute inset-0 flex items-center justify-center pointer-events-none"
+          style={{
+            zIndex: 70,
+            background: 'rgba(15, 23, 42, 0.72)',
+            border: '1px dashed var(--color-cyan-light)',
+            borderRadius: 12,
+          }}
+        >
+          <div className="flex flex-col items-center gap-2 text-center px-6">
+            <Paperclip size={22} style={{ color: 'var(--color-cyan-light)' }} />
+            <p className="text-sm" style={{ color: 'var(--color-text)' }}>
+              Drop to read it in this conversation
+            </p>
+            {/* Said at the moment of the drop, because this is the moment the
+                user would otherwise assume the opposite. Rule 7d is invisible
+                unless it is stated where the decision looks like it is made. */}
+            <p className="text-[11px]" style={{ color: 'var(--color-text-muted)' }}>
+              It is not added to Knowledge unless you keep it
+            </p>
+          </div>
+        </div>
+      )}
       <ResizeHandle
         panelSide="right"
         label="Resize conversation panel"
@@ -536,7 +692,44 @@ export default function ChatSurface() {
         variants={item}
         style={{ backdropFilter: 'blur(20px) saturate(1.4)' }}
       >
+        {/* What is in scope for the next message, above the box you type it
+            in. Below the composer would put the evidence after the question. */}
+        <AttachmentChips
+          attachments={attachments}
+          refused={refused}
+          kept={kept}
+          busy={attachBusy}
+          onDetach={handleDetach}
+          onKeep={(id) => void handleKeep(id)}
+          onDismissRefusal={(name) => setRefused((c) => c.filter((r) => r.name !== name))}
+        />
+        {/* Not styled as an error: nothing failed in the conversation. Eviction
+            and a refused file are both housekeeping the user has to be able to
+            read, and red would train them to dread the whole row. */}
+        {attachError && (
+          <p
+            className="mb-2 px-1 text-[11px] leading-relaxed"
+            style={{ color: 'var(--color-text-muted)' }}
+          >
+            {attachError}
+          </p>
+        )}
         <div className="relative">
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            className="hidden"
+            aria-hidden="true"
+            tabIndex={-1}
+            onChange={(e) => {
+              void takeFiles(Array.from(e.target.files ?? []));
+              // Reset, so choosing the same file twice in a row fires `change`
+              // the second time. Without this, removing a file and picking it
+              // again does nothing and looks like a broken button.
+              e.target.value = '';
+            }}
+          />
           <input
             ref={inputRef}
             type="text"
@@ -561,16 +754,32 @@ export default function ChatSurface() {
             }
             aria-label="Message Zaram"
             disabled={isStreaming}
-            // pr-20 rather than pr-16: the two controls plus their gap occupy
-            // 68px, and 64px of padding put the caret underneath the mic.
-            className="w-full pl-4 pr-20 py-3 text-sm bg-[var(--color-glass)] border border-white/5 rounded-xl text-slate-200 placeholder-slate-500 outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-colors"
+            // pr-28 rather than pr-20: a third control joined the cluster, and
+            // the padding is what keeps the caret from running underneath it.
+            // The original note is worth keeping — the two controls plus their
+            // gap occupied 68px, and 64px of padding put the caret under the
+            // mic. One more button is 26px more.
+            className="w-full pl-4 pr-28 py-3 text-sm bg-[var(--color-glass)] border border-white/5 rounded-xl text-slate-200 placeholder-slate-500 outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-colors"
           />
-          {/* One positioned container, two ordinary buttons inside it.
+          {/* One positioned container, three ordinary buttons inside it.
               Each control used to place itself with its own `right-*` offset,
               which meant the spacing between them was a coincidence of two
               numbers in two files — and `whileHover` scaling either one closed
               the gap. See the note in `MicButton`. */}
           <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
+            {/* Leftmost of the three, because it acts on the message before it
+                is written while the mic and send act on sending it. */}
+            <motion.button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={isStreaming || attachBusy === '*'}
+              aria-label="Attach a file"
+              title="Attach a document to this message"
+              className="p-1.5 rounded-lg hover:bg-white/5 disabled:opacity-30 transition-colors"
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+            >
+              <Paperclip size={16} className="text-slate-300" />
+            </motion.button>
             <MicButton onTranscript={appendTranscript} disabled={isStreaming} />
             <motion.button
               onClick={handleSend}
