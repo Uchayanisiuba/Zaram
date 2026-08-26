@@ -146,18 +146,39 @@ class OllamaEngine(LLMEngine):
         response.raise_for_status()
         return str(response.json().get("response", ""))
 
-    def stream_response(self, prompt: str, system_prompt: str = "", model: str | None = None) -> Iterator[str]:
+    def stream_response(
+        self,
+        prompt: str,
+        system_prompt: str = "",
+        model: str | None = None,
+        images: list[str] | None = None,
+    ) -> Iterator[str]:
         """Stream plain text tokens, per `LLMEngine`.
 
         This used to yield SSE frames that `ModelsService` immediately parsed
         back into tokens — transport framing invented by the engine and undone
-        one call up the stack. `stream_vision_response` below still speaks SSE
-        because its caller in `main.py` reads the frames directly; collapsing
-        that is a separate change to a separate endpoint.
+        one call up the stack.
+
+        ``images`` ride in the same `/api/generate` call as the prompt, on
+        **whichever model was routed here**. `stream_vision_response` below
+        does the same thing against a hardcoded `qwen2.5vl:7b` that is not
+        installed on the machine this was written on, from an endpoint that
+        bypasses routing and the egress gate — which is why it is a side
+        door rather than the way in. Whether a model can see is decided before
+        this point, by the gate in `ProviderManager.select_model_for_task`.
         """
         url = f"{self.base_url}/api/generate"
-        if "<image>" in prompt or "data:image" in prompt or "[IMAGE:" in prompt:
-            yield ERROR_PREFIX + "Image input is not supported for text chat. Use /vision/analyze for image analysis, or remove the image and try again."
+        attached = [i for i in (images or []) if i and i.strip()]
+        # An image *embedded in the prompt text* is still refused, and the
+        # refusal no longer points at `/vision/analyze`. A data URI in a
+        # prompt is not an attachment: nothing parsed it, nothing sized it,
+        # and nothing logged it leaving.
+        if not attached and ("<image>" in prompt or "data:image" in prompt or "[IMAGE:" in prompt):
+            yield ERROR_PREFIX + (
+                "That looks like an image pasted into the message text. "
+                "Attach it with the paperclip instead, so Zaram can read it "
+                "and tell you what it did with it."
+            )
             return
         payload = {
             "model": self._wire(model or self.default_model),
@@ -181,9 +202,33 @@ class OllamaEngine(LLMEngine):
             # gives the memory back.
             "keep_alive": KEEP_ALIVE,
         }
-        logger.debug("OllamaEngine.stream_response: model=%s prompt='%s...'", payload["model"], prompt[:50])
+        # Only when there are some. Ollama reads the presence of the key as a
+        # vision request on some builds, and a text-only model handed an empty
+        # list answers oddly rather than failing, which is the worst of both.
+        if attached:
+            payload["images"] = attached
+        logger.debug(
+            "OllamaEngine.stream_response: model=%s images=%d prompt='%s...'",
+            payload["model"],
+            len(attached),
+            prompt[:50],
+        )
         try:
-            response = requests.post(url, json=payload, stream=True, timeout=120)
+            # A vision request waits for the projector as well as the weights.
+            #
+            # Measured on this machine, 26 August 2026: `gemma4:12b` answering
+            # a question about a 7 KB PNG took **158.9 s** on the first call,
+            # against a 120 s timeout — so the image arrived, Ollama answered
+            # correctly, and Zaram threw the answer away and reported a read
+            # timeout. Subsequent calls are fast; it is the cold projector load
+            # that does not fit.
+            #
+            # Raised only for the image path. A text request that has gone
+            # quiet for two minutes is a hang worth reporting, and stretching
+            # every request to cover the slowest one would make a genuinely
+            # stuck model look like a slow one.
+            timeout = 420 if attached else 120
+            response = requests.post(url, json=payload, stream=True, timeout=timeout)
             response.raise_for_status()
             token_count = 0
             for line in response.iter_lines():

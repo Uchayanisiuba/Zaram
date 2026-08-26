@@ -34,6 +34,11 @@ export interface ChatAttachment {
   pages: number;
   /** Which parser read it, so "how do you know that" has an answer. */
   parser: string;
+  /** `document` or `image`. Not decoration: a document becomes text in the
+   *  prompt and is excerpted when it does not fit, while an image becomes its
+   *  own field on the request, is never excerpted, and can only go to a model
+   *  that can see. */
+  kind: string;
   created_at: number;
 }
 
@@ -157,6 +162,9 @@ export async function keepAttachment(id: string, signal?: AbortSignal): Promise<
  *  number the user has no way to check.
  */
 export function attachmentSize(item: ChatAttachment): string {
+  // An image has no characters and no pages, and "0 characters" would read as
+  // a file that failed to parse rather than one with nothing to parse.
+  if (item.kind === 'image') return 'image';
   if (item.pages > 0) return `${item.pages} page${item.pages === 1 ? '' : 's'}`;
   if (item.chars < 1000) return `${item.chars} characters`;
   return `${Math.round(item.chars / 1000)}k characters`;

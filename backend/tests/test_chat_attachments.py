@@ -29,6 +29,16 @@ from attachments import (
 )
 
 
+#: A one-pixel PNG. Real bytes rather than a stub, because the store writes
+#: them to disk and encodes them, and a fake would pass both while proving
+#: nothing about either.
+PNG_BYTES = bytes.fromhex(
+    "89504e470d0a1a0a0000000d4948445200000001000000010806000000"
+    "1f15c4890000000a49444154789c6300010000050001"
+    "0d0a2db40000000049454e44ae426082"
+)
+
+
 def attachment(text: str, name: str = "brief.txt", session: str = "s1") -> Attachment:
     return Attachment(
         id=f"att_{name}",
@@ -90,15 +100,32 @@ class TestTheStoreIsWorkingState:
         assert store.remove(item.id) is True
         assert not on_disk.exists()
 
-    def test_an_image_is_refused_by_naming_what_is_missing(self, store):
-        with pytest.raises(AttachmentError) as raised:
-            store.add("s1", "receipt.png", b"\x89PNG\r\n\x1a\n" + b"0" * 64)
+    def test_an_image_is_held_rather_than_parsed(self, store):
+        # This asserted a refusal until images landed. The refusal has moved to
+        # where it belongs: not "Zaram cannot read images", which was a missing
+        # path, but "*this model* cannot see", which is a fact about the
+        # request and is decided in `/chat` by the capability gate.
+        item, _ = store.add("s1", "receipt.png", PNG_BYTES)
 
-        message = str(raised.value)
-        assert "receipt.png" in message
-        # The distinction that makes the refusal worth reading: this is a path
-        # Zaram has not built, not a thing it cannot do.
-        assert "image" in message.lower()
+        assert item.kind == "image"
+        assert item.parser == "image"
+
+    def test_an_image_carries_no_text_and_does_not_pretend_to(self, store):
+        item, _ = store.add("s1", "receipt.png", PNG_BYTES)
+
+        # A filename or a placeholder here would be a value nobody measured,
+        # and worse: `compose` would treat it as a document and excerpt it.
+        assert item.text == ""
+        assert item.chars == 0
+
+    def test_an_image_is_encoded_for_the_engine(self, store):
+        import base64
+
+        item, _ = store.add("s1", "receipt.png", PNG_BYTES)
+
+        # Raw base64, no data-URI prefix — what Ollama's `images` field wants.
+        assert not item.data.startswith("data:")
+        assert base64.b64decode(item.data) == PNG_BYTES
 
     def test_an_unreadable_format_says_what_is_readable(self, store):
         with pytest.raises(AttachmentError) as raised:
@@ -277,6 +304,53 @@ class TestALongDocumentIsSearchedAndSaidSo:
         # the marker by using it, so `"[…]" in block` is true even when no
         # gap is marked at all. That is what the first version asserted.
         assert result.block.count("[…]") > 1
+
+
+class TestAnImageIsNotADocument:
+    @staticmethod
+    def _image(name: str = "receipt.png") -> Attachment:
+        return Attachment(
+            id=f"att_{name}",
+            session_id="s1",
+            name=name,
+            suffix=".png",
+            path="",
+            text="",
+            parser="image",
+            kind="image",
+            data="aGVsbG8=",
+        )
+
+    def test_it_never_enters_the_text_block(self):
+        result = compose([self._image()], "what is this?")
+
+        # A picture base64-encoded into a prompt is not an image input, it is
+        # a wall of characters that eats the whole context budget.
+        assert result.block == ""
+
+    def test_the_user_is_told_it_was_looked_at(self):
+        result = compose([self._image()], "what is this?")
+
+        assert result.notice() == "Looked at receipt.png."
+
+    def test_it_does_not_spend_the_document_budget(self):
+        text = "\n\n".join(f"Paragraph {i} about delivery." for i in range(200))
+        doc = attachment(text, name="long.txt")
+
+        alone = compose([doc], "delivery", budget_chars=3000)
+        with_image = compose([doc, self._image()], "delivery", budget_chars=3000)
+
+        # Dividing the budget by a file that spends none of it would shrink the
+        # document for no reason — the image costs no characters.
+        assert with_image.reads[0].chars_used == alone.reads[0].chars_used
+
+    def test_a_document_and_an_image_are_both_accounted_for(self):
+        doc = attachment("The rate is 500.", name="rate.txt")
+
+        notice = compose([doc, self._image()], "rate").notice()
+
+        assert "Read rate.txt in full." in notice
+        assert "Looked at receipt.png." in notice
 
 
 class TestSeveralFilesAtOnce:

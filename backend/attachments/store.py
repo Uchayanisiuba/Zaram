@@ -48,7 +48,7 @@ from typing import Dict, List, Optional
 from core.paths import data_dir
 from ingest.parsers import parsers_for, supported_suffixes
 
-from .contracts import Attachment, AttachmentError
+from .contracts import Attachment, AttachmentError, AttachmentKind
 
 #: The directory attachments live in, under the data directory.
 #:
@@ -74,12 +74,12 @@ MAX_PER_SESSION = 8
 #: by the back door because nothing looks missing.
 MAX_BYTES = 100 * 1024 * 1024
 
-#: Suffixes that are plainly images, held separately from "unknown".
+#: Image formats an attachment may be.
 #:
-#: Not to support them — nothing here can read one — but so the refusal can say
-#: *why*. "Zaram cannot read images yet" is a different sentence from "that is
-#: not a document", and a person who drops a screenshot has been told something
-#: true either way, but only one of them is worth reading.
+#: Deliberately narrower than "every format Pillow opens". These are what
+#: Ollama's vision models accept directly, and a format that has to be
+#: converted first is a conversion nobody asked for producing a file subtly
+#: unlike the one the user attached.
 IMAGE_SUFFIXES = frozenset(
     {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tif", ".tiff", ".heic", ".heif"}
 )
@@ -139,11 +139,7 @@ class AttachmentStore:
 
         suffix = Path(name).suffix.lower()
         if suffix in IMAGE_SUFFIXES:
-            raise AttachmentError(
-                f"{name} is an image, and Zaram cannot read images yet. "
-                "Both of your local models can see, so this is a missing "
-                "path rather than a missing capability."
-            )
+            return self._add_image(session_id, name, suffix, data)
 
         candidates = parsers_for(suffix)
         if not candidates:
@@ -189,6 +185,46 @@ class AttachmentStore:
             text=result.text,
             parser=result.parser or (candidates[0].name if candidates else ""),
             pages=result.pages,
+        )
+
+        with self._lock:
+            self._items[identifier] = attachment
+            evicted = self._evict_locked(session_id)
+        return attachment, evicted
+
+    def _add_image(
+        self, session_id: str, name: str, suffix: str, data: bytes
+    ) -> tuple[Attachment, List[Attachment]]:
+        """Hold an image for this conversation. No parsing, no text.
+
+        `text` stays empty rather than being filled with a filename or a
+        placeholder. An image has no extracted text, and inventing some would
+        put a value nobody measured into the prompt — and worse, would make
+        `compose` treat it as a document and try to excerpt it.
+
+        Whether any installed model can *see* it is not decided here. This
+        layer holds files; the gate is `ProviderManager.select_model_for_task`,
+        and refusing at attach time would mean a user who later connects a
+        vision-capable provider still cannot attach the picture they already
+        have.
+        """
+        import base64
+
+        identifier = f"{PREFIX}{uuid.uuid4().hex[:12]}"
+        path = self._root / f"{identifier}{suffix}"
+        path.write_bytes(data)
+
+        attachment = Attachment(
+            id=identifier,
+            session_id=session_id,
+            name=name,
+            suffix=suffix,
+            path=str(path),
+            text="",
+            parser="image",
+            kind=AttachmentKind.IMAGE.value,
+            # Ollama wants raw base64 with no data-URI prefix.
+            data=base64.b64encode(data).decode("ascii"),
         )
 
         with self._lock:

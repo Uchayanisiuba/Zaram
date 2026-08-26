@@ -229,6 +229,7 @@ class ExecutionEngine:
         session_id: str = "default",
         project_id: str | None = None,
         only_ids: frozenset[str] | None = None,
+        images: list[str] | None = None,
     ) -> Iterator[Any]:
         """End-to-end execution: Recall -> Plan -> Route -> Dispatch -> Stream.
 
@@ -411,6 +412,14 @@ class ExecutionEngine:
                             kind="search",
                             action="settings",
                         )
+
+            # The images attached to this message, put where the dispatcher
+            # reads them. On the generation step only: a search step handed a
+            # picture would send it to a search connector, which is an egress
+            # nobody asked for.
+            if images and not internal:
+                step.input_data = dict(step.input_data or {})
+                step.input_data["images"] = list(images)
 
             try:
                 for token in self._dispatcher.execute_step(step, model, system_prompt):

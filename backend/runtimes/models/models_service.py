@@ -10,7 +10,11 @@ class ModelsService:
         self._knowledge_runtime = knowledge_runtime
 
     def generate_response(
-        self, user_text: str, system_prompt: str = "", model: str | None = None
+        self,
+        user_text: str,
+        system_prompt: str = "",
+        model: str | None = None,
+        images: list[str] | None = None,
     ) -> Iterator[str]:
         """Orchestrates the prompt generation.
 
@@ -25,7 +29,7 @@ class ModelsService:
         # a chunk prefixed with ERROR_PREFIX. This used to parse SSE frames the
         # engine had just built, so both sides had to agree on a wire format
         # that never went over a wire.
-        yield from self.engine.stream_response(full_prompt, system_prompt, model)
+        yield from self.engine.stream_response(full_prompt, system_prompt, model, images)
 
     def _parse_sse(self, chunk: str) -> dict | None:
         """Parse one SSE frame. Only the vision path still speaks SSE."""

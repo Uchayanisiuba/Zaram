@@ -25,7 +25,23 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
+from enum import Enum
 from typing import Any, Dict
+
+
+class AttachmentKind(str, Enum):
+    """What sort of thing was attached, and therefore how it reaches a model.
+
+    The distinction is load-bearing rather than descriptive. A document becomes
+    *text in the prompt*, sized against a character budget and excerpted when
+    it does not fit. An image becomes *a separate field on the request*, is
+    never excerpted, and can only go to a model that can see. Treating them
+    alike is how a picture ends up base64-encoded inside a prompt, or how a
+    contract gets sent to a vision endpoint.
+    """
+
+    DOCUMENT = "document"
+    IMAGE = "image"
 
 
 @dataclass(frozen=True)
@@ -49,9 +65,17 @@ class Attachment:
     #: than a re-upload. Under the data directory, never in the Spine.
     path: str
     #: The extracted text, whole. What the *model* sees is decided per request.
+    #: Empty for an image, which has no text and must not pretend to.
     text: str
     #: Which parser read it, so "how do you know that" has an answer.
     parser: str
+    kind: str = AttachmentKind.DOCUMENT.value
+    #: Base64 for an image, without a data-URI prefix. Empty for a document.
+    #:
+    #: Held in memory rather than re-read from disk on every request because a
+    #: conversation asks several questions about the same picture, and because
+    #: the encoding is what the engine wants either way.
+    data: str = ""
     #: Pages, where the format has them. 0 where it does not — not a guess.
     pages: int = 0
     created_at: float = field(default_factory=time.time)
@@ -75,6 +99,7 @@ class Attachment:
             "chars": self.chars,
             "pages": self.pages,
             "parser": self.parser,
+            "kind": self.kind,
             "created_at": self.created_at,
         }
 

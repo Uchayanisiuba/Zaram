@@ -50,7 +50,21 @@ class LLMEngine(Protocol):
     """
 
     def stream_response(
-        self, prompt: str, system_prompt: str = "", model: str | None = None
+        self,
+        prompt: str,
+        system_prompt: str = "",
+        model: str | None = None,
+        images: list[str] | None = None,
     ) -> Iterator[str]:
-        """Stream plain text tokens from the LLM."""
+        """Stream plain text tokens from the LLM.
+
+        ``images`` are base64-encoded, without a data-URI prefix, and are the
+        images attached to *this* message. An engine whose model cannot see
+        must not silently drop them: answering as though the picture were not
+        there produces confident prose about an image nobody looked at, which
+        is rule 9's failure in a new medium. Refuse instead.
+
+        Optional so that every existing implementation and caller is unchanged
+        when no image is involved.
+        """
         ...

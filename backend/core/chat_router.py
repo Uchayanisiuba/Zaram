@@ -46,6 +46,7 @@ class ChatRouter:
         session_id: str = "default",
         project_id: str | None = None,
         only_ids: frozenset[str] | None = None,
+        images: list[str] | None = None,
     ) -> AsyncGenerator:
         """Returns the correct generator based on the feature flag.
 
@@ -63,10 +64,14 @@ class ChatRouter:
         """
         if USE_NEW_KERNEL:
             return self._kernel_stream(
-                request_text, model, system_prompt, session_id, project_id, only_ids
+                request_text, model, system_prompt, session_id, project_id,
+                only_ids, images,
             )
         else:
-            return self._legacy_stream(request_text, model, system_prompt)
+            # The legacy path has no image plumbing and is not getting any.
+            # Dropping them silently would answer about a picture nobody
+            # looked at, so it refuses instead - see `_legacy_stream`.
+            return self._legacy_stream(request_text, model, system_prompt, images)
 
     async def _kernel_stream(
         self,
@@ -76,6 +81,7 @@ class ChatRouter:
         session_id: str = "default",
         project_id: str | None = None,
         only_ids: frozenset[str] | None = None,
+        images: list[str] | None = None,
     ) -> AsyncGenerator:
         """Streams structured StreamEvent lines from the new Execution Engine.
 
@@ -96,7 +102,7 @@ class ChatRouter:
             yield StreamEvent.start().to_ipc() + "\n"
             async for item in iterate_in_threadpool(self.execution_engine.execute(
                 text, model, system_prompt, session_id,
-                project_id=project_id, only_ids=only_ids,
+                project_id=project_id, only_ids=only_ids, images=images,
             )):
                 if isinstance(item, StreamEvent):
                     yield item.to_ipc() + "\n"
@@ -110,7 +116,13 @@ class ChatRouter:
             yield StreamEvent.error(str(exc)).to_ipc() + "\n"
         yield StreamEvent.done().to_ipc() + "\n"
 
-    async def _legacy_stream(self, text: str, model: str, system_prompt: str = "") -> AsyncGenerator:
+    async def _legacy_stream(
+        self,
+        text: str,
+        model: str,
+        system_prompt: str = "",
+        images: list[str] | None = None,
+    ) -> AsyncGenerator:
         """Transforms legacy ConversationManager events into structured StreamEvents.
 
         Off the event loop for the same reason as the kernel stream. This path
@@ -118,7 +130,22 @@ class ChatRouter:
         but it blocks the loop for the length of every generation regardless,
         and leaving one of the two chat paths able to freeze the server is the
         kind of asymmetry that gets found by a user rather than by a test.
+
+        **It refuses images rather than ignoring them.** There is no plumbing
+        here and none is being added — but a path that quietly dropped the
+        attachment would answer with confident prose about a picture nobody
+        looked at, which is precisely rule 9's failure. Saying so costs one
+        branch; the alternative is indistinguishable from a correct answer.
         """
+        from core.streaming_events import StreamEvent
+
+        if images:
+            yield StreamEvent.error(
+                "This build's legacy chat path cannot read images. Remove the "
+                "attachment to ask about the text, or enable the kernel path."
+            ).to_ipc() + "\n"
+            yield StreamEvent.done().to_ipc() + "\n"
+            return
         from core.reasoning import ReasoningSplitter
         from core.streaming_events import StreamEvent, EventType
         import json

@@ -43,7 +43,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Dict, List, Sequence
 
-from .contracts import Attachment
+from .contracts import Attachment, AttachmentKind
 
 #: Tokens of context assumed available for attached documents.
 #:
@@ -96,6 +96,8 @@ class Mode:
     EXCERPT = "excerpt"
     #: Nothing — no attachments on this request.
     NONE = "none"
+    #: An image. Never excerpted: a picture is looked at or it is not.
+    IMAGE = "image"
 
 
 @dataclass
@@ -137,7 +139,12 @@ class Composition:
         """
         parts: List[str] = []
         for read in self.reads:
-            if read.mode == Mode.FULL:
+            if read.mode == Mode.IMAGE:
+                # Named rather than counted. "Looked at" is the honest verb:
+                # the model was shown the picture, and what it made of it is
+                # in the answer rather than in this line.
+                parts.append(f"Looked at {read.name}.")
+            elif read.mode == Mode.FULL:
                 parts.append(f"Read {read.name} in full.")
             else:
                 pages = f" ({read.pages} pages)" if read.pages else ""
@@ -242,6 +249,16 @@ def _select(passages: Sequence[str], question: str, budget: int) -> List[int]:
     return sorted(chosen)
 
 
+def _picture_read(item: Attachment) -> DocumentRead:
+    """An image's line in the account. It was looked at, whole or not at all."""
+    return DocumentRead(
+        name=item.name,
+        mode=Mode.IMAGE,
+        chars_used=0,
+        chars_total=0,
+    )
+
+
 def compose(
     attachments: Sequence[Attachment],
     question: str,
@@ -255,9 +272,24 @@ def compose(
     evenly: a request that reaches for four files is asking about all four, and
     spending it all on whichever happens to be first would answer about one.
     """
-    if not attachments:
-        return Composition(block="", mode=Mode.NONE, missing=list(missing))
+    # Images are not documents and are separated before anything is sized.
+    #
+    # They have no text to excerpt and no character cost against the context
+    # budget - they reach the model as their own field on the request. Sizing
+    # them here would divide the document budget by files that never spend any
+    # of it, and excerpting one is not a coherent operation.
+    pictures = [a for a in attachments if a.kind == AttachmentKind.IMAGE.value]
+    documents = [a for a in attachments if a.kind != AttachmentKind.IMAGE.value]
 
+    if not documents:
+        return Composition(
+            block="",
+            mode=Mode.NONE,
+            reads=[_picture_read(p) for p in pictures],
+            missing=list(missing),
+        )
+
+    attachments = documents
     share = max(600, budget_chars // len(attachments))
     sections: List[str] = []
     reads: List[DocumentRead] = []
@@ -311,4 +343,5 @@ def compose(
     )
 
     mode = Mode.EXCERPT if Mode.EXCERPT in modes else Mode.FULL
+    reads.extend(_picture_read(p) for p in pictures)
     return Composition(block=block, mode=mode, reads=reads, missing=list(missing))

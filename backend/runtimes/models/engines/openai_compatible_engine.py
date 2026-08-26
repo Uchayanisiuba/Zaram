@@ -220,7 +220,11 @@ class OpenAICompatibleEngine(LLMEngine):
         }
 
     def stream_response(
-        self, prompt: str, system_prompt: str = "", model: str | None = None
+        self,
+        prompt: str,
+        system_prompt: str = "",
+        model: str | None = None,
+        images: list[str] | None = None,
     ) -> Iterator[str]:
         """Stream plain text tokens, per `LLMEngine`.
 
