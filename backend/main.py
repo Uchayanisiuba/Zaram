@@ -363,7 +363,9 @@ def _task_model(requires_vision: bool, specialisation: str | None) -> str | None
     return model.display_name if model is not None else None
 
 
-def _resolve_model(requested: str | None, prompt: str = "") -> _ModelChoice:
+def _resolve_model(
+    requested: str | None, prompt: str = "", has_images: bool = False
+) -> _ModelChoice:
     """Which model answers: the request, then Settings, then Zaram's own pick.
 
     ``model=None`` is a real answer and the best one when nobody has chosen and
@@ -403,6 +405,11 @@ def _resolve_model(requested: str | None, prompt: str = "") -> _ModelChoice:
         return _ModelChoice(settings_default, "settings")
 
     requires_vision, specialisation = _task_requirements(prompt)
+    # An attached image is not a guess. Wording-based inference stays for the
+    # case where someone describes a picture they have not attached, but a
+    # file that is actually here outranks it and can only ever add the
+    # requirement, never remove one the classifier found.
+    requires_vision = requires_vision or has_images
 
     # Nothing known about the task is not the same as a task with no
     # preference: only the second is worth a round trip through the provider
@@ -422,6 +429,69 @@ def _resolve_model(requested: str | None, prompt: str = "") -> _ModelChoice:
             return _ModelChoice(routed, "task")
 
     return _ModelChoice(None, "zaram")
+
+
+async def _vision_refusal(model: str | None) -> str:
+    """Why this request cannot be answered, or `""` if it can.
+
+    Called only when an image is attached. Returns a sentence for the user,
+    never a status code: the person needs to know whether to change model or
+    to install one, and those are different actions.
+
+    **Every uncertainty resolves to `""`.** A model Zaram cannot place, a
+    provider layer that has not booted, a discovery that found nothing, a
+    lookup that raised \u2014 all proceed. Refusing on any of them would report
+    "your machine cannot read images" as a fact about the hardware when it is a
+    statement about our own bookkeeping, and that is the failure this function
+    was written with: it fired on the first request after a boot, before
+    anything had scanned, on a machine with two vision-capable models
+    installed.
+
+    The one case that does refuse is the one Zaram positively knows: models
+    were found, and none of them can see. Same shape as `vram_bytes` returning
+    `None` rather than `0`, and `locality_of` returning `None` rather than
+    guessing local \u2014 do not turn "unmeasured" into a claim.
+    """
+    manager = getattr(getattr(kernel, "providers_runtime", None), "manager", None)
+    if manager is None:
+        return ""
+
+    try:
+        # The same thing `/providers/models` does before reading the catalogue.
+        # Without it the first request of a session asks an empty shelf.
+        await manager.ensure_scanned()
+        if model:
+            # Matched on `display_name`, which is what the chat path speaks and
+            # what `_task_model` returns. `catalog.get` keys on the catalogue
+            # id (`ollama:gemma4:12b`) and would miss every time.
+            found = next(
+                (m for m in manager.catalog.all() if m.display_name == model), None
+            )
+            if found is not None and not found.supports_vision:
+                return (
+                    f"{model} cannot read images. Choose a model that can see "
+                    "in Settings, or remove the picture to ask about the text."
+                )
+            if found is not None:
+                return ""
+
+        # No model named, or one that could not be placed: ask the gate
+        # whether *anything* here can see.
+        #
+        # Guarded on the catalogue being populated at all. An empty one means
+        # discovery has not run or failed, and answering "nothing here can
+        # see" to that question is a claim about the user's machine built on
+        # our own missing data.
+        known = manager.catalog.all()
+        if known and manager.select_model_for_task(requires_vision=True) is None:
+            return (
+                "No model on this machine can read images. Zaram will not "
+                "answer about a picture it cannot see."
+            )
+    except Exception:
+        # A lookup failure must not become a refusal. See the docstring.
+        logging.getLogger(__name__).debug("Vision eligibility check failed")
+    return ""
 
 
 def _answering_event(choice: _ModelChoice):
@@ -876,8 +946,34 @@ async def chat(request: ChatRequest):
     # The question itself is the fourth input and the last one consulted: it
     # decides only when nobody else has, and only when its intent asks for a
     # model Zaram would not otherwise have picked.
-    choice = _resolve_model(request.model, request.text)
+    # Attachments are resolved before the model, because an image changes
+    # which models are eligible and that is a *fact* about the request rather
+    # than an inference from its wording. `_resolve_model` previously guessed
+    # `requires_vision` from the text alone - the word "screenshot" - and its
+    # own docstring recorded that as the gap to close when image input landed.
+    attached, missing_attachments = attachment_store.resolve(
+        request.session_id, request.attachment_ids
+    )
+    images = [a.data for a in attached if a.kind == "image" and a.data]
+
+    choice = _resolve_model(request.model, request.text, has_images=bool(images))
     model = choice.model
+
+    # The refusal the docstring promised. A model that cannot see, asked to
+    # look at a picture, must say so rather than answer around it: answering
+    # blind produces confident prose about an image nobody looked at, which is
+    # rule 9's failure in a new medium.
+    #
+    # Two different causes, two different sentences. "You chose a model that
+    # cannot see" is actionable; "nothing installed here can see" is a
+    # different problem with a different fix, and collapsing them into one
+    # message leaves the user unable to tell which they have.
+    if images:
+        refusal = await _vision_refusal(model)
+        if refusal:
+            return StreamingResponse(
+                _stream_error(refusal), media_type="text/event-stream"
+            )
 
     # Web search compensates for what the *answering* model does not know, so
     # whether to search depends on which model that is — and this is the first
@@ -951,9 +1047,6 @@ async def chat(request: ChatRequest):
     # session stores, and *before* the stream starts because what was read has
     # to be sayable before the answer built on it — the same reasoning the
     # domain notice already follows.
-    attached, missing_attachments = attachment_store.resolve(
-        request.session_id, request.attachment_ids
-    )
     composition = compose_attachments(attached, request.text, missing=missing_attachments)
     if composition.block:
         final_prompt = f"{composition.block}\n\n{request.text}"
@@ -1000,6 +1093,7 @@ async def chat(request: ChatRequest):
             final_prompt, model, system_prompt, request.session_id,
             project_id=request.project_id or None,
             only_ids=only_ids,
+            images=images or None,
         ):
             yield chunk
 

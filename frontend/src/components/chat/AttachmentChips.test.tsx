@@ -10,8 +10,10 @@
  * document a commitment to remember it for ever.
  *
  * **A refusal is a row, not a toast.** The user is about to ask a question
- * whose answer depends on what is actually attached, so "that one is an image
- * and Zaram cannot read images yet" cannot disappear on a timer.
+ * whose answer depends on what is actually attached, so "Zaram has no parser
+ * for .zip" cannot disappear on a timer. (Images used to be the example here
+ * and are no longer refused — they attach, and whether a model can *see* one
+ * is decided in `/chat` by the capability gate.)
  *
  * **The size is shown before the question is asked**, because it is what
  * decides whether the reply says "read in full" or "searched it and used 3
@@ -30,6 +32,7 @@ const file = (over: Partial<ChatAttachment> = {}): ChatAttachment => ({
   chars: 14_000,
   pages: 12,
   parser: 'pypdf',
+  kind: 'document',
   created_at: 0,
   ...over,
 });
@@ -66,6 +69,19 @@ describe('what is attached', () => {
   it('falls back to characters where the format has no pages', () => {
     renderChips({ attachments: [file({ pages: 0, chars: 8200 })] });
     expect(screen.getByText('8k characters')).toBeTruthy();
+  });
+
+  it('says image rather than counting characters it does not have', () => {
+    renderChips({
+      attachments: [
+        file({ name: 'receipt.png', suffix: '.png', kind: 'image', chars: 0, pages: 0 }),
+      ],
+    });
+
+    // "0 characters" would read as a file that failed to parse rather than one
+    // with nothing to parse, which is the opposite of what happened.
+    expect(screen.getByText('image')).toBeTruthy();
+    expect(screen.queryByText('0 characters')).toBeNull();
   });
 
   it('renders nothing at all when there is nothing attached', () => {
@@ -131,9 +147,9 @@ describe('detaching', () => {
 
 describe('a file that was refused', () => {
   const refusal = {
-    name: 'receipt.png',
+    name: 'archive.zip',
     reason:
-      'receipt.png is an image, and Zaram cannot read images yet. Both of your local models can see, so this is a missing path rather than a missing capability.',
+      'Zaram has no parser for .zip. It can read: .csv, .docx, .json, .markdown, .md, .pdf, .rst, .txt, .xlsx, .yaml, .yml.',
   };
 
   it('shows the backend sentence verbatim', () => {
@@ -157,8 +173,8 @@ describe('a file that was refused', () => {
     const onDismissRefusal = vi.fn();
     renderChips({ attachments: [], refused: [refusal], onDismissRefusal });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Dismiss receipt.png' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss archive.zip' }));
 
-    expect(onDismissRefusal).toHaveBeenCalledWith('receipt.png');
+    expect(onDismissRefusal).toHaveBeenCalledWith('archive.zip');
   });
 });

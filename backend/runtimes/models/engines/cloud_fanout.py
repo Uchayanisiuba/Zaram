@@ -75,7 +75,11 @@ class CloudFanout(LLMEngine):
         self._default_model = value
 
     def stream_response(
-        self, prompt: str, system_prompt: str = "", model: str | None = None
+        self,
+        prompt: str,
+        system_prompt: str = "",
+        model: str | None = None,
+        images: list[str] | None = None,
     ) -> Iterator[str]:
         try:
             resolved = self._resolve(model)

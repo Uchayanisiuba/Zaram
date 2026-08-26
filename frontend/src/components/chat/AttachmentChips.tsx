@@ -20,7 +20,7 @@
  * answer depends on what is actually in scope.
  */
 import { useState } from 'react';
-import { Check, FileText, Loader2, Paperclip, X } from 'lucide-react';
+import { Check, FileText, Image as ImageIcon, Loader2, Paperclip, X } from 'lucide-react';
 
 import {
   attachmentSize,
@@ -68,7 +68,13 @@ export default function AttachmentChips({
               border: '1px solid var(--color-border-subtle)',
             }}
           >
-            <FileText size={13} style={{ color: 'var(--color-cyan-light)', flexShrink: 0 }} />
+            {/* Told apart at a glance, because they behave differently: a
+                document may come back excerpted and an image never does. */}
+            {item.kind === 'image' ? (
+              <ImageIcon size={13} style={{ color: 'var(--color-violet)', flexShrink: 0 }} />
+            ) : (
+              <FileText size={13} style={{ color: 'var(--color-cyan-light)', flexShrink: 0 }} />
+            )}
             <span
               className="truncate"
               style={{ color: 'var(--color-text)', maxWidth: '16rem' }}

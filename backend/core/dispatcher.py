@@ -132,12 +132,34 @@ class ExecutionDispatcher:
                     )
                 elif hasattr(service, "generate_response"):
                     prompt = step.input_data.get("prompt", "")
-                    logger.debug("Dispatcher: calling generate_response prompt='%s...' model=%s", prompt[:50], model)
+                    # Carried on `input_data` rather than as a new argument to
+                    # `execute_step`, because that is what `input_data` is for
+                    # and every other per-request value already travels there.
+                    images = step.input_data.get("images") or None
+                    logger.debug(
+                        "Dispatcher: calling generate_response prompt='%s...' model=%s images=%s",
+                        prompt[:50], model, bool(images),
+                    )
                     # `model` was logged here and then not passed, so every
                     # request answered with the engine default whatever it asked
                     # for. The log made it look plumbed.
+                    # **Passed only when there are some.** `generate_response`
+                    # is implemented by every model service and by a dozen test
+                    # doubles, and handing all of them a fourth argument broke
+                    # thirteen tests — including the provenance and outbound-
+                    # query invariants, which are the two this repository can
+                    # least afford to have red for an unrelated reason.
+                    #
+                    # An implementation that cannot take images still fails
+                    # loudly when one is actually attached: the `TypeError`
+                    # surfaces through the fallback path and is reported. What
+                    # it no longer does is fail when no image is involved.
                     yield from self._execute_with_fallback(
-                        lambda: service.generate_response(prompt, system_prompt, model),
+                        lambda: (
+                            service.generate_response(prompt, system_prompt, model, images)
+                            if images
+                            else service.generate_response(prompt, system_prompt, model)
+                        ),
                         step.capability_id,
                         prompt[:100] if prompt else "empty",
                         "response generation",

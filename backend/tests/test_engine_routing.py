@@ -30,12 +30,21 @@ class _Recorder:
     def __init__(self, label: str) -> None:
         self.label = label
         self.calls: list[tuple[str, str, str | None]] = []
+        #: Images seen per call. Recorded separately so a test can assert that
+        #: the cloud side was never handed one without every existing
+        #: assertion about `calls` having to change shape.
+        self.images: list[list[str] | None] = []
         self.default_model: str | None = None
 
     def stream_response(
-        self, prompt: str, system_prompt: str = "", model: str | None = None
+        self,
+        prompt: str,
+        system_prompt: str = "",
+        model: str | None = None,
+        images: list[str] | None = None,
     ) -> Iterator[str]:
         self.calls.append((prompt, system_prompt, model))
+        self.images.append(images)
         yield self.label
 
 
@@ -107,6 +116,63 @@ class TestItFailsTowardsTheMachine:
 
         assert list(engine.stream_response("q", "sys", "anything")) == ["local"]
         assert not cloud.calls
+
+
+class TestAnImageNeverLeavesTheDevice:
+    """Rule 7j: consent is per destination *and data class*.
+
+    A chat message is a couple of kilobytes; a photograph is a few megabytes of
+    something far more personal. Connecting a provider for text is not consent
+    to send it a picture, and nothing asks that question yet \u2014 so nothing may
+    assume the answer.
+    """
+
+    def test_a_picture_reaches_a_local_engine(self, local, cloud):
+        engine = RoutedEngine(local=local, cloud=cloud, is_remote=lambda m: False)
+
+        list(engine.stream_response("what is this", "sys", "gemma4:12b", ["aGk="]))
+
+        assert local.images == [["aGk="]]
+
+    def test_a_picture_is_refused_rather_than_sent_to_the_cloud(self, local, cloud):
+        engine = RoutedEngine(local=local, cloud=cloud, is_remote=lambda m: True)
+
+        out = "".join(
+            engine.stream_response("what is this", "sys", "gpt-4o", ["aGk="])
+        )
+
+        # Nothing reached the cloud engine at all.
+        assert cloud.calls == []
+        assert "does not send images off" in out
+
+    def test_the_refusal_is_not_a_silent_strip(self, local, cloud):
+        engine = RoutedEngine(local=local, cloud=cloud, is_remote=lambda m: True)
+
+        out = "".join(
+            engine.stream_response("what is this", "sys", "gpt-4o", ["aGk="])
+        )
+
+        # Answering from the prompt with the image quietly removed would be
+        # confident prose about a picture nobody looked at \u2014 the same failure
+        # the local gate exists to stop, arriving by the cloud route.
+        #
+        # Asserted on the error prefix and on the recorder, not on the absence
+        # of the label: the label is "cloud" and the refusal says "cloud
+        # model", so `label not in out` was a substring collision that failed
+        # for the wrong reason and would have passed for one too.
+        from runtimes.models.engines.base_engine import ERROR_PREFIX
+
+        assert out.startswith(ERROR_PREFIX)
+        assert cloud.images == []
+
+    def test_a_text_request_still_reaches_the_cloud(self, local, cloud):
+        engine = RoutedEngine(local=local, cloud=cloud, is_remote=lambda m: True)
+
+        out = "".join(engine.stream_response("hello", "sys", "gpt-4o"))
+
+        # The refusal must not leak into requests that carry no image.
+        assert out == cloud.label
+        assert cloud.images == [None]
 
 
 class TestAMissingCloudEngineIsSaidOutLoud:

@@ -76,7 +76,11 @@ class RoutedEngine(LLMEngine):
         self._local.default_model = value  # type: ignore[attr-defined]
 
     def stream_response(
-        self, prompt: str, system_prompt: str = "", model: str | None = None
+        self,
+        prompt: str,
+        system_prompt: str = "",
+        model: str | None = None,
+        images: list[str] | None = None,
     ) -> Iterator[str]:
         try:
             remote = bool(model) and self._is_remote(model)
@@ -86,13 +90,33 @@ class RoutedEngine(LLMEngine):
             remote = False
 
         if not remote:
-            yield from self._local.stream_response(prompt, system_prompt, model)
+            yield from self._local.stream_response(prompt, system_prompt, model, images)
             return
 
         if self._cloud is None:
             yield ERROR_PREFIX + (
                 f"{model} is a cloud model and no API key is configured, so it "
                 f"cannot be used. Add a key in Settings, or choose a local model."
+            )
+            return
+
+        # **An image does not go to a cloud provider yet, and that is a
+        # consent decision rather than a missing feature.** Rule 7j grants
+        # consent per destination *and data class*: a chat message is a couple
+        # of kilobytes and a photograph is a few megabytes of something far
+        # more personal, so connecting a provider for text is not consent to
+        # send it a picture. Nothing asks that question yet, so nothing may
+        # assume the answer.
+        #
+        # Refused rather than stripped, because an answer built from the prompt
+        # with the image quietly removed is confident prose about a picture
+        # nobody looked at — the same failure the local gate exists to stop,
+        # arriving by the cloud route.
+        if images:
+            yield ERROR_PREFIX + (
+                f"{model} is a cloud model, and Zaram does not send images off "
+                "this device yet. Choose a local model that can see, or remove "
+                "the picture."
             )
             return
 

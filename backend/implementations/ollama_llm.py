@@ -34,7 +34,13 @@ class OllamaLLM:
     def __init__(self, base_url: str = "http://localhost:11434"):
         self.base_url = base_url
 
-    def stream_response(self, prompt: str, system_prompt: str = "", model: str | None = None) -> Iterator[str]:
+    def stream_response(
+        self,
+        prompt: str,
+        system_prompt: str = "",
+        model: str | None = None,
+        images: list[str] | None = None,
+    ) -> Iterator[str]:
         chosen = model or self.default_model
         if not chosen:
             # Saying so beats guessing. A guessed name produces a 404 from
