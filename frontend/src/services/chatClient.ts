@@ -136,6 +136,19 @@ export interface ChatRequest {
    *  backend unions them — asking across *Clients* and *Legal* means either —
    *  even though the control currently offers one at a time. */
   domainIds?: string[];
+  /** Files attached to this message, by id from `POST /chat/attachments`.
+   *
+   *  A third axis, and the narrowest. A project says whose work this is, a
+   *  domain says which library to read from, and this says "the document in
+   *  front of us right now" - working state that never enters the Spine
+   *  unless the user separately decides it should (rule 7d).
+   *
+   *  Ids rather than text, deliberately. How much of a document fits is a
+   *  question about the answering model's context budget, which is known in
+   *  the backend and not here; inlining the text would mean choosing on
+   *  behalf of a limit this side cannot see.
+   */
+  attachmentIds?: string[];
 }
 
 /** A failure that should be shown to the user, with the cause preserved. */
@@ -189,6 +202,7 @@ export async function* streamChat(
         session_id: req.sessionId ?? 'default',
         project_id: req.projectId ?? '',
         domain_ids: req.domainIds ?? [],
+        attachment_ids: req.attachmentIds ?? [],
       }),
       signal,
     });
