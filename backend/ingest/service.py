@@ -172,6 +172,7 @@ def iter_ingest_folder(
     root: str | Path,
     *,
     store_fact: Callable[[str, dict[str, Any]], str] | None = None,
+    read_obligations: Callable[[str, Path], None] | None = None,
     paths: Sequence[Path] | None = None,
 ) -> Iterator[IngestOutcome]:
     """Ingest `root`, yielding each file's outcome as it is finished.
@@ -187,13 +188,14 @@ def iter_ingest_folder(
     root = Path(root)
     files = list(paths) if paths is not None else discover(root)
     for path in files:
-        yield _ingest_one(path, store_fact)
+        yield _ingest_one(path, store_fact, read_obligations)
 
 
 def ingest_folder(
     root: str | Path,
     *,
     store_fact: Callable[[str, dict[str, Any]], str] | None = None,
+    read_obligations: Callable[[str, Path], None] | None = None,
     on_outcome: Callable[[IngestOutcome], None] | None = None,
     paths: Sequence[Path] | None = None,
 ) -> IngestReport:
@@ -211,7 +213,9 @@ def ingest_folder(
     started = time.perf_counter()
     outcomes: list[IngestOutcome] = []
 
-    for outcome in iter_ingest_folder(root, store_fact=store_fact, paths=paths):
+    for outcome in iter_ingest_folder(
+        root, store_fact=store_fact, read_obligations=read_obligations, paths=paths
+    ):
         outcomes.append(outcome)
         if on_outcome is not None:
             try:
@@ -234,7 +238,9 @@ def ingest_folder(
 
 
 def _ingest_one(
-    path: Path, store_fact: Callable[[str, dict[str, Any]], str] | None
+    path: Path,
+    store_fact: Callable[[str, dict[str, Any]], str] | None,
+    read_obligations: Callable[[str, Path], None] | None = None,
 ) -> IngestOutcome:
     started = time.perf_counter()
     try:
@@ -262,6 +268,29 @@ def _ingest_one(
         # second, quieter way to lose a file — the exact failure this module
         # exists to prevent. It is flagged, not suppressed.
         fact_ids = _store_chunks(path, result, store_fact)
+
+    # Obligations are read from the **whole document**, not from the chunks.
+    #
+    # A clause is a sentence and `chunk()` splits on size, so a payment term
+    # can land across a boundary — and half of "payment is due within 30 days
+    # of the invoice date" is not a commitment, it is a fragment. The chunks
+    # exist so recall can retrieve a passage; a deadline has to be read from
+    # the text the parser produced.
+    #
+    # Injected rather than imported, like `store_fact` above and for the same
+    # reason: this module stays testable without a Spine or an obligations
+    # database, and the caller decides what storing one means.
+    if read_obligations is not None and status in {
+        IngestStatus.INDEXED,
+        IngestStatus.SPARSE,
+    }:
+        try:
+            read_obligations(result.text, path)
+        except Exception:
+            # A commitment Zaram failed to read is bad; a document Zaram failed
+            # to *ingest* because it could not read a commitment is worse. The
+            # file is already parsed, graded and indexed by this point.
+            logger.exception("Ingest: obligation extraction failed for %s", path.name)
 
     return IngestOutcome(
         path=str(path),

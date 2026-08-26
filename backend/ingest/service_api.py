@@ -38,13 +38,60 @@ UPLOADS_DIRNAME = "uploads"
 class IngestService:
     """Point at a folder, put its text in the Spine, remember what happened."""
 
-    def __init__(self, records: IngestRecords, memory_runtime: Any | None = None) -> None:
+    def __init__(
+        self,
+        records: IngestRecords,
+        memory_runtime: Any | None = None,
+        obligations: Any | None = None,
+    ) -> None:
         self._records = records
         self._memory = memory_runtime
+        self._obligations = obligations
 
     @property
     def records(self) -> IngestRecords:
         return self._records
+
+    @property
+    def obligations(self) -> Any | None:
+        return self._obligations
+
+    def attach_obligations(self, obligations: Any | None) -> None:
+        """Point this at the obligations store.
+
+        Separate from `attach_memory` on purpose. Indexing a document and
+        reading its commitments are two different capabilities, and a build
+        that has one and not the other should do the half it can rather than
+        neither.
+        """
+        self._obligations = obligations
+
+    def _read_obligations(self, text: str, path: Any) -> None:
+        """Every dated commitment in one document, into the store.
+
+        **No anchor date is supplied, and that is the honest default.** A
+        relative term like "30 days from the invoice date" needs the issue date
+        to become a deadline, and this layer does not know it — the parsers
+        return text, not fields. So such a clause is stored unresolved, with
+        the question that would settle it, and the user is asked. Passing
+        today's date as an anchor would turn "I don't know when this was
+        issued" into a confident wrong deadline, which is the failure rule 9
+        exists to prevent, applied to something the user will plan around.
+
+        `direction` is likewise left UNKNOWN. The sentence cannot say whether
+        the user owes the money or is owed it — "payment is due within 30 days"
+        reads identically on an invoice sent and one received — and guessing
+        would tell a freelancer they owe money they are in fact owed.
+        """
+        if self._obligations is None:
+            return
+        from obligations.extract import extract_obligations
+
+        result = extract_obligations(text, document_id=str(path))
+        self._obligations.record(
+            obligations=list(result.obligations),
+            unresolved=list(result.unresolved),
+        )
 
     def attach_memory(self, memory_runtime: Any | None) -> None:
         """Point this at the Spine.
@@ -91,6 +138,9 @@ class IngestService:
         report = ingest_folder(
             root,
             store_fact=self._store_fact if self._memory is not None else None,
+                read_obligations=(
+                    self._read_obligations if self._obligations is not None else None
+                ),
             on_outcome=on_outcome,
         )
         source_id = self._records.upsert_source(report.root, seconds=report.seconds)
@@ -126,6 +176,9 @@ class IngestService:
             iter_ingest_folder(
                 root_path,
                 store_fact=self._store_fact if self._memory is not None else None,
+                read_obligations=(
+                    self._read_obligations if self._obligations is not None else None
+                ),
                 paths=files,
             ),
             start=1,
@@ -257,9 +310,10 @@ class IngestService:
         started = time.perf_counter()
         outcomes: list[IngestOutcome] = []
         store = self._store_fact if self._memory is not None else None
+        read = self._read_obligations if self._obligations is not None else None
 
         for index, path in enumerate(paths, start=1):
-            outcome = _ingest_one(Path(path), store)
+            outcome = _ingest_one(Path(path), store, read)
             outcomes.append(outcome)
             yield {"type": "file", "index": index, "total": len(paths), **outcome.to_dict()}
 
@@ -368,6 +422,9 @@ class IngestService:
         report = ingest_folder(
             path.parent,
             store_fact=self._store_fact if self._memory is not None else None,
+                read_obligations=(
+                    self._read_obligations if self._obligations is not None else None
+                ),
             paths=[path],
         )
         if report.outcomes:
