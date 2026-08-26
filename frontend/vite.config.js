@@ -131,6 +131,11 @@ export default defineConfig(({ command }) => ({
       '/vision': { target: BACKEND, changeOrigin: true },
       '/export': { target: BACKEND, changeOrigin: true },
       '/character': { target: BACKEND, changeOrigin: true },
+      // The obligations routes landed with the backend on 26 August and
+      // neither proxy list was updated, so the check below had been
+      // failing since. Read the guard's output rather than adding a
+      // prefix here from memory — it names both lists.
+      '/obligations': { target: BACKEND, changeOrigin: true },
     },
   },
 }));
