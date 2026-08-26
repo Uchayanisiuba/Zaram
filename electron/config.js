@@ -89,6 +89,7 @@ function createConfig(options) {
         '/knowledge',
         '/memory',
         '/models',
+        '/obligations',
         '/personalities',
         '/projects',
         '/providers',
