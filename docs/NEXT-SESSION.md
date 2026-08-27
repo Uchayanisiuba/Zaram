@@ -1,7 +1,7 @@
 # Next session — start here
 
-A prompt and a state snapshot. Rewritten 26 August 2026 at the end of the
-attachments, images and desktop-launch session.
+A prompt and a state snapshot. Rewritten 27 August 2026 at the end of the
+EXL3, local-routing and Knowledge-removal session.
 
 **This file is a pointer, not a second handoff.** `docs/MILESTONES.md` Current
 state is the handoff and stays the authority on status; `CLAUDE.md` stays the
@@ -14,303 +14,244 @@ is stale — say so and fix it.
 
 Paste this into a new session:
 
-> Read `CLAUDE.md`, then `docs/MILESTONES.md` Current state — 26 August — then
-> this file. For anything touching voice read `docs/SPEECH.md`; before
-> launching the app read `docs/RUNNING.md`, which has four failure modes that
-> each look like something else.
+> Read `CLAUDE.md`, then `docs/MILESTONES.md` Current state, then this file.
+> For anything touching voice read `docs/SPEECH.md`; before starting the app
+> read `docs/RUNNING.md`, and note that **launching now means three processes,
+> not two** — Vite, Electron, and TabbyAPI on port 1234.
 >
-> State you are inheriting:
+> The machine has changed since the last handoff. Ollama holds only
+> `gemma4:26b-a4b-it-q4_K_M` and `bge-m3`; the main chat model is
+> **Qwen3.8-27B EXL3 at 2.20bpw served by TabbyAPI**, which Zaram discovers on
+> loopback as "LM Studio". Nothing from this session is committed — read
+> "Uncommitted work" below before touching those files.
 >
-> - Branch `Zaram-V0.1`. **The working tree is clean and everything is
->   committed.** `git log --oneline -8` is the list.
-> - Nothing is running. Ollama may or may not be up — check, because it
->   changes what the suite executes and how long it takes.
->
-> How this repository fails, so you can recognise it:
->
-> - **Nineteen** complete, tested, unreachable subsystems have been found. The
->   nineteenth was `/vision/analyze`: a finished streaming endpoint, called by
->   nothing, hardcoding a model that is not installed. **Assume unreachable
->   until you have seen the caller.**
-> - A green suite has meant nothing on at least seven occasions. Before you
->   trust a new test, disable the thing it tests and watch it go red — and then
->   read *which* tests survived. Five of mine passed with the feature disabled
->   this session, across two separate mutation runs.
-> - Verify against the code, not the documentation. **`CLAUDE.md` is currently
->   wrong about the modality gate** — it says nothing gates, and the gate has
->   been in `select_model_for_task` for some time. When the two disagree the
->   code wins, and say so.
-> - Say which environment you measured in, and **check the GPU before trusting
->   any timing**. See the VRAM note below; it is the likeliest explanation for
->   the long-standing suite-timing mystery.
->
-> Environment specifics that have each cost time:
->
-> - Python is `backend/venv/Scripts/python.exe`. There are two other
->   interpreters here and both have been launched by accident; a bare `python`
->   on PATH is broken.
-> - Run tests from `backend/`. Scripts outside it need
->   `PYTHONPATH=C:/Zaram/backend`, and `PYTHONIOENCODING=utf-8` or printing a
->   document will die on cp1252.
-> - `curl http://127.0.0.1:8420/health` returning **401** is success. The auth
->   header is `X-Zaram-Auth`, not `X-Zaram-Client`, which is enforced nowhere.
-> - **`gh` is not installed.**
-> - **Do not read a command's exit code through a pipe.**
-> - **Bash heredocs mangle escape sequences.** `\x89PNG` and `\u2014` both came
->   out wrong this session and cost two rounds each. Write the patch to a file
->   with the Write tool and run it with Python. This is in the handoff for the
->   third time; believe it.
->
-> Start on item 1 under "What to do next" unless I say otherwise. Before
-> reporting anything as working, run it and watch it happen.
+> The first job is the vision path. It is broken in a way that is half fixed
+> and half not, and the unfixed half needs a decision rather than a patch.
 
 ---
 
-## Read this before you install or launch anything
+## What happened this session
 
-`docs/RUNNING.md` is the full version. **The launch bugs it documented are
-fixed as of this session** — see MILESTONES — but the two structural traps
-remain:
+**Qwen3.8-27B now runs locally at 2.20bpw through TabbyAPI**, and getting
+there found three real defects in Zaram rather than in the setup.
 
-**There are two virtualenvs and two Electron trees.** Both pairs are internally
-consistent, so no guard sees either.
+### The routing defect, and why it mattered more than the symptom
 
-| | ships / working | the other one |
+`RoutedEngine` splits the world into local and cloud and hands everything
+local to `OllamaEngine`. That was true while Ollama was the only local server
+and stopped being true when the catalogue gained `lm_studio` — an
+OpenAI-compatible server on `127.0.0.1:1234`. A model served there was
+discovered, catalogued, shown in the picker with a correct
+`NEVER_LEAVES_DEVICE` policy, chosen, and then posted to Ollama:
+
+    Ollama refused the request for Qwen3.8-27B-exl3-2.20bpw:
+    model 'Qwen3.8-27B-exl3-2.20bpw' not found
+
+Underneath it, `OpenAICompatibleEngine` refused an empty API key with *"A
+cloud model needs your own API key"* — written on the assumption that
+OpenAI-compatible implies cloud. LM Studio and TabbyAPI both ship auth-free on
+loopback, so **the `lm_studio` catalogue entry could never have executed a
+single request.** Discoverable, never runnable: the fifteen-unreachable-
+subsystems shape, in the routing layer.
+
+Fixed by `engines/local_dispatch_engine.py` (dispatch by **provider id**,
+never by model name) and a loopback-only exemption to the key requirement. The
+exemption is gated on the address, not on the key being blank, so a cloud
+provider still cannot slip through — `tests/test_local_dispatch.py` asserts
+that `https://localhost.attacker.example` is refused.
+
+### Two existing tests were asserting the wrong thing
+
+`test_engine_routing.py` had two tests reading `isinstance(engine,
+OllamaEngine)` for the no-key case. That pins **which local server answers**
+when the contract they exist to protect is *no engine capable of leaving the
+device is built without a key*. Rewritten to assert that. Worth remembering as
+a pattern: the test was green for the whole time it was wrong, and only a
+change it should not have blocked revealed it.
+
+### Reasoning was being rendered as the answer
+
+This model's chat template ends the prompt with a bare `<think>\n`, so
+generation begins *inside* the block and the model only ever emits the closing
+tag. `ReasoningSplitter` waits for an opening tag that never comes and files
+the monologue as the reply — which also meant Kokoro read it aloud, the exact
+failure that module's docstring says it exists to prevent.
+
+Two fixes were needed and either alone looks like it did nothing: TabbyAPI's
+`reasoning: true` splits it server-side (`start_in_reasoning: auto` detects the
+unclosed prefill), and `OpenAICompatibleEngine` now reads `reasoning_content`
+as well as `content`, re-wrapping it in the tags the splitter already
+understands. That second half also fixes DeepSeek and every other provider
+using the same OpenAI extension.
+
+---
+
+## The first job: vision
+
+**Half fixed today, half needs a decision.**
+
+The symptom was:
+
+    Dispatcher: CRITICAL ERROR for vision.analyze:
+      AttributeError: 'RoutedEngine' object has no attribute 'stream_vision_response'
+
+*Fixed:* both wrappers now forward the method. `RoutedEngine` never had it —
+a pre-existing hole that only appeared once a cloud key was configured — and
+`LocalDispatchEngine` inherited it, which briefly widened the bug, because a
+keyless setup previously got a bare `OllamaEngine` that had the method.
+
+*Not fixed, and this is the decision:* `OllamaEngine.stream_vision_response`
+hardcodes `"model": "qwen2.5vl:7b"`, which **is not installed on this
+machine**, and ignores whatever model the user chose. So vision now reaches
+the engine and fails at Ollama instead of at the attribute lookup.
+
+The right fix is the modality gate `CLAUDE.md` already describes and it is not
+a one-liner:
+
+* `ModelInfo.supports_vision` exists and Ollama discovery populates it from
+  `/api/show`. **It is a 0..1 ranking score, not a gate** — `capabilities.py`
+  maps `ModelCategory.IMAGE` to `Capability.VISION: 1.0`, the same value a
+  model that *reads* images gets, so "can see" and "can draw" are one number.
+* Modality is a **precondition**, never a ranking. It filters the candidate
+  set; similarity then orders what survives. This codebase has paid three
+  times for merging membership with ordering.
+* `gemma4:26b-a4b` is vision-capable and installed. Selecting it for a vision
+  request is the concrete outcome to aim for.
+
+Do not paper over it by pulling `qwen2.5vl:7b` — that leaves the hardcode in
+place and makes a future user's vision request depend on a model they never
+chose.
+
+---
+
+## Uncommitted work
+
+Nothing from this session is committed. Thirteen modified files and five new
+ones, and they are four independent changes that should land as four commits:
+
+**1. Preview fix.** `frontend/src/components/ArtifactPreview.tsx`.
+`WorkWorkspace`'s detail sidebar carries `backdrop-filter: blur(24px)`, which
+makes it the containing block for `position: fixed` descendants and then clips
+them with its own `overflow: hidden`. The preview panel resolved `right:
+panelWidth` — a fraction of the *viewport* — inside a 520px box. Measured: the
+same element reported width 816 against the viewport and 202 inside the aside,
+and above a viewport of ~1857px it collapses to zero. Fixed with a portal to
+`document.body`.
+
+**2. Model picker and dropdown theming.**
+`SettingsWorkspace.tsx`, `groupModelsByLocality.test.ts`, `index.css`. The
+picker groups by locality with headings that name the consequence ("nothing is
+sent" / "leaves this device"). **Four localities, not two** — a `local, else
+cloud` split would file a hybrid model under a guarantee nobody checked, and
+the test asserts nothing is ever dropped. The CSS fixes every `<select>` in
+the app, not just this one: seven of them across five files had no `option`
+styling at all, so their popups drew near-white text on the platform's white
+surface. `color-scheme: dark` is what makes the popup *chrome* match.
+
+**3. Cloud providers.** `backend/providers/catalogue.py`. NVIDIA NIM,
+SambaNova and Cerebras. Every endpoint was probed before being written down —
+GitHub Models returned **410 Gone** and is deliberately absent rather than
+listed with a dead URL. Cerebras is labelled a trial, not a free tier,
+because it requires a verified payment method.
+
+**4. Local routing + reasoning + Knowledge removal.** The backend files, plus
+`local_dispatch_engine.py`, `test_local_dispatch.py`,
+`test_ingest_remove_file.py`. Described above and below.
+
+`docs/MODEL-ONBOARDING.md` is new and independent of all four — nine ideas read
+out of LM Studio's own on-disk state, each mapped to a Zaram rule that already
+exists but has nowhere to live. None of it is implemented.
+
+---
+
+## Knowledge: per-file removal
+
+Rule 4 says the user can delete any stored thing. Until today the only unit of
+removal was a **whole source**, and every dropped or pasted file shares one
+uploads source — so getting rid of one image meant discarding everything ever
+pasted. Reported by the maintainer with a PNG they could not remove.
+
+Added: `records.remove_outcome`, `service.withdraw_file`,
+`DELETE /ingest/outcomes/{outcome_id}`, `removeFile` in `ingestClient`, and a
+Remove control on both outcome sections in `KnowledgeWorkspace`.
+
+Two decisions worth keeping:
+
+* **The source row survives its last file.** An empty uploads directory is
+  still where the next drop goes; deleting the row would make the next paste
+  re-create it under a fresh id, detaching it from any domain pointing at the
+  old one.
+* **Only Zaram's own copies are unlinked.** A scanned folder holds the user's
+  originals. `_delete_own_copies` checks containment *after* resolving, so a
+  symlink inside uploads pointing at a real document is refused.
+
+---
+
+## The machine, as it now stands
+
+| | |
+|---|---|
+| Ollama | `gemma4:26b-a4b-it-q4_K_M` (17 GB), `bge-m3` (1.2 GB) |
+| TabbyAPI on 1234 | `Qwen3.8-27B-exl3-2.20bpw`, 9.61 GiB, 10.2/12.3 GB VRAM |
+| Removed | `qwen3.8:27b`, `qwen2.5-coder:14b`, `gemma4:12b`, `bge-reranker-v2-m3` |
+| TabbyAPI env | `C:\Users\user\tabbyapi-env` — torch 2.10.0+cu128, exllamav3 1.4.4, triton-windows 3.7.1 |
+
+**Measured, same ~2,500-token prompt, RTX 3060 12 GB / i7-7700:**
+
+| | Time to first token | Generation |
 |---|---|---|
-| Python | `backend/venv` | `C:\Zaram\.venv` — also complete |
-| Electron | `electron/main.js` | `desktop/src/main/index.ts` |
+| `qwen3.8:27b` (removed) | 19.5 s | 1.96 tok/s |
+| Qwen3.8 EXL3 2.20bpw | **0.72 s** | 8.0 tok/s |
+| `gemma4:26b-a4b` (MoE) | 4.5 s | **23.75 tok/s** |
 
-Launch, from the repo root, with Vite already listening on 5173:
-
-```bash
-env -u ELECTRON_RUN_AS_NODE ZARAM_PYTHON="C:/Zaram/backend/venv/Scripts/python.exe" node_modules/.bin/electron electron/main.js
-```
-
-`ELECTRON_RUN_AS_NODE` must be **deleted, never blanked**; Electron tests for
-its presence.
-
-**A cold boot takes ~2.5 minutes and that is expected now.** The launcher waits
-240s and logs its state transitions, so `desktop.log` will say
-`Backend state: starting` → `available` → `Loading renderer`. If you see
-`error.html` instead, read the log rather than guessing — that is what it is
-for now.
-
-**Electron mints the API secret per launch and never exposes it.** To drive the
-backend by hand instead, run it yourself with a known secret:
-
-```bash
-cd backend && ZARAM_API_SECRET=dev-secret ZARAM_DATA_DIR=/some/scratch venv/Scripts/python.exe main.py
-```
-
-```bash
-curl -s -H 'X-Zaram-Auth: dev-secret' http://127.0.0.1:8420/chat/attachments?session_id=probe
-```
-
-Use `ZARAM_DATA_DIR` for anything that writes. It is what keeps a test run away
-from the real Spine — and note that without it `data_dir()` resolves to
-`C:\Zaram\backend`, which is correct and is also how a module this session
-deleted its own source directory.
+The MoE result is the one worth remembering: **two 18 GB models spilling by
+the same ~50%, and the MoE generates 9.4× faster**, because only ~4B params
+are read per token so the exiled experts sit untouched. Prior advice that
+spill would be punishing on a 2017 CPU was too pessimistic — the CPU barely
+matters when the spilled weights are not being read.
 
 ---
 
-## The VRAM finding, which may explain the suite-timing mystery
+## Smaller things left open
 
-**An ordinary Windows desktop holds ~8.8 GB of this 12 GB card.** Measured with
-`nvidia-smi --query-compute-apps` on 26 August: Explorer, Edge, WebView2,
-WhatsApp, PhoneExperienceHost, SearchHost and the start menu, with **no model
-loaded at all**.
-
-That leaves ~3.4 GB. `gemma4:12b` needs 7.5 GB, so it **spills to CPU** —
-measured at 1.8 GB of 8.95 GB resident, with the rest on the processor. Any
-test that performs a real inference then runs at CPU speed.
-
-The backend suite hung at 51% twice in that state and completed in **4:51**
-once the model was unloaded and the card was quieter. CLAUDE.md records an
-unexplained 2:53-versus-20:46 split and blames provider-probe timeouts. **This
-is a better candidate**, and it is cheap to check: read `nvidia-smi` before
-quoting a duration.
-
-Two consequences worth thinking about:
-
-* The **30.3 tok/s "fully resident"** figure for `gemma4:12b` was measured on a
-  quiet machine. On a working desktop it is not resident and the number does
-  not hold.
-* `ProviderManager.resident_budget_bytes` subtracts the embedder and a KV
-  reserve from *total* VRAM. It does not subtract the desktop, and on this
-  machine the desktop is the largest single consumer. The residency gate is
-  therefore optimistic by several gigabytes in exactly the case that matters.
+* **Gemma 26B timed out at 120 s** on a cold first request
+  (`OllamaEngine.stream_response failed: ReadTimeout`). Spill makes the first
+  load slow; the timeout may simply be too tight for a spilling MoE.
+* **The ambient surface 401s** against the per-launch secret. A second
+  BrowserWindow polls `/health` and `/egress/pending` once a second and never
+  authenticates, so Ctrl+Shift+Space likely shows "engine not running". The
+  IPC secret handoff was never traced.
+* **TabbyAPI shows as "LM Studio (on this machine)"**, because the catalogue's
+  only local entry is the generic adapter pinned to 1234. Policy is correct;
+  the name is not. Adding a generic "local server" entry would fix it.
+* **`ReasoningPanel` uses `--color-text-muted`**, ~4.0:1 contrast. Deliberate
+  quietness, possibly too faint. The dropdown headings were raised to
+  `--color-text-muted-light` (9.34:1) for the same reason and it may want the
+  same treatment.
+* **Two Electron trees still unreconciled** (`electron/main.js` versus
+  `desktop/`), and **two virtualenvs** (`backend/venv` versus `.venv`, the
+  latter CPU-only torch). Both are triage decisions `docs/RUNNING.md` has been
+  flagging for over a week.
 
 ---
 
-## What is uncommitted right now
+## Working notes worth carrying
 
-**Nothing.** The tree is clean.
+**Downloading from HuggingFace on a slow link took five attempts, and four
+failures were self-inflicted.** Recorded because the diagnosis order was the
+useful part: `huggingface_hub` hung at 0/22 twice with no error; `curl -C -`
+managed 0.02 MB/s; a *bounded* range got 1.41 MB/s; headers showed a clean 206
+and `X-Cache: Miss from cloudfront`, so the cap was **per-connection**, not
+per-account and not the local link. 24 parallel ranges reached 1.7 MB/s.
 
----
+The self-inflicted ones: a hardcoded byte count rounded off a GiB display
+(2–4 MB too large, so the last chunk asked past EOF — and had it "succeeded"
+the preallocated file would have been the wrong length, failing at model-load
+time instead of download time); a resume marker wiped by a misfiring guard;
+an orphaned `curl` retry loop that ran for an hour holding a file lock and
+stealing bandwidth *while throughput was being measured around it*; and an
+unretried API call.
 
-## Decisions taken this session
-
-* **Attachments are working state, never the Spine (rule 7d).** A file dropped
-  into a conversation is parsed, used, and *offered* — `Keep` adds it to
-  Knowledge, and nothing does so on the user's behalf.
-* **Chips persist across messages.** An attached file belongs to the
-  conversation, not to one message. The backend scopes attachments by session
-  for exactly this.
-* **The reply always says how much of a file it read**, including when it read
-  all of it. A disclosure that appears only on the lossy path teaches the user
-  that silence means "all of it".
-* **Images are a separate kind, not a document with no text.** They never enter
-  the prompt block, never spend the character budget, and are never excerpted.
-* **An image is refused rather than sent to a cloud provider.** Rule 7j: a chat
-  message is ~2 KB and a photograph is megabytes of something far more
-  personal, and connecting a provider for text is not consent to send it one.
-  Refused rather than stripped, because an answer built with the picture
-  quietly removed is the same failure the local gate exists to stop.
-* **A capability check must never turn "unmeasured" into a claim.** The vision
-  check read an unscanned catalogue and told the user their machine could not
-  read images. Every uncertainty now proceeds; only "models were found and none
-  can see" refuses.
-* **The model installer will follow LM Studio's experience.** The maintainer
-  asked for this directly on 26 August, having heard the argument against
-  copying the browser. It is their call and it is now the brief. See item 2.
-* **`qwen3.8:27b` earns nothing and should be deleted.** Identical capability
-  list to `gemma4:12b` (completion, vision, tools, thinking), 17 GB against
-  7.6 GB, 1.85 tok/s against 30.3. The registry has no lighter build — all 12
-  tags are 27B and the smallest is the q4_K_M already installed. Not deleted,
-  because that is the maintainer's 17 GB to remove.
-
----
-
-## What to do next
-
-1. **The recall disclosure — item 4 of the LM Studio list, and the last piece
-   of it.** Attachments already say what was read; recall does not.
-   `ExecutionEngine.MAX_RECALL = 6` keeps the six most relevant facts *above
-   the floor* and silently drops the rest, so an answer can be missing
-   something the Spine holds with nothing said. **Disclose only when facts were
-   actually dropped** — `len(above_floor) > MAX_RECALL` — which is rule 7h's
-   moment of doubt. A notice on every message is the tax that rule forbids, and
-   it is a different case from attachments, where the user just handed over a
-   file and is owed an account of it. Emit it as a `notice` event with a new
-   `kind`; `NoticeCard` needs a tone for it or it draws an amber warning
-   triangle over something routine.
-
-2. **The model installer, with the LM Studio experience.** The maintainer has
-   asked for this specifically. **Settle the scope with them first** — search
-   and browse, download progress, compatibility badges, or all three — because
-   that is the difference between an afternoon and a week.
-   What exists: hardware detection, `resident_budget_bytes`, `ModelInfo`,
-   discovery across Ollama and LM Studio, and `providers/catalogue.py` as a
-   working template for a dated, honestly-graded local manifest.
-   What does not: **the VRAM-tiered model manifest CLAUDE.md specifies does not
-   exist** — `vram_tier` and `recommended_models` appear nowhere, and
-   `model_catalog.py` only stores models discovery already found. And there is
-   **no pull path at all**; `/api/pull` appears nowhere outside the venv.
-   The thing only Zaram can say: *"7.6 GB, fits your card, about 30 words a
-   second"* beside *"17 GB, does not fit, about one word a second"* — graded
-   against measured hardware rather than a spec sheet. Read the VRAM note
-   above first: the honest number must subtract the desktop.
-   Constraints: never block on a download, state the size before the click,
-   log the pull like any other egress, and keep filenames and quant suffixes
-   out of the primary path.
-
-3. **The FTS5 work, step 1.** Unchanged and still queued. Membership is the
-   union of each retriever's top-K, ordering is RRF, citation stays on measured
-   relevance. **The delete path is the part that matters** — rule 4 promises
-   that correcting a fact changes the answers, and a lexical index not kept in
-   sync breaks that silently.
-
-4. **Settle whether `qwen2.5-coder:14b` earns its swap.** `INTENT_SPECIALISATION`
-   maps exactly one intent, so that entry is the only thing that can trigger a
-   model swap. Needs three real coding questions judged by a human.
-
-5. **Make `_rank_key` ask the question its docstring claims** — a residency term
-   read from `/api/ps`, as a preference and never a gate. The VRAM finding
-   above makes this worth more than it looked: a model that "fits" on paper is
-   spilling to CPU in practice.
-
-6. **The markdown preamble case.** A model that opens with "Sure! Here's the
-   statement of work:" leaves a stray paragraph. Small, and the last known
-   model-variance gap.
-
-7. **Document kinds** — proposal, report, meeting notes, letter, CV. Presets
-   over structure that already exists.
-
-8. **Conversation persistence, as the session/memory split.** Still no history.
-   Guardrail, enforced by test: readable by the user, invisible to recall
-   (rule 7d). **Chat organisation waits on this** — folders for conversations
-   that vanish on restart organise nothing.
-
-9. **`KPipeline.load_voice` is an ungated download.** Fetches a `.pt` at
-   synthesis time with nothing asked and nothing logged. Rules 3 and 7g.
-
-10. **Delete `backend/orchestrator/`.** 1,261 lines, no importers, no tests, and
-    it contains the membership-versus-ranking bug ready to be revived —
-    `scoring.py` records a *missing required capability* as a warning and ranks
-    the candidate anyway, which is the modality gate inverted. Pure subtraction.
-
-11. **Reconcile the two Electron trees and the two venvs.** Triage nobody has
-    done, invisible to every guard because each side is internally consistent.
-
-12. **Rebuild the installer and run it on a machine that has never seen this
-    repo.** Still the actual blocker.
-
----
-
-## Open questions for the maintainer
-
-* **Does `Return` send a message?** It did not fire in a Playwright-driven test
-  and the button was used instead. Not investigated, so it may be an artefact
-  of synthetic key events — but if it is real it is an obvious daily
-  irritation. Ten minutes to check by hand.
-* **Should `conversation`-type memories be in `knowledge.search` results at
-  all?** Unchanged. They are labelled honestly now, but labelling is not the
-  same as deciding they belong.
-* **Is `qwen3.8:27b` worth keeping installed?** Answered by measurement this
-  session: no unique capability, sixteen times slower, 17 GB. The deletion is
-  the maintainer's to run.
-* **The suite timing.** See the VRAM note. This is the first concrete
-  candidate; confirming it is an hour's work and would settle a question every
-  measurement in this repository depends on.
-* **`test_an_engine_failure_becomes_an_error_event_and_still_terminates` is
-  flaky.** Fails under load, passes alone. The log shows the error *was* caught
-  and printed, so the event races the consumer's completion — a real defect in
-  the legacy `ConversationManager` path, not a test bug.
-* **`en_core_web_sm` in the base install.** Unchanged and still open.
-* **Should Zaram expose an MCP server?** Unchanged.
-
----
-
-## What this session learned about the instruments
-
-**A recursive delete rooted at a configured path has a blast radius somebody
-else chooses.** `AttachmentStore` swept its scratch directory with
-`shutil.rmtree`, `data_dir()` resolves to `C:\Zaram\backend` in a checkout, the
-directory was called `attachments` — and importing `main.py` deleted the
-package's own source. The rename to `chat-attachments` stops that route; the
-real fix is that the sweep now unlinks only files it created and never removes
-a directory.
-
-**A swallowed exception is worse than a crash, and a launcher that logs no
-state transitions cannot be debugged.** `broadcastViewport` was declared inside
-`if (loadedDesktop && desktopRuntime)` and called outside it, so every backend
-status change threw `ReferenceError` into a bare `catch (_) {}`. It was found
-only after adding the logging that should always have been there.
-
-**Check the GPU before trusting a timing.** Two suite hangs, both VRAM.
-
-**A test fixture that stops exercising its branch is how a test starts proving
-nothing.** A 40-clause fixture fitted inside the budget, so two tests asserting
-the excerpt path were grading the full one. The fixture now asserts its own
-size before the tests that depend on it.
-
-**Two sources of truth for one fact, in the file whose purpose is that there be
-one.** `test_llm_engine_contract` hardcoded `CANONICAL_PARAMETERS` beside an
-assertion message naming `base_engine.LLMEngine` as the authority. Adding a
-parameter to the protocol and to every implementation failed all four engines
-against a contract they satisfied. It now reads the protocol.
-
-**Mutation testing found five assertion-free tests across two runs**, including
-one where the id under test was also `attachments[0]`, so the assertion held
-however the component behaved. Counting failures is not enough — read *which*
-tests survived.
+**The lesson that generalises: never type a number the source will tell you.**
+The final downloader takes the file list and every byte count from the API and
+verifies each file against it afterwards.
