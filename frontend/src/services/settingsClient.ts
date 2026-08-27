@@ -204,6 +204,23 @@ export interface DiscoveredModel {
   /** Whether Zaram may route here without being asked. False is normal for
    *  cloud models and is the reason one has to be chosen deliberately. */
   selectableByDefault: boolean;
+  /** Whether this model can sit in VRAM beside the embedding model.
+   *
+   *  **Three values, and `null` is not a quiet yes.** It means the question
+   *  could not be answered — no accelerator, a card whose capacity cannot be
+   *  read (Metal and DirectML report nothing), or a model that does not state
+   *  its size. The backend never promotes `null` to `true` and neither may
+   *  this: on the one fact a user is most likely to check, an admission beats
+   *  a confident guess. */
+  fitsResident: boolean | null;
+  /** On-disk size, or `null` where the provider does not report one. */
+  sizeBytes: number | null;
+  /** How much VRAM a chat model may claim on this machine, or `null`.
+   *
+   *  Carried so the reason can name numbers. "18.2 GB, and this machine has
+   *  9.1 GB for a chat model" is a sentence someone can act on; "does not fit"
+   *  is a verdict they can only accept. */
+  residentBudgetBytes: number | null;
   /** `llm`, `embedding`, and whatever the provider layer adds later.
    *
    *  Carried because an embedder cannot hold a conversation: Ollama answers
@@ -231,6 +248,13 @@ export async function fetchModels(): Promise<DiscoveredModel[]> {
     locality: String(m.locality ?? ''),
     dataPolicy: typeof m.data_policy === 'string' ? m.data_policy : null,
     selectableByDefault: m.selectable_by_default === true,
+    // `?? null` rather than a boolean coercion, deliberately: `Boolean(null)`
+    // is `false`, which would render "too large for this machine" for every
+    // model on a Mac — where the answer is genuinely unknown, not no.
+    fitsResident: typeof m.fits_resident === 'boolean' ? m.fits_resident : null,
+    residentBudgetBytes:
+      typeof m.resident_budget_bytes === 'number' ? m.resident_budget_bytes : null,
+    sizeBytes: typeof m.size_bytes === 'number' ? m.size_bytes : null,
     category: String(m.category ?? ''),
   }));
 }

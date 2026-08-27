@@ -369,6 +369,40 @@ const messageOf = (error: unknown): string =>
  */
 export type ModelGroup = { key: string; label: string; models: DiscoveredModel[] };
 
+/** Gigabytes, one decimal, for a number a person is about to compare. */
+function gb(bytes: number): string {
+  return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
+}
+
+/**
+ * Why a model will be slow on this machine, or `null` when it will not be.
+ *
+ * **The product already knew this and only told a log file.** A model larger
+ * than the whole resident budget loads with layers spilled into system RAM,
+ * which `swap_preflight` grades as `oversized` and its own docstring calls
+ * "a hardware fact no setting will change". `select_default_model` refuses to
+ * auto-pick one; a user choosing by hand skipped that gate entirely — which is
+ * right, a deliberate choice is theirs to make, and silent, which is not.
+ *
+ * Measured, 27 August 2026: choosing an 18.2 GB model on a 12 GB card gave no
+ * warning at any point, then a read timeout naming a URL.
+ *
+ * `null` covers two different situations that must both stay quiet: the model
+ * fits, and the question could not be answered. A Mac reports no VRAM at all,
+ * and greying out every model there would be worse than saying nothing.
+ */
+export function describeFit(model: DiscoveredModel): string | null {
+  if (model.fitsResident !== false) return null;
+  if (model.sizeBytes === null || model.residentBudgetBytes === null) {
+    // Graded as not fitting, but without both numbers there is no sentence
+    // worth writing. Say the short true thing rather than an empty comparison.
+    return 'larger than this machine can hold';
+  }
+  return `${gb(model.sizeBytes)}, and this machine has about ${gb(
+    model.residentBudgetBytes,
+  )} for a chat model`;
+}
+
 export function groupModelsByLocality(models: DiscoveredModel[]): ModelGroup[] {
   const local: DiscoveredModel[] = [];
   const cloud: DiscoveredModel[] = [];
@@ -908,12 +942,41 @@ export default function SettingsWorkspace() {
                         <option key={model.id} value={model.id}>
                           {model.displayName}
                           {model.dataPolicy ? '' : ' · terms unknown'}
+                          {/* On the label, because a native `option` cannot be
+                              styled portably and the text is the one carrier
+                              that always survives. Same shape as the terms
+                              note beside it. */}
+                          {model.fitsResident === false ? ' · too large for this machine' : ''}
                         </option>
                       ))}
                     </optgroup>
                   ))}
                 </select>
               )}
+
+              {/* **The case that actually bit.** Marking the option is enough
+                  while someone is choosing; it is no use at all to the person
+                  who chose an hour ago and is now watching a reply that will
+                  not arrive. So the chosen model is checked on its own, and
+                  the consequence is stated rather than the verdict — "will be
+                  slow" is what they will experience, "does not fit alongside
+                  the embedding model" is how the system phrases it to itself. */}
+              {(() => {
+                if (models === null) return null;
+                const chosen = models.find((m) => m.id === routingSettings?.defaultModel);
+                const reason = chosen ? describeFit(chosen) : null;
+                if (!chosen || !reason) return null;
+                return (
+                  <p
+                    className="text-[11px] leading-snug mt-0.5"
+                    style={{ color: 'var(--color-amber)', maxWidth: '46ch' }}
+                  >
+                    {chosen.displayName} is {reason}. Part of it will run on the processor,
+                    so every reply will be slow — not just the first. A smaller model is the
+                    remedy.
+                  </p>
+                );
+              })()}
             </div>
           </Row>
         </Section>

@@ -9,7 +9,7 @@
  * by a test that only exercises the two common cases.
  */
 import { describe, expect, it } from 'vitest';
-import { groupModelsByLocality } from './SettingsWorkspace';
+import { describeFit, groupModelsByLocality } from './SettingsWorkspace';
 import type { DiscoveredModel } from '@/services/settingsClient';
 
 function model(id: string, locality: string): DiscoveredModel {
@@ -21,8 +21,59 @@ function model(id: string, locality: string): DiscoveredModel {
     dataPolicy: null,
     selectableByDefault: true,
     category: 'chat',
+    fitsResident: null,
+    sizeBytes: null,
+    residentBudgetBytes: null,
   };
 }
+
+const GB = 1024 ** 3;
+
+/** A local model with a size, and a machine with a budget. */
+function sized(
+  id: string,
+  sizeBytes: number | null,
+  residentBudgetBytes: number | null,
+  fitsResident: boolean | null,
+): DiscoveredModel {
+  return { ...model(id, 'local'), sizeBytes, residentBudgetBytes, fitsResident };
+}
+
+/**
+ * The picker says a model will be slow *before* it is chosen.
+ *
+ * Measured 27 August 2026: an 18.2 GB model chosen on a 12 GB card produced no
+ * warning at any point, then a read timeout naming a URL. The verdict existed
+ * the whole time -- `model_fits_resident` computed it and only auto-selection
+ * ever read it.
+ */
+describe('describeFit', () => {
+  it('names both numbers, so the reason can be acted on', () => {
+    const text = describeFit(sized('gemma4:26b', 18.2 * GB, 9.1 * GB, false));
+
+    expect(text).toContain('18.2 GB');
+    expect(text).toContain('9.1 GB');
+  });
+
+  it('says nothing about a model that fits', () => {
+    expect(describeFit(sized('qwen2.5-coder:7b', 4.7 * GB, 9.1 * GB, true))).toBeNull();
+  });
+
+  it('says nothing when the question could not be answered', () => {
+    // Metal and DirectML report no capacity. Greying out every model on a Mac
+    // would be worse than staying quiet, and `null` is not a quiet no.
+    expect(describeFit(sized('anything', 8 * GB, null, null))).toBeNull();
+  });
+
+  it('still says the short true thing when the numbers are missing', () => {
+    // Graded as not fitting, but without both figures there is no comparison
+    // to write. An empty "0.0 GB, and this machine has 0.0 GB" would be worse
+    // than a plain sentence.
+    const text = describeFit(sized('mystery', null, null, false));
+
+    expect(text).toBe('larger than this machine can hold');
+  });
+});
 
 describe('groupModelsByLocality', () => {
   it('separates local from cloud', () => {
