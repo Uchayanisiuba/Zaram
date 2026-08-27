@@ -76,6 +76,15 @@ spine.db-wal
 spine.db-shm
 backend/spine.db*
 
+# The transcripts. Rule 7d's session store -- everything the user and Zaram
+# actually said to each other, which is the most personal thing in the product
+# after the egress log. Never committed.
+conversations.db
+conversations.db-journal
+conversations.db-wal
+conversations.db-shm
+backend/conversations.db*
+
 # The egress log and its policy. A record of every question that left the
 # machine is the most private file Zaram holds — more so than the Spine, which
 # at least only contains what the user chose to store. Never committed.
