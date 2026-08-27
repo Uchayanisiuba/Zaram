@@ -103,6 +103,10 @@ export default defineConfig(({ command }) => ({
     proxy: {
       '/api': { target: BACKEND, changeOrigin: true },
       '/chat': { target: BACKEND, changeOrigin: true },
+      // The session store. Added with the routes rather than after the
+      // first syntax-error-at-character-0, which is what a missing prefix
+      // produces -- see the note further down.
+      '/conversations': { target: BACKEND, changeOrigin: true },
       '/personalities': { target: BACKEND, changeOrigin: true },
       '/audio': { target: BACKEND, changeOrigin: true },
       '/models': { target: BACKEND, changeOrigin: true },

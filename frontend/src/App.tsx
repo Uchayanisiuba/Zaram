@@ -12,6 +12,7 @@ import { useRuntimeLoop } from '@/hooks/useRuntimeLoop';
 import TopNav from './components/TopNav';
 import LeftRail from './components/LeftRail';
 import ChatSurface from './components/chat/ChatSurface';
+import HistoryPanel from './components/chat/HistoryPanel';
 import SourcePanelLayer from './components/chat/SourcePanelLayer';
 import CommandPalette from './components/CommandPalette';
 import LandingHint from './components/shell/LandingHint';
@@ -182,6 +183,15 @@ export default function App() {
       <AnimatePresence>
         {chatView === 'chat' && <ChatSurface />}
       </AnimatePresence>
+
+      {/* Past conversations, on a lip at the left edge.
+          Mounted only with the conversation, because history of the shell has
+          no meaning while a workspace is open -- and because `SourcePanelLayer`
+          below also comes from the left, so the two must not be on screen
+          competing for the same edge. Sources are transient and belong to the
+          reply being read; this is ambient and belongs to the shell, which is
+          why it sits under them in the stack. */}
+      {chatView === 'chat' && <HistoryPanel />}
 
       {/* Source panels — over the orb region, beside the conversation. */}
       <SourcePanelLayer />
