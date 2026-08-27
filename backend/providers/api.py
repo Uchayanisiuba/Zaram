@@ -53,11 +53,43 @@ def _manager() -> ProviderManager:
     return _PROVIDERS_RUNTIME.manager
 
 
+def _payload(manager: ProviderManager, model) -> dict:
+    """A model as the interface needs it: the record, plus whether it fits.
+
+    **The fit verdict cannot live on `ModelInfo.to_dict()`**, and that is why
+    it is added here rather than there. Fitting is a question about *this
+    machine* — the card's capacity, minus the embedder, minus the KV-cache
+    reserve — and a `ModelInfo` is a record of what a provider offers. Putting
+    a machine-dependent answer on a provider record would make the same model
+    serialise differently on two computers, which is the kind of quiet
+    coupling that is discovered a year later.
+
+    So `ProviderManager` answers it, at the one place a model is handed to the
+    interface.
+
+    Three values, never two. ``None`` means the question could not be
+    answered — no accelerator, unreadable VRAM (Metal and DirectML report
+    nothing), or a model that does not state its size — and it must render as
+    *"cannot tell"* rather than as a quiet yes. `model_fits_resident` never
+    promotes ``None`` to ``True`` and neither may the UI: a false reassurance
+    here is worse than silence, because the user acts on it.
+
+    `resident_budget_bytes` rides along on every row, redundantly. One number
+    repeated is cheaper than a second round trip, and the picker needs it to
+    say something actionable — *"18.2 GB, and this machine has 9.1 GB for a
+    chat model"* is a sentence a person can act on; *"does not fit"* is not.
+    """
+    payload = model.to_dict()
+    payload["fits_resident"] = manager.model_fits_resident(model)
+    payload["resident_budget_bytes"] = manager.resident_budget_bytes()
+    return payload
+
+
 @router.get("/models")
 async def list_models() -> List[dict]:
     manager = _manager()
     await manager.ensure_scanned()
-    return [m.to_dict() for m in manager.list_models()]
+    return [_payload(manager, m) for m in manager.list_models()]
 
 
 @router.get("/models/{model_id}")
@@ -67,7 +99,7 @@ async def get_model(model_id: str) -> dict:
     model = manager.get_model(model_id)
     if model is None:
         raise HTTPException(status_code=404, detail="Model not found")
-    return model.to_dict()
+    return _payload(manager, model)
 
 
 @router.get("/sources")
