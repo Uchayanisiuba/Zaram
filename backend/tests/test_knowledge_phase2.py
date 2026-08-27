@@ -562,3 +562,66 @@ class TestKnowledgeRuntimePhase2:
         )
         runtime.store(obj)
         assert obj.authority_score > 0.8
+
+
+class TestStoppingIsPrompt:
+    """`stop()` returns at once, rather than waiting out an interval.
+
+    **This was a live defect and it hid as a slow suite.** `_run` slept
+    `_interval_seconds` (1800) *while holding the lock* that `stop()` needs to
+    clear the running flag, so `stop()` blocked until the sleep finished, found
+    the flag still set, and went round again. Measured 27 August 2026:
+    `test_start_stop`, four lines long, took **9,000.04 s** — exactly five
+    intervals — and was 97% of a 2h35m run.
+
+    The original test asserted the flag and not the *time*, so it passed
+    throughout. That is the assertion that was missing.
+    """
+
+    def test_stop_returns_without_waiting_for_the_interval(self):
+        import time as _time
+
+        pipeline = ContinuousLearningPipeline(runtime=KnowledgeRuntime())
+        # A long interval, so a stop that waits for one cannot pass by luck.
+        pipeline._interval_seconds = 3600
+        pipeline.start()
+
+        started = _time.monotonic()
+        pipeline.stop()
+        elapsed = _time.monotonic() - started
+
+        assert pipeline._running is False
+        assert elapsed < 5, (
+            f"stop() took {elapsed:.1f}s — it is waiting out the interval "
+            "instead of waking the worker"
+        )
+
+    def test_the_worker_is_not_holding_the_lock_while_it_waits(self):
+        """The property underneath the timing. A lock held across a wait is not
+        protecting state, it is scheduling — and anything else needing that lock
+        inherits the whole interval."""
+        pipeline = ContinuousLearningPipeline(runtime=KnowledgeRuntime())
+        pipeline._interval_seconds = 3600
+        pipeline.start()
+        try:
+            assert pipeline._lock.acquire(timeout=2), (
+                "the worker holds the lock while waiting, so every other caller "
+                "waits an interval too"
+            )
+            pipeline._lock.release()
+        finally:
+            pipeline.stop()
+
+    def test_stopping_one_that_never_started_is_harmless(self):
+        ContinuousLearningPipeline(runtime=KnowledgeRuntime()).stop()
+
+    def test_start_is_idempotent(self):
+        pipeline = ContinuousLearningPipeline(runtime=KnowledgeRuntime())
+        pipeline._interval_seconds = 3600
+        pipeline.start()
+        first = pipeline._thread
+        pipeline.start()
+        try:
+            assert pipeline._thread is first
+        finally:
+            pipeline.stop()

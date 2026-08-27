@@ -17,27 +17,54 @@ class ContinuousLearningPipeline:
     _thread: threading.Thread | None = None
     _interval_seconds: int = 1800
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
+    #: Set to wake the worker out of its wait. See `_run`.
+    _wake: threading.Event = field(default_factory=threading.Event, repr=False)
 
     def start(self) -> None:
         with self._lock:
             if self._running:
                 return
             self._running = True
+            self._wake.clear()
             self._thread = threading.Thread(target=self._run, daemon=True)
             self._thread.start()
 
     def stop(self) -> None:
         with self._lock:
             self._running = False
+        # Wake the worker rather than waiting for its interval to elapse.
+        self._wake.set()
         if self._thread:
             self._thread.join(timeout=5)
 
     def _run(self) -> None:
+        """The evolution loop, waiting between passes.
+
+        **This used to sleep while holding `_lock`, and that made `stop()`
+        block for up to a full interval.** `stop()` takes the same lock to set
+        `_running = False`, so it could not get in until the worker's
+        `time.sleep(1800)` finished -- and the worker then re-checked a flag
+        that `stop()` had never been allowed to clear, and went round again.
+
+        Measured 27 August 2026: `TestContinuousLearning::test_start_stop`, four
+        lines long, took **9,000.04 s** -- exactly five intervals, the number of
+        rounds it took `stop()` to win the race for the lock. It was 97% of a
+        2h35m suite run, and it had been read as the suite being slow.
+
+        The `join(timeout=5)` below it never had a chance to matter, because
+        `stop()` was already blocked before reaching it.
+
+        Two changes. The wait is an `Event`, so it is interruptible and `stop()`
+        returns at once; and the lock is held only to read the flag, never
+        across the wait. A lock held across a sleep is not protecting state, it
+        is scheduling.
+        """
         while True:
+            # Interruptible: returns True the moment `stop()` sets it, and
+            # False when the interval elapses on its own.
+            if self._wake.wait(self._interval_seconds):
+                break
             with self._lock:
-                if not self._running:
-                    break
-                time.sleep(self._interval_seconds)
                 if not self._running:
                     break
             try:
