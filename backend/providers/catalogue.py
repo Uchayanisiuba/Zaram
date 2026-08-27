@@ -385,6 +385,54 @@ PROVIDERS: Tuple[ProviderEntry, ...] = (
             "console to use it anyway."
         ),
     ),
+    # Free tiers, added 27 August 2026. Each endpoint was probed before it was
+    # written down -- an unauthenticated GET on the models path, expecting the
+    # host to answer at all. NVIDIA returned 200 (its catalogue is public),
+    # Cerebras 403, SambaNova 200. GitHub Models was probed too and returned
+    # **410 Gone**, so it is deliberately absent rather than listed with a URL
+    # that does not resolve.
+    #
+    # `CLAUDE.md`: *"Every free tier is paid for with the user's data, and
+    # Zaram is the only product that can say so."* None of these carry a data
+    # policy here -- policy lives on `ModelInfo`, not on the provider -- but
+    # the notes say it in words, because the offer is only honest if the cost
+    # is named at the moment the key is pasted.
+    _openai_compatible(
+        "nvidia_nim",
+        "NVIDIA NIM",
+        "https://integrate.api.nvidia.com/v1",
+        "https://build.nvidia.com/",
+        note=(
+            "84 open-weight models on NVIDIA's own hardware -- Nemotron, "
+            "DeepSeek, Llama, Gemma, Qwen, GLM, Kimi. No card needed; keys "
+            "begin nvapi- and expire after six months. Roughly 40 requests a "
+            "minute. Free means your prompts are logged, and Zaram will tell "
+            "you every time one goes."
+        ),
+    ),
+    _openai_compatible(
+        "sambanova",
+        "SambaNova Cloud",
+        "https://api.sambanova.ai/v1",
+        "https://cloud.sambanova.ai/apis",
+        note=(
+            "Open-weight models, fast, with a standing free tier of about "
+            "200,000 tokens a day per model and no card required. Prompts are "
+            "logged."
+        ),
+    ),
+    _openai_compatible(
+        "cerebras",
+        "Cerebras",
+        "https://api.cerebras.ai/v1",
+        "https://cloud.cerebras.ai/",
+        note=(
+            "The fastest open-weight inference available, but read this "
+            "before you sign up: Cerebras asks for a verified payment method, "
+            "so its grant is a trial rather than a free tier. Listed as paid "
+            "for that reason."
+        ),
+    ),
     ProviderEntry(
         id="lm_studio",
         display_name="LM Studio (on this machine)",

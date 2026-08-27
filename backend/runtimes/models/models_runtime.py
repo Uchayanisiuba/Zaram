@@ -22,6 +22,7 @@ from core.contracts import Capability, CapabilityLocality, Runtime, RuntimeMetad
 from core.event_bus import EventBus, ZaramEvent
 
 from .engines.ollama_engine import OllamaEngine
+from .engines.local_dispatch_engine import LocalDispatchEngine
 from .engines.openai_compatible_engine import from_environment as cloud_engine_from_environment
 from .engines.routed_engine import RoutedEngine
 from .models_service import ModelsService
@@ -133,7 +134,15 @@ class ModelsRuntime(Runtime):
         call happens here either way: rule 7g, and `from_environment` reads
         variables rather than testing them.
         """
-        local = OllamaEngine(wire_name=self.wire_name)
+        # Ollama is one local server, not the only one. `LocalDispatchEngine`
+        # sends a model to whichever on-device server actually holds it, and
+        # falls back to Ollama for anything it cannot place -- see that module
+        # for the failure this fixes.
+        local = LocalDispatchEngine(
+            ollama=OllamaEngine(wire_name=self.wire_name),
+            resolve_endpoint=self._local_endpoint_for,
+            wire_name=self.wire_name,
+        )
 
         # The factory wins when the provider layer has attached one, because it
         # knows about every connection rather than the single pair of
@@ -223,6 +232,41 @@ class ModelsRuntime(Runtime):
         else:
             self._service.engine = engine
         return isinstance(engine, RoutedEngine)
+
+    #: Provider kinds that speak the OpenAI wire format on this machine.
+    #: Compared by string so this runtime keeps its promise not to import
+    #: `providers` -- the same reason `_provider_manager` is typed loosely.
+    _LOCAL_OPENAI_KINDS = frozenset({"local_ai_server"})
+
+    def _local_endpoint_for(self, model_id: str) -> Optional[str]:
+        """The local OpenAI-compatible endpoint holding `model_id`, or None.
+
+        None means "not one of those", which the dispatcher reads as "use
+        Ollama". It is returned for every failure too: no provider layer, an id
+        with no provider prefix, an unregistered provider, a lookup that
+        raised. Ollama is the safe fallback because an id this cannot place is
+        far more often one Ollama serves than one it does not.
+
+        Note what is *not* used to decide: the model's name. `RoutedEngine`
+        already rejects name matching as "a string comparison against a list
+        nobody maintains", and the same objection applies here with more force
+        -- a user can pull a model called anything at all.
+        """
+        manager = self._provider_manager
+        if manager is None or not model_id or ":" not in model_id:
+            return None
+        provider_id = model_id.split(":", 1)[0]
+        try:
+            provider = manager.registry.get_model_provider(provider_id)
+        except Exception:
+            return None
+        if provider is None:
+            return None
+        kind = getattr(getattr(provider, "kind", None), "value", None)
+        if kind not in self._LOCAL_OPENAI_KINDS:
+            return None
+        base_url = getattr(provider, "base_url", None)
+        return base_url or None
 
     def wire_name(self, model: str) -> str:
         """The name the provider itself speaks, for a model catalogued as `model`.

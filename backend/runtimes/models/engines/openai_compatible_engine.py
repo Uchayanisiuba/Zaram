@@ -80,10 +80,12 @@ import json
 import logging
 import os
 import urllib.error
+from urllib.parse import urlparse
 from collections.abc import Iterator
 from typing import Any
 
 from core.egress import EgressDenied, get_gate
+from core.reasoning import CLOSE_TAG, OPEN_TAG
 
 from .base_engine import ERROR_PREFIX, LLMEngine
 
@@ -157,6 +159,22 @@ class MissingApiKey(ValueError):
     """
 
 
+#: Hosts whose traffic cannot leave the machine. Duplicated from the discovery
+#: adapter rather than imported: this module must not depend on `providers`,
+#: which is the same layering constraint `ModelsRuntime` keeps by typing its
+#: provider manager loosely.
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1", "[::1]", "0.0.0.0"})
+
+
+def _is_loopback(base_url: str) -> bool:
+    """True when the endpoint is on this machine, by address not by name."""
+    try:
+        host = urlparse((base_url or "").strip()).hostname
+    except ValueError:
+        return False
+    return bool(host) and host.lower() in _LOOPBACK_HOSTS
+
+
 class OpenAICompatibleEngine(LLMEngine):
     """Streams from an OpenAI-compatible `/v1/chat/completions`.
 
@@ -176,7 +194,21 @@ class OpenAICompatibleEngine(LLMEngine):
         source: str = "chat",
         timeout: float = DEFAULT_TIMEOUT,
     ) -> None:
-        if not (api_key or "").strip():
+        # A keyless endpoint is allowed **only on loopback**, and the test is
+        # the address rather than the absence of a key.
+        #
+        # This class was written on the assumption that OpenAI-compatible means
+        # cloud, which its own error message still says. It is not true here:
+        # LM Studio ships auth-free on 127.0.0.1:1234 and TabbyAPI does the
+        # same, and the `lm_studio` catalogue entry has declared
+        # `AuthStyle.NONE` all along -- so that entry could be discovered,
+        # listed in the picker, and never executed. Relaxing on emptiness
+        # instead would let a *cloud* provider through with no key, turning a
+        # clear "bring your own key" refusal into an opaque 401 from a
+        # stranger's server. Loopback is structural: a request to 127.0.0.1
+        # cannot leave, which is the same reasoning `_policy_for` uses in the
+        # discovery adapter.
+        if not (api_key or "").strip() and not _is_loopback(base_url):
             raise MissingApiKey(
                 "A cloud model needs your own API key. Zaram does not provide one."
             )
@@ -306,7 +338,23 @@ class OpenAICompatibleEngine(LLMEngine):
         used to yield SSE that `ModelsService` parsed straight back off, and
         the contract docstring is explicit that transport framing belongs to
         the transport.
+
+        **`reasoning_content` is read as well as `content`, and re-tagged.**
+        Providers that split a reasoning model's stream -- TabbyAPI with its
+        parser on, DeepSeek, and others following the same OpenAI extension --
+        put the thinking in a second delta field. This engine read only
+        `content`, so on those providers the thinking was **dropped in
+        silence**: not leaked into the answer, simply gone, with the panel that
+        exists to show it left permanently empty.
+
+        The tokens are wrapped back into `<think>` ... `</think>` rather than
+        given a new channel, because `core.reasoning.ReasoningSplitter` already
+        understands exactly that shape and everything downstream is built on
+        it -- the reasoning event, the transcript, and the rule that thinking
+        never reaches `pushSpeech`. A parallel path would have to re-earn all
+        three.
         """
+        in_reasoning = False
         for raw in lines:
             if not raw:
                 continue
@@ -316,6 +364,12 @@ class OpenAICompatibleEngine(LLMEngine):
                 continue
             data = line[len("data:"):].strip()
             if data == "[DONE]":
+                # Close an open block before leaving. `[DONE]` returns early,
+                # so the tidy-up after the loop never runs on the normal path --
+                # and an unclosed `<think>` makes the splitter hold the entire
+                # reply, showing the user nothing at all.
+                if in_reasoning:
+                    yield CLOSE_TAG
                 return
             try:
                 frame = json.loads(data)
@@ -332,6 +386,27 @@ class OpenAICompatibleEngine(LLMEngine):
                 return
 
             for choice in frame.get("choices") or ():
-                text = (choice.get("delta") or {}).get("content")
+                delta = choice.get("delta") or {}
+
+                thinking = delta.get("reasoning_content")
+                if thinking:
+                    if not in_reasoning:
+                        in_reasoning = True
+                        yield OPEN_TAG
+                    yield thinking
+
+                text = delta.get("content")
                 if text:
+                    # The answer starting is what closes the block. A provider
+                    # is not obliged to send a final empty reasoning delta, so
+                    # waiting for one would leave the tag unclosed and the
+                    # whole reply filed as thinking.
+                    if in_reasoning:
+                        in_reasoning = False
+                        yield CLOSE_TAG
                     yield text
+
+        # A stream that ends mid-thought still has to close its tag, or the
+        # splitter holds everything and the user sees nothing at all.
+        if in_reasoning:
+            yield CLOSE_TAG
