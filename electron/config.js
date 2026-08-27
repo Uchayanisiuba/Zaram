@@ -88,6 +88,7 @@ function createConfig(options) {
         '/audio',
         '/character',
         '/chat',
+        '/conversations',
         '/egress',
         '/export',
         '/garage',
