@@ -181,6 +181,7 @@ app.add_middleware(
 # mounts the router itself. Every route below is asserted against *this* object
 # in `tests/test_routes_are_mounted.py`, which is the only place the claim can
 # be true.
+from core.context_budget import budget_for  # noqa: E402
 from providers.api import router as providers_router  # noqa: E402
 
 app.include_router(providers_router)
@@ -441,6 +442,185 @@ def _resolve_model(
     return _ModelChoice(None, "zaram")
 
 
+def _conversation_store():
+    """The session store, or ``None`` if it could not be reached.
+
+    Every caller below degrades to "the exchange is not recorded" rather than
+    failing the reply. A transcript is bookkeeping; an answer is the product,
+    and a bookkeeping fault must never cost the user their answer.
+    """
+    try:
+        from conversations.api import _RECORDS
+
+        return _RECORDS
+    except Exception:  # pragma: no cover - import guard
+        return None
+
+
+def _open_conversation(request: "ChatRequest") -> tuple[str, bool]:
+    """The transcript for this exchange, and whether it was just started.
+
+    Records the user's message immediately, before any generation. A question
+    that produced an error is still a question they asked, and losing it
+    because the model failed is exactly the amnesia this store exists to end.
+
+    Returns ``("", False)`` when the store is unavailable, which every caller
+    treats as "do not record" rather than as an error.
+    """
+    records = _conversation_store()
+    if records is None:
+        return "", False
+
+    from conversations import USER, UnknownConversation
+
+    conversation_id = (request.conversation_id or "").strip()
+    started = False
+    try:
+        if conversation_id:
+            # A named conversation that does not exist is not silently
+            # replaced. Opening a new one under a different id would leave the
+            # client writing into a transcript it cannot find again.
+            records.get(conversation_id)
+        else:
+            conversation_id = records.start(project_id=request.project_id or "").id
+            started = True
+        records.append(conversation_id, USER, request.text)
+    except UnknownConversation:
+        logging.getLogger(__name__).info(
+            "Chat: conversation %s is not in the store; this exchange is not recorded",
+            conversation_id,
+        )
+        return "", False
+    except Exception as exc:
+        logging.getLogger(__name__).warning("Chat: could not record the question: %s", exc)
+        return "", False
+
+    return conversation_id, started
+
+
+def _seed_turns_from_transcript(
+    conversation_id: str, session_id: str, budget
+) -> None:
+    """Give a resumed conversation the turns it had before the restart.
+
+    **The engine's turn buffer is in-process and dies with it.** That is rule
+    7d's ephemeral half and it is correct — false starts must not reach the
+    Spine — but until transcripts were stored it also meant reopening a
+    conversation handed the model nothing, so "write that up as a proposal"
+    resolved against an empty buffer. Rule 9's referential failure, arriving
+    after a restart instead of on a first message.
+
+    Fitted to the *answering* model's real window rather than sent whole. A
+    local model is loaded with 4,096 tokens and a cloud one has far more, so
+    the same transcript has to arrive trimmed at one and complete at the other
+    -- which is `core/transcript.fit`'s job, and it drops whole turns because
+    half a message attributed to a person is a fabrication.
+
+    Never raises. A conversation that could not be rehydrated is a weaker
+    reply, not a failed one.
+    """
+    if not conversation_id or not session_id:
+        return
+    records = _conversation_store()
+    engine = getattr(kernel, "execution_engine", None)
+    if records is None or engine is None or not hasattr(engine, "seed_session_turns"):
+        return
+
+    try:
+        from core.transcript import ASSISTANT, USER, fit, from_messages
+
+        turns = from_messages(records.messages(conversation_id))
+        # The message just recorded is this request's own question, and it is
+        # not a prior turn. Left in, the buffer would answer "what is 'that'"
+        # with the sentence containing "that".
+        if turns and turns[-1].role == USER:
+            turns = turns[:-1]
+
+        kept, _dropped = fit(turns, budget.document_tokens)
+
+        # Back into the (question, answer) pairs the buffer holds. A reply with
+        # no question ahead of it is dropped rather than paired with whatever
+        # preceded it -- see `fit`, which already refuses to start on one.
+        pairs: list[tuple[str, str]] = []
+        pending: str | None = None
+        for turn in kept:
+            if turn.role == USER:
+                pending = turn.text
+            elif pending is not None:
+                pairs.append((pending, turn.text))
+                pending = None
+
+        engine.seed_session_turns(session_id, pairs)
+    except Exception as exc:
+        logging.getLogger(__name__).debug(
+            "Chat: could not rehydrate %s: %s", conversation_id, exc
+        )
+
+
+def _conversation_title(conversation_id: str) -> str:
+    """The title the store settled on, for the event that names it."""
+    records = _conversation_store()
+    if records is None or not conversation_id:
+        return ""
+    try:
+        return records.get(conversation_id).title
+    except Exception:
+        return ""
+
+
+def _collect_answer(chunk: str, answer: list[str]) -> None:
+    """Accumulate the reply text out of one IPC frame.
+
+    Reads the frames rather than teeing the engine, because by this point the
+    reply has already been through reasoning-splitting and citation handling —
+    the tokens here are the ones the user sees, which is what belongs in a
+    transcript.
+    """
+    try:
+        frame = json.loads(chunk)
+    except Exception:
+        # A frame this layer cannot parse is still a frame the client gets.
+        # Never let bookkeeping interfere with the stream.
+        return
+    if isinstance(frame, dict) and frame.get("type") == "token":
+        content = (frame.get("data") or {}).get("content")
+        if isinstance(content, str):
+            answer.append(content)
+
+
+def _record_reply(conversation_id: str, text: str, choice: "_ModelChoice") -> None:
+    """Store the assistant's reply, with what answered and where it ran.
+
+    An empty reply is not recorded. A stream that produced no tokens — refused,
+    aborted before the first one, or failed — has nothing a person would want
+    to find later, and an empty assistant row in the transcript reads as Zaram
+    having said nothing when in fact it never spoke.
+    """
+    if not conversation_id or not text.strip():
+        return
+    records = _conversation_store()
+    if records is None:
+        return
+
+    from conversations import ASSISTANT
+
+    try:
+        inference = _current_inference(choice.model)
+        # `locality_of` answers `None` for a model it cannot place, and that
+        # travels as "" rather than as "local". CLAUDE.md: *"runs on this
+        # machine" would be a confident false claim on the one thing the user
+        # is most likely to check.*
+        records.append(
+            conversation_id,
+            ASSISTANT,
+            text,
+            model=str(inference.get("model") or choice.model or ""),
+            locality=str(inference.get("locality") or ""),
+        )
+    except Exception as exc:
+        logging.getLogger(__name__).warning("Chat: could not record the reply: %s", exc)
+
+
 async def _vision_refusal(model: str | None) -> str:
     """Why this request cannot be answered, or `""` if it can.
 
@@ -618,6 +798,18 @@ class ChatRequest(BaseModel):
     #: is made where the model's budget is known. A frontend that inlined the
     #: text would be choosing on behalf of a context length it cannot see.
     attachment_ids: list[str] = []
+    #: Which stored conversation this message belongs to, or "" to begin one.
+    #:
+    #: **Not `session_id`, and the two must not be merged.** A session is a
+    #: page load -- the frontend mints one per mount, and `_session_turns`
+    #: evicts them by the dozen. A conversation is a thing a person comes back
+    #: to next week. Keying transcripts on the session id would file every
+    #: reload as a new conversation and every restart as amnesia, which is the
+    #: behaviour this store exists to end.
+    #:
+    #: Empty means "start one", answered with a `conversation` event before the
+    #: first token so the client knows what to send next time.
+    conversation_id: str = ""
 
 
 def _domain_scope(domain_ids: list[str]) -> tuple[frozenset[str] | None, str]:
@@ -1057,7 +1249,25 @@ async def chat(request: ChatRequest):
     # session stores, and *before* the stream starts because what was read has
     # to be sayable before the answer built on it — the same reasoning the
     # domain notice already follows.
-    composition = compose_attachments(attached, request.text, missing=missing_attachments)
+    # **Sized against the window this model was actually loaded with.**
+    #
+    # `compose.py` has carried a constant since it was written, with the reason
+    # in its own comment: Ollama serves a default `num_ctx` regardless of what a
+    # model advertises -- `gemma4:12b` reports a 262,144-token maximum through
+    # `/api/show` and loads with 4,096 -- so the declared figure is the wrong
+    # number and the constant erred small on purpose. `/api/ps` reports the real
+    # one, which turns the guess into a measurement.
+    #
+    # Unknown still falls back to the constant rather than to a guess. A model
+    # that is not resident has no loaded context, and inventing one for it is
+    # the false-zero bug in different clothes.
+    _budget = budget_for(model)
+    composition = compose_attachments(
+        attached,
+        request.text,
+        missing=missing_attachments,
+        budget_chars=_budget.document_chars,
+    )
     if composition.block:
         final_prompt = f"{composition.block}\n\n{request.text}"
 
@@ -1075,7 +1285,27 @@ async def chat(request: ChatRequest):
 
     only_ids, domain_notice = _domain_scope(request.domain_ids)
 
+    # The transcript this exchange belongs to, opened now if the request did
+    # not name one. **Before the stream**, because the user's message is
+    # recorded whether or not a reply ever arrives -- a question that produced
+    # an error is still a question they asked, and losing it because
+    # generation failed is the amnesia this store exists to end.
+    conversation_id, conversation_started = _open_conversation(request)
+    # A conversation picked up after a restart gets its recent turns back.
+    # Only when it was not just created: a new one has nothing prior, and
+    # asking the store for it would be a query with a known answer.
+    if conversation_id and not conversation_started:
+        _seed_turns_from_transcript(conversation_id, request.session_id, _budget)
+
     async def _stream_with_attribution():
+        # Only when Zaram opened it: the client already knows the id it sent
+        # and needs to be told the id it did not. Ahead of the first token, so
+        # an interrupted stream still leaves a conversation that can be
+        # reopened rather than a thread with no name.
+        if conversation_started:
+            yield StreamEvent.conversation(
+                conversation_id, _conversation_title(conversation_id)
+            ).to_ipc() + "\n"
         yield _answering_event(choice).to_ipc() + "\n"
         # Before the answer rather than after it, unlike the ingest notice.
         # This one is a *frame* for what follows rather than housekeeping: if
@@ -1099,13 +1329,28 @@ async def chat(request: ChatRequest):
             yield StreamEvent.notice(
                 attachment_notice, kind="attachment"
             ).to_ipc() + "\n"
+        # Tokens are accumulated as they pass, so the reply can be stored
+        # when the stream ends.
+        #
+        # **Only `token`.** `reasoning` is the model's working, which
+        # `ReasoningSplitter` already keeps out of `streamingText` and out
+        # of speech -- storing it would put a model's internal monologue in
+        # the transcript as though it were the answer, and a later session
+        # would read it back as what Zaram said.
+        answer: list[str] = []
         async for chunk in chat_router.route(
             final_prompt, model, system_prompt, request.session_id,
             project_id=request.project_id or None,
             only_ids=only_ids,
             images=images or None,
         ):
+            _collect_answer(chunk, answer)
             yield chunk
+
+        # After the loop rather than in a `finally`. A stream the user
+        # aborted has a partial answer, and storing half a reply as though
+        # it were the whole one is worse than storing nothing.
+        _record_reply(conversation_id, "".join(answer), choice)
 
     return StreamingResponse(
         _stream_with_attribution(),

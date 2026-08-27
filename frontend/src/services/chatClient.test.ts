@@ -57,7 +57,13 @@ async function collect(gen: AsyncGenerator<ChatEvent>): Promise<ChatEvent[]> {
   return out;
 }
 
-const mockFetch = (impl: () => Promise<Response> | Response) => {
+// Widened to take the request. A zero-argument implementation is still
+// assignable -- TypeScript accepts a function that ignores parameters -- so
+// every existing caller is unchanged, and a test that needs to assert what was
+// *sent* no longer has to stub `fetch` by hand.
+const mockFetch = (
+  impl: (url: string, init: RequestInit) => Promise<Response> | Response,
+) => {
   vi.stubGlobal('fetch', vi.fn(impl));
 };
 
@@ -391,6 +397,74 @@ describe('the model-load verdict is carried whole', () => {
     );
 
     const events = await collect(streamChat({ text: 'hi' }));
+    expect(events.map((e) => e.type)).toEqual(['token', 'done']);
+  });
+});
+
+describe('the conversation this reply is written into', () => {
+  /**
+   * Without this the client never learns the id the backend opened, so every
+   * message starts its own one-line thread — a transcript store with a caller
+   * that cannot use it, which looks exactly like a working feature.
+   */
+  it('carries the id the backend opened', async () => {
+    mockFetch(() =>
+      streamingResponse([
+        line({
+          type: 'conversation',
+          data: { conversation_id: 'conv_abc123', title: 'what is my day rate' },
+        }),
+        token('400 a day.'),
+        done(),
+      ]),
+    );
+
+    const events = await collect(streamChat({ text: 'what is my day rate' }));
+
+    expect(events.map((e) => e.type)).toEqual(['conversation', 'token', 'done']);
+    expect(events[0]).toMatchObject({
+      conversationId: 'conv_abc123',
+      title: 'what is my day rate',
+    });
+  });
+
+  it('sends the conversation it is continuing', async () => {
+    const seen: RequestInit[] = [];
+    mockFetch((_url: string, init: RequestInit) => {
+      seen.push(init);
+      return streamingResponse([token('hi'), done()]);
+    });
+
+    await collect(streamChat({ text: 'and the terms?', conversationId: 'conv_abc123' }));
+
+    expect(JSON.parse(String(seen[0].body)).conversation_id).toBe('conv_abc123');
+  });
+
+  it('sends an empty string when starting a new one', async () => {
+    // Empty means "open one for me". Omitting the field entirely would leave
+    // the backend defaulting, which is the same thing but says less.
+    const seen: RequestInit[] = [];
+    mockFetch((_url: string, init: RequestInit) => {
+      seen.push(init);
+      return streamingResponse([token('hi'), done()]);
+    });
+
+    await collect(streamChat({ text: 'hello' }));
+
+    expect(JSON.parse(String(seen[0].body)).conversation_id).toBe('');
+  });
+
+  it('drops an event with no id rather than holding an empty one', async () => {
+    mockFetch(() =>
+      streamingResponse([
+        line({ type: 'conversation', data: { conversation_id: '  ', title: 'x' } }),
+        token('hi'),
+        done(),
+      ]),
+    );
+
+    const events = await collect(streamChat({ text: 'hello' }));
+
     expect(events.map((e) => e.type)).toEqual(['token', 'done']);
   });
 });

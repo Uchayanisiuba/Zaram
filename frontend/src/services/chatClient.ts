@@ -99,6 +99,13 @@ export type ChatEvent =
    *  than after the machine has already gone quiet. `kind` is `load` (cold
    *  start, room to spare) or `swap` (something resident gets evicted). */
   | { type: 'model_load'; kind: 'load' | 'swap' | 'oversized'; model: string; evicts: string[] }
+  /** The transcript this reply is being written into.
+   *
+   *  Sent only when the backend *started* one — the client already knows the
+   *  id it sent, and needs to be told the id it did not. Arrives before the
+   *  first token, so an interrupted stream still leaves a conversation that
+   *  can be reopened rather than a thread with no name. */
+  | { type: 'conversation'; conversationId: string; title: string }
   /** Which model is about to answer, and where it runs. Arrives *before* the
    *  first token, so the attribution is present while the reply is read rather
    *  than added underneath it afterwards.
@@ -149,6 +156,13 @@ export interface ChatRequest {
    *  behalf of a limit this side cannot see.
    */
   attachmentIds?: string[];
+  /** Which stored conversation this message continues, or omitted to begin one.
+   *
+   *  **Not `sessionId`, and the two must not be merged.** A session is a page
+   *  load — the frontend mints one per mount. A conversation is a thing a
+   *  person comes back to next week. Keying transcripts on the session would
+   *  file every reload as a new conversation and every restart as amnesia. */
+  conversationId?: string | null;
 }
 
 /** A failure that should be shown to the user, with the cause preserved. */
@@ -203,6 +217,7 @@ export async function* streamChat(
         project_id: req.projectId ?? '',
         domain_ids: req.domainIds ?? [],
         attachment_ids: req.attachmentIds ?? [],
+        conversation_id: req.conversationId ?? '',
       }),
       signal,
     });
@@ -363,6 +378,16 @@ function parseLine(line: string): ChatEvent | null {
           origin: data.origin == null ? null : String(data.origin),
           recordId: data.record_id == null ? null : String(data.record_id),
         },
+      };
+    }
+
+    case 'conversation': {
+      const conversationId = String(data.conversation_id ?? '').trim();
+      if (!conversationId) return null;
+      return {
+        type: 'conversation',
+        conversationId,
+        title: String(data.title ?? ''),
       };
     }
 
