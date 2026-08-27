@@ -185,6 +185,16 @@ from providers.api import router as providers_router  # noqa: E402
 
 app.include_router(providers_router)
 
+# The session store, per rule 7d's *"session state and long-term memory are
+# separate stores"* -- the half that was never built. Mounted here and asserted
+# in `tests/test_routes_are_mounted.py`, which is the only place the claim that
+# these routes are reachable can be true.
+from conversations import ConversationRecords, default_db_path as conversations_db_path  # noqa: E402
+from conversations.api import router as conversations_router, set_records  # noqa: E402
+
+set_records(ConversationRecords(conversations_db_path()))
+app.include_router(conversations_router)
+
 # --- KERNEL LIFECYCLE ---
 kernel = KernelBootstrapper()
 chat_router = None

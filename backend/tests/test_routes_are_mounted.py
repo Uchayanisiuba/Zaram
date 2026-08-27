@@ -34,6 +34,9 @@ from fastapi.testclient import TestClient
 #: `/health` is noticed in seconds, and a missing `/providers/catalogue` is
 #: noticed as an empty dropdown somebody assumes is a frontend bug.
 EXPECTED_GET_ROUTES = [
+    # The session store. Without it, closing the window loses the
+    # conversation -- which is what it did until 27 August 2026.
+    "/conversations",
     "/providers/models",
     "/providers/sources",
     "/providers/hardware",
