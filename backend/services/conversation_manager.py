@@ -29,7 +29,6 @@ class ConversationManager:
     def run_conversation(self, prompt: str, model: str, system_prompt: str = "", persona: str = "zaram_prime") -> Iterator[Any]:
         planner = SpeechPlanner()
         out_queue = queue.Queue()
-        error_occurred = [False]
 
         def llm_and_planner_worker():
             try:
@@ -47,7 +46,6 @@ class ConversationManager:
             except Exception as e:
                 print(f"❌ LLM/Planner Worker Error: {e}")
                 out_queue.put({'type': 'error', 'content': str(e)})
-                error_occurred[0] = True
             finally:
                 out_queue.put({'type': 'llm_done'})
 
@@ -68,8 +66,23 @@ class ConversationManager:
                     yield event
             except queue.Empty:
                 pass
-            if error_occurred[0]:
-                break
+            # **There was an `error_occurred` flag here and it raced the queue.**
+            #
+            # The worker put the error event, then set the flag, then put
+            # `llm_done`. This loop yielded one event and *then* checked the
+            # flag -- so when the worker got ahead, the flag was already true
+            # while the error was still sitting unread in the queue, and the
+            # loop broke out without it. The user got a partial reply and no
+            # error: `['token', 'done']`, measured, intermittently, on
+            # `test_an_engine_failure_becomes_an_error_event_and_still_terminates`.
+            #
+            # A failure that reaches the user as silence is worse than a
+            # failure, because a truncated answer reads as a complete one.
+            #
+            # The flag bought nothing the queue did not already provide. The
+            # error branch above breaks, and `finally` guarantees `llm_done`,
+            # so termination is covered by two independent paths and neither of
+            # them can overtake the events it is meant to follow.
             if llm_done:
                 break
             if not got_event:
