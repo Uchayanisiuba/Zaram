@@ -40,6 +40,12 @@ LOCAL_ONLY = {
     "runtimes/models/engines/ollama_engine.py": "Ollama on localhost:11434",
     "runtimes/memory/embeddings.py": "Ollama bge-m3 on localhost:11434",
     "providers/discoverers/ollama.py": "Ollama on localhost:11434",
+    # Reads the window a model is *loaded* with from Ollama's `/api/ps`, which
+    # is the same loopback server the engines above talk to. `base_url` is a
+    # parameter, so the module refuses any host that is not loopback rather
+    # than trusting its own default -- an exemption written here has to be a
+    # fact about the code, not an intention.
+    "core/context_budget.py": "Ollama /api/ps on localhost:11434, loopback enforced",
 }
 
 #: Directories that are not shipped product code.
