@@ -11,6 +11,44 @@ logger = logging.getLogger(__name__)
 #: How long Ollama holds the weights after a reply. See `stream_response`.
 KEEP_ALIVE = "30m"
 
+#: How long to wait for the socket. Loopback, so a slow one is a dead one.
+CONNECT_TIMEOUT = 5.0
+
+#: How long a request may go without a byte **once the weights are in memory**.
+#: A model that has gone this quiet with everything already loaded is stuck,
+#: not slow, and saying so is worth more than waiting longer.
+IDLE_TIMEOUT = 120.0
+
+#: The same wait, when the weights are *not* in memory yet.
+#:
+#: These were one number, and the number was measuring two different things.
+#: Measured on this machine, 27 August 2026, `gemma4:26b-a4b-it-q4_K_M` —
+#: 18.2 GB on disk against a 12 GB card, so Ollama put 9.3 GB on the GPU and
+#: spilled the rest to system RAM:
+#:
+#:   * cold load, empty prompt, nothing generated: **109 s**
+#:   * first token afterwards, on a five-word prompt: **28.8 s**
+#:
+#: 138 s of which the first 109 produced no bytes at all, against a 120 s read
+#: timeout — so Ollama was loading correctly and Zaram hung up on it and
+#: reported a read timeout. Exactly the failure already recorded for the
+#: vision path below, which was patched with a second constant rather than by
+#: separating the two questions, and so came back on the text path.
+#:
+#: **Ollama does not send response headers until the first token**, which is
+#: what makes this a read timeout rather than a slow stream. Measured on the
+#: same model: ``status=200`` and the first ``response`` chunk arrived in the
+#: same 49.9 s, on a warm model with a five-word prompt. So `requests.post`
+#: itself blocks for the whole load, and there is no earlier moment at which a
+#: shorter budget could be applied.
+#:
+#: Ten minutes covers moving an oversized model off a slow disk. It is a
+#: deliberate trade: for the request that pays it, a genuinely hung model is
+#: not reported for ten minutes rather than two. That only applies while the
+#: weights are still cold, which is the one case where a long silence is the
+#: expected behaviour rather than a symptom.
+COLD_START_TIMEOUT = 600.0
+
 #: Given the id a model is catalogued under, return the name Ollama speaks.
 #:
 #: A callable rather than a `ProviderManager`, for the same reason
@@ -74,7 +112,75 @@ class OllamaEngine(LLMEngine):
             return model
         return resolved or model
 
-    def warm(self, model: str | None = None, *, timeout: float = 180.0) -> bool:
+    def _is_resident(self, model: Optional[str]) -> Optional[bool]:
+        """Whether Ollama already holds `model`'s weights. Never raises.
+
+        Asked so the read timeout can be sized to what the request is actually
+        waiting for — a load, or a token. `ProviderManager.swap_preflight`
+        asks the same question for the orb's sake and cannot answer this one:
+        this module must not import `providers`, and `/api/ps` is a loopback
+        call to the server we are about to post to anyway.
+
+        ``None`` means the question could not be answered — Ollama unreachable,
+        or a reply we do not understand. It is not promoted to ``True``: a
+        request that is about to fail for another reason must not also be
+        given the short timeout, and guessing "already loaded" is the guess
+        that produced the bug this exists to fix.
+        """
+        if not model:
+            return None
+        try:
+            response = requests.get(f"{self.base_url}/api/ps", timeout=1.0)
+            response.raise_for_status()
+            loaded = response.json().get("models")
+        except Exception as exc:
+            logger.debug("residency check failed for %r: %s", model, exc)
+            return None
+        if not isinstance(loaded, list):
+            return None
+        # Ollama answers `/api/ps` with the name it resolved, which may carry a
+        # `:latest` the request did not. Normalised rather than compared
+        # directly, for the same reason `_same_model` is in the provider
+        # layer: treating those as different models would put every reply on
+        # the cold budget and give back the hang detection.
+        #
+        # Duplicated rather than imported, because this module must not depend
+        # on `providers` — the constraint the whole `wire_name` callable exists
+        # to satisfy. Narrower than that one on purpose: only Ollama's own
+        # spellings reach here.
+        #
+        # **The tag is part of the name and must not be dropped.** Comparing
+        # only up to the first colon would read a resident `gemma4:12b` as
+        # covering a cold `gemma4:26b-a4b-it-q4_K_M` — the short budget handed
+        # to the exact request that cannot meet it, which is this bug again by
+        # a shorter route.
+        def norm(name: str) -> str:
+            name = (name or "").strip().lower()
+            if name.startswith("ollama:"):
+                name = name[len("ollama:"):]
+            return name[: -len(":latest")] if name.endswith(":latest") else name
+
+        wanted = norm(model)
+        for entry in loaded:
+            name = str((entry or {}).get("name") or (entry or {}).get("model") or "")
+            if name and norm(name) == wanted:
+                return True
+        return False
+
+    def _read_timeout(self, model: Optional[str], *, attached: bool) -> float:
+        """How long this request may go without a byte.
+
+        A vision request is treated as cold whatever `/api/ps` says. The
+        projector loads separately from the weights and does not appear there,
+        so a resident model answering its first question about an image is a
+        cold start that reports as a warm one — measured at 158.9 s against a
+        120 s timeout, 26 August 2026.
+        """
+        if attached:
+            return COLD_START_TIMEOUT
+        return IDLE_TIMEOUT if self._is_resident(model) is True else COLD_START_TIMEOUT
+
+    def warm(self, model: str | None = None, *, timeout: float = COLD_START_TIMEOUT) -> bool:
         """Load the model into memory without generating anything.
 
         An empty prompt with `keep_alive` set is Ollama's documented way to
@@ -142,7 +248,15 @@ class OllamaEngine(LLMEngine):
             "options": {"temperature": 0},
             "keep_alive": KEEP_ALIVE,
         }
-        response = requests.post(f"{self.base_url}/api/generate", json=payload, timeout=180)
+        # Not streaming, so this one number really is the whole wait — the
+        # load and the reading of the document together. Sized to the load for
+        # the same reason `stream_response` is: extraction is the path a
+        # freshly-chosen model is most likely to meet cold.
+        response = requests.post(
+            f"{self.base_url}/api/generate",
+            json=payload,
+            timeout=(CONNECT_TIMEOUT, COLD_START_TIMEOUT),
+        )
         response.raise_for_status()
         return str(response.json().get("response", ""))
 
@@ -214,20 +328,22 @@ class OllamaEngine(LLMEngine):
             prompt[:50],
         )
         try:
-            # A vision request waits for the projector as well as the weights.
+            # **The wait before the first token and the wait between tokens are
+            # different questions, and one number was answering both.**
             #
-            # Measured on this machine, 26 August 2026: `gemma4:12b` answering
-            # a question about a 7 KB PNG took **158.9 s** on the first call,
-            # against a 120 s timeout — so the image arrived, Ollama answered
-            # correctly, and Zaram threw the answer away and reported a read
-            # timeout. Subsequent calls are fast; it is the cold projector load
-            # that does not fit.
+            # `requests` applies a read timeout per socket read, so with
+            # `stream=True` this is an *inter-byte* budget: once tokens flow at
+            # an ordinary rate, a large value costs nothing. The only stretch it
+            # actually buys is the silence before the first one — which for a
+            # cold model is the load, and for a model that does not fit the card
+            # is the load plus the spill to system RAM. See `COLD_START_TIMEOUT`
+            # for what that measured.
             #
-            # Raised only for the image path. A text request that has gone
-            # quiet for two minutes is a hang worth reporting, and stretching
-            # every request to cover the slowest one would make a genuinely
-            # stuck model look like a slow one.
-            timeout = 420 if attached else 120
+            # So the budget is chosen by whether the weights are already there,
+            # not by whether an image is attached. The image case is a cold
+            # start too — of the projector — which is why it kept needing a
+            # constant of its own.
+            timeout = (CONNECT_TIMEOUT, self._read_timeout(payload["model"], attached=bool(attached)))
             response = requests.post(url, json=payload, stream=True, timeout=timeout)
             response.raise_for_status()
             token_count = 0
@@ -296,7 +412,9 @@ class OllamaEngine(LLMEngine):
         }
         print(f"[STAGE-9][Vision] OllamaEngine.stream_vision_response called: model=qwen2.5vl:7b, prompt='{prompt[:50]}...', images={len(clean_images)}")
         try:
-            response = requests.post(url, json=payload, stream=True, timeout=120)
+            response = requests.post(
+                url, json=payload, stream=True, timeout=(CONNECT_TIMEOUT, COLD_START_TIMEOUT)
+            )
             response.raise_for_status()
             print(f"[STAGE-9][Vision] Ollama responded, streaming tokens...")
             token_count = 0

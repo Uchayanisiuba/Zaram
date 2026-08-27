@@ -196,6 +196,26 @@ class ModelsRuntime(Runtime):
         gigabytes onto the card, and doing that on the event loop would freeze
         every endpoint — the same class of defect as the confirm hook in M10.
         """
+        # **A preload of a model nobody chose is a preload of a guess.**
+        #
+        # `_selected_model` is ``None`` whenever `select_default_model` declined
+        # everything installed — which on a machine whose only chat model does
+        # not fit alongside the embedder is the *normal* outcome, not an edge
+        # case. `warm(None)` then fell through to `OllamaEngine.default_model`,
+        # a hardcoded `gemma3:latest`, and warmed a model that was not
+        # installed. It failed at `logger.info` and returned False, so the
+        # promise this method exists to keep — that warming is a once-a-session
+        # state rather than a per-message one — was quietly not being kept, and
+        # the first message paid the full cold start it was written to avoid.
+        #
+        # Nothing to warm is a fact worth logging, not a name worth guessing.
+        if not self._selected_model:
+            logger.info(
+                "[ModelsRuntime] No preload: no model was selected, and warming "
+                "the engine default would warm a model the user has not chosen."
+            )
+            return False
+
         engine = getattr(self._service, "engine", None)
         # `RoutedEngine` wraps the local one. Warming the wrapper would send an
         # empty prompt down whichever path the router picks, which for a cloud
