@@ -11,7 +11,69 @@ accurate — it is the first thing anyone reads.
 
 ---
 
-## Current state — 26 August 2026
+## Current state — 27 August 2026
+
+*The latest work is first. Sessions dated 26 August follow below.*
+
+> ### A second local server, and three defects it exposed
+>
+> **Qwen3.8-27B now runs on this machine at 2.20bpw through TabbyAPI**, served
+> on `127.0.0.1:1234` where Zaram discovers it as `lm_studio`. Getting there
+> found three defects in Zaram rather than in the setup, and the first is the
+> one worth carrying forward.
+>
+> **"Local" was a synonym for "Ollama".** `RoutedEngine` splits local from
+> cloud and gave everything local to `OllamaEngine`. True while Ollama was the
+> only local server; false since the catalogue gained an OpenAI-compatible
+> entry on loopback. A model served there was discovered, catalogued, listed
+> with a correct `NEVER_LEAVES_DEVICE` policy, chosen — and posted to Ollama,
+> which had never heard of it. Underneath, `OpenAICompatibleEngine` refused an
+> empty key with *"A cloud model needs your own API key"*, written assuming
+> OpenAI-compatible implies cloud. Both LM Studio and TabbyAPI ship auth-free
+> on loopback, so **the `lm_studio` entry could never have executed a single
+> request** — discoverable, never runnable, in the routing layer.
+>
+> `engines/local_dispatch_engine.py` dispatches by **provider id**, never by
+> model name, and the keyless exemption is gated on the address rather than on
+> the key being blank — `https://localhost.attacker.example` is still refused,
+> and asserted.
+>
+> **Two existing tests were asserting the wrong contract.** They read
+> `isinstance(engine, OllamaEngine)` for the no-key case, pinning *which local
+> server answers* when the rule they protect is *nothing capable of leaving the
+> device is built without a key*. Green the whole time they were wrong.
+>
+> **Reasoning was being rendered as the answer.** The model's chat template
+> ends the prompt with a bare `<think>`, so generation starts inside the block
+> and only the closing tag is emitted; `ReasoningSplitter` waited for an
+> opening tag that never came — and Kokoro read the monologue aloud, the exact
+> failure that module exists to prevent. Fixed at both ends: TabbyAPI splits it
+> server-side, and the engine now reads `reasoning_content`, which also fixes
+> DeepSeek and every other provider using that extension.
+>
+> **Knowledge gained per-file removal.** Rule 4 says the user can delete any
+> stored thing; the only unit was a whole source, and every pasted file shares
+> one uploads source — so removing one image meant discarding everything ever
+> pasted.
+>
+> **Vision is half fixed and is the next job.** Both engine wrappers now
+> forward `stream_vision_response`, but `OllamaEngine` hardcodes
+> `qwen2.5vl:7b`, which is not installed and ignores the chosen model. The
+> real fix is the modality gate: `supports_vision` exists but only as a 0..1
+> *ranking* score, and modality is a precondition, never a ranking.
+>
+> Measured, same ~2,500-token prompt: the old `qwen3.8:27b` managed 19.5 s to
+> first token and 1.96 tok/s; the EXL3 does **0.72 s and 8.0 tok/s**; and
+> `gemma4:26b-a4b` does 4.5 s and **23.75 tok/s**. Two 18 GB models spilling
+> by the same ~50%, and **the MoE generates 9.4× faster** — only ~4B params
+> read per token, so the exiled experts sit untouched.
+>
+> Full detail, uncommitted-work breakdown and open threads:
+> `docs/NEXT-SESSION.md`.
+
+---
+
+## Earlier — 26 August 2026
 
 *Several sessions ran on this date. The latest work is first.*
 
