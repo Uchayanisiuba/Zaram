@@ -1022,6 +1022,42 @@ class ExecutionEngine:
         except Exception:
             return False
 
+    def seed_session_turns(
+        self, session_id: str, pairs: "list[tuple[str, str]]"
+    ) -> None:
+        """Fill a session's turn buffer from a transcript that outlived it.
+
+        **The buffer dies with the process, and that used to mean a resumed
+        conversation arrived with nothing in front of it.** `_session_turns` is
+        rule 7d's ephemeral half, correctly so — but "ephemeral" was doing two
+        jobs: it kept false starts out of the Spine, which is the rule, and it
+        also lost the exchange the moment Zaram restarted, which is not. Now
+        that transcripts are stored, the second is a gap rather than a
+        guarantee, and this closes it.
+
+        It does not weaken 7d. Nothing here reaches the Spine; this is one
+        session store filling another from a record the user can read and
+        delete. The facts remain the memory runtime's decision.
+
+        Called once, when a stored conversation is picked up. Existing turns
+        win: a buffer with anything in it is a live session, and overwriting it
+        with a transcript read from disk would discard the exchange that just
+        happened in favour of an older copy of itself.
+        """
+        if not session_id or not pairs:
+            return
+        if self._session_turns.get(session_id):
+            return
+        self._session_turns[session_id] = list(pairs)[-self.MAX_SESSION_TURNS :]
+        self._session_turns.move_to_end(session_id)
+        while len(self._session_turns) > self.MAX_SESSIONS:
+            self._session_turns.popitem(last=False)
+        logger.info(
+            "Engine: seeded session %s with %d turn(s) from a stored transcript",
+            session_id,
+            len(self._session_turns[session_id]),
+        )
+
     def _record_exchange(self, session_id: str, prompt: str, answer: str) -> None:
         """Keep the last few turns of this session, in memory only.
 
