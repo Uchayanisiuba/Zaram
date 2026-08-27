@@ -122,6 +122,30 @@ export async function setSourcePolicy(
   });
 }
 
+/**
+ * Remove one file from Knowledge, leaving the rest of its source alone.
+ *
+ * `removeSource` is the wrong unit for a single document: every dropped or
+ * pasted file shares one uploads source, so withdrawing it to be rid of one
+ * image discards everything ever pasted. Rule 4 says the user can delete any
+ * stored thing, and "all of them or none" is not that.
+ *
+ * `files_deleted` counts only copies Zaram made -- a scanned folder holds the
+ * user's originals and they are never unlinked.
+ */
+export async function removeFile(
+  outcomeId: string,
+): Promise<{
+  id: string;
+  name: string;
+  source_id: string;
+  facts_removed: number;
+  facts_recorded: number;
+  files_deleted: number;
+}> {
+  return json(`/ingest/outcomes/${outcomeId}`, { method: 'DELETE' });
+}
+
 export async function removeSource(
   sourceId: string,
 ): Promise<{ facts_removed: number; facts_recorded: number; files_deleted: number }> {

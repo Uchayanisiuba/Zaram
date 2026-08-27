@@ -376,6 +376,36 @@ class IngestRecords:
             ).fetchone()
         return str(row["root"]) if row else None
 
+    def remove_outcome(self, outcome_id: str) -> list[str] | None:
+        """Forget one file. Returns the fact ids it produced, or None if absent.
+
+        The per-file counterpart to :meth:`remove_source`, and it exists
+        because the source is the wrong unit for this. A dropped image lands in
+        the uploads directory alongside every other dropped document, so the
+        only removal available was withdrawing that entire source -- throwing
+        away every file the user had ever pasted in order to be rid of one PNG.
+        Rule 4 says the user can delete any stored thing; "all of them or none"
+        is not that.
+
+        The source row is deliberately left in place, even when this was its
+        last file. An uploads directory with nothing in it is still where the
+        next dropped file goes, and deleting the row would make the next drop
+        silently re-create it under a new id -- detaching it from any domain
+        that pointed at the old one.
+
+        Like `remove_source`, this does not touch the Spine. Rule 4 belongs to
+        whoever owns the facts.
+        """
+        with self._lock, self._connect() as connection:
+            row = connection.execute(
+                "SELECT fact_ids FROM outcomes WHERE id = ?", (outcome_id,)
+            ).fetchone()
+            if row is None:
+                return None
+            fact_ids = list(json.loads(row["fact_ids"]))
+            connection.execute("DELETE FROM outcomes WHERE id = ?", (outcome_id,))
+        return fact_ids
+
     def remove_source(self, source_id: str) -> list[str]:
         """Forget a folder. Returns the fact ids its files produced.
 

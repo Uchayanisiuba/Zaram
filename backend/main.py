@@ -3644,6 +3644,50 @@ async def remove_ingest_source(source_id: str):
     }
 
 
+@app.delete("/ingest/outcomes/{outcome_id}")
+async def remove_ingest_file(outcome_id: str):
+    """Remove one file from Knowledge, rather than the source that holds it.
+
+    Rule 4 says the user can delete any stored thing. Until this existed the
+    only unit of removal was a whole source, and every dropped or pasted file
+    shares one uploads source -- so getting rid of a single image meant
+    withdrawing everything ever pasted. That is not the rule being satisfied.
+
+    Same guarantees as withdrawing a source, because they are the same
+    machinery: the file's facts leave the Spine, and only a copy *Zaram* made
+    is deleted from disk. A scanned folder's file is the user's original and is
+    never unlinked -- its row and its facts go, which is what removing it from
+    Knowledge honestly means.
+
+    A file that produced no facts is still removable, and that is not a
+    no-op worth optimising away: an unsupported PNG has a row, a reason and a
+    staged copy on disk, and the user asking for it to be gone means all
+    three.
+    """
+    outcome = ingest_service.withdraw_file(outcome_id)
+    if outcome is None:
+        raise HTTPException(status_code=404, detail="No such file")
+
+    fact_ids = outcome["fact_ids"]
+    forgotten = 0
+    runtime = getattr(kernel, "memory_runtime", None)
+    if runtime is not None:
+        for fact_id in fact_ids:
+            try:
+                if await runtime.forget(fact_id):
+                    forgotten += 1
+            except Exception:
+                print(f"[Ingest] could not forget {fact_id}")
+    return {
+        "id": outcome_id,
+        "name": outcome["name"],
+        "source_id": outcome["source_id"],
+        "facts_removed": forgotten,
+        "facts_recorded": len(fact_ids),
+        "files_deleted": outcome["files_deleted"],
+    }
+
+
 # --- Knowledge domains ---------------------------------------------------- #
 #
 # A named retrieval scope over the user's own sources. Not a folder: `CLAUDE.md`
