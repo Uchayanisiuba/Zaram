@@ -348,6 +348,54 @@ const messageOf = (error: unknown): string =>
 
 // ------------------------------------------------------------------- screen
 
+/**
+ * The model picker, grouped by where the model runs.
+ *
+ * A flat list made the single most important fact about a model -- whether
+ * choosing it sends your documents off the machine -- a suffix on a line of
+ * text, read only by someone already looking for it. `CLAUDE.md` puts locality
+ * on the one indicator whose whole job is to be trusted; the picker is where
+ * that choice is actually made, so it belongs here too.
+ *
+ * **Four localities, not two.** `CapabilityLocality` is `local | cloud |
+ * hybrid | remote_device`, and a split written as "local, else cloud" would
+ * quietly file a hybrid model under a guarantee nobody checked. Anything that
+ * is not one of the two known groups gets its own heading and says so, which
+ * is the same posture as `data_policy` returning `None` rather than guessing:
+ * an unanswered question is shown as unanswered.
+ *
+ * Order is deliberate and is not a ranking: local first because it is the
+ * default posture of the product, not because it is better.
+ */
+export type ModelGroup = { key: string; label: string; models: DiscoveredModel[] };
+
+export function groupModelsByLocality(models: DiscoveredModel[]): ModelGroup[] {
+  const local: DiscoveredModel[] = [];
+  const cloud: DiscoveredModel[] = [];
+  const other: DiscoveredModel[] = [];
+
+  for (const model of models) {
+    if (model.locality === 'local') local.push(model);
+    else if (model.locality === 'cloud') cloud.push(model);
+    else other.push(model);
+  }
+
+  const groups: ModelGroup[] = [];
+  if (local.length) {
+    groups.push({ key: 'local', label: 'On this machine — nothing is sent', models: local });
+  }
+  if (cloud.length) {
+    groups.push({ key: 'cloud', label: 'Cloud — your prompt leaves this device', models: cloud });
+  }
+  if (other.length) {
+    // Named rather than hidden. If a locality Zaram does not recognise ever
+    // appears, the user should see the model and see that we cannot vouch for
+    // where it runs.
+    groups.push({ key: 'other', label: 'Where this runs is not established', models: other });
+  }
+  return groups;
+}
+
 export default function SettingsWorkspace() {
   const backendOnline = useSystemStore((s) => s.backendOnline);
   const routing = useSystemStore((s) => s.routing);
@@ -852,14 +900,18 @@ export default function SettingsWorkspace() {
                       outcome is a failed reply. `/readiness` already excludes
                       them from its chat-model count; this was the surface that
                       did not. */}
-                  {models
-                    .filter((model) => model.category !== 'embedding')
-                    .map((model) => (
-                      <option key={model.id} value={model.id}>
-                        {model.displayName} — {model.locality}
-                        {model.dataPolicy ? '' : ' · terms unknown'}
-                      </option>
-                    ))}
+                  {groupModelsByLocality(
+                    models.filter((model) => model.category !== 'embedding'),
+                  ).map((group) => (
+                    <optgroup key={group.key} label={group.label}>
+                      {group.models.map((model) => (
+                        <option key={model.id} value={model.id}>
+                          {model.displayName}
+                          {model.dataPolicy ? '' : ' · terms unknown'}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ))}
                 </select>
               )}
             </div>

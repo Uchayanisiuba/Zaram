@@ -75,6 +75,21 @@ class RoutedEngine(LLMEngine):
     def default_model(self, value: Optional[str]) -> None:
         self._local.default_model = value  # type: ignore[attr-defined]
 
+    def stream_vision_response(self, prompt: str, images, system_prompt: str = ""):
+        """Vision goes local. Forwarded so the wrapper does not swallow it.
+
+        `Dispatcher` looks this up by attribute, so a wrapper that does not
+        name it fails with `AttributeError` rather than falling back -- which
+        is what "Can you see images" produced once a cloud key was configured.
+
+        Local rather than cloud, deliberately: the cloud engine has no vision
+        path today, and rule 5's default-deny means an image -- far more
+        personal than a chat message, and its own consent class under rule 7j
+        -- must not start leaving the device because a wrapper picked the
+        nearest available method.
+        """
+        return self._local.stream_vision_response(prompt, images, system_prompt)
+
     def stream_response(
         self,
         prompt: str,

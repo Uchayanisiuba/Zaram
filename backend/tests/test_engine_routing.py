@@ -214,18 +214,24 @@ class TestTheRuntimeBuildsTheRightEngine:
 
         return ModelsRuntime(EventBus())
 
-    def test_with_no_key_it_is_the_local_engine_unchanged(self, monkeypatch):
+    def test_with_no_key_nothing_that_can_leave_the_device_is_built(self, monkeypatch):
         """The overwhelmingly common case, and the one that must not regress.
 
-        Nothing about the previous behaviour may depend on the cloud path
-        existing — a user with no key gets exactly the engine they had before.
+        Asserted as *no cloud path exists*, not as an exact class. This test
+        read `isinstance(..., OllamaEngine)` until local dispatch landed, and
+        that was the wrong assertion the whole time: it pinned which local
+        server answers, when what rule 5 actually requires is that **no engine
+        capable of leaving the machine** is constructed without a key. The
+        distinction became load-bearing the moment a second local server
+        (`lm_studio`) could hold a model, and a test written against the class
+        would have blocked the fix while claiming to protect the rule.
         """
-        from runtimes.models.engines.ollama_engine import OllamaEngine
-
         for var in ("ZARAM_OPENAI_ENDPOINT", "ZARAM_OPENAI_KEY", "OPENROUTER_API_KEY"):
             monkeypatch.delenv(var, raising=False)
 
-        assert isinstance(self._runtime()._build_engine(), OllamaEngine)
+        engine = self._runtime()._build_engine()
+        assert not isinstance(engine, RoutedEngine)
+        assert getattr(engine, "_cloud", None) is None
 
     def test_a_configured_key_produces_a_routed_engine(self, monkeypatch):
         monkeypatch.setenv("ZARAM_OPENAI_ENDPOINT", "https://api.example.test")
@@ -249,13 +255,13 @@ class TestTheRuntimeBuildsTheRightEngine:
         """Rule 1. Zaram never supplies inference, so half a configuration is
         no configuration — and it must not half-build something that fails on
         the user's first message."""
-        from runtimes.models.engines.ollama_engine import OllamaEngine
-
         monkeypatch.setenv("ZARAM_OPENAI_ENDPOINT", "https://api.example.test")
         monkeypatch.delenv("ZARAM_OPENAI_KEY", raising=False)
         monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
 
-        assert isinstance(self._runtime()._build_engine(), OllamaEngine)
+        engine = self._runtime()._build_engine()
+        assert not isinstance(engine, RoutedEngine)
+        assert getattr(engine, "_cloud", None) is None
 
     def test_locality_is_read_from_the_provider_record(self, monkeypatch):
         """Not from the name. `gpt-oss` runs on Ollama.

@@ -304,6 +304,52 @@ body {
     font-weight: 400;
     line-height: 1.5;
   }
+
+  /* Native dropdowns.
+   *
+   * A `<select>` styled `background: transparent` looks right while closed and
+   * unreadable once opened: the popup list is painted by the platform on its
+   * own white surface, and `--color-text` is `#e2e4ee` -- a near-white chosen
+   * for dark panels. Near-white on white. `<option>` does not inherit the
+   * control's background either, so styling only the `<select>` fixes nothing.
+   *
+   * Set here rather than per component because there are seven of these across
+   * five files and none of them had it; a theme that stops at the edge of the
+   * popup is a theme with a hole in it.
+   *
+   * `color-scheme: dark` is what makes the platform draw the popup chrome --
+   * scrollbar, focus ring, the frame itself -- to match, which explicit
+   * colours alone cannot reach. */
+  select {
+    color-scheme: dark;
+    background-color: var(--color-surface);
+    color: var(--color-text);
+  }
+
+  select option {
+    background-color: var(--color-surface);
+    color: var(--color-text);
+  }
+
+  /* The group heading is a label, not a choice: quieter than its options, and
+   * never mistakable for one.
+   *
+   * `--color-text-muted` was the obvious pick and measures ~4.0:1 against
+   * `--color-surface`, under the 4.5:1 readability threshold. Acceptable for a
+   * decorative label and not for this one -- these headings are where the
+   * picker says "nothing is sent" or "leaves this device", so the privacy
+   * claim would have been the least legible text on the screen. The lighter
+   * muted token measures ~9.3:1 and is still visibly quieter than an option. */
+  select optgroup {
+    background-color: var(--color-surface);
+    color: var(--color-text-muted-light);
+    font-style: normal;
+    font-weight: 500;
+  }
+
+  select option:disabled {
+    color: var(--color-text-faint);
+  }
 }
 
 /* ─── Glass Utility ──────────────────────────────────────────────── */
