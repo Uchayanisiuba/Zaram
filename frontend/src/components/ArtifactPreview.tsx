@@ -32,6 +32,7 @@
  * bring something forward is a thing users learn once.
  */
 import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { motion } from 'framer-motion';
 import { X, Download, FileWarning, Loader2 } from 'lucide-react';
 import { downloadUrl, getArtifact, type Artifact } from '@/services/artifactsClient';
@@ -126,7 +127,30 @@ export default function ArtifactPreview({
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
 
-  return (
+  // Rendered into `document.body`, not into the tree that mounted it.
+  //
+  // Every `position: fixed` measurement below assumes the **viewport** is the
+  // containing block. That is not this component's assumption to make: an
+  // ancestor carrying `transform`, `filter` or `backdrop-filter` becomes the
+  // containing block for fixed descendants instead, and then an ancestor's
+  // `overflow: hidden` clips them too - which it does not do to an element
+  // that is genuinely fixed to the viewport.
+  //
+  // `WorkWorkspace`'s detail sidebar is exactly that: `backdrop-filter:
+  // blur(24px)` on a 520px column with `overflow: hidden`. Mounted inside it,
+  // this panel resolved `right: panelWidth` - a fraction of the *viewport* -
+  // against 520px and was clipped to a sliver; above a viewport of ~1857px
+  // `panelWidth` exceeds 520 outright and the panel collapses to zero width,
+  // which is a preview that opens onto nothing.
+  //
+  // Measured rather than reasoned about: the same element reported width 816
+  // against the viewport and width 202 inside the blurred aside, with the blur
+  // as the only variable.
+  //
+  // The portal makes the guarantee structural instead of a rule every future
+  // mount site has to remember. The blur on that sidebar is deliberate and
+  // stays.
+  return createPortal(
     <motion.div
       className="fixed top-0 bottom-0 left-0 z-[90] flex items-center justify-center p-8"
       initial={{ opacity: 0 }}
@@ -226,6 +250,7 @@ export default function ArtifactPreview({
           )}
         </div>
       </motion.div>
-    </motion.div>
+    </motion.div>,
+    document.body,
   );
 }
