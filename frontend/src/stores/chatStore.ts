@@ -360,6 +360,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
             clearTimeout(warmingTimer);
             if (event.kind === 'swap') {
               useSystemStore.getState().beginModelSwap(event.model);
+            } else if (event.kind === 'oversized') {
+              // Still a warming orb — it really is loading — but the label
+              // beneath it must not say the first reply is the slow one. See
+              // `describeSystem`.
+              useSystemStore.getState().beginOversizedLoad(event.model);
             } else {
               // A cold start with room to spare is warming, not swapping.
               // Same wait, different cause, and only one of them is something

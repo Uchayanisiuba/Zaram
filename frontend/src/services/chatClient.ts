@@ -98,7 +98,7 @@ export type ChatEvent =
    *  generation, so the orb can say why the wait is about to happen rather
    *  than after the machine has already gone quiet. `kind` is `load` (cold
    *  start, room to spare) or `swap` (something resident gets evicted). */
-  | { type: 'model_load'; kind: 'load' | 'swap'; model: string; evicts: string[] }
+  | { type: 'model_load'; kind: 'load' | 'swap' | 'oversized'; model: string; evicts: string[] }
   /** Which model is about to answer, and where it runs. Arrives *before* the
    *  first token, so the attribution is present while the reply is read rather
    *  than added underneath it afterwards.
@@ -368,7 +368,14 @@ function parseLine(line: string): ChatEvent | null {
 
     case 'model_load': {
       const kind = String(data.kind ?? '');
-      if (kind !== 'load' && kind !== 'swap') return null;
+      // **`oversized` was being dropped here.** `SwapPlan` has four kinds and
+      // this listed two; `resident` is deliberately never sent, so the one
+      // missing case was the verdict that most needed saying — the model is
+      // larger than the whole VRAM budget and will run half on the processor.
+      // The backend graded it correctly, logged it, sent it, and the parser
+      // discarded it as unrecognised, so the user waited in silence for a
+      // condition the product already knew about.
+      if (kind !== 'load' && kind !== 'swap' && kind !== 'oversized') return null;
       const model = String(data.model ?? '').trim();
       if (!model) return null;
       return {

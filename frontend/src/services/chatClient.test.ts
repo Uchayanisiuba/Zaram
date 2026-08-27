@@ -352,3 +352,45 @@ describe('the request body', () => {
     expect(sent(fetchMock).model).toBe('openai:gpt-4o');
   });
 });
+
+describe('the model-load verdict is carried whole', () => {
+  /**
+   * `SwapPlan` has four kinds. `resident` is deliberately never sent, and this
+   * parser listed two of the remaining three — so `oversized`, the verdict that
+   * most needed saying, was discarded as unrecognised. What reached the user
+   * for a model twice the size of their card was silence and then a read
+   * timeout naming a URL.
+   */
+  it('passes an oversized verdict through rather than dropping it', async () => {
+    mockFetch(() =>
+      streamingResponse([
+        line({
+          type: 'model_load',
+          data: { kind: 'oversized', model: 'gemma4:26b-a4b-it-q4_K_M', evicts: [] },
+        }),
+        token('ready'),
+        done(),
+      ]),
+    );
+
+    const events = await collect(streamChat({ text: 'hi' }));
+    expect(events.map((e) => e.type)).toEqual(['model_load', 'token', 'done']);
+    expect(events[0]).toMatchObject({
+      kind: 'oversized',
+      model: 'gemma4:26b-a4b-it-q4_K_M',
+    });
+  });
+
+  it('still drops a kind it has no meaning for', async () => {
+    mockFetch(() =>
+      streamingResponse([
+        line({ type: 'model_load', data: { kind: 'resident', model: 'gemma3', evicts: [] } }),
+        token('hi'),
+        done(),
+      ]),
+    );
+
+    const events = await collect(streamChat({ text: 'hi' }));
+    expect(events.map((e) => e.type)).toEqual(['token', 'done']);
+  });
+});

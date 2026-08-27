@@ -73,6 +73,17 @@ interface SystemState {
    *  beside it and never called by anything: a signal that could only ever read
    *  null, on the one indicator that must not be decorative. */
   cloudAnsweredAt: number | null;
+  /** Which model is being loaded *and does not fit this machine*, while
+   *  `activity` is `warming`. Null otherwise, on the same rule as `swappingTo`.
+   *
+   *  Its own field rather than a seventh `OrbActivity`, because the orb is
+   *  showing the truth already — this is a load, and it is warming. What
+   *  differs is the sentence underneath: an ordinary cold start passes and the
+   *  session gets fast, while a model larger than the whole VRAM budget has
+   *  spilled layers into system RAM and will be slow on *every* reply. Telling
+   *  the user "the first reply of a session takes longer" in that case is a
+   *  promise the machine cannot keep. */
+  oversizedModel: string | null;
 
   setActivity: (a: OrbActivity) => void;
   /** Enter the swap state, naming the model being loaded, and move the orb with
@@ -82,6 +93,9 @@ interface SystemState {
   beginModelSwap: (model: string) => void;
   /** Leave the swap for whatever comes next, clearing the model name. */
   endModelSwap: (next?: OrbActivity) => void;
+  /** Enter the warming state for a model the provider layer graded as larger
+   *  than the whole resident budget. */
+  beginOversizedLoad: (model: string) => void;
   /** Record that a cloud model answered. Called from the chat stream when the
    *  backend reports `locality: 'cloud'` — an observation, never a setting. */
   noteCloudAnswer: () => void;
@@ -96,10 +110,17 @@ export const useSystemStore = create<SystemState>((set, get) => ({
   activity: 'idle',
   swappingTo: null,
   cloudAnsweredAt: null,
+  oversizedModel: null,
 
-  // Clears `swappingTo` on every transition, so the name cannot outlive the
+  // Clears both model names on every transition, so neither can outlive the
   // state that explains it.
-  setActivity: (activity) => set({ activity, swappingTo: null }),
+  setActivity: (activity) => set({ activity, swappingTo: null, oversizedModel: null }),
+
+  // Set together, for the reason `beginModelSwap` is: they are two halves of
+  // one fact, and a caller that sets the activity without the name produces a
+  // warming label that cannot say why this wait is different.
+  beginOversizedLoad: (model) =>
+    set({ activity: 'warming', swappingTo: null, oversizedModel: model }),
 
   beginModelSwap: (model) => {
     set({ activity: 'swapping', swappingTo: model });
@@ -107,7 +128,7 @@ export const useSystemStore = create<SystemState>((set, get) => ({
   },
 
   endModelSwap: (next = 'thinking') => {
-    set({ activity: next, swappingTo: null });
+    set({ activity: next, swappingTo: null, oversizedModel: null });
     // `listening` and `swapping` are the only OrbActivity members the orb has
     // no visual for, and neither can follow a swap — so this mapping is total
     // in practice without a cast that would hide a future gap.
@@ -173,6 +194,9 @@ export function describeSystem(s: {
   routing: RoutingState | null;
   activity: OrbActivity;
   swappingTo?: string | null;
+  /** Optional so existing callers keep working; absent reads as "the model
+   *  fits", which understates the problem rather than inventing one. */
+  oversizedModel?: string | null;
   /** When a cloud model actually answered. Optional so existing callers keep
    *  working, and absent reads as "none has", which is the safe direction:
    *  a caller that forgets to pass it understates egress rather than
@@ -205,6 +229,26 @@ export function describeSystem(s: {
     };
   }
   if (s.activity === 'warming') {
+    // **A model larger than the whole budget is not an ordinary cold start,
+    // and saying it is would be a promise the machine cannot keep.**
+    //
+    // `ProviderManager.swap_preflight` grades this as `oversized` — "larger
+    // than the whole budget, so evicting everything would not help; it will
+    // load with layers spilled to system RAM" — and its own docstring says
+    // why the verdict is worth having separately: "a cold start passes on its
+    // own; an oversized model is a hardware fact no setting will change".
+    //
+    // The backend has been sending it. `chatClient` dropped it on the floor as
+    // an unrecognised kind, so what the user got instead was silence, then a
+    // read timeout naming a URL — for a condition the product had graded
+    // correctly before generation started.
+    if (s.oversizedModel) {
+      return {
+        label: 'Warming up',
+        detail: `${s.oversizedModel} is larger than this machine’s graphics memory, so part of it runs on the processor. It will answer, slowly, and every reply will be slow — a smaller model is the remedy.`,
+        tone: 'busy',
+      };
+    }
     // Said only after a request has gone several seconds with no output, which
     // on a local model means it is still being loaded into memory. Without
     // this the first message of a session looks like a hang.
