@@ -74,6 +74,12 @@ class EventType(str, Enum):
     #: attribution that arrives after the answer is a footnote, and the
     #: question "where did this come from" is asked while reading, not after.
     ANSWERING = "answering"
+    #: Which stored conversation this reply is being written into.
+    #:
+    #: Sent when the backend *started* one, which is the only case a client
+    #: cannot work out for itself -- it knows the id it sent, and needs to be
+    #: told the id it did not.
+    CONVERSATION = "conversation"
 
 
 @dataclass
@@ -298,6 +304,21 @@ class StreamEvent:
         return StreamEvent(
             type=EventType.ERROR,
             data={"content": content},
+            correlation_id=correlation_id,
+        )
+
+    @staticmethod
+    def conversation(conversation_id: str, title: str = "", correlation_id: str = "") -> StreamEvent:
+        """The transcript this reply is being written into.
+
+        Ahead of the first token, for the same reason `answering` is: a client
+        that learns the id after the reply has nowhere to put the reply. It
+        also means an interrupted stream still leaves the client holding a
+        conversation it can reopen, rather than a thread with no name.
+        """
+        return StreamEvent(
+            type=EventType.CONVERSATION,
+            data={"conversation_id": conversation_id, "title": title},
             correlation_id=correlation_id,
         )
 

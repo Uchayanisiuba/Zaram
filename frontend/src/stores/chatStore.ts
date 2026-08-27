@@ -11,6 +11,7 @@
  * possible later.
  */
 import { create } from 'zustand';
+import { fetchConversation } from '@/services/conversationsClient';
 import {
   streamChat,
   ChatTransportError,
@@ -103,6 +104,14 @@ interface ChatState {
   /** Connection-level failure, as opposed to a failure within one reply. */
   connectionError: string | null;
   sessionId: string;
+  /** The stored transcript this conversation is being written into.
+   *
+   *  Null until the backend names one, which it does on the first reply of a
+   *  new conversation. **Distinct from `sessionId`, which is a page load.**
+   *  Keying transcripts on the session would file every reload as a new
+   *  conversation and every restart as amnesia — the behaviour the store
+   *  exists to end. */
+  conversationId: string | null;
   /** The project this conversation belongs to, or null for none (rule 7i).
    *
    *  Scopes recall to this project plus global, and captures facts under it so
@@ -127,6 +136,16 @@ interface ChatState {
   setDomains: (domainIds: string[]) => void;
   cancel: () => void;
   clear: () => void;
+  /** Reopen a stored conversation, replacing what is on screen.
+   *
+   *  The transcript comes back as text and attribution and nothing else.
+   *  **Sources, artifacts and reasoning are not restored, and that is not an
+   *  oversight** — a citation is a claim that *this* answer used *that* fact,
+   *  and the fact may since have been corrected or deleted (rule 4). Rendering
+   *  yesterday's citation against today's Spine would show provenance that no
+   *  longer holds, which is worse than showing none. Reasoning is the model's
+   *  working, never part of what it said. */
+  resumeConversation: (conversationId: string) => Promise<void>;
 }
 
 /** Where the active project is remembered between launches.
@@ -184,6 +203,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   isStreaming: false,
   connectionError: null,
   sessionId: `session-${newId()}`,
+  conversationId: null,
   projectId: loadProject(),
   domainIds: loadDomains(),
 
@@ -297,6 +317,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         {
           text: trimmed,
           sessionId: get().sessionId,
+          conversationId: get().conversationId,
           projectId: get().projectId,
           domainIds: get().domainIds,
           ...opts,
@@ -345,6 +366,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
             // and, from the same record, as a row in Work.
             artifacts.push(event.artifact);
             set({ streamingArtifacts: [...artifacts] });
+            break;
+          }
+
+          case 'conversation': {
+            // The backend opened a transcript for this exchange and is telling
+            // us its id. Held so the *next* message continues the same
+            // conversation rather than starting another — without this every
+            // message would be its own one-line thread.
+            set({ conversationId: event.conversationId });
             break;
           }
 
@@ -527,6 +557,75 @@ export const useChatStore = create<ChatState>((set, get) => ({
       isStreaming: false,
       connectionError: null,
       sessionId: `session-${newId()}`,
+      // Clearing the transcript on screen starts a new one on disk. The old
+      // conversation is not deleted -- it is simply no longer the one being
+      // written into, which is what "new conversation" means.
+      conversationId: null,
     });
+  },
+
+  resumeConversation: async (conversationId) => {
+    // Anything in flight is abandoned first. A reply still streaming into the
+    // old conversation would append itself to the new one on screen, which is
+    // the worst kind of wrong: plausible, and attributed to the wrong thread.
+    inFlight?.abort();
+    inFlight = null;
+
+    try {
+      const stored = await fetchConversation(conversationId);
+      set({
+        messages: stored.messages.map((m) => ({
+          id: m.id,
+          role: m.role,
+          text: m.text,
+          sources: [],
+          artifacts: [],
+          notices: [],
+          timestamp: m.createdAt * 1000,
+          // Restored where it was recorded. `locality` is '' for a model the
+          // backend could not place, and that stays absent rather than
+          // becoming "local" -- the same refusal `locality_of` makes.
+          answeredBy:
+            m.role === 'assistant' && m.model
+              ? {
+                  model: m.model,
+                  // '' means the backend could not place the model, and it
+                  // stays absent rather than becoming 'local' -- the same
+                  // refusal `locality_of` makes.
+                  locality:
+                    m.locality === 'local' || m.locality === 'cloud' ? m.locality : null,
+                  // Not recorded per message. `null` is the honest value:
+                  // reconstructing a provider from the model name would be a
+                  // guess rendered as a fact, on a line whose whole job is to
+                  // say what actually answered.
+                  provider: null,
+                  // Why this model answered was true at the time and is not
+                  // stored. A restored transcript says what answered, not what
+                  // the routing reasoning was.
+                  chosenBy: null,
+                }
+              : null,
+        })),
+        conversationId: stored.id,
+        streamingText: '',
+        streamingReasoning: '',
+        streamingSources: [],
+        streamingArtifacts: [],
+        streamingNotices: [],
+        streamingAnsweredBy: null,
+        isStreaming: false,
+        connectionError: null,
+        // A new session id: this is a fresh working context over an old
+        // transcript. The engine's in-memory turn buffer is per session and
+        // holds the *previous* conversation's turns, which must not leak into
+        // this one.
+        sessionId: `session-${newId()}`,
+      });
+    } catch (error) {
+      set({
+        connectionError:
+          error instanceof Error ? error.message : 'That conversation could not be opened.',
+      });
+    }
   },
 }));
