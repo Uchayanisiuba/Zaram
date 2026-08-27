@@ -39,6 +39,7 @@ import {
   isProblem,
   removeSource,
   retryOutcome,
+  removeFile,
   setSourcePolicy,
   uploadFiles,
   STATUS_LABELS,
@@ -330,6 +331,37 @@ export default function KnowledgeWorkspace() {
     window.addEventListener('paste', onPaste);
     return () => window.removeEventListener('paste', onPaste);
   }, [addFiles]);
+
+  const [removingFile, setRemovingFile] = useState<string | null>(null);
+
+  /**
+   * Remove one file from Knowledge.
+   *
+   * Not routed through the source-withdrawal confirmation: that dialog exists
+   * because withdrawing a source can delete many files at once, and this is
+   * one, named, that the user pointed at. The note afterwards still says what
+   * happened to the copy on disk -- `files_deleted` counts only copies Zaram
+   * made, so a scanned folder's original is reported as untouched because it
+   * is.
+   */
+  const onRemoveFile = useCallback(async (outcome: IngestOutcome) => {
+    setRemovingFile(outcome.id);
+    try {
+      const result = await removeFile(outcome.id);
+      setOutcomes((current) => current.filter((o) => o.id !== outcome.id));
+      setNotice(
+        result.files_deleted > 0
+          ? `Removed ${result.name}, and the copy Zaram kept was deleted. Your original is untouched.`
+          : result.facts_removed > 0
+            ? `Removed ${result.name} and the ${result.facts_removed} fact(s) it produced.`
+            : `Removed ${result.name}. It had produced nothing to forget.`,
+      );
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'Could not remove that file.');
+    } finally {
+      setRemovingFile(null);
+    }
+  }, []);
 
   const onRetry = useCallback(async (outcome: IngestOutcome) => {
     setRetrying(outcome.id);
@@ -767,6 +799,22 @@ export default function KnowledgeWorkspace() {
                       )}
                       Retry
                     </button>
+
+                    <button
+                      onClick={() => void onRemoveFile(outcome)}
+                      disabled={removingFile === outcome.id}
+                      className="text-[11px] px-2 py-1 rounded-md shrink-0 flex items-center gap-1 disabled:opacity-40"
+                      style={{ border: '1px solid var(--color-border-subtle)', color: 'var(--color-text-muted)' }}
+                      data-testid={`remove-${outcome.id}`}
+                      aria-label={`Remove ${outcome.name} from Knowledge`}
+                    >
+                      {removingFile === outcome.id ? (
+                        <Loader2 size={11} className="animate-spin" />
+                      ) : (
+                        <Trash2 size={11} />
+                      )}
+                      Remove
+                    </button>
                   </div>
                 </div>
               ))}
@@ -800,6 +848,21 @@ export default function KnowledgeWorkspace() {
                       ? `${outcome.chars.toLocaleString()} characters`
                       : STATUS_LABELS[outcome.status]}
                   </span>
+                  <button
+                    onClick={() => void onRemoveFile(outcome)}
+                    disabled={removingFile === outcome.id}
+                    className="shrink-0 rounded-md p-1 disabled:opacity-40 hover:bg-white/5"
+                    style={{ color: 'var(--color-text-muted)' }}
+                    data-testid={`remove-${outcome.id}`}
+                    aria-label={`Remove ${outcome.name} from Knowledge`}
+                    title="Remove from Knowledge"
+                  >
+                    {removingFile === outcome.id ? (
+                      <Loader2 size={11} className="animate-spin" />
+                    ) : (
+                      <Trash2 size={11} />
+                    )}
+                  </button>
                 </div>
               ))}
             </div>

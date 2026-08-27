@@ -369,6 +369,39 @@ class IngestService:
         deleted = self._delete_own_copies(root, paths)
         return {"fact_ids": fact_ids, "files_deleted": deleted}
 
+    def withdraw_file(self, outcome_id: str) -> dict[str, Any] | None:
+        """Take one file out, with the same guarantees `withdraw` gives a source.
+
+        Same three conditions, for the same reason: the facts go, only *Zaram's*
+        copy is deleted, and the path is checked for containment after resolving
+        before anything is unlinked. A scanned folder's file is the user's
+        original and is never touched -- only its row and its facts go, which
+        is what "remove this from Knowledge" honestly means for a document
+        Zaram never owned a copy of.
+
+        Returns None when the outcome does not exist, which the route turns
+        into a 404 rather than a cheerful no-op.
+        """
+        outcome = self._records.get_outcome(outcome_id)
+        if outcome is None:
+            return None
+
+        source_id = str(outcome.get("source_id") or "")
+        path = str(outcome.get("path") or "")
+        root = self._records.source_root(source_id) if source_id else None
+
+        fact_ids = self._records.remove_outcome(outcome_id)
+        if fact_ids is None:
+            return None
+
+        deleted = self._delete_own_copies(root, [path]) if root else 0
+        return {
+            "fact_ids": fact_ids,
+            "files_deleted": deleted,
+            "name": str(outcome.get("name") or ""),
+            "source_id": source_id,
+        }
+
     def _delete_own_copies(self, root: str, paths: list[str]) -> int:
         """Delete the staged copies belonging to a withdrawn uploads source."""
         if not self.is_staged_source(root):
