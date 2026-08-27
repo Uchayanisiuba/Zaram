@@ -182,18 +182,34 @@ Persistent bar, always at the bottom:
 
 ### The orb
 
-A 20px circle at the left of the persistent bar. Four states, no others:
+A 20px circle at the left of the persistent bar. It reports **what the system
+is doing**, and nothing else:
 
 | State | Appearance |
 |---|---|
 | idle | dim, still |
 | thinking | slow pulse, accent |
-| local | steady accent ring |
-| cloud active | steady accent-2 ring + provider name in mono |
+| speaking | pulse in time with speech |
+| listening | steady, while the microphone is open |
+| swapping | dimmed, slow breathe — a model is being evicted for another |
 
 It never grows, never centres, never reacts to cursor position, never speaks.
 It is an instrument light, not a character. This is deliberate — do not
 reintroduce expressive behaviour.
+
+**The orb does not report locality, and this table used to say it did.**
+It listed `local` as a *steady accent ring* and `cloud active` as an
+*accent-2 ring*, which contradicts both `CLAUDE.md` and the code. The narrowing
+of 13 August 2026 is explicit: locality is stated **in words** by
+`OrbStatusLabel` — "Local only", "Local · can send", "Cloud enabled" — because
+*"a rim colour cannot make that distinction on the one indicator whose whole
+job is to be trusted."* A ring cannot say *can send but has not*, and that is
+the distinction that matters.
+
+`OrbState` in `frontend/src/stores/orbStore.ts` is `idle | thinking | speaking |
+listening | swapping`. It has never carried locality. Corrected here on
+27 August 2026 — the codebase wins, and a spec that disagrees with it is worse
+than no spec, because it is reviewed against.
 
 ---
 
