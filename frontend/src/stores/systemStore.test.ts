@@ -14,7 +14,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { describeSystem, type RoutingState } from './systemStore';
+import { describeSystem, useSystemStore, type RoutingState } from './systemStore';
 
 const online = { backendOnline: true, activity: 'idle' as const };
 
@@ -121,5 +121,44 @@ describe('offline and busy still win over everything', () => {
       cloudAnsweredAt: Date.now(),
     });
     expect(label).toBe('Thinking');
+  });
+});
+
+describe('an oversized model is not an ordinary cold start', () => {
+  /**
+   * `swap_preflight` grades a model larger than the whole resident budget as
+   * `oversized` — a hardware fact no setting will change — and the backend has
+   * been sending that verdict all along. `chatClient` dropped it as an
+   * unrecognised kind, so the user got silence and then a read timeout.
+   */
+  it('says why this wait will not pass, naming the model', () => {
+    const { detail } = describeSystem({
+      backendOnline: true,
+      routing: routing(),
+      activity: 'warming',
+      oversizedModel: 'gemma4:26b-a4b-it-q4_K_M',
+    });
+
+    expect(detail).toContain('gemma4:26b-a4b-it-q4_K_M');
+    expect(detail).not.toContain('first reply of a session');
+  });
+
+  it('an ordinary cold start keeps the sentence it had', () => {
+    const { detail } = describeSystem({
+      backendOnline: true,
+      routing: routing(),
+      activity: 'warming',
+    });
+
+    expect(detail).toContain('first reply of a session');
+  });
+
+  it('the name cannot outlive the state that explains it', () => {
+    const store = useSystemStore.getState();
+    store.beginOversizedLoad('gemma4:26b-a4b-it-q4_K_M');
+    expect(useSystemStore.getState().oversizedModel).toBe('gemma4:26b-a4b-it-q4_K_M');
+
+    useSystemStore.getState().setActivity('idle');
+    expect(useSystemStore.getState().oversizedModel).toBeNull();
   });
 });
