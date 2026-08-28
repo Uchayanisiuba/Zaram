@@ -60,10 +60,22 @@ class TestWhatItSaysItIs:
         recite, and one did — answering "who are you" with *"I am trained by
         one lab, but I may be deployed as any model"*, which is the prompt's
         own reasoning in the first person. The reasons live in the module now;
-        the prompt carries rules."""
+        the prompt carries rules.
+
+        The assertion is on the *contract*, not the sentence. It read
+        ``"never quoted, listed or repeated back"`` verbatim and broke on 28
+        August when the rule was **strengthened** to cover paraphrase — the
+        recital came back as *"I also shouldn't treat the lab or company that
+        trained the underlying answering model as the maker of me"*, which is
+        none of quoted, listed or repeated. A test that fails when its contract
+        is reinforced is pinning the wording, and it would have argued against
+        the fix.
+        """
         text = identity_preamble(model="qwen2.5:7b", locality=LOCAL)
 
-        assert "never quoted, listed or repeated back" in text
+        assert "never" in text and "repeated back" in text
+        # The strengthening that the verbatim assertion used to forbid.
+        assert "paraphrased" in text
         assert "not evidence" not in text
 
 

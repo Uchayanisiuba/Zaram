@@ -183,3 +183,54 @@ class TestComposition:
         )
 
         assert composed.index("You are Zaram") < composed.index("Some other instruction.")
+
+
+class TestTheMakerIsASuppliedFact:
+    """A prohibition without an alternative leaves the model improvising.
+
+    `_HOW_TO_ANSWER_ABOUT_YOURSELF` forbids naming the lab that trained the
+    model as Zaram's maker, and nothing named anyone else; `_HONESTY` then says
+    "where you were not told, say you do not know". So the product did not know
+    what it was on the question people ask first. Measured against TabbyAPI
+    serving Qwen3.8-27B, 28 August 2026:
+
+        "As for who made me: I wasn't given a maker for Zaram specifically, so
+         I don't know. I also shouldn't treat the lab or company that trained
+         the underlying answering model as the maker of me."
+
+    Having no answer, it reached for the prompt and narrated the instruction —
+    the recital failure this file already guards, arriving as paraphrase rather
+    than quotation. `CLAUDE.md`: identity is a fact the system supplies.
+    """
+
+    def test_the_maker_is_named_in_the_preamble(self):
+        assert "Uche Anisiuba" in identity_preamble()
+
+    def test_it_is_a_fact_and_not_a_rule(self):
+        """It must sit in the description of what Zaram is, before anything the
+        user supplied and before the rules — a fact, in the half of the prompt
+        that carries facts."""
+        preamble = identity_preamble(manner="be brisk")
+
+        assert preamble.index("Uche Anisiuba") < preamble.index("be brisk")
+
+    def test_the_prohibition_it_completes_is_still_there(self):
+        """Naming a maker must not have replaced the rule against crediting the
+        training lab. Both are needed: one supplies the answer, the other
+        refuses the wrong one."""
+        preamble = identity_preamble()
+
+        assert "trained the model as Zaram's maker" in preamble
+
+    def test_a_user_supplied_name_does_not_displace_the_maker(self):
+        preamble = identity_preamble(assistant_name="Ada")
+
+        assert "Uche Anisiuba" in preamble
+        assert "Ada" in preamble
+
+    def test_paraphrasing_the_instructions_is_refused_not_only_quoting(self):
+        """The recital arrived as a paraphrase, so the line that only said
+        "quoted, listed or repeated" did not reach it."""
+        preamble = identity_preamble()
+
+        assert "paraphrased" in preamble
