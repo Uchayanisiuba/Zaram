@@ -129,3 +129,99 @@ class TestTheModelsOnThisMachine:
         )
         for m in local:
             assert isinstance(m.supports_vision, bool)
+
+
+
+class TestResidencyDoesNotAnswerACapabilityQuestion:
+    """The measured failure, 28 August 2026.
+
+    `_auto_candidates` drops anything that positively does not fit VRAM, and it
+    does so *before* the vision gate. So on a machine whose only sighted model
+    is oversized the field emptied for the wrong reason, and the user was told:
+
+        "No model on this machine can read images. Zaram will not answer about
+         a picture it cannot see."
+
+    `gemma4:26b-a4b` was catalogued ``supports_vision: True``,
+    ``fits_resident: False`` — 18.2 GB against a 12 GB card. It can see
+    perfectly well. It is *slow*, which is a different sentence, and
+    `CLAUDE.md` settles which one wins: **"VRAM limits route a task; they do
+    not reject a vertical."** Two questions merged into one refusal that named
+    the wrong reason.
+
+    **The budget is stubbed, and it has to be.** `resident_budget_bytes()`
+    returns ``None`` in a bare test process — no accelerator is detected — so
+    `model_fits_resident` answers ``None`` for every model and the residency
+    filter never fires. Every existing test in this file therefore passes
+    without it ever running. A test written against the host's real card would
+    assert nothing here and pass on the machine where the bug lives.
+    """
+
+    #: Room for a 7B and nothing like a 27B. The number is arbitrary; the
+    #: relationship to the fixture sizes below is what is being tested.
+    BUDGET = 9_000_000_000
+
+    @pytest.fixture()
+    def budgeted(self, manager, monkeypatch) -> ProviderManager:
+        monkeypatch.setattr(manager, "resident_budget_bytes", lambda: self.BUDGET)
+        return manager
+
+    def test_the_stub_actually_gates(self, budgeted):
+        """So the four below cannot pass vacuously the way the rest of this
+        file did."""
+        stock(budgeted, model("huge:27b", size=60_000_000_000))
+
+        assert budgeted.model_fits_resident(budgeted.catalog.all()[0]) is False
+
+    def test_an_oversized_sighted_model_is_still_chosen(self, budgeted):
+        stock(
+            budgeted,
+            model("blind-small:7b", vision=False, size=4_000_000_000),
+            model("sighted-huge:27b", vision=True, size=60_000_000_000),
+        )
+
+        chosen = budgeted.select_model_for_task(requires_vision=True)
+
+        assert chosen is not None, (
+            "refused to see because the only sighted model was slow"
+        )
+        assert chosen.display_name == "sighted-huge:27b"
+
+    def test_one_that_fits_still_wins(self, budgeted):
+        """The relaxation is a fallback, never a preference — otherwise
+        'capability first' quietly becomes 'largest first'."""
+        stock(
+            budgeted,
+            model("sighted-small:7b", vision=True, size=4_000_000_000),
+            model("sighted-huge:27b", vision=True, size=60_000_000_000),
+        )
+
+        chosen = budgeted.select_model_for_task(requires_vision=True)
+
+        assert chosen is not None
+        assert chosen.display_name == "sighted-small:7b"
+
+    def test_a_blind_catalogue_is_still_a_refusal(self, budgeted):
+        """The refusal is the feature, and it has to survive the fix to it."""
+        stock(
+            budgeted,
+            model("blind-small:7b", vision=False, size=4_000_000_000),
+            model("blind-huge:27b", vision=False, size=60_000_000_000),
+        )
+
+        assert budgeted.select_model_for_task(requires_vision=True) is None
+
+    def test_an_ordinary_text_request_still_respects_residency(self, budgeted):
+        """The relaxation is scoped to a required capability. Nothing about an
+        untasked pick changes, or every default becomes the biggest model
+        installed."""
+        stock(
+            budgeted,
+            model("small:7b", vision=False, size=4_000_000_000),
+            model("huge:27b", vision=False, size=60_000_000_000),
+        )
+
+        chosen = budgeted.select_model_for_task(requires_vision=False)
+
+        assert chosen is not None
+        assert chosen.display_name == "small:7b"

@@ -331,7 +331,11 @@ class ExecutionEngine:
         if search_notice is not None:
             yield search_notice
 
-        plan = self._planner.create_plan(prompt)
+        # The attachment is a fact; the planner's keyword match is a guess.
+        # Told about it, the plan stays an ordinary generation rather than
+        # diverting to `vision.analyze`, whose input key is singular and which
+        # this engine never fills. See `IntentPlanner.create_plan`.
+        plan = self._planner.create_plan(prompt, has_images=bool(images))
         plan = self._drop_unavailable_steps(plan)
         plan.state = PlanState.RUNNING
         logger.debug("Engine: plan created with %d steps", len(plan.steps))

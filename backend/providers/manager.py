@@ -428,6 +428,31 @@ class ProviderManager:
         Returns ``None`` when the gate empties the field, and callers must not
         substitute: no vision-capable model installed means Zaram cannot answer
         that question, not that it should answer it blind.
+
+        **Residency does not get to answer a capability question, and it used
+        to.** `_auto_candidates` drops anything that positively does not fit
+        VRAM *before* this gate runs, so on a machine whose only vision-capable
+        model is oversized the field emptied for the wrong reason and the user
+        was told:
+
+            "No model on this machine can read images. Zaram will not answer
+             about a picture it cannot see."
+
+        Measured 28 August 2026: `gemma4:26b-a4b` catalogued
+        ``supports_vision: True``, ``fits_resident: False`` — 18.2 GB against a
+        12 GB card. It can see perfectly well. It is *slow*, which is a
+        different sentence, and `CLAUDE.md` settles which one wins: **"VRAM
+        limits route a task; they do not reject a vertical."**
+
+        So when a *required capability* empties the field, the residency filter
+        is relaxed and only then is the answer `None`. That ordering is the
+        whole point — capability first, speed second — and it keeps the two
+        questions apart rather than merging them into one refusal that names
+        the wrong reason. Consent filters are untouched by the retry.
+
+        The caller still has to say the reply will be slow; `swap_preflight`
+        already reports ``oversized`` and the chat stream already carries a
+        `model_load` event for it. Warn, never block.
         """
         preference = self._routing_preference()
         candidates = self._auto_candidates(category, preference)
@@ -435,6 +460,18 @@ class ProviderManager:
         # The gate. Before the ranking, never inside it.
         if requires_vision:
             candidates = [m for m in candidates if m.supports_vision]
+            if not candidates:
+                # Capability first, speed second. A model that does not fit is
+                # a slow answer; no model at all is a refusal, and refusing
+                # when something on the machine can do the job is the worse of
+                # the two. Consent is re-applied, never skipped.
+                candidates = [
+                    m
+                    for m in self._auto_candidates(
+                        category, preference, require_resident_fit=False
+                    )
+                    if m.supports_vision
+                ]
 
         if not candidates:
             return None
@@ -455,14 +492,25 @@ class ProviderManager:
         )[0]
 
     def _auto_candidates(
-        self, category: ModelCategory, preference: str
+        self,
+        category: ModelCategory,
+        preference: str,
+        *,
+        require_resident_fit: bool = True,
     ) -> List[ModelInfo]:
         """Models Zaram may pick on its own, before the task is considered.
 
-        Consent and residency only. Every filter here answers "may this model
-        be used at all", which is why it is shared by every caller rather than
+        Consent and residency. Every filter here answers "may this model be
+        used at all", which is why it is shared by every caller rather than
         recomputed per task — a task-specific filter that quietly dropped one
         of these would be a consent gate with an exception in it.
+
+        **`require_resident_fit` is the one exception, and consent is not part
+        of it.** Residency is a *speed* judgement; consent is a permission.
+        Relaxing the first never relaxes the second — `selectable_by_default`
+        and `prefer_local` apply either way — so the escape hatch cannot become
+        a route around rule 5. See `select_model_for_task` for when it is used
+        and why refusing was worse.
         """
         candidates = [
             m
@@ -470,10 +518,13 @@ class ProviderManager:
             if m.selectable_by_default
         ]
 
-        # Hard gate. `None` (unknown fit) survives it — an unmeasurable machine
-        # must not be left with no default at all — but ranks below a model we
-        # positively know fits, so "we could not check" never outranks "it fits".
-        candidates = [m for m in candidates if self.model_fits_resident(m) is not False]
+        # `None` (unknown fit) survives — an unmeasurable machine must not be
+        # left with no default at all — but ranks below a model we positively
+        # know fits, so "we could not check" never outranks "it fits".
+        if require_resident_fit:
+            candidates = [
+                m for m in candidates if self.model_fits_resident(m) is not False
+            ]
 
         # `prefer_local` is the one that constrains rather than reorders.
         # "Prefer" is doing real work here: a ranking nudge would be
