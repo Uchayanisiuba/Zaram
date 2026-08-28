@@ -29,18 +29,23 @@ class BackgroundReindexer:
         self._running = False
         self._worker_thread: threading.Thread | None = None
         self._interval_seconds: int = 3600
+        #: Set to wake the worker out of its wait. See `_run`.
+        self._wake: threading.Event = threading.Event()
 
     def start(self) -> None:
         with self._lock:
             if self._running:
                 return
             self._running = True
+            self._wake.clear()
             self._worker_thread = threading.Thread(target=self._run, daemon=True)
             self._worker_thread.start()
 
     def stop(self) -> None:
         with self._lock:
             self._running = False
+        # Wake the worker rather than waiting for its interval to elapse.
+        self._wake.set()
         if self._worker_thread:
             self._worker_thread.join(timeout=5)
 
@@ -55,14 +60,42 @@ class BackgroundReindexer:
         return task
 
     def _run(self) -> None:
+        """The maintenance loop, waiting when the queue is empty.
+
+        **The same defect `ContinuousLearningPipeline` was fixed for on 27
+        August 2026, in the sibling class the fix never reached** — and worse
+        here, because this interval is 3600 s against that one's 1800.
+
+        It slept while holding `_lock`. `stop()` takes the same lock to clear
+        `_running`, so it could not get in until the sleep finished; `enqueue`
+        takes it too, so **a task submitted while the worker idled blocked the
+        caller for up to an hour**, which is the half that is not merely a slow
+        test. The `join(timeout=5)` in `stop()` never had a chance to matter,
+        because `stop()` was already blocked before reaching it.
+
+        It survived the first fix because it is a **race, not a certainty**:
+        the test starts the worker and stops it immediately, so whichever
+        thread reaches the lock first decides. `TestBackgroundReindexing::
+        test_start_stop` therefore passes most runs and hangs the suite on the
+        others — measured 28 August 2026, two consecutive full runs at 4:18 and
+        then blocked at 51% with the pytest process flat on CPU. Intermittency
+        is why "the suite is slow" survived as an explanation.
+
+        The wait is an `Event`: interruptible, so `stop()` returns at once, and
+        the lock is held only to read state, never across the wait. A lock held
+        across a sleep is not protecting state, it is scheduling.
+        """
         while True:
             with self._lock:
                 if not self._running:
                     break
-                if not self._queue:
-                    time.sleep(self._interval_seconds)
-                    continue
-                task = self._queue.pop(0)
+                task = self._queue.pop(0) if self._queue else None
+            if task is None:
+                # Outside the lock. Returns True the moment `stop()` sets it,
+                # False when the interval elapses on its own.
+                if self._wake.wait(self._interval_seconds):
+                    break
+                continue
             try:
                 task.status = "running"
                 self._process_task(task)
