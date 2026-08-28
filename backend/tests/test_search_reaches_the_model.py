@@ -219,7 +219,10 @@ class _SearchPlanner(IntentPlanner):
     """Forces the search plan, so the test asserts the injection rather than
     the classifier's opinion of the question."""
 
-    def create_plan(self, prompt, priority="normal"):
+    # `**_` because this double forces one fixed plan and cares about none of
+    # the planner's inputs. Mirroring the real signature would make every
+    # future keyword a failure in a search test that has no opinion about it.
+    def create_plan(self, prompt, priority="normal", **_):
         from core.contracts import ExecutionPlan, ExecutionStep, PlanState
         import time as _time
         import uuid as _uuid

@@ -670,8 +670,41 @@ class IntentPlanner:
         """Classify a user prompt into an intent."""
         return self._router.classify(prompt)
 
-    def create_plan(self, prompt: str, priority: str = "normal") -> ExecutionPlan:
-        """Creates an execution plan, including web search when the question likely needs current info."""
+    def create_plan(
+        self,
+        prompt: str,
+        priority: str = "normal",
+        *,
+        has_images: bool = False,
+    ) -> ExecutionPlan:
+        """Creates an execution plan, including web search when the question likely needs current info.
+
+        **`has_images` is a fact and the classifier is a guess, so the fact
+        wins.** Without it this planner reads the *word* "image" and emits a
+        `vision.analyze` step — and the dispatcher's vision branch reads
+        ``input_data["image"]``, singular, while `ExecutionEngine` writes
+        ``input_data["images"]``, plural, onto the **generation** step only. Two
+        names for one thing, chosen by a keyword.
+
+        Measured 28 August 2026. A PNG attached to *"What shapes and colours
+        are in this image?"* routed correctly to a vision-capable model, then
+        answered::
+
+            [ERROR] No valid image provided for vision analysis.
+
+        The picture was three layers up, intact, on a step nobody ran.
+
+        `main.py` already had this right for *model selection* —
+        ``requires_vision = requires_vision or has_images``, an attachment
+        outranking wording — and the planner never learned the same lesson.
+
+        So when an image is genuinely attached the plan stays an ordinary
+        generation, because that path carries images to whichever model was
+        routed, passes the residency and consent gates, and is logged.
+        `vision.analyze` remains for the capability route — `/vision/analyze`,
+        screen and camera — which supplies its own singular ``image`` and does
+        not go through here.
+        """
         classification = self._router.classify(prompt)
         logger.debug("IntentPlanner: classified as %s (confidence=%.2f)", classification.intent_type, classification.confidence)
 
@@ -715,9 +748,19 @@ class IntentPlanner:
                 ),
             ]
         else:
+            capability = (
+                classification.capabilities[0]
+                if classification.capabilities
+                else "reasoning.generate"
+            )
+            # An attached image is answered by generating *with* it, never by
+            # the capability side door. See the docstring for the measured
+            # failure this prevents.
+            if has_images and capability.startswith("vision."):
+                capability = "reasoning.generate"
             plan_steps = [
                 ExecutionStep(
-                    capability_id=classification.capabilities[0] if classification.capabilities else "reasoning.generate",
+                    capability_id=capability,
                     input_data={"prompt": prompt},
                     depends_on=[],
                 ),
