@@ -22,14 +22,20 @@
  */
 import { AlertTriangle, ArrowRight, FileText, Library } from 'lucide-react';
 import type { ChatNotice } from '../../stores/chatStore';
+import type { WorkspaceId } from '@/runtime/shortcuts/registry';
 
-const DESTINATIONS: Record<string, { node: string; label: string }> = {
+const DESTINATIONS: Record<string, { node: WorkspaceId; label: string }> = {
   knowledge: { node: 'knowledge', label: 'Open Sources' },
   // A notice that names a switch the user can flip should be one click from
   // the switch. Search being off is the first case: telling someone their
   // answer is stale and leaving them to find the setting is half a disclosure.
   settings: { node: 'settings', label: 'Open Settings' },
 };
+//: Typed `WorkspaceId` rather than `string`, for the reason `LeftRail` types
+//: its own map that way: a destination that is not a real node should fail to
+//: compile rather than render a button that goes nowhere. Which is precisely
+//: what this card did — see `ChatSurface`, where `onOpen` used to be wired to
+//: a store nothing read.
 
 /** How a notice presents itself. Keyed on `kind`, which the backend sends.
  *
@@ -49,7 +55,7 @@ const DEFAULT_TONE = { Icon: AlertTriangle, color: 'var(--color-amber, #d97706)'
 
 interface Props {
   notice: ChatNotice;
-  onOpen?: (node: string) => void;
+  onOpen?: (node: WorkspaceId) => void;
 }
 
 export default function NoticeCard({ notice, onOpen }: Props) {

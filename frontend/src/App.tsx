@@ -181,7 +181,7 @@ export default function App() {
 
       {/* Chat surface — slides in from the right over the landing */}
       <AnimatePresence>
-        {chatView === 'chat' && <ChatSurface />}
+        {chatView === 'chat' && <ChatSurface navigate={navigate} />}
       </AnimatePresence>
 
       {/* Past conversations, on a lip at the left edge.
