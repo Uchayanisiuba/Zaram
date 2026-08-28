@@ -38,7 +38,7 @@ import logging
 from typing import Any, Callable, Dict, Iterator, Optional
 
 from .base_engine import LLMEngine
-from .openai_compatible_engine import OpenAICompatibleEngine
+from .openai_compatible_engine import LOCAL_SAMPLING, OpenAICompatibleEngine
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +65,10 @@ class LocalDispatchEngine(LLMEngine):
         self._resolve_endpoint = resolve_endpoint
         self._wire_name = wire_name
         self._gate = gate
+        #: The runtime's chosen model, when nothing in the request names one.
+        #: Held here rather than only on Ollama — see the `default_model`
+        #: setter for the failure that caused.
+        self._default_model: Optional[str] = getattr(ollama, "default_model", None)
         #: Engines are cached per endpoint. Constructing one is cheap, but a
         #: new object per message would discard nothing useful and make the
         #: logs harder to read.
@@ -72,10 +76,39 @@ class LocalDispatchEngine(LLMEngine):
 
     @property
     def default_model(self) -> Optional[str]:
-        return getattr(self._ollama, "default_model", None)
+        return self._default_model
 
     @default_model.setter
     def default_model(self, value: Optional[str]) -> None:
+        """Kept here as well as on Ollama, and *here* is the one that dispatches.
+
+        **This property was the same defect as the one this class exists to
+        fix, one door along.** It stored the runtime's chosen default on
+        `self._ollama` and nowhere else, so a default served by TabbyAPI was
+        recorded on the engine that cannot reach it — and `stream_response`
+        below, handed ``model=None``, never attempted resolution at all and
+        went straight to Ollama.
+
+        That is the ordinary path, not an edge case. `_resolve_model` returns
+        ``_ModelChoice(None, "zaram")`` whenever nobody named a model, which is
+        every message where the user has expressed no preference. Measured on
+        this machine, 28 August 2026, asking *"What are you, and who made
+        you?"* with no model named::
+
+            answering -> {"model": "Qwen3.8-27B-exl3-2.20bpw",
+                          "locality": "local", "provider": "lm_studio"}
+            answer    -> [ERROR] Ollama refused the request for
+                         Qwen3.8-27B-exl3-2.20bpw: model not found
+
+        The interface named one server and the dispatcher used another, which
+        is the routing-legibility claim inverted on the surface whose whole job
+        is to be trusted.
+
+        Ollama keeps its copy so that everything about the Ollama-served case
+        is unchanged, including what it falls back to when this wrapper hands
+        it ``None``.
+        """
+        self._default_model = value
         self._ollama.default_model = value  # type: ignore[attr-defined]
 
     def _engine_for(self, endpoint: str, wire: str) -> OpenAICompatibleEngine:
@@ -87,12 +120,19 @@ class LocalDispatchEngine(LLMEngine):
         # are on loopback and ship auth-free. `OpenAICompatibleEngine` permits
         # a keyless endpoint only when the address is loopback, so a cloud
         # provider still cannot reach this path.
+        # Sampling is supplied here and nowhere else. A local server has no
+        # Modelfile to carry per-model defaults the way Ollama does, so with
+        # nothing sent it generates at its own factory setting -- TabbyAPI's is
+        # unconstrained. Cloud engines are built elsewhere and deliberately do
+        # not get this: a provider's default is part of what the user chose
+        # when they connected it. See `LOCAL_SAMPLING`.
         engine = OpenAICompatibleEngine(
             base_url=endpoint,
             api_key="",
             default_model=wire,
             gate=self._gate,
             source="chat",
+            sampling=LOCAL_SAMPLING,
         )
         self._engines[endpoint] = engine
         return engine
@@ -122,28 +162,39 @@ class LocalDispatchEngine(LLMEngine):
         model: Optional[str] = None,
         images: Optional[Any] = None,
     ) -> Iterator[str]:
+        # **The default is a choice, and it has to be resolved like one.** An
+        # absent `model` does not mean "no model" -- it means the runtime's own
+        # pick, which `_resolve_model` reports as `chosen_by: "zaram"` and which
+        # the answering event already names to the user. Resolving only the
+        # explicit case sent every unspecified message to Ollama while the
+        # interface named whichever server actually held the default.
+        chosen = model or self._default_model
+
         endpoint: Optional[str] = None
-        if model:
+        if chosen:
             try:
-                endpoint = self._resolve_endpoint(model)
+                endpoint = self._resolve_endpoint(chosen)
             except Exception as exc:  # noqa: BLE001
                 # Same posture as `RoutedEngine`'s locality lookup: a failed
                 # resolution falls back rather than failing the message.
                 logger.warning(
-                    "local endpoint lookup failed for %r, using Ollama: %s", model, exc
+                    "local endpoint lookup failed for %r, using Ollama: %s", chosen, exc
                 )
                 endpoint = None
 
         if endpoint is None:
+            # `model`, not `chosen`. Ollama holds its own copy of the default
+            # and applies it itself, so forwarding the argument untouched keeps
+            # the Ollama-served path byte-for-byte what it was.
             yield from self._ollama.stream_response(prompt, system_prompt, model, images)
             return
 
-        wire = model or ""
+        wire = chosen
         try:
-            wire = self._wire_name(model) if model else ""
+            wire = self._wire_name(chosen)
         except Exception:  # noqa: BLE001
-            logger.debug("wire_name failed for %r; sending id unchanged", model)
+            logger.debug("wire_name failed for %r; sending id unchanged", chosen)
 
-        logger.info("[LocalDispatch] %s -> %s (as %r)", model, endpoint, wire)
+        logger.info("[LocalDispatch] %s -> %s (as %r)", chosen, endpoint, wire)
         engine = self._engine_for(endpoint, wire)
         yield from engine.stream_response(prompt, system_prompt, wire, images)

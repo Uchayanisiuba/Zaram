@@ -116,3 +116,74 @@ class TestKeylessIsLoopbackOnly:
                 api_key="",
                 default_model="m",
             )
+
+
+class TestTheDefaultIsAChoiceToo:
+    """The same defect, one door along, and the ordinary path rather than an
+    edge case.
+
+    `_resolve_model` returns ``_ModelChoice(None, "zaram")`` whenever nobody
+    named a model, which is every message where the user has expressed no
+    preference. `default_model` used to store the runtime's pick on
+    `self._ollama` and nowhere else, and `stream_response` resolved only when
+    `model` was truthy -- so an unspecified message went to Ollama however the
+    default was served, while the answering event named the real provider.
+
+    Measured on the machine this was written on, asking "What are you, and who
+    made you?" with no model named::
+
+        answering -> {"model": "Qwen3.8-27B-exl3-2.20bpw", "provider": "lm_studio"}
+        answer    -> [ERROR] Ollama refused the request ... model not found
+    """
+
+    def test_the_runtime_default_is_dispatched_not_only_stored(self):
+        engine, ollama = _dispatch(
+            {"lm_studio:Qwen3.8-27B-exl3-2.20bpw": "http://127.0.0.1:1234"}
+        )
+        engine.default_model = "lm_studio:Qwen3.8-27B-exl3-2.20bpw"
+
+        # No model named: exactly what the chat path passes for `chosen_by:
+        # "zaram"`.
+        list(engine.stream_response("hi", ""))
+
+        assert ollama.calls == [], "an unspecified message reached Ollama"
+
+    def test_the_default_still_reaches_ollama_when_ollama_holds_it(self):
+        """The fallback must not regress: a default Ollama serves is unresolvable
+        as a local OpenAI endpoint, and must go where it always went."""
+        engine, ollama = _dispatch({})
+        engine.default_model = "ollama:gemma4:12b"
+
+        out = "".join(engine.stream_response("hi", ""))
+
+        assert out == "from-ollama"
+        # `None`, not the default: Ollama holds its own copy and applies it
+        # itself, so the argument is forwarded untouched.
+        assert ollama.calls == [None]
+
+    def test_ollama_keeps_its_copy(self):
+        """Setting it here must still set it there, or the Ollama-served path
+        loses the default it applies itself."""
+        engine, ollama = _dispatch({})
+        engine.default_model = "ollama:gemma4:12b"
+
+        assert ollama.default_model == "ollama:gemma4:12b"
+        assert engine.default_model == "ollama:gemma4:12b"
+
+    def test_an_explicit_model_still_outranks_the_default(self):
+        engine, ollama = _dispatch(
+            {"lm_studio:Qwen3.8-27B-exl3-2.20bpw": "http://127.0.0.1:1234"}
+        )
+        engine.default_model = "ollama:gemma4:12b"
+
+        list(engine.stream_response("hi", "", "lm_studio:Qwen3.8-27B-exl3-2.20bpw"))
+
+        assert ollama.calls == []
+
+    def test_no_default_and_no_model_is_still_ollama(self):
+        engine, ollama = _dispatch({})
+
+        out = "".join(engine.stream_response("hi", ""))
+
+        assert out == "from-ollama"
+        assert ollama.calls == [None]
