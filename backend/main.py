@@ -65,14 +65,20 @@ app = FastAPI()
 # client carries `127.0.0.1` or `localhost`. That one comparison closes the
 # browser-borne half of the problem for the cost of a middleware.
 #
-# **It does not close the other half**, and that is worth stating rather than
-# implying: any *process* on this machine can still call the API, because there
-# is no authentication anywhere. Loopback is a network boundary, not an
-# identity one. `X-Zaram-Client` is sent by the interface and enforced by
-# nothing, so it is a label rather than a credential. The fix is a per-launch
-# secret minted here and handed to the frontend by the desktop host — see
-# `docs/MILESTONES.md`. Until that exists, this middleware is the honest
-# improvement rather than the complete one.
+# **The other half is `RequireApiSecret`, below.** This paragraph used to end
+# "any process on this machine can still call the API, because there is no
+# authentication anywhere ... until that exists, this middleware is the honest
+# improvement rather than the complete one" — sitting four lines above the
+# import of the module that closed it. Loopback is a network boundary, not an
+# identity one, and a per-launch secret is what makes it an identity one: the
+# desktop host mints 32 bytes at boot, hands them to this process in the spawn
+# environment and to the renderer over IPC, and `core/api_secret.py` documents
+# the development file fallback as weaker rather than glossing it.
+#
+# Left stale, a comment like that is the README defect this repository has
+# already recorded once — the product understating itself, in the one direction
+# where a reader acts on it. `X-Zaram-Client` is unchanged and is still a label
+# enforced by nothing; `X-Zaram-Auth` is the credential.
 # --------------------------------------------------------------------------- #
 from fastapi.middleware.trustedhost import TrustedHostMiddleware  # noqa: E402
 from core.api_secret import (  # noqa: E402
