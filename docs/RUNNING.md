@@ -28,6 +28,32 @@ it to the renderer over IPC. **Do not start a backend by hand as well** — port
 
 ## The traps, in the order they bite
 
+### Port 5173 is "held" and cannot be moved
+
+It is held by **your own last session**, and it looks exactly like an external
+process squatting on it. `strictPort: true` plus the backend's CORS allow-list
+naming that exact origin makes it unmovable, so the reasonable conclusion is
+that the port is the problem. It is not; the leftovers are.
+
+This cost a whole session once. The 28 August handoff recorded *"port 5173 was
+held for the whole session"* as an environmental fact, and the panel that
+session shipped went unrendered because of it. The next session found the
+holder was that session's own Vite — started 11 hours earlier — beside a
+complete orphaned Electron tree still running its own backend on 8420.
+
+**Check start times, not just ports.** `netstat` shows an eleven-hour-old
+process and a live one identically:
+
+```bash
+netstat -ano | grep LISTENING | grep -E ":(5173|8420) "
+powershell -NoProfile -Command \
+  "Get-Process electron,node -EA SilentlyContinue | Select Id,ProcessName,StartTime"
+```
+
+Anything predating the session you are in is a leftover. Stop the whole tree —
+Electron spawns the backend, so killing Electron alone can leave 8420 taken.
+**TabbyAPI on 1234 is not yours**; leave it alone.
+
 ### `npm run dev:desktop` launches the wrong tree
 
 There are **two** Electron mains in this repository:

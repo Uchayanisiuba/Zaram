@@ -268,12 +268,26 @@ requests, so CORS never runs. DNS rebinding, against `GET /memory`, `GET /egress
 and `PUT /egress/policy`. Measured 16 August: the same request returned **200 and
 the whole Spine** without a guard and **400** with one.
 
-A `Host` header check now refuses a rebound hostname —
-`tests/test_host_header_guard.py`. **It is half the fix and must not be
-described as the whole one.** There is still no authentication, so any *process*
-on this machine can read every stored fact. The remaining half is a per-launch
-secret minted at boot and handed to the frontend by the desktop host, and it
-belongs before a stranger installs this.
+A `Host` header check refuses a rebound hostname —
+`tests/test_host_header_guard.py`. That was half the fix, and **the other half
+has since shipped**: `RequireApiSecret` in `main.py` authenticates every
+request against a per-launch secret, minted at boot by the desktop host
+(`electron/main.js`), handed to the backend in the spawn environment and to the
+renderer over IPC. Nothing is exempt, `/health` included, because it describes
+the user's setup. `core/api_secret.py`, `tests/test_api_requires_the_credential.py`.
+Measured 28 August: `GET /health` with no credential returns **401**.
+
+This paragraph read *"there is still no authentication"* for eleven days after
+that landed, and the 28 August handoff sent a session to build it a second
+time. **A status claim in this file is the one thing here that goes stale**;
+`docs/MILESTONES.md` is the authority on status and this file on the rules, and
+where the two disagree the code settles it.
+
+Two things it still does **not** do, and they are the honest remainder. The
+development file fallback under `data_dir()` is a secret at rest, readable by
+anything that can read the directory — weaker than the packaged path and
+documented as such in the module rather than glossed. And `core/pairing.py`,
+the credential a second *device* needs, still has no caller.
 
 **`X-Zaram-Client` is a label, not a credential.** It is sent by the interface
 and enforced nowhere. Never reason as though it were a check.

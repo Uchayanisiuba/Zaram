@@ -15,13 +15,353 @@ accurate — it is the first thing anyone reads.
 
 *The latest work is first. Earlier sessions follow below.*
 
+### The history panel, seen — and a routing defect it uncovered — 28 August
+
+**The panel works.** Rendered in a real browser against a real backend, with a
+scratch `ZARAM_DATA_DIR` so nothing touched the maintainer's Spine. Verified by
+watching it, not by reading a test: the lip carries a real count (7), it pins
+on click, groups under **Today**, lists by recency, **resume restores the whole
+transcript** with its model attribution line, and **delete removes exactly one
+conversation** (7 → 6) while the rest stand.
+
+The port that blocked this last session was held by that session's own leftover
+Vite and Electron — eleven hours old. Nothing was wrong with the config.
+
+> **A live routing defect, found by running it and not on any list.**
+>
+> The first real message came back as
+>
+>     [ERROR] Ollama refused the request for Qwen3.8-27B-exl3-2.20bpw:
+>     model 'Qwen3.8-27B-exl3-2.20bpw' not found
+>
+> which is the *exact* error last session's `LocalDispatchEngine` was written to
+> stop. Isolated with two requests differing only in the name:
+>
+> | `model` sent | Result |
+> |---|---|
+> | `lm_studio:Qwen3.8-27B-exl3-2.20bpw` | TabbyAPI, generated |
+> | `Qwen3.8-27B-exl3-2.20bpw` | **Ollama**, `model not found` |
+>
+> Same model. The second is `display_name` — what TabbyAPI itself reports and
+> what `wire_name` converts *to*. `provider_of`, `locality_of`, `_is_remote_model`
+> and `wire_name` all resolve a model through `_catalogued`, which normalises a
+> bare provider-native name. **`_local_endpoint_for` alone did a
+> `split(":", 1)`** and could not. One question, two implementations, and they
+> disagreed.
+>
+> The user-facing half is worse than the failure: the `answering` event said
+> `provider: lm_studio, locality: local` **while the dispatcher posted to
+> Ollama**. The product naming one server and using another is the routing
+> legibility claim inverted, on the surface whose whole job is to be trusted.
+>
+> **Why it was green.** `test_local_dispatch.py` passes
+> `resolve_endpoint=lambda mid: endpoints.get(mid)` — it tests the dispatcher
+> and *stubs the resolver*, and the resolver was the bug.
+> `_local_endpoint_for`, the function actually wired in at
+> `models_runtime.py:143`, had **zero tests**. The regression suite for a fix
+> mocked out the one part of it that was wrong.
+>
+> Fixed by asking the catalogue first, exactly as its four siblings do; the
+> prefix split stays underneath it for an id the catalogue does not hold. New
+> `tests/test_local_endpoint_resolution.py` — nine cases, and the two that
+> matter were **confirmed to fail against the unfixed code** before being kept.
+> Verified against the running product: the same request now answers `pong`
+> from TabbyAPI, ~2.2 s to first token.
+>
+> **And there was a second door, which is the one that was actually biting.**
+> The fix above only helps a request that *names* a model.
+> `_resolve_model` returns `_ModelChoice(None, "zaram")` whenever nobody named
+> one — **every ordinary message** — and `LocalDispatchEngine` resolved only
+> when `model` was truthy, so an unspecified message went to Ollama however the
+> default was served. Underneath, the `default_model` setter stored the
+> runtime's pick on `self._ollama` **and nowhere else**: the default was
+> recorded on the one engine that could not reach it.
+>
+> Measured after the first fix, asking *"What are you, and who made you?"*
+> with no model named:
+>
+>     answering -> {"model": "Qwen3.8-27B-exl3-2.20bpw", "provider": "lm_studio"}
+>     answer    -> [ERROR] Ollama refused the request ... model not found
+>
+> The interface named one server and the dispatcher used another — again. The
+> engine now holds its own `_default_model` and resolves `model or default`;
+> Ollama keeps its copy so the Ollama-served path is untouched. Five cases in
+> `test_local_dispatch.py::TestTheDefaultIsAChoiceToo`, one confirmed failing
+> without the fix. Verified live: the same question now answers from TabbyAPI.
+>
+> **Two doors, one assumption.** Worth stating plainly because a third is
+> possible: anywhere that treats "no model named" or "cannot place this name"
+> as *therefore Ollama* is the same bug waiting.
+
+> ### Replies opened with a blank gap, on every message
+>
+> Reported as *"talking weird"*. The first content delta after `</think>`
+> arrives as `"\n\nI’m"` — the chat template's own newlines — so every reply
+> began with two blank lines. Invisible in a raw stream, and on screen it
+> reads as the answer starting late.
+>
+> `OpenAICompatibleEngine._tokens` now trims the leading edge once, and only
+> once: a blank line *inside* an answer is a paragraph break and stripping
+> those would run the prose together. Thinking is left verbatim, because it is
+> shown in a panel of its own and reshaping it would misrepresent what the
+> model did.
+>
+> **The `reasoning_content` re-tagging this sits inside had no tests at all** —
+> it shipped last session and nothing asserted that a provider splitting the
+> monologue into its own field was read rather than dropped in silence.
+> `tests/test_reasoning_content_retag.py`, eighteen cases; the eight covering
+> re-tagging pin behaviour that already worked, and the four covering the trim
+> were confirmed failing without it.
+
+> ### Two decisions the maintainer took, 28 August
+>
+> Both came out of the "talking weird" report and both were put to them rather
+> than assumed.
+>
+> **Sending no sampling parameters is not neutral.** The OpenAI-compatible body
+> carried `model`, `messages` and `stream` and nothing else, so the server's own
+> factory default applied — and TabbyAPI's is temperature 1.0 with top-p 1.0,
+> unconstrained sampling from the raw distribution. Ollama does not have this
+> problem: a Modelfile ships per-model settings and Ollama applies them. **So
+> the two local engines generated differently, nobody chose that, and nothing
+> anywhere said so** — visible as wandering answers and headings nobody asked
+> for, on a 27B quantised to 2.20bpw.
+>
+> `LOCAL_SAMPLING` is temperature 0.6 / top-p 0.95, Qwen3's own published
+> recommendation for thinking mode and conservative enough for any model. It is
+> a **default, not a setting** — never surfaced in the interface, which
+> `CLAUDE.md` forbids — and it is supplied by `LocalDispatchEngine` alone.
+> **Cloud engines deliberately do not get it**: a provider's default is part of
+> what the user chose when they connected it. `temperature` and `top_p` only,
+> because both are standard OpenAI fields; `top_k` is a local dialect extension
+> and one dialect-specific key would make the constant unsafe to reuse.
+>
+> **The maker is now a supplied fact: "Zaram was made by Uche Anisiuba."**
+> The preamble forbade crediting the training lab and named no alternative,
+> and `_HONESTY` says "where you were not told, say you do not know" — so
+> asked who made it, Zaram answered *"I wasn't given a maker for Zaram
+> specifically, so I don't know."* The product did not know what it was on the
+> question people ask first.
+>
+> The second half is the more instructive one. Having no answer, the model
+> **narrated its own instruction** to fill the gap: *"I also shouldn't treat
+> the lab or company that trained the underlying answering model as the maker
+> of me."* That is the recital failure `identity.py` already records happening
+> once on `qwen2.5-coder:1.5b`, returning as **paraphrase rather than
+> quotation**, which is exactly why the line against quoting did not catch it.
+> The line now says "quoted, listed, paraphrased or repeated back — not even to
+> explain why you cannot say something".
+>
+> **The durable lesson:** a rule that removes a wrong answer without supplying
+> the right one does not leave silence. It leaves the model improvising, and
+> what it reaches for is the prompt itself. `CLAUDE.md` already says identity
+> is a fact the system supplies; the maker was a fact nobody had supplied.
+
+> ### Two things the interface was saying that were not true
+>
+> Both reported by the maintainer from ordinary use, both fixed and **verified
+> by driving the running product**, not by tests alone.
+>
+> **"Open Settings →" did nothing.** `NoticeCard` called `openWorkspace`, which
+> was `useConversationStore.setActiveNode` — and `activeNode` has no reader
+> outside `src/legacy/`, which is not mounted. Two dead routes: the notice
+> action and the citation panel's "open Activity". `ChatSurface` now takes
+> `navigate` as a **required prop** from `App`. Not a store, because `App`'s
+> `navigate` also closes the chat, closes the command palette and sets the
+> conversation context — a second implementation would drift, and drifting
+> navigation is how this broke. Required rather than optional so `tsc` fails at
+> the call site instead of a button failing silently.
+>
+> **`check:reachability` cannot see this class of defect**, and the reason is
+> worth keeping: the export *was* used and the call *did* go somewhere. It had
+> no effect. No import graph tells that apart from working code.
+>
+> The four new tests in `NoticeCard.test.tsx` say in their own docstring that
+> **all of them would have passed on the day the bug was reported** — the card
+> was never the broken part. They pin which node each action resolves to; the
+> wiring is guarded by the required prop, which is a compile error rather than
+> a test, and that is the better guard when the defect was a call that went
+> nowhere rather than a wrong value.
+>
+> **The "web search is off" warning fired on a question Zaram had already
+> answered from a supplied fact.** Asked *"What is today's date?"*, Zaram
+> answered **"Today's date is 28 August 2026"** — correct, from
+> `identity._today_line` — and rendered the amber *"this answer comes only from
+> what the model already knows"* card underneath it. The reply and the warning
+> about the reply contradicted each other on screen, and the warning was the
+> wrong one: the answer came from Zaram, not from the weights. Two patterns
+> matched — `_TIME_RE` on the bare word "today", `_FACTUAL_RE` on "what is the".
+>
+> `_ANSWERED_BY_SUPPLIED_DATE` exempts it, checked before every other pattern.
+> Measured after: the date question answers with no notice, *"What happened in
+> the news today?"* still warns.
+>
+> **Three constraints keep it from becoming another keyword list.** Anchored to
+> the whole question — `_TIME_RE` matching "today" anywhere is how the bug
+> happened, and an unanchored exemption is the same defect with the sign
+> reversed, which is the worse direction because a missing warning is quieter
+> than a false one. Scoped to the *date*, since `_today_line` supplies nothing
+> finer, so "what time is it" is deliberately not exempt. And **coupled to the
+> fact by test**, so if `identity.py` ever stops supplying the date the
+> exemption fails rather than silently suppressing a warning that has become
+> true. No general "answerable from supplied facts" mechanism was built: there
+> is one supplied fact, and building the abstraction from one example is what
+> the pack-system rule forbids.
+>
+> ### Local vision works, and three defects were stacked in front of it
+>
+> **Measured end to end, 28 August 2026.** A PNG of a red circle and a blue
+> rectangle, attached to a chat message, asked *"What shapes and colours are in
+> this image?"*:
+>
+> > "The image contains a red circle and a blue rectangle. The two shapes are a
+> > circle and a rectangle."
+>
+> `gemma4:26b-a4b-it-q4_K_M`, `chosen_by: "task"`, **165.8 s to first token**
+> because it spills — and the `oversized` warning fired, which is the designed
+> behaviour rather than a fault. Slow, honest, working.
+>
+> Three defects, each hiding the next, and each a different shape of the same
+> mistake — **a guess overriding a fact**.
+>
+> **1. Residency answered a capability question.** `_auto_candidates` drops
+> anything that positively does not fit VRAM, *before* the vision gate runs. So
+> on a machine whose only sighted model is oversized the field emptied for the
+> wrong reason and the user was told **"No model on this machine can read
+> images."** `gemma4:26b-a4b` is catalogued `supports_vision: True`,
+> `fits_resident: False` — 18.2 GB against a 12 GB card. It sees perfectly
+> well; it is *slow*, which is a different sentence, and `CLAUDE.md` settles
+> which wins: *"VRAM limits route a task; they do not reject a vertical."*
+> A required capability now relaxes residency before answering `None`. Consent
+> filters are re-applied, never skipped.
+>
+> **2. The planner is built from words alone.** `create_plan(prompt)` matched
+> the *word* "image" and emitted a `vision.analyze` step. It had no idea an
+> image was actually attached — while `main.py` had already got this right for
+> model selection (`requires_vision or has_images`, an attachment outranking
+> wording) and the planner never learned the same lesson.
+>
+> **3. Two names for one thing.** The dispatcher's vision branch reads
+> `input_data["image"]` — singular. `ExecutionEngine` writes
+> `input_data["images"]` — plural, and onto the **generation** step only. So
+> the picture sat three layers up, intact, on a step nobody ran, and the reply
+> was *"[ERROR] No valid image provided for vision analysis."*
+>
+> `create_plan` now takes `has_images`, and an attached image keeps the plan an
+> ordinary generation — which carries images to whichever model was routed,
+> passes the residency and consent gates, and is logged. `vision.analyze` stays
+> for the capability route, `/vision/analyze`, screen and camera, which supply
+> their own singular `image` and do not go through the planner.
+>
+> **The residency gate is inert in the entire test suite**, and that is why
+> defect 1 lived only on the machine where it mattered. `vram_known` is `False`
+> in a bare pytest process, so `model_fits_resident` returns `None` for
+> everything and the filter never fires — every pre-existing test in
+> `test_vision_gate.py` passed without it running once. The new cases stub
+> `resident_budget_bytes` explicitly and carry a `test_the_stub_actually_gates`
+> case so they cannot pass vacuously. The regression case was confirmed failing
+> against the unfixed code.
+>
+> **Qwen can see too, and Zaram says it cannot.** The EXL3 quant reports
+> `architectures: ['Qwen3_5ForConditionalGeneration']`, `vision_config`,
+> `image_token_id`, and **987 vision tensors** with `language_model_only:
+> False`. Zaram catalogues it `supports_vision: False` because
+> `OpenAICompatibleAdapter._to_model` never sets the flag — the same discovery
+> gap as queue item 7, on the local side. Not fixed; TabbyAPI advertises no
+> modality field, so the fix needs a decision rather than a line.
+>
+> ### The 1800 s lock bug had a sibling with 3600 s, and it was still live
+>
+> **`BackgroundReindexer._run` slept `_interval_seconds` — 3600 — while
+> holding `_lock`.** `stop()` takes that lock to clear `_running` and
+> `enqueue()` takes it to append a task, so both blocked for **up to an hour**.
+> The `join(timeout=5)` in `stop()` never mattered; `stop()` was already
+> blocked before reaching it.
+>
+> This is the defect the 27 August session found in
+> `ContinuousLearningPipeline` and fixed there — 1800 s, 9,000.04 s in one
+> test, 97% of a 2h35m run. **The sibling class was never looked at**, and its
+> interval is twice as long.
+>
+> **Why it survived: it is a race, not a certainty.** The test starts the
+> worker and stops it immediately, so whichever thread reaches the lock first
+> decides. It passes most runs. Measured 28 August: one full suite at 4:18,
+> then the next blocked at 51% with the pytest process flat on CPU over a
+> 20-second sample and one socket open going nowhere — which is how it got
+> misread as a network problem for twenty minutes before `--collect-only`
+> named the test.
+>
+> Fixed the same way: an interruptible `threading.Event` instead of `sleep`,
+> and the lock held only to read state. `TestStoppingIsPrompt` gains two cases
+> — `stop()` and `enqueue()` both bounded at 5 s. Against the unfixed code they
+> **time out on every run** (exit 124, three consecutive tries at 25 s);
+> with the fix the whole 65-test file runs in **0.87 s**.
+>
+> **The lesson is about the first fix, not the second.** A defect found in one
+> class is a defect to look for in every class with the same shape, and nobody
+> grepped. `enqueue()` is also the half that was never only a slow test: a task
+> submitted while the worker idled blocked the caller for up to an hour **in
+> the running product**.
+>
+> Separately and still open: the suite makes **live outbound internet calls** —
+> five simultaneous HTTPS connections to Wikimedia, Cloudflare, Yahoo and
+> CloudFront observed from the pytest process. Not the cause of this hang, but
+> it makes the suite's duration depend on the network, and
+> `test_egress_chokepoint.py` cannot see it because that scans source rather
+> than runtime.
+
+**Roadmap 1.4 was already done, and the handoff was wrong to list it.** The
+per-launch API secret ships: `electron/main.js` mints 32 bytes at boot,
+`RequireApiSecret` enforces on every route including `/health`,
+`core/api_secret.py` documents the dev file fallback as the weaker path.
+`GET /health` with no credential returns **401**, measured. A comment block in
+`main.py` still said *"there is no authentication anywhere ... until that
+exists"* four lines above the import that provides it, and `CLAUDE.md`'s
+custody section said the same — both corrected. This is the README defect this
+repository already recorded once: **the product understating itself**, in the
+one direction where a reader acts on it and rebuilds what exists.
+
+**Suite: 2781 passing, 0 failing, 16 skipped.** Frontend **302 passing** (35
+files). Started the session at 2716 backend / 298 frontend, so **65 new backend
+tests and 4 new frontend tests** — every one written against a defect that was
+reproduced first, and for each fix the decisive cases were confirmed to **fail
+against the unfixed code** before being kept.
+
+**Say the condition, because it moved a lot.** 3 m 25 s and 4 m 16 s with
+Ollama up and idle; **6 m 46 s** on one run with `gemma4:26b-a4b` resident from
+the vision test and contending for the card. Same suite, same code, +98%
+between the extremes.
+
+One of those 39 replaced an assertion rather than adding coverage.
+`test_identity.py` pinned the string `"never quoted, listed or repeated back"`
+verbatim, so **strengthening that rule to cover paraphrase turned the suite
+red** — a test that fails when its own contract is reinforced is pinning the
+wording, and it would have argued against the fix. It now asserts the contract.
+
+**Vision was re-read rather than carried forward, and the job is not what the
+handoff said.** The modality gate exists — `select_model_for_task`, live
+callers at `main.py:372` and `682`, `tests/test_vision_gate.py` — and the
+ordinary path already carries images on whichever model was routed. What
+remains is `OllamaEngine.stream_vision_response`: a hardcoded, uninstalled
+`qwen2.5vl:7b`, reachable through `POST /vision/analyze`, and by its own
+docstring bypassing **routing and the egress gate**. A second entrance to
+inference that the log cannot see is rule 3, and it is a deletion question
+rather than a gating one. Detail in `docs/NEXT-SESSION.md`.
+
+That is the second stale handoff claim caught in one session, and the pattern
+is the same both times: the note described work as unbuilt, and the code had
+it. **Re-read before starting; the base rate here is high enough that it is
+not optional.**
+
+---
+
 ### Conversation history, context budget, transcript projection — 28 August
 
 **Suite: 2716 passing, 0 failing, 194 s with Ollama up.** Frontend 298 passing.
 Everything committed and pushed on `Zaram-V0.1` through `08788f6`.
 
-Roadmap 0.2, 1.1, 1.2, 1.3 and U.3 done. **1.4 — the per-launch API secret —
-is the one Phase 1 item left, and it gates exposing the Spine over MCP.**
+Roadmap 0.2, 1.1, 1.2, 1.3 and U.3 done. ~~1.4 — the per-launch API secret — is
+the one Phase 1 item left~~ — **wrong, see above: 1.4 had already shipped.**
 
 * **Conversation history exists.** Before this, no table in any of the seven
   databases held a message; closing the window lost the conversation.
