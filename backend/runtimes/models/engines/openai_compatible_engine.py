@@ -82,7 +82,7 @@ import os
 import urllib.error
 from urllib.parse import urlparse
 from collections.abc import Iterator
-from typing import Any
+from typing import Any, Dict, Optional
 
 from core.egress import EgressDenied, get_gate
 from core.reasoning import CLOSE_TAG, OPEN_TAG
@@ -102,6 +102,34 @@ DEFAULT_TIMEOUT = 120.0
 #: and the provider layer already registers OpenRouter from the same variable —
 #: two places reading one key is fine; two places inventing two URLs is not.
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+
+
+#: Generation settings for a **local** OpenAI-compatible server.
+#:
+#: **Sending nothing is not neutral, and that is the whole point.** This body
+#: carried `model`, `messages` and `stream` and no sampling at all, so the
+#: server's own factory default applied — and TabbyAPI's is temperature 1.0
+#: with top-p 1.0, which is unconstrained sampling from the raw distribution.
+#: The Ollama path does not have this problem because a Modelfile ships
+#: per-model settings and Ollama applies them. So the two local engines
+#: generated differently, nobody chose that, and nothing anywhere said so.
+#:
+#: Reported as *"talking weird"*, 28 August 2026, against Qwen3.8-27B at
+#: **2.20bpw** — a quantisation aggressive enough that loose sampling shows up
+#: as wandering answers and headings nobody asked for. The quantisation is the
+#: user's choice and not this module's business; the missing dial was ours.
+#:
+#: The values are Qwen3's own published recommendation for thinking mode and
+#: are conservative enough to suit a general assistant on any model. They are a
+#: **default, not a setting** — `CLAUDE.md` forbids sampling controls in the
+#: primary path, and this never appears in the interface.
+#:
+#: **`temperature` and `top_p` only.** Both are standard OpenAI fields that
+#: every compatible server accepts. `top_k` is a local extension: TabbyAPI and
+#: vLLM take it, OpenAI itself rejects unknown fields, and one dialect-specific
+#: key would make this constant unsafe to reuse. The gain from the two standard
+#: ones is most of the benefit at none of the risk.
+LOCAL_SAMPLING: Dict[str, Any] = {"temperature": 0.6, "top_p": 0.95}
 
 
 def from_environment(**kwargs: Any) -> "OpenAICompatibleEngine | None":
@@ -193,6 +221,7 @@ class OpenAICompatibleEngine(LLMEngine):
         gate: Any = None,
         source: str = "chat",
         timeout: float = DEFAULT_TIMEOUT,
+        sampling: Optional[Dict[str, Any]] = None,
     ) -> None:
         # A keyless endpoint is allowed **only on loopback**, and the test is
         # the address rather than the absence of a key.
@@ -221,6 +250,11 @@ class OpenAICompatibleEngine(LLMEngine):
         self._gate = gate
         self._source = source
         self._timeout = timeout
+        #: Extra generation parameters merged into every request body, or
+        #: ``None`` for "send none and let the server decide". See
+        #: `LOCAL_SAMPLING` for why the local path supplies these and the
+        #: cloud path deliberately does not.
+        self._sampling = dict(sampling) if sampling else None
 
     @staticmethod
     def _normalise(base_url: str) -> str:
@@ -245,11 +279,14 @@ class OpenAICompatibleEngine(LLMEngine):
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": prompt})
-        return {
+        body: Dict[str, Any] = {
             "model": model or self.default_model,
             "messages": messages,
             "stream": True,
         }
+        if self._sampling:
+            body.update(self._sampling)
+        return body
 
     def stream_response(
         self,
@@ -355,6 +392,9 @@ class OpenAICompatibleEngine(LLMEngine):
         three.
         """
         in_reasoning = False
+        #: Whether any answer text has been emitted yet. Gates the one-off
+        #: leading-whitespace trim below; see the comment there.
+        answer_started = False
         for raw in lines:
             if not raw:
                 continue
@@ -404,6 +444,26 @@ class OpenAICompatibleEngine(LLMEngine):
                     if in_reasoning:
                         in_reasoning = False
                         yield CLOSE_TAG
+
+                    # **The answer never begins with blank lines.** A reasoning
+                    # model's chat template puts a newline or two after the
+                    # closing think tag, so the first content delta arrives as
+                    # ``"\n\nI’m"`` — measured against TabbyAPI serving
+                    # Qwen3.8-27B, 28 August 2026, on every reply. That gap is
+                    # invisible in a raw stream and reads on screen as the
+                    # answer starting late or the model having stalled.
+                    #
+                    # Only the leading edge, and only once: a blank line
+                    # *inside* an answer is the author's paragraph break and
+                    # stripping those would run the prose together. Nothing is
+                    # yielded until there is something to yield, so a chunk
+                    # that was entirely whitespace does not emit an empty one.
+                    if not answer_started:
+                        text = text.lstrip()
+                        if not text:
+                            continue
+                        answer_started = True
+
                     yield text
 
         # A stream that ends mid-thought still has to close its tag, or the
