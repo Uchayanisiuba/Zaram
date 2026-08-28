@@ -28,7 +28,6 @@ import FirstRunPanel from '@/components/firstrun/FirstRunPanel';
 import { useReadiness, setupToOffer } from '@/hooks/useReadiness';
 import { useTypedText } from '@/hooks/useTypedText';
 import { stripCitationMarkers } from '@/lib/markers';
-import { useConversationStore } from '@/stores/conversationStore';
 import { useChatStore } from '@/stores/chatStore';
 import { useSourceStore } from '@/stores/sourceStore';
 import { useOrbStore } from '@/stores';
@@ -56,6 +55,7 @@ import ResizeHandle from '@/components/common/ResizeHandle';
 import { useIsReducedMotion } from '@/hooks/useReducedMotion';
 import { useViewport } from '@/hooks/useViewport';
 import type { ChatSource } from '@/services/chatClient';
+import type { WorkspaceId } from '@/runtime/shortcuts/registry';
 
 /** Strip internal citation markers ([M1], [S2]) from displayed text.
  *
@@ -64,7 +64,32 @@ import type { ChatSource } from '@/services/chatClient';
  *  raw text, markers and all. One copy, so the next caller cannot miss it. */
 const stripMarkers = stripCitationMarkers;
 
-export default function ChatSurface() {
+interface Props {
+  /** Go to a workspace. The shell's own `navigate`, passed in rather than
+   *  reimplemented.
+   *
+   *  **This was wired to a store nothing read.** `openWorkspace` was
+   *  `useConversationStore.setActiveNode`, and `activeNode` has no reader
+   *  outside `src/legacy/`, which is not mounted. So every notice's
+   *  "Open Settings →" set a field and returned, and the panel's "open
+   *  Activity" did the same — two dead routes that looked live. Reported by
+   *  the maintainer, 28 August 2026.
+   *
+   *  Required rather than optional, and passed rather than pulled from a
+   *  store, for one reason each. Required: a surface that renders notices
+   *  offering to take you somewhere must have somewhere to take you, and
+   *  TypeScript should say so at the call site rather than the button failing
+   *  silently. Passed: `App`'s `navigate` also closes the chat, closes the
+   *  command palette and sets the conversation's context — a second
+   *  implementation in a store would drift from it, and drifting navigation is
+   *  how this broke in the first place.
+   *
+   *  `npm run check:reachability` cannot catch the original defect: the export
+   *  *was* used. It just led nowhere. */
+  navigate: (id: WorkspaceId) => void;
+}
+
+export default function ChatSurface({ navigate }: Props) {
   const reduced = useIsReducedMotion();
 
   const messages = useChatStore((s) => s.messages);
@@ -74,9 +99,6 @@ export default function ChatSurface() {
   const streamingArtifacts = useChatStore((s) => s.streamingArtifacts);
   const streamingNotices = useChatStore((s) => s.streamingNotices);
   const streamingAnsweredBy = useChatStore((s) => s.streamingAnsweredBy);
-  // A notice names where to go about it; the route has to actually work, so
-  // it drives the same node selection the orbit uses.
-  const openWorkspace = useConversationStore((s) => s.setActiveNode);
   const isStreaming = useChatStore((s) => s.isStreaming);
   const connectionError = useChatStore((s) => s.connectionError);
   const send = useChatStore((s) => s.send);
@@ -612,7 +634,7 @@ export default function ChatSurface() {
                     <ArtifactCard key={artifact.id} artifact={artifact} />
                   ))}
                   {msg.notices?.map((notice, i) => (
-                    <NoticeCard key={i} notice={notice} onOpen={openWorkspace} />
+                    <NoticeCard key={i} notice={notice} onOpen={navigate} />
                   ))}
                   {msg.error && (
                     <p className="mt-1 text-[11px]" style={{ color: '#fca5a5' }}>
@@ -677,7 +699,7 @@ export default function ChatSurface() {
                     <ArtifactCard key={artifact.id} artifact={artifact} />
                   ))}
                   {streamingNotices.map((notice, i) => (
-                    <NoticeCard key={i} notice={notice} onOpen={openWorkspace} />
+                    <NoticeCard key={i} notice={notice} onOpen={navigate} />
                   ))}
                 </div>
               )}
@@ -851,7 +873,7 @@ export default function ChatSurface() {
                 setPanel(null);
               }}
               onOpenActivity={() => {
-                openWorkspace('activity');
+                navigate('activity');
                 setPanel(null);
               }}
             />
