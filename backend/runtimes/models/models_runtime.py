@@ -263,19 +263,46 @@ class ModelsRuntime(Runtime):
 
         None means "not one of those", which the dispatcher reads as "use
         Ollama". It is returned for every failure too: no provider layer, an id
-        with no provider prefix, an unregistered provider, a lookup that
-        raised. Ollama is the safe fallback because an id this cannot place is
-        far more often one Ollama serves than one it does not.
+        the catalogue cannot place that carries no provider prefix either, an
+        unregistered provider, a lookup that raised. Ollama is the safe
+        fallback because an id this cannot place is far more often one Ollama
+        serves than one it does not.
+
+        **The catalogue answers first, and that is the fix rather than a
+        tidying.** `provider_of`, `locality_of` and `wire_name` all resolve a
+        model through `_catalogued`, which normalises a bare provider-native
+        name; this one asked a `split(":", 1)` instead. So one question had two
+        implementations that disagreed, and the disagreement was reachable:
+        `Qwen3.8-27B-exl3-2.20bpw` — the name TabbyAPI itself reports, and the
+        one the catalogue stores as `display_name` — was announced to the user
+        as `provider: lm_studio` by the answering event and posted to **Ollama**
+        by the dispatcher, which answered `model not found`. Measured on this
+        machine, 28 August 2026: the same request with the full catalogue id
+        `lm_studio:Qwen3.8-27B-exl3-2.20bpw` reached TabbyAPI and generated.
+
+        This is the same class as one score answering two questions, arriving
+        from the other side: two answers to one question. The prefix split
+        stays *below* the catalogue, for an id the catalogue does not hold that
+        still names its provider — it was never wrong, only incomplete.
 
         Note what is *not* used to decide: the model's name. `RoutedEngine`
         already rejects name matching as "a string comparison against a list
         nobody maintains", and the same objection applies here with more force
-        -- a user can pull a model called anything at all.
+        -- a user can pull a model called anything at all. Reading
+        `display_name` off the catalogue record is the opposite of that: it is
+        what discovery recorded, not what the string looks like.
         """
         manager = self._provider_manager
-        if manager is None or not model_id or ":" not in model_id:
+        if manager is None or not model_id:
             return None
-        provider_id = model_id.split(":", 1)[0]
+
+        info = self._catalogued(model_id)
+        provider_id = getattr(info, "provider", None) if info is not None else None
+        if not provider_id and ":" in model_id:
+            provider_id = model_id.split(":", 1)[0]
+        if not provider_id:
+            return None
+
         try:
             provider = manager.registry.get_model_provider(provider_id)
         except Exception:
