@@ -1,7 +1,7 @@
 # Next session — start here
 
-A prompt and a state snapshot. Rewritten 27 August 2026 at the end of the
-EXL3, local-routing and Knowledge-removal session.
+A prompt and a state snapshot. Rewritten 28 August 2026 at the end of the
+conversation-history, context-budget and transcript-projection session.
 
 **This file is a pointer, not a second handoff.** `docs/MILESTONES.md` Current
 state is the handoff and stays the authority on status; `CLAUDE.md` stays the
@@ -16,242 +16,236 @@ Paste this into a new session:
 
 > Read `CLAUDE.md`, then `docs/MILESTONES.md` Current state, then this file.
 > For anything touching voice read `docs/SPEECH.md`; before starting the app
-> read `docs/RUNNING.md`, and note that **launching now means three processes,
-> not two** — Vite, Electron, and TabbyAPI on port 1234.
+> read `docs/RUNNING.md`, and note that launching means three processes, not
+> two — Vite, Electron, and TabbyAPI on port 1234.
 >
-> The machine has changed since the last handoff. Ollama holds only
-> `gemma4:26b-a4b-it-q4_K_M` and `bge-m3`; the main chat model is
-> **Qwen3.8-27B EXL3 at 2.20bpw served by TabbyAPI**, which Zaram discovers on
-> loopback as "LM Studio". Nothing from this session is committed — read
-> "Uncommitted work" below before touching those files.
+> **Everything from the last session is committed and pushed** (`Zaram-V0.1`,
+> through `08788f6`). The suite is 2716 passing, 0 failing, 194 s with Ollama
+> up. Frontend 298 passing.
 >
-> The first job is the vision path. It is broken in a way that is half fixed
-> and half not, and the unfixed half needs a decision rather than a patch.
+> Two jobs are open and they are independent. Pick by what you can verify:
+>
+> 1. **See the history panel work.** It shipped without ever being rendered,
+>    because port 5173 was held for the whole session. If you can get a dev
+>    server, that is the cheapest real thing to do first — and this project has
+>    already paid once for shipping UI that passed its tests and did not
+>    visibly work (the VRM gaze).
+> 2. **The per-launch API secret** — roadmap 1.4. It is the hard gate on
+>    exposing the Spine over MCP, and `CLAUDE.md` says it belongs before a
+>    stranger installs this.
+>
+> The vision decision from the previous handoff is **still open** and is
+> described below. It was not touched last session.
 
 ---
 
-## What happened this session
+## What happened
 
-**Qwen3.8-27B now runs locally at 2.20bpw through TabbyAPI**, and getting
-there found three real defects in Zaram rather than in the setup.
+Started from one pasted error and went a long way from it. Seven commits.
 
-### The routing defect, and why it mattered more than the symptom
+### The error, and the two defects under it
 
-`RoutedEngine` splits the world into local and cloud and hands everything
-local to `OllamaEngine`. That was true while Ollama was the only local server
-and stopped being true when the catalogue gained `lm_studio` — an
-OpenAI-compatible server on `127.0.0.1:1234`. A model served there was
-discovered, catalogued, shown in the picker with a correct
-`NEVER_LEAVES_DEVICE` policy, chosen, and then posted to Ollama:
+    [ERROR] Ollama could not answer with gemma4:26b-a4b-it-q4_K_M:
+    HTTPConnectionPool(host='127.0.0.1', port=11434):
+    Read timed out. (read timeout=120)
 
-    Ollama refused the request for Qwen3.8-27B-exl3-2.20bpw:
-    model 'Qwen3.8-27B-exl3-2.20bpw' not found
+`stream_response` used one number for two different waits: the silence before
+the first token, and the gap between tokens. Ollama does not send response
+headers until the first token, so that budget covered the whole model load.
 
-Underneath it, `OpenAICompatibleEngine` refused an empty API key with *"A
-cloud model needs your own API key"* — written on the assumption that
-OpenAI-compatible implies cloud. LM Studio and TabbyAPI both ship auth-free on
-loopback, so **the `lm_studio` catalogue entry could never have executed a
-single request.** Discoverable, never runnable: the fifteen-unreachable-
-subsystems shape, in the routing layer.
-
-Fixed by `engines/local_dispatch_engine.py` (dispatch by **provider id**,
-never by model name) and a loopback-only exemption to the key requirement. The
-exemption is gated on the address, not on the key being blank, so a cloud
-provider still cannot slip through — `tests/test_local_dispatch.py` asserts
-that `https://localhost.attacker.example` is refused.
-
-### Two existing tests were asserting the wrong thing
-
-`test_engine_routing.py` had two tests reading `isinstance(engine,
-OllamaEngine)` for the no-key case. That pins **which local server answers**
-when the contract they exist to protect is *no engine capable of leaving the
-device is built without a key*. Rewritten to assert that. Worth remembering as
-a pattern: the test was green for the whole time it was wrong, and only a
-change it should not have blocked revealed it.
-
-### Reasoning was being rendered as the answer
-
-This model's chat template ends the prompt with a bare `<think>\n`, so
-generation begins *inside* the block and the model only ever emits the closing
-tag. `ReasoningSplitter` waits for an opening tag that never comes and files
-the monologue as the reply — which also meant Kokoro read it aloud, the exact
-failure that module's docstring says it exists to prevent.
-
-Two fixes were needed and either alone looks like it did nothing: TabbyAPI's
-`reasoning: true` splits it server-side (`start_in_reasoning: auto` detects the
-unclosed prefill), and `OpenAICompatibleEngine` now reads `reasoning_content`
-as well as `content`, re-wrapping it in the tags the splitter already
-understands. That second half also fixes DeepSeek and every other provider
-using the same OpenAI extension.
-
----
-
-## The first job: vision
-
-**Half fixed today, half needs a decision.**
-
-The symptom was:
-
-    Dispatcher: CRITICAL ERROR for vision.analyze:
-      AttributeError: 'RoutedEngine' object has no attribute 'stream_vision_response'
-
-*Fixed:* both wrappers now forward the method. `RoutedEngine` never had it —
-a pre-existing hole that only appeared once a cloud key was configured — and
-`LocalDispatchEngine` inherited it, which briefly widened the bug, because a
-keyless setup previously got a bare `OllamaEngine` that had the method.
-
-*Not fixed, and this is the decision:* `OllamaEngine.stream_vision_response`
-hardcodes `"model": "qwen2.5vl:7b"`, which **is not installed on this
-machine**, and ignores whatever model the user chose. So vision now reaches
-the engine and fails at Ollama instead of at the attribute lookup.
-
-The right fix is the modality gate `CLAUDE.md` already describes and it is not
-a one-liner:
-
-* `ModelInfo.supports_vision` exists and Ollama discovery populates it from
-  `/api/show`. **It is a 0..1 ranking score, not a gate** — `capabilities.py`
-  maps `ModelCategory.IMAGE` to `Capability.VISION: 1.0`, the same value a
-  model that *reads* images gets, so "can see" and "can draw" are one number.
-* Modality is a **precondition**, never a ranking. It filters the candidate
-  set; similarity then orders what survives. This codebase has paid three
-  times for merging membership with ordering.
-* `gemma4:26b-a4b` is vision-capable and installed. Selecting it for a vision
-  request is the concrete outcome to aim for.
-
-Do not paper over it by pulling `qwen2.5vl:7b` — that leaves the hardcode in
-place and makes a future user's vision request depend on a model they never
-chose.
-
----
-
-## Uncommitted work
-
-Nothing from this session is committed. Thirteen modified files and five new
-ones, and they are four independent changes that should land as four commits:
-
-**1. Preview fix.** `frontend/src/components/ArtifactPreview.tsx`.
-`WorkWorkspace`'s detail sidebar carries `backdrop-filter: blur(24px)`, which
-makes it the containing block for `position: fixed` descendants and then clips
-them with its own `overflow: hidden`. The preview panel resolved `right:
-panelWidth` — a fraction of the *viewport* — inside a 520px box. Measured: the
-same element reported width 816 against the viewport and 202 inside the aside,
-and above a viewport of ~1857px it collapses to zero. Fixed with a portal to
-`document.body`.
-
-**2. Model picker and dropdown theming.**
-`SettingsWorkspace.tsx`, `groupModelsByLocality.test.ts`, `index.css`. The
-picker groups by locality with headings that name the consequence ("nothing is
-sent" / "leaves this device"). **Four localities, not two** — a `local, else
-cloud` split would file a hybrid model under a guarantee nobody checked, and
-the test asserts nothing is ever dropped. The CSS fixes every `<select>` in
-the app, not just this one: seven of them across five files had no `option`
-styling at all, so their popups drew near-white text on the platform's white
-surface. `color-scheme: dark` is what makes the popup *chrome* match.
-
-**3. Cloud providers.** `backend/providers/catalogue.py`. NVIDIA NIM,
-SambaNova and Cerebras. Every endpoint was probed before being written down —
-GitHub Models returned **410 Gone** and is deliberately absent rather than
-listed with a dead URL. Cerebras is labelled a trial, not a free tier,
-because it requires a verified payment method.
-
-**4. Local routing + reasoning + Knowledge removal.** The backend files, plus
-`local_dispatch_engine.py`, `test_local_dispatch.py`,
-`test_ingest_remove_file.py`. Described above and below.
-
-`docs/MODEL-ONBOARDING.md` is new and independent of all four — nine ideas read
-out of LM Studio's own on-disk state, each mapped to a Zaram rule that already
-exists but has nowhere to live. None of it is implemented.
-
----
-
-## Knowledge: per-file removal
-
-Rule 4 says the user can delete any stored thing. Until today the only unit of
-removal was a **whole source**, and every dropped or pasted file shares one
-uploads source — so getting rid of one image meant discarding everything ever
-pasted. Reported by the maintainer with a PNG they could not remove.
-
-Added: `records.remove_outcome`, `service.withdraw_file`,
-`DELETE /ingest/outcomes/{outcome_id}`, `removeFile` in `ingestClient`, and a
-Remove control on both outcome sections in `KnowledgeWorkspace`.
-
-Two decisions worth keeping:
-
-* **The source row survives its last file.** An empty uploads directory is
-  still where the next drop goes; deleting the row would make the next paste
-  re-create it under a fresh id, detaching it from any domain pointing at the
-  old one.
-* **Only Zaram's own copies are unlinked.** A scanned folder holds the user's
-  originals. `_delete_own_copies` checks containment *after* resolving, so a
-  symlink inside uploads pointing at a real document is refused.
-
----
-
-## The machine, as it now stands
+Measured on this machine, `gemma4:26b-a4b-it-q4_K_M` — 18.2 GB on disk against
+a 12 GB card, so 9.3 GB lands on the GPU and the rest in system RAM:
 
 | | |
 |---|---|
-| Ollama | `gemma4:26b-a4b-it-q4_K_M` (17 GB), `bge-m3` (1.2 GB) |
-| TabbyAPI on 1234 | `Qwen3.8-27B-exl3-2.20bpw`, 9.61 GiB, 10.2/12.3 GB VRAM |
-| Removed | `qwen3.8:27b`, `qwen2.5-coder:14b`, `gemma4:12b`, `bge-reranker-v2-m3` |
-| TabbyAPI env | `C:\Users\user\tabbyapi-env` — torch 2.10.0+cu128, exllamav3 1.4.4, triton-windows 3.7.1 |
+| cold load, empty prompt, nothing generated | **109 s** |
+| first token after that, five-word prompt | **28.8 s** |
+| cold load to first chunk, through the engine | **172.7 s** |
+| headers arrive | with the first token, not before it |
 
-**Measured, same ~2,500-token prompt, RTX 3060 12 GB / i7-7700:**
+The budget is now chosen by whether the weights are resident, asked of
+`/api/ps`, rather than by whether an image is attached. The vision path is a
+cold start too — of the projector — which is why it kept needing a constant of
+its own.
 
-| | Time to first token | Generation |
-|---|---|---|
-| `qwen3.8:27b` (removed) | 19.5 s | 1.96 tok/s |
-| Qwen3.8 EXL3 2.20bpw | **0.72 s** | 8.0 tok/s |
-| `gemma4:26b-a4b` (MoE) | 4.5 s | **23.75 tok/s** |
+Second defect, same story: `warm_local_model` called `warm(self._selected_model)`
+and that is `None` whenever `select_default_model` declines everything
+installed, which on this machine is the ordinary outcome. `warm` fell back to a
+hardcoded `gemma3:latest` that is not installed here, failed at `logger.info`,
+and returned False — so "warming is once per session" was quietly never
+happening.
 
-The MoE result is the one worth remembering: **two 18 GB models spilling by
-the same ~50%, and the MoE generates 9.4× faster**, because only ~4B params
-are read per token so the exiled experts sit untouched. Prior advice that
-spill would be punishing on a 2017 CPU was too pessimistic — the CPU barely
-matters when the spilled weights are not being read.
+### What shipped
+
+| Roadmap | What |
+|---|---|
+| 0.2 | Settings says a model is too large **before** it is chosen |
+| 1.1 | Conversation history, end to end |
+| 1.2 | Neutral transcript, per-provider projection, session seeding |
+| 1.3 | Context budget measured from `/api/ps` |
+| U.3 | UI-SPEC orb table corrected to match the code |
+
+Plus two bug fixes that were not on any list — see below.
+
+**Conversation history** is the foundation item. Before it, no table in any of
+the seven databases held a message: closing the window lost the conversation.
+`conversations.db` implements rule 7d's *"session state and long-term memory
+are separate stores"* — Zaram had the second and not the first.
+
+Decisions worth not re-litigating:
+
+* Deleting a conversation deletes the transcript and **nothing else**, and the
+  API response says so. Facts are correctable in Memory in their own right.
+* Two roles, no `system`. The system prompt is recomposed per request from
+  identity, character settings and the date; a stored one becomes false the
+  moment the user renames the assistant.
+* The title is the first thing typed — never asked, never model-generated.
+* Restoring a conversation does **not** restore its citations. A citation
+  claims *this* answer used *that* fact, and the fact may since have been
+  corrected under rule 4.
+
+**Context budget.** Ollama serves a default `num_ctx` whatever a model
+advertises — `gemma4:12b` reports 262,144 and loads with 4,096. Unknown returns
+`None`, never a guess; `context_length: 0` counts as unreadable rather than a
+budget of nothing. Documents get a *share* of the input budget, calibrated so
+that at Ollama's default it yields 1,843 tokens against the old flat 1,800 —
+behaviour unchanged, and a 16k model now gets a proportionally larger share.
+
+**Transcript projection.** The transcript is canonical; a provider's format is
+a projection. Whole turns only — half a message attributed to a person is a
+fabrication, and the model answers the truncated question. The kept transcript
+never begins with a reply.
+
+`seed_session_turns` closes the gap that makes visible: `_session_turns` dies
+with the process, so a resumed conversation used to arrive with nothing in
+front of it and *"write that up as a proposal"* resolved against an empty
+buffer.
+
+### Two live defects found by accident
+
+Both surfaced while chasing what I had written off as environment noise. Both
+had been hiding behind a label.
+
+**`ConversationManager` raced its own error path.** The worker put the error
+event, then set an `error_occurred` flag, then put `llm_done`. The consumer
+yielded an event and *then* checked the flag — so when the worker got ahead,
+the loop broke out with the error still unread. The user got a partial reply
+and no error. A failure that arrives as silence is worse than a failure,
+because a truncated answer reads as a complete one.
+
+**`ContinuousLearningPipeline` slept 1800 s holding the lock `stop()` needs.**
+So `stop()` could hang for up to half an hour in the product. In the suite:
+
+    9000.04s call  TestContinuousLearning::test_start_stop
+
+Four lines of test. Exactly five intervals — the rounds it took `stop()` to win
+the race — and **97% of a 2h35m suite run**. It had been read as "the suite is
+slow". Same file after the fix: 0.60 s. Full suite: 2h35m → 3m14s.
+
+The old test asserted the flag and not the *time*, so it passed throughout.
 
 ---
 
-## Smaller things left open
+## Still open: the vision decision
 
-* **Gemma 26B timed out at 120 s** on a cold first request
-  (`OllamaEngine.stream_response failed: ReadTimeout`). Spill makes the first
-  load slow; the timeout may simply be too tight for a spilling MoE.
-* **The ambient surface 401s** against the per-launch secret. A second
-  BrowserWindow polls `/health` and `/egress/pending` once a second and never
-  authenticates, so Ctrl+Shift+Space likely shows "engine not running". The
-  IPC secret handoff was never traced.
-* **TabbyAPI shows as "LM Studio (on this machine)"**, because the catalogue's
-  only local entry is the generic adapter pinned to 1234. Policy is correct;
-  the name is not. Adding a generic "local server" entry would fix it.
-* **`ReasoningPanel` uses `--color-text-muted`**, ~4.0:1 contrast. Deliberate
-  quietness, possibly too faint. The dropdown headings were raised to
-  `--color-text-muted-light` (9.34:1) for the same reason and it may want the
-  same treatment.
-* **Two Electron trees still unreconciled** (`electron/main.js` versus
-  `desktop/`), and **two virtualenvs** (`backend/venv` versus `.venv`, the
-  latter CPU-only torch). Both are triage decisions `docs/RUNNING.md` has been
-  flagging for over a week.
+**Carried forward unchanged from the previous handoff. Not touched.**
+
+`OllamaEngine.stream_vision_response` hardcodes `"model": "qwen2.5vl:7b"`,
+which is not installed here, and ignores whatever model the user chose. Vision
+reaches the engine and fails at Ollama.
+
+The right fix is the modality gate `CLAUDE.md` describes, and it is not a
+one-liner:
+
+* `ModelInfo.supports_vision` exists and Ollama discovery populates it from
+  `/api/show`. It is a 0..1 ranking score, not a gate — `capabilities.py` maps
+  `ModelCategory.IMAGE` to `Capability.VISION: 1.0`, the same value a model
+  that *reads* images gets, so "can see" and "can draw" are one number.
+* Modality is a **precondition**, never a ranking. It filters the candidate
+  set; similarity orders what survives.
+* `gemma4:26b-a4b` is vision-capable and installed. Selecting it for a vision
+  request is the outcome to aim for.
+* The `orchestrator/` package has **zero importers** and its `scoring.py`
+  records a missing required capability as a *warning* and ranks the candidate
+  anyway. Do not build the gate on it. Delete it instead.
+
+Do not paper over it by pulling `qwen2.5vl:7b`.
 
 ---
 
-## Working notes worth carrying
+## Not verified
 
-**Downloading from HuggingFace on a slow link took five attempts, and four
-failures were self-inflicted.** Recorded because the diagnosis order was the
-useful part: `huggingface_hub` hung at 0/22 twice with no error; `curl -C -`
-managed 0.02 MB/s; a *bounded* range got 1.41 MB/s; headers showed a clean 206
-and `X-Cache: Miss from cloudfront`, so the cap was **per-connection**, not
-per-account and not the local link. 24 parallel ranges reached 1.7 MB/s.
+**The history panel has never been rendered.** Port 5173 was held by another
+process for the entire session, and `vite.config.js` sets `strictPort: true`
+while the backend's CORS allow-list names that exact origin — so it could not
+be moved. The panel compiles, `conversationsClient` has 12 tests, and the proxy
+hole that would have broken it is fixed. None of that is a screenshot.
 
-The self-inflicted ones: a hardcoded byte count rounded off a GiB display
-(2–4 MB too large, so the last chunk asked past EOF — and had it "succeeded"
-the preallocated file would have been the wrong length, failing at model-load
-time instead of download time); a resume marker wiped by a misfiring guard;
-an orphaned `curl` retry loop that ran for an hour holding a file lock and
-stealing bandwidth *while throughput was being measured around it*; and an
-unretried API call.
+Found while investigating it: **`/conversations` was missing from both proxy
+lists**, Vite's and Electron's. A missing prefix does not 404 — both servers
+fall through to the SPA handler and answer `index.html` with a 200, so the
+client hands HTML to `response.json()` and reports a syntax error naming
+neither the route nor the proxy. `npm run check:proxy` now reports 20 prefixes
+covered, development and packaged.
 
-**The lesson that generalises: never type a number the source will tell you.**
-The final downloader takes the file list and every byte count from the API and
-verifies each file against it afterwards.
+---
+
+## Process notes, all of them mine
+
+Three instrument misreads in one session, the same shape each time — inferring
+from a proxy signal when a direct measurement was one call away.
+
+1. **GPU utilisation read as Ollama activity.** TabbyAPI is running and holds
+   VRAM. `nvidia-smi` is not an Ollama activity monitor on a machine with two
+   inference servers. `/api/ps` is.
+2. **`TaskStop` believed to have killed processes that were still running.**
+   Two orphaned full-suite runs kept executing and competing while I started
+   more. Check the process list with command lines; do not assume.
+3. **A suite believed hung because I piped its output through `tail`.** Nothing
+   appears until completion. Write test output straight to a file.
+
+And one that cost a live `NameError`: an edit script asserting on two
+replacements aborted on the second, silently discarding the first. **Do not use
+assert-then-write edit scripts for multi-part changes** — the failure mode is
+silent partial application.
+
+The thing that actually found the 2h35m problem was `pytest --durations`. It
+should have been the first move, not the fifth.
+
+---
+
+## Roadmap
+
+Published as an artifact — 25 tasks in dependency order, with the measurement
+or CLAUDE.md rule each rests on:
+
+<https://claude.ai/code/artifact/b5c802a5-0701-43c1-aff1-5f9835ffbc65>
+
+Phase 0 (day one: free-tier first run, import ChatGPT/Claude history) is the
+gate everything else waits behind — a new user with no GPU and no key currently
+gets nothing. Phase 1 is now four-fifths done; **1.4, the per-launch API
+secret, is the remaining one** and it gates 4.1.
+
+One entry in that artifact was withdrawn as my error: I claimed
+`docs/KNOWN-FAILURES.md` was stale. It is not — its first line reads
+"Current: 0 failing", and the 27 failures appear in the past tense as the
+reason the file exists.
+
+---
+
+## Machine state
+
+Unchanged from the last handoff, and worth restating because it shapes what is
+testable here:
+
+* Ollama holds `gemma4:26b-a4b-it-q4_K_M` (18.2 GB) and `bge-m3`. The chat
+  model **does not fit** — the resident budget on a 12 GB card is ~9.1 GB — so
+  it runs half on the processor and every reply is slow. This is now said in
+  Settings before it is chosen.
+* `select_default_model` therefore returns `None`, which is correct and is the
+  ordinary path on this machine. Any code assuming a default model exists will
+  be exercised here.
+* TabbyAPI serves Qwen3.8-27B EXL3 on `127.0.0.1:1234`, discovered as
+  "LM Studio" and routed by `LocalDispatchEngine`.
+* **Say which environment you measured in.** The suite is ~194 s with Ollama
+  up. With it down it is far longer *and executes different code*.

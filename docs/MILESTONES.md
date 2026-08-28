@@ -11,9 +11,41 @@ accurate — it is the first thing anyone reads.
 
 ---
 
-## Current state — 27 August 2026
+## Current state — 28 August 2026
 
-*The latest work is first. Sessions dated 26 August follow below.*
+*The latest work is first. Earlier sessions follow below.*
+
+### Conversation history, context budget, transcript projection — 28 August
+
+**Suite: 2716 passing, 0 failing, 194 s with Ollama up.** Frontend 298 passing.
+Everything committed and pushed on `Zaram-V0.1` through `08788f6`.
+
+Roadmap 0.2, 1.1, 1.2, 1.3 and U.3 done. **1.4 — the per-launch API secret —
+is the one Phase 1 item left, and it gates exposing the Spine over MCP.**
+
+* **Conversation history exists.** Before this, no table in any of the seven
+  databases held a message; closing the window lost the conversation.
+  `conversations.db` implements rule 7d's *"session state and long-term memory
+  are separate stores"* — the half that was never built. Deleting a transcript
+  does not touch Spine facts, and the response says so.
+* **The context window is measured**, from `/api/ps`, not assumed. Ollama
+  serves a default `num_ctx` whatever a model advertises — `gemma4:12b` reports
+  262,144 and loads with 4,096. Unknown returns `None`, never a guess.
+* **One transcript, projected per provider**, fitted to the answering model's
+  real window. Whole turns only. A resumed conversation now gets its recent
+  turns back, which `_session_turns` could not do because it dies with the
+  process.
+* **Two live defects fixed, neither on any list.** An engine failure could
+  reach the user as a truncated reply with no error, because
+  `ConversationManager` raced its own error flag against the queue carrying it.
+  And `ContinuousLearningPipeline.stop()` could hang for half an hour, because
+  `_run` slept 1800 s holding the lock `stop()` needs — that one was 97% of a
+  2h35m suite run and had been read as "the suite is slow".
+* **Not verified:** the conversation history panel has never been rendered.
+  Port 5173 was held for the whole session and `strictPort` plus the backend's
+  CORS allow-list make it unmovable. See `docs/NEXT-SESSION.md`.
+* **Still open, carried forward:** the vision modality gate. Untouched this
+  session.
 
 > ### A second local server, and three defects it exposed
 >
