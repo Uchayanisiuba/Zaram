@@ -625,3 +625,54 @@ class TestStoppingIsPrompt:
             assert pipeline._thread is first
         finally:
             pipeline.stop()
+
+    def test_the_reindexer_stops_promptly_too(self):
+        """The sibling the first fix never reached.
+
+        `BackgroundReindexer._run` had the identical defect with **twice the
+        interval** — 3600 s — and it survived because it is a race rather than
+        a certainty: the test starts the worker and stops it immediately, so
+        whichever thread reaches the lock first decides. It therefore passed
+        most runs and hung the whole suite on the others, which is exactly how
+        "the suite is slow" stayed a plausible explanation.
+
+        Measured 28 August 2026: two consecutive full runs, 4:18 and then
+        blocked at 51% with the pytest process flat on CPU.
+        """
+        import time as _time
+
+        reindexer = BackgroundReindexer(KnowledgeRuntime())
+        reindexer.start()
+
+        started = _time.monotonic()
+        reindexer.stop()
+        elapsed = _time.monotonic() - started
+
+        assert reindexer._running is False
+        assert elapsed < 5, (
+            f"stop() took {elapsed:.1f}s — it is waiting out the interval "
+            "instead of waking the worker"
+        )
+
+    def test_enqueue_is_not_blocked_by_an_idle_worker(self):
+        """The half that is not a test problem.
+
+        `enqueue` takes the same lock, so a task submitted while the worker sat
+        in its sleep waited for the sleep to end — up to an hour, in the running
+        product rather than in a test.
+        """
+        import time as _time
+
+        reindexer = BackgroundReindexer(KnowledgeRuntime())
+        reindexer.start()
+        try:
+            started = _time.monotonic()
+            reindexer.enqueue("refresh_embeddings", [])
+            elapsed = _time.monotonic() - started
+
+            assert elapsed < 5, (
+                f"enqueue() took {elapsed:.1f}s — the worker is holding the "
+                "lock across its wait"
+            )
+        finally:
+            reindexer.stop()
