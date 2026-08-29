@@ -210,9 +210,10 @@ strong { font-weight: 600; }
 }
 .hero-shot img { box-shadow: 0 40px 90px -30px rgba(0,0,0,.9); }
 .hero-caption {
-  margin: 14px auto 0; max-width: 620px; text-align: right;
+  margin: 18px auto 0; max-width: 1000px; text-align: right;
   font-size: .84rem; color: var(--text-3);
 }
+@media (max-width: 860px) { .hero-caption { text-align: center; } }
 
 /* ---------- claim strip ---------- */
 
@@ -318,7 +319,31 @@ kbd {
 }
 .panel-foot b { color: var(--text-2); font-weight: 500; }
 
-.hero .panel { max-width: 620px; margin: 0 auto; }
+/* Orb beside the answer it produced — the composition the original screenshot
+   had, rebuilt from the half of it that carries no stale example data. */
+.hero-showcase {
+  display: grid;
+  grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr);
+  gap: 36px;
+  align-items: center;
+  max-width: 1000px;
+  margin: 0 auto;
+}
+.orb-shot img {
+  border: 0; background: transparent; border-radius: 50%;
+  filter: drop-shadow(0 30px 70px rgba(139,127,212,.28));
+}
+.orb-shot figcaption {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  margin-top: 10px; max-width: 34ch; font-size: .84rem; color: var(--accent);
+}
+.orb-shot figcaption .dot { flex: 0 0 auto; }
+.hero .panel { margin: 0; max-width: none; }
+
+@media (max-width: 860px) {
+  .hero-showcase { grid-template-columns: 1fr; gap: 24px; }
+  .orb-shot { max-width: 320px; margin: 0 auto; }
+}
 .panel.gate { max-width: 640px; margin: 34px auto 0; }
 
 /* ---------- who it's for ---------- */
