@@ -690,6 +690,82 @@ async def _vision_refusal(model: str | None) -> str:
     return ""
 
 
+async def _unplaceable_model_refusal(choice: _ModelChoice) -> str:
+    """A model the user named that matches nothing here, or `""`.
+
+    **The third door the 28 August handoff predicted.** Two had already been
+    found — anywhere that reads *"no model named"* or *"cannot place this
+    name"* as **therefore Ollama** is the same bug — and this is where the
+    third one was: an explicitly typed name that the catalogue cannot place
+    falls through `LocalDispatchEngine` to Ollama, which answers
+
+        [ERROR] Ollama refused the request for anthropic/claude-sonnet-4.5:
+        model 'anthropic/claude-sonnet-4.5' not found
+
+    Measured on this machine, 28 August. The *safety* is right and stays
+    exactly as it is — `_is_remote_model` returns `False` for a name it cannot
+    resolve, so nothing was sent anywhere and no document leaked. The message
+    is the problem: it names a server the user never mentioned, for a model
+    they did not associate with it, and tells them nothing about what to do.
+
+    Ollama's fallback is correct for a *bare* id, and that is not weakened
+    here. `_local_endpoint_for`'s own reasoning holds — "an id this cannot
+    place is far more often one Ollama serves than one it does not" — and it
+    holds because those ids arrive from a picker built out of the catalogue.
+    It stops holding the moment a person can type any string they like, which
+    is what the Advanced model field makes possible.
+
+    **Every uncertainty resolves to `""`.** Same discipline as
+    `_vision_refusal`, and for the same reason: no provider layer, a discovery
+    that has not run, an empty catalogue, a lookup that raised — all proceed
+    exactly as before. A refusal built on our own missing bookkeeping would
+    report "that model does not exist" about a machine we simply had not
+    scanned yet, and it would fire hardest on the first message after a boot.
+
+    The one case that refuses is the one Zaram positively knows: models were
+    found, the user named one, and it is none of them.
+    """
+    # Only what a person chose. `"task"` and `"zaram"` are the provider layer's
+    # own picks, drawn from the catalogue, so they cannot fail to be in it —
+    # and if they ever did, refusing would blame the user for our selection.
+    if choice.chosen_by not in {"request", "settings"}:
+        return ""
+    named = (choice.model or "").strip()
+    if not named:
+        return ""
+
+    manager = getattr(getattr(kernel, "providers_runtime", None), "manager", None)
+    if manager is None:
+        return ""
+
+    try:
+        await manager.ensure_scanned()
+        known = manager.catalog.all()
+        if not known:
+            # Discovery has not run or found nothing. Saying "that model does
+            # not exist" from an empty shelf is a claim about the user's
+            # machine built on our own missing data.
+            return ""
+
+        # Matched the way the rest of the chat path matches — on
+        # `display_name`, which is what this path speaks — and on the catalogue
+        # id too, because the Advanced field lets someone paste either and
+        # being right about only one spelling is the defect this guards.
+        if any(m.display_name == named or m.id == named for m in known):
+            return ""
+
+        return (
+            f"Zaram cannot place \u201c{named}\u201d. It is not one of the models "
+            "found on this machine or offered by a provider you have "
+            "connected, so there is nowhere to send it. Check the spelling, or "
+            "connect the provider it belongs to in Settings."
+        )
+    except Exception:
+        # A lookup failure must not become a refusal. See the docstring.
+        logging.getLogger(__name__).debug("Model placement check failed")
+    return ""
+
+
 def _answering_event(choice: _ModelChoice):
     """The event that tells the user which model is about to speak.
 
@@ -1182,6 +1258,18 @@ async def chat(request: ChatRequest):
             return StreamingResponse(
                 _stream_error(refusal), media_type="text/event-stream"
             )
+
+    # A name nobody can place is refused here rather than dispatched, because
+    # the dispatcher's fallback would answer for Ollama about a model the user
+    # never associated with it. Checked after the vision refusal deliberately:
+    # "this model cannot see" is the more specific and more useful sentence
+    # when both are true, and a user who chose a real model that cannot read
+    # pictures should be told that rather than nothing.
+    placement = await _unplaceable_model_refusal(choice)
+    if placement:
+        return StreamingResponse(
+            _stream_error(placement), media_type="text/event-stream"
+        )
 
     # Web search compensates for what the *answering* model does not know, so
     # whether to search depends on which model that is — and this is the first

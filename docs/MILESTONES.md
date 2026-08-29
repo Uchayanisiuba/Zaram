@@ -15,6 +15,52 @@ accurate — it is the first thing anyone reads.
 
 *The latest work is first. Earlier sessions follow below.*
 
+### The third door, and it was the one that had been measured — 29 August
+
+The 28 August handoff predicted it in one sentence: *"anywhere that treats 'no
+model named' or 'cannot place this name' as **therefore Ollama** is the same
+bug waiting."* Two had been found. This was the third, and unlike the others it
+had already been observed — asking for `anthropic/claude-sonnet-4.5` produced
+
+    [ERROR] Ollama refused the request for anthropic/claude-sonnet-4.5:
+    model 'anthropic/claude-sonnet-4.5' not found
+
+**The safety was never the problem and has not changed.** Nothing was sent
+anywhere: `_is_remote_model` answers `False` for a name it cannot resolve,
+which is the fail-safe direction, so the request went to a local server and
+stopped. What was wrong was the *sentence*. It names a server the user never
+mentioned, for a model they did not associate with it, and offers no idea what
+to do — and it mattered more the moment queue item 6's type-in field made "any
+string at all" something a person can enter.
+
+`_unplaceable_model_refusal` refuses before dispatch. Two disciplines shape it,
+both borrowed rather than invented:
+
+**Every uncertainty resolves to no refusal.** No provider layer, a discovery
+that has not run, an empty catalogue, a lookup that raised — all proceed
+exactly as before. `_vision_refusal` states the reason in its own docstring and
+learned it the hard way: that function's first version fired on the first
+request after a boot, before anything had scanned, on a machine with two
+vision-capable models installed. A guard built on our own missing bookkeeping
+reports "that model does not exist" about a machine nobody had looked at.
+
+**It blames nobody for Zaram's own pick.** Only `request` and `settings` are
+checked. `task` and `zaram` are the provider layer's selections, drawn from the
+catalogue, so they cannot fail to be in it — and if one ever did, refusing
+would report our bookkeeping error as the user's mistake.
+
+**Ollama's fallback for a bare id is untouched.** `_local_endpoint_for`'s own
+reasoning still holds — *"an id this cannot place is far more often one Ollama
+serves than one it does not"* — because those ids arrive from a picker built
+out of the catalogue. It stops holding only where a person can type anything,
+which is the case this now covers.
+
+`tests/test_a_model_nobody_can_place.py`, 14 cases. **Two of them post to
+`/chat`**, because the rest could all pass against a function nothing calls —
+this directory already holds `test_chat_endpoint_writes_a_transcript.py`, which
+exists because sixteen tests of the persistence helpers missed a live
+`NameError` in the endpoint that used them.
+
 ### The consent has a way to be given — 29 August
 
 **Shipping the refusal without the remedy was half a feature, and the half
