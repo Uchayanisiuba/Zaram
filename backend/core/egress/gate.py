@@ -55,7 +55,7 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from .log import EgressLog
-from .policy import EgressPolicy, Mode
+from .policy import DataClass, EgressPolicy, Mode
 
 #: Hostnames that never leave the machine. ``localhost`` and the reserved
 #: ``.localhost`` TLD are loopback by RFC 6761.
@@ -112,6 +112,15 @@ class EgressRequest:
     url: str
     body: str | None
     source: str
+    #: What kind of thing is leaving — rule 7j's second dimension.
+    #:
+    #: **Not a `source` label, and the difference is the one `SearchReadGrant`
+    #: already had to learn.** `source` is what a call site says about itself
+    #: and is enforced nowhere; this is what the *body* is, and it decides
+    #: which permission applies. The distinction survives only as long as
+    #: nobody widens a grant by renaming their caller, so the classes are a
+    #: closed enum and the sensitive ones can never be reached by default.
+    data_class: DataClass = DataClass.PROMPT
     #: Why the confirm hook said no, when it did not say no on the user's behalf.
     #:
     #: The log's default wording for a refusal is "you chose not to send this",
@@ -228,6 +237,7 @@ class EgressGate:
 
     def check(self, url: str, *, method: str = "GET", body: str | None = None,
               source: str = "unknown",
+              data_class: DataClass = DataClass.PROMPT,
               grant: "SearchReadGrant | None" = None) -> EgressRequest | None:
         """Decide and log, without performing the request.
 
@@ -251,8 +261,8 @@ class EgressGate:
 
         host = (urllib.parse.urlparse(url).hostname or "").lower()
         req = EgressRequest(host=host, method=method.upper(), url=url,
-                            body=body, source=source)
-        decision = self._policy.decide(host)
+                            body=body, source=source, data_class=data_class)
+        decision = self._policy.decide(host, data_class)
 
         # A page a search has already returned, permitted by the grant the
         # caller is holding rather than by anything it says about itself.
@@ -273,9 +283,16 @@ class EgressGate:
         # grant entirely, and written the other way round it would have
         # disabled the kill switch. A test caught it; the parentheses are the
         # whole difference.
+        # `data_class` is checked here as well as inside `permits`, and the
+        # redundancy is deliberate: a grant exists to cover *reading a page a
+        # search returned*, which is a `GET` with no body and therefore always
+        # `PROMPT`. Should a future call site ever construct one around
+        # something richer, this refuses rather than inheriting an exemption
+        # written for a different kind of cargo.
         if (
             grant is not None
             and decision.mode is Mode.DENY
+            and req.data_class is DataClass.PROMPT
             and not self._policy.kill_switch()
             and not self._policy.has_rule(host)
             and grant.permits(req)
@@ -362,6 +379,7 @@ class EgressGate:
         headers: dict[str, str] | None = None,
         timeout: float = 10.0,
         source: str = "unknown",
+        data_class: DataClass = DataClass.PROMPT,
     ) -> bytes:
         """Check, log, and send. Returns the response body.
 
@@ -373,7 +391,9 @@ class EgressGate:
 
         # Same reasoning as `stream_lines`: the confirmation may have rewritten
         # the body, and what is sent has to be what was logged and agreed to.
-        approved = self.check(url, method=method, body=body_text, source=source)
+        approved = self.check(
+            url, method=method, body=body_text, source=source, data_class=data_class
+        )
         edited = approved is not None and approved.body != body_text
 
         if edited:
@@ -410,6 +430,7 @@ class EgressGate:
         headers: dict[str, str] | None = None,
         timeout: float = 120.0,
         source: str = "unknown",
+        data_class: DataClass = DataClass.PROMPT,
     ) -> Iterator[bytes]:
         """Check, log, and stream the response one line at a time.
 
@@ -446,7 +467,9 @@ class EgressGate:
         # before the check would send bytes that differ from the ones logged
         # and approved. That gap is worse than not asking, because it looks
         # like consent.
-        approved = self.check(url, method=method, body=body, source=source)
+        approved = self.check(
+            url, method=method, body=body, source=source, data_class=data_class
+        )
         final_body = approved.body if approved is not None else body
         body_bytes = final_body.encode("utf-8") if final_body is not None else None
 

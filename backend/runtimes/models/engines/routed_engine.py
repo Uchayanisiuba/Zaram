@@ -75,21 +75,6 @@ class RoutedEngine(LLMEngine):
     def default_model(self, value: Optional[str]) -> None:
         self._local.default_model = value  # type: ignore[attr-defined]
 
-    def stream_vision_response(self, prompt: str, images, system_prompt: str = ""):
-        """Vision goes local. Forwarded so the wrapper does not swallow it.
-
-        `Dispatcher` looks this up by attribute, so a wrapper that does not
-        name it fails with `AttributeError` rather than falling back -- which
-        is what "Can you see images" produced once a cloud key was configured.
-
-        Local rather than cloud, deliberately: the cloud engine has no vision
-        path today, and rule 5's default-deny means an image -- far more
-        personal than a chat message, and its own consent class under rule 7j
-        -- must not start leaving the device because a wrapper picked the
-        nearest available method.
-        """
-        return self._local.stream_vision_response(prompt, images, system_prompt)
-
     def stream_response(
         self,
         prompt: str,
@@ -115,25 +100,28 @@ class RoutedEngine(LLMEngine):
             )
             return
 
-        # **An image does not go to a cloud provider yet, and that is a
-        # consent decision rather than a missing feature.** Rule 7j grants
-        # consent per destination *and data class*: a chat message is a couple
-        # of kilobytes and a photograph is a few megabytes of something far
-        # more personal, so connecting a provider for text is not consent to
-        # send it a picture. Nothing asks that question yet, so nothing may
-        # assume the answer.
+        # **An image is its own consent class, and the answer now lives where
+        # every other egress decision does.** Rule 7j grants consent per
+        # destination *and data class*: a chat message is a couple of kilobytes
+        # and a photograph is a few megabytes of something far more personal,
+        # so connecting a provider for text is not consent to send it a
+        # picture.
         #
-        # Refused rather than stripped, because an answer built from the prompt
-        # with the image quietly removed is confident prose about a picture
-        # nobody looked at — the same failure the local gate exists to stop,
-        # arriving by the cloud route.
-        if images:
-            yield ERROR_PREFIX + (
-                f"{model} is a cloud model, and Zaram does not send images off "
-                "this device yet. Choose a local model that can see, or remove "
-                "the picture."
-            )
-            return
-
-        logger.info("routing to cloud engine for model=%s", model)
-        yield from self._cloud.stream_response(prompt, system_prompt, model)
+        # This used to refuse every cloud-bound image outright, with a comment
+        # saying nothing asked that question yet. `EgressPolicy` could only
+        # speak about hosts, so there was nowhere to put the answer, and a
+        # blanket refusal was the only honest position available. Since 29
+        # August 2026 the policy is keyed on `(host, DataClass)`, so the
+        # question is asked properly: `OpenAICompatibleEngine` reads the class
+        # off the body it is about to send, and the gate refuses, asks, or
+        # allows — and logs whichever it did.
+        #
+        # **The check is not repeated here, and that is the point.** This
+        # module deliberately holds no policy and no gate — it takes an
+        # `is_remote` callable precisely so the chat path acquires no
+        # dependency on the provider layer. A second copy of the rule here
+        # would be a second implementation of one question, which is the defect
+        # `_local_endpoint_for` shipped: four call sites resolving a model one
+        # way and a fifth resolving it another. One chokepoint, asked once.
+        logger.info("routing to cloud engine for model=%s images=%s", model, bool(images))
+        yield from self._cloud.stream_response(prompt, system_prompt, model, images)

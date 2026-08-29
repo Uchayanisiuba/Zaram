@@ -118,13 +118,28 @@ class TestItFailsTowardsTheMachine:
         assert not cloud.calls
 
 
-class TestAnImageNeverLeavesTheDevice:
+class TestAnImageIsCarriedRatherThanJudgedHere:
     """Rule 7j: consent is per destination *and data class*.
 
-    A chat message is a couple of kilobytes; a photograph is a few megabytes of
-    something far more personal. Connecting a provider for text is not consent
-    to send it a picture, and nothing asks that question yet \u2014 so nothing may
-    assume the answer.
+    **This class used to assert the opposite, and the change is deliberate.**
+    It was `TestAnImageNeverLeavesTheDevice`, and it pinned a blanket refusal:
+    every cloud-bound image was rejected by `RoutedEngine` itself. That was the
+    right behaviour while it lasted, for a reason that has since stopped being
+    true — `EgressPolicy` was keyed on host alone, so there was nowhere to
+    record "this provider may receive pictures", and a blanket refusal was the
+    only honest position available.
+
+    Since 29 August 2026 the policy is keyed on ``(host, DataClass)``. The
+    question is therefore asked properly, at the chokepoint, and **the
+    guarantee moved with it** — see `test_an_image_needs_its_own_consent.py`,
+    which asserts against a real gate, a real policy and a real log that an
+    image bound for a host approved only for chat is refused and recorded.
+
+    What is left to assert *here* is the narrower thing this module is
+    responsible for: it carries the image to the engine that knows the host,
+    and it does not make a second, private copy of the decision. A second copy
+    is exactly the defect `_local_endpoint_for` shipped — four call sites
+    resolving a model one way and a fifth resolving it another.
     """
 
     def test_a_picture_reaches_a_local_engine(self, local, cloud):
@@ -134,36 +149,36 @@ class TestAnImageNeverLeavesTheDevice:
 
         assert local.images == [["aGk="]]
 
-    def test_a_picture_is_refused_rather_than_sent_to_the_cloud(self, local, cloud):
+    def test_a_picture_reaches_the_cloud_engine_intact(self, local, cloud):
+        """Handed on, not stripped.
+
+        The strip is the failure worth guarding: an answer built from the
+        prompt with the picture quietly removed is confident prose about
+        something nobody looked at, and it reads exactly like a real answer.
+        Whether it is then *sent* is the gate's decision, not this module's.
+        """
+        engine = RoutedEngine(local=local, cloud=cloud, is_remote=lambda m: True)
+
+        list(engine.stream_response("what is this", "sys", "gpt-4o", ["aGk="]))
+
+        assert cloud.images == [["aGk="]]
+
+    def test_routing_holds_no_opinion_of_its_own_about_images(self, local, cloud):
+        """No second implementation of the consent rule lives here.
+
+        `RoutedEngine` takes an `is_remote` callable precisely so the chat path
+        acquires no dependency on the provider or policy layers. If a future
+        change reintroduces a refusal here, this fails — and it should, because
+        two places answering one question is how they come to disagree.
+        """
         engine = RoutedEngine(local=local, cloud=cloud, is_remote=lambda m: True)
 
         out = "".join(
             engine.stream_response("what is this", "sys", "gpt-4o", ["aGk="])
         )
 
-        # Nothing reached the cloud engine at all.
-        assert cloud.calls == []
-        assert "does not send images off" in out
-
-    def test_the_refusal_is_not_a_silent_strip(self, local, cloud):
-        engine = RoutedEngine(local=local, cloud=cloud, is_remote=lambda m: True)
-
-        out = "".join(
-            engine.stream_response("what is this", "sys", "gpt-4o", ["aGk="])
-        )
-
-        # Answering from the prompt with the image quietly removed would be
-        # confident prose about a picture nobody looked at \u2014 the same failure
-        # the local gate exists to stop, arriving by the cloud route.
-        #
-        # Asserted on the error prefix and on the recorder, not on the absence
-        # of the label: the label is "cloud" and the refusal says "cloud
-        # model", so `label not in out` was a substring collision that failed
-        # for the wrong reason and would have passed for one too.
-        from runtimes.models.engines.base_engine import ERROR_PREFIX
-
-        assert out.startswith(ERROR_PREFIX)
-        assert cloud.images == []
+        assert not out.startswith(ERROR_PREFIX)
+        assert out == cloud.label
 
     def test_a_text_request_still_reaches_the_cloud(self, local, cloud):
         engine = RoutedEngine(local=local, cloud=cloud, is_remote=lambda m: True)
