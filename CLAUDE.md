@@ -15,8 +15,15 @@ The earlier line was *"the product is horizontal; the wedge is not — we start 
 freelancers because that is where it can be proven fastest."* That was right about
 obligation extraction and wrong about the product, and the daily-driver work is what
 exposed it. **What earns the daily open is universal**: an assistant one keystroke away
-that is fast, remembers you, reads your documents, and sends nothing anywhere. That
-serves anyone who types on a computer. Only the *obligations* layer is freelance-shaped.
+that is fast, remembers you, reads your documents, and sends nothing you did not send.
+That serves anyone who types on a computer. Only the *obligations* layer is
+freelance-shaped.
+
+*"…and sends nothing anywhere" until 29 August 2026, corrected because it stopped being
+true when the cloud engine landed and because this file argues against it 400 lines
+later — see "everything you already use, in one place, and it tells you the truth about
+each one". Rule 7j governs what leaves; the claim is control, never abstinence.
+`docs/PITCH.md` carries the full account.*
 
 So the shape is now: **a universal base, with verticals as packs.** The freelance
 business layer — invoices, quotes, expenses, obligations — stops being the wedge and
@@ -298,6 +305,78 @@ unwritable in an install. `core/paths.py` owns the one answer;
 `ZARAM_DATA_DIR` moves all of it; a checkout that already holds databases keeps
 them, because silently relocating somebody's Spine is indistinguishable from
 losing it.
+
+## What 2026 established, and what it obliges us to build
+
+Written 29 August 2026. Four things stopped being predictions this year, and each
+one turns an argument the product was *making* into a constraint the product must
+*meet*. The evidence lives in `docs/PITCH.md`; the obligations live here, because
+a thesis that changes no code is marketing.
+
+**A rented model can be switched off, and was.** Anthropic shipped Claude Fable 5
+and Mythos 5 on 9 June 2026. On 12 June a US export-control order barred access by
+any foreign national anywhere; nationality cannot be checked live, so **both models
+were disabled worldwide, for everyone, paying US customers included.** Restored 1
+July. Eighteen days, no appeal. Not a connectivity story and not a developing-market
+story — the best model available, switched off by the government of the country
+that built it.
+
+**AI conversations became discoverable.** A court affirmed an order to produce 20
+million consumer chat logs; an *"AI privilege"* was argued for and refused; AI chats
+were held not to be covered by attorney-client privilege; courts have ordered
+preservation of conversations users had deleted.
+
+Five obligations follow. They are not new rules so much as existing rules with the
+slack taken out.
+
+1. **Local is the fallback for everything, and the fallback is exercised.** No
+   capability may quietly become cloud-only. Where one genuinely is — image
+   *generation* is the honest current example — the product says so **before** the
+   user builds a habit on it, not at the moment it fails. The test is Fable-shaped:
+   if every remote provider vanished this afternoon, what still answers? That
+   question needs a real answer, and the answer must be visible in the interface
+   rather than discovered.
+
+2. **Never let a provider become load-bearing for memory.** Recall, correction and
+   provenance must work with every key removed. The Spine is the product; a model
+   is a renter. This is already the architecture — the obligation is to keep proving
+   it, because it is the one property that made the June outage survivable.
+
+3. **Retention is a liability before it is a feature.** The court record makes a
+   permanent transcript a hazard rather than a convenience, and `Activity` already
+   says so in the product — *"a permanent record of every question you have asked is
+   its own privacy problem"* — with retention windows and pruning that is itself
+   recorded. Extend that posture: **no new store ships without an answer to how long
+   it keeps things and how the user shortens that.** A store with no retention answer
+   is an unshipped feature.
+
+4. **Export is load-bearing, so it gets tested like it.** Rule 7 already requires an
+   open format. What changed is why it matters: the ownership claim is that the
+   memory outlives the provider, the order, and **Zaram itself**. A claim that
+   strong cannot rest on a path nobody exercises — export is verified every release,
+   and a broken export is a release blocker rather than a bug.
+
+5. **The data policy on a model is headline information, not a detail.** If the
+   subsidy behind cheap AI is paid in training data rather than collected in money —
+   and `DataPolicy.LOGGED_AND_TRAINED_ON`'s own comment says *"every free tier is
+   this"* — then naming the deal is a primary feature of the picker, and
+   `selectable_by_default` refusing to auto-route there is a load-bearing default
+   rather than a nicety.
+
+**One argument is explicitly retired: "cloud AI will get more expensive."** It is
+the obvious claim and it is false — per-token prices are collapsing, roughly 50×
+a year by Epoch AI's measure. Do not put it in a deck, a README, or a landing page.
+The true and narrower version is that the bill is **metered and set by somebody
+else**, while a model on the user's own machine is a fixed cost already paid. That
+survives a price war; the prediction does not.
+
+**And the posture that follows from all of it: Zaram does not need cloud AI to
+fail.** Cheaper, better cloud is a destination Zaram routes to with the memory
+still on the user's machine. Restricted or withdrawn cloud is a reason the local
+half exists. Either way people use more than one and the memory should be theirs.
+Reject any framing — in the product, the docs or the pitch — that requires
+competitors to do badly, because it makes the argument fragile and it is not what
+the architecture actually claims.
 
 ## Tool risk tiers
 
@@ -1194,6 +1273,38 @@ granularity, not before.
 Some model pairs are co-resident; others force an unload/reload costing
 seconds. Settings must show which is which, and a route that requires a swap
 must be visible in the orb's state. An invisible swap reads as a broken product.
+
+**Routing between local and cloud is per request, and it is a product claim
+rather than an implementation note.** A user brings a local model, a cloud key,
+or both, and Zaram decides per question which answers. What that decision is
+made of — filters first, ranking last, and that split is the guarantee:
+
+1. **Consent**, in `_auto_candidates`. `selectable_by_default` excludes any
+   model whose terms are unknown or which trains on input, and `prefer_local`
+   removes cloud models outright rather than ranking them down — "prefer" doing
+   real work, because a nudge would be indistinguishable from `auto`, which
+   already ranks local first.
+2. **Residency**, in the same pass: a model positively known not to fit the
+   budget beside the embedder is dropped. Unknown fit survives, because an
+   unmeasurable machine must not be left with no default at all.
+3. **Capability** — a binary precondition, never a score. A model that cannot
+   accept an image is not a worse answer to a question about a screenshot; it is
+   not an answer. If `requires_vision` empties the field, **residency is
+   relaxed and the gate re-runs** — capability first, speed second, warn and
+   never block. Consent is re-applied and never relaxed, so the escape hatch
+   cannot become a route around rule 5.
+4. **Ranking**, and only here may a blend be used: fit first (a specialist that
+   forces an eviction costs seconds twice), then `prefer_cloud` as a locality
+   bias, then `INTENT_SPECIALISATION` sending a coding question to a coding
+   model.
+
+Then `RoutedEngine` dispatches on the resolved model's locality, failing safe to
+local when it cannot resolve one.
+
+**What is deliberately not routed: difficulty.** "This is too hard for the local
+model" is not decidable in advance, so Zaram does not predict it — it reacts to
+it with an offer under the reply. The decidable preconditions above may route on
+their own once granted; a guess about quality may not.
 
 **Three tiers of control**, so a non-technical user never sees the third:
 1. Default — Zaram picks, one local and one cloud, auto-routed

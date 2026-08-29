@@ -16,7 +16,27 @@ not developers building products.
 
 ## Who this is for
 
-Three groups where this is a requirement rather than a preference:
+**Anyone who types on a computer.** That is not a hedge, it is the design: what earns a
+daily open is an assistant one keystroke away that is fast, remembers you, reads your
+documents, and sends nothing you did not send. There is no profession in that sentence,
+and the product has no gate that adds one.
+
+**It is a daily driver first**, which means it has to be good at the ordinary jobs
+before it is clever at the rare ones. Writing, editing, summarising, rewriting,
+translating — five of the eight things people actually use AI for, and a local 8–14B
+model already does all five well. Those answer with no network round trip at all, which
+is a kind of fast a cloud service structurally cannot be.
+
+**Your models, your keys, and Zaram picks between them per question.** Bring a local
+model, bring a cloud key, or bring both and let it route: the request is classified
+against exemplars you can edit, capability filters the candidates before anything is
+ranked, and a single *Prefer local · Auto · Prefer cloud* control biases the rest. Every
+reply names the model that answered and why. Nothing here requires a subscription,
+because Zaram never buys inference.
+
+### Where it stops being a preference and becomes a requirement
+
+The same product, for people who have no alternative:
 
 **People whose documents cannot leave.** Therapists, accountants, lawyers, HR,
 clinicians with case notes. They are told to use AI and forbidden to upload. Local
@@ -29,21 +49,22 @@ connections, subscriptions priced in dollars against a local wage. A resident mo
 costs nothing per question and works with the connection down. That is a structural
 advantage, not a philosophical one.
 
-**Freelancers and one-person businesses.** Invoices, quotes, expenses, and the
-commitments buried in contracts nobody re-reads. Zaram already knows the client's rate,
-their terms, and that they pay late — which is what makes memory useful rather than
-merely present.
+**People with a long project and a bad memory for it.** Researchers citing from a
+library, students with a reading list, writers holding continuity across a manuscript,
+developers whose code never leaves the machine, consultants who need to know what was
+decided per client, freelancers with rates and terms buried in contracts nobody
+re-reads.
 
-Underneath those the base is horizontal: researchers citing from a library, students
-with a reading list, writers with a long project, developers whose code never leaves the
-machine, consultants who need to know what was decided per client.
+That last group is where the **first pack** lives — invoices, quotes, expenses,
+obligations. A pack adds parsers, tools, templates and routing exemplars. It adds no
+screens, and it is never a different product.
 
 ## Why this is hard to copy
 
 The ambient-assistant pattern is proven — Grammarly's Superhuman Go docks a panel to the
 screen edge and offers to act on what you are typing. It works by sending that text to
-their servers, which is their business. They cannot ship the same product that sends
-nothing anywhere.
+their servers, which is their business. They cannot ship the same product where sending
+it is the user's decision, because the sending is the company.
 
 The labs have memory too, and it is locked to their own model. Memory that works *across*
 competitors is against their interest to build, permanently.
@@ -55,6 +76,28 @@ promotional. Nothing funded by token margin can match that.
 Local-first is copyable in principle by another small team. The accumulated memory of
 your own work is not, and neither is the discipline: provenance on every recalled fact,
 an append-only egress log, and a correction loop that changes the answers.
+
+## A rented model can be taken back
+
+On 9 June 2026 Anthropic shipped Claude Fable 5 and Mythos 5. On 12 June a US
+export-control order barred access by any foreign national anywhere — and because
+nationality cannot be verified live, **both models were disabled worldwide, for
+everyone, paying US customers included**. Access was restored on 1 July. Eighteen
+days, no appeal, three days after launch.
+
+That is not a connectivity problem and not a developing-market problem. It is the
+most capable model available, switched off globally by the government of the country
+that built it, and nobody who had built their work around it had any recourse.
+
+**Be exact about what Zaram does and does not survive.** Cloud routing stops in that
+scenario too — that half was always somebody else's. What keeps working is the model
+on your disk, your documents, and everything Zaram has learned about your work. The
+Spine is exportable in an open format, so the memory outlives the provider, the
+order, and Zaram itself.
+
+That is the whole ownership claim, and it is deliberately narrow. What you own is
+what is on your machine. It is also, on the evidence of June, the only part anybody
+owned at all.
 
 ## Principles
 
@@ -114,16 +157,47 @@ What has been observed working, rather than merely written:
 
 What is not built:
 
-- **Obligation extraction is not wired.** The extractor reads payment, deliverable,
-  expiry and renewal clauses with the sentence each came from, and nothing outside its
-  own tests imports it. This is the differentiator and it is the next real feature.
-- **Knowledge domains**, and ingestion by drop, paste or upload. The parsers exist; the
-  way in does not.
-- **Images in either direction.** In scope, not started. Reading a receipt locally is
-  the demonstration the product is missing.
+- **Image generation.** Zaram reads pictures; nothing routes a request for one. That
+  needs a way to say "this reply should be a picture", which does not exist — building
+  the gate before the request would be scoring a decision nobody can make yet.
 - **The installer has not been run on a machine that has never seen this repo.** Until
   that happens, treat "a stranger can install this" as unproven. It is the actual
   blocker, and no amount of further capability substitutes for it.
+
+> **This list drifted again, and was corrected 29 August 2026 — understating, which
+> the preamble above already names as the same defect as overstating.** It carried
+> three entries that the 28 August work had made false, and a session building the
+> launch site nearly published the understatement:
+>
+> * *"Obligation extraction is not wired… nothing outside its own tests imports it."*
+>   `GET /obligations` is served at `main.py:3457` with `/correct`, `/dismiss` and
+>   `/met` beside it, `ObligationRecords` is constructed at `main.py:3311`,
+>   `services/obligationsClient.ts` calls all four, and `Commitments` is mounted at
+>   `MemoryWorkspace.tsx:689`.
+> * *"Ingestion by drop, paste or upload — the way in does not exist."* `POST
+>   /chat/attachments` resolves through `attachment_store.resolve` into
+>   `compose_attachments`; the paperclip, a drag and `Ctrl`+`V` all reach `takeFiles`,
+>   and the paste path was driven in a browser on 28 August.
+> * *"Images in either direction. In scope, not started."* Half right, and the wrong
+>   half was load-bearing. Reading is built — `openai_compatible_engine.py` builds the
+>   content-parts form from `images`, and a local vision model answers without the
+>   picture leaving. Only *generation* is absent, which is why it is the one that
+>   survives above.
+>
+> The lesson is the one the preamble states and this section keeps failing: a status
+> list is only true on the day it is checked against the code. Check it, or delete it.
+>
+> **A fourth entry survived that first correction and should not have.** *"Knowledge
+> domains"* was left in the not-built list because the session doing the correcting
+> carried it over from the old list instead of checking it — the same fault it was
+> mid-way through fixing, committed in the act of fixing it. Domains are built:
+> `GET`/`POST /knowledge/domains`, `PUT` and `DELETE` on one, and
+> `POST`/`DELETE /knowledge/domains/{id}/sources/{source_id}`, all at `main.py:3937`
+> onward; `KnowledgeDomains` constructed at `main.py:3929`; `_domain_scope` narrowing
+> retrieval in the chat path at `main.py:1292`; `services/domainsClient.ts` calling
+> every route, `DomainList` in Knowledge and `DomainScopePicker` in the composer.
+> **Verifying the entries you delete is half the job; the other half is verifying the
+> ones you keep.**
 
 ## v1 scope
 
