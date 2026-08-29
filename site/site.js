@@ -50,9 +50,9 @@ const CONFIG = {
   //                       the cap on the other one actually bites.
   //                       endpoint: https://docs.google.com/forms/d/e/FORM_ID/formResponse
   //                       and fill googleFields with the entry.NNN ids.
-  formEndpoint: "",
+  formEndpoint: "https://formspree.io/f/mwlkpnej",
   formKind:     "json",
-  formHost:     "the form host",
+  formHost:     "Formspree",
   googleFields: { email: "", setup: "", intent: "" },
 };
 
