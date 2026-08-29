@@ -129,10 +129,10 @@ export default defineConfig(({ command }) => ({
       '/providers': { target: BACKEND, changeOrigin: true },
       '/routing': { target: BACKEND, changeOrigin: true },
       '/search': { target: BACKEND, changeOrigin: true },
-      // Found by the check above on its first run, and it predates this
-      // session: `/vision/analyze` has been served by the backend and
-      // unreachable from the dev frontend the whole time.
-      '/vision': { target: BACKEND, changeOrigin: true },
+      // `/vision` was here because `POST /vision/analyze` existed. It was
+      // deleted on 28 August 2026 — an entrance to inference that skipped
+      // routing and the egress gate — so the prefix goes with it. Images now
+      // travel on `/chat` like any other part of a message.
       '/export': { target: BACKEND, changeOrigin: true },
       '/character': { target: BACKEND, changeOrigin: true },
       // The obligations routes landed with the backend on 26 August and

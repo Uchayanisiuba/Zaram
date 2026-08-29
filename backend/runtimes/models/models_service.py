@@ -31,20 +31,6 @@ class ModelsService:
         # that never went over a wire.
         yield from self.engine.stream_response(full_prompt, system_prompt, model, images)
 
-    def _parse_sse(self, chunk: str) -> dict | None:
-        """Parse one SSE frame. Only the vision path still speaks SSE."""
-        import json
-        trimmed = chunk.strip()
-        if not trimmed.startswith("data:"):
-            return None
-        payload = trimmed[5:].strip()
-        if payload == "[DONE]":
-            return {"type": "done"}
-        try:
-            return json.loads(payload)
-        except Exception:
-            return None
-
     def search_knowledge(self, query: str, persona: str = "zaram_prime") -> Iterator[str]:
         """Search knowledge across all providers."""
         if self._knowledge_runtime:
@@ -66,14 +52,3 @@ class ModelsService:
                 "results": user_results,
                 "total_results": result.get('total_results', len(user_results)),
             })
-
-    def analyze_image(self, prompt: str, image_base64: str, system_prompt: str = "") -> Iterator[str]:
-        """Vision analysis using multimodal model."""
-        full_prompt = f"{prompt}"
-        for chunk in self.engine.stream_vision_response(full_prompt, images=[image_base64], system_prompt=system_prompt):
-            parsed = self._parse_sse(chunk)
-            if parsed and parsed.get("type") == "token":
-                yield parsed.get("content", "")
-            elif parsed and parsed.get("type") == "error":
-                yield f"[ERROR] {parsed.get('content', '')}"
-        return
