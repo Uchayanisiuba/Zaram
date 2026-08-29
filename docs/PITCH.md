@@ -9,20 +9,28 @@ For grant applications and investor conversations. The vision lives in
 
 ## The opening
 
-> **Zaram replaces the admin half of a small business.**
+> **Zaram is the assistant you open every day, and the only one that keeps what
+> it learns.**
 >
-> Every business runs on obligations buried in documents — payment terms in an
-> invoice, milestones in a contract, deliverables in a brief, expiry on a quote.
-> Today those dates live in a PDF in a folder, and nobody types them into a
-> calendar, which is why project tools get abandoned.
+> Everyone now uses three or four AIs and re-explains themselves to each. The
+> memory lives with the vendor, locked to their model, and moving costs you
+> everything you taught it.
 >
-> Zaram reads what you produce and receive, extracts what you owe and what you're
-> owed with the source clause attached, and acts before it's late.
+> Zaram is the memory that stays put while the model changes. One knowledge base
+> on your machine; your local models and your cloud keys both recall from it, and
+> Zaram routes between them per question. You see what was recalled, you can
+> correct it, and every byte that leaves is logged.
 >
-> **We start with freelancers and one-person businesses** — the sharpest version of
-> the pain, and reachable without a sales team. The same mechanism serves
-> contractors, agencies, landlords, consultants and clinics, because the shape of
-> the obligation does not change. Only the nouns do.
+> **It never buys inference** — you bring the key or the model — so the cost of
+> goods is approximately zero and the free tier is uncapped permanently rather
+> than promotionally. Nothing funded by token margin can answer that.
+>
+> **The first vertical pack is obligations**, because it is the sharpest proof
+> that memory is worth having: payment terms in an invoice, milestones in a
+> contract, expiry on a quote — dates that live in a PDF in a folder and reach no
+> calendar. Zaram extracts what you owe and what you're owed with the source
+> clause attached, and acts before it's late. That is a pack on a universal base,
+> not the product's boundary.
 
 ## Why this shape
 
@@ -44,10 +52,35 @@ and the mechanism is universal" is accurate and it is what gets funded.
 > and a student's reading list, and it does not require picking one of them.
 >
 > The pitch that follows from it: **"every AI you use, in one place, that
-> remembers you and sends nothing anywhere."** Universal, demonstrable in ten
-> seconds, and structurally unavailable to any lab whose business is that your
-> words leave. The invoice layer is the first *pack* on top — it is what proves
-> the pack abstraction, not what defines the audience. See `CLAUDE.md`.
+> remembers you and tells you the truth about each one."** Universal,
+> demonstrable in ten seconds, and structurally unavailable to any lab whose
+> business is that your words leave. The invoice layer is the first *pack* on
+> top — it is what proves the pack abstraction, not what defines the audience.
+> See `CLAUDE.md`.
+
+> **Corrected 29 August 2026, and the wrong version is worth keeping because it
+> is the one that got out.** This line read *"…that remembers you and sends
+> nothing anywhere"* for thirteen days, and it had been false since the cloud
+> engine landed. Zaram routes to OpenRouter, sends images on the
+> OpenAI-compatible path, and the acquisition story in `CLAUDE.md` is a
+> first-run offer to paste a free Gemini key. A product that does all three
+> cannot claim nothing leaves. Rule 7j says it from the other end: consent is
+> granted per destination **and data class** and then *remembered* — a sentence
+> that only makes sense about bytes going somewhere.
+>
+> **`CLAUDE.md` already had the right version and this file kept the wrong
+> one.** There: *"everything you already use, in one place, and it tells you the
+> truth about each one"*, with the reason attached — the privacy framing "asks
+> someone to give something up", and that is the trade that has capped every
+> privacy product at a niche. The honest pitch is the stronger pitch, which is
+> what makes keeping the weak one expensive rather than merely untidy.
+>
+> **It reached a public page before anybody noticed**, which is the part worth
+> recording. Two pitches sat in two files for thirteen days; a session building
+> the launch site read both, used the correct line for a supporting claim, and
+> put the false one in the `<h1>`. External framing is where a stale claim does
+> its damage, so this file is the one that cannot carry a second version of the
+> pitch "for now".
 
 ## The pain
 
@@ -63,6 +96,47 @@ now that is past due. Invented figures are the fastest way to lose a room.
 Small models finally run on hardware people already own, and document extraction
 became reliable in the last eighteen months. The admin half of a small business is
 finally automatable at zero marginal cost — because the user brings their own compute.
+
+**Four things became true in 2026 that were not true in 2023. Every figure here is
+sourced; check them before quoting them, because two of the four move.**
+
+1. **Local crossed the "good enough" line — not the frontier line, and it does not
+   need to.** Five of the eight jobs people actually use AI for — writing, editing,
+   summarising, rewriting, translating — run well on a 12B model on hardware people
+   already own. Measured here, not estimated: `gemma4` reads a full statement of
+   work and an invoice photograph at **23.75 tok/s on a 12 GB RTX 3060**.
+
+2. **AI conversations stopped being private, in court, this year.** In **January
+   2026** a federal court affirmed an order requiring OpenAI to produce **20 million
+   consumer chat logs**. OpenAI argued for a new *"AI privilege"* to shield them and
+   was **refused**. In **February 2026** a court held that AI chats are **not**
+   covered by attorney-client privilege. Courts have ordered the preservation of
+   conversations users had already deleted. This is not a forecast about
+   surveillance; it is the current legal position, and it is the strongest argument
+   the product has ever had.
+
+3. **The subscription price is not the cost.** Microsoft loses **more than $20 per
+   user per month** on GitHub Copilot and up to **$80** on heavy users; OpenAI does
+   not expect to break even before 2030.
+
+   > **Do not say "cloud AI will get more expensive". It is the obvious claim and it
+   > is false.** Per-token prices are collapsing — GPT-4-class went from ~$20 per
+   > million tokens in late 2022 to ~$0.40 in early 2026, a median **50× decline per
+   > year** by Epoch AI's measure. A reviewer who follows this will correct you.
+   >
+   > The true version is narrower and survives a price cut: **total spend rises
+   > faster than prices fall, because usage grows** — Uber exhausted its *annual*
+   > token budget in four months — and **frontier pricing has doubled since January
+   > 2026** even while budget tiers fall. Whatever the headline rate does, the bill
+   > is metered and outside the user's control. A model on your own machine is a
+   > fixed cost already paid. That argument cannot be falsified by a price war;
+   > the prediction can.
+
+4. **Memory is the lock-in, and no vendor will unlock it.** Every provider is
+   building memory that works only with their own model. That is not an oversight,
+   it is the switching cost. A memory layer that works *across* competitors is
+   against every vendor's interest permanently — so it can only come from outside
+   them, which is the whole reason this company can exist at all.
 
 ## Why us
 
