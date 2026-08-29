@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import urllib.error
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 
@@ -118,6 +119,71 @@ class OpenAICompatibleAdapter:
             return {"available": True, "provider": self.provider_id, "endpoint": self.base_url}
         except Exception as exc:
             return {"available": False, "provider": self.provider_id, "error": str(exc)}
+
+    def resident_models(
+        self, *, timeout: float = 1.0
+    ) -> Optional[Dict[str, Optional[int]]]:
+        """What this server holds in VRAM right now, or ``None`` for unknown.
+
+        A second local AI server is the reason this exists.
+        `ProviderManager._resident_models` used to return the first adapter
+        that answered, so on a machine running Ollama *and* something else the
+        second one was invisible. Measured 28 August 2026 on the 12 GB card:
+        Ollama answered `{}` first while TabbyAPI held 9.5 GB, and every fit
+        decision downstream was taken as though the card were empty.
+
+        **The size is not knowable here, and it is reported as unknown rather
+        than as zero.** `/v1/model` returns the loaded model's id, its context
+        and cache settings and its chat template — no memory figure, because
+        the OpenAI contract has no field for one. A `0` would be a measurement
+        meaning "holds nothing", which is the false zero `vram_bytes` already
+        cost this codebase once; the caller reaches for a real measurement
+        instead.
+
+        Three outcomes, and the middle one is why this is not one `except`
+        around everything:
+
+        - a **cloud** provider holds no VRAM on this machine, so it answers
+          ``{}`` without a request. Asking would also put a network call on
+          the reply path for an answer that is known in advance.
+        - a **refused connection** on a local port is a fact rather than a
+          failure: nothing is listening, so that server is holding nothing.
+          ``{}``. This matters because the LM Studio adapter is registered
+          whether or not anything is running behind it, and treating an absent
+          server as unknowable would silence the swap indicator on every
+          Ollama-only machine.
+        - anything else — a timeout, an HTTP error, unparseable JSON — is
+          "could not find out", which is ``None``. A server that is up but
+          slow to answer may well be the one holding the card, and being busy
+          is exactly when that is most likely.
+        """
+        if self.kind is ProviderKind.CLOUD_API:
+            return {}
+        try:
+            payload = self._get("/v1/model", timeout=timeout)
+        except urllib.error.HTTPError as exc:
+            # The server answered and declined. TabbyAPI serves this route; a
+            # server that does not is one whose residency we cannot read, and
+            # saying so is better than reporting an empty card.
+            logger.debug("%s residency probe rejected: %s", self.provider_id, exc)
+            return None
+        except urllib.error.URLError as exc:
+            if isinstance(exc.reason, ConnectionRefusedError):
+                return {}
+            logger.debug("%s residency probe failed: %s", self.provider_id, exc)
+            return None
+        except Exception as exc:
+            logger.debug("%s residency probe failed: %s", self.provider_id, exc)
+            return None
+
+        if not isinstance(payload, dict):
+            return None
+        model_id = payload.get("id")
+        if not model_id:
+            # A well-formed answer naming no model: the server is up with
+            # nothing loaded. That is a fact, not the absence of one.
+            return {}
+        return {str(model_id): None}
 
     def to_dict(self) -> Dict[str, Any]:
         return ProviderSummary(
