@@ -137,24 +137,6 @@ class LocalDispatchEngine(LLMEngine):
         self._engines[endpoint] = engine
         return engine
 
-    def stream_vision_response(self, prompt: str, images, system_prompt: str = ""):
-        """Forwarded, not reimplemented.
-
-        Wrapping an engine silently drops every method the wrapper does not
-        name, and `Dispatcher` reaches for this one by attribute. Before this
-        wrapper existed a keyless setup got a bare `OllamaEngine` and vision
-        worked; adding a layer without forwarding turned that into
-
-            AttributeError: object has no attribute 'stream_vision_response'
-
-        `RoutedEngine` already had the same hole. Vision stays on the local
-        engine because that is where it is implemented today -- routing it by
-        provider needs `ModelInfo.supports_vision` to gate the choice, which is
-        the modality-as-a-gate work `CLAUDE.md` describes and is not this
-        change.
-        """
-        return self._ollama.stream_vision_response(prompt, images, system_prompt)
-
     def stream_response(
         self,
         prompt: str,

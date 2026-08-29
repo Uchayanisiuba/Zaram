@@ -701,9 +701,17 @@ class IntentPlanner:
         So when an image is genuinely attached the plan stays an ordinary
         generation, because that path carries images to whichever model was
         routed, passes the residency and consent gates, and is logged.
-        `vision.analyze` remains for the capability route — `/vision/analyze`,
-        screen and camera — which supplies its own singular ``image`` and does
-        not go through here.
+
+        **And when one is not attached, a `vision.*` step is always wrong.**
+        This used to say `vision.analyze` remained "for the capability route —
+        `/vision/analyze`, screen and camera — which supplies its own singular
+        ``image``". No such caller existed: the endpoint reached an ungated
+        engine method against a hardcoded, uninstalled model, through a
+        `_parse_legacy_sse` that was never defined, and it was deleted on 28
+        August 2026. So the only `vision.*` step this planner can now produce
+        is one the keywords invented, and `Dispatcher` refuses it rather than
+        letting it fall through to generation — a model asked to describe a
+        picture nobody supplied writes a confident description of nothing.
         """
         classification = self._router.classify(prompt)
         logger.debug("IntentPlanner: classified as %s (confidence=%.2f)", classification.intent_type, classification.confidence)

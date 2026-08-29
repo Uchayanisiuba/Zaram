@@ -1364,44 +1364,6 @@ async def chat(request: ChatRequest):
     )
 
 
-class VisionRequest(BaseModel):
-    prompt: str
-    image: str
-
-
-@app.post("/vision/analyze")
-async def vision_analyze(request: VisionRequest):
-    """Vision analysis endpoint using Ollama vision models."""
-    print(f"[STAGE-7][Python] POST /vision/analyze received: prompt='{request.prompt[:50]}...'")
-    from runtimes.models.engines.ollama_engine import OllamaEngine
-    engine = OllamaEngine()
-    full_prompt = request.prompt
-
-    if not request.image or not request.image.strip():
-        async def _empty():
-            yield StreamEvent.error("No image was provided for vision analysis. Capture a screenshot or attach an image first.").to_ipc() + "\n"
-            yield StreamEvent.done().to_ipc() + "\n"
-        return StreamingResponse(_empty(), media_type="text/event-stream")
-
-    image_data = request.image
-    if isinstance(image_data, str) and image_data.startswith("data:"):
-        image_data = image_data.split(",", 1)[1] if "," in image_data else image_data
-
-    async def _vision_stream():
-        from core.streaming_events import StreamEvent, EventType
-        yield StreamEvent.start().to_ipc() + "\n"
-        for chunk in engine.stream_vision_response(full_prompt, images=[image_data]):
-            parsed = _parse_legacy_sse(chunk)
-            if parsed and parsed.get("type") == "token":
-                yield StreamEvent.token(parsed.get("content", "")).to_ipc() + "\n"
-            elif parsed and parsed.get("type") == "error":
-                yield StreamEvent.error(parsed.get("content", "Vision error")).to_ipc() + "\n"
-        yield StreamEvent.status("complete").to_ipc() + "\n"
-        yield StreamEvent.done().to_ipc() + "\n"
-
-    return StreamingResponse(_vision_stream(), media_type="text/event-stream")
-
-
 class KnowledgeRequest(BaseModel):
     query: str
     persona: str = "zaram_prime"

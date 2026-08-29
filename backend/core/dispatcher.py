@@ -115,11 +115,33 @@ class ExecutionDispatcher:
                     step.capability_id,
                     list((step.input_data or {}).keys()),
                 )
-                if step.capability_id.startswith("vision.") and hasattr(service, "analyze_image"):
-                    prompt = step.input_data.get("prompt", "")
-                    image = step.input_data.get("image", "")
-                    logger.debug("Dispatcher: calling analyze_image prompt='%s...'", prompt[:50])
-                    yield from service.analyze_image(prompt, image, system_prompt)
+                if step.capability_id.startswith("vision."):
+                    # **A vision step that reaches here has no image, always.**
+                    # `IntentPlanner.create_plan` sends an attached image down
+                    # the ordinary generation path — that is what carries it to
+                    # whichever model was routed, through the residency and
+                    # consent gates and into the egress log — so the only way a
+                    # `vision.*` step survives is a keyword match on a prompt
+                    # with nothing attached to it.
+                    #
+                    # It used to reach `analyze_image` and from there
+                    # `stream_vision_response`, which posted to a hardcoded
+                    # `qwen2.5vl:7b` past routing and past the gate. That is
+                    # deleted, and this must not become a fall-through to
+                    # `generate_response` instead: asked to describe a picture
+                    # that was never supplied, a model writes a confident
+                    # description of nothing, which is rule 9 exactly. Refusing
+                    # is the whole point.
+                    logger.debug(
+                        "Dispatcher: refusing %s — no image was attached",
+                        step.capability_id,
+                    )
+                    yield (
+                        "[ERROR] There is no image attached, so there is "
+                        "nothing to look at. Zaram will not describe a picture "
+                        "it has not been given — attach it with the paperclip "
+                        "and ask again."
+                    )
                 elif step.capability_id == "knowledge.search" and hasattr(service, "search_knowledge"):
                     query = step.input_data.get("query", "") or step.input_data.get("prompt", "")
                     persona = step.input_data.get("persona", "zaram_prime") or "zaram_prime"

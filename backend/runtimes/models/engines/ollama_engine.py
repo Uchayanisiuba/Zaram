@@ -274,19 +274,25 @@ class OllamaEngine(LLMEngine):
         one call up the stack.
 
         ``images`` ride in the same `/api/generate` call as the prompt, on
-        **whichever model was routed here**. `stream_vision_response` below
-        does the same thing against a hardcoded `qwen2.5vl:7b` that is not
-        installed on the machine this was written on, from an endpoint that
-        bypasses routing and the egress gate — which is why it is a side
-        door rather than the way in. Whether a model can see is decided before
-        this point, by the gate in `ProviderManager.select_model_for_task`.
+        **whichever model was routed here**. Whether a model can see is decided
+        before this point, by the gate in
+        `ProviderManager.select_model_for_task`.
+
+        There used to be a second one. `stream_vision_response` posted to the
+        same Ollama against a hardcoded `qwen2.5vl:7b` — not installed on the
+        machine it was written on — from `POST /vision/analyze`, and its own
+        docstring said it bypassed routing and the egress gate. It was deleted
+        on 28 August 2026 rather than repaired: a second entrance to inference
+        that the egress log cannot see is rule 3, and there is no version of it
+        that is better than the one path above.
         """
         url = f"{self.base_url}/api/generate"
         attached = [i for i in (images or []) if i and i.strip()]
-        # An image *embedded in the prompt text* is still refused, and the
-        # refusal no longer points at `/vision/analyze`. A data URI in a
-        # prompt is not an attachment: nothing parsed it, nothing sized it,
-        # and nothing logged it leaving.
+        # An image *embedded in the prompt text* is refused rather than
+        # read. A data URI in a prompt is not an attachment: nothing parsed
+        # it, nothing sized it, and nothing logged it leaving. The refusal
+        # used to point the user at `/vision/analyze`; that route is gone, so
+        # it points at the paperclip, which is the only way in.
         if not attached and ("<image>" in prompt or "data:image" in prompt or "[IMAGE:" in prompt):
             yield ERROR_PREFIX + (
                 "That looks like an image pasted into the message text. "
@@ -353,7 +359,21 @@ class OllamaEngine(LLMEngine):
                     if "response" in json_data:
                         text = json_data["response"]
                         if "does not support image input" in text or "doesn't support image input" in text:
-                            yield ERROR_PREFIX + "The selected model does not support image input. Switch to a vision-capable model (qwen2.5vl:7b) for image analysis, or remove the image and try again."
+                            # Names no model, deliberately. This read
+                            # "(qwen2.5vl:7b)" and pointed at something the
+                            # user did not have — advice naming a model nobody
+                            # installed is worse than advice naming none, and
+                            # `CLAUDE.md` keeps model filenames out of the
+                            # primary path in any case.
+                            #
+                            # `implementations/ollama_llm.py` carries the same
+                            # sentence and was fixed on 19 August 2026. This
+                            # copy was missed, which is what two copies of one
+                            # message are for. What is vision-capable here is a
+                            # question the provider layer answers, through
+                            # `select_model_for_task(requires_vision=True)`,
+                            # and this engine cannot.
+                            yield ERROR_PREFIX + "The selected model does not support image input. Switch to a vision-capable model for image analysis, or remove the image and try again."
                             return
                         token_count += 1
                         yield text
@@ -396,50 +416,3 @@ class OllamaEngine(LLMEngine):
             return f"Ollama refused the request for {named}: {detail}"
         return f"Ollama could not answer with {named}: {exc}"
 
-    def stream_vision_response(self, prompt: str, images: list[str], system_prompt: str = "") -> Iterator[str]:
-        url = f"{self.base_url}/api/generate"
-        clean_images = [img for img in (images or []) if img and img.strip()]
-        if not clean_images:
-            yield f"data: {json.dumps({'type': 'error', 'content': 'No valid image provided for vision analysis. Attach or capture an image before analyzing.'})}\n\n"
-            yield "data: [DONE]\n\n"
-            return
-        payload = {
-            "model": "qwen2.5vl:7b",
-            "prompt": prompt,
-            "images": clean_images,
-            "system": system_prompt,
-            "stream": True
-        }
-        print(f"[STAGE-9][Vision] OllamaEngine.stream_vision_response called: model=qwen2.5vl:7b, prompt='{prompt[:50]}...', images={len(clean_images)}")
-        try:
-            response = requests.post(
-                url, json=payload, stream=True, timeout=(CONNECT_TIMEOUT, COLD_START_TIMEOUT)
-            )
-            response.raise_for_status()
-            print(f"[STAGE-9][Vision] Ollama responded, streaming tokens...")
-            token_count = 0
-            accumulated = ""
-            for line in response.iter_lines():
-                if line:
-                    json_data = json.loads(line)
-                    if "response" in json_data:
-                        text = json_data["response"]
-                        accumulated += text
-                        token_count += 1
-                        if "does not support image input" in accumulated or "doesn't support image input" in accumulated or "Cannot read" in accumulated:
-                            yield f"data: {json.dumps({'type': 'error', 'content': 'The vision model rejected the image input. Ensure the image is a valid PNG/JPEG and that the qwen2.5vl:7b model is pulled (run: ollama pull qwen2.5vl:7b).'})}\n\n"
-                            yield "data: [DONE]\n\n"
-                            return
-                        yield f"data: {json.dumps({'type': 'token', 'content': text})}\n\n"
-                    if "done" in json_data and json_data["done"]:
-                        yield "data: [DONE]\n\n"
-                        break
-                    if "error" in json_data:
-                        yield f"data: {json.dumps({'type': 'error', 'content': json_data['error']})}\n\n"
-                        yield "data: [DONE]\n\n"
-                        break
-            print(f"[STAGE-9][Vision] Done streaming. Total tokens: {token_count}")
-        except Exception as e:
-            print(f"[STAGE-9][Vision] Error: {e}")
-            yield f"data: {json.dumps({'type': 'error', 'content': str(e)})}\n\n"
-            yield "data: [DONE]\n\n"
