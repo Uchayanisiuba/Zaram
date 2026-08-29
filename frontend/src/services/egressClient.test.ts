@@ -40,8 +40,11 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+/** Indexed rather than the obvious `at(-1)`, which this project's `lib` target
+ *  does not carry: `tsc --noEmit` refuses it while vitest transpiles it
+ *  happily, so a green test run does not catch it. */
 function lastBody(): Record<string, unknown> {
-  const [, init] = fetchMock.mock.calls.at(-1)!;
+  const [, init] = fetchMock.mock.calls[fetchMock.mock.calls.length - 1];
   return JSON.parse((init as RequestInit).body as string);
 }
 
@@ -74,21 +77,21 @@ describe('forgetting a policy', () => {
     // since the pane lists host rules.
     void forgetEgressPolicy('api.example.test');
 
-    const [url] = fetchMock.mock.calls.at(-1)!;
+    const [url] = fetchMock.mock.calls[fetchMock.mock.calls.length - 1];
     expect(url).toBe('/egress/policy/api.example.test');
   });
 
   it('forgets one class when one is named', () => {
     void forgetEgressPolicy('api.example.test', 'image');
 
-    const [url] = fetchMock.mock.calls.at(-1)!;
+    const [url] = fetchMock.mock.calls[fetchMock.mock.calls.length - 1];
     expect(url).toBe('/egress/policy/api.example.test?data_class=image');
   });
 
   it('escapes a host rather than pasting it into the path', () => {
     void forgetEgressPolicy('a host/with slashes');
 
-    const [url] = fetchMock.mock.calls.at(-1)!;
+    const [url] = fetchMock.mock.calls[fetchMock.mock.calls.length - 1];
     expect(url).not.toContain('with slashes');
     expect(url).toContain('%2F');
   });
