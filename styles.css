@@ -376,19 +376,25 @@ kbd {
 .demo.is-working .panel-bar .orb { background: var(--accent); box-shadow: 0 0 0 3px rgba(94,231,220,.18); }
 .demo:not(.is-working) .panel-bar .orb { background: var(--text-3); box-shadow: none; }
 
-.thread { padding: 16px 18px; min-height: 232px; display: flex; flex-direction: column; gap: 14px; }
-.turn { display: flex; flex-direction: column; gap: 3px; }
-.turn .who {
-  font-size: .66rem; letter-spacing: .12em; text-transform: uppercase; color: var(--text-3);
+/* Laid out to match the product's own conversation surface: a small speaker
+   label, the user's line plain, Zaram's in cyan behind a rule, and the source
+   underneath it. NB the label class is `.speaker`, not `.who` — `.who` is the
+   audience section, and reusing it put a 120px margin on every line. */
+.thread { padding: 18px; min-height: 210px; display: flex; flex-direction: column; gap: 18px; }
+.turn { display: block; }
+.turn .speaker {
+  display: block; margin: 0 0 5px;
+  font-size: .66rem; letter-spacing: .14em; text-transform: uppercase; color: var(--text-3);
 }
 .turn p { margin: 0; font-size: .93rem; line-height: 1.55; color: var(--text); }
-.turn.is-zaram .who { color: var(--accent); }
+.turn.is-zaram .speaker { color: var(--accent); }
 .turn.is-zaram > p:first-of-type {
-  border-left: 2px solid var(--accent); padding-left: 11px; color: var(--text);
+  border-left: 2px solid var(--accent); padding-left: 12px; color: var(--accent);
 }
 .turn .src {
+  display: inline-block; margin-top: 8px; margin-left: 14px; padding: 4px 9px;
+  background: var(--bg-overlay); border-radius: 5px;
   font-family: var(--mono); font-size: .68rem; color: var(--text-3);
-  padding-left: 13px; margin-top: 3px;
 }
 .turn .src b { color: var(--text-2); font-weight: 500; }
 

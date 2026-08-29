@@ -234,7 +234,7 @@ async function playDemo() {
     const turn = document.createElement("div");
     turn.className = "turn" + (zaram ? " is-zaram" : "");
     const who = document.createElement("span");
-    who.className = "who";
+    who.className = "speaker";
     who.textContent = step.who;
     const p = document.createElement("p");
     turn.append(who, p);
