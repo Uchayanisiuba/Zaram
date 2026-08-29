@@ -118,6 +118,36 @@ class TestABroaderConsentNeverImpliesANarrowerOne:
         assert decision.mode is Mode.DENY
         assert "blocked" in decision.reason
 
+    def test_blocking_a_host_beats_a_standing_image_grant(self, policy):
+        """Blocking a destination means blocking it, whatever was granted.
+
+        Found while wiring the privacy pane rather than while writing the
+        policy, which is the useful part: the pane's "cut everything" control
+        sets every known host to deny, and with the class rule consulted first
+        a standing image grant survived it. The one control whose meaning must
+        be unambiguous would have left a destination able to receive
+        photographs.
+        """
+        policy.set(HOST, Mode.ALLOW)
+        policy.set(HOST, Mode.ALLOW, DataClass.IMAGE)
+
+        policy.set(HOST, Mode.DENY)
+
+        decision = policy.decide(HOST, DataClass.IMAGE)
+        assert decision.mode is Mode.DENY
+        assert "blocked" in decision.reason
+
+    def test_a_class_grant_still_widens_a_permitted_host(self, policy):
+        """The asymmetry points one way only.
+
+        A class rule may widen what a *permitted* destination receives, because
+        the user granted it deliberately. It may never rescue one they shut.
+        """
+        policy.set(HOST, Mode.ASK)
+        policy.set(HOST, Mode.ALLOW, DataClass.IMAGE)
+
+        assert policy.decide(HOST, DataClass.IMAGE).mode is Mode.ALLOW
+
     def test_the_kill_switch_beats_a_class_grant(self, policy):
         """One control with no exceptions at all."""
         policy.set(HOST, Mode.ALLOW)
@@ -407,3 +437,95 @@ class TestTheClassIsReadOffTheBodyNotTheArgument:
 
         assert engine._body_carries_images(with_image) is True
         assert engine._body_carries_images(without) is False
+
+
+# ================================== the way the user gives the consent ===
+
+class TestTheRefusalHasARemedy:
+    """A refusal whose remedy exists nowhere is worse than no refusal.
+
+    The policy started refusing images bound for a chat-approved host on
+    29 August, correctly and with a message naming the missing decision — and
+    `PUT /egress/policy` took a host and a mode and nothing else, so there was
+    no way in the product to make that decision. The user would be told a
+    choice had not been made and given nothing to make it with, which reads as
+    the product being broken rather than careful.
+
+    Asserted against the real application, not a router mounted here. A
+    complete router that nothing includes is a defect this repository has
+    already shipped once.
+    """
+
+    @pytest.fixture
+    def client(self, tmp_path, monkeypatch):
+        from fastapi.testclient import TestClient
+
+        import core.egress as egress_pkg
+
+        gate = EgressGate(
+            log=EgressLog(str(tmp_path / "egress.db")),
+            policy=EgressPolicy(str(tmp_path / "policy.json")),
+        )
+        monkeypatch.setattr(egress_pkg, "get_gate", lambda: gate)
+        monkeypatch.setattr("core.egress.runtime.get_gate", lambda: gate)
+
+        from main import app
+
+        return TestClient(app), gate
+
+    def test_a_class_grant_can_be_given_through_the_api(self, client):
+        http, gate = client
+        gate.policy.set(HOST, Mode.ALLOW)
+
+        response = http.put(
+            "/egress/policy",
+            json={"host": HOST, "mode": "allow", "data_class": "image"},
+        )
+
+        assert response.status_code == 200
+        assert response.json()["data_class"] == "image"
+        assert gate.policy.decide(HOST, DataClass.IMAGE).mode is Mode.ALLOW
+
+    def test_omitting_the_class_still_means_chat(self, client):
+        """Every existing caller sends no class and must keep its behaviour."""
+        http, gate = client
+
+        http.put("/egress/policy", json={"host": HOST, "mode": "allow"})
+
+        assert gate.policy.decide(HOST).mode is Mode.ALLOW
+        assert gate.policy.decide(HOST, DataClass.IMAGE).mode is Mode.DENY
+
+    def test_an_unknown_class_is_refused_rather_than_defaulted(self, client):
+        """Silently treating it as `prompt` would grant chat to a caller that
+        asked for something else — the widening the field exists to prevent."""
+        http, _ = client
+
+        response = http.put(
+            "/egress/policy",
+            json={"host": HOST, "mode": "allow", "data_class": "hologram"},
+        )
+
+        assert response.status_code == 400
+        assert "data_class" in response.json()["detail"]
+
+    def test_the_policy_view_shows_the_class_rules(self, client):
+        """A grant the privacy pane cannot render is a permission nobody can
+        see, which is the same failure as one nobody can give."""
+        http, gate = client
+        gate.policy.set(HOST, Mode.ALLOW)
+        gate.policy.set(HOST, Mode.ALLOW, DataClass.IMAGE)
+
+        body = http.get("/egress/policy").json()
+
+        assert body["rules"][HOST] == "allow"
+        assert body["class_rules"][HOST]["image"] == "allow"
+
+    def test_forgetting_a_destination_forgets_its_class_grants(self, client):
+        http, gate = client
+        gate.policy.set(HOST, Mode.ALLOW)
+        gate.policy.set(HOST, Mode.ALLOW, DataClass.IMAGE)
+
+        http.delete(f"/egress/policy/{HOST}")
+
+        assert gate.policy.class_rules() == {}
+

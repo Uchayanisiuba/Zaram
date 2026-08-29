@@ -268,15 +268,31 @@ class EgressPolicy:
 
         cls = DataClass(data_class)
         host_l = host.lower()
+        host_mode = self._rules.get(host_l)
 
-        # An explicit rule for this exact (host, class) wins over everything
-        # below it, in both directions: it can permit a class the host rule
-        # would not reach, and it can deny one the host rule would.
+        # **A blocked destination is blocked for everything, and this ordering
+        # is what makes that true.** Checked before the class rules, not after.
+        #
+        # Found while wiring the privacy pane's "cut everything" control, which
+        # sets every known host to deny: with the class rule consulted first, a
+        # standing image grant survived it, so pressing the one control whose
+        # meaning must be unambiguous would have left a destination able to
+        # receive photographs. The same hole is open to anyone who blocks a
+        # host by hand and reasonably expects it to mean what it says.
+        #
+        # It also keeps the asymmetry pointing the right way. A class rule may
+        # *widen* what a permitted host receives, because the user granted it
+        # deliberately; it may never rescue a destination the user shut.
+        if host_mode is Mode.DENY:
+            return Decision(Mode.DENY, f"you blocked requests to {host}")
+
+        # Otherwise an explicit rule for this exact (host, class) wins: it can
+        # permit a class the host rule would not reach, and it can refuse one
+        # the host rule would have allowed.
         mode = self._class_rules.get(host_l, {}).get(cls)
         if mode is not None:
             return self._describe(mode, host, cls)
 
-        host_mode = self._rules.get(host_l)
         if host_mode is None:
             return DEFAULT_DECISION
 
@@ -284,8 +300,6 @@ class EgressPolicy:
         # silent about everything else, so a more sensitive class falls through
         # to a refusal that says which decision is missing.
         if cls not in _INHERITS_HOST_RULE:
-            if host_mode is Mode.DENY:
-                return Decision(Mode.DENY, f"you blocked requests to {host}")
             return _needs_own_grant(host, cls)
 
         return self._describe(host_mode, host, cls)

@@ -55,10 +55,30 @@ export interface EgressIntegrity {
 
 export type PolicyMode = 'allow' | 'ask' | 'deny';
 
+/**
+ * *What* is leaving, as distinct from where it is going — rule 7j's second
+ * dimension.
+ *
+ * `prompt` is what a plain host rule has always meant and is the default
+ * everywhere. The others must be granted for a destination in their own right:
+ * a chat message is a couple of kilobytes and a photograph is a few megabytes
+ * of something far more personal, so connecting a provider for text is not
+ * consent to send it a picture.
+ */
+export type EgressDataClass = 'prompt' | 'image' | 'spine';
+
 export interface EgressPolicySnapshot {
   /** Always "deny" — stated by the backend rather than assumed here. */
   default: string;
   rules: Record<string, PolicyMode>;
+  /**
+   * host → class → mode, for the classes a host rule does not speak for.
+   *
+   * Its own field rather than a nesting of `rules`, matching the backend: that
+   * shape is already rendered and parsed, and changing it quietly is how a
+   * privacy pane comes to show nothing at all.
+   */
+  classRules: Record<string, Partial<Record<EgressDataClass, PolicyMode>>>;
   hostsSeen: string[];
   /** Contacted at least once but never ruled on. What the pane should offer. */
   hostsWithoutARule: string[];
@@ -128,20 +148,46 @@ export async function fetchEgressPolicy(): Promise<EgressPolicySnapshot> {
   return {
     default: String(raw.default ?? 'deny'),
     rules: (raw.rules as Record<string, PolicyMode>) ?? {},
+    classRules:
+      (raw.class_rules as Record<string, Partial<Record<EgressDataClass, PolicyMode>>>) ?? {},
     hostsSeen: (raw.hosts_seen as string[]) ?? [],
     hostsWithoutARule: (raw.hosts_without_a_rule as string[]) ?? [],
   };
 }
 
-export async function setEgressPolicy(host: string, mode: PolicyMode): Promise<void> {
+/**
+ * Set one destination's rule, for one class of thing.
+ *
+ * `dataClass` defaults to `prompt`, so every existing call site keeps its
+ * exact behaviour — and the default is the least sensitive class rather than
+ * the most, because a caller that does not say what it is sending must not be
+ * able to grant permission for a photograph by omission.
+ */
+export async function setEgressPolicy(
+  host: string,
+  mode: PolicyMode,
+  dataClass: EgressDataClass = 'prompt',
+): Promise<void> {
   await json('/egress/policy', {
     method: 'PUT',
-    body: JSON.stringify({ host, mode }),
+    body: JSON.stringify({ host, mode, data_class: dataClass }),
   });
 }
 
-export async function forgetEgressPolicy(host: string): Promise<void> {
-  await json(`/egress/policy/${encodeURIComponent(host)}`, { method: 'DELETE' });
+/**
+ * Remove a rule.
+ *
+ * Omitting `dataClass` forgets the destination entirely, every class with it.
+ * Leaving an image grant behind after the host rule was removed would be a
+ * permission outliving the decision that created it — and an invisible one,
+ * since the list shows host rules.
+ */
+export async function forgetEgressPolicy(
+  host: string,
+  dataClass?: EgressDataClass,
+): Promise<void> {
+  const query = dataClass ? `?data_class=${encodeURIComponent(dataClass)}` : '';
+  await json(`/egress/policy/${encodeURIComponent(host)}${query}`, { method: 'DELETE' });
 }
 
 /**
