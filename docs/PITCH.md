@@ -132,6 +132,30 @@ sourced; check them before quoting them, because two of the four move.**
    > fixed cost already paid. That argument cannot be falsified by a price war;
    > the prediction can.
 
+   **The subsidy is real; the "and then they raise prices" is not — and the
+   sharper reading is better for us anyway.** The losses are documented: Microsoft
+   loses **$20–80 per user per month** on Copilot, OpenAI does not break even
+   before 2030, Anthropic's gross margin was **−94% in 2024**. But the
+   loss-leader-then-extract play needs a monopoly at the end of it, and there
+   isn't one: five credible labs, OpenAI reportedly weighing *price cuts* to fight
+   Anthropic, and Anthropic reaching ~60% margin through **efficiency rather than
+   price rises**. Above all, **open weights are a permanent ceiling** — a user who
+   can run Gemma on their own disk cannot be gouged, because the substitute is
+   already installed.
+
+   So they may never need to raise the price, **because the price was never the
+   point**. The return on subsidising a user is their data now
+   (`DataPolicy.LOGGED_AND_TRAINED_ON` — *"every free tier is this"*) and a
+   switching cost that compounds daily. The lock-in is **memory**, not money, and
+   it is being built deliberately.
+
+   **State this as the position, because it is the one that cannot be argued
+   down: Zaram does not need cloud AI to fail.** Cheaper and better cloud is a
+   destination Zaram routes to, with the memory still on the user's machine.
+   Expensive or restrictive cloud is a reason to stay local. Either way people use
+   more than one and the memory should be theirs. A thesis that requires
+   competitors to do badly is fragile; this one does not.
+
 4. **Memory is the lock-in, and no vendor will unlock it.** Every provider is
    building memory that works only with their own model. That is not an oversight,
    it is the switching cost. A memory layer that works *across* competitors is
@@ -198,3 +222,33 @@ traction number that makes the venture pitch land. Trying it in the other order 
 pitching without the one thing being screened for.
 
 *Verify every programme's current status and terms before applying — these change.*
+
+## The ownership argument — added 29 August 2026
+
+**A hosted model is rented, and in June 2026 the rent was cancelled with three
+days' notice.**
+
+Anthropic shipped Claude Fable 5 and Mythos 5 on 9 June — its two most capable
+models. On 12 June a US federal export-control order barred access by any foreign
+national anywhere, including Anthropic's own foreign-national staff. Nationality
+cannot be verified live, so **both models were disabled worldwide, for everyone,
+paying US customers included.** The order was lifted on 30 June and access
+restored on 1 July: eighteen days, no appeal, no warning.
+
+This is the strongest version of the argument because it is none of the things a
+sceptic can dismiss. Not a poor-connectivity story, not an authoritarian-government
+story, not a developing-market story. The best model in the world, switched off
+globally, by the government of the country that built it.
+
+It is not the only door, and the others matter for this market specifically:
+sanctions cut Iran, Cuba, North Korea and Syria off entirely; OpenAI withdrew from
+Hong Kong in July 2024; **fifteen African countries shut the internet off
+thirty-six times in 2025**, and Nigeria blocked Twitter for **seven months** in
+2021–22, a ban the ECOWAS Court later found unlawful — after it had run its course.
+
+**Be exact about what survives, because overclaiming here would be the same
+failure the product exists to refuse.** Zaram's cloud routing stops in every one
+of those scenarios; that half was always somebody else's. What keeps working is
+the model on the disk, the documents, and everything Zaram has learned about the
+work — and rule 7 makes the Spine exportable in an open format, so the memory
+outlives the provider, the order, and Zaram itself.
