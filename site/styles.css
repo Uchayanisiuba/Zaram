@@ -329,15 +329,91 @@ kbd {
   max-width: 1000px;
   margin: 0 auto;
 }
-.orb-shot img {
-  border: 0; background: transparent; border-radius: 50%;
-  filter: drop-shadow(0 30px 70px rgba(139,127,212,.28));
+/* ---------- the orb, alive ---------- */
+
+.orb-stage { position: relative; display: flex; flex-direction: column; align-items: center; }
+
+.orb-img {
+  display: block; width: 100%; height: auto; border-radius: 50%;
+  filter: drop-shadow(0 26px 64px rgba(139,127,212,.26));
+  animation: breathe 7s ease-in-out infinite;
+  transition: filter .8s ease;
 }
-.orb-shot figcaption {
-  display: flex; align-items: center; justify-content: center; gap: 8px;
-  margin-top: 10px; max-width: 34ch; font-size: .84rem; color: var(--accent);
+/* Working is the one state the orb reports here. It never reports routing. */
+.orb-stage.is-working .orb-img { filter: drop-shadow(0 26px 64px rgba(94,231,220,.38)); }
+
+@keyframes breathe {
+  0%, 100% { transform: scale(1); }
+  50%      { transform: scale(1.018); }
 }
-.orb-shot figcaption .dot { flex: 0 0 auto; }
+
+/* One thin ring with a travelling dot, drawn rather than baked in, so it can
+   turn independently of the sphere. */
+.orb-track {
+  position: absolute; inset: 6%;
+  border: 1px solid rgba(139,127,212,.20); border-radius: 50%;
+  animation: orbit 26s linear infinite;
+  pointer-events: none;
+}
+.orb-track i {
+  position: absolute; top: -3px; left: 50%; width: 5px; height: 5px;
+  margin-left: -2.5px; border-radius: 50%;
+  background: var(--accent); box-shadow: 0 0 8px var(--accent);
+}
+.orb-stage.is-working .orb-track { animation-duration: 6s; border-color: rgba(94,231,220,.30); }
+
+@keyframes orbit { to { transform: rotate(360deg); } }
+
+.orb-state {
+  display: flex; align-items: center; gap: 8px;
+  margin: 14px 0 0; font-size: .84rem; color: var(--accent); text-align: center;
+}
+.orb-state .dot { flex: 0 0 auto; transition: background .5s ease, box-shadow .5s ease; }
+
+/* ---------- the conversation replay ---------- */
+
+.demo .panel-bar .orb { transition: background .4s ease, box-shadow .4s ease; }
+.demo.is-working .panel-bar .orb { background: var(--accent); box-shadow: 0 0 0 3px rgba(94,231,220,.18); }
+.demo:not(.is-working) .panel-bar .orb { background: var(--text-3); box-shadow: none; }
+
+.thread { padding: 16px 18px; min-height: 232px; display: flex; flex-direction: column; gap: 14px; }
+.turn { display: flex; flex-direction: column; gap: 3px; }
+.turn .who {
+  font-size: .66rem; letter-spacing: .12em; text-transform: uppercase; color: var(--text-3);
+}
+.turn p { margin: 0; font-size: .93rem; line-height: 1.55; color: var(--text); }
+.turn.is-zaram .who { color: var(--accent); }
+.turn.is-zaram > p:first-of-type {
+  border-left: 2px solid var(--accent); padding-left: 11px; color: var(--text);
+}
+.turn .src {
+  font-family: var(--mono); font-size: .68rem; color: var(--text-3);
+  padding-left: 13px; margin-top: 3px;
+}
+.turn .src b { color: var(--text-2); font-weight: 500; }
+
+/* The caret only exists while something is being written. */
+.caret {
+  display: inline-block; width: 7px; height: 1em; margin-left: 1px;
+  background: var(--accent); vertical-align: text-bottom;
+  animation: blink 1s step-end infinite;
+}
+@keyframes blink { 50% { opacity: 0; } }
+
+.demo-foot { justify-content: flex-end; min-height: 20px; }
+.replay {
+  font: inherit; font-family: var(--mono); font-size: .7rem;
+  color: var(--text-3); background: none; border: 1px solid var(--line);
+  border-radius: 6px; padding: 4px 10px; cursor: pointer;
+  transition: color .15s ease, border-color .15s ease;
+}
+.replay:hover { color: var(--accent); border-color: rgba(94,231,220,.4); }
+.replay:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* Motion is opt-out, and opting out must leave the page complete, not empty. */
+@media (prefers-reduced-motion: reduce) {
+  .orb-img, .orb-track { animation: none; }
+}
 .hero .panel { margin: 0; max-width: none; }
 
 @media (max-width: 860px) {
