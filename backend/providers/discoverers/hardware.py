@@ -27,6 +27,13 @@ logger = logging.getLogger(__name__)
 #: wedged driver cannot stall boot. Hardware detection is on the startup path.
 _PROBE_TIMEOUT_S = 4.0
 
+#: The occupancy probe runs before every reply, not once at boot, so it gets a
+#: much tighter budget than capacity detection. A slow answer here is worse than
+#: no answer: the fallback is to say nothing about a swap, which is correct and
+#: costs the user an indicator, while waiting costs them the reply. Same
+#: reasoning as the one-second timeout on Ollama's residency probe.
+_OCCUPANCY_TIMEOUT_S = 1.0
+
 #: Where Windows records adapter memory as a 64-bit value. The obvious source,
 #: Win32_VideoController.AdapterRAM, is a uint32 and saturates at 4 GB — it
 #: reports 4294967295 for a 12 GB card, which is precisely the kind of confident
@@ -202,7 +209,7 @@ class HardwareProfiler:
         )
 
     @staticmethod
-    def _run(cmd: list[str]) -> Optional[str]:
+    def _run(cmd: list[str], *, timeout: float = _PROBE_TIMEOUT_S) -> Optional[str]:
         """Run a probe, or return None. Never raises, never blocks for long."""
         kwargs = {}
         if platform.system() == "Windows":
@@ -213,7 +220,7 @@ class HardwareProfiler:
             cmd,
             capture_output=True,
             text=True,
-            timeout=_PROBE_TIMEOUT_S,
+            timeout=timeout,
             check=False,
             **kwargs,
         )
@@ -279,3 +286,52 @@ class HardwareProfiler:
         conclude that nothing fits.
         """
         return self._gpu_reading().vram_bytes
+
+    def vram_used_bytes(self) -> Optional[int]:
+        """VRAM occupied on the card *right now*, or None.
+
+        Deliberately outside `profile()` and deliberately not cached. Capacity
+        is a property of the machine and is asked once at boot; occupancy
+        changes between one reply and the next, so a cached answer here would
+        be a stale number wearing a measurement's authority.
+
+        It exists because occupancy cannot always be reached by adding up what
+        Zaram knows about. `swap_preflight` sums the sizes each local server
+        reports for what it holds, and a server that names the model without
+        sizing it leaves that sum unanswerable — TabbyAPI is exactly that
+        shape, because no OpenAI-compatible route carries a memory figure. The
+        driver can answer regardless, because it measures the card rather than
+        asking its tenants.
+
+        None whenever it cannot be established: no NVIDIA driver, a Mac (Apple
+        shares one memory pool and there is no separate figure to report), or a
+        probe that failed. **Zero, unlike in `_vram_bytes`, is a real reading
+        here** — an idle card genuinely holds nothing, whereas a card with no
+        memory is not a machine that exists. Same discipline, opposite
+        conclusion, because it is a different quantity.
+        """
+        if self._gpu_reading().source != "nvidia-smi":
+            return None
+        try:
+            out = self._run(
+                [
+                    "nvidia-smi",
+                    "--query-gpu=memory.used",
+                    "--format=csv,noheader,nounits",
+                ],
+                timeout=_OCCUPANCY_TIMEOUT_S,
+            )
+        except Exception as exc:
+            logger.debug("Hardware: VRAM occupancy probe failed: %s", exc)
+            return None
+        if not out:
+            return None
+        # The first line, to stay consistent with `_probe_nvidia_smi`: it takes
+        # the first card because placing a model on a specific device is not
+        # something anything here can do, and reading occupancy off a different
+        # card than capacity would be worse than reading neither.
+        try:
+            mib = int(out.splitlines()[0].strip())
+        except ValueError:
+            return None
+        return mib * 1024 * 1024 if mib >= 0 else None

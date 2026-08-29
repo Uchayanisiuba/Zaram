@@ -74,7 +74,7 @@ def _same_model(a: str, b: str) -> bool:
     return norm(a) == norm(b)
 
 
-def _matches_resident(model_id: str, resident: Dict[str, int]) -> bool:
+def _matches_resident(model_id: str, resident: Dict[str, Optional[int]]) -> bool:
     return any(_same_model(model_id, name) for name in resident)
 
 
@@ -243,6 +243,15 @@ class ProviderManager:
         unreadable VRAM, an unreachable Ollama, or a model whose size we do not
         know. Never guesses. Announcing a swap that does not happen would train
         the user to ignore the indicator, which costs more than staying quiet.
+
+        Returns ``None`` in one further case, and it is new: the model does not
+        fit, and nothing Zaram's own servers would unload is what is in the
+        way. That happens when a *second* local server holds the card, or when
+        a program Zaram knows nothing about does. There is no honest sentence
+        for it in this vocabulary — it is not ``oversized``, because the model
+        is not too big for the machine, and it is not a ``swap``, because
+        nothing is displaced — so it says nothing rather than saying the
+        nearest wrong thing.
         """
         model = self._resolve_model(model_id)
         if model is None or model.size_bytes is None:
@@ -262,21 +271,6 @@ class ProviderManager:
         if _matches_resident(model_id, resident):
             return SwapPlan(kind="resident", model=model_id, evicts=[], bytes_needed=0)
 
-        # Only chat weights compete for the budget. The embedder's share is
-        # already deducted inside `resident_budget_bytes`, so counting it again
-        # here would double-charge it and report a swap on a machine with room.
-        occupied = sum(
-            size for name, size in resident.items()
-            if not self._is_embedding_model(name)
-        )
-
-        if occupied + model.size_bytes <= budget:
-            return SwapPlan(kind="load", model=model_id, evicts=[], bytes_needed=model.size_bytes)
-
-        evicts = sorted(
-            name for name in resident if not self._is_embedding_model(name)
-        )
-
         # A model that does not fit even with the card cleared is not swapping
         # anything — there is nothing to evict that would make room. Ollama
         # loads it anyway and spills layers to system RAM, which is slow for a
@@ -287,11 +281,32 @@ class ProviderManager:
         # is worse than saying nothing. Found by a test asserting the embedder
         # was excluded, which it was; the leftover `swap` with an empty
         # `evicts` was the real defect underneath.
+        #
+        # Asked before headroom, and that ordering is load-bearing now that
+        # headroom can be unknown: whether a model is too big for the whole
+        # card is decidable from capacity alone, so an unsizeable tenant must
+        # not be allowed to suppress the one verdict it has no bearing on.
         if model.size_bytes > budget:
             return SwapPlan(
                 kind="oversized", model=model_id, evicts=[],
                 bytes_needed=model.size_bytes,
             )
+
+        headroom = self._headroom_bytes(resident)
+        if headroom is None:
+            return None
+
+        if model.size_bytes <= headroom:
+            return SwapPlan(kind="load", model=model_id, evicts=[], bytes_needed=model.size_bytes)
+
+        evicts = self._evictable_by(model, resident)
+        if not evicts:
+            # It does not fit, and nothing this model's own server would unload
+            # is what is occupying the card. Another local server or another
+            # program is, and neither will step aside. Naming an eviction that
+            # will not happen is the failure the `oversized` branch above was
+            # written to avoid, so this stays quiet instead.
+            return None
 
         return SwapPlan(
             kind="swap",
@@ -323,19 +338,156 @@ class ProviderManager:
                 return candidate
         return None
 
-    def _resident_models(self) -> Optional[Dict[str, int]]:
-        """Live residency from whichever adapter can report it, or None."""
+    def _resident_models(self) -> Optional[Dict[str, Optional[int]]]:
+        """Live residency across **every** local server, or None for unknown.
+
+        Merged, not first-wins. This used to return the first adapter that gave
+        a non-``None`` answer, which on a one-server machine is
+        indistinguishable from correct and on a two-server machine is a
+        ten-gigabyte lie. Measured 28 August 2026 on the 12 GB card: Ollama
+        answered an empty map first while TabbyAPI held 9.5 GB, so
+        `swap_preflight` planned against an empty card and would have graded a
+        cold start onto 2.6 GB of actual headroom as "fits".
+
+        **A provider that cannot answer makes the whole answer unknown.**
+        Merging whatever happens to be reachable would report a partial picture
+        as a complete one, which is the same defect at a smaller scale — and
+        the error runs in the dangerous direction, because an unseen tenant
+        always makes the card look emptier than it is. Silence is a supported
+        outcome downstream; a confident undercount is not.
+
+        A local provider with no residency probe at all is likewise unknown
+        rather than nothing: that absence *is* the hole this method was fixed
+        to close, and treating it as an empty answer would reintroduce it by a
+        quieter route. Cloud providers are skipped — they hold no VRAM on this
+        machine — and a provider that does not say which kind it is is treated
+        as local, because that is the assumption that fails safe.
+
+        Values are ``Optional[int]``: bytes where the server reports them,
+        ``None`` for "resident, size unknown". TabbyAPI is the second shape,
+        since no OpenAI-compatible route carries a memory figure. Callers must
+        not read that ``None`` as a zero.
+        """
+        merged: Dict[str, Optional[int]] = {}
         for adapter in self.registry.list_model_providers():
+            if getattr(adapter, "kind", None) is ProviderKind.CLOUD_API:
+                continue
             probe = getattr(adapter, "resident_models", None)
             if probe is None:
-                continue
+                logger.debug(
+                    "Residency unknown: local provider %s cannot report what it holds",
+                    getattr(adapter, "provider_id", "?"),
+                )
+                return None
             try:
                 result = probe()
-            except Exception:
+            except Exception as exc:
+                logger.debug(
+                    "Residency unknown: provider %s probe raised: %s",
+                    getattr(adapter, "provider_id", "?"), exc,
+                )
+                return None
+            if result is None:
+                return None
+            merged.update(result)
+        return merged
+
+    def _vram_used_bytes(self) -> Optional[int]:
+        """The driver's own reading of what is on the card, or None.
+
+        Asked of the hardware profiler rather than of the model providers,
+        because it is the one source that sees tenants Zaram did not put there.
+        Guarded with ``getattr`` so a profiler that predates the probe — every
+        fake in the suite — degrades to "cannot tell" rather than raising on
+        the reply path.
+        """
+        profiler = self.registry.get_hardware_profiler()
+        probe = getattr(profiler, "vram_used_bytes", None)
+        if probe is None:
+            return None
+        try:
+            return probe()
+        except Exception as exc:
+            logger.debug("VRAM occupancy probe failed: %s", exc)
+            return None
+
+    def _headroom_bytes(self, resident: Dict[str, Optional[int]]) -> Optional[int]:
+        """Bytes a new model may claim right now without displacing anything.
+
+        Two sources for the same quantity, preferred in this order — and they
+        are *alternatives*, never blended. Each is measured against its own
+        baseline, because mixing the baselines is how a number gets charged
+        twice.
+
+        **The sum**, when every resident chat model reports a size. Counted
+        against ``resident_budget_bytes``, which has already deducted the
+        embedder and the KV reserve. Preferred because it is attributable: it
+        counts Zaram's own tenants and nothing else, so the answer does not
+        move when an unrelated program takes a slice of the card.
+
+        **The driver**, when it does not. A server that names the model it
+        holds without sizing it — TabbyAPI, and any other OpenAI-compatible
+        server — leaves the sum unanswerable, and an unanswerable sum is how
+        9.5 GB came to be invisible. This one is counted against capacity less
+        the reserve, because the measured figure already contains the embedder
+        if the embedder is loaded. Deducting it from the budget as well would
+        charge it twice, and charging it twice with the on-disk size standing
+        in for its resident footprint would over-deduct in the direction that
+        invents swaps.
+
+        When the embedder is *not* resident, room is left for it explicitly:
+        recall runs on every exchange, so it is not an optional tenant.
+        """
+        budget = self.resident_budget_bytes()
+        if budget is None:
+            return None
+
+        chat = {
+            name: size
+            for name, size in resident.items()
+            if not self._is_embedding_model(name)
+        }
+        if all(size is not None for size in chat.values()):
+            return max(budget - sum(size or 0 for size in chat.values()), 0)
+
+        used = self._vram_used_bytes()
+        if used is None:
+            return None
+
+        profile = self.hardware_profile()
+        total = profile.vram_bytes or 0
+        headroom = total - used - int(total * _KV_CACHE_RESERVE_FRACTION)
+        if not any(self._is_embedding_model(name) for name in resident):
+            headroom -= self.embedding_footprint_bytes()
+        return max(headroom, 0)
+
+    def _evictable_by(
+        self, model: ModelInfo, resident: Dict[str, Optional[int]]
+    ) -> List[str]:
+        """Resident models that loading ``model`` would actually displace.
+
+        A server evicts its own tenants and nobody else's. Ollama unloads an
+        Ollama model to make room for an Ollama model; it has no way to touch
+        what a second server on the same card is holding, and does not try — it
+        loads anyway and spills layers to system RAM. Naming a cross-server
+        model here would be an indicator claiming a displacement that never
+        happens, which is the swap-with-nothing-evicted failure wearing a
+        different disguise.
+
+        The provider is read from the catalog rather than from the probe,
+        because the residency map is keyed by provider-native names and the
+        provider is a catalog fact. A resident model the catalog does not know
+        is not named: we cannot say whose it is, and a guess here becomes a
+        sentence on screen about a model being unloaded.
+        """
+        evictable: List[str] = []
+        for name in resident:
+            if self._is_embedding_model(name):
                 continue
-            if result is not None:
-                return result
-        return None
+            other = self._resolve_model(name)
+            if other is not None and other.provider == model.provider:
+                evictable.append(name)
+        return sorted(evictable)
 
     def _is_embedding_model(self, name: str) -> bool:
         """Whether a resident model is the embedder rather than a chat model.
@@ -418,12 +570,14 @@ class ProviderManager:
           this" is a judgement, and the general model stays a real answer when
           no specialist is installed.
 
-        Merging the two is this codebase's most expensive recurring bug in its
-        modality form, and the dead `orchestrator` package contains it ready to
-        run: `scoring.py` records a *missing required capability* as a warning
-        and ranks the candidate anyway. That is how a text-only model comes to
-        be asked to read a picture and answers with confident prose about an
-        image it never saw — rule 9's failure in a new medium.
+        Merging the two is this codebase's most expensive recurring bug in
+        its modality form. The `orchestrator` package contained a working
+        version of the mistake — `scoring.py` recorded a *missing required
+        capability* as a warning and ranked the candidate anyway — and it was
+        deleted on 28 August 2026 rather than left as a temptation with a
+        comment on it. That shape is how a text-only model comes to be asked to
+        read a picture and answers with confident prose about an image it never
+        saw: rule 9's failure in a new medium.
 
         Returns ``None`` when the gate empties the field, and callers must not
         substitute: no vision-capable model installed means Zaram cannot answer

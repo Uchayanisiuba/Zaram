@@ -3,9 +3,11 @@
 ``select_model_for_task`` takes two arguments and they are different kinds of
 thing on purpose — a gate and a preference — so most of this file is about
 keeping them apart. That distinction is the one CLAUDE.md records as this
-codebase's most expensive recurring bug, and the dead ``orchestrator`` package
-still contains the version that gets it wrong: `scoring.py` records a missing
-*required* capability as a warning and ranks the candidate anyway.
+codebase's most expensive recurring bug. The ``orchestrator`` package held a
+version that got it wrong — `scoring.py` recorded a missing *required*
+capability as a warning and ranked the candidate anyway — and was deleted on
+28 August 2026, unimported by anything, so the wrong version is gone rather
+than merely unused.
 
 The failure that produces is not a slightly worse answer. It is a text-only
 model asked to read a screenshot, answering with confident prose about an image
