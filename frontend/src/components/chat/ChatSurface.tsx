@@ -15,6 +15,7 @@ import { motion, AnimatePresence, type Variants } from 'framer-motion';
 import { Paperclip, Send } from 'lucide-react';
 import ArtifactCard from '@/components/ArtifactCard';
 import AttachmentChips from '@/components/chat/AttachmentChips';
+import { filesFromClipboard, withPasteName } from '@/lib/pastedFiles';
 import {
   attachFiles,
   detachAttachment,
@@ -148,7 +149,7 @@ export default function ChatSurface({ navigate }: Props) {
   // `setupToOffer` returns null unless the backend said plainly that chat
   // cannot work, so a slow or unreachable probe leaves the composer exactly
   // where it was.
-  const readiness = useReadiness();
+  const [readiness, recheckReadiness] = useReadiness();
   const setupNeeded = setupToOffer(readiness);
   const landingFraction = useLayoutStore((s) => s.chatFraction);
   const workspaceFraction = useLayoutStore((s) => s.chatFractionWorkspace);
@@ -305,6 +306,40 @@ export default function ChatSurface({ navigate }: Props) {
       }
     },
     [sessionId],
+  );
+
+  /**
+   * A screenshot pasted into the message box.
+   *
+   * The last way into the attachment path that was missing. The paperclip and
+   * a drag both reached `takeFiles`; Ctrl+V did nothing, so the one gesture a
+   * person uses immediately after taking a screenshot was the one gesture that
+   * was not wired — and there is no keyboard route to the file picker either.
+   *
+   * **On the input, not on the window**, which is the opposite of
+   * `KnowledgeWorkspace`'s handler and deliberately so: that one skips fields
+   * because a paste into its search box is a search. Here the caret is in the
+   * message box by definition, so a window listener that skipped fields would
+   * never fire, and one that did not would take pastes from every other
+   * surface mounted beside it.
+   *
+   * **Text pastes are untouched.** `preventDefault` is called only once files
+   * are known to be present; a paste with nothing on it falls through to the
+   * browser and types, which is what it must keep doing.
+   *
+   * Nothing here is a new route to a model. It reaches the same `takeFiles`
+   * the paperclip does, so the same parse, the same eight-file cap, the same
+   * refusals and the same vision gate apply — a paste that changed any of
+   * those would be a second door of exactly the kind just closed elsewhere.
+   */
+  const handlePaste = useCallback(
+    (event: React.ClipboardEvent<HTMLInputElement>) => {
+      const files = filesFromClipboard(event.clipboardData);
+      if (files.length === 0) return;
+      event.preventDefault();
+      void takeFiles(files.map((file) => withPasteName(file)));
+    },
+    [takeFiles],
   );
 
   const handleDetach = useCallback((id: string) => {
@@ -495,7 +530,11 @@ export default function ChatSurface({ navigate }: Props) {
           chance at. Never render both: an input under an explanation of why
           there is no input is still an input, and it will be typed into. */}
       {setupNeeded ? (
-        <FirstRunPanel report={setupNeeded} onExplore={closeChat} />
+        <FirstRunPanel
+          report={setupNeeded}
+          onExplore={closeChat}
+          onConnected={recheckReadiness}
+        />
       ) : (
         <>
       {/* Transcript */}
@@ -769,6 +808,7 @@ export default function ChatSurface({ navigate }: Props) {
               setInputText(e.target.value);
             }}
             onKeyDown={handleKeyDown}
+            onPaste={handlePaste}
             placeholder={
               micStatus === 'recording'
                 ? 'Listening on this machine…'
