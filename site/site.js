@@ -35,8 +35,25 @@ const CONFIG = {
   // so the footer can tell visitors truthfully where their address goes.
   // Leave endpoint empty and the form explains it isn't connected yet instead
   // of silently swallowing addresses.
+  //
+  //   formKind: "json"    Formspree and most form backends. POSTs JSON and
+  //                       reads the reply, so a failure is a real failure and
+  //                       the person is told. Recommended.
+  //                       endpoint: https://formspree.io/f/xxxxxxxx
+  //
+  //   formKind: "google"  A Google Form. Free and uncapped, and the responses
+  //                       land in a sheet you own — but the browser is not
+  //                       allowed to read the reply, so the page cannot tell a
+  //                       delivered address from a lost one and has to assume
+  //                       it worked. On a product that refuses to overstate
+  //                       what it knows, that is a real cost. Use it only if
+  //                       the cap on the other one actually bites.
+  //                       endpoint: https://docs.google.com/forms/d/e/FORM_ID/formResponse
+  //                       and fill googleFields with the entry.NNN ids.
   formEndpoint: "",
+  formKind:     "json",
   formHost:     "the form host",
+  googleFields: { email: "", setup: "", intent: "" },
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -132,12 +149,23 @@ async function submitSignup(event) {
   say(status, "", "");
 
   try {
-    const response = await fetch(CONFIG.formEndpoint, {
-      method: "POST",
-      headers: { "Accept": "application/json", "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    if (!response.ok) throw new Error("HTTP " + response.status);
+    if (CONFIG.formKind === "google") {
+      // A Google Form replies with headers the page is not permitted to read,
+      // so this is send-and-hope by construction. Anything that throws is still
+      // caught below; what cannot be detected is a 4xx from Google itself.
+      const body = new URLSearchParams();
+      for (const [field, entry] of Object.entries(CONFIG.googleFields)) {
+        if (entry && payload[field]) body.append(entry, payload[field]);
+      }
+      await fetch(CONFIG.formEndpoint, { method: "POST", mode: "no-cors", body });
+    } else {
+      const response = await fetch(CONFIG.formEndpoint, {
+        method: "POST",
+        headers: { "Accept": "application/json", "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!response.ok) throw new Error("HTTP " + response.status);
+    }
     form.reset();
     say(
       status,
