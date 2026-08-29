@@ -30,28 +30,48 @@
  * **No model filenames.** Every string on this screen comes from the payload,
  * which is asserted clean on the backend side. Nothing is composed here.
  */
+import { useState } from 'react';
+
+import CloudKeyForm from './CloudKeyForm';
 import type { ReadinessOffer, ReadinessReport } from '@/services/readinessClient';
 
 interface FirstRunPanelProps {
   report: ReadinessReport;
-  /** Chosen "look around first" — the one offer this screen can honour. */
+  /** Chosen "look around first". */
   onExplore: () => void;
+  /**
+   * A provider was configured, so readiness should be asked again.
+   *
+   * **Required, not optional**, for the reason `ChatSurface`'s own `navigate`
+   * prop is required: a missing handler here would leave the setup screen
+   * standing over a product that had just become able to answer, and the
+   * failure would be silent. A compile error at the call site is the cheaper
+   * version of that bug.
+   */
+  onConnected: () => void;
 }
 
 /**
  * Whether choosing this does anything today.
  *
- * Exploring is a navigation and needs nothing behind it. Installing an engine,
- * pulling a model and storing a cloud key each need an executor that does not
- * exist yet, and inventing an instruction here — a command to type, a site to
- * visit — would put a value in the interface that nothing else in the product
- * maintains. When the executor lands, this function is where it is admitted.
+ * Exploring is a navigation and needs nothing behind it. **Storing a cloud key
+ * was admitted on 29 August 2026** — `CloudKeyForm` is its executor, and it
+ * qualified before the other two because its backend already existed:
+ * `POST /providers/cloud` writes the configuration and is effective without a
+ * restart, so the offer can be carried out here and now rather than promising
+ * something about the next launch.
+ *
+ * Installing an engine and pulling a model still have no executor. Inventing an
+ * instruction for them here — a command to type, a site to visit — would put a
+ * value in the interface that nothing else in the product maintains. When those
+ * executors land, this function is where they are admitted.
  */
 function canBeCarriedOut(kind: string): boolean {
-  return kind === 'explore';
+  return kind === 'explore' || kind === 'use_cloud_key';
 }
 
-export default function FirstRunPanel({ report, onExplore }: FirstRunPanelProps) {
+export default function FirstRunPanel({ report, onExplore, onConnected }: FirstRunPanelProps) {
+  const [openOffer, setOpenOffer] = useState<string | null>(null);
   return (
     <section
       aria-label="Setting Zaram up"
@@ -74,8 +94,27 @@ export default function FirstRunPanel({ report, onExplore }: FirstRunPanelProps)
         {report.offers.length > 0 && (
           <ul className="flex flex-col gap-2 list-none p-0 m-0">
             {report.offers.map((offer) => (
-              <li key={offer.kind}>
-                <OfferRow offer={offer} onChoose={onExplore} />
+              <li key={offer.kind} className="flex flex-col gap-2">
+                <OfferRow
+                  offer={offer}
+                  onChoose={() => {
+                    if (offer.kind === 'use_cloud_key') {
+                      // Toggled rather than navigated. The form belongs under
+                      // the offer it belongs to, where the price and the
+                      // detail above it stay readable — a setup screen that
+                      // replaces itself loses the context that made the choice
+                      // make sense.
+                      setOpenOffer((current) => (current === offer.kind ? null : offer.kind));
+                      return;
+                    }
+                    onExplore();
+                  }}
+                />
+                {openOffer === offer.kind && offer.kind === 'use_cloud_key' && (
+                  <div className="pl-3">
+                    <CloudKeyForm onConnected={onConnected} />
+                  </div>
+                )}
               </li>
             ))}
           </ul>

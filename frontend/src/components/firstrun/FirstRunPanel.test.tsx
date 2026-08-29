@@ -13,6 +13,33 @@ import { render, screen, cleanup } from '@testing-library/react';
 import FirstRunPanel from './FirstRunPanel';
 import type { ReadinessReport } from '@/services/readinessClient';
 
+// `CloudKeyForm` reads the shipped provider manifest on mount. Stubbed rather
+// than left to fail, because an unstubbed fetch lands the form in its
+// `unavailable` state — which is correct behaviour and would make the tests
+// below assert nothing about the thing they name.
+vi.mock('@/services/settingsClient', () => ({
+  fetchProviderCatalogue: vi.fn(async () => ({
+    generated: '2026-08-01',
+    providers: [
+      {
+        id: 'openrouter',
+        displayName: 'OpenRouter',
+        baseUrl: 'https://openrouter.ai/api/v1',
+        available: true,
+        note: 'Free models here are logged and may be trained on.',
+        keyUrl: 'https://openrouter.ai/keys',
+        compatibility: 'openai',
+        auth: 'bearer',
+      },
+    ],
+  })),
+  connectCloudProvider: vi.fn(async () => ({
+    connections: [],
+    configured: true,
+    generated: '2026-08-01',
+  })),
+}));
+
 afterEach(cleanup);
 
 /** Shaped like the real `no_engine` payload, including its sizes. */
@@ -54,13 +81,13 @@ const offerButton = (kind: string) =>
 
 describe('the first-run screen', () => {
   it('states what is missing, in the backend’s words', () => {
-    render(<FirstRunPanel report={noEngine} onExplore={() => {}} />);
+    render(<FirstRunPanel report={noEngine} onExplore={() => {}} onConnected={() => {}} />);
 
     expect(screen.getByText(noEngine.summary)).toBeInTheDocument();
   });
 
   it('puts the download size on the button, not behind a tooltip', () => {
-    render(<FirstRunPanel report={noEngine} onExplore={() => {}} />);
+    render(<FirstRunPanel report={noEngine} onExplore={() => {}} onConnected={() => {}} />);
 
     // Read off the accessible name: a size in a `title` or a hover card is a
     // price the user has to go looking for, which is not a price stated.
@@ -68,7 +95,7 @@ describe('the first-run screen', () => {
   });
 
   it('shows no size at all when nothing is downloaded', () => {
-    render(<FirstRunPanel report={noEngine} onExplore={() => {}} />);
+    render(<FirstRunPanel report={noEngine} onExplore={() => {}} onConnected={() => {}} />);
 
     // Not "0 MB". Zero is a figure and it reads as free rather than as absent.
     expect(offerButton('use_cloud_key').textContent).not.toMatch(/\d+\s*(MB|GB)/);
@@ -76,7 +103,7 @@ describe('the first-run screen', () => {
   });
 
   it('names what still works, so the screen reads as unconfigured not broken', () => {
-    render(<FirstRunPanel report={noEngine} onExplore={() => {}} />);
+    render(<FirstRunPanel report={noEngine} onExplore={() => {}} onConnected={() => {}} />);
 
     for (const line of noEngine.stillWorks) {
       expect(screen.getByText(line)).toBeInTheDocument();
@@ -85,7 +112,7 @@ describe('the first-run screen', () => {
 
   it('offers the way out that it can actually honour', async () => {
     const onExplore = vi.fn();
-    render(<FirstRunPanel report={noEngine} onExplore={onExplore} />);
+    render(<FirstRunPanel report={noEngine} onExplore={onExplore} onConnected={() => {}} />);
 
     offerButton('explore').click();
 
@@ -94,20 +121,52 @@ describe('the first-run screen', () => {
 
   it('does not pretend to carry out what nothing can carry out yet', () => {
     const onExplore = vi.fn();
-    render(<FirstRunPanel report={noEngine} onExplore={onExplore} />);
+    render(<FirstRunPanel report={noEngine} onExplore={onExplore} onConnected={() => {}} />);
 
     // Greyed and stated, not silently inert. A button that takes a click and
     // does nothing is the worst thing on a first-run screen: the user concludes
     // the product is broken rather than unconfigured, which is the exact
     // impression this screen exists to prevent.
-    for (const kind of ['install_engine', 'use_cloud_key']) {
-      expect(offerButton(kind)).toBeDisabled();
+    //
+    // `use_cloud_key` was on this list until 29 August 2026 and has been
+    // removed because it now has an executor, not because the rule softened.
+    // Installing an engine and pulling a model still have none.
+    for (const kind of ['install_engine', 'pull_model']) {
+      const button = offerButton(kind);
+      if (!button) continue;
+      expect(button).toBeDisabled();
       // And it says so in words. A greyed button explains nothing on its own,
       // and the detail line above it describes an action — "installs the
       // engine" — that this button does not perform.
-      expect(offerButton(kind)).toHaveAccessibleName(/can’t set this up for you yet/);
-      offerButton(kind).click();
+      expect(button).toHaveAccessibleName(/can’t set this up for you yet/);
+      button.click();
     }
+    expect(onExplore).not.toHaveBeenCalled();
+  });
+
+  it('lets the cloud-key offer be carried out, and opens its form in place', async () => {
+    // The offer this screen can now honour. It was greyed for as long as
+    // nothing could store a key; `POST /providers/cloud` writes the
+    // configuration and takes effect without a restart, so the button is real.
+    render(<FirstRunPanel report={noEngine} onExplore={() => {}} onConnected={() => {}} />);
+
+    expect(offerButton('use_cloud_key')).not.toBeDisabled();
+
+    offerButton('use_cloud_key').click();
+
+    // In place, under the offer it belongs to — the price and the detail above
+    // it stay readable, which is the context that made the choice make sense.
+    expect(await screen.findByTestId('cloud-key-form')).toBeInTheDocument();
+  });
+
+  it('does not send the user somewhere else when they choose the key offer', () => {
+    // `onExplore` closes the conversation. Wiring the key offer to it would
+    // dismiss the setup screen and set nothing up.
+    const onExplore = vi.fn();
+    render(<FirstRunPanel report={noEngine} onExplore={onExplore} onConnected={() => {}} />);
+
+    offerButton('use_cloud_key').click();
+
     expect(onExplore).not.toHaveBeenCalled();
   });
 
@@ -115,7 +174,7 @@ describe('the first-run screen', () => {
     // The payload is asserted clean on the backend side. This asserts the
     // component adds nothing — an "e.g. …" in a detail line would be the
     // obvious, helpful-looking way to reintroduce them.
-    const { container } = render(<FirstRunPanel report={noEngine} onExplore={() => {}} />);
+    const { container } = render(<FirstRunPanel report={noEngine} onExplore={() => {}} onConnected={() => {}} />);
 
     expect(container.textContent).not.toMatch(/gguf|safetensors|\bq4[_-]|:\d+b\b/i);
   });
@@ -134,7 +193,7 @@ describe('the first-run screen', () => {
         },
       ],
     };
-    render(<FirstRunPanel report={future} onExplore={() => {}} />);
+    render(<FirstRunPanel report={future} onExplore={() => {}} onConnected={() => {}} />);
 
     expect(screen.getByText('An offer this build has never heard of')).toBeInTheDocument();
     expect(offerButton('something_later')).toBeDisabled();

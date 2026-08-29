@@ -17,7 +17,7 @@
  *
  * Fail toward the working product, in other words: doubt renders chat.
  */
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 import { fetchReadiness, type ReadinessReport } from '@/services/readinessClient';
 
@@ -39,18 +39,29 @@ export function setupToOffer(probe: ReadinessProbe): ReadinessReport | null {
 }
 
 /**
- * Ask once per mount.
+ * Ask once per mount, and again when something has plainly changed.
  *
  * Mounted with the conversation, so this re-asks each time it is opened — which
  * is what makes the screen disappear by itself after someone sets a model up,
  * with nothing to dismiss and nothing remembering a decision. Rule 7e: measure
  * what happened rather than asking the user to predict it.
  *
+ * **`recheck` is the same measurement, not a second source of truth**, and it
+ * exists because one action on the setup screen can now change the answer
+ * without a remount: saving a cloud key takes effect immediately on the
+ * backend, so the screen offering it would otherwise keep standing over a
+ * product that had just become able to answer. Nothing here caches or infers —
+ * the same probe runs again and the backend decides, which is what keeps this
+ * from becoming a second opinion that can drift from `/readiness`.
+ *
  * Loopback only. `/readiness` reports and never fetches, so asking it costs
  * nothing and consents to nothing.
  */
-export function useReadiness(probe: () => Promise<ReadinessReport> = fetchReadiness): ReadinessProbe {
+export function useReadiness(
+  probe: () => Promise<ReadinessReport> = fetchReadiness,
+): [ReadinessProbe, () => void] {
   const [state, setState] = useState<ReadinessProbe>({ status: 'checking' });
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     let live = true;
@@ -64,7 +75,9 @@ export function useReadiness(probe: () => Promise<ReadinessReport> = fetchReadin
     return () => {
       live = false;
     };
-  }, [probe]);
+  }, [probe, attempt]);
 
-  return state;
+  const recheck = useCallback(() => setAttempt((n) => n + 1), []);
+
+  return [state, recheck];
 }
