@@ -108,34 +108,36 @@
     </div>
 
     <div class="hero-showcase">
-    <figure class="shot orb-shot">
-      <img src="img/orb.webp" width="800" height="800" alt="Zaram's orb, the system-state indicator, at rest inside its orbit rings." loading="eager" decoding="async">
-      <figcaption><span class="dot"></span> Local only — inference runs on this machine and nothing is sent out.</figcaption>
-    </figure>
+      <div class="orb-stage" data-role="orb-stage">
+        <img class="orb-img" src="img/orb.webp" width="800" height="800"
+             alt="Zaram's orb, the system-state indicator, inside its orbit rings."
+             loading="eager" decoding="async">
+        <span class="orb-track" aria-hidden="true"><i></i></span>
+        <p class="orb-state"><span class="dot"></span><span data-role="orb-state">Local only — nothing is sent out</span></p>
+      </div>
 
-    <div class="panel">
-      <div class="panel-bar">
-        <span class="orb" aria-hidden="true"></span>
-        <span>Working · on this machine</span>
-        <span class="spacer">nothing left the device</span>
-      </div>
-      <div class="panel-prose">
-        <p>
-          The launch is <strong>9 September in Lagos</strong> <span class="cite">M1</span>.
-          Your day rate on that job is <strong>₦180,000</strong>, agreed in the revised
-          scope on 12 March <span class="cite">S2</span>, and Adaeze's terms are net 30
-          <span class="cite">S2</span> — the last two invoices were paid on day 38 and
-          day 41 <span class="cite">M7</span>.
-        </p>
-      </div>
-      <div class="panel-foot">
-        <span><b>M1</b> Memory · stored 22 hr ago</span>
-        <span><b>S2</b> Adaeze_SOW_rev2.pdf · p.4</span>
-        <span><b>M7</b> Invoices · 2 records</span>
+      <!-- The final state is written here so that no-JS and reduced-motion
+           visitors get the whole exchange immediately. The script clears it and
+           replays it only when motion is welcome. -->
+      <div class="panel demo">
+        <div class="panel-bar">
+          <span class="orb" data-role="demo-dot" aria-hidden="true"></span>
+          <span data-role="demo-state">Idle · on this machine</span>
+          <span class="spacer">nothing left the device</span>
+        </div>
+        <div class="thread" data-role="thread">
+          <div class="turn"><span class="who">You</span><p>Remember: the launch is 9 September in Lagos.</p></div>
+          <div class="turn is-zaram"><span class="who">Zaram</span><p>Noted — I'll remember that.</p></div>
+          <div class="turn"><span class="who">You</span><p>When is the launch?</p></div>
+          <div class="turn is-zaram"><span class="who">Zaram</span><p>9 September, in Lagos. <span class="cite">M1</span></p>
+            <p class="src"><b>M1</b> Memory · you told me this</p></div>
+        </div>
+        <div class="panel-foot demo-foot">
+          <button type="button" class="replay" data-role="replay" hidden>↻ Replay</button>
+        </div>
       </div>
     </div>
-    </div>
-    <p class="hero-caption">Every fact links back to where it came from. Wrong? Correct it once.</p>
+    <p class="hero-caption">It remembers, and it shows you why. Wrong? Correct it once.</p>
   </section>
 
   <section class="claims" id="see">

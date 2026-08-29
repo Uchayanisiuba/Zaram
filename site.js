@@ -154,5 +154,138 @@ async function submitSignup(event) {
   }
 }
 
+/* ── The recall demo, replayed ───────────────────────────────────────────────
+   Ask, be remembered, ask again, get a cited answer. It is the product's
+   central claim and the one thing a screenshot cannot show.
+
+   Three rules it obeys:
+     - It plays ONCE, when scrolled into view, then rests on the final state.
+       A loop becomes wallpaper and stops being read.
+     - Reduced motion gets the finished exchange, already in the HTML,
+       untouched. Opting out of motion must not opt you out of the content.
+     - The user's line is typed by character and Zaram's is streamed by word,
+       because that is what the two things actually do.                       */
+
+const SCRIPT = [
+  { who: "You",   text: "Remember: the launch is 9 September in Lagos." },
+  { who: "Zaram", text: "Noted — I'll remember that.", think: 620 },
+  { who: "You",   text: "When is the launch?", pause: 900 },
+  { who: "Zaram", text: "9 September, in Lagos.", cite: "M1",
+    src: "<b>M1</b> Memory · you told me this", think: 780 },
+];
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+function setWorking(on) {
+  const stage = document.querySelector('[data-role="orb-stage"]');
+  const demo = document.querySelector(".demo");
+  const label = document.querySelector('[data-role="orb-state"]');
+  const state = document.querySelector('[data-role="demo-state"]');
+  if (stage) stage.classList.toggle("is-working", on);
+  if (demo) demo.classList.toggle("is-working", on);
+  // Working, never routing: the orb says what the system is doing and no more.
+  if (label) label.textContent = on ? "Working — on this machine" : "Local only — nothing is sent out";
+  if (state) state.textContent = on ? "Working · on this machine" : "Idle · on this machine";
+}
+
+async function writeInto(node, text, perChar) {
+  const caret = document.createElement("span");
+  caret.className = "caret";
+  node.after(caret);
+  for (let i = 0; i < text.length; i++) {
+    node.textContent += text[i];
+    await sleep(perChar);
+  }
+  caret.remove();
+}
+
+async function streamInto(node, text, perWord) {
+  const caret = document.createElement("span");
+  caret.className = "caret";
+  node.after(caret);
+  const words = text.split(" ");
+  for (let i = 0; i < words.length; i++) {
+    node.textContent += (i ? " " : "") + words[i];
+    await sleep(perWord);
+  }
+  caret.remove();
+}
+
+let playing = false;
+
+async function playDemo() {
+  const thread = document.querySelector('[data-role="thread"]');
+  const replay = document.querySelector('[data-role="replay"]');
+  if (!thread || playing) return;
+  playing = true;
+  if (replay) replay.hidden = true;
+  thread.textContent = "";
+  setWorking(false);
+
+  for (const step of SCRIPT) {
+    if (step.pause) await sleep(step.pause);
+    const zaram = step.who === "Zaram";
+
+    if (zaram) {
+      setWorking(true);
+      await sleep(step.think || 500);
+    }
+
+    const turn = document.createElement("div");
+    turn.className = "turn" + (zaram ? " is-zaram" : "");
+    const who = document.createElement("span");
+    who.className = "who";
+    who.textContent = step.who;
+    const p = document.createElement("p");
+    turn.append(who, p);
+    thread.append(turn);
+
+    if (zaram) {
+      await streamInto(p, step.text, 90);
+      if (step.cite) {
+        const c = document.createElement("span");
+        c.className = "cite";
+        c.textContent = step.cite;
+        p.append(" ", c);
+      }
+      if (step.src) {
+        await sleep(260);
+        const s = document.createElement("p");
+        s.className = "src";
+        s.innerHTML = step.src;
+        turn.append(s);
+      }
+      await sleep(220);
+      setWorking(false);
+    } else {
+      await writeInto(p, step.text, 26);
+      await sleep(320);
+    }
+  }
+
+  playing = false;
+  if (replay) replay.hidden = false;
+}
+
+function armDemo() {
+  const demo = document.querySelector(".demo");
+  if (!demo) return;
+  // The written-out exchange stays exactly as it is for anyone who asked for
+  // less motion — there is nothing to arm.
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+
+  const replay = document.querySelector('[data-role="replay"]');
+  if (replay) replay.addEventListener("click", playDemo);
+
+  if (!("IntersectionObserver" in window)) { playDemo(); return; }
+  const io = new IntersectionObserver((entries) => {
+    for (const e of entries) {
+      if (e.isIntersecting) { io.disconnect(); playDemo(); }
+    }
+  }, { threshold: 0.35 });
+  io.observe(demo);
+}
+
 applyConfig();
 $all('[data-role="signup"]').forEach(form => form.addEventListener("submit", submitSignup));
+armDemo();
