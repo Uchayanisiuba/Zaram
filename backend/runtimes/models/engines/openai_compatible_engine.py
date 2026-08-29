@@ -76,6 +76,7 @@ and the text, which is what the log exists to answer for.
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import os
@@ -84,7 +85,7 @@ from urllib.parse import urlparse
 from collections.abc import Iterator
 from typing import Any, Dict, Optional
 
-from core.egress import EgressDenied, get_gate
+from core.egress import DataClass, EgressDenied, get_gate
 from core.reasoning import CLOSE_TAG, OPEN_TAG
 
 from .base_engine import ERROR_PREFIX, LLMEngine
@@ -203,6 +204,68 @@ def _is_loopback(base_url: str) -> bool:
     return bool(host) and host.lower() in _LOOPBACK_HOSTS
 
 
+#: The first bytes of each image format, and what to call it on the wire.
+#:
+#: Read from the picture rather than taken from the filename, because by the
+#: time an image reaches an engine the filename is gone: `main.py` passes
+#: ``[a.data for a in attached ...]``, which is base64 and nothing else, and
+#: `Attachment.suffix` never travels with it. Widening `stream_response` to
+#: carry a MIME type would touch every engine and every caller to move a fact
+#: that is already inside the bytes.
+#:
+#: A signature is a measurement. Defaulting to `image/png` because most
+#: screenshots are PNGs would be a guess, and a mislabelled data URI is the
+#: kind of wrong that produces a provider error nobody can read.
+_IMAGE_SIGNATURES: tuple[tuple[bytes, str], ...] = (
+    (b"\x89PNG\r\n\x1a\n", "image/png"),
+    (b"\xff\xd8\xff", "image/jpeg"),
+    (b"GIF87a", "image/gif"),
+    (b"GIF89a", "image/gif"),
+    (b"BM", "image/bmp"),
+)
+
+#: Enough base64 to decode the longest signature above plus the RIFF/WEBP pair,
+#: which needs twelve bytes. Base64 decodes in four-character groups, so this is
+#: rounded to one.
+_SIGNATURE_CHARS = 24
+
+
+def _data_uri(image: str) -> str:
+    """One image as the `image_url` content part wants it, or raise.
+
+    Already-formed data URIs pass through untouched: a caller that knows the
+    type has better information than a signature does, and re-encoding it would
+    be this function overruling a fact with an inference.
+
+    Raises `ValueError` when the format cannot be established. **Refusing is
+    the point.** The alternative is to label it `image/png` and send it anyway,
+    which is rule 9 in miniature — the request goes, the provider rejects or
+    misreads it, and the failure surfaces as something unrelated. An image
+    Zaram cannot name is an image it does not send.
+    """
+    if image.startswith("data:"):
+        return image
+
+    try:
+        head = base64.b64decode(image[:_SIGNATURE_CHARS], validate=False)
+    except Exception as exc:  # noqa: BLE001 — reported, not swallowed
+        raise ValueError(
+            "That image could not be read as base64, so Zaram will not send it."
+        ) from exc
+
+    for signature, media_type in _IMAGE_SIGNATURES:
+        if head.startswith(signature):
+            return f"data:{media_type};base64,{image}"
+    # RIFF....WEBP — the only one whose marker is not at the start.
+    if head[:4] == b"RIFF" and head[8:12] == b"WEBP":
+        return f"data:image/webp;base64,{image}"
+
+    raise ValueError(
+        "Zaram could not tell what kind of image that is, so it did not send "
+        "it. PNG, JPEG, GIF, WebP and BMP are the formats it can label."
+    )
+
+
 class OpenAICompatibleEngine(LLMEngine):
     """Streams from an OpenAI-compatible `/v1/chat/completions`.
 
@@ -268,17 +331,46 @@ class OpenAICompatibleEngine(LLMEngine):
     def endpoint(self) -> str:
         return f"{self.base_url}/chat/completions"
 
-    def _body(self, prompt: str, system_prompt: str, model: str | None) -> dict[str, Any]:
+    def _body(
+        self,
+        prompt: str,
+        system_prompt: str,
+        model: str | None,
+        images: list[str] | None = None,
+    ) -> dict[str, Any]:
         """The exact object that will be sent, built before anything is checked.
 
         Built once and used for both the gate and the request. Building it
         twice would let the text the user was shown drift from the text that
         left, which is the one thing the confirmation dialog cannot survive.
+
+        **Images were accepted by `stream_response` and dropped here.** The
+        signature took an ``images`` argument, this method did not, and nothing
+        joined them — so an image attached while an OpenAI-compatible model was
+        selected was discarded and the model answered about a picture it had
+        never seen. Rule 9 in a new medium, and silent, which is the worst
+        version: the reply is fluent and there is nothing on screen to suggest
+        the picture went nowhere.
+
+        The content-parts form is used only when there are images. A plain
+        string is what every server has always accepted and several older ones
+        accept *only*, so sending a one-element array for an ordinary message
+        would trade a fixed bug for a new one on endpoints nobody here can
+        test.
         """
-        messages: list[dict[str, str]] = []
+        messages: list[dict[str, Any]] = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
-        messages.append({"role": "user", "content": prompt})
+
+        attached = [image for image in (images or []) if image and image.strip()]
+        if attached:
+            content: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
+            for image in attached:
+                content.append({"type": "image_url", "image_url": {"url": _data_uri(image)}})
+            messages.append({"role": "user", "content": content})
+        else:
+            messages.append({"role": "user", "content": prompt})
+
         body: Dict[str, Any] = {
             "model": model or self.default_model,
             "messages": messages,
@@ -287,6 +379,31 @@ class OpenAICompatibleEngine(LLMEngine):
         if self._sampling:
             body.update(self._sampling)
         return body
+
+    @staticmethod
+    def _body_carries_images(body: Dict[str, Any]) -> bool:
+        """Whether the payload actually contains a picture.
+
+        **Read off the body, never off the caller's argument.** `stream_response`
+        takes an ``images`` list that may be empty, may be entirely whitespace,
+        and — for two milestones — was accepted and then silently dropped by
+        `_body`. Deciding the consent class from that argument would mean
+        asking the user's permission for an image that is not there, or worse,
+        the reverse if the shapes ever drift again. This inspects what is about
+        to go on the wire, so the permission and the payload cannot disagree.
+
+        Matches the content-parts form `_body` produces above. A server dialect
+        that carried images some other way would read as `PROMPT` here, which
+        is why `_body` is the only place allowed to build one.
+        """
+        for message in body.get("messages") or []:
+            content = message.get("content")
+            if not isinstance(content, list):
+                continue
+            for part in content:
+                if isinstance(part, dict) and part.get("type") == "image_url":
+                    return True
+        return False
 
     def stream_response(
         self,
@@ -310,7 +427,16 @@ class OpenAICompatibleEngine(LLMEngine):
         it is broken, and they stop reading the dialog — which is the one
         outcome M10 cannot afford.
         """
-        body = self._body(prompt, system_prompt, model)
+        try:
+            body = self._body(prompt, system_prompt, model, images)
+        except ValueError as unreadable:
+            # Said here rather than swallowed by the general handler below,
+            # which would report it as "could not reach" — a network problem,
+            # which this is not, and which sends the user looking in the wrong
+            # place entirely.
+            logger.info("refusing to send an unidentifiable image: %s", unreadable)
+            yield ERROR_PREFIX + str(unreadable)
+            return
         payload = json.dumps(body)
 
         gate = self._gate if self._gate is not None else get_gate()
@@ -328,6 +454,21 @@ class OpenAICompatibleEngine(LLMEngine):
                 },
                 timeout=self._timeout,
                 source=self._source,
+                # **Rule 7j's second dimension, at the one place that knows.**
+                # `RoutedEngine` used to refuse every image bound for the cloud
+                # outright, because the policy could only speak about hosts and
+                # so had no way to hold the answer. It can now, so the question
+                # is asked here — where the host is known, where the gate
+                # already runs, and where the decision is logged with the rest.
+                #
+                # Read off the body rather than off an argument, deliberately.
+                # A caller that says what it is sending is a label; the body is
+                # the fact, and `_body` is the only thing that knows whether an
+                # image actually survived into the payload.
+                data_class=(
+                    DataClass.IMAGE if self._body_carries_images(body)
+                    else DataClass.PROMPT
+                ),
             )
             yield from self._tokens(lines)
         except EgressDenied as denied:

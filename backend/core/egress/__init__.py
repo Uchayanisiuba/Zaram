@@ -13,7 +13,7 @@ remember.
 from .confirm import PendingConfirmations
 from .gate import EgressDenied, EgressGate, EgressRequest, is_local
 from .log import EgressEntry, EgressLog, TamperDetected
-from .policy import DEFAULT_DECISION, Decision, EgressPolicy, Mode
+from .policy import DEFAULT_DECISION, DataClass, Decision, EgressPolicy, Mode
 from .runtime import (
     default_log_path,
     default_policy_path,
@@ -34,6 +34,7 @@ __all__ = [
     "TamperDetected",
     "EgressPolicy",
     "Mode",
+    "DataClass",
     "Decision",
     "DEFAULT_DECISION",
     "get_gate",
