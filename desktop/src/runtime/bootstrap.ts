@@ -24,10 +24,6 @@ import { ExecutionRuntime, IExecutionRuntime, ExecutionInvoker, IExecutionInvoke
 import { WorkspaceRuntime } from './workspace'
 import { FilesystemCapabilityPack } from '../capabilities/filesystem'
 import { VSCodeCapabilityPack } from '../capabilities/vscode'
-import { VisionCapabilityPack } from '../capabilities/vision'
-import { KnowledgeCapabilityPack } from '../capabilities/knowledge'
-import { SPEECH_CAPABILITIES } from '../capabilities/speech'
-import { handleSpeechTTS, createSpeechHandlers } from '../capabilities/speech/speech-handler'
 
 export interface BootstrapOptions {
   renderTransport?: IRenderTransport
@@ -304,21 +300,30 @@ export function bootstrapPresence(options: BootstrapOptions = {}): BootstrapResu
   filesystemPack.registerDescriptors(container.resolve<ICapabilityRuntime>(TOKENS.capabilityRuntime))
   console.log('[STARTUP] FilesystemCapabilityPack registered')
 
-  // Sprint Alpha.5: Vision Capability Pack integrates Qwen2.5-VL 7B as the
-  // primary vision backend through the existing Executive -> Capability -> Execution pipeline.
-  console.log('[STARTUP] Registering VisionCapabilityPack...')
-  const visionPack = new VisionCapabilityPack(container.resolve<ICapabilityRuntime>(TOKENS.capabilityRuntime))
-  visionPack.registerHandlers(container.resolve<IExecutionInvoker>(TOKENS.executionInvoker))
-  visionPack.registerDescriptors(container.resolve<ICapabilityRuntime>(TOKENS.capabilityRuntime))
-  console.log('[STARTUP] VisionCapabilityPack registered')
+  // The Vision Capability Pack was removed on 28 August 2026. Its five
+  // handlers all posted to `POST /vision/analyze` on 8420 with no credential,
+  // so every one of them had returned 401 since the per-launch API secret
+  // shipped; behind that the endpoint reached a hardcoded, uninstalled
+  // `qwen2.5vl:7b` past routing and past the egress gate, through a helper
+  // that was never defined. Registering capabilities that cannot work is the
+  // shape `CLAUDE.md` warns about — a plausible, tested, unreachable
+  // subsystem. Images now travel on `/chat` like any other part of a message,
+  // gated and logged.
 
-  // Sprint Alpha.5: Knowledge Capability Pack adds internet search as a capability
-  // consumed by Executive Runtime. Local-first by default; internet only when needed.
-  console.log('[STARTUP] Registering KnowledgeCapabilityPack...')
-  const knowledgePack = new KnowledgeCapabilityPack(container.resolve<ICapabilityRuntime>(TOKENS.capabilityRuntime))
-  knowledgePack.registerHandlers(container.resolve<IExecutionInvoker>(TOKENS.executionInvoker))
-  knowledgePack.registerDescriptors(container.resolve<ICapabilityRuntime>(TOKENS.capabilityRuntime))
-  console.log('[STARTUP] KnowledgeCapabilityPack registered')
+  // The Knowledge and Speech capability packs were removed on 28 August 2026,
+  // for the reason the Vision pack above them was: their handlers called the
+  // backend on 8420 with `Content-Type` and nothing else, and
+  // `RequireApiSecret` wants `X-Zaram-Auth` and exempts nothing -- so both had
+  // returned 401 since the per-launch secret shipped. Neither was ever
+  // invoked either; `executeCapability` has no caller in the live frontend.
+  //
+  // They were also duplicates. `knowledge.search` is a live backend capability
+  // with its own dispatcher branch, and speech reaches `/voice/synthesize`
+  // from `speechStore.ts` in the renderer. `CLAUDE.md` settles which of the
+  // two is right: *"Frontend calls the backend directly over HTTP, not through
+  // Electron IPC."* So `desktop/` keeps the native work -- filesystem, VS
+  // Code, workspace, presence -- and stops re-implementing, uncredentialed,
+  // what the product already does.
 
   // Sprint 2.3: VS Code Capability Pack exposes the developer's coding context
   // through the same Executive -> Capability -> Execution pipeline.
@@ -390,92 +395,6 @@ export function bootstrapPresence(options: BootstrapOptions = {}): BootstrapResu
       }
     })
 
-    // Speech TTS capability - streams audio from backend
-    invoker.register('speech.tts', async (req, ctx, controls) => {
-      try {
-        const text = ((req.input as any)?.text || '') as string
-        const voice = ((req.input as any)?.voice as string | undefined)
-        const persona = ((req.input as any)?.persona as string | undefined) || 'zaram_prime'
-        
-        if (!text) {
-          controls.fail({ code: 'validation_error', message: 'text is required', attempt: 0, kind: 'handler' })
-          return
-        }
-
-        const backendUrl = options.backendUrl!.replace(/\/$/, '')
-        const postData = JSON.stringify({ text, voice, persona })
-        
-        const controller = new AbortController()
-        const timeoutId = setTimeout(() => controller.abort(), 120000)
-        
-        const response = await fetch(`${backendUrl}/voice/stream`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Content-Length': Buffer.byteLength(postData).toString()
-          },
-          body: postData,
-          signal: controller.signal
-        })
-        
-        clearTimeout(timeoutId)
-        
-        if (!response.ok) {
-          throw new Error(`Voice stream failed: ${response.status}`)
-        }
-        
-        const reader = response.body?.getReader()
-        const decoder = new TextDecoder()
-        let buffer = ''
-        let sequence = 0
-        
-        if (!reader) {
-          controls.fail({ code: 'handler', message: 'No response body', attempt: 0, kind: 'handler' })
-          return
-        }
-        
-        while (true) {
-          const { done, value } = await reader.read()
-          if (done) break
-          
-          buffer += decoder.decode(value, { stream: true })
-          const lines = buffer.split('\n')
-          buffer = lines.pop() || ''
-          
-          for (const line of lines) {
-            const trimmed = line.trim()
-            if (!trimmed || !trimmed.startsWith('data: ')) continue
-            const data = trimmed.slice(6)
-            if (data === '[DONE]' || data === 'done') continue
-            
-            try {
-              const event = JSON.parse(data)
-              if (event.type === 'audio') {
-                // Forward audio chunk via execution event
-                controls.reportProgress(0.5) // Indicate progress
-                // Emit custom event for audio - we'll use reportToken with a special prefix
-                // Or we can publish directly to the event bus
-                ;(controls as any).reportAudioChunk?.(event)
-              } else if (event.type === 'error') {
-                controls.fail({ code: 'handler', message: event.content, attempt: 0, kind: 'handler' })
-                return
-              }
-            } catch {
-              // Ignore malformed events
-            }
-          }
-        }
-        
-        controls.succeed({ response: 'Audio streamed' })
-      } catch (error) {
-        if (error instanceof Error && error.name === 'AbortError') {
-          controls.fail({ code: 'timeout', message: 'Speech synthesis timed out', attempt: 0, kind: 'timeout' })
-        } else {
-          controls.fail({ code: 'handler', message: String(error), attempt: 0, kind: 'handler' })
-        }
-      }
-    })
-
     const backendCaps = [
       {
         id: 'conversation.runtime',
@@ -497,17 +416,6 @@ export function bootstrapPresence(options: BootstrapOptions = {}): BootstrapResu
         inputSchema: { type: 'object', properties: { prompt: { type: 'string' } }, required: ['prompt'] },
         outputSchema: { type: 'object', properties: { response: { type: 'string' } } },
         latencyEstimateMs: 1500,
-        location: 'backend'
-      },
-      {
-        id: 'speech.tts',
-        name: 'Speech Synthesis',
-        description: 'Stream text-to-speech audio from the backend voice runtime.',
-        category: 'speech',
-        permissions: [] as string[],
-        inputSchema: { type: 'object', properties: { text: { type: 'string' }, voice: { type: 'string' }, persona: { type: 'string' } }, required: ['text'] },
-        outputSchema: { type: 'object', properties: { response: { type: 'string' } } },
-        latencyEstimateMs: 500,
         location: 'backend'
       }
     ]

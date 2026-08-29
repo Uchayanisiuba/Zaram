@@ -437,24 +437,26 @@ export class ExecutiveRuntime {
         plan.evidence.push('Diagnostics')
       }
 
-      if (lower.includes('look at this') || lower.includes('what do you see') || lower.includes('describe image') || 
-          lower.includes('analyze screenshot') || lower.includes('read this pdf') || lower.includes('ocr') ||
-          lower.includes('camera') || lower.includes('screen') || lower.includes('diagram') ||
-          lower.includes('ui') || lower.includes('chart') || lower.includes('image') || lower.includes('photo') ||
-          lower.includes('picture') || lower.includes('screenshot') || lower.includes('scan') || lower.includes('document')) {
-        const capabilityId = lower.includes('screen') || lower.includes('screenshot') ? 'vision.screen' :
-                            lower.includes('camera') || lower.includes('photo') ? 'vision.camera' :
-                            lower.includes('pdf') || lower.includes('document') ? 'vision.document' :
-                            lower.includes('ocr') || lower.includes('scan') ? 'vision.ocr' :
-                            'vision.analyze'
-        plan.steps.push(createExecutionStep(capabilityId, capabilityId.replace('vision.', 'Analyze ').replace(/\b\w/g, l => l.toUpperCase()), { prompt: query }))
-        plan.evidence.push('Vision Analysis')
-      }
+      // A vision block used to sit here, choosing between `vision.screen`,
+      // `vision.camera`, `vision.document`, `vision.ocr` and `vision.analyze`
+      // by keyword — on the word "ui", "chart" or "document", with nothing
+      // attached and no way to attach anything. It was removed on 28 August
+      // 2026 along with the capability pack it planned for, whose handlers all
+      // posted to a `/vision/analyze` that no longer exists.
+      //
+      // The backend planner made the same mistake and its fix is the one to
+      // copy if this ever returns: an attachment is a fact and a keyword is a
+      // guess, so `create_plan` takes `has_images` and the fact wins. See
+      // `backend/core/planner.py`.
 
       if (NEEDS_INTERNET) {
-        plan.steps.push(createExecutionStep('knowledge.search', 'Search Internet', { query, internetMode }))
-        plan.steps.push(createExecutionStep('reasoning.generate', 'Generate response from search', { prompt: `Based on internet search results for: ${query}`, persona, model }))
-        plan.evidence.push('Internet Search')
+        // The `knowledge.search` step that stood here planned for a handler
+        // deleted on 28 August 2026 -- it posted to 8420 with no credential
+        // and had returned 401 since the per-launch secret shipped. Planning a
+        // step nothing can execute is worse than not planning it: the plan
+        // reads as capability the product does not have.
+        plan.steps.push(createExecutionStep('reasoning.generate', 'Generate response', { prompt: query, persona, model }))
+        plan.evidence.push('Reasoning')
       }
     } else {
       console.log(`[EXECUTIVE] No capability runtime available`)
