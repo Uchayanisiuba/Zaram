@@ -31,35 +31,50 @@ Paste this into a new session:
 > raised by the maintainer while using the product on 28 August, so every one
 > is a thing that actually happened rather than a thing that might.
 >
-> **Items 1 and 2 are done**, both verified by driving the running product
-> rather than by tests alone. **Item 4 is half done** — local vision works and
-> was measured; only the TabbyAPI half remains. **Items 3, 5, 6 and 7 are
-> untouched.**
+> **Items 1, 2, 3, 4, 5 and 7 are done.** **Item 6 is the only one left**, and
+> it is a design that was agreed in principle with nothing built.
 >
-> **Take item 3 next** — paste an image into the chat box. It is the smallest
-> of what is left, it is a plain feature rather than a defect, and there is a
-> working `paste` handler in `KnowledgeWorkspace.tsx` to model it on. Item 4's
-> remaining half is the natural follow-on, since both are about getting images
-> into a model.
+> **The vision side door is gone too** — the longer-horizon item that used to
+> sit under this list. `POST /vision/analyze` is deleted rather than repaired,
+> along with `stream_vision_response`, both wrapper forwarders,
+> `ModelsService.analyze_image`, the desktop capability pack that was its only
+> caller, and the `/vision` prefix from both proxy lists.
 >
-> If you would rather fix than build: **item 5** (the VRAM budget cannot see a
-> second local server) is the one blocking real work — nothing about task
-> routing can be trusted until it is done.
+> **What is left across the whole queue is item 6 and Phase 0**, and item 6 is
+> the design for half of Phase 0. A stranger with no GPU and no key still gets
+> nothing, and `CLAUDE.md` says packaging is the actual blocker, not
+> capability — so that is the work, and it is now the only thing standing
+> between here and a retention test.
 >
 > **Before starting any item, read its section and then read the code.** Two
-> handoff claims were stale this session and one of them sent a whole job at
-> work that had shipped eleven days earlier. The queue entries name files and
-> line numbers so you can check in a minute.
+> handoff claims were stale before this session and one of them sent a whole
+> job at work that had shipped eleven days earlier. The queue entries name
+> files and line numbers so you can check in a minute.
 >
-> Longer-horizon, and both still open:
+> **`backend/orchestrator/` is deleted** — 1,261 lines, zero importers, the
+> merged "can see = can draw" scorer and the ranker that treated a missing
+> *required* capability as a warning. `CLAUDE.md` had said to delete it; three
+> files carried prose warning about it instead. It is gone and they now say so
+> in the past tense.
 >
-> * **Phase 0** — the free-tier first run. A stranger with no GPU and no key
->   still gets nothing, and `CLAUDE.md` says packaging is the actual blocker,
->   not capability. Queue item 6 is the design for half of it.
-> * **The vision side door.** `POST /vision/analyze` still reaches
->   `stream_vision_response`, which hardcodes an uninstalled `qwen2.5vl:7b` and
->   by its own docstring bypasses routing **and the egress gate**. The chat
->   path no longer touches it. It is a deletion question, not a gating one.
+> > **Rule 7j's second dimension shipped.** `EgressPolicy` is keyed on
+> `(host, DataClass)`, so "you connected this provider for chat" no longer
+> reads as permission to send it a photograph. That unblocked cloud vision,
+> which had been finished and refused one question short of working.
+>
+> **First run can store a cloud key.** `CloudKeyForm` is the executor for the
+> offer `FirstRunPanel` had been greying out since it was built. **It has not
+> been seen in the running app** — reaching that screen needs `can_chat:
+> false`, and this machine has models. Verify with an empty `ZARAM_DATA_DIR`
+> and Ollama stopped before trusting it.
+>
+**The `desktop/` audit is half done, and finishing it needs a decision
+> rather than a cleanup — see the section below.** Knowledge and Speech went
+> the way Vision did: uncredentialed, unreachable, duplicating a path that
+> works. `conversation.runtime`, `reasoning.generate` and the `speech.tts`
+> call in `VoiceRuntime` are in the same position and were left, because
+> removing them decides whether the desktop execution pipeline keeps a
+> backend-facing half at all.
 >
 > Read the Ollama question below too. It is not a task yet, but it changes what
 > Phase 0 means.
@@ -266,75 +281,98 @@ supplied fact, and designing an abstraction from a single example is what the
 pack-system rule explicitly forbids. **If a second time-varying fact is ever
 supplied, that is the moment to generalise** — not before.
 
-### 3. Paste an image into the chat box
+### 3. Paste an image into the chat box — **DONE**
 
-Straight feature request, and there is a working implementation to copy:
-`KnowledgeWorkspace.tsx:305` already handles `paste` for ingesting sources. The
-chat composer has a file input and no paste handler.
+`frontend/src/lib/pastedFiles.ts`, wired as `onPaste` on the composer input.
+**On the input rather than on the window**, the opposite of
+`KnowledgeWorkspace.tsx:305` and deliberately so: that one skips fields because
+a paste into its search box is a search, and here the caret is in the message
+box by definition. Sharing the code would have meant a flag deciding which
+product it was.
 
-### 4. Images on the OpenAI-compatible path — **partly done, read carefully**
+Two things that are not obvious. `items` and `files` are **both** read, because
+an OS screenshot arrives as a `DataTransferItem` while a file copied from a
+folder populates `files`, and which one is empty varies by platform. And a
+clipboard image is named `image.png` every time, so two pastes produce two
+chips the user cannot tell apart — a file copied from a folder keeps its real
+name, a clipboard image gets the time it was pasted.
 
-**Local vision through Ollama now works and was measured.** A PNG of a red
-circle and a blue rectangle, attached to a chat message, answered correctly by
-`gemma4:26b-a4b` at 165.8 s to first token with the `oversized` warning shown.
-Three defects were fixed to get there — residency answering a capability
-question, the planner not knowing an image was attached, and singular `image`
-versus plural `images` between dispatcher and engine. Full account in
+It reaches the same `takeFiles` the paperclip does, so the same parse, cap,
+refusals and vision gate apply. Text pastes are untouched.
+`frontend/src/lib/pastedFiles.test.ts`, 10 cases.
+
+### 4. Images on the OpenAI-compatible path — **DONE (the bug), open (the discovery)**
+
+**Local vision through Ollama works and was measured** — a PNG of a red circle
+and a blue rectangle, answered correctly by `gemma4:26b-a4b` at 165.8 s to
+first token with the `oversized` warning shown. Full account in
 `docs/MILESTONES.md`; do not re-derive it.
 
-**What remains under this heading is the TabbyAPI half**, and it is two
-separate things:
+**`_body()` now carries images.** It took no `images` parameter while
+`stream_response` accepted one, so an image attached with a TabbyAPI or cloud
+model selected was discarded and the model answered about a picture it had
+never seen. The content-parts form appears only when there are images, because
+several older servers accept a plain string only. The media type is read from
+the picture's own **signature** — the filename is gone by the time an image
+reaches an engine — and an image whose format cannot be established is refused
+rather than labelled `image/png`.
+`tests/test_images_on_the_openai_path.py`, 15 cases, 14 confirmed failing
+before.
 
-`OpenAICompatibleEngine.stream_response` accepts an `images` parameter and
-**never uses it** — `_body()` does not take images at all. An image attached
-while a TabbyAPI model is selected is discarded, and the model answers about a
-picture it never saw. Rule 9 in a new medium, and it would bite even with a
-vision-capable model on that endpoint.
+**Still open: TabbyAPI's modality is a default, not a measurement.**
+`OpenAICompatibleAdapter._to_model` never sets `supports_vision`, so Zaram
+reports `false` for a model that can plainly see —
+`C:/Users/user/models/Qwen3.8-27B-exl3-2.20bpw/config.json` has a
+`vision_config`, an `image_token_id`, `language_model_only: False`, and **987
+vision tensors** out of 3,080.
 
-And the model on this machine **can** see, which was checked rather than
-assumed. `C:/Users/user/models/Qwen3.8-27B-exl3-2.20bpw/config.json` reports
-`architectures: ['Qwen3_5ForConditionalGeneration']`, a `vision_config`, an
-`image_token_id`, and `language_model_only: False`; the weight index holds
-**987 vision tensors** out of 3,080. Zaram's `supports_vision: false` for it is
-`OpenAICompatibleAdapter._to_model` never setting the flag — a **default, not a
-measurement**. Do not treat it as one.
+Fixing that needs a decision, not a line, and there is now a **measurement that
+sharpens it**: TabbyAPI's `/v1/model` reports `"use_vision": false` for the
+loaded model on this machine. So the server itself says vision is off, whatever
+the weights can do — which means the honest source is that field rather than
+the chat template's `image_count` handling, and it also means an image sent
+there today would not be read even with `_body` carrying it. `/v1/models`
+still advertises no modality at all, so plain OpenAI keeps the base behaviour.
+Queue item 7 did the equivalent for OpenRouter, where the field exists.
 
-Fixing that needs a decision, not a line: TabbyAPI's `/v1/models` advertises no
-modality field at all. `/v1/model` returns the loaded model's parameters and
-its chat template, and that template does contain `image_count` and
-`video_count` handling — a usable signal, but inference rather than a stated
-fact, so it needs to be argued for before it is shipped. The two halves are
-independent: `_body()` dropping images is a plain bug and can be fixed now;
-the modality flag is a discovery question.
+### 5. The VRAM budget cannot see a second local server — **DONE, measured**
 
-### 5. The VRAM budget cannot see a second local server
+Both defects were real and there was a third underneath them: merging the
+adapters would have changed nothing, because `OpenAICompatibleAdapter` had no
+`resident_models` to merge. Measured here with both servers up —
 
-Two defects, and together they make every residency decision on a two-server
-machine wrong:
+    nvidia-smi          -> 12288 MiB total, 9493 MiB used, 2623 MiB free
+    Ollama /api/ps      -> {"models": []}        <- answered first, so this won
+    TabbyAPI /v1/model  -> Qwen3.8-27B-exl3-2.20bpw
 
-* **`ProviderManager._resident_models()` returns the first adapter that
-  answers** — it `return`s on the first non-`None` result instead of merging
-  across adapters. With Ollama *and* TabbyAPI registered, only one is ever
-  seen.
-* **`resident_budget_bytes()`** subtracts the embedder and a 20% KV reserve
-  from total VRAM and knows nothing about another server's footprint.
+— a 3.3 GB cold start onto 2.6 GB of real headroom graded as `load`, "a cold
+start with room to spare".
 
-Measured 28 August on the 12 GB card: `nvidia-smi` reported **10,630 MiB used**
-with TabbyAPI holding a 9.7 GB model, while `resident_budget_bytes()` would
-compute roughly **8.7 GB available**. `swap_preflight` — which exists to make
-swaps honest and whose logic is right — would confidently report "fits, just a
-cold start".
+Now: the map merges across every local server and a provider that cannot answer
+makes it unknown rather than empty; `/v1/model` reports the loaded model with
+its size as `None` (never `0` — no OpenAI-compatible route carries a memory
+figure); `HardwareProfiler.vram_used_bytes` supplies occupancy when an
+unsizeable tenant makes the sum unanswerable; and `evicts` names only what the
+model's own server would unload. Full account in `docs/MILESTONES.md`.
 
-**Do not build task routing on top of this.** It is the *"a score built for
-ranking is not a score for deciding"* lesson in a new place: the machinery is
-sound and its inputs are off by ten gigabytes.
+`tests/test_residency_sees_every_server.py`, 19 cases — twelve confirmed
+failing against the unfixed code, three run against the real servers and skip
+when they are not up. The fourteen existing `test_swap_preflight.py` cases pass
+unchanged.
 
-Note also the asymmetry that makes local↔local routing expensive here: Ollama
-unloads after `keep_alive` (observed — `bge-m3` dropped out mid-session);
-**TabbyAPI holds for the process lifetime**. One server lets go, the other
-never does. TabbyAPI does expose `/v1/model/unload` and `/v1/model/load`
-(confirmed in its OpenAPI), so a driven handoff is possible — but it is still a
-~100 s round trip, so it belongs behind an offer, never a silent route.
+**What was deliberately not built, with its re-entry point.** When a model does
+not fit and nothing evictable is in the way — a second server holding the card,
+or a program Zaram knows nothing about — `swap_preflight` returns `None`. There
+is no honest word for that among its four kinds, and a fifth is a cross-stack
+change: `chatClient.ts:403` drops any kind it does not recognise, which it has
+already been bitten by once. Worth doing when someone can write the sentence
+the user should read. Re-entry: the empty-`evicts` branch in `swap_preflight`.
+
+**And the asymmetry that makes local↔local routing expensive here is unchanged.**
+Ollama unloads after `keep_alive` (observed — `bge-m3` dropped out mid-session);
+**TabbyAPI holds for the process lifetime**. TabbyAPI does expose
+`/v1/model/unload` and `/v1/model/load`, so a driven handoff is possible — but
+it is a ~100 s round trip, so it belongs behind an offer, never a silent route.
 
 ### 6. Cloud routing, the setup offer, and a type-in model field
 
@@ -377,51 +415,32 @@ useless. It must **state the data policy while the user is choosing**, because
 stop the *user* picking one knowingly. And a typed name **widens nothing** —
 same rule as a tool description.
 
-### 7. Cloud discovery throws modality away, and it is the only thing missing
+### 7. Cloud discovery throws modality away — **DONE**
 
-**This is smaller than it looks and unblocks more than it looks.** Everything
-needed to route an image to a cloud model that can read one is already built
-except this.
+`OpenRouterAdapter._to_model` now reads `architecture.input_modalities` and
+`architecture.output_modalities` — the same object `_is_free_tier` already
+opened for pricing. Accepting images sets `supports_vision` and the model stays
+an `LLM`; emitting images *and not text* makes it a `ModelCategory.IMAGE`, so
+`select_model_for_task` stops offering a model that can only draw as an answer
+to a question. Absent or malformed `architecture` leaves the base behaviour
+alone — absent is "we do not know", never "text only".
 
-`OpenAICompatibleAdapter._to_model` hardcodes `category=ModelCategory.LLM` and
-never sets `supports_vision`. Its comment justifies that correctly for plain
-OpenAI — *"/v1/models exposes only an id + ownership; deeper metadata is not
-part of the spec"* — and that reasoning does **not** carry to OpenRouter, whose
-`/api/v1/models` returns `architecture` with input and output modalities. It
-arrives in the same response `OpenRouterAdapter._to_model` already parses,
-because that override exists specifically to read `pricing` for the free-tier
-policy. The modality sits beside the pricing and is discarded.
+The gate it feeds was already built and reachable —
+`select_model_for_task(requires_vision=True)`, callers at `main.py:372` and
+`main.py:682`, and the refusal at 682 is correct. It was reading a flag nothing
+ever set, which is why a user with a dozen vision-capable cloud models was told
+nothing could see. `tests/test_cloud_modality_survives_discovery.py`, 11 cases,
+two of which pin that `test_openrouter_policy.py`'s rules are unloosened.
 
-What is already built and verified reachable, so do not rebuild it:
-
-* `select_model_for_task(requires_vision=True)` — the gate, live callers at
-  `main.py:372` and `main.py:682`
-* the refusal, `main.py:682` — *"No model on this machine can read images.
-  Zaram will not answer about a picture it cannot see."* Rule 9, correct
-* `_resolve_model(..., has_images=bool(images))` at `main.py:1167` — the
-  requirement comes from a real attachment, not from wording
-* `main.py:1351` passes `images` into the chat path; `chat_router` carries
-  them and its legacy path **refuses** rather than ignoring
-* `OllamaEngine.stream_response` carries images on whichever model was routed
-
-So today the cloud behaviour **fails closed, not open**: Zaram refuses rather
-than handing a picture to a blind model — the right refusal built on missing
-data. A user with a connected OpenRouter account and a dozen vision-capable
-models is told nothing can see.
-
-**Local vision is believed to work and has not been run.** The chain above was
-traced, not executed. Three "the plumbing exists" claims turned out to have a
-dead link in the middle during the 28 August session, including a fix that
-shipped with its own resolver stubbed out. Convert it to a measurement before
-relying on it — `gemma4:26b-a4b` is installed and vision-capable, and it will
-be slow because it does not fit.
-
-`output_modalities` rides in the same field, so this one change is also the
-prerequisite for image *generation* routing. That still needs the second half:
-`orchestrator/capabilities.py:40-44` maps `ModelCategory.VISION`, `IMAGE` and
-`VIDEO` all to `Capability.VISION: 1.0`, so **"reads images", "makes images"
-and "makes video" are one number** — ask for a model that can draw and you can
-get one that can only look. Confirmed in code, 28 August.
+**The other half is still genuinely unbuilt, and it stays that way on purpose.**
+`orchestrator/capabilities.py` used to map `ModelCategory.VISION`, `IMAGE` and
+`VIDEO` all to `Capability.VISION: 1.0` — "reads images", "makes images" and
+"makes video" as one number. **The package was deleted on 28 August** (1,261
+lines, zero importers, exactly as `CLAUDE.md` instructed), so the wrong version
+is gone rather than merely unused; nothing was salvaged from it. Routing an
+image *request* still needs a way to say "this reply should be a picture",
+which does not exist — building the gate before the request would be scoring a
+decision nobody can make yet.
 
 ### Not yet scoped: generated documents look subpar
 
@@ -431,46 +450,80 @@ structure, or the content itself. Ask before starting.
 
 ---
 
-## Still open: vision — but not the job the last handoff described
+## Vision: what is settled and what is not
 
-**Read this before starting it. The previous two handoffs said "build the
-modality gate", and checking the code found the gate already built.** Same
-mistake as roadmap 1.4, caught this time before it cost a session.
+**The side door is gone.** `POST /vision/analyze`,
+`OllamaEngine.stream_vision_response`, both wrapper forwarders,
+`ModelsService.analyze_image` and the desktop capability pack that was its only
+caller were all deleted on 28 August. Three facts settled the deletion, and
+none of them was visible from the route table: the desktop caller sent no
+credential and `RequireApiSecret` exempts nothing, so it had returned 401 for
+eleven days; the endpoint called `_parse_legacy_sse`, which is defined nowhere;
+and the suite's pass count was identical before and after, so nothing tested
+it. `tests/test_no_second_entrance_to_inference.py` asserts the quarantine
+rather than describing it.
 
-What exists: `ProviderManager.select_model_for_task(requires_vision=True)` is
-the gate, it has live callers at `main.py:372` and `main.py:682`, and
-`tests/test_vision_gate.py` exercises it against a catalogue shaped like a real
-machine's. The ordinary path is right too — `OllamaEngine.stream_response`
-carries images on **whichever model was routed**, and refuses an image pasted
-into prompt text rather than pretending to read it.
+**The trap in that deletion is recorded because it nearly worked.**
+`IntentPlanner` still emits a `vision.*` step on keywords when nothing is
+attached, and the dispatcher's vision branch was the only thing catching it —
+remove the branch and such a step falls through to `generate_response`, where a
+model describes a picture nobody supplied. The branch stays and refuses,
+reaching no engine.
 
-**What is left is a side door, and it is worse than a gap.**
-`OllamaEngine.stream_vision_response` still hardcodes
-`"model": "qwen2.5vl:7b"` — not installed here — and its own docstring at
-`ollama_engine.py:277` says it bypasses **routing and the egress gate**. It is
-reachable: `POST /vision/analyze` (`main.py:1393`) and `models_service.py:73`,
-forwarded through both `RoutedEngine` and `LocalDispatchEngine`.
+**What is settled:** `select_model_for_task(requires_vision=True)` is the gate,
+`OllamaEngine.stream_response` carries images on whichever model was routed,
+`OpenAICompatibleEngine._body` now does too, and OpenRouter discovery reports
+which cloud models can see.
 
-So the question is not *how do we gate modality* but **why does a second
-entrance to inference exist that skips the gate and the egress log**. An
-egress path the log cannot see is rule 3, and it is a data file's-worth of
-precedent away from the `.vrm` remote-asset problem: the guard is real, and
-something reaches past it.
+**What is not:** there is still no way to ask for an image as an *answer*.
+("Can see" versus "can draw" as one number went with `orchestrator/`, deleted
+28 August — there is nothing left to fix there, only something to build.) TabbyAPI's own `/v1/model` says `"use_vision": false` for the
+model loaded here, which is the measurement the discovery question needs; see
+queue item 4.
 
-The likely answer is deletion, not repair — route `/vision/analyze` through
-the gated path and drop the method — but confirm what the frontend calls
-before removing an endpoint.
+## Open: does the desktop runtime keep a backend-facing half?
 
-Do not paper over any of it by pulling `qwen2.5vl:7b`.
+**A decision, not a task**, and the audit that produced it is finished to the
+point where the rest is one call.
 
-Still true and worth keeping from the older note: `capabilities.py` maps
-`ModelCategory.IMAGE` to `Capability.VISION: 1.0`, the same value a model that
-*reads* images gets, so **"can see" and "can draw" are still one number** —
-that half is genuinely unbuilt. And the `orchestrator/` package still has zero
-importers and ranks a candidate that is missing a required capability, logging
-a warning. Do not build on it; delete it.
+`desktop/` is a second, parallel runtime with its own keyword planner, its own
+capability registry and its own HTTP calls to 8420. **Every one of those calls
+sends `Content-Type` and nothing else**, and `RequireApiSecret` wants
+`X-Zaram-Auth` and exempts nothing — so all of them have returned 401 since the
+per-launch secret shipped. Three are now deleted (Vision, Knowledge, Speech);
+these remain:
 
----
+* `callBackendChat` (`bootstrap.ts:585`) → `POST /chat`, behind
+  `conversation.runtime` and `reasoning.generate`. Also hardcodes
+  `gemma3:latest`, which is not installed here.
+* `VoiceRuntime` (full) executes `speech.tts`, whose handler is now gone.
+  Commented in place at `voice/voice-runtime.ts:120`.
+
+**Nothing invokes any of it.** `executeCapability` is on the preload bridge at
+`electron/preload.js:111` with no caller in the live frontend; `executive.plan`
+likewise; `desktop-bridge.ts` is imported only by `PresenceContext` and
+`OrbEngine`, both for presence and orb state.
+
+**The rule that decides it is already written.** `CLAUDE.md`: *"Frontend calls
+the backend directly over HTTP, not through Electron IPC."* On that reading the
+backend-facing half of the desktop pipeline should not exist, and what stays is
+the native work — filesystem, VS Code, workspace, presence, world. The counter
+is that `ExecutiveRuntime` also feeds the orb's presence snapshot through
+`main.js`, so it cannot simply be deleted wholesale; the planning half and the
+presence half have to be separated first.
+
+**Do not do this piecemeal.** Removing one more handler leaves the executive
+planning steps nothing can execute, which is how this audit kept widening. Take
+the decision, then make one change.
+
+**One consequence to fold into that decision.** `npm run check:reachability`
+now lists `POST /knowledge/search` as a backend route no frontend file
+mentions, and that is this deletion's doing: the desktop Knowledge pack was its
+only HTTP caller. The *capability* is very much alive — `ExecutionDispatcher`
+calls `service.search_knowledge()` in process — so the route, not the feature,
+is what has lost its caller. Check whether the frontend reaches search by some
+other prefix before removing it; `/memory/maintenance` and `/memory/traffic`
+were already on that list and are not related.
 
 ## Running it for a visual check
 

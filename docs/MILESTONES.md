@@ -15,6 +15,464 @@ accurate — it is the first thing anyone reads.
 
 *The latest work is first. Earlier sessions follow below.*
 
+### Rule 7j's second dimension, and the first-run key — 29 August
+
+Two items, and the first unblocked work that had already shipped.
+
+#### The egress policy now knows *what* is leaving, not only where
+
+Rule 7j grants consent "per destination **and data class**". `EgressPolicy` was
+keyed on host alone, so the second half of that sentence had nowhere to live —
+and the cost had just become concrete: OpenRouter discovery had started
+reporting which cloud models can see, `select_model_for_task(requires_vision=True)`
+could pick one, and then `RoutedEngine` refused to send the picture. **A
+finished feature dead-ending one consent question short of working.**
+
+`DataClass` is three members, each named in `CLAUDE.md` rather than invented:
+`PROMPT`, `IMAGE`, `SPINE`. Rules are keyed `(host, class)`, and the whole
+design is one asymmetry:
+
+> **Inheritance runs one way.** A plain host rule covers `PROMPT` and nothing
+> else. Every other class must be granted for that host in its own right, so a
+> broader consent never implies a narrower and more sensitive one.
+
+That is `_INHERITS_HOST_RULE`, a frozenset of one — a set rather than an `if`
+so that widening what "I connected this provider" means is a visible,
+reviewable diff.
+
+Four details worth not re-deriving:
+
+* **Existing policy files keep meaning what they meant.** Every one on every
+  machine predates this. `{"hosts": {...}}` reads as permission for chat, which
+  is what the user was actually asked; read as "permission for everything" it
+  would have silently granted image egress nobody agreed to.
+* **The refusal names the missing decision** rather than falling back to
+  default-deny wording. The user *has* decided about this destination, and
+  "refused, no reason given" sends them looking for a rule that does not exist.
+* **`has_rule` is per class too**, because `SearchReadGrant` leans on it: a
+  grant written for reading a web page must not start reasoning about a class
+  it was never meant to touch.
+* **`forget(host)` takes the class grants with it.** A permission outliving the
+  decision that created it would also be invisible — the privacy pane lists
+  host rules.
+
+The class is decided at the chokepoint, by `OpenAICompatibleEngine`, and **read
+off the body rather than off the caller's argument**. That distinction is the
+one `SearchReadGrant` already had to learn: `source` is a label a call site
+supplies about itself, and `_body` is the only thing that knows whether an
+image actually survived into the payload. `RoutedEngine`'s blanket refusal is
+gone, and deliberately not replaced with a second copy of the rule — one
+chokepoint, asked once, which is the lesson `_local_endpoint_for` cost.
+
+> **A weak assertion of my own, caught by falsifying it.** The new tests were
+> run against deliberately broken code, and
+> `test_an_image_to_a_chat_approved_host_is_refused` **passed anyway**: the
+> `no_socket` fixture raised, the engine caught it in its "could not reach the
+> provider" handler, and the resulting `[ERROR]` line named the host — which
+> was exactly what the test checked for. A network failure and a refusal had
+> become indistinguishable to the test. The fixture now records attempts
+> instead of raising, and the test asserts the transport was never reached.
+> Both then failed against the broken code, which is the only reason either is
+> worth keeping.
+
+`tests/test_an_image_needs_its_own_consent.py`, 22 cases.
+`test_engine_routing.py`'s image class was rewritten rather than deleted, with
+its old contract and the reason it changed recorded in the docstring. Backend
+suite: **2852 passed, 24 skipped**, 4 m 21 s with Ollama up.
+
+#### First run can now store a cloud key
+
+`FirstRunPanel` has rendered a "use a cloud key" offer since it was built,
+greyed out, with its own docstring naming why: *"Installing an engine, pulling
+a model and storing a cloud key each need an executor that does not exist
+yet."* This is that executor, and the cloud key went first because **its
+backend already existed** — `POST /providers/cloud` writes the configuration
+and is effective without a restart, so the offer can be honoured now rather
+than promising something about the next launch.
+
+`CloudKeyForm` holds four rules, and each is one a friendlier version of the
+screen would break by accident:
+
+* **It never claims the key works.** The backend makes no network call, so a
+  200 means *configured* and nothing else. The success line reads "Zaram has
+  not contacted them — nothing has left this device," and a test asserts the
+  words *connected*, *verified*, *valid* and *working* do not appear.
+* **The data policy is shown while choosing**, under the picker, before the key
+  field — not behind a disclosure. `CLAUDE.md`: *"add a free key — your prompts
+  train Google, and Zaram will tell you every time one goes."*
+* **`selectable_by_default` is not this screen's business.** It stops *Zaram*
+  routing to a provider whose terms are unknown; it must never stop a person
+  choosing one knowingly. Every available entry is offered.
+* **The button says "Save key", not "Connect".** What happens is that a value
+  is written to disk, and the label says so.
+
+`useReadiness` gained a `recheck`, because saving a key takes effect
+immediately and the setup screen would otherwise keep standing over a product
+that had just become able to answer. It re-runs the same probe — no cache, no
+inference, so it cannot drift from `/readiness`.
+
+`onConnected` is a **required** prop, following `ChatSurface`'s `navigate`: the
+eight call sites that broke were eight compile errors rather than one silent
+button. `CloudKeyForm.test.tsx` (11 cases) and the extended
+`FirstRunPanel.test.tsx` (10) both pass; frontend **325 passing, `tsc` clean**.
+
+> **Not seen in the running app, and the reason is worth stating.** Reaching
+> this screen requires `can_chat: false`, and this machine has Ollama with
+> models — so it cannot be reached here without breaking the local setup. The
+> tests drive a real `userEvent` against a stubbed client, which is not the
+> same as watching it. `docs/MILESTONES.md` already records what that
+> distinction cost once, on the VRM gaze. **To verify: run with an empty
+> `ZARAM_DATA_DIR` and Ollama stopped**, open the conversation, and the panel
+> should stand where the composer does with a live key offer under it.
+
+### The framing caught up with the product — 29 August
+
+**Nothing in the code changed. Four documents did**, because they still sold a
+product `CLAUDE.md` stopped describing on 16 August 2026.
+
+That was the day the wedge stopped being a segment: *"a universal base, with
+verticals as packs"*, the freelance business layer demoted from **the wedge** to
+**the first pack**. `CLAUDE.md` was rewritten then. `README.md`, `docs/PITCH.md`
+and `docs/VISION.md` were not, and for thirteen days the three documents a
+stranger reads first opened on invoices and one-person businesses while the file
+that governs them opened on "what earns the daily open is universal".
+
+* **`README.md`** — "Who this is for" led with three professions and buried the
+  horizontal base in a trailing sentence. It now leads with *anyone who types on
+  a computer*, states the daily-driver order, and the professions follow under
+  **where it stops being a preference and becomes a requirement** — which is the
+  honest thing they are.
+* **`docs/PITCH.md`** — the opening quote said *"Zaram replaces the admin half of
+  a small business."* It now opens on the memory that stays put while the model
+  changes, with obligations named as the first pack rather than the boundary.
+  The 16 August sharpening note underneath it had already said this; the pitch
+  above it had not been changed to match, which is how a document argues with
+  itself.
+* **`docs/VISION.md`** — the worst of the three, opening on the freelancer's
+  unpaid hours for its whole first section. A new opening carries the universal
+  argument and the routing claim; the old section is retitled **"The first
+  pack"** and kept intact, because its argument is good and only its billing was
+  wrong.
+
+**And one thing that was true in code and stated nowhere: Zaram routes between
+local and cloud per request.** `CLAUDE.md`'s "Models and routing" described
+classification and the three tiers of control, but never the decision itself. It
+now does, read off `ProviderManager.select_model_for_task` rather than
+remembered — **and the first draft of it got the order wrong**, listing
+capability before residency. The code applies consent and residency together in
+`_auto_candidates`, *then* the capability gate, and relaxes residency only when
+that gate empties the field. Corrected before it landed, which is the only
+reason it is worth recording: a wrong order in the file that governs the order
+is worse than no description at all.
+
+The honest boundaries went in beside the claim: **difficulty is not routed**
+("too hard for the local model" is not decidable in advance — react with an
+offer, never predict), and **images do not go to cloud yet**, which
+`RoutedEngine` refuses explicitly rather than by stripping the picture.
+
+### Two dead subsystems removed, and one line of the audit left open — 28 August
+
+Follow-on from the side door below, and the same defect three more times.
+
+**`backend/orchestrator/` is gone — 1,261 lines across 7 modules, zero
+importers.** Not one `import` statement anywhere in `backend/`, `frontend/`,
+`desktop/` or `electron/` named it; every surviving mention was a comment
+calling it dead. `CLAUDE.md` had said *"Do not build on it; delete it"* for
+weeks while three separate files carried prose explaining why it was dangerous.
+
+It was dangerous. `scoring.py` recorded a **missing required capability** as a
+warning and ranked the candidate anyway, and `capabilities.py` scored
+`ModelCategory.VISION`, `IMAGE` and `VIDEO` all as `Capability.VISION: 1.0` —
+"can see", "can draw" and "can make video" as one number. That is this
+codebase's most expensive recurring bug, in working form, one import away.
+**A warning about a loaded gun is worth less than removing it**, so the four
+places that cited it as a cautionary example now cite it in the past tense and
+the code is gone. Backend suite after: **2832 passed, 22 skipped**.
+
+**Two more desktop capability packs could not authenticate.** The vision pack
+deleted below was not the only one. Every backend-calling handler in
+`desktop/` sends `Content-Type` and nothing else, and `RequireApiSecret` wants
+`X-Zaram-Auth` and exempts nothing:
+
+| Handler | Calls | Since the secret shipped |
+|---|---|---|
+| `knowledge-handler.ts:27` | `/knowledge/search` | 401 |
+| `speech-handler.ts:38` | `/voice/stream` | 401 |
+| `bootstrap.ts:414` — inline `speech.tts` | `/voice/stream` | 401 |
+| `callBackendChat`, `bootstrap.ts:585` | `/chat` | 401 |
+
+**And nothing invokes any of them.** `executeCapability` is exposed on the
+preload bridge at `electron/preload.js:111` and has **no caller in the live
+frontend**; `executive.plan` likewise. `desktop-bridge.ts` is imported by
+exactly two modules, `PresenceContext` and `OrbEngine`, and both use it for
+presence and orb state.
+
+They were also duplicates of paths that work. `knowledge.search` is a live
+backend capability with its own dispatcher branch; speech reaches
+`POST /voice/synthesize` from `speechStore.ts`, which is what `docs/SPEECH.md`
+documents as the path that speaks. `CLAUDE.md` settles which of the two is
+right — *"Frontend calls the backend directly over HTTP, not through Electron
+IPC"* — so the Knowledge and Speech packs are gone, with the `speech.tts`
+descriptor and the executive's `knowledge.search` planning step that reached
+for them. `tsc --noEmit` clean; desktop tests unchanged at 617/620, the three
+failures confirmed pre-existing against stashed changes (one incomplete
+Electron mock, two timing benchmarks).
+
+> **What was deliberately left, with its reason.** `VoiceRuntime` (full) still
+> executes `speech.tts`, which now has no handler — the one internal caller,
+> found by grepping after the deletion rather than before it, which is the
+> right order to be embarrassed in. It is commented at
+> `voice/voice-runtime.ts:120` rather than removed, because removing it takes
+> `VoiceRuntime` with it and that raises the wider question this audit does not
+> settle: **whether the desktop execution pipeline keeps a backend-facing half
+> at all.** `conversation.runtime` and `reasoning.generate` are in the same
+> position — uncredentialed, unreachable, duplicating `/chat`. Four handlers,
+> one decision, and it is an architecture call rather than a cleanup.
+
+### The second entrance to inference is gone — 28 August
+
+`POST /vision/analyze` reached `OllamaEngine.stream_vision_response`, whose own
+docstring said it bypassed **routing and the egress gate**, against a hardcoded
+`qwen2.5vl:7b` that was never installed here. Three things were true of it that
+the route table could not show, and each was checked rather than assumed:
+
+* **Its only caller could not authenticate.** `desktop/src/capabilities/vision/`
+  posted to `127.0.0.1:8420/vision/analyze` with `Content-Type` and
+  `Content-Length` and nothing else. `RequireApiSecret` exempts nothing, so
+  every call had returned **401** since the per-launch secret shipped eleven
+  days earlier. The live React frontend never referenced the route at all.
+* **It could not have run even so.** The endpoint called `_parse_legacy_sse`,
+  which is defined **nowhere in the repository**. The first streamed chunk
+  would have raised `NameError`.
+* **Nothing tested it.** The suite's pass count was identical before and after
+  the deletion — an ungated path into inference with zero coverage.
+
+So it was deleted rather than repaired, which is what the handoff expected:
+endpoint, engine method, both wrapper forwarders, `ModelsService.analyze_image`
+and its private SSE parser, the `/vision` prefix from both proxy lists, and the
+desktop capability pack with the keyword planner that reached for it.
+
+> **The deletion had a trap in it, and it is the part worth reading.**
+> `IntentPlanner` still emits a `vision.*` step when the *words* suggest a
+> picture and nothing is attached — `has_images` fixed the case where an image
+> *is* attached and deliberately left the other alone. The dispatcher's vision
+> branch was the only thing catching it.
+>
+> Removing that branch would have let such a step fall through to
+> `generate_response`, and a model asked to describe a picture nobody supplied
+> writes a confident description of nothing. **Deleting a side door into a rule
+> 9 failure would have been a poor trade.** The branch stays and refuses,
+> reaching no engine at all — which is also the honest shape, since there is no
+> gated capability route for vision and the real path is `/chat` with an
+> attachment.
+
+`tests/test_no_second_entrance_to_inference.py`, 12 cases, **10 confirmed
+failing against the undeleted code** — including all five vision capabilities,
+which is the fall-through proved rather than argued.
+
+It also found a live defect on its first run, which is the only reason to trust
+a guard like it. `implementations/ollama_llm.py` had its *"switch to a
+vision-capable model (qwen2.5vl:7b)"* advice fixed on 19 August — *"names no
+model deliberately"* — and `OllamaEngine` carried a **second copy of the same
+sentence** that was missed, still recommending a model nobody had. The guard
+reads string constants through the AST rather than raw text, so prose
+explaining the removal is allowed and a live string is not.
+
+### Images travel on the OpenAI-compatible path — 28 August
+
+Queue item 4's remaining half. `stream_response` took an `images` argument;
+`_body` had no such parameter; nothing joined them. An image attached while a
+TabbyAPI or cloud model was selected was **discarded, and the model answered
+about a picture it had never seen** — rule 9 again, in the silent version,
+where the reply is fluent and nothing on screen suggests the picture went
+nowhere.
+
+The content-parts form is used **only when there are images**: a plain string
+is what every server has always accepted and several older ones accept only, so
+sending a one-element array for an ordinary message would trade a fixed bug for
+a new one on endpoints nobody here can test.
+
+**The media type is read from the picture's own signature.** By the time an
+image reaches an engine the filename is gone — `main.py` passes
+`[a.data for a in attached ...]`, base64 and nothing else, and
+`Attachment.suffix` stays behind — while `image_url` needs a type. Defaulting
+to `image/png` because most screenshots are PNGs would be a guess; the first
+bytes are a measurement. **An image whose format cannot be established is
+refused rather than labelled**, and the refusal is reported in band rather than
+falling into the general handler, which would have called it *"could not
+reach"* and sent the user to look at their connection.
+
+`tests/test_images_on_the_openai_path.py`, 15 cases, **14 confirmed failing
+against the unfixed engine**.
+
+### Cloud discovery keeps what a model can see — 28 August
+
+Queue item 7, and it was as small as the handoff said. OpenRouter's
+`/api/v1/models` returns `architecture` with `input_modalities` and
+`output_modalities`, in the same object `_is_free_tier` already opens for
+pricing, and `_to_model` threw it away.
+
+The consequence was a refusal built on missing data, which is the hardest kind
+to notice because it looks like the safety working: a user with a connected
+account and a dozen vision-capable models attaches a screenshot and is told
+*"No model on this machine can read images."* That sentence is correct and the
+gate behind it — `select_model_for_task(requires_vision=True)`, live callers at
+`main.py:372` and `main.py:682` — was already built. It was reading a flag
+nothing ever set.
+
+**Input and output stay two questions**, because `CLAUDE.md` names the merged
+version as a failure with a worked example. Accepting images sets
+`supports_vision` and leaves the model an `LLM` — a chat model that can also
+see is still a chat model, and that is the shape Ollama discovery already
+produces from `/api/show`. Emitting images *and not text* makes it a
+`ModelCategory.IMAGE`, which is not decoration: `select_model_for_task` filters
+by category, so without it a model that can only draw is a candidate for
+answering a question, and it answers by not answering.
+
+Nothing here routes an image *request* anywhere. That needs a way to say "this
+reply should be a picture", which does not exist, and building the gate before
+the request would be scoring a decision nobody can make yet.
+
+`tests/test_cloud_modality_survives_discovery.py`, 11 cases, including two that
+pin the policy rules this must not have loosened — a vision-capable `:free`
+model is still the logged tier and still not `selectable_by_default`.
+
+### Pasting a screenshot into the chat box — 28 August
+
+Queue item 3. The paperclip and a drag both reached `takeFiles`; Ctrl+V did
+nothing, so the gesture a person uses immediately after taking a screenshot was
+the one that was not wired — and there is no keyboard route to the file picker
+either.
+
+`frontend/src/lib/pastedFiles.ts`, wired as `onPaste` on the composer input.
+**On the input rather than on the window**, which is the opposite of
+`KnowledgeWorkspace`'s handler and deliberately so: that one skips fields
+because a paste into its search box is a search, and here the caret is in the
+message box by definition. Sharing the code would have meant a flag deciding
+which product it was.
+
+Two details that are not obvious and are the whole reason this is a module with
+tests rather than four lines in a component. `items` and `files` are **both**
+read, because an OS screenshot arrives as a `DataTransferItem` while a file
+copied from a folder populates `files`, and which one is empty varies by
+platform — so reading one loses one of the two ways a person puts a picture on
+the clipboard. And a clipboard image is named `image.png` by Chromium every
+time, so two pastes produce two chips the user cannot tell apart; the time it
+was pasted is the only thing that distinguishes them, and a file copied from a
+folder keeps its real name because that is what the user recognises.
+
+Nothing here is a new route to a model: it reaches the same `takeFiles` the
+paperclip does, so the same parse, the same eight-file cap, the same refusals
+and the same vision gate apply. Text pastes are untouched — `preventDefault` is
+called only once files are known to be present.
+
+`frontend/src/lib/pastedFiles.test.ts`, 10 cases.
+
+**Verified by driving it**, against a matched backend and Vite on a scratch
+`ZARAM_DATA_DIR`. A real 1×1 PNG named `image.png` — Chromium's own name for a
+clipboard screenshot, so the rename was exercised too — pasted into the
+composer produced `POST /chat/attachments -> 200` and the chip
+**`pasted-2026-08-28-155933.png · image`** above the input. A text paste
+straight after left `defaultPrevented` false, so typing is untouched.
+
+Say which instrument, because it changes the weight: the orb was opened with a
+real synthetic pointer click through the browser tool, and the paste was a
+`ClipboardEvent` carrying a real `DataTransfer` and a real `File`, dispatched
+from the page rather than from a physical Ctrl+V. Screenshots worked in this
+session, unlike the last.
+
+**Both ports were held by leftovers when this started**, which is the trap
+`docs/RUNNING.md` names, and the evidence that they were dead is worth keeping:
+the Vite was fourteen hours old, the backend was a bare `python main.py` that
+returned **401 to every request including `/health`** with the twelve-day-old
+`backend/api-secret`, and no Electron process existed to hold a secret it would
+accept. It could serve nobody.
+
+### The card had a second tenant and nothing could see it — 28 August
+
+Queue item 5, and it was the one blocking rather than the one recommended.
+`ProviderManager._resident_models` asked each registered adapter in turn and
+**returned on the first non-`None` answer**. On a one-server machine that is
+indistinguishable from correct. Measured here, with both servers up:
+
+    nvidia-smi          -> 12288 MiB total, 9493 MiB used, 2623 MiB free
+    Ollama /api/ps      -> {"models": []}        <- answered first, so this won
+    TabbyAPI /v1/model  -> Qwen3.8-27B-exl3-2.20bpw
+
+So the residency map was an empty Ollama, `swap_preflight` planned against a
+card it believed was clear, and a 3.3 GB cold start onto 2.6 GB of real
+headroom graded as **`load` — "a cold start with room to spare"**. Every
+residency verdict on this machine was taken on an input wrong by most of the
+card.
+
+**Merging alone would have changed nothing, and that is the half worth
+remembering.** `OpenAICompatibleAdapter` had no `resident_models` at all, so
+the second server could not have contributed to the map however the map was
+built. The defect looked like one bad `return` and was two things, one of them
+an absence — the same shape as the vision chain, where each defect hid the next.
+
+Four pieces:
+
+* **The map is merged across every local server**, and a provider that cannot
+  answer makes the whole map unknown rather than contributing nothing. Partial
+  knowledge is not knowledge here, and the error runs one way: an unseen tenant
+  always makes the card look emptier than it is. Cloud providers are skipped;
+  a provider that does not declare its kind is treated as local, which is the
+  assumption that fails safe.
+* **`OpenAICompatibleAdapter.resident_models`**, reading `/v1/model`. Three
+  outcomes rather than one `except`: a cloud provider answers `{}` with no
+  request; a **refused connection on a local port is a fact** — nothing is
+  listening, so that server holds nothing, which is what keeps the indicator
+  alive on the Ollama-only machines where the LM Studio adapter is registered
+  and idle; anything else is unknown.
+* **The size is `None`, never `0`.** `/v1/model` carries the id, the context
+  and cache settings and the chat template, and no memory figure anywhere — the
+  OpenAI contract has no field for one. A zero would be a measurement meaning
+  "holds nothing", which is the false zero `vram_bytes` already cost this
+  codebase once, pointing the same way.
+* **`HardwareProfiler.vram_used_bytes`**, because an unsizeable tenant leaves
+  the sum unanswerable and the driver can answer regardless — it measures the
+  card rather than asking its tenants. Outside `profile()` and uncached, on a
+  one-second budget: capacity is a property of the machine, occupancy changes
+  between one reply and the next.
+
+**Two sources for occupancy, and they are alternatives rather than a blend.**
+The attributable sum is preferred and is counted against `resident_budget_bytes`;
+the driver is the fallback and is counted against capacity-less-reserve, because
+the measured figure already contains the embedder and deducting it from the
+budget as well would charge it twice. Each measured against its own baseline —
+`_headroom_bytes` — which is the same discipline the ranking-versus-selection
+rule states, applied to a quantity rather than to a score.
+
+**Two things it deliberately does not do.**
+
+`evicts` now names only models **this model's own server** would unload. Ollama
+cannot touch what TabbyAPI holds and does not try; it loads anyway and spills to
+system RAM. Naming a cross-server model would be the indicator claiming a
+displacement that never happens.
+
+And when a model does not fit while nothing evictable is in the way — a second
+server holding the card, or a program Zaram knows nothing about — `swap_preflight`
+returns **`None`**. There is no honest word for it in the four-kind vocabulary:
+not `oversized`, the model is far smaller than the card; not `swap`, nothing is
+displaced. Adding a fifth kind is a cross-stack change (`chatClient.ts` drops
+any kind it does not know, which it has been bitten by once), and it should be
+argued for with a user-visible sentence in hand rather than added in passing.
+**Re-entry point: `_evictable_by` returning empty in `swap_preflight`.**
+
+`tests/test_residency_sees_every_server.py` — 19 cases. Twelve were confirmed
+failing against the unfixed code, including the replay of the measurement
+above; four are guards that would have passed; and three run against **whatever
+is actually listening on this machine**, skipping when nothing is. Those last
+three are the point: this defect survived because `test_swap_preflight.py`
+registers exactly one adapter and `test_local_dispatch.py` stubbed the resolver
+it was testing, so neither fake could hold two servers. The existing fourteen
+`test_swap_preflight.py` cases still pass unchanged.
+
+**Still true and untouched:** TabbyAPI holds for the process lifetime while
+Ollama unloads after `keep_alive`, so a driven local↔local handoff via
+`/v1/model/unload` remains a ~100 s round trip and belongs behind an offer.
+
 ### The history panel, seen — and a routing defect it uncovered — 28 August
 
 **The panel works.** Rendered in a real browser against a real backend, with a
