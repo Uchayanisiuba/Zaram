@@ -1685,6 +1685,11 @@ async def egress_policy():
     return {
         "default": "deny",
         "rules": rules,
+        # host -> class -> mode, for the classes a host rule does not speak
+        # for. Sent as its own key rather than nested into `rules`, because
+        # `rules` is already rendered and parsed and quietly changing its shape
+        # is how a privacy pane comes to show nothing at all.
+        "class_rules": gate.policy.class_rules(),
         "hosts_seen": seen,
         "hosts_without_a_rule": [h for h in seen if h not in rules and h != "-"],
     }
@@ -1901,12 +1906,28 @@ class EgressPolicyUpdate(BaseModel):
     host: str
     #: "allow", "ask" or "deny". Anything else is rejected.
     mode: str
+    #: "prompt", "image" or "spine". Defaults to `prompt`, which is what a
+    #: plain host rule has always meant and what every existing caller sends.
+    #:
+    #: **Without this route there is no way to give the consent.** The policy
+    #: learned about data classes on 29 August and started refusing an image
+    #: bound for a host approved only for chat — correctly, and with a message
+    #: naming the missing decision. A refusal whose remedy exists nowhere in
+    #: the interface is worse than the permissive behaviour it replaced: the
+    #: user is told a decision has not been made and given no way to make it.
+    data_class: str = "prompt"
 
 
 @app.put("/egress/policy")
 async def set_egress_policy(update: EgressPolicyUpdate):
-    """Set one host's rule. Rule 5's 'explicit, per-item policy' in practice."""
-    from core.egress import Mode, get_gate
+    """Set one host's rule. Rule 5's 'explicit, per-item policy' in practice.
+
+    Rule 7j's "and data class" arrives here as an optional field rather than a
+    second route, because it is the same decision about the same destination —
+    splitting it would let the two drift, and the privacy pane would end up
+    rendering one of them.
+    """
+    from core.egress import DataClass, Mode, get_gate
 
     host = (update.host or "").strip().lower()
     if not host:
@@ -1918,18 +1939,57 @@ async def set_egress_policy(update: EgressPolicyUpdate):
             status_code=400,
             detail=f"mode must be one of: {', '.join(m.value for m in Mode)}",
         )
+    try:
+        data_class = DataClass(update.data_class)
+    except ValueError:
+        # Named rather than defaulted. Silently treating an unknown class as
+        # `prompt` would grant chat permission to a caller that asked for
+        # something else, which is the widening this whole field exists to
+        # prevent.
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "data_class must be one of: "
+                f"{', '.join(c.value for c in DataClass)}"
+            ),
+        )
 
-    get_gate().policy.set(host, mode)
-    return {"host": host, "mode": mode.value}
+    get_gate().policy.set(host, mode, data_class)
+    return {"host": host, "mode": mode.value, "data_class": data_class.value}
 
 
 @app.delete("/egress/policy/{host}")
-async def forget_egress_policy(host: str):
-    """Remove a rule. The host reverts to the default, which is deny."""
-    from core.egress import get_gate
+async def forget_egress_policy(host: str, data_class: str | None = None):
+    """Remove a rule. What is removed reverts to the default, which is deny.
 
-    get_gate().policy.forget(host)
-    return {"host": host.lower(), "mode": "deny", "reverted_to_default": True}
+    Omitting ``data_class`` forgets the destination **entirely**, every class
+    with it. That is what "forget this destination" has to mean: an image grant
+    left behind after the host rule was removed would be a permission
+    outliving the decision that created it, and invisible, because the privacy
+    pane lists host rules.
+    """
+    from core.egress import DataClass, get_gate
+
+    resolved: DataClass | None = None
+    if data_class is not None:
+        try:
+            resolved = DataClass(data_class)
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "data_class must be one of: "
+                    f"{', '.join(c.value for c in DataClass)}"
+                ),
+            )
+
+    get_gate().policy.forget(host, resolved)
+    return {
+        "host": host.lower(),
+        "mode": "deny",
+        "data_class": resolved.value if resolved else None,
+        "reverted_to_default": True,
+    }
 
 
 class EgressRetentionUpdate(BaseModel):

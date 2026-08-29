@@ -15,6 +15,51 @@ accurate — it is the first thing anyone reads.
 
 *The latest work is first. Earlier sessions follow below.*
 
+### The consent has a way to be given — 29 August
+
+**Shipping the refusal without the remedy was half a feature, and the half
+that reads as a broken product.** The policy started refusing an image bound
+for a chat-approved host, correctly and with a message naming the missing
+decision — while `PUT /egress/policy` took a host and a mode and nothing else.
+The user would be told a choice had not been made and given nothing to make it
+with.
+
+`data_class` now travels the whole way: an optional field on `PUT`, an optional
+query parameter on `DELETE`, and a `class_rules` key on `GET` beside the
+existing `rules` rather than nested into it — that shape is already parsed and
+rendered, and changing it quietly is how a privacy pane comes to show nothing
+at all. An unknown class is **refused with its name**, never defaulted to
+`prompt`, since silently downgrading it would grant chat permission to a caller
+that asked for something else.
+
+Activity gains an `images` row under each destination's mode buttons, shown
+only once that destination has a rule at all — before then the question does
+not arise, and offering to permit pictures to somewhere nothing may be sent is
+a control that governs nothing. **`spine` deliberately has no row.** It exists
+in the policy and nothing sends it yet, so a switch for it would be an invented
+value on the one surface whose whole job is to be trusted.
+
+> **A hole in the day's own work, found by wiring it up.** The privacy pane's
+> "cut everything" control sets every known host to deny — and `decide`
+> consulted the class rules *first*, so a standing image grant survived it. The
+> one control whose meaning has to be unambiguous would have left a destination
+> able to receive photographs, and the same hole was open to anyone who blocked
+> a host by hand and reasonably expected it to mean what it says.
+>
+> A host `DENY` is now checked ahead of the class rules. The asymmetry still
+> points one way: a class rule may **widen** what a permitted destination
+> receives, because the user granted it deliberately, and may never rescue one
+> they shut. Two cases pin both directions.
+>
+> The lesson is the one this file keeps recording: the defect was not in the
+> policy, it was at the seam, and it appeared the moment something real was
+> connected to it. Tracing would not have found it.
+
+`tests/test_an_image_needs_its_own_consent.py` is now 29 cases, five of them
+against the real application rather than a router mounted in the test — a
+complete router that nothing includes is a defect this repository has shipped
+once already.
+
 ### Rule 7j's second dimension, and the first-run key — 29 August
 
 Two items, and the first unblocked work that had already shipped.
