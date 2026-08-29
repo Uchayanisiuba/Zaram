@@ -1,0 +1,540 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Zaram — the memory and control layer for people who use more than one AI</title>
+<meta name="description" content="One memory every AI can read, on your own machine. Switch between a local model and a frontier one without losing what it knows about your work — and see exactly what leaves the device.">
+<link rel="icon" href="favicon.ico">
+<link rel="stylesheet" href="styles.css">
+<meta property="og:title" content="Zaram">
+<meta property="og:description" content="One memory every AI can read, on your own machine. Switch model without starting over, and see exactly what leaves.">
+<meta property="og:image" content="img/og.png">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary_large_image">
+</head>
+<body>
+
+<header class="nav">
+  <a class="wordmark" href="#top">Zaram</a>
+  <nav>
+    <a href="#see">What it does</a>
+    <a href="#build">In the build</a>
+    <a href="#honest">What it isn't</a>
+    <a href="https://github.com/Uchayanisiuba/Zaram">Source</a>
+  </nav>
+</header>
+
+<main id="top">
+
+  <section class="hero">
+    <p class="eyebrow"><span class="dot"></span> <span data-role="eyebrow">Alpha · Windows</span></p>
+    <h1>Every AI you use, in one place —<br>that remembers you, and tells you<br>the truth about each one.</h1>
+    <p class="lede">
+      A model on your own machine answers first — free, private, and no bill per question.
+      Add your own keys when you want more reach, and Zaram picks whichever suits the job.
+      What changes is the model; what doesn't is <strong>the memory</strong> — it stays on
+      your machine, and every one of them can read it.
+    </p>
+
+    <!-- ALPHA SIGNUP — shown while releaseLive is false -->
+    <div class="cta" data-role="waitlist">
+      <div class="alpha-card">
+        <h2 class="alpha-title">Join the alpha</h2>
+        <p class="alpha-sub">
+          The first builds go out in <strong>early September</strong>. Two questions, because
+          whether Zaram is any good on your machine depends on the answers.
+        </p>
+
+        <form class="alpha-form" data-role="signup" novalidate>
+          <div class="field">
+            <label for="email">Email address</label>
+            <input id="email" name="email" type="email" required autocomplete="email"
+                   placeholder="you@example.com" spellcheck="false">
+          </div>
+
+          <div class="field">
+            <label for="setup">What are you running?</label>
+            <select id="setup" name="setup" required>
+              <option value="" selected disabled>Choose one…</option>
+              <option>A dedicated GPU with 8GB of memory or more</option>
+              <option>A dedicated GPU, but a smaller one</option>
+              <option>No dedicated GPU — laptop or integrated graphics</option>
+              <option>Not sure</option>
+            </select>
+            <p class="hint">
+              Zaram runs the model on your machine, so this decides how fast it feels. Every
+              answer is welcome — "not sure" included, and no GPU is still a useful test.
+            </p>
+          </div>
+
+          <div class="field">
+            <label for="intent">What would you point it at first? <span class="opt">optional</span></label>
+            <textarea id="intent" name="intent" rows="2"
+                      placeholder="A folder of contracts, three years of invoices, a thesis…"></textarea>
+          </div>
+
+          <button type="submit">Request an invite</button>
+        </form>
+
+        <p class="cta-status" data-role="signup-status" role="status" aria-live="polite"></p>
+
+        <div class="alpha-terms">
+          <p class="kicker">What you're signing up for</p>
+          <ul>
+            <li><strong>Windows 10 or 11.</strong> There is no macOS or Linux build yet.</li>
+            <li><strong>It will break.</strong> That is the point of an alpha, and finding out how is the job.</li>
+            <li><strong>It isn't code-signed yet</strong>, so Windows will warn you the first time. <a href="#install">Here's what that means.</a></li>
+            <li><strong>Don't put anything irreplaceable in it.</strong> Data may not survive between alpha builds. That changes before beta — see below.</li>
+            <li><strong>I'll ask what went wrong.</strong> You can ignore me — nobody is on a hook.</li>
+          </ul>
+          <p class="muted">
+            Your answers go to the form host named in the footer, and nowhere else. No account,
+            no password, and I'll email you about this and nothing else.
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <!-- DOWNLOAD — shown when releaseLive is true -->
+    <div class="cta" data-role="download" hidden>
+      <a class="btn-primary" data-role="download-link" href="#">
+        Download for Windows
+        <span class="btn-sub">v<span data-role="version">0.1.0</span> · <span data-role="size">178</span> MB · 64-bit</span>
+      </a>
+      <p class="cta-note">
+        <a href="#install">Windows will show a warning the first time. Here's why, and what to click.</a>
+      </p>
+    </div>
+
+    <div class="panel">
+      <div class="panel-bar">
+        <span class="orb" aria-hidden="true"></span>
+        <span>Working · on this machine</span>
+        <span class="spacer">nothing left the device</span>
+      </div>
+      <div class="panel-prose">
+        <p>
+          The launch is <strong>9 September in Lagos</strong> <span class="cite">M1</span>.
+          Your day rate on that job is <strong>₦180,000</strong>, agreed in the revised
+          scope on 12 March <span class="cite">S2</span>, and Adaeze's terms are net 30
+          <span class="cite">S2</span> — the last two invoices were paid on day 38 and
+          day 41 <span class="cite">M7</span>.
+        </p>
+      </div>
+      <div class="panel-foot">
+        <span><b>M1</b> Memory · stored 22 hr ago</span>
+        <span><b>S2</b> Adaeze_SOW_rev2.pdf · p.4</span>
+        <span><b>M7</b> Invoices · 2 records</span>
+      </div>
+    </div>
+    <p class="hero-caption">Every fact links back to where it came from. Wrong? Correct it once.</p>
+  </section>
+
+  <section class="claims" id="see">
+    <div>
+      <h3>One memory, every model</h3>
+      <p>The memory is Zaram's, not the model's. Ask a local model today and a frontier model next week — what it knows about your work doesn't reset because you changed which thing answers.</p>
+    </div>
+    <div>
+      <h3>The truth about each one</h3>
+      <p>Every provider has a different deal with your words, and the free tiers train on them. Zaram names the deal before you pick a model, and again every time something goes.</p>
+    </div>
+    <div>
+      <h3>You decide what leaves</h3>
+      <p>Cloud models are welcome here — it's your key and your call. Nothing goes to a destination you haven't named, you say yes once per destination and kind of data, and every byte that went is in the log.</p>
+    </div>
+  </section>
+
+  <section class="feature feature-plain">
+    <div class="feature-text wide">
+      <p class="kicker">The whole idea</p>
+      <h2>Use each one for what it's best at.</h2>
+      <p>
+        No model is best at everything, and which one leads changes by the month. Zaram's
+        answer to that isn't to pick a winner — it's to make switching cost you nothing.
+        Run what's on your machine through Ollama or LM Studio, reach further through
+        OpenRouter or any provider whose key you already hold, and let the one that's
+        genuinely better at a job do that job.
+      </p>
+      <p>
+        <strong>Local goes first.</strong> On <em>Auto</em>, models on your machine are
+        ranked ahead of anything remote and a cloud model is reached for only when nothing
+        local qualifies. Set <em>Prefer local</em> and Zaram won't reach for one on its own
+        at all.
+      </p>
+
+      <div class="panel">
+        <div class="panel-bar">
+          <span class="orb" aria-hidden="true"></span>
+          <span>Routing · this question</span>
+          <span class="spacer">Auto</span>
+        </div>
+        <div class="panel-body"><span class="line"><span class="dim">question    </span>"read this screenshot and tell me what's wrong"</span><span class="line"><span class="dim">needs       </span><span class="cy">an image</span> — a precondition, not a preference</span><span class="line"><span class="dim">excluded    </span>3 models that cannot see</span><span class="line"><span class="dim">excluded    </span>1 model whose provider trains on what you send</span><span class="line"><span class="dim">chose       </span><span class="ok">a model on this machine</span> · slower than usual, it's a big one</span><span class="line"><span class="dim">left device </span><span class="ok">nothing</span></span></div>
+        <p class="panel-note">
+          A model that can't look at a picture isn't a <em>worse</em> answer to a question
+          about a screenshot. It isn't an answer. That's treated as a hard requirement,
+          never a score to be outvoted — while "a coding model would be better at this"
+          stays a preference, so the general model still answers properly when you have
+          no specialist.
+        </p>
+      </div>
+
+      <p class="aside">
+        The facts, documents and project context live in <em>Zaram's</em> store, not in any
+        model's, so they survive every switch — and each reply names which model answered
+        and where it ran. That's deliberate. A model switch isn't a hole in the story, it
+        <em>is</em> the story. It's also why a drawer full of custom bots never compounds
+        into anything: each one starts over, and this doesn't.
+      </p>
+    </div>
+  </section>
+
+  <section class="feature feature-plain">
+    <div class="feature-text wide">
+      <p class="kicker">Pictures</p>
+      <h2>Show it a screenshot. It gets read here.</h2>
+      <p>
+        Paste with <kbd>Ctrl</kbd>+<kbd>V</kbd>, drag one in, or use the paperclip — a receipt,
+        a page of a contract, an error on screen. Pick a vision model running on your machine
+        and it's read where it sits, with nothing uploaded.
+      </p>
+      <p>
+        Every other assistant has to send that photograph somewhere to answer you. Here it's a
+        choice, and a separate one: a picture is more personal than a sentence, so permission
+        to send a cloud provider your text is <em>not</em> permission to send it your photos —
+        that gets asked once on its own. And if no model you have can read images at all,
+        Zaram says so rather than describing a picture it never saw.
+      </p>
+    </div>
+  </section>
+
+  <section class="policy">
+    <p class="kicker">Every model carries its deal</p>
+    <h2>You should know what you're paying with.</h2>
+    <p class="policy-lede">
+      Zaram doesn't pretend the cloud is off-limits — it's often the right tool, and it's
+      your key. What it refuses to do is let you use one without knowing the arrangement.
+      Every model in the picker carries one of three labels:
+    </p>
+    <ul class="policy-list">
+      <li>
+        <span class="tag tag-local">Never leaves the device</span>
+        <p>A model running on your machine. Nothing is sent, and there is nothing to log.</p>
+      </li>
+      <li>
+        <span class="tag tag-key">Your key, no training</span>
+        <p>A paid API you brought. The provider's terms exclude training on it. Zaram still logs every byte.</p>
+      </li>
+      <li>
+        <span class="tag tag-warn">Logged, and trained on</span>
+        <p><strong>Every free tier is this one.</strong> Your prompts are kept and become training data. Zaram will use it if you ask — and it will never quietly route you here to save you money.</p>
+      </li>
+    </ul>
+    <p class="aside policy-note">
+      That last one is the point. Free AI is paid for with your words, and Zaram is the only
+      thing in the chain with no reason to be vague about it — there's no ad model here and
+      nobody's inference to sell.
+    </p>
+  </section>
+
+  <section id="how" class="feature">
+    <div class="feature-text">
+      <p class="kicker">The egress log</p>
+      <h2>You can see exactly what left, and stop it.</h2>
+      <p>
+        Every destination is listed with its own <em>deny · ask · allow</em>. Requests that
+        were refused are recorded too, so the log tells you what a tool <em>tried</em> to do,
+        not only what it managed. One button cuts all outbound traffic.
+      </p>
+      <p class="aside">
+        The chain is tamper-evident, and the app says plainly what that does and doesn't
+        prove: it detects an edit, deletion or reordering made outside Zaram. It cannot stop
+        someone who already has your machine.
+      </p>
+
+      <div class="panel">
+        <div class="panel-bar">
+          <span>Egress log</span>
+          <span class="spacer">append-only</span>
+        </div>
+        <div class="panel-body"><span class="line"><span class="dim">14:02:11  </span><span class="ok">—  </span>local answer · nothing left this device</span><span class="line"><span class="dim">14:07:40  </span><span class="ok">—  </span>local answer · nothing left this device</span><span class="line"><span class="dim">14:19:03  </span><span class="vi">→  </span>a cloud provider · <span class="vi">1,650 bytes</span> · you confirmed</span><span class="line"><span class="dim">            </span>"Draft a reply to Northwind about the revised…"</span><span class="line"><span class="dim">            </span><span class="dim">1 fact withheld — you struck it before sending</span></span></div>
+        <p class="panel-note">
+          You see the request before it goes and can strike a fact out of it. Measured
+          against a live provider: the preview, the log entry and the bytes actually on
+          the wire were identical at 1,650 bytes, and the struck fact was absent from all
+          three. It isn't a summary of what left — it's what left.
+        </p>
+      </div>
+    </div>
+    <figure class="shot">
+      <img src="img/activity.webp" width="1600" height="1000" alt="The Activity surface: 0 bytes left this device in the last 24 hours, four blocked, four recorded, with per-destination deny, ask and allow controls." loading="lazy" decoding="async">
+    </figure>
+  </section>
+
+  <section class="feature reverse">
+    <div class="feature-text">
+      <p class="kicker">Memory you can correct</p>
+      <h2>Wrong is fixable, and the answers change.</h2>
+      <p>
+        Everything Zaram has learned is listed, searchable, and shows how often it has
+        actually been used. Edit a fact and the original is kept and struck through —
+        answers that relied on it change with it.
+      </p>
+      <p class="aside">
+        There are no thumbs up and no rating buttons. Correcting the fact <em>is</em> the
+        feedback, because it says which part was wrong.
+      </p>
+    </div>
+    <div class="panel">
+      <div class="panel-bar">
+        <span>Memory · one fact</span>
+        <span class="spacer">corrected</span>
+      </div>
+      <div class="panel-prose">
+        <p class="struck">The launch is 9 September in Lagos.</p>
+        <p>The launch is <strong>14 November</strong> in Lagos.</p>
+      </div>
+      <div class="panel-foot">
+        <span><b>superseded</b> you corrected this</span>
+        <span><b>recalled</b> 3× before the correction</span>
+        <span><b>answers</b> all now say November</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="feature feature-plain">
+    <div class="feature-text wide">
+      <p class="kicker">Commitments</p>
+      <h2>Your deadlines are not in a calendar. They're in a PDF.</h2>
+      <p>
+        Payment terms, milestones, deliverables, expiry dates — Zaram reads a contract and
+        pulls out what you owe and when. Each one shows <strong>the clause it came from</strong>,
+        and each one can be corrected, because an extraction you can't check is worse than none.
+      </p>
+      <p class="aside">
+        It surfaces commitments and drafts the reply. It never silently creates one, and it is
+        not trying to be your calendar — a missed deadline is worse than no reminder, since
+        trust doesn't come back.
+      </p>
+    </div>
+  </section>
+
+  <section class="feature">
+    <div class="feature-text">
+      <p class="kicker">Your documents</p>
+      <h2>Point it at a folder. Ask it something you didn't know.</h2>
+      <p>
+        PDFs, Word files, spreadsheets and plain text are read and indexed on the device.
+        Each source carries its own privacy policy, so a folder you never want leaving the
+        machine never does.
+      </p>
+    </div>
+    <div class="panel">
+      <div class="panel-bar">
+        <span>Knowledge · answering from your files</span>
+        <span class="spacer">4 sources indexed</span>
+      </div>
+      <div class="panel-body"><span class="line"><span class="dim">you       </span>"what did we actually agree on payment?"</span><span class="line"><span class="dim">read      </span>Adaeze_SOW_rev2.pdf · p.4</span><span class="line"><span class="dim">          </span><span class="cy">"Payment terms: net 30 from date of invoice."</span></span><span class="line"><span class="dim">answer    </span>Net 30 from the invoice date <span class="cy">[S2]</span></span><span class="line"><span class="dim">policy    </span><span class="ok">this folder never leaves the device</span></span></div>
+      <p class="panel-note">
+        Click the citation and the page it came from opens. When Zaram can't work out what
+        you're referring to, it says so and asks — it doesn't fill the gap with something
+        plausible.
+      </p>
+    </div>
+  </section>
+
+  <section class="feature feature-plain">
+    <div class="feature-text wide">
+      <p class="kicker">Scope</p>
+      <h2>One memory. Not one big pile.</h2>
+      <p>
+        Two different questions, kept apart on purpose. A <strong>project</strong> says
+        whose work a fact belongs to — decisions, constraints, what a client asked for.
+        A <strong>domain</strong> says which library to read from — a named set of your
+        sources, like Contracts or Research, that you can ask a question inside.
+      </p>
+      <p>
+        Domains are many-to-many and never a tree, because a contract belongs in Clients
+        <em>and</em> Legal and making you file it once is how filing systems start
+        losing things. Delete a domain and its sources and their facts stay exactly where
+        they were.
+      </p>
+    </div>
+
+    <div class="panel">
+      <div class="panel-bar">
+        <span>Recall · scoped</span>
+        <span class="spacer">2 domains</span>
+      </div>
+      <div class="panel-body"><span class="line"><span class="dim">ask       </span>"what's our position on late payment?"</span><span class="line"><span class="dim">inside    </span><span class="cy">Contracts</span> + <span class="cy">Legal</span> — not your whole library</span><span class="line"><span class="dim">read      </span>3 sources · 14 passages</span><span class="line"><span class="dim">scope     </span>project:adaeze <span class="dim">and</span> global</span><span class="line"><span class="dim">answer    </span>Net 30, with 4% monthly after day 45 <span class="cy">[S2]</span></span></div>
+      <p class="panel-note">
+        Narrowing what gets <em>read</em> is not the same as splitting what gets
+        <em>kept</em>. The Spine stays one store — which is exactly what a drawer full of
+        separate custom bots can never do, and why nothing you teach them ever adds up.
+      </p>
+    </div>
+  </section>
+
+  <section class="who">
+    <h2>Who it's for</h2>
+    <p class="who-lede">
+      Anyone who types on a computer — and a few people who don't have an alternative.
+    </p>
+    <div class="who-rows">
+      <div class="who-row">
+        <h3>Work that can't be uploaded</h3>
+        <p>Therapists, accountants, lawyers, HR. Told to use AI and forbidden to upload it. A model on your own machine is the only version you're permitted, and the log is what makes that checkable rather than promised.</p>
+      </div>
+      <div class="who-row">
+        <h3>Expensive or patchy internet</h3>
+        <p>Metered data, dropped connections, subscriptions priced in dollars against a local wage. A model already on the machine costs nothing per question and works with the connection down.</p>
+      </div>
+      <div class="who-row">
+        <h3>Long projects</h3>
+        <p>A thesis, a manuscript, a codebase, a client you've had three years. The value compounds instead of resetting every conversation.</p>
+      </div>
+      <div class="who-row">
+        <h3>Freelancers and one-person businesses</h3>
+        <p>Rates, terms and deadlines buried in contracts nobody re-reads. Zaram pulls the dates out with the clause attached — and never invents a commitment you didn't make.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="build" class="caps">
+    <h2>Also in the build</h2>
+    <div class="caps-grid">
+      <div>
+        <h3>Attach anything</h3>
+        <p>Drop, paste or pick a file. The reply tells you how much of it was actually read, rather than pretending it read all of it.</p>
+      </div>
+      <div>
+        <h3>Conversations continue</h3>
+        <p>Past conversations sit on a lip at the edge of the screen. Resume one and the whole transcript comes back, with the model that answered.</p>
+      </div>
+      <div>
+        <h3>It can speak, and listen</h3>
+        <p>Replies are spoken as they're written, not after. Dictation is transcribed on the device. Both are optional installs.</p>
+      </div>
+      <div>
+        <h3>A face, if you want one</h3>
+        <p>The orb by default. Switch to an avatar if you prefer, including your own VRM — it reports what the system is doing, never who answered.</p>
+      </div>
+      <div>
+        <h3>Documents out</h3>
+        <p>Generate .docx and .pdf from your own data, with the sources carried into the file rather than left behind in the chat.</p>
+      </div>
+      <div>
+        <h3>Not only Ollama</h3>
+        <p>LM Studio, TabbyAPI and any OpenAI-compatible local server. The picker tells you where each model actually runs.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="honest" class="honest">
+    <h2>What this is, honestly.</h2>
+    <div class="honest-grid">
+      <div>
+        <h3>It is</h3>
+        <ul>
+          <li>An early alpha, on <strong>Windows only</strong>. No macOS or Linux build exists yet.</li>
+          <li><strong>Source-available</strong> — you can read every line on GitHub. That is not the same as open source; see the licence.</li>
+          <li>Free to use, with no account, no sign-in and no cap.</li>
+          <li>Best with <a href="https://ollama.com">Ollama</a> and one local model pulled. It also works with a cloud key alone.</li>
+        </ul>
+      </div>
+      <div>
+        <h3>It is not</h3>
+        <ul>
+          <li>Finished. Expect rough edges, and expect to lose data between alpha builds.</li>
+          <li>Able to <em>make</em> pictures. It reads them; it does not draw them.</li>
+          <li>A calendar, an accounting system, or a system of record.</li>
+          <li>A source of medical, legal or financial advice — it is built to refuse rather than guess.</li>
+          <li>Free of cost to <em>run</em>: a local model needs a GPU with headroom, or patience.</li>
+        </ul>
+      </div>
+    </div>
+    <p class="honest-note">
+      <strong>What's missing is the front door, not the capability.</strong> The parts above
+      have been watched working; getting them running still takes more patience than it
+      should, and that's what the alpha is for. Some pieces are optional downloads with the
+      size stated before you commit — speech about 905 MB, the microphone about 81 MB, and
+      OCR for scanned PDFs about 321 MB. Naming a fix without naming its cost isn't a
+      choice you can make on a metered connection.
+    </p>
+
+    <div class="panel gate">
+      <div class="panel-bar">
+        <span>Alpha → beta</span>
+        <span class="spacer">what has to be true first</span>
+      </div>
+      <div class="panel-body"><span class="line"><span class="dim">[ ]  </span>it installs on a machine that has never seen the source</span><span class="line"><span class="dim">[ ]  </span>it's signed, so Windows stops warning you</span><span class="line"><span class="dim">[ ]  </span>your data survives an update</span><span class="line"><span class="dim">[ ]  </span>ten testers through a full week with nothing blocking</span><span class="line"><span class="dim">[ ]  </span>a second platform — or an honest decision to stay Windows-only</span></div>
+      <p class="panel-note">
+        Calling this a beta would be the first untrue thing on the page. Beta promises
+        stability, and the top line is genuinely unproven: the installer has never been
+        run on a machine that has never seen the source. Everything above is what alpha
+        testers are actually contributing to.
+      </p>
+    </div>
+  </section>
+
+  <section id="install" class="install">
+    <h2>About the security warning</h2>
+    <p>
+      This build is <strong>not code-signed yet</strong>. Windows SmartScreen will show
+      <em>"Windows protected your PC"</em>, and you'll need to click <strong>More info →
+      Run anyway</strong> to install it.
+    </p>
+    <p>
+      We'd rather explain that than hope you don't notice. A signing certificate identifies
+      the publisher; it is paperwork and money, and it is on the list. Until then, the honest
+      position is: verify the file yourself.
+    </p>
+    <div class="checksum" data-role="checksum-block" hidden>
+      <p class="kicker">SHA-256 of the installer</p>
+      <code data-role="sha256"></code>
+      <p class="aside">Check it in PowerShell before you run it:</p>
+      <pre><code>Get-FileHash .\Zaram-<span data-role="version">0.1.0</span>-x64.exe -Algorithm SHA256</code></pre>
+    </div>
+    <p class="aside" data-role="checksum-pending">
+      The checksum will be published here alongside the first build, generated by the
+      release pipeline rather than typed by hand.
+    </p>
+  </section>
+
+  <!-- Only appears once there is a build to download: an alpha tester who has
+       already installed it wants to hear about the next one, not to re-apply. -->
+  <section class="closing">
+    <h2>Told when the next build lands.</h2>
+    <p>One email per release. Nothing else.</p>
+    <form class="signup" data-role="signup" novalidate>
+      <label class="sr-only" for="email2">Email address</label>
+      <input id="email2" name="email" type="email" required autocomplete="email"
+             placeholder="you@example.com" spellcheck="false">
+      <button type="submit">Keep me posted</button>
+    </form>
+    <p class="cta-status" data-role="signup-status" role="status" aria-live="polite"></p>
+  </section>
+
+</main>
+
+<footer>
+  <div>
+    <p class="wordmark small">Zaram</p>
+    <p class="muted">The memory and control layer for people who use more than one AI.</p>
+  </div>
+  <nav>
+    <a href="https://github.com/Uchayanisiuba/Zaram">Source on GitHub</a>
+    <a href="https://github.com/Uchayanisiuba/Zaram/blob/main/LICENSE">Licence</a>
+    <a href="https://github.com/Uchayanisiuba/Zaram/issues">Report a problem</a>
+  </nav>
+  <p class="muted colophon">
+    This page loads no fonts, no analytics and no third-party scripts. The only request it
+    ever makes to anyone else is the one that carries your email address, when you press the
+    button, to <span data-role="form-host">the form host</span>.
+  </p>
+</footer>
+
+<script src="site.js"></script>
+</body>
+</html>
