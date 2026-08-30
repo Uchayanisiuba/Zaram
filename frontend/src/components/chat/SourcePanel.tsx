@@ -19,6 +19,7 @@ import { motion, type Variants } from 'framer-motion';
 import { X, Trash2, Loader2, ExternalLink } from 'lucide-react';
 import { useIsReducedMotion } from '@/hooks/useReducedMotion';
 import { fetchMemory, deleteMemory, type MemoryRecord } from '@/services/memoryClient';
+import { hostOf } from '@/services/chatClient';
 
 export interface SourcePanelProps {
   /** Provenance URL, e.g. "memory:1a2b-...". */
@@ -86,13 +87,10 @@ export default function SourcePanel({
    *  half of rule 2 missing precisely where the user is most likely to check:
    *  a claim Zaram made about the world. */
   const webUrl = /^https?:\/\//i.test(url) ? url : null;
-  const host = (() => {
-    try {
-      return webUrl ? new URL(webUrl).host : null;
-    } catch {
-      return null;
-    }
-  })();
+  // `hostOf` rather than a second parse here. The chip beside this panel names
+  // the same site, and two implementations of "which site is this" is how the
+  // two come to disagree about one page.
+  const host = hostOf(url);
 
   /** Hand the page to the user's real browser.
    *

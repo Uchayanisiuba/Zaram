@@ -75,6 +75,44 @@ export function sourceLeftDevice(source: ChatSource): boolean {
   return source.kind === 'web';
 }
 
+/** The site a cited page came from, or `null` when it is not a web page.
+ *
+ *  **The signal a row of citations was missing.** A web chip rendered as a
+ *  globe and a number, so four sources were four identical globes — and the
+ *  domain, which is the thing that actually distinguishes them, was only
+ *  visible after opening the panel one at a time.
+ *
+ *  `www.` is dropped because it is noise on every domain that has it and
+ *  absent on every domain that does not, so it carries no information and
+ *  costs the width that a longer name needs. Nothing else is trimmed: a
+ *  subdomain is part of who published the page, and `docs.example.com` and
+ *  `blog.example.com` are not interchangeable.
+ *
+ *  One implementation, here, because `SourcePanel` already computed this
+ *  inline and a second copy is how the panel and the chip come to disagree
+ *  about what they are pointing at. */
+export function sourceHost(source: ChatSource): string | null {
+  return hostOf(source.url ?? '');
+}
+
+/** The same question asked of a bare URL, for callers holding one.
+ *
+ *  `SourcePanel` receives a `url` rather than a `ChatSource` and had its own
+ *  inline copy of this. Two implementations of "which site is this" is how the
+ *  panel and the chip come to name different things while pointing at the same
+ *  page. */
+export function hostOf(url: string): string | null {
+  if (!/^https?:\/\//i.test(url)) return null;
+  try {
+    const host = new URL(url).host.toLowerCase();
+    return host.startsWith('www.') ? host.slice(4) : host;
+  } catch {
+    // A malformed URL is not a domain, and inventing one from a substring
+    // would put a name on a chip that links somewhere else.
+    return null;
+  }
+}
+
 export type ChatEvent =
   | { type: 'token'; content: string }
   /** The model's working, from a `<think>` block, with the tags removed.

@@ -16,7 +16,7 @@
  */
 import { FileText, Diamond, Globe } from 'lucide-react';
 
-import { type ChatSource, sourceLeftDevice } from '@/services/chatClient';
+import { type ChatSource, sourceHost, sourceLeftDevice } from '@/services/chatClient';
 
 /** Icon per kind. The kind is *what* it is; the colour is whether it left. */
 const KIND_ICON = {
@@ -43,6 +43,23 @@ export function CitationChip({
   const left = sourceLeftDevice(source);
   const Icon = KIND_ICON[source.kind];
 
+  // The site, on the chip, for a web source only.
+  //
+  // **Four web citations used to render as four identical globes**, and the
+  // one thing that tells them apart — who published the page — was reachable
+  // only by opening the panel on each in turn. A row of sources is scanned,
+  // not read, and a glyph that is the same for every entry carries nothing.
+  //
+  // Text rather than a favicon, and that is a decision rather than a stopgap.
+  // A favicon is fetched from the site, which is a request `EgressGate`
+  // structurally cannot see — `check-no-remote-assets.mjs` bans exactly that —
+  // and it would fire on every *render*, so reopening a conversation next week
+  // would ping the publisher again. The domain says more anyway: a name is
+  // legible where a 16px mark is a guess, and it does not lend a content farm
+  // the authority of a nice logo.
+  const host = sourceHost(source);
+  const label = host ? `${KIND_LABEL[source.kind]} — ${host}` : KIND_LABEL[source.kind];
+
   // Never render a chip that is not clickable. Citing without linking fails
   // the only task a citation exists for — checking it — and for this product a
   // decorative citation is worse than none.
@@ -50,8 +67,8 @@ export function CitationChip({
     <button
       type="button"
       onClick={(e) => onOpen(source, e.currentTarget)}
-      title={`${KIND_LABEL[source.kind]}${forgotten ? ' — forgotten' : ''}`}
-      aria-label={`Source ${source.number ?? ''}: ${KIND_LABEL[source.kind]}`}
+      title={`${label}${forgotten ? ' — forgotten' : ''}`}
+      aria-label={`Source ${source.number ?? ''}: ${label}`}
       className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full border text-[10px] leading-none align-baseline transition-colors hover:bg-white/5"
       style={{
         borderColor: left ? 'rgba(168,85,247,0.45)' : 'rgba(34,211,238,0.40)',
@@ -62,6 +79,19 @@ export function CitationChip({
     >
       <Icon size={9} aria-hidden />
       {source.number != null && <span>{source.number}</span>}
+      {/* Capped, and truncated from the *end*, because a domain is read
+          left to right and its first label is the part that identifies it:
+          "logupdateafrica…" is recognisable and "…africa.com" is not. Set at
+          the same size as the number so a long name cannot make one chip
+          tower over its neighbours in a wrapped row. */}
+      {host && (
+        <span
+          className="max-w-[11rem] truncate"
+          style={{ opacity: 0.85 }}
+        >
+          {host}
+        </span>
+      )}
     </button>
   );
 }
