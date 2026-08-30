@@ -108,27 +108,76 @@ class TestTheModelsOnThisMachine:
     """
 
     def test_discovery_fills_in_vision_support(self):
+        """**This had never once run its assertions.** Two reasons, and the
+        second is the one that made it invisible.
+
+        `refresh` is a coroutine and was called bare, so discovery never
+        happened — the only trace was a `RuntimeWarning` in the suite's tail.
+        And `ProviderManager()` builds an empty `ProviderRegistry`, so even
+        awaited there was nothing registered to scan: the real path registers
+        `OllamaAdapter` in `providers/runtime.py`, and this constructed a
+        manager that could discover nothing by construction.
+
+        Both failures ended in the same place — an empty model list — and the
+        `if not local: skip` above read that as a statement about the machine.
+        So on a machine holding two Ollama models the suite reported *"no
+        Ollama models installed"* and moved on, for as long as this test has
+        existed.
+
+        The skip now hangs off what Ollama itself reports, not off what
+        discovery returned. If Ollama has models and discovery does not, that
+        is the defect this test exists to catch and it fails rather than
+        skips.
+        """
+        import asyncio
+
         import httpx
 
+        from providers.discoverers.ollama import OllamaAdapter
+
         try:
-            httpx.get("http://127.0.0.1:11434/api/tags", timeout=2.0)
+            tags = httpx.get("http://127.0.0.1:11434/api/tags", timeout=2.0).json()
         except Exception:
             pytest.skip("Ollama is not running")
 
-        manager = ProviderManager()
-        manager.refresh()
-
-        local = [m for m in manager.list_models() if m.provider == "ollama"]
-        if not local:
+        installed = [m.get("name") for m in tags.get("models") or []]
+        if not installed:
             pytest.skip("no Ollama models installed")
 
-        # At least one flag has to be readable, or `supports_vision` is
-        # decorative and the gate is deciding on a field nobody fills.
-        assert any(m.supports_vision for m in local) or all(
-            not m.supports_vision for m in local
+        manager = ProviderManager()
+        manager.registry.register_model_provider(OllamaAdapter())
+        asyncio.run(manager.refresh())
+
+        local = [m for m in manager.list_models() if m.provider == "ollama"]
+        assert local, (
+            f"Ollama reports {len(installed)} model(s) — {installed} — and "
+            "discovery found none, so the gate is reading an empty catalogue."
         )
-        for m in local:
-            assert isinstance(m.supports_vision, bool)
+
+        # **The previous assertion here was a tautology**: `any(x) or all(not
+        # x)` is true for every possible list of booleans, so it passed
+        # whatever discovery returned. It was written to catch
+        # `supports_vision` being decorative — False for every real model
+        # while correct in every fixture — and it could not have.
+        #
+        # The check that does catch it compares the flag against what Ollama
+        # itself says, per model. `/api/tags` does not carry vision at all;
+        # only `/api/show` does, which is exactly the enrichment step the
+        # adapter makes and the one thing here worth guarding.
+        for model in local:
+            name = model.display_name
+            shown = httpx.post(
+                "http://127.0.0.1:11434/api/show",
+                json={"model": name},
+                timeout=20.0,
+            ).json()
+            expected = "vision" in [
+                str(c).lower() for c in (shown.get("capabilities") or [])
+            ]
+            assert model.supports_vision is expected, (
+                f"{name}: Ollama reports vision={expected} and discovery "
+                f"catalogued {model.supports_vision}"
+            )
 
 
 
