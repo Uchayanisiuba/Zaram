@@ -41,7 +41,14 @@ PAYLOAD = json.dumps(
     }
 )
 
-EMPTY = json.dumps({"results": [], "total_results": 0})
+#: An empty search, as the knowledge runtime actually emits one — with the
+#: per-connector status on it. Without that field this payload cannot say
+#: whether the search left the machine, and the engine deliberately drops the
+#: *cause* from its notice when it cannot tell. See
+#: `test_a_refused_search_is_not_an_empty_web.py`.
+EMPTY = json.dumps(
+    {"results": [], "total_results": 0, "provider_status": {"duckduckgo": "ok"}}
+)
 
 
 class TestTheSourcesReachThePrompt:

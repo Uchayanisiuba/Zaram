@@ -243,12 +243,56 @@ def _parse(raw: Any) -> Optional[Dict[str, Any]]:
     return parsed if isinstance(parsed, dict) else None
 
 
+#: Connectors that answer from this machine. Everything else went out.
+#:
+#: A list of the local ones rather than of the remote ones, deliberately: a new
+#: web connector should count as web without anybody remembering to add it
+#: here, and the failure of forgetting is then "we said we could not reach the
+#: web when we did", which is a cautious wrong answer rather than a confident
+#: one.
+_LOCAL_CONNECTORS = frozenset({"memory", "graph"})
+
+
+def reached_the_web(raw: Any) -> Optional[bool]:
+    """Whether any search connector actually got out, or ``None`` if unreadable.
+
+    **Zero results and a refused search are not the same event**, and the
+    difference is the whole of what the user needs to hear. Measured on this
+    machine, 30 August 2026: web search was turned on, `duckduckgo.com` had no
+    egress rule, default-deny refused the request, and the reply said *"Web
+    search ran but returned no results, so this answer comes only from what the
+    model already knows."* Every word of that was wrong except the last clause.
+    The web was never asked.
+
+    ``result_count`` cannot tell them apart, because a refusal and an empty web
+    both arrive as an empty list. This reads `provider_status`, which the
+    knowledge runtime already fills in per connector, and answers a different
+    question: did anything leave this machine.
+
+    ``None`` where the payload cannot be read, and the caller must stay silent
+    on it. "We could not reach the web" is a claim, and a claim built on an
+    unparseable payload is a guess.
+    """
+    parsed = _parse(raw)
+    if parsed is None:
+        return None
+    status = parsed.get("provider_status")
+    if not isinstance(status, dict):
+        return None
+    return any(
+        name not in _LOCAL_CONNECTORS and value == "ok"
+        for name, value in status.items()
+    )
+
+
 def result_count(raw: Any) -> Optional[int]:
     """How many sources the search returned, or ``None`` if it cannot be read.
 
     ``0`` and ``None`` are different answers and callers must keep them apart:
     zero means the search ran and the web had nothing, which is worth telling
     the user, and ``None`` means we cannot say — which is not.
+
+    Zero does **not** mean the web was consulted. See `reached_the_web`.
     """
     parsed = _parse(raw)
     if parsed is None:
