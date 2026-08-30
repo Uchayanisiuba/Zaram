@@ -12,7 +12,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence, type Variants } from 'framer-motion';
-import { Paperclip, Send } from 'lucide-react';
+import { Paperclip, Send, Square } from 'lucide-react';
 import ArtifactCard from '@/components/ArtifactCard';
 import AttachmentChips from '@/components/chat/AttachmentChips';
 import { filesFromClipboard, withPasteName } from '@/lib/pastedFiles';
@@ -103,6 +103,49 @@ export default function ChatSurface({ navigate }: Props) {
   const isStreaming = useChatStore((s) => s.isStreaming);
   const connectionError = useChatStore((s) => s.connectionError);
   const send = useChatStore((s) => s.send);
+  const cancel = useChatStore((s) => s.cancel);
+
+  /** Turn web search on, permit the search engine, then ask again.
+   *
+   *  The second half is what makes it an offer rather than a setting with a
+   *  shortcut. A person who has just been told the answer may be stale wants
+   *  *this question* answered, not the next one — enabling the switch and
+   *  leaving the stale reply on screen would be the same dead end one click
+   *  further along.
+   *
+   *  **The host rule is the part that was missing, and its absence made the
+   *  first version a refusal with no remedy.** `setWebSearch(true)` turns the
+   *  planner on and grants nothing; the search then goes out to a host with no
+   *  rule, default-deny refuses it, and the reply says "web search ran but
+   *  returned no results". Observed by the maintainer on the first press.
+   *  Nothing had gone wrong except that Zaram asked the same question twice
+   *  and answered it "no" the second time.
+   *
+   *  Rule 7j settles it: *"Consent given deliberately for a destination is
+   *  consent… Requiring a second, separate host rule afterwards asks the same
+   *  question twice and reads as the product being broken."* Pressing a button
+   *  that says the question goes to a search engine **is** the decision about
+   *  that destination. It is still per-host, still visible in Settings, still
+   *  revocable there, and the kill switch still beats it.
+   *
+   *  Errors are not caught here: `NoticeCard` awaits this and says so on its
+   *  own button, which is where the person is looking. */
+  const enableSearchAndRetry = useCallback(async () => {
+    const { setWebSearch, setEgressPolicyForHost } = await import(
+      '@/services/settingsClient'
+    );
+    const status = await setWebSearch(true);
+    // Only when it is not already permitted, and only for the host the
+    // backend names. Deriving the hostname here would be a second answer to
+    // a question `/search/web` already answers.
+    if (status.host && status.hostPolicy !== 'allow') {
+      await setEgressPolicyForHost(status.host, 'allow');
+    }
+    const lastAsked = [...useChatStore.getState().messages]
+      .reverse()
+      .find((message) => message.role === 'user');
+    if (lastAsked) void send(lastAsked.text);
+  }, [send]);
 
   // Typed out at a steady cadence rather than in the clumps tokens arrive in.
   //
@@ -673,7 +716,12 @@ export default function ChatSurface({ navigate }: Props) {
                     <ArtifactCard key={artifact.id} artifact={artifact} />
                   ))}
                   {msg.notices?.map((notice, i) => (
-                    <NoticeCard key={i} notice={notice} onOpen={navigate} />
+                    <NoticeCard
+                      key={i}
+                      notice={notice}
+                      onOpen={navigate}
+                      onEnableSearch={enableSearchAndRetry}
+                    />
                   ))}
                   {msg.error && (
                     <p className="mt-1 text-[11px]" style={{ color: '#fca5a5' }}>
@@ -738,7 +786,12 @@ export default function ChatSurface({ navigate }: Props) {
                     <ArtifactCard key={artifact.id} artifact={artifact} />
                   ))}
                   {streamingNotices.map((notice, i) => (
-                    <NoticeCard key={i} notice={notice} onOpen={navigate} />
+                    <NoticeCard
+                      key={i}
+                      notice={notice}
+                      onOpen={navigate}
+                      onEnableSearch={enableSearchAndRetry}
+                    />
                   ))}
                 </div>
               )}
@@ -843,16 +896,41 @@ export default function ChatSurface({ navigate }: Props) {
               <Paperclip size={16} className="text-slate-300" />
             </motion.button>
             <MicButton onTranscript={appendTranscript} disabled={isStreaming} />
-            <motion.button
-              onClick={handleSend}
-              disabled={isStreaming || !inputText.trim()}
-              aria-label="Send message"
-              className="p-1.5 rounded-lg hover:bg-white/5 disabled:opacity-30 transition-colors"
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-            >
-              <Send size={16} className="text-slate-300" />
-            </motion.button>
+            {/* Send, or stop — the same control, because they are the same
+                decision at two moments and a second button would be dead for
+                most of the product's life.
+
+                **`cancel` existed and nothing called it.** The store has
+                aborted the in-flight request on clear, on resume and on the
+                next send since it was written; the one case it was never wired
+                to was a person deciding, mid-answer, that this one is going
+                wrong. On a machine where an oversized model takes minutes per
+                reply that is not a convenience — it is the difference between
+                watching three minutes of a wrong answer and asking a better
+                question. */}
+            {isStreaming ? (
+              <motion.button
+                onClick={() => cancel()}
+                aria-label="Stop answering"
+                title="Stop answering"
+                className="p-1.5 rounded-lg hover:bg-white/5 transition-colors"
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+              >
+                <Square size={16} fill="currentColor" className="text-slate-300" />
+              </motion.button>
+            ) : (
+              <motion.button
+                onClick={handleSend}
+                disabled={!inputText.trim()}
+                aria-label="Send message"
+                className="p-1.5 rounded-lg hover:bg-white/5 disabled:opacity-30 transition-colors"
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+              >
+                <Send size={16} className="text-slate-300" />
+              </motion.button>
+            )}
           </div>
         </div>
         {/* Voice input's state, in words. A disabled button with a tooltip is
