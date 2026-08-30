@@ -93,7 +93,34 @@ class OllamaEngine(LLMEngine):
         wire_name: Optional[WireName] = None,
     ):
         self.base_url = base_url
-        self.default_model = "gemma3:latest"
+        #: The model used when a caller names none. ``None`` is the only
+        #: honest value, and it is assigned from outside by
+        #: `ModelsRuntime.initialize` once the provider layer has picked one.
+        #:
+        #: **This was ``"gemma3:latest"``, and it was the fourth instance of a
+        #: class this codebase had already fixed three times.** The identical
+        #: note sits on `implementations/ollama_llm.py`, which was fixed while
+        #: the engine actually on the chat path was not — so the literal
+        #: survived where it did the most damage.
+        #:
+        #: It reaches a user because the assignment above it is guarded:
+        #: ``if self._selected_model: engine.default_model = ...``. That guard
+        #: is right — it must not overwrite a real pick with ``None`` — but it
+        #: means a selection that yields *nothing* leaves whatever was here.
+        #: Measured 30 August 2026 on a clean data dir: the first message of
+        #: the session came back ``Ollama refused the request for
+        #: gemma3:latest: model 'gemma3:latest' not found``, naming a model
+        #: uninstalled months earlier that no control had ever offered.
+        #:
+        #: The branch is the one `CLAUDE.md` warns about by name — it runs
+        #: "never with Ollama up, always on a stranger's machine" — because an
+        #: empty candidate set is the ordinary outcome when every installed
+        #: model is too large to select, which is exactly the first-run state
+        #: this product is blocked on.
+        #:
+        #: Naming a different model here would repeat the mistake with a
+        #: fresher name.
+        self.default_model: Optional[str] = None
         self._wire_name = wire_name
 
     def _wire(self, model: Optional[str]) -> Optional[str]:
@@ -239,8 +266,17 @@ class OllamaEngine(LLMEngine):
         callers reach this through `getattr` so an engine without it degrades
         to ordinary generation rather than breaking.
         """
+        chosen = model or self.default_model
+        if not chosen:
+            # Raised rather than posted. Extraction callers already treat an
+            # exception as "no draft" and say what was missing, and asking
+            # Ollama for `None` would produce a 404 that reads as the server
+            # being unreachable — sending whoever debugs it to the wrong layer.
+            raise RuntimeError(
+                "No model was selected for this request. Choose one in Settings."
+            )
         payload = {
-            "model": self._wire(model or self.default_model),
+            "model": self._wire(chosen),
             "prompt": prompt,
             "system": system_prompt,
             "stream": False,
@@ -300,8 +336,19 @@ class OllamaEngine(LLMEngine):
                 "and tell you what it did with it."
             )
             return
+        chosen = model or self.default_model
+        if not chosen:
+            # Said plainly, and never guessed. A guessed name produces a 404
+            # from Ollama that reads as "the local model is unreachable",
+            # which is a claim about the server rather than about the caller
+            # that passed nothing — the same sentence `ollama_llm` settled on.
+            yield (
+                f"{ERROR_PREFIX}No model was selected for this request. "
+                "Choose one in Settings."
+            )
+            return
         payload = {
-            "model": self._wire(model or self.default_model),
+            "model": self._wire(chosen),
             "prompt": prompt,
             "system": system_prompt,
             "stream": True,
