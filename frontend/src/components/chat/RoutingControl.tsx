@@ -121,14 +121,23 @@ export default function RoutingControl() {
   // that opened it is a trap on a surface this small.
   useEffect(() => {
     if (!open) return;
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      // Captured and stopped, because Escape means "close the thing on top"
+      // and the conversation panel is listening for it too. Without this,
+      // dismissing this popover closed the whole conversation behind it —
+      // measured in the browser, and invisible to a test that renders this
+      // component on its own.
+      e.stopPropagation();
+      setOpen(false);
+    };
     const onDown = (e: MouseEvent) => {
       if (!root.current?.contains(e.target as Node)) setOpen(false);
     };
-    document.addEventListener('keydown', onKey);
+    document.addEventListener('keydown', onKey, true);
     document.addEventListener('mousedown', onDown);
     return () => {
-      document.removeEventListener('keydown', onKey);
+      document.removeEventListener('keydown', onKey, true);
       document.removeEventListener('mousedown', onDown);
     };
   }, [open]);

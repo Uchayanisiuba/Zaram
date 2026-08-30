@@ -244,6 +244,25 @@ describe('choosing', () => {
   });
 });
 
+describe('dismissing the panel', () => {
+  it('closes on Escape without letting it reach the conversation', async () => {
+    const panel = await openPanel();
+    expect(panel).toBeTruthy();
+
+    const outer = vi.fn();
+    document.addEventListener('keydown', outer);
+    await userEvent.keyboard('{Escape}');
+    document.removeEventListener('keydown', outer);
+
+    await waitFor(() => expect(screen.queryByTestId('routing-panel')).toBeNull());
+    // Escape means "close the thing on top". The conversation panel listens
+    // for it too, so without stopping propagation this dismissed the whole
+    // conversation behind the popover — seen in the browser, and invisible to
+    // a test that renders this component alone.
+    expect(outer).not.toHaveBeenCalled();
+  });
+});
+
 describe('the chip itself', () => {
   it('claims the guarantee only for prefer_local', async () => {
     fetchRoutingSettings.mockResolvedValue({
