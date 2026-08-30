@@ -259,8 +259,28 @@ export function describeSystem(s: {
     };
   }
   if (s.activity === 'thinking') {
-    const where = s.routing?.mode === 'local' ? 'on this machine' : 'remotely';
-    return { label: 'Thinking', detail: `Working ${where}.`, tone: 'busy' };
+    // **Read off the thing that answers, never off the machine's posture.**
+    //
+    // This said `Working remotely.` whenever `routing.mode` was anything but
+    // `local` — and `mode` is the overall posture, so connecting a cloud
+    // provider made it say so while a local model was generating. Observed on
+    // the ambient panel with TabbyAPI answering on loopback: "Thinking.
+    // Working remotely." A false claim that the user's question left the
+    // machine, on the surface `CLAUDE.md` singles out as the one where the
+    // egress disclosure matters most.
+    //
+    // The fix is the correction `applyHealth` twenty lines up already made for
+    // the persistent bar, in its own words: *"mode describes the machine's
+    // overall posture and this must describe the thing that actually
+    // answers"*. Half the fix landed; this branch was the other half.
+    //
+    // Unknown says neither, following `locality_of` in `core/identity.py`:
+    // "runs on this machine" would be a confident false claim on the one fact
+    // a user is most likely to check, and so would its opposite.
+    const locality = (s.routing?.providers ?? [])[0]?.locality;
+    const where =
+      locality === 'local' ? ' on this machine' : locality === 'cloud' ? ' remotely' : '';
+    return { label: 'Thinking', detail: `Working${where}.`, tone: 'busy' };
   }
   // **Capability is not activity, and the colour must track activity.**
   //
