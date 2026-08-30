@@ -39,6 +39,24 @@ export interface RoutingState {
   canLeaveDevice: boolean;
 }
 
+/** Whether a cloud *model* is connected at all.
+ *
+ *  **Distinct from `canLeaveDevice`, and conflating them says something
+ *  false.** This asks whether a route to a cloud model is configured; that
+ *  asks whether anything is permitted to leave. They disagree in the ordinary
+ *  case of a key pasted with no egress rule yet — measured on this machine,
+ *  30 August 2026: `providers` held `openrouter` while `can_leave_device` was
+ *  `false`.
+ *
+ *  Exported because two readers need it — the orb's label and the routing
+ *  picker beside the composer — and a second inline copy is how they come to
+ *  tell the user different things about one machine. The same argument
+ *  `hostOf` settles for a citation's domain.
+ */
+export function cloudModelConnected(routing: RoutingState | null): boolean {
+  return (routing?.providers ?? []).some((p) => p.locality && p.locality !== 'local');
+}
+
 /** Whether speech synthesis can actually run.
  *
  *  Voice ships as an optional extra — Kokoro pulls torch, transformers and the
@@ -304,9 +322,7 @@ export function describeSystem(s: {
 
   // Observed from `routing.providers`, which is configuration: these two say a
   // route *exists*, never that anything took it.
-  const cloudAvailable = (s.routing?.providers ?? []).some(
-    (p) => p.locality && p.locality !== 'local',
-  );
+  const cloudAvailable = cloudModelConnected(s.routing);
 
   if (cloudAvailable) {
     return {

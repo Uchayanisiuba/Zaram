@@ -15,6 +15,7 @@ import { motion, AnimatePresence, type Variants } from 'framer-motion';
 import { Paperclip, Send, Square } from 'lucide-react';
 import ArtifactCard from '@/components/ArtifactCard';
 import AttachmentChips from '@/components/chat/AttachmentChips';
+import RoutingControl from '@/components/chat/RoutingControl';
 import { filesFromClipboard, withPasteName } from '@/lib/pastedFiles';
 import {
   attachFiles,
@@ -592,7 +593,7 @@ export default function ChatSurface({ navigate }: Props) {
             </p>
           ) : (
             <>
-              {messages.map((msg) => (
+              {messages.map((msg, msgIndex) => (
                 <div
                   key={msg.id}
                   // Who said it is now carried by *side* as well as by label and
@@ -696,7 +697,27 @@ export default function ChatSurface({ navigate }: Props) {
                       about this reply rather than about a source, and because
                       a reply with no sources must still say where it came
                       from. */}
-                  {msg.role === 'assistant' && <AnsweredBy attribution={msg.answeredBy} />}
+                  {msg.role === 'assistant' && (
+                    <AnsweredBy
+                      attribution={msg.answeredBy}
+                      /* The question this reply answered, not the last thing
+                         said. Re-asking from the middle of a history must
+                         re-send *that* question — taking the most recent one
+                         would silently answer something else and attribute it
+                         to this point in the conversation. */
+                      onAskAnother={
+                        isStreaming
+                          ? undefined
+                          : (model) => {
+                              const question = [...messages]
+                                .slice(0, msgIndex)
+                                .reverse()
+                                .find((m) => m.role === 'user');
+                              if (question) void send(question.text, { model });
+                            }
+                      }
+                    />
+                  )}
                   {msg.role === 'assistant' && (
                     <CitationSummary
                       sources={msg.sources}
@@ -969,6 +990,11 @@ export default function ChatSurface({ navigate }: Props) {
         <div className="mt-2 px-1 flex items-center gap-3 flex-wrap">
           <ProjectScopePicker />
           <DomainScopePicker />
+          {/* The third axis, and the only one of the three that is about the
+              user rather than about the work: where this may go. It sits here
+              rather than in Settings because the alternative was six actions
+              and a context switch for a decision that costs one. */}
+          <RoutingControl />
         </div>
       </motion.div>
         </>
