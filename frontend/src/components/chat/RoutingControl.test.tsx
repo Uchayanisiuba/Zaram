@@ -28,11 +28,13 @@ import userEvent from '@testing-library/user-event';
 const fetchModels = vi.fn();
 const fetchRoutingSettings = vi.fn();
 const updateRoutingSettings = vi.fn();
+const rescanModels = vi.fn();
 
 vi.mock('@/services/settingsClient', () => ({
   fetchModels: (...a: unknown[]) => fetchModels(...a),
   fetchRoutingSettings: (...a: unknown[]) => fetchRoutingSettings(...a),
   updateRoutingSettings: (...a: unknown[]) => updateRoutingSettings(...a),
+  rescanModels: (...a: unknown[]) => rescanModels(...a),
 }));
 
 vi.mock('@/components/settings/AdvancedModelField', () => ({
@@ -95,6 +97,7 @@ beforeEach(() => {
     { id: 'openrouter', locality: 'cloud' },
   ];
   fetchModels.mockResolvedValue(MODELS);
+  rescanModels.mockResolvedValue(MODELS);
   fetchRoutingSettings.mockResolvedValue({ routingPreference: 'auto', defaultModel: null });
   updateRoutingSettings.mockImplementation(
     async (u: { routingPreference?: string; defaultModel?: string }) => ({
@@ -241,6 +244,49 @@ describe('choosing', () => {
     // Not left reading "Prefer local", which would tell someone their next
     // question stays here when nothing was saved.
     expect(screen.getByTestId('routing-chip').textContent).toContain('Auto');
+  });
+});
+
+describe('looking again', () => {
+  /** The defect that made this control look broken from the outside.
+   *
+   *  Discovery ran once per backend process, so a model server started after
+   *  Zaram stayed invisible until Zaram was restarted — measured with TabbyAPI
+   *  confirmed to be answering while the list showed only what was found at
+   *  boot. "A model I installed is missing" and "Zaram has not looked since it
+   *  started" are the same picture to a user, so the control has to offer the
+   *  second explanation where the first is felt. */
+  it('picks up a model that appeared after the list was first read', async () => {
+    fetchModels.mockResolvedValue([MODELS[0]]);
+    const panel = await openPanel();
+    await waitFor(() => expect(within(panel).getByText('qwen2.5:7b')).toBeTruthy());
+    expect(within(panel).queryByText('gemma4:26b')).toBeNull();
+
+    rescanModels.mockResolvedValue([MODELS[0], MODELS[1]]);
+    await userEvent.click(screen.getByTestId('routing-rescan'));
+
+    await waitFor(() => expect(within(panel).getByText('gemma4:26b')).toBeTruthy());
+  });
+
+  it('rescans only when asked, never on open', async () => {
+    await openPanel();
+
+    // Discovery asks every connected cloud provider what it offers. Folding it
+    // into opening the panel would make browsing the list an egress event.
+    expect(rescanModels).not.toHaveBeenCalled();
+
+    await userEvent.click(screen.getByTestId('routing-rescan'));
+
+    await waitFor(() => expect(rescanModels).toHaveBeenCalledTimes(1));
+  });
+
+  it('says so when looking again fails', async () => {
+    await openPanel();
+    rescanModels.mockRejectedValue(new Error('backend down'));
+
+    await userEvent.click(screen.getByTestId('routing-rescan'));
+
+    await waitFor(() => expect(screen.getByText(/not saved/i)).toBeTruthy());
   });
 });
 

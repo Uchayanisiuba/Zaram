@@ -92,6 +92,37 @@ async def list_models() -> List[dict]:
     return [_payload(manager, m) for m in manager.list_models()]
 
 
+@router.post("/rescan")
+async def rescan() -> List[dict]:
+    """Run discovery again and return what is there now.
+
+    **Discovery ran once per process and never again.** `ensure_scanned` sets a
+    flag on its first call, so every listing after that reads a catalogue
+    frozen at boot — and a local inference server started *after* Zaram was
+    invisible until Zaram itself was restarted. Measured 30 August 2026:
+    TabbyAPI serving `Qwen3.8-27B-exl3-2.20bpw` on 127.0.0.1:1234, confirmed
+    answering, while `/providers/models` returned only the two Ollama models
+    found at boot. The user had installed nothing wrong and had no way to tell
+    the difference between "Zaram cannot see my model" and "my model is gone".
+
+    `CLAUDE.md` already specified this and named it: *"Re-runnable from
+    Settings as **re-scan**, not as a replayed wizard: it re-detects and shows
+    a diff, changing nothing without confirmation."* This is the re-detect
+    half. It changes no setting — a model the user had pinned stays pinned,
+    including one that has since disappeared, because silently unpinning a
+    choice somebody made is worse than showing it as missing.
+
+    **A POST rather than a scan on every GET.** Discovery asks every connected
+    cloud provider what it offers, so it is egress and it is logged; putting it
+    behind a listing that the interface polls would send a request to every
+    provider on a timer that nobody asked for. Rule 7g's posture applied to
+    the smaller case: refreshing from the network is an explicit action.
+    """
+    manager = _manager()
+    await manager.refresh()
+    return [_payload(manager, m) for m in manager.list_models()]
+
+
 @router.get("/models/{model_id}")
 async def get_model(model_id: str) -> dict:
     manager = _manager()
