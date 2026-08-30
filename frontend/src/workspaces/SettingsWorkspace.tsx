@@ -54,6 +54,7 @@ import {
   UserRound,
 } from 'lucide-react';
 import SurfaceHeader from '../components/common/SurfaceHeader';
+import AdvancedModelField from '../components/settings/AdvancedModelField';
 import { useSystemStore } from '@/stores/systemStore';
 import { useEmbodimentStore } from '@/stores/embodimentStore';
 import {
@@ -977,6 +978,22 @@ export default function SettingsWorkspace() {
                   </p>
                 );
               })()}
+
+              {/* A dropdown cannot hold OpenRouter's catalogue, so a name can
+                  be typed. Behind Advanced, per the three tiers of control.
+                  The refusal that makes it safe is already in `main.py`: a
+                  name the catalogue cannot place is refused before dispatch
+                  rather than falling through to Ollama. */}
+              <AdvancedModelField
+                models={models}
+                chosen={routingSettings?.defaultModel ?? null}
+                busy={busy === 'routing'}
+                onChoose={(model) =>
+                  void run('routing', async () =>
+                    setRoutingSettings(await updateRoutingSettings({ defaultModel: model })),
+                  )
+                }
+              />
             </div>
           </Row>
         </Section>
