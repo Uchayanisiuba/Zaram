@@ -4,8 +4,23 @@
     {
       "name": "zaram-site",
       "runtimeExecutable": "npx",
-      "runtimeArgs": ["--yes", "serve", "site", "-l", "4321"],
+      "runtimeArgs": [
+        "--yes",
+        "serve",
+        "site",
+        "-l",
+        "4321"
+      ],
       "port": 4321
+    },
+    {
+      "name": "zaram-frontend",
+      "runtimeExecutable": "cmd",
+      "runtimeArgs": [
+        "/c",
+        "cd frontend && set ZARAM_API_SECRET=dev-secret && npx vite --port 5173 --strictPort"
+      ],
+      "port": 5173
     }
   ]
 }
