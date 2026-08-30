@@ -1,18 +1,20 @@
 # Next session — start here
 
-A prompt and a state snapshot. Rewritten 29 August 2026 at the end of the
-session that deleted three dead subsystems, gave rule 7j its second dimension,
-and made the first-run cloud key real.
+A prompt and a state snapshot. Rewritten 30 August 2026 at the end of a long
+session: the cross-model memory claim was measured for the first time, queue
+item 6 finished, ordinary replies learned to carry the conversation, generated
+documents stopped looking generated, and three defects were found by the
+maintainer pressing things.
 
 **This file is a pointer, not a second handoff.** `docs/MILESTONES.md` Current
 state is the handoff and stays the authority on status; `CLAUDE.md` stays the
 authority on rules. If this file disagrees with either, they win and this file
 is stale — say so and fix it.
 
-The version before last was wrong about one thing and it cost a whole job: it
-listed the per-launch API secret as outstanding when it had shipped eleven days
-earlier. **Check the code before starting a task a handoff hands you.** Every
-entry below names files so you can check in a minute.
+Two versions ago this file was wrong about one thing and it cost a whole job:
+it listed the per-launch API secret as outstanding when it had shipped eleven
+days earlier. **Check the code before starting a task a handoff hands you.**
+Every entry below names files so you can check in a minute.
 
 ---
 
@@ -25,28 +27,49 @@ Paste this into a new session:
 > read `docs/RUNNING.md`, and note that launching means three processes — Vite,
 > Electron, and TabbyAPI on port 1234.
 >
-> **Everything from the last session is committed** (`Zaram-V0.1`). Backend
-> 2873 passing, frontend 331, `tsc` clean, guards clean.
+> **That work is now committed** — ten commits on `Zaram-V0.1`, reviewed
+> first, not pushed. The previous version of this line said nothing was
+> committed and that is no longer true.
 >
-> **The seven-item queue is finished.** What is left is four things, and only
-> one of them is a plain build:
+> Backend **2954 passing, 21 skipped, 2m32s**; frontend **362 passing, 41
+> files**, `tsc` clean. Measured 30 August with Ollama up holding `bge-m3`
+> and `gemma4:26b-a4b`, and TabbyAPI serving on 127.0.0.1:1234 — so the
+> discovery branches really executed. `npm run lint` is broken and was
+> already broken: eslint cannot resolve `react-hooks/exhaustive-deps`, which
+> takes `check:all` down with it.
 >
-> 1. **The Advanced type-in model field** — item 6's last piece. Its hardest
->    condition already shipped: a name Zaram cannot place is refused before
->    dispatch instead of falling through to Ollama. What remains is the field
->    itself and the sentence beside it. **Take this one if you want to build.**
-> 2. **Gemini** — investigated last session and smaller than the deck says.
->    `ProviderEntry.chat_endpoint` already holds the exact URL and **is read
->    nowhere**. An afternoon, not an integration. Details below.
-> 3. **The desktop decision** — an architecture call rather than a task. Do not
->    start it without the maintainer.
-> 4. **Phase 0 / packaging** — `CLAUDE.md` says this is the actual blocker, and
->    with the free-tier key path now real it is the next big piece.
+> **One number does not reconcile and is worth a minute of yours.** The last
+> handoff recorded 2959 passing / 16 skipped; this is 2954 / 21, the same
+> total of 2975. The raw difference was six — one of those was found and
+> fixed, see below, leaving **five tests that ran then and skip now**, still
+> unaccounted for.
+> Every skip is environment-gated and the gates are: `test_recall_at_scale`
+> (9, `ZARAM_SCALE_EVAL=1`), `voice/test_kokoro_onnx_backend` (7, wants
+> `onnxruntime`, `onnx` and `misaki` — `onnx` is missing on this machine),
+> `test_identity_holds_across_models` and `test_extraction_across_models`
+> (3, `ZARAM_LIVE_MODELS=1`), `test_memory_traffic_review` (2, no memory
+> runtime in-process). One run with those named should settle it. A stable
+> count nobody can explain is how a broken instrument survives, and this
+> project has already paid for that twice.
 >
-> **Two things were built and have not been seen on screen.** Both are named
-> below with the exact conditions to reach them. This project has paid once for
-> shipping a feature whose tests passed and whose eyes never moved; do not add
-> a third.
+> What is left, in the order I would take it:
+>
+> 1. **The model-pull executor** — half built, and it is the piece that fixes
+>    the maintainer's own machine. `providers/models.manifest.json` and
+>    `providers/model_manifest.py` landed; the endpoint, the progress UI and
+>    the offer beside Settings' "too large for this machine" warning did not.
+>    One decision is waiting for the maintainer, below.
+> 2. **Phase 0 / packaging** — `CLAUDE.md` still says this is the actual
+>    blocker, and the Ollama question below decides what it means.
+> 3. **Gemini** — untouched, still an afternoon. `ProviderEntry.chat_endpoint`
+>    holds the correct URL and is read nowhere.
+> 4. **The desktop decision** — untouched, an architecture call. Do not start
+>    it without the maintainer.
+>
+> **One thing was built and has not been seen working**, and it is the most
+> valuable thing in the product: the ambient surface's Electron half. Details
+> below with the exact conditions. This project has paid twice for shipping a
+> feature whose tests passed and whose eyes never moved.
 >
 > Read the Ollama question below too. It is not a task, and it changes what
 > Phase 0 means.
@@ -55,300 +78,255 @@ Paste this into a new session:
 
 ## What happened last session
 
-Nine commits. The through-line is worth stating because it decided what got
-built: **three separate things existed, were tested, and could not work**, and
-each was found by connecting something real to it rather than by reading it.
+The through-line: **five complete, tested subsystems could not be reached from
+the interface**, and every one was found by connecting something real to it.
 
-**The second entrance to inference is gone.** `POST /vision/analyze` reached
-`OllamaEngine.stream_vision_response`, which by its own docstring bypassed
-routing *and the egress gate*, against a hardcoded `qwen2.5vl:7b` nobody had
-installed. Three things were true of it that the route table could not show:
-its only caller sent no credential and had been getting 401 since the secret
-shipped; it called `_parse_legacy_sse`, which is defined nowhere; and nothing
-tested it. Deleted rather than repaired.
+**The cross-model memory claim had never been measured.** It is what the
+product is for, and the pieces were each covered separately while the property
+joining them was not. Now measured live in both directions — a fact told to
+TabbyAPI/Qwen was recalled and cited by Ollama/gemma4 at relevance 0.821 in a
+different session, and back the other way at 0.779; deleting it changed the
+answer. `test_memory_holds_across_providers.py`, 10 cases.
 
-> The deletion had a trap in it. `IntentPlanner` still emits a `vision.*` step
-> on a keyword when nothing is attached, and the dispatcher's vision branch was
-> the only thing catching it. Removing that branch would have let the step fall
-> through to generation, and a model asked to describe a picture nobody
-> supplied writes a confident description of nothing. **Deleting a side door
-> into a rule 9 failure would have been a poor trade.**
+**Ordinary replies could not follow up.** *"What is the capital of Portugal?"*
+→ *"Lisbon."* → *"And roughly how many people live there?"* → *"I don't have
+the place you're referring to."* One model, one session, seconds apart. The
+turn buffer, the transcript rehydration, the window-fitting and the renderer
+all existed; the only caller was the *document* branch. Fixed, and verified
+across a provider switch.
 
-**`backend/orchestrator/` is gone** — 1,261 lines, zero importers, and the
-merged "can see = can draw" scorer plus a ranker that treated a missing
-*required* capability as a warning. `CLAUDE.md` had said to delete it for
-weeks while three files carried prose warning about it. A warning about a
-loaded gun is worth less than removing it.
+**The reply could not be stopped.** `chatStore.cancel()` had no UI caller.
 
-**Two more desktop capability packs** went the same way as the vision one:
-uncredentialed, unreachable, duplicating paths that work. What is left of that
-audit is a decision, not a cleanup — see below.
+**Word output ignored the design.** The `.docx` was rebuilt block by block
+against `python-docx`'s 2007 template — Calibri, Word-blue headings, 1.25 inch
+margins, a box around every table cell — while the HTML carried a considered
+A4 stylesheet. Both renderers now read `artifacts/theme.py`.
 
-**Rule 7j got its second dimension.** `EgressPolicy` was keyed on host alone,
-so "you connected this provider for chat" silently read as permission to send
-it anything. It is now keyed `(host, DataClass)` with one asymmetry: a plain
-host rule covers `PROMPT` and nothing else. That unblocked cloud vision, which
-had been finished and refused one consent question short of working.
+**A CV had no kind**, so "write my CV" got a proposal's layout with somebody's
+career inside it.
 
-**First run can store a cloud key.** `FirstRunPanel` had been greying that
-offer out since it was built; `CloudKeyForm` is its executor, and it went first
-because `POST /providers/cloud` already existed and takes effect without a
-restart.
+And the search offer built mid-session shipped **as a refusal with no remedy** —
+see the two mistakes below.
 
-**A name Zaram cannot place is refused before dispatch** — the third door the
-last handoff predicted. It used to fall through to Ollama and report
-`model 'anthropic/claude-sonnet-4.5' not found` against a server the user never
-named. The safety was never wrong; the sentence was.
+### A test that had never run, found while accounting for a skip
 
-### Two mistakes of mine, both instructive
+Not from the last session's work — it is older than that, and it was found by
+refusing to accept a skip count that did not reconcile.
 
-**A test of mine passed against deliberately broken code.** The no-socket
-fixture *raised*, the engine caught it in its "could not reach the provider"
-handler, and the resulting `[ERROR]` line named the host — which is exactly
-what the test checked for. A network failure and a refusal had become
-indistinguishable to the test. It records attempts now instead of raising.
-**Falsify a new guard before keeping it**; this one would have been decorative.
+`test_vision_gate.py` reported *"no Ollama models installed"* on a machine
+holding two. `ProviderManager.refresh` is a coroutine and was called bare, so
+discovery never ran; and `ProviderManager()` builds an **empty**
+`ProviderRegistry`, so even awaited there was nothing to scan — the real path
+registers `OllamaAdapter` in `providers/runtime.py`. Both failures produce an
+empty model list, and `if not local: pytest.skip(...)` read that as a fact
+about the hardware.
 
-**I shipped a refusal with no remedy.** The policy started refusing images to a
-chat-approved host, correctly and with a message naming the missing decision —
-while `PUT /egress/policy` took a host and a mode and nothing else, so there
-was no way in the product to make that decision. Wiring the pane afterwards
-also exposed that a host `DENY` did not beat a standing image grant, so the
-"cut everything" control would have left a destination able to receive
-photographs. **Both were at the seam, and neither was visible until something
-real was connected.**
+So a check whose own docstring says it exists because *"`supports_vision`
+could be correct in every fixture and still be `False` for every real model"*
+had never executed a single assertion, and its claim to have caught exactly
+that on first run cannot be true.
+
+The two assertions underneath were worthless anyway: `any(x) or all(not x)` is
+a tautology. Replaced with the real contract — each model's `supports_vision`
+against Ollama's own `/api/show` capabilities, which is the enrichment that
+does the work, since `/api/tags` does not report vision at all. Both
+polarities are exercised on this machine. Verified by inverting the assertion
+and watching it fail.
+
+The capability was fine. The instrument was broken, and it was broken quietly.
+
+### Three mistakes of mine, all instructive
+
+**I shipped a refusal with no remedy, one day after reading about the last
+one.** The search offer turned web search on and granted the destination
+nothing, so the search was refused by default-deny and the reply said the web
+had returned no results. Rule 7j is explicit that requiring a second host rule
+*"asks the same question twice and reads as the product being broken"*. Found
+by the maintainer on the first press.
+
+**A test of mine passed against deliberately broken code — again.** The
+reference-document case went green with the outline read from the excerpt,
+because the excerpt happened to contain the headings. The **fixture** was
+rewritten, not the assertion.
+
+**I left a component stuck in a working state.** The notice card sat on
+"Turning it on…" for the rest of the session because its phase was never reset
+on success. Notices are not persisted, so the stale card was a live component
+and a reload was the user's only escape.
 
 ---
 
-## Not seen on screen, and how to see them
+## Not seen working, and how to see it
 
-Two pieces shipped tested and unwitnessed. The VRM-gaze precedent is the
-reason this section exists: the maths had unit tests, the rig was confirmed,
-and the fringe covered the eyes.
+**The ambient surface's Electron half.** `electron/native/ambient.js` and
+`globalShortcuts.js` are built and wired in `electron/main.js`, and
+`CLAUDE.md` calls this the highest-leverage item on the whole daily-driver
+list. The **renderer** was verified: `http://localhost:5173/ambient.html` in
+the Browser pane answered *"Name the capital of Portugal in one word."* with
+**Lisbon**, from TabbyAPI on loopback, with the egress line reading *"Local ·
+cloud ready — Answers are running on this machine."*
 
-**The first-run cloud key form.** Reaching it needs `can_chat: false`, and this
-machine has Ollama with models, so it cannot be got to without breaking the
-local setup. To verify: **empty `ZARAM_DATA_DIR`, Ollama stopped**, open the
-conversation. The panel should stand where the composer does with a live key
-offer under it; choosing it opens the form in place.
+What was **not** checked, and cannot be from a browser tab: the global
+accelerator registering (`CommandOrControl+Shift+Space` by default), the panel
+appearing over another application, and the screen-edge handle. That needs
+`docs/RUNNING.md`'s real launch — Vite, then Electron, with no backend started
+by hand. **If it works, the most valuable feature in the product is already
+shipped and nobody knows.**
 
-**The Activity images row.** Under each destination's mode buttons, shown only
-once that destination has a rule. To verify: connect any provider, send one
-message so the host appears, then look for the `images` line.
+Two earlier items are now seen: the Advanced model field and the Activity
+images row both rendered in the browser-tab route, screenshotted.
 
 ---
 
 ## What is left
 
-### 1. The Advanced type-in model field — the last of queue item 6
+### 1. The model-pull executor — half built
 
-**Agreed in principle, one third built.** A dropdown cannot hold OpenRouter's
-catalogue, so a person must be able to type a name. Three conditions, and the
-first one shipped last session:
+**The problem it solves is the maintainer's own machine.** The only chat model
+installed is 18.2 GB against a ~9.1 GB resident budget, so every reply runs
+half on the processor — `CLAUDE.md`'s whole speed thesis, inverted. Settings
+warns correctly and can offer nothing, because `FirstRunPanel` still greys out
+"pull a model": there is no executor.
 
-* **It must resolve before sending — DONE.** `_unplaceable_model_refusal` in
-  `main.py` refuses a name the catalogue cannot place, before dispatch, with a
-  sentence that names the model and says what to do.
-  `tests/test_a_model_nobody_can_place.py`, 14 cases, two of them driving
-  `POST /chat` to prove it is wired rather than merely written. Every
-  uncertainty resolves to *no refusal* — no provider layer, an empty
-  catalogue, a lookup that raised all proceed, because a guard built on our own
-  missing bookkeeping would fire hardest on the first message after a boot.
-* **It must state the data policy while the user is choosing.** Not built.
-  `selectable_by_default` stops *Zaram* picking a `:free` model and must never
-  stop the *user* picking one knowingly — the line between a consent gate and a
-  paternalism gate. `CloudKeyForm.tsx` already does exactly this with the
-  catalogue's `note`; copy its shape, and read its tests, which assert the
-  words *connected*, *verified*, *valid* and *working* never appear.
-* **A typed name widens nothing.** Same rule as a tool description: nothing
-  supplied from outside may enlarge what is permitted. The refusal above is
-  most of this already — an unknown name reaches nothing — but the field must
-  not, for example, imply a host rule.
+Landed: `providers/models.manifest.json` — dated, VRAM-tiered, sizes marked
+approximate — and `providers/model_manifest.py`, which recommends against a
+measured budget, treats `None` as "unmeasurable, take the smallest tier",
+never fails closed, and carries `smaller_than` for the *"your model does not
+fit"* case.
 
-Where it goes: **Settings, behind Advanced.** `CLAUDE.md`'s three tiers put
-per-task assignment there so a non-technical user never meets it.
+Not built: `POST /models/pull` streaming Ollama's progress, `GET
+/models/recommended`, the progress UI, and the offer attached to the oversized
+warning. `readiness.py` already models the offer shape (`OfferKind.PULL_MODEL`,
+`SMALLEST_CHAT_MODEL`, a real byte count) — reuse it rather than inventing a
+second vocabulary.
 
-### 2. Gemini — smaller than it looks, and the deck oversells the problem
+> **One decision is waiting for the maintainer, and it should not be made
+> unilaterally.** Ollama downloads the model over **its own socket**, so
+> `EgressGate` cannot see it and Activity will not show it — the same blind
+> spot the local-proxy idea was rejected for. The proposal is one egress-log
+> entry marked as a *delegated* download, naming the registry host and the
+> size, rather than letting a download Zaram initiated leave no trace.
+> `EgressLog.append` already takes a `kind`, and `KIND_REQUEST` is what the
+> counts filter on, so a new kind would not pollute "what Zaram sent". Ask
+> before building it either way.
 
-**Investigated last session, not started.** `catalogue.py` already grades this
-correctly and separates it from the harder cases:
+### 2. Phase 0 — still the actual blocker
 
-* Anthropic is genuinely a different wire format (`/v1/messages`, `x-api-key`)
-  and needs an adapter that does not exist.
-* **Gemini is not.** Its OpenAI-compatible root ends in `/openai` with the chat
-  path hanging directly off it, and both halves of Zaram's cloud path assume
-  `<root>/v1/...` — `OpenAICompatibleEngine._normalise` appends `/v1`, and
-  `openai_compat.py` strips and re-adds it. So a Gemini root is sent to
-  `.../openai/v1/chat/completions`, which is not where it listens. The
-  catalogue's own words: *"The wire format is fine; the assumption is not."*
+Unchanged from the last two handoffs, and now with a second half: the free-tier
+key path is real, the model-pull path is not. Read `canBeCarriedOut` in
+`FirstRunPanel.tsx` — that function is where each offer is admitted and its
+docstring says why nothing may be invented there.
 
-**The fix is half-built already.** `ProviderEntry.chat_endpoint` exists,
-carries the exact correct Gemini URL, and appears **nine times in
-`catalogue.py` and nowhere else** — carried and never read. The work is to
-honour it in the engine and relax the discoverer, with a test pinning the URL.
+PDF belongs here too. `pip install weasyprint` now succeeds in the backend
+venv; the GTK native libraries are what is missing, which on Windows means
+MSYS2. **Whether the installer bundles them is a packaging decision**, and it
+is the difference between a designed PDF and a Word file being the only
+output anyone sees.
 
-> **A local Node/Express proxy was proposed and should not be built.** It fails
-> on four counts and the first is fatal: `is_local()` returns true for
-> `localhost`, so `EgressGate.check` returns before the policy is consulted and
-> **records nothing** — every Gemini request would leave the machine invisibly,
-> from the proxy, which is rule 3 broken on the product's central claim and the
-> same shape as the `/vision/analyze` side door just deleted. It also does not
-> stream (`generateContent`, one JSON body, where the engine consumes SSE
-> frames), implements no `/v1/models` so discovery catalogues nothing, and
-> silently substitutes `gemini-2.5-flash` for an unrecognised name — Zaram
-> naming one model while another answers. Behind all of it: a Node sidecar is
-> another process to ship in a product whose stated blocker is that a stranger
-> cannot install it, which is the ground `CLAUDE.md` rejected TencentDB on.
->
-> If an adapter is ever needed it belongs **in-process, in Python, behind the
-> gate**. For Gemini it is not needed at all.
+### 3. Gemini — unchanged, still an afternoon
 
-### 3. Does the desktop runtime keep a backend-facing half?
+`catalogue.py` grades it correctly and separates it from Anthropic, which is a
+genuinely different wire format. Gemini speaks the dialect Zaram speaks; its
+address does not fit the `<root>/v1/...` pattern both halves of the cloud path
+assume. `ProviderEntry.chat_endpoint` holds the exact correct URL, appears nine
+times in `catalogue.py` and **is read nowhere**. Honour it in the engine, relax
+the discoverer, pin the URL with a test. The local Node proxy is still refused —
+`is_local()` returns true for localhost, so the gate would record nothing.
 
-**A decision, not a task.** The audit is finished to the point where the rest
-is one call, and doing it piecemeal is what made it keep widening.
+### 4. Does the desktop runtime keep a backend-facing half?
 
-Every backend-calling handler in `desktop/` sends `Content-Type` and nothing
-else while `RequireApiSecret` wants `X-Zaram-Auth` and exempts nothing, so all
-of them have returned 401 since the secret shipped. Three are deleted (Vision,
-Knowledge, Speech). These remain:
+Unchanged. `callBackendChat` and `VoiceRuntime` remain, uncredentialed and
+unreachable, and `ExecutiveRuntime` feeds the orb's presence snapshot, so the
+planning half and the presence half must be separated before anything is
+removed. A decision, not a task.
 
-* `callBackendChat` (`bootstrap.ts:585`) → `POST /chat`, behind
-  `conversation.runtime` and `reasoning.generate`. Also hardcodes
-  `gemma3:latest`, which is not installed here.
-* `VoiceRuntime` (full) executes `speech.tts`, whose handler is now gone.
-  Commented in place at `voice/voice-runtime.ts:120`.
+### Found and not fixed
 
-**Nothing invokes any of it.** `executeCapability` is on the preload bridge at
-`electron/preload.js:111` with no caller in the live frontend; `executive.plan`
-likewise; `desktop-bridge.ts` is imported only by `PresenceContext` and
-`OrbEngine`, both for presence and orb state.
-
-**The rule that decides it is already written.** `CLAUDE.md`: *"Frontend calls
-the backend directly over HTTP, not through Electron IPC."* On that reading the
-backend-facing half should not exist and what stays is the native work —
-filesystem, VS Code, workspace, presence, world. The counter is that
-`ExecutiveRuntime` also feeds the orb's presence snapshot through `main.js`, so
-the planning half and the presence half must be separated first.
-
-**One consequence to fold in.** `npm run check:reachability` now lists
-`POST /knowledge/search` as a route no frontend file mentions — the deleted
-desktop pack was its only HTTP caller. The *capability* is alive
-(`ExecutionDispatcher` calls `service.search_knowledge()` in process), so the
-route lost its caller, not the feature. Check whether the frontend reaches
-search by another prefix before removing it; `/memory/maintenance` and
-`/memory/traffic` were already on that list and are unrelated.
-
-### 4. Phase 0 — the actual blocker
-
-`CLAUDE.md` is unambiguous: *"A stranger cannot install this. Capability is not
-what stands between the current state and a 15-person retention test —
-packaging is."*
-
-The free-tier key path is now real, which was half of it. What remains is an
-installer and a guided first run, plus the two offers `FirstRunPanel` still
-greys out — installing an engine and pulling a model — neither of which has an
-executor. Read `canBeCarriedOut` in `FirstRunPanel.tsx`; that function is where
-each one is admitted, and its docstring says why nothing may be invented there.
-
-### Not yet scoped: generated documents look subpar
-
-Reported 28 August against templates available online. Still not diagnosed and
-still needs one thing before it can be: **a specific example, and a statement
-of what is wrong** — layout, typography, structure, or the content itself. Ask
-before starting.
+* **A client stop may not stop the backend.** The abort closes the stream; the
+  next reply was unusually slow, consistent with the abandoned generation still
+  holding the card. Unmeasured.
+* **The two intent classifiers disagree about a document request.** A bare
+  `IntentPlanner` reads *"Write that up as a proposal document"* as
+  `CONVERSATION`, while the semantic router the backend boots read *"Now add
+  ten to that number"* as a document request and silently wrote a `.docx`.
+* **The embedder fallback is silent, and it is the worst place for it.**
+  Without Ollama, `bootstrapper.py` drops to the hash backend and recall runs
+  on keyword overlap with nothing said. Measured: a question matching a stored
+  fact word-for-word scores **0.064** against a shipped floor of **0.42**. A
+  stranger with no Ollama gets working chat and a Spine that retrieves nothing.
+  `CLAUDE.md`: *"Disabled capabilities are visible, not silent."*
+* **`npm run lint` is broken** — eslint cannot resolve
+  `react-hooks/exhaustive-deps`. Pre-existing, one line, two possible fixes
+  that are not equivalent.
+* **Favicons on citations** were asked for and declined for now; the honest
+  build route is recorded in the MILESTONES entry if it is ever wanted.
 
 ---
 
-## The Ollama question — raised by the maintainer, 28 August
+## The Ollama question — sharpened, 30 August
 
-*Does Zaram need to ship with Ollama?* Recorded because it reframes Phase 0.
+*Does a user need Ollama?* Three questions hide in that one:
 
-**Bundling it: no.** Docling was refused at 321 MB against a 267 MB base, and
-the Ollama installer is larger once GPU runners are counted. Unlike Docling it
-is not a library — it is a background service that claims port 11434 and
-updates itself. That is shipping a second product inside this one.
+* **Running a local model — no.** Any OpenAI-compatible local server is
+  discovered and used. TabbyAPI answered every question this session on
+  127.0.0.1:1234 as `lm_studio`, `local_ai_server`, `never_leaves_device`.
+* **Installing a model from inside Zaram — there is no path at all today**, and
+  the executor above uses Ollama's `/api/pull`, so building it that way makes
+  Ollama required for that one job.
+* **Recall — yes, and silently.** See the embedder note above.
 
-**Depending on it: currently yes, in three places, and one is quiet.**
+**Bundling Ollama: still no.** It is a *product* — a background service that
+claims port 11434 and updates itself — not a library, and larger than Docling,
+which was refused at 321 MB.
 
-| Where | Without Ollama |
-|---|---|
-| `bootstrapper.py:150` — embedder defaults to `ollama/bge-m3` | Falls back to the hash backend. Recall keeps working, on **keyword overlap**, and says nothing. |
-| `LocalDispatchEngine` — Ollama is the fallback for anything unplaceable | Connection refused, surfaced as a model error |
-| Context budget, warming, `keep_alive` | All read `/api/ps`, which is Ollama-only |
+> **`llama-server` closes all three at once.** One MIT binary spawned as a
+> child process, Zaram picks the port, it exits when Zaram exits; it can serve
+> a GGUF chat model *and* the embedder, and Zaram can fetch a model file
+> without asking anyone to install a second product. Ship the CPU build; GPU as
+> an opt-in download **with the size named**, the `zaram[ingest]` precedent.
 
-The embedder is the real one. A stranger with no Ollama gets a Spine that
-retrieves on word overlap and is never told — `CLAUDE.md`'s *"disabled
-capabilities are visible, not silent"* broken on the product's central claim.
-
-> **Ollama is a product. `llama-server` is a component.**
-
-A single binary spawned as a child process — no installer, no service, no tray
-icon, no port collision because Zaram chooses the port, and it exits when Zaram
-exits. MIT. Caveat that decides the packaging: a CPU build is small, GPU builds
-drag the CUDA runtime. Ship CPU, make GPU an opt-in download **with the size
-named** — the `zaram[ingest]` precedent, *"321 MB, one time"*.
-
-**A Phase 0 decision, not a task.** Nothing has been changed on it.
+A Phase 0 decision, not a task. Nothing has been changed on it.
 
 ---
 
 ## Running it for a visual check
 
-`docs/RUNNING.md` is the authority, and it carries the leftover-process trap
-that cost one session its screenshot — read it before concluding a port is held
-by something external.
+`docs/RUNNING.md` is the authority, and it carries the leftover-process trap.
+Three things learned this session that are about the agent's tools rather than
+the product:
 
-Two things not in it, because they are about the agent's tools rather than the
-product:
-
-* **The Browser pane may not be displayed**, and then screenshots fail outright
-  and synthetic clicks silently do not reach the page. `read_page`,
-  `get_page_text` and `javascript_tool` all work; dispatching a pointer
-  sequence through `javascript_tool` is what actually opens the orb. **Say
-  which of these you used** — a JS-dispatched click is weaker evidence than a
-  real one.
-* **Another session may already hold the dev server.** It is not reachable from
-  a second session's Browser tools. Start your own, or say plainly that you did
-  not look.
-
----
-
-## Roadmap
-
-<https://claude.ai/code/artifact/b5c802a5-0701-43c1-aff1-5f9835ffbc65>
-
-Phase 1 is done. Phase 0 — free-tier first run, import ChatGPT/Claude history —
-is the gate everything else waits behind, and the key half of it now exists.
-
-There is also a published page describing the product to a potential user:
-<https://claude.ai/code/artifact/bf05fa1c-fcc8-4c8b-8183-5c5f290f34ea>
+* **The browser-tab route works and is much cheaper than Electron.** Start the
+  backend with `ZARAM_API_SECRET=dev-secret` and a scratch `ZARAM_DATA_DIR`,
+  then Vite with the same secret. There is a `zaram-frontend` entry in
+  `.claude/launch.json` that does the Vite half.
+* **An emulated viewport can hide the whole conversation panel.** Twenty
+  minutes went on an orb that appeared not to open the chat; the chat *was*
+  open, letterboxed off-screen by a 1440×900 emulation in an 800px pane.
+  Reset to the desktop preset before concluding a control is dead.
+* **Synthetic clicks do not always reach framer-motion elements.** Real
+  `computer` clicks did; `javascript_tool`-dispatched ones did not, on the orb.
+  **Say which you used** — a JS-dispatched click is weaker evidence.
 
 ---
 
 ## Machine state
 
 * Ollama holds `gemma4:26b-a4b-it-q4_K_M` (18.2 GB) and `bge-m3`. The chat
-  model **does not fit** — the resident budget on a 12 GB card is ~9.1 GB — so
-  it runs half on the processor and every reply is slow. Settings says so
-  before it is chosen.
-* `select_default_model` returns `None`, which is correct and is the ordinary
-  path here. Any code assuming a default model exists is exercised on this
-  machine.
-* TabbyAPI serves Qwen3.8-27B EXL3 on `127.0.0.1:1234`, discovered as
-  "LM Studio", routed by `LocalDispatchEngine`, reachable by either of its two
-  names. ~2.2 s to first token.
-* **`gemma4:26b-a4b` can see**, and local vision through it works end to end —
-  165.8 s to first token with the `oversized` warning shown, which is the
-  designed behaviour rather than a fault.
-* **Qwen3.8-27B can see too**, confirmed from its own config: 987 vision
-  tensors, `language_model_only: False`. TabbyAPI's `/v1/model` reports
-  `"use_vision": false` for it, which is the measurement the discovery question
-  needs.
-* **Say which environment you measured in.** The backend suite runs ~4 minutes
-  with Ollama up and idle, ~7 with `gemma4` resident and contending, and far
-  longer with Ollama *down* — where it also **executes different code**.
-* **The residency gate is inert under pytest.** `vram_known` is `False` in a
-  bare test process, so `model_fits_resident` returns `None` for everything and
-  the filter never fires. Any test about residency must stub
-  `resident_budget_bytes` or it asserts nothing.
+  model **does not fit** the ~9.1 GB budget, so every reply is slow — about
+  **3m20s** for a short question, measured this session.
+* TabbyAPI serves `Qwen3.8-27B-exl3-2.20bpw` on 127.0.0.1:1234, ~6–9s for a
+  short reply when it has the card to itself. Start it with
+  `C:\Users\user\tabbyapi-env\Scripts\python.exe main.py` from
+  `C:\Users\user\tabbyAPI` — **not** `start.bat`, which would create a second
+  venv and reinstall everything.
+* **Running both at once is what makes either slow.** With gemma4 resident,
+  TabbyAPI timed out at 120s on a question it normally answers in seconds.
+  `curl http://127.0.0.1:11434/api/generate -d '{"model":"...","keep_alive":0}'`
+  unloads Ollama's copy.
+* The scratch Spine from this session is under the session scratchpad, holding
+  the Harbour Lane and Northwind facts and the search grants. The **real**
+  Spine was never touched.
+* `duckduckgo.com` now has an `allow` rule in the scratch policy, created by
+  the search offer. The real machine's policy is unchanged.
+* **Say which environment you measured in.** The backend suite ran 3m31s with
+  the GPU idle and 9m43s with models contending — same suite, same commit.
