@@ -43,6 +43,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Dict, List, Sequence
 
+from . import exemplar
 from .contracts import Attachment, AttachmentKind
 
 #: Tokens of context assumed available for attached documents.
@@ -294,6 +295,8 @@ def compose(
     sections: List[str] = []
     reads: List[DocumentRead] = []
     modes: set[str] = set()
+    #: Whether any attached file turned out to have a structure worth naming.
+    outlined = False
 
     for item in attachments:
         passages = _passages(item.text)
@@ -326,7 +329,17 @@ def compose(
             )
             modes.add(Mode.EXCERPT)
 
-        sections.append(f"--- {item.name} ---\n{body}")
+        # The shape of the file, read from all of it rather than from the
+        # excerpt above. See `exemplar`: selection is free to drop the very
+        # headings the outline is made of, so an outline taken from `body`
+        # would describe whichever sections happened to match the question.
+        structure = exemplar.structure_line(exemplar.outline_of(item.text))
+        if structure:
+            outlined = True
+        heading = f"--- {item.name} ---"
+        sections.append(
+            f"{heading}\n{structure}\n{body}" if structure else f"{heading}\n{body}"
+        )
 
     # Named as attached rather than as retrieved. The model must not present
     # a file the user handed it in this exchange as something Zaram remembered
@@ -339,6 +352,10 @@ def compose(
         "the passages was not included.\n\n"
         + "\n\n".join(sections)
         + "\n"
+        # Only when something actually has a shape to copy. An instruction
+        # about following a structure, under a file that has none, is an
+        # instruction to invent one.
+        + (f"\n{exemplar.REFERENCE_NOTE}\n" if outlined else "")
         + "=" * 38
     )
 
