@@ -35,12 +35,13 @@
  * a choice that can only fail.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Check, Cloud, HardDrive, Shuffle } from 'lucide-react';
+import { Check, Cloud, HardDrive, RefreshCw, Shuffle } from 'lucide-react';
 
 import { describeDataPolicy } from '@/components/settings/AdvancedModelField';
 import {
   fetchModels,
   fetchRoutingSettings,
+  rescanModels,
   updateRoutingSettings,
   type DiscoveredModel,
   type RoutingPreference,
@@ -95,6 +96,7 @@ export default function RoutingControl() {
   const [loading, setLoading] = useState(false);
   const [failed, setFailed] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [rescanning, setRescanning] = useState(false);
   const root = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -160,6 +162,27 @@ export default function RoutingControl() {
       setLoading(false);
     }
   }, [models, loading]);
+
+  /** Look again, because a server may have started since Zaram did.
+   *
+   *  **This is the fix for the defect that made the whole control look
+   *  broken.** Discovery ran once per backend process, so an inference server
+   *  started after Zaram was invisible until Zaram was restarted — and from
+   *  the outside that is indistinguishable from Zaram having lost a model the
+   *  user knows they installed. It sits here rather than only in Settings
+   *  because this is the moment of doubt: the list is open and the model is
+   *  not in it. */
+  async function rescan() {
+    setRescanning(true);
+    setFailed(false);
+    try {
+      setModels(await rescanModels());
+    } catch {
+      setFailed(true);
+    } finally {
+      setRescanning(false);
+    }
+  }
 
   async function save(update: {
     routingPreference?: RoutingPreference;
@@ -306,6 +329,24 @@ export default function RoutingControl() {
             showPolicy
             onChoose={(name) => void save({ defaultModel: name })}
           />
+
+          {/* Named for what it is, and with the reason under it, because
+              "a model I installed is missing" and "Zaram has not looked since
+              it started" are indistinguishable from the outside. */}
+          <button
+            type="button"
+            disabled={rescanning || loading}
+            onClick={() => void rescan()}
+            data-testid="routing-rescan"
+            className="mt-1 flex items-center gap-1.5 text-[10px] text-slate-500 hover:text-slate-300 transition-colors disabled:opacity-50"
+          >
+            <RefreshCw size={10} aria-hidden className={rescanning ? 'animate-spin' : ''} />
+            {rescanning ? 'Looking again…' : 'Model missing? Look again'}
+          </button>
+          <p className="mt-0.5 text-[10px] leading-snug text-slate-600">
+            Zaram lists what your model servers report. One started after Zaram
+            is not seen until it looks again.
+          </p>
         </div>
       )}
     </div>

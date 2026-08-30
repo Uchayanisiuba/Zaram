@@ -239,9 +239,32 @@ export interface DiscoveredModel {
  * it is logged and refused by policy like anything else — which is why the
  * interface asks for it on a button rather than on mount.
  */
-export async function fetchModels(): Promise<DiscoveredModel[]> {
-  const rows = (await get('/providers/models')) as Array<Record<string, unknown>>;
-  return rows.map((m) => ({
+/**
+ * Run discovery again, and return what is there now.
+ *
+ * **Discovery ran once per backend process and never again.** So an inference
+ * server started *after* Zaram was invisible until Zaram itself restarted:
+ * measured 30 August 2026 with TabbyAPI serving a model it was confirmed to be
+ * answering with, while the model list showed only what was found at boot. To
+ * the user that is indistinguishable from Zaram having lost their model.
+ *
+ * A POST, and never folded into `fetchModels`, for the reason that function
+ * already gives: discovery asks every connected cloud provider what it offers,
+ * so it is egress. Refreshing from the network stays an explicit act.
+ */
+export async function rescanModels(): Promise<DiscoveredModel[]> {
+  const rows = (await send('/providers/rescan', 'POST')) as Array<Record<string, unknown>>;
+  return rows.map(toDiscoveredModel);
+}
+
+/** One row as the interface needs it.
+ *
+ *  Shared by the listing and the rescan rather than written twice: two mappers
+ *  for one payload is how a field comes to be read in one place and dropped in
+ *  the other, and it is the same argument `hostOf` settled for a citation's
+ *  domain. */
+function toDiscoveredModel(m: Record<string, unknown>): DiscoveredModel {
+  return {
     id: String(m.id),
     displayName: String(m.display_name ?? m.id),
     provider: String(m.provider ?? ''),
@@ -256,7 +279,12 @@ export async function fetchModels(): Promise<DiscoveredModel[]> {
       typeof m.resident_budget_bytes === 'number' ? m.resident_budget_bytes : null,
     sizeBytes: typeof m.size_bytes === 'number' ? m.size_bytes : null,
     category: String(m.category ?? ''),
-  }));
+  };
+}
+
+export async function fetchModels(): Promise<DiscoveredModel[]> {
+  const rows = (await get('/providers/models')) as Array<Record<string, unknown>>;
+  return rows.map(toDiscoveredModel);
 }
 
 // ----------------------------------------------------------------- routing
