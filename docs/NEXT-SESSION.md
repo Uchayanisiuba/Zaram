@@ -27,8 +27,9 @@ Paste this into a new session:
 > read `docs/RUNNING.md`, and note that launching means three processes — Vite,
 > Electron, and TabbyAPI on port 1234.
 >
-> **That work is now committed** — ten commits on `Zaram-V0.1`, reviewed
-> first, not pushed. The previous version of this line said nothing was
+> **That work is now committed** — reviewed against the diff first, grouped
+> along file boundaries on `Zaram-V0.1`, not pushed. A test fix found on the
+> way is in there too, and so is this file. The previous version of this line said nothing was
 > committed and that is no longer true.
 >
 > Backend **2954 passing, 21 skipped, 2m32s**; frontend **362 passing, 41

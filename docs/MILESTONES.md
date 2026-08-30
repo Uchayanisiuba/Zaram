@@ -17,8 +17,12 @@ accurate — it is the first thing anyone reads.
 
 ### The session's work is committed, and a skip was not what it said — 30 August
 
-Ten commits on `Zaram-V0.1`, each reviewed against the diff before it was
-written, none pushed. The session that produced the work left 38 files
+Committed on `Zaram-V0.1`, grouped along file boundaries, each message
+written against the diff it describes rather than from the handoff, none
+pushed. Where one file carried two changes — `execution_engine.py` has both
+the conversation carry-forward and the search-notice fix, `html.py` both the
+CV renderer and the theme wiring — the commit names both rather than claiming
+an atomicity it does not have. The session that produced the work left 38 files
 uncommitted; this is that surface read and landed rather than built on.
 
 Re-measured rather than carried over: backend **2954 passing, 21 skipped,
