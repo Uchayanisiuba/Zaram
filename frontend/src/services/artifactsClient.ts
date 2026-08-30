@@ -14,13 +14,29 @@
 
 const API_BASE = import.meta.env.VITE_ZARAM_API ?? '';
 
-export type ArtifactKind = 'invoice' | 'document' | 'spreadsheet' | 'chart';
+/** The kinds the backend can produce.
+ *
+ *  `artifacts/contracts.py` says outright that divergence between the two is a
+ *  bug rather than a variation, and it had diverged: `deck` shipped on the
+ *  backend and never arrived here, so a slide deck's card had no icon and no
+ *  colour — `Record<ArtifactKind, …>` cannot catch a member it does not know
+ *  exists. `cv` is added with it.
+ */
+export type ArtifactKind =
+  | 'invoice'
+  | 'document'
+  | 'spreadsheet'
+  | 'chart'
+  | 'deck'
+  | 'cv';
 
 export const KIND_LABELS: Record<ArtifactKind, string> = {
   invoice: 'Invoices',
   document: 'Documents',
   spreadsheet: 'Spreadsheets',
   chart: 'Charts',
+  deck: 'Decks',
+  cv: 'CVs',
 };
 
 /** Where an artifact drew on. Mirrors `ChatSource` in chatClient — provenance

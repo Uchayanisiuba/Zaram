@@ -60,6 +60,10 @@ _KIND_WORDS = {
     ArtifactKind.SPREADSHEET: ("spreadsheet", "xlsx", "excel", "csv", "table of"),
     ArtifactKind.INVOICE: ("invoice", "bill", "quote", "estimate"),
     ArtifactKind.CHART: ("chart", "graph", "plot"),
+    # "write my CV" used to fall through to DOCUMENT, which gave somebody's
+    # career a proposal's layout. "resume" carries the accented spelling too,
+    # because a person writing "résumé" is asking for exactly this.
+    ArtifactKind.CV: ("cv", "curriculum vitae", "résumé", "resume"),
     # DECK was absent, so "make me a PowerPoint" fell through to DOCUMENT and
     # produced a .docx. The .pptx exporter existed and was tested throughout.
     ArtifactKind.DECK: ("powerpoint", "pptx", "deck", "slides", "slide", "presentation"),
@@ -72,7 +76,14 @@ _KIND_WORDS = {
 #: produces a file that carries the *label* of the thing and none of its shape —
 #: which is what "make me an invoice" was doing: a .docx of the model's prose
 #: with `invoice` in the filename and no table in it anywhere.
-_STRUCTURED = {ArtifactKind.INVOICE, ArtifactKind.SPREADSHEET, ArtifactKind.DECK}
+#: A CV is here for the same reason: it is a set of dated entries, and prose in
+#: a file called `cv.docx` is the same defect wearing a different label.
+_STRUCTURED = {
+    ArtifactKind.INVOICE,
+    ArtifactKind.SPREADSHEET,
+    ArtifactKind.DECK,
+    ArtifactKind.CV,
+}
 
 #: Prefixes an engine or the dispatcher puts in front of a failure.
 #:
@@ -286,6 +297,7 @@ class DocumentsRuntime(Runtime):
         ArtifactKind.INVOICE: "an invoice",
         ArtifactKind.SPREADSHEET: "a spreadsheet",
         ArtifactKind.DECK: "a slide deck",
+        ArtifactKind.CV: "a CV",
     }
 
     def _structured(
@@ -357,6 +369,25 @@ class DocumentsRuntime(Runtime):
                 artifact = self._service.create_spreadsheet(
                     header=draft.header, rows=draft.rows, **common
                 )
+            elif kind is ArtifactKind.CV:
+                draft = extract.cv_from(body, prompt, self._ask)
+                if isinstance(draft, extract.Missing):
+                    return {"success": False, "error": draft.sentence(what)}
+                # The person's name titles the file, not the request. `common`
+                # carries the request's title, so it is replaced rather than
+                # passed alongside — two titles would be a filename argument
+                # nobody could predict.
+                cv_common = dict(common, title=f"{draft.name} — CV")
+                artifact = self._service.create_cv(
+                    name=draft.name,
+                    headline=draft.headline,
+                    contact=draft.contact,
+                    summary=draft.summary,
+                    experience=draft.experience,
+                    education=draft.education,
+                    skills=draft.skills,
+                    **cv_common,
+                )
             else:
                 draft = extract.deck_from(body, prompt, self._ask)
                 if isinstance(draft, extract.Missing):
@@ -399,9 +430,22 @@ def _card(artifact: Artifact) -> Dict[str, Any]:
 
 
 def _kind_from(prompt: str) -> ArtifactKind:
+    """Which kind the request names, matched on words rather than substrings.
+
+    **`in` was enough until "cv" joined the list.** Two letters match inside
+    ordinary words, and a request that happened to contain one would have been
+    answered with somebody's CV layout. That is the failure
+    `test_intent_word_boundaries.py` already records one floor down — "invoice"
+    contains "voice", so every invoice request routed to text-to-speech — and
+    it costs nothing to not have it twice.
+
+    The boundary is applied to every entry, not only the short ones: "bill"
+    inside "billing" and "slide" inside "slides" were both matching by
+    accident, and an accident that happens to be right is not a rule.
+    """
     lowered = prompt.lower()
     for kind, words in _KIND_WORDS.items():
-        if any(word in lowered for word in words):
+        if any(re.search(rf"\b{re.escape(word)}\b", lowered) for word in words):
             return kind
     return ArtifactKind.DOCUMENT
 

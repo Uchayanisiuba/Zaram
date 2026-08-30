@@ -46,6 +46,14 @@ class ArtifactKind(str, Enum):
     DOCUMENT = "document"
     SPREADSHEET = "spreadsheet"
     CHART = "chart"
+    #: A CV, which is a kind rather than a longer document.
+    #:
+    #: **It used to fall through to `DOCUMENT`**, which meant "write my CV"
+    #: produced a proposal's layout — a ruled masthead, a metadata grid,
+    #: justified prose — with somebody's career inside it. A CV is read by
+    #: scanning down a column of dates, so its layout is not a variation on a
+    #: report's; it is a different one, and `render_cv` is where that lives.
+    CV = "cv"
     #: Slides. A *kind*, not a format — the .pptx exporter reads headings, so
     #: any document can be exported as slides. This exists for the case where
     #: the user asked for a deck, so the outline is what gets previewed and

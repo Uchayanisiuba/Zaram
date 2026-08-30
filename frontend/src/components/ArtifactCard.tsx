@@ -21,8 +21,10 @@ import {
   Eye,
   FileSpreadsheet,
   FileText,
+  Presentation,
   Quote,
   Receipt,
+  UserRound,
 } from 'lucide-react';
 
 import ArtifactPreview from '@/components/ArtifactPreview';
@@ -33,6 +35,8 @@ const KIND_ICON: Record<ArtifactKind, React.ReactNode> = {
   document: <FileText size={15} />,
   spreadsheet: <FileSpreadsheet size={15} />,
   chart: <BarChart3 size={15} />,
+  deck: <Presentation size={15} />,
+  cv: <UserRound size={15} />,
 };
 
 const KIND_COLOUR: Record<ArtifactKind, string> = {
@@ -40,6 +44,8 @@ const KIND_COLOUR: Record<ArtifactKind, string> = {
   document: 'var(--color-cyan-light)',
   spreadsheet: 'var(--color-amber)',
   chart: 'var(--color-violet)',
+  deck: 'var(--color-indigo-light)',
+  cv: 'var(--color-cyan-light)',
 };
 
 const bytes = (n: number) => {

@@ -33,8 +33,9 @@ from __future__ import annotations
 import io
 from typing import Dict
 
+from .. import theme
 from ..html import claim_entry_id
-from . import _reader
+from . import _reader, word_theme
 from .base import Availability, module_available
 
 #: Word's limit. Longer names are dropped without an error.
@@ -65,6 +66,10 @@ class DocxExporter:
 
         doc = _reader.read(document_html)
         word = WordDocument()
+        # Before anything is added, so every heading, paragraph and table
+        # inherits the design rather than `python-docx`'s 2007 template. See
+        # `word_theme` for what that template actually looked like.
+        word_theme.apply(word)
 
         word.add_heading(doc.title or "Untitled", level=1)
 
@@ -166,35 +171,41 @@ def _add_table(word, table) -> None:
     the client's name — and **no line items, no amounts and no total.** Measured
     that way before this existed.
 
-    "Table Grid" is one of the styles python-docx's default template ships, so
-    it needs no template of ours. Without a style the table is drawn with no
-    rules at all, which reads as columns of text that happen to line up.
+    **It used to be drawn with "Table Grid"**, the one table style
+    `python-docx`'s template ships — a visible box around every single cell,
+    and the most dated thing in the output. `word_theme.style_table` replaces
+    it with what the stylesheet already does on the HTML side: a rule under the
+    header, hairlines between rows, nothing around the outside.
     """
+    from docx.shared import Pt, RGBColor
+
     width = max([len(table.header)] + [len(row) for row in table.rows] or [0])
     if not width:
         return
 
     word_table = word.add_table(rows=0, cols=width)
-    try:
-        word_table.style = "Table Grid"
-    except KeyError:  # pragma: no cover - template without the built-in style
-        pass
 
     if table.header:
         cells = word_table.add_row().cells
         for column, text in enumerate(table.header[:width]):
             cells[column].text = text
-            for paragraph in cells[column].paragraphs:
-                for run in paragraph.runs:
-                    run.bold = True
 
     for row in table.rows:
         cells = word_table.add_row().cells
         for column, text in enumerate(row[:width]):
             cells[column].text = text
 
+    # After the content, because the run-level formatting it applies needs runs
+    # to exist — a cell written by `.text` has exactly one.
+    word_theme.style_table(word_table, numeric_columns=table.numeric_columns)
+
     if table.caption:
-        word.add_paragraph(table.caption)
+        caption = word.add_paragraph(table.caption)
+        for run in caption.runs:
+            run.font.name = theme.WORD_SANS
+            run.font.size = Pt(theme.SMALL_PT)
+            run.font.color.rgb = RGBColor.from_string(theme.MUTED)
+            run.italic = True
 
 
 def _bookmark_name(anchor: str) -> str:

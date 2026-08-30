@@ -73,6 +73,14 @@ class Table:
     caption: str = ""
     header: List[str] = field(default_factory=list)
     rows: List[List[str]] = field(default_factory=list)
+    #: Column indices the composer marked as figures, read back off the
+    #: `class="num"` the stylesheet already puts on them.
+    #:
+    #: Carried rather than re-derived, for the reason `TableBlock` states about
+    #: the same field: a heuristic that reads digits right-aligns a reference
+    #: number. The caller knew; this recovers what they knew instead of
+    #: guessing it a second time.
+    numeric_columns: List[int] = field(default_factory=list)
     #: How many blocks had been read when this table opened.
     #:
     #: `blocks` and `tables` are two flat lists, so on their own they say what
@@ -167,6 +175,13 @@ class _Reader(HTMLParser):
             # 340,000.00</td>`, which without this reads as a two-column row.
             try:
                 self._cell_span = max(1, int(attr.get("colspan", 1)))
+                if "num" in (attr.get("class") or "").split():
+                    # The column, not the cell: alignment is a property of the
+                    # column in every consumer of this, and the header cell is
+                    # the one the composer marks first.
+                    column = len(self._row) if self._row is not None else 0
+                    if column not in self._table.numeric_columns:
+                        self._table.numeric_columns.append(column)
             except (TypeError, ValueError):
                 # A malformed span is not worth failing an export over. One
                 # column is the value that changes nothing.
