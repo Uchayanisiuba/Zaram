@@ -11,9 +11,415 @@ accurate — it is the first thing anyone reads.
 
 ---
 
-## Current state — 28 August 2026
+## Current state — 30 August 2026
 
 *The latest work is first. Earlier sessions follow below.*
+
+### The session's work is committed, and a skip was not what it said — 30 August
+
+Ten commits on `Zaram-V0.1`, each reviewed against the diff before it was
+written, none pushed. The session that produced the work left 38 files
+uncommitted; this is that surface read and landed rather than built on.
+
+Re-measured rather than carried over: backend **2954 passing, 21 skipped,
+2m32s**; frontend **362 passing across 41 files**, `tsc` clean. The condition,
+because a number without one is not a measurement: Ollama up holding `bge-m3`
+and `gemma4:26b-a4b`, TabbyAPI serving on 127.0.0.1:1234, so the discovery
+branches executed.
+
+**Reconciling the skip count found a test that had never run.**
+
+`test_vision_gate.py` reported *"no Ollama models installed"* on a machine
+holding two of them. Two causes, and both land in the same place:
+`ProviderManager.refresh` is a coroutine and was called bare, so discovery
+never happened — the only trace anywhere was a `RuntimeWarning` in the tail of
+the suite output; and `ProviderManager()` constructs an **empty**
+`ProviderRegistry`, so even correctly awaited there was nothing registered to
+scan, the real path registering `OllamaAdapter` in `providers/runtime.py`.
+Both produce an empty model list, and `if not local: pytest.skip(...)` read
+that as a statement about the hardware.
+
+So a check whose docstring says it exists precisely because *"`supports_vision`
+could be correct in every fixture and still be `False` for every real model"*
+had never executed one assertion, and its claim to have caught that failure on
+its first run cannot be true. It is the `docs/KNOWN-FAILURES.md` shape again —
+*"the suite was skipping, not passing"* — arrived at from the other direction,
+by a count that would not add up.
+
+The assertions were empty in any case: `any(x) or all(not x)` is a tautology
+over booleans and passed whatever discovery returned. The replacement is the
+real contract — each discovered model's `supports_vision` compared against
+Ollama's own `/api/show` capabilities, which is the enrichment step that does
+the work, since `/api/tags` omits vision entirely. Both polarities are
+exercised on this machine: gemma4 reports vision, bge-m3 does not. Checked by
+inverting the assertion and watching it fail, then pass again on revert.
+
+The capability was never broken. The instrument was, quietly, for its whole
+life.
+
+> **Five skips still do not reconcile, and they are left named rather than
+> guessed at.** The previous handoff recorded 2959 / 16 against this run's
+> 2954 / 21 — identical totals, so five tests that ran then skip now, beyond
+> the one fixed above. Every skip is environment-gated: `test_recall_at_scale`
+> (9, `ZARAM_SCALE_EVAL=1`), `voice/test_kokoro_onnx_backend` (7, wants
+> `onnxruntime`, `onnx` and `misaki`, of which `onnx` is missing here),
+> `test_identity_holds_across_models` plus `test_extraction_across_models` (3,
+> `ZARAM_LIVE_MODELS=1`), and `test_memory_traffic_review` (2, no memory
+> runtime in-process). None of those families is five, which is why this is
+> recorded as unexplained rather than attributed. One run with the gates named
+> settles it.
+
+> **`providers/model_manifest.py` and `models.manifest.json` are committed and
+> have no caller and no tests.** Half of the model-pull executor; the endpoint,
+> the progress UI and the offer beside Settings' oversized-model warning are
+> not built. Committed as work in progress rather than left loose, and said
+> plainly here because this codebase's base rate for complete, tested,
+> unreachable subsystems is fifteen and counting. It is dead code today.
+
+### A citation now says which site it came from — 30 August
+
+A cited page rendered as a globe and a number, so four web sources were four
+identical glyphs and the one fact that separates them — who published the
+page — was reachable only by opening the panel on each in turn. A source row is
+scanned, not read.
+
+`sourceHost` / `hostOf` in `chatClient`, and `SourcePanel`'s own inline parse
+now calls the shared one: two implementations of *"which site is this"* is how
+a panel and the chip beside it come to name different things about one page.
+`www.` is dropped, subdomains are kept — `docs.example.com` and
+`blog.example.com` are not the same publisher — and a malformed URL yields no
+name rather than a guessed one.
+
+> **Favicons were asked for and declined, and the reasoning is the useful
+> part.** Claude and Gemini show them; here the same feature is banned twice
+> over. An `<img src="https://site/favicon.ico">` is a request the *renderer*
+> makes, which `EgressGate` structurally cannot see — precisely what
+> `check-no-remote-assets.mjs` exists to forbid — and the common shortcut
+> (`google.com/s2/favicons`) hands Google the domain of every page the user
+> cited. Worse, it fires on **render**: reopening a conversation next week
+> pings the publisher again, so it reports not that the page was read once but
+> every time the citation was looked at.
+>
+> It is buildable honestly — fetch at search time, backend-side, through the
+> gate, to a host the user has already permitted, cache as a data URI, serve
+> locally — and that is the route if it is ever wanted. It was not taken now
+> because the domain is the better signal anyway: legible where a 16px mark is
+> a guess, and it does not lend a content farm the authority of a good logo.
+>
+> `CitationChips.test.tsx`, 9 cases, three of which guard what naming the site
+> must *not* change — the colour still encodes egress rather than category, the
+> summary still leads with the split, and **rendering a chip touches the
+> network zero times**, asserted by spying on `fetch`. That last one is the
+> property a favicon would break, written down so the next person to want one
+> argues with a test rather than with a comment.
+
+### A refused search is not an empty web — 30 August
+
+Two defects, both found by the maintainer pressing the button built earlier the
+same day, and the second was mine twice over.
+
+**The offer was a refusal with no remedy.** `setWebSearch(true)` turns the
+planner on and grants nothing. The search then went to `duckduckgo.com`, which
+had no egress rule, default-deny refused it, and the reply said *"web search
+ran but returned no results"*. Nothing had failed except that Zaram asked the
+same question twice and answered it "no" the second time — which is the exact
+shape the 29 August handoff recorded about the image consent, one day later.
+
+Rule 7j settles it almost verbatim: *"Requiring a second, separate host rule
+afterwards asks the same question twice and reads as the product being
+broken."* Pressing a button that says the question goes to a search engine
+**is** the decision about that destination, so `enableSearchAndRetry` now sets
+the host rule too — reading the host off `/search/web` rather than deriving it,
+because that endpoint already answers the question. Still per-host, still
+visible in Settings, still revocable, and the kill switch still beats it. The
+card's disclosure names both halves rather than one.
+
+**And the sentence itself was false.** `result_count` cannot tell a refusal
+from an empty web: both arrive as an empty list. `reached_the_web` in
+`search_context.py` reads `provider_status` and answers the other question —
+did anything leave this machine — with three states, because an unreadable
+payload is evidence for neither claim. The engine now says *"could not reach
+the web — the search engine is not a permitted destination yet"*, or *"ran but
+returned no results"*, or, when it cannot tell, only that no live sources were
+used. The local connector set is the closed one deliberately: a new web
+connector nobody adds to a list counts as web, so forgetting produces the
+cautious error rather than telling a user their question stayed home when it
+did not.
+
+`test_a_refused_search_is_not_an_empty_web.py`, 9 cases. `EMPTY` in
+`test_search_reaches_the_model.py` was rewritten to carry `provider_status`,
+which is what the runtime actually emits — the old fixture could not have
+distinguished the two states it was asserting about.
+
+> **Verified by repeating the failure.** Search off, `duckduckgo.com` reset to
+> deny, backend restarted, the same question asked and the button pressed:
+> `search/web` returned `on: true, host_policy: "allow"`, the egress policy
+> gained `duckduckgo.com: allow`, `hosts_seen` grew by freightwaves,
+> logupdateafrica and nytimes, and the reply came back `4 sources · 4 sent to
+> the web` citing DP World's $1b Lagos port talks. A third defect went with it:
+> the card sat on "Turning it on…" forever because its phase was never reset —
+> notices are not persisted, so the stale card was a live component, and a
+> reload was the user's only escape.
+
+### The reply can be stopped — 30 August
+
+`chatStore.cancel()` aborted the in-flight request on clear, on resume and on
+the next send, and **nothing in the interface called it**. The one case it was
+never wired to was a person deciding, mid-answer, that this one is going wrong.
+On a machine where an oversized model takes minutes per reply that is not a
+convenience; it is the difference between watching three minutes of a wrong
+answer and asking a better question.
+
+Send becomes stop while streaming — one control, because they are the same
+decision at two moments. Verified with a real click against gemma4: the
+button's accessible name changed to *Stop answering*, pressing it returned the
+composer, and the network log recorded `POST /chat → net::ERR_ABORTED`. The
+abandoned question stays in the transcript rather than vanishing.
+
+**Not verified, and not claimed: whether the backend stops generating.** The
+client abort closes the stream; whether Ollama halts is a separate question,
+and the evidence points at no — the next reply was unusually slow, consistent
+with the abandoned generation still holding the card.
+
+> **A live defect found while looking at the ambient panel.** It read
+> *"Thinking. Working remotely."* while a local model on 127.0.0.1 was
+> answering. `describeSystem` consulted `routing.mode` — the machine's overall
+> *posture*, which is non-local as soon as any cloud provider is configured —
+> rather than the locality of the thing actually answering. A false egress
+> claim, on the surface `CLAUDE.md` singles out as the one where the disclosure
+> matters most. The correction was already written twenty lines above in the
+> same file, for the persistent bar: *"mode describes the machine's overall
+> posture and this must describe the thing that actually answers."* Half of it
+> had landed. Unknown locality now claims neither direction, following
+> `locality_of`.
+
+### Documents stopped looking generated — 30 August
+
+Reported as *"generated documents look subpar"* since 28 August and undiagnosed
+because nobody had looked at the file. The composer was never at fault.
+
+**The design existed and stopped at the HTML boundary.** Measured by unzipping
+a generated proposal: body Calibri 11pt, headings in `#365F91` and `#4F81BD` —
+Word 2007's blues — page US Letter with 1 inch top and **1.25 inch** sides,
+which is the Word 2003 default, and every table drawn with "Table Grid", a
+border on all four sides of every cell. Meanwhile the HTML carried A4 with
+print margins, a serif face, uppercase letterspaced section labels, hairline
+rules and one accent deliberately not blue. A `.docx` is not rendered from that
+CSS; it is rebuilt block by block, and every block took the stock style.
+
+`artifacts/theme.py` holds the tokens once and both renderers read them.
+`artifacts/export/word_theme.py` applies them: A4 at the stylesheet's margins,
+Georgia at the shared body size, section labels in the sans face with real
+letterspacing, a footer with `PAGE`/`NUMPAGES` fields, and table borders that
+rule between rows instead of boxing every cell. Styles rather than direct
+formatting, so the file stays editable and the user's next paragraph inherits
+the design. `_reader` now carries `numeric_columns` back off the `class="num"`
+the stylesheet already emits, so money right-aligns in Word as it does in the
+PDF. `test_word_carries_the_design.py`, 14 cases reading the XML rather than
+trusting the API; 9 fail with the theme removed.
+
+**A CV is a kind now, not a longer document.** `ArtifactKind.CV` with its own
+extractor, renderer and stylesheet: no masthead — a CV's letterhead is the
+person's name — no metadata grid, dates in their own column in tabular figures,
+entries that never split across a page, skills as a separated line, and empty
+sections omitted because a bare "Education" heading says something untrue about
+the person. It refuses rather than invents: no name, or nothing to put on it,
+and it stops. `_kind_from` now matches on word boundaries for every keyword,
+because `"cv"` is two letters and `test_intent_word_boundaries.py` already
+records what `in`-matching cost when "invoice" contained "voice".
+`test_a_cv_looks_like_a_cv.py`, 20 cases.
+
+**An attached document can be a shape to follow.** `attachments/exemplar.py`
+reads a reference's outline and puts it under that file in the prompt with one
+instruction: follow its sections, write the content from what the user said,
+**never copy its sentences or carry over its names, figures or dates** — without
+which a model asked to write one "like this" returns the reference with the
+names changed. The outline is read from the whole file, never the excerpt,
+because selection ranks passages against the question and will drop the very
+headings it is made of. Heading detection fails towards *fewer* headings: a
+missed one makes a thinner exemplar, an invented one becomes a section the
+author never had. `test_a_reference_document_shapes_the_new_one.py`, 13 cases.
+
+> **A test of mine passed against broken code, again.** The long-document case
+> went green with the outline read from the *excerpt*, because the excerpt
+> happened to contain the headings. The fixture was rewritten — the question's
+> rare terms now appear once, deep in filler, nowhere near a heading — not the
+> assertion. It fails correctly now.
+
+Two smaller things went with it. The preview sheet was `content-box`, so it
+rendered 945px wide where A4 is 794 — the margins added *outside* the paper, on
+the one surface whose job is to show what will print; measured in the browser,
+now exactly 794. And the frontend's `ArtifactKind` union was missing `deck`,
+which had shipped on the backend weeks earlier, so a deck's card had no icon
+and no colour: adding `cv` broke both copies of the map at compile time, which
+is how it was found.
+
+**PDF is still unavailable on this machine and the reason is unchanged.**
+`pip install weasyprint` now succeeds in the backend venv; the native GTK
+libraries are what is missing, which on Windows means an MSYS2 installation.
+Whether the installer bundles it is a Phase 0 decision, not a bug, and it was
+left for the maintainer.
+
+### A follow-up knows what it follows — 30 August
+
+**Measured before it was fixed**, one model, one session, seconds apart:
+
+    "What is the capital of Portugal?"        -> "Lisbon."
+    "And roughly how many people live there?" -> "I don't have the place you're
+                                                 referring to in this
+                                                 conversation."
+
+Everything needed was already built. `_session_turns` recorded the exchange,
+`seed_session_turns` rehydrated it across a restart, `core/transcript.fit`
+trimmed it by whole turns and `as_prompt` rendered it — and the only caller was
+the *document* branch, so none of it reached an ordinary reply.
+`core/transcript.as_prompt` and `as_messages` had tests and no production
+caller at all: the repository's signature failure, on the daily-driver path.
+
+`_augment_with_conversation` puts the recent exchange in the same system-prompt
+slot recall already uses, so no engine changed. Bounded twice —
+`CONVERSATION_TURNS` caps how many exchanges are eligible,
+`CONVERSATION_SHARE` caps what they may spend against the smallest window Zaram
+assumes, and `fit` drops oldest-first and whole turns only. The document branch
+keeps its own framing because rule 9's refusal hangs off `context_resolved`,
+which only that path produces; never both, or the same exchange arrives twice
+under two headings.
+
+`test_a_follow_up_knows_what_it_follows.py`, 12 cases; removing the one new
+line fails 6 of them.
+
+> **Verified live, and across a provider switch.** Asked TabbyAPI/Qwen *"What
+> is the capital of Portugal?"*, then asked Ollama/gemma4 in the same session
+> *"And roughly how many people live there?"* — which answered with Lisbon's
+> city and metropolitan populations. The buffer is keyed on the session and
+> carries no model, so this is the same measurement the handoff had offered to
+> run for document requests, done for every reply instead.
+>
+> **What it does not guard**, checked by breaking it: changing `_recall`'s
+> `session_id=None` to pass the session through leaves every test green,
+> because session membership is a *ranking* signal in `MemoryRankerImpl` and
+> never a filter.
+
+### The claim at the centre of the product was never measured — 29 August
+
+**"One memory, whichever model answers" is what Zaram is for, and nothing in
+the repository asserted it.** The pieces each had cover —
+`test_provenance_invariant.py` proves recall reaches *the* model,
+`test_memory_supersession.py` proves a corrected fact stops being recalled,
+`test_engine_routing.py` proves a model name reaches the right engine — and the
+property that joins them, which is the one a user would call memory, had no
+test and had never been run end to end on two real models.
+
+It has now been both. **Run first, on this machine, with two live providers:**
+
+| | |
+|---|---|
+| Fact stated to **TabbyAPI / Qwen3.8-27B**, session `turn-one` | stored, one record |
+| Asked of **Ollama / gemma4:26b-a4b**, session `turn-two` | recalled, **cited**, relevance **0.821**, answered *"You mentioned earlier that your day rate for Harbour Lane is 425,000 naira…"* |
+| Second fact stated to **gemma4**, session `turn-three` | stored |
+| Asked of **Qwen**, session `turn-four-b` | recalled, cited, relevance **0.779**, answered from it |
+| `DELETE /memory/{id}`, then re-asked of Qwen | **0 sources**, and the reply says it does not have it |
+
+Four different session ids, two different engines — `OllamaEngine` and
+`OpenAICompatibleEngine` through `LocalDispatchEngine` — one Spine. Measured
+with the real `bge-m3` embedder against a scratch `ZARAM_DATA_DIR`, so no
+number here is a fixture's. gemma4 took **2 m 55 s** to answer, which is the
+`oversized` warning behaving as designed rather than a fault.
+
+`tests/test_memory_holds_across_providers.py`, 10 cases, is the durable half:
+capture under one provider, recall under the other, in both directions, plus
+correction and deletion crossing the same boundary. Two things in it worth not
+re-deriving:
+
+* **The floors are the fixture's, not the product's.** It embeds with the
+  `hash` backend so the suite needs no Ollama, and 0.42 is a bge-m3 number that
+  means nothing there. The fixture runs at 0.35, and
+  `test_an_unrelated_question_recalls_nothing` is what stops the file measuring
+  its own permissiveness.
+
+  **The first version of that number was measured on the wrong quantity**, and
+  it is this codebase's recurring error in miniature: it quoted the embedding
+  cosine (+0.064 for the matching question), when what the floor is compared
+  against is `MemoryResult.relevance` out of the hybrid retriever — **0.40**,
+  because under the hash backend `_keyword_match` carries the retrieval and the
+  cosine carries nothing. Same fixture, same run, two numbers an order of
+  magnitude apart, and only one of them is the one being thresholded.
+* **Falsified before it was kept.** Dropping `system_prompt` on the cloud route
+  fails two cases. Making `_recall` session-scoped fails **none**, and that is
+  recorded in the test rather than glossed: session membership is a *ranking*
+  signal in `MemoryRankerImpl` and never a filter, so the test asserts the
+  outcome and not the argument that currently produces it.
+
+> **What the claim does not cover, found while measuring it.** Recall carries
+> **facts**; it does not carry **the conversation**. `_augment_with_recent_turns`
+> is called from exactly one place — behind `if self._is_document_request(prompt)`
+> — and `OpenAICompatibleEngine._body` sends one system message and one user
+> message with no history. Observed, same model, same session: *"What is the
+> capital of Portugal?"* → "Lisbon", then *"And roughly how many people live
+> there?"* → **"I don't have the place you're referring to in this
+> conversation."**
+>
+> That is not a cross-model gap; it is a single-model one, and switching models
+> mid-thread only makes it visible. It sits directly under the daily-driver
+> argument — an assistant that cannot follow up is not one somebody opens on a
+> Tuesday — and the machinery already exists: the buffer is bounded, seeded
+> from stored transcripts, and fitted to the answering model's window by
+> `core/transcript.fit`. What is missing is the decision to put it in front of
+> an ordinary reply, which is a design call and is **not** made here.
+>
+> A second finding from the same probe: *"Now add ten to that number."* was
+> classified as a **document** request, so it took the recent-turns path — and
+> silently wrote a `.docx`. It answered correctly, for the wrong reason, and
+> produced a file nobody asked for.
+
+### The Advanced type-in model field — queue item 6 is finished — 29 August
+
+The last third of the model picker. Its hard condition shipped last session:
+`_unplaceable_model_refusal` refuses a name the catalogue cannot place before
+dispatch, so a typed string can no longer fall through to Ollama and return
+`model 'anthropic/claude-sonnet-4.5' not found` from a server the user never
+named. What was left was the field and the sentence beside it.
+
+`frontend/src/components/settings/AdvancedModelField.tsx`, inside *Which model
+answers*, behind a `<details>` — the third of `CLAUDE.md`'s three tiers, "so a
+non-technical user never sees the third".
+
+Three rules, each one a friendlier version of this field would break:
+
+* **The terms are stated while the user is choosing**, from the discovered
+  model's own `data_policy`, in `CloudKeyForm`'s shape rather than behind a
+  disclosure. A `:free` name typed here says outright that prompts are logged
+  and may be trained on.
+* **`selectableByDefault` is not this field's business.** It stops *Zaram*
+  routing to a provider whose terms are unknown; it must never stop a person
+  choosing one knowingly.
+* **A typed name widens nothing** — no host rule, no connection, no egress —
+  and the field says so under the button rather than leaving a saved name to
+  imply it.
+
+**And it never calls a name imaginary on the strength of not having looked.**
+Three states, three different sentences: a name that resolves gets its terms; a
+name that does not, *with discovery run and non-empty*, gets "Zaram cannot
+place… it will refuse to send rather than guess"; and with no discovery it gets
+"Zaram has not looked for models yet". That mirrors the backend guard, whose
+own rule is that every uncertainty resolves to no refusal. Falsified: removing
+the `models !== null && models.length > 0` condition fails two cases.
+
+`AdvancedModelField.test.tsx`, 14 cases.
+
+> **Seen on screen, which the handoff asked for.** Vite on 5173 against a
+> backend on a scratch `ZARAM_DATA_DIR` with a known secret — the browser-tab
+> route `docs/RUNNING.md` documents — in the Browser pane, screenshotted at
+> each step: the disclosure open with the field and its permits-nothing line;
+> `anthropic/claude-sonnet-4.5` typed **before** discovery showing the
+> not-looked sentence; the same name **after** *Look for models* showing the
+> amber cannot-place sentence; `gemma4:26b-a4b-it-q4_K_M` showing "Runs on this
+> machine. Nothing is sent."; and *Use this model* pressed, after which
+> `GET /routing/preference` returns `"default_model":"gemma4:26b-a4b-it-q4_K_M"`.
+> The typing and the Settings navigation were real pointer and keyboard events;
+> two clicks on orbiting nav nodes and on the buttons had to be dispatched
+> through `javascript_tool`, because the landing nodes move under the cursor
+> between the screenshot and the click.
 
 ### The third door, and it was the one that had been measured — 29 August
 
