@@ -317,11 +317,34 @@ class ExecutionEngine:
         # anything to resolve "that" against. The documents runtime refuses when
         # a referential request arrives without it (rule 9), so this flag must
         # be set from what actually happened rather than from having tried.
+        # And the same problem in its ordinary clothes. "And roughly how many
+        # people live there?" is referential in exactly the way "write that up"
+        # is, and until 30 August 2026 nothing carried the answer: the turns
+        # were recorded, bounded, rehydrated from stored transcripts and fitted
+        # to the model's window, and then handed to the model **only when the
+        # request was classified as a document**. Measured, one model, one
+        # session, seconds apart:
+        #
+        #     "What is the capital of Portugal?"        -> "Lisbon."
+        #     "And roughly how many people live there?" -> "I don't have the
+        #                                                  place you're
+        #                                                  referring to."
+        #
+        # `CLAUDE.md` already said the general thing — *"carrying the recent
+        # exchange forward fixes the referential case"* — and the wiring was
+        # narrower than the sentence. The two branches stay distinct because
+        # they are asking different questions: the document path must also
+        # report whether there *was* anything to resolve against, because rule
+        # 9's refusal hangs off that flag, and an ordinary reply has no such
+        # duty. Never both, or the same exchange arrives twice under two
+        # headings.
         context_resolved = False
         if self._is_document_request(prompt):
             system_prompt, context_resolved = self._augment_with_recent_turns(
                 system_prompt, session_id
             )
+        else:
+            system_prompt = self._augment_with_conversation(system_prompt, session_id)
 
         # Said before the answer, not after it, and for the same reason the
         # empty-domain notice is: it is a *frame* for what follows. A reader who
@@ -397,7 +420,11 @@ class ExecutionEngine:
             if step.capability_id == "reasoning.generate":
                 searched = step_results.get("knowledge.search")
                 if searched:
-                    from core.search_context import result_count, search_prompt
+                    from core.search_context import (
+                        reached_the_web,
+                        result_count,
+                        search_prompt,
+                    )
 
                     step.input_data = dict(step.input_data or {})
                     original = step.input_data.get("prompt", "") or prompt
@@ -408,14 +435,45 @@ class ExecutionEngine:
                     # from the weights in both cases. `None` is not zero here:
                     # it means the output could not be read, which is not a
                     # statement about the web and must not be reported as one.
+                    #
+                    # **And zero is two different events.** Measured 30 August
+                    # 2026: search was on, `duckduckgo.com` had no egress rule,
+                    # default-deny refused it, and this said *"web search ran
+                    # but returned no results"* — a claim about the web, made
+                    # about a request that never left the machine. The user
+                    # then has nothing to act on, because the sentence names a
+                    # problem they do not have.
                     if result_count(searched) == 0:
-                        yield StreamEvent.notice(
-                            "Web search ran but returned no results, so this "
-                            "answer comes only from what the model already "
-                            "knows.",
-                            kind="search",
-                            action="settings",
-                        )
+                        out = reached_the_web(searched)
+                        if out is False:
+                            yield StreamEvent.notice(
+                                "Zaram could not reach the web for this "
+                                "answer — the search engine is not a permitted "
+                                "destination yet, so this comes only from what "
+                                "the model already knows.",
+                                kind="search",
+                                action="settings",
+                            )
+                        elif out is True:
+                            yield StreamEvent.notice(
+                                "Web search ran but returned no results, so "
+                                "this answer comes only from what the model "
+                                "already knows.",
+                                kind="search",
+                                action="settings",
+                            )
+                        else:
+                            # The payload does not say where it went — the
+                            # fallback search path returns results and a total
+                            # and nothing else. The disclosure the user needs
+                            # is still true and is kept; only the *cause* is
+                            # dropped, because that is the half we cannot see.
+                            yield StreamEvent.notice(
+                                "This answer comes only from what the model "
+                                "already knows — no live sources were used.",
+                                kind="search",
+                                action="settings",
+                            )
 
             # The images attached to this message, put where the dispatcher
             # reads them. On the generation step only: a search step handed a
@@ -573,6 +631,31 @@ class ExecutionEngine:
 
     #: How many turns of ephemeral session state to keep, per session.
     MAX_SESSION_TURNS = 8
+
+    #: How many recent exchanges an ordinary reply is shown.
+    #:
+    #: The same three the document path uses. More would be a better answer to
+    #: "what were we talking about" and a worse one to everything else — on a
+    #: 4,096-token window the conversation would start crowding out recall,
+    #: which is the memory that makes the answer worth having. The buffer keeps
+    #: `MAX_SESSION_TURNS`; this is how much of it is put in front of a model.
+    CONVERSATION_TURNS = 3
+
+    #: The ceiling on that block, in tokens.
+    #:
+    #: **Sized for the smallest window Zaram assumes rather than measured, and
+    #: that is deliberate.** `budget_for` reads the model's real loaded context
+    #: from Ollama, costs a request with a one-second timeout, and is already
+    #: paid once per chat at the API layer; paying it a second time inside
+    #: every reply would put a network round trip in front of a block that is
+    #: three turns long. So the cap is computed from `FALLBACK_CONTEXT_TOKENS`
+    #: — 4,096, Ollama's default — less the reply reserve, times the share
+    #: below. It under-uses a 16k window, which costs nothing, and it never
+    #: overruns a 4k one, which is the case that would hurt.
+    #:
+    #: `core.transcript.fit` spends it, so whole turns are dropped rather than
+    #: sentences cut. Half a message attributed to a person is a fabrication.
+    CONVERSATION_SHARE = 0.25
 
     #: How many sessions to keep state for at once, evicted least-recently-used.
     #:
@@ -1130,6 +1213,84 @@ class ExecutionEngine:
 
         logger.info("Engine: gave the document step %d prior turns", len(turns))
         return system_prompt + "\n".join(lines), True
+
+    def _augment_with_conversation(self, system_prompt: str, session_id: str) -> str:
+        """Put the recent exchange in front of an ordinary reply.
+
+        **The machinery for this was complete and reached from one place.**
+        `_session_turns` is bounded and LRU, `seed_session_turns` rehydrates it
+        from a stored transcript, `core/transcript.fit` drops whole turns to a
+        budget, and `as_prompt` renders them — and the only caller was the
+        document branch. So a follow-up question was answered by a model that
+        had never been shown what it followed.
+
+        Three properties, and each is the reason this is a block in the system
+        prompt rather than a `messages` array:
+
+        *It is engine-neutral.* Recall already rides in `system_prompt`, and
+        every engine carries that — `OllamaEngine` in its `system` field,
+        `OpenAICompatibleEngine` as a system message. Threading history through
+        `stream_response` instead would mean a second shape for every engine to
+        agree about, and `as_messages` exists for the day that is worth doing.
+
+        *It is not memory.* Rule 7d: the buffer dies with the process and never
+        reaches the Spine. This changes what a model is *shown*, not what Zaram
+        *keeps* — `_remember` is untouched and still stores the user's words
+        only, so nothing here can make Zaram quote its own replies as sources.
+
+        *It is bounded twice.* `CONVERSATION_TURNS` caps how many exchanges are
+        eligible and `CONVERSATION_SHARE` caps what they may spend, with `fit`
+        dropping oldest-first and whole turns only.
+
+        Silent when there is nothing: a first turn has nothing to follow, and a
+        heading over an empty exchange teaches a model that the section is
+        sometimes furniture.
+        """
+        pairs = self._session_turns.get(session_id, [])[-self.CONVERSATION_TURNS :]
+        if not pairs:
+            return system_prompt
+
+        from core.context_budget import (
+            FALLBACK_CONTEXT_TOKENS,
+            REPLY_RESERVE_FRACTION,
+        )
+        from core.transcript import ASSISTANT, USER, Turn, as_prompt, fit
+
+        turns: list[Turn] = []
+        for question, answer in pairs:
+            turns.append(Turn(role=USER, text=question))
+            turns.append(Turn(role=ASSISTANT, text=answer))
+
+        cap = int(
+            FALLBACK_CONTEXT_TOKENS
+            * (1 - REPLY_RESERVE_FRACTION)
+            * self.CONVERSATION_SHARE
+        )
+        kept, dropped = fit(turns, cap)
+        if not kept:
+            # Every turn was too long to fit. Saying nothing is right: a
+            # heading with nothing under it claims a continuity that is not
+            # being supplied.
+            logger.info("Engine: no prior turn fits %d tokens; none sent", cap)
+            return system_prompt
+
+        logger.info(
+            "Engine: gave the reply %d prior turn(s), %d dropped for budget",
+            len(kept), dropped,
+        )
+        return (system_prompt or "") + "\n".join([
+            "",
+            "=== THE CONVERSATION SO FAR ===",
+            "Earlier turns in this conversation, oldest first. The question you",
+            "are about to answer may refer back to them — \"it\", \"that\", \"there\".",
+            "",
+            as_prompt(kept),
+            "",
+            "Answer the new question. Do not repeat or summarise the above",
+            "unless you are asked to.",
+            "=" * 42,
+            "",
+        ])
 
     def _augment_system_prompt(self, system_prompt: str, recalled: list[Any]) -> str:
         """Fold recalled memories into the system prompt, with citation markers.
