@@ -36,6 +36,7 @@ from . import export
 from .contracts import Artifact, ArtifactKind, ArtifactSource, Claim
 from .html import (
     render_chart,
+    render_cv,
     render_deck,
     render_document,
     render_invoice,
@@ -58,6 +59,12 @@ DEFAULT_FORMAT = {
     ArtifactKind.SPREADSHEET: "xlsx",
     ArtifactKind.CHART: "png",
     ArtifactKind.DECK: "pptx",
+    # .docx rather than .pdf for the same reason as the rest, and one more that
+    # is specific to this document: a CV is edited more than any other file a
+    # person owns, and an application portal that asks for one usually parses
+    # it. Handing back a format nobody can open in Word would be a worse
+    # document however well it printed.
+    ArtifactKind.CV: "docx",
 }
 
 
@@ -165,6 +172,55 @@ class ArtifactService:
             title=title,
             filename=filename,
             kind=ArtifactKind.DECK,
+            fmt=fmt,
+            project_id=project_id,
+            conversation_id=conversation_id,
+            conversation_title=conversation_title,
+            sources=sources,
+            claims=claims,
+        )
+
+    def create_cv(
+        self,
+        *,
+        name: str,
+        headline: str = "",
+        contact: Sequence[str] = (),
+        summary: str = "",
+        experience: Sequence[object] = (),
+        education: Sequence[object] = (),
+        skills: Sequence[str] = (),
+        title: str = "",
+        filename: str = "",
+        fmt: Optional[str] = None,
+        project_id: str = "",
+        conversation_id: str = "",
+        conversation_title: str = "",
+        sources: Sequence[ArtifactSource] = (),
+        claims: Sequence[Claim] = (),
+    ) -> Artifact:
+        """A CV, in the layout a CV is read in — see `render_cv`.
+
+        ``title`` defaults to the person's name rather than to the request,
+        because the title becomes the filename and "cv.docx" in a folder of
+        applications is the file nobody can find again.
+        """
+        html = render_cv(
+            name=name,
+            headline=headline,
+            contact=list(contact),
+            summary=summary,
+            experience=list(experience),
+            education=list(education),
+            skills=list(skills),
+            sources=sources,
+            claims=claims,
+        )
+        return self._persist(
+            html=html,
+            title=title or f"{name} — CV",
+            filename=filename,
+            kind=ArtifactKind.CV,
             fmt=fmt,
             project_id=project_id,
             conversation_id=conversation_id,

@@ -377,3 +377,134 @@ def deck_from(answer: str, request: str, ask: Ask) -> DeckDraft | Missing:
     if not slides:
         return Missing(["enough structure to make slides from"])
     return DeckDraft(slides=slides)
+
+
+@dataclass
+class CvEntry:
+    """One dated thing a person did.
+
+    The same shape serves employment and education, because on the page they
+    are the same object — a role, where it happened, when, and what came of it.
+    Two dataclasses would be two renderers and two extraction prompts for one
+    visual pattern.
+    """
+
+    role: str
+    organisation: str = ""
+    dates: str = ""
+    bullets: List[str] = field(default_factory=list)
+
+
+@dataclass
+class CvDraft:
+    """A CV, as fields rather than as paragraphs.
+
+    ``name`` is the only required one. A CV with no name is not a CV with a
+    hole in it, it is somebody else's — so `cv_from` refuses rather than
+    heading the page with the title of the conversation.
+    """
+
+    name: str
+    headline: str = ""
+    contact: List[str] = field(default_factory=list)
+    summary: str = ""
+    experience: List[CvEntry] = field(default_factory=list)
+    education: List[CvEntry] = field(default_factory=list)
+    skills: List[str] = field(default_factory=list)
+
+
+_CV_PROMPT = """Read the text below into the fields of a CV.
+
+Return JSON of exactly this shape:
+{{"name": "Full name",
+  "headline": "Their profession in a few words",
+  "contact": ["city", "email", "phone"],
+  "summary": "Two or three sentences",
+  "experience": [{{"role": "Job title", "organisation": "Employer",
+                  "dates": "2023 - present", "bullets": ["what they did"]}}],
+  "education": [{{"role": "Qualification", "organisation": "Institution",
+                 "dates": "2019"}}],
+  "skills": ["skill", "skill"]}}
+
+Rules:
+- Use only what the text says. Never invent an employer, a date or a
+  qualification. A CV is read by someone deciding whether to believe it.
+- Leave a field out entirely rather than filling it with a guess.
+- Dates exactly as the text gives them. Do not normalise or complete them.
+- Most recent first.
+
+The request was:
+{request}
+
+The text:
+{answer}
+"""
+
+
+def _entries(value: Any) -> List[CvEntry]:
+    """Entries from whatever the model returned, skipping anything unusable.
+
+    An entry with no role is dropped rather than rendered as a dated blank —
+    on a CV that reads as a gap the person is hiding, which is a worse failure
+    than the entry being absent.
+    """
+    entries: List[CvEntry] = []
+    for raw in value or []:
+        if not isinstance(raw, dict):
+            continue
+        role = str(raw.get("role") or "").strip()
+        if not role:
+            continue
+        entries.append(
+            CvEntry(
+                role=role,
+                organisation=str(raw.get("organisation") or "").strip(),
+                dates=str(raw.get("dates") or "").strip(),
+                bullets=_strings(raw.get("bullets")),
+            )
+        )
+    return entries
+
+
+def cv_from(answer: str, request: str, ask: Ask) -> CvDraft | Missing:
+    """A CV read into fields, or a refusal naming what was not there.
+
+    **Rule 9 applies here about as hard as it does to an invoice.** A CV is a
+    set of claims about a person that they will send to someone deciding
+    whether to employ them, and a plausible invented employer is worse than a
+    missing one — it is the kind of error that ends an application when it is
+    caught, and the kind that follows someone when it is not.
+
+    So there is no prose fallback and no completion of a partial date. What was
+    not in the text does not appear in the file.
+    """
+    try:
+        reply = ask(_CV_PROMPT.format(request=request, answer=answer), _SYSTEM)
+    except Exception as exc:
+        logger.warning("cv extraction failed: %s", exc)
+        return Missing(["the details of the CV"])
+
+    parsed = _json_from(reply)
+    if parsed is None:
+        return Missing()
+
+    name = str(parsed.get("name") or "").strip()
+    if not name:
+        # The one field with no honest default. Heading a CV with the
+        # conversation's title would put a stranger's name on somebody's
+        # career, which is the worst available outcome for this document.
+        return Missing(["whose CV this is"])
+
+    draft = CvDraft(
+        name=name,
+        headline=str(parsed.get("headline") or "").strip(),
+        contact=_strings(parsed.get("contact")),
+        summary=str(parsed.get("summary") or "").strip(),
+        experience=_entries(parsed.get("experience")),
+        education=_entries(parsed.get("education")),
+        skills=_strings(parsed.get("skills")),
+    )
+
+    if not (draft.experience or draft.education or draft.summary):
+        return Missing(["anything to put on the CV"])
+    return draft

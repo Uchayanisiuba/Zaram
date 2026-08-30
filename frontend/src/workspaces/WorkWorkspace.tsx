@@ -23,9 +23,11 @@ import {
   FileSpreadsheet,
   FileText,
   MessageSquare,
+  Presentation,
   Quote,
   Receipt,
   RefreshCw,
+  UserRound,
   X,
 } from 'lucide-react';
 
@@ -40,11 +42,17 @@ import {
   type ArtifactKind,
 } from '@/services/artifactsClient';
 
+// The second copy of this map, and the reason `ArtifactKind` is a union rather
+// than a string: adding `deck` and `cv` to it broke both copies at compile
+// time, which is how a kind that had shipped on the backend for weeks with no
+// icon here was found at all.
 const KIND_ICON: Record<ArtifactKind, React.ReactNode> = {
   invoice: <Receipt size={16} />,
   document: <FileText size={16} />,
   spreadsheet: <FileSpreadsheet size={16} />,
   chart: <BarChart3 size={16} />,
+  deck: <Presentation size={16} />,
+  cv: <UserRound size={16} />,
 };
 
 // One accent per kind, drawn from the existing token set. No new hues.
@@ -53,6 +61,8 @@ const KIND_COLOUR: Record<ArtifactKind, string> = {
   document: 'var(--color-cyan-light)',
   spreadsheet: 'var(--color-amber)',
   chart: 'var(--color-violet)',
+  deck: 'var(--color-indigo-light)',
+  cv: 'var(--color-cyan-light)',
 };
 
 const relative = (seconds: number) => {

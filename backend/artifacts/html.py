@@ -38,6 +38,7 @@ from .contracts import (
     RichText,
     TableBlock,
 )
+from . import theme
 from .invoice import LineItem, Totals, format_money
 from .letterhead import Letterhead
 
@@ -623,10 +624,15 @@ def strip_anchors(document_html: str) -> str:
 #: Serif for body text, because a document is read in long lines and on paper.
 #: Charter and Palatino ship on macOS, Cambria and Georgia on Windows; the last
 #: two entries are the generic fallbacks that keep Linux honest.
-_SERIF = "Charter,'Bitstream Charter','Palatino Linotype',Palatino,Cambria,Georgia,serif"
+#:
+#: Read from `artifacts/theme.py` rather than written here, because the Word
+#: exporter needs the same answers and used to have its own — which is how a
+#: `.docx` came to be Calibri and Word-blue while the PDF of the same document
+#: was Charter and teal.
+_SERIF = theme.SERIF_STACK
 #: Sans for labels, table headers and the metadata block — the parts a reader
 #: scans rather than reads.
-_SANS = "'Segoe UI',Inter,-apple-system,BlinkMacSystemFont,'Helvetica Neue',Arial,sans-serif"
+_SANS = theme.SANS_STACK
 
 _PAGE_STYLE = (
     # A4 because that is the paper everywhere Zaram's first users are. The
@@ -639,7 +645,8 @@ _PAGE_STYLE = (
 )
 
 _STYLE = (
-    ":root{--ink:#14171a;--muted:#5b6570;--rule:#d8dde2;--accent:#0f766e}"
+    f":root{{--ink:{theme.css(theme.INK)};--muted:{theme.css(theme.MUTED)};"
+    f"--rule:{theme.css(theme.RULE)};--accent:{theme.css(theme.ACCENT)}}}"
     f"body{{font:11.5pt/1.65 {_SERIF};color:var(--ink);"
     "-webkit-font-smoothing:antialiased;margin:0}"
     # Screen: emulate a sheet of paper so the preview reads as a document rather
@@ -647,7 +654,13 @@ _STYLE = (
     # removed or it would print a border around every page.
     "@media screen{"
     "body{background:#eceef1;padding:28px 16px}"
-    ".sheet{background:#fff;max-width:210mm;min-height:297mm;margin:0 auto;"
+    # `border-box`, because the padding *is* the page margin. Without it the
+    # preview sheet came out 945px wide where A4 is 794 — the margins added
+    # outside the paper, so the one surface whose whole job is to show what
+    # will print was 25mm wider than the page it claimed to be. Measured in the
+    # browser rather than noticed by reading: `getBoundingClientRect` said 945.
+    ".sheet{box-sizing:border-box;"
+    "background:#fff;max-width:210mm;min-height:297mm;margin:0 auto;"
     "padding:22mm 20mm 24mm;box-shadow:0 1px 3px rgba(0,0,0,.14),0 8px 28px rgba(0,0,0,.10);"
     "border-radius:2px}"
     "}"
@@ -761,3 +774,131 @@ _TABLE_STYLE = (
     # it is the clause a disputed reminder gets checked against.
     f".terms{{font:italic 10pt/1.5 {_SANS};color:var(--muted);margin-top:16px}}"
 )
+
+
+#: The CV's own rules, appended to `_STYLE` rather than replacing it.
+#:
+#: **A CV is not a report with different words in it.** A report is read in
+#: order, so it wants a masthead, a metadata block and justified prose. A CV is
+#: read by running an eye down the left edge for dates and job titles and
+#: stopping where something catches — so what it needs is a dated column, tight
+#: vertical rhythm inside an entry and generous space between them, and no
+#: furniture at the top competing with the person's name.
+#:
+#: That difference is why `ArtifactKind.CV` exists at all. Falling through to
+#: `DOCUMENT` produced a proposal's layout with somebody's career inside it.
+_CV_STYLE = (
+    # The name carries the page. No rule under it: a heavy border under a
+    # person's name is a letterhead, and a CV is not correspondence.
+    ".cv-name{font:600 26pt/1.15 " + _SERIF + ";color:var(--ink);margin:0 0 2px}"
+    f".cv-headline{{font:400 12pt/1.35 {_SANS};color:var(--accent);margin:0 0 8px}}"
+    f".cv-contact{{font:9.5pt/1.5 {_SANS};color:var(--muted);margin:0 0 22px;"
+    "padding-bottom:14px;border-bottom:1px solid var(--rule)}"
+    ".cv-contact span+span:before{content:'·';margin:0 .5em;color:var(--rule)}"
+    ".cv-summary{margin:0 0 22px}"
+    # The entry. Dates in their own column on the right, because a left-hand
+    # date column pushes every job title inwards and the title is what is being
+    # scanned for.
+    ".cv-entry{margin:0 0 16px;break-inside:avoid;page-break-inside:avoid}"
+    ".cv-entry .top{display:flex;justify-content:space-between;align-items:baseline;"
+    "gap:16px}"
+    f".cv-entry .role{{font:600 11.5pt/1.3 {_SERIF};color:var(--ink)}}"
+    f".cv-entry .dates{{font:9pt/1.3 {_SANS};color:var(--muted);white-space:nowrap;"
+    "font-variant-numeric:tabular-nums}"
+    f".cv-entry .org{{font:italic 10.5pt/1.35 {_SERIF};color:var(--muted);"
+    "margin:1px 0 5px}}"
+    ".cv-entry ul{margin:0;padding-left:1.1em}"
+    ".cv-entry li{margin-bottom:.25em}"
+    # Skills read as a line of terms, not as a bulleted list of one word each.
+    f".cv-skills{{font:10.5pt/1.7 {_SANS};color:var(--ink)}}"
+    ".cv-skills span+span:before{content:'·';margin:0 .55em;color:var(--rule)}"
+)
+
+
+def _cv_entry(entry: object) -> str:
+    """One dated entry: what, where, when, and what came of it."""
+    role = _esc(getattr(entry, "role", "") or "")
+    organisation = _esc(getattr(entry, "organisation", "") or "")
+    dates = _esc(getattr(entry, "dates", "") or "")
+    bullets = [b for b in (getattr(entry, "bullets", None) or []) if str(b).strip()]
+
+    parts = ['<div class="cv-entry"><div class="top">']
+    parts.append(f'<div class="role">{role}</div>')
+    # Emitted only when there is one. An empty dates cell leaves a gap in the
+    # column a reader is scanning, which reads as a date somebody removed.
+    if dates:
+        parts.append(f'<div class="dates">{dates}</div>')
+    parts.append("</div>")
+    if organisation:
+        parts.append(f'<div class="org">{organisation}</div>')
+    if bullets:
+        items = "".join(f"<li>{_text(b)}</li>" for b in bullets)
+        parts.append(f"<ul>{items}</ul>")
+    parts.append("</div>")
+    return "".join(parts)
+
+
+def render_cv(
+    *,
+    name: str,
+    headline: str = "",
+    contact: Sequence[str] = (),
+    summary: str = "",
+    experience: Sequence[object] = (),
+    education: Sequence[object] = (),
+    skills: Sequence[str] = (),
+    sources: Sequence[ArtifactSource] = (),
+    claims: Sequence[Claim] = (),
+    include_provenance: bool = False,
+) -> str:
+    """A CV, in the layout a CV is read in.
+
+    No masthead and no metadata block, which are the two things that made the
+    generic document layout wrong here: a CV's letterhead *is* the person's
+    name, and its metadata is the dates, which belong beside the entries they
+    date rather than in a grid at the top.
+
+    Provenance is **off** by default, like an invoice and unlike a deck. This
+    document goes to an employer, and `memory:55b6` at the foot of it is
+    internal working on a page where every line is being read as a claim about
+    the person.
+
+    Sections with nothing in them are omitted entirely rather than rendered
+    empty — a CV with a bare "Education" heading and nothing under it says
+    something about the person that is not true.
+    """
+    body: List[str] = [f'<h1 class="cv-name">{_esc(name)}</h1>']
+    if headline:
+        body.append(f'<p class="cv-headline">{_esc(headline)}</p>')
+    if contact:
+        spans = "".join(f"<span>{_esc(item)}</span>" for item in contact if item)
+        body.append(f'<p class="cv-contact">{spans}</p>')
+    if summary:
+        body.append(f'<p class="cv-summary">{_text(summary)}</p>')
+
+    for label, entries in (("Experience", experience), ("Education", education)):
+        entries = [e for e in entries or ()]
+        if not entries:
+            continue
+        body.append(f"<h2>{label}</h2>")
+        body.extend(_cv_entry(entry) for entry in entries)
+
+    if skills:
+        body.append("<h2>Skills</h2>")
+        spans = "".join(f"<span>{_esc(skill)}</span>" for skill in skills if skill)
+        body.append(f'<p class="cv-skills">{spans}</p>')
+
+    return "\n".join(
+        [
+            "<!DOCTYPE html>",
+            '<html lang="en"><head><meta charset="utf-8">',
+            f"<title>{_esc(name)}</title>",
+            f"<style>{_STYLE}{_CV_STYLE}</style>",
+            "</head><body>",
+            '<div class="sheet">',
+            *body,
+            _sources_section(sources, claims) if include_provenance else "",
+            "</div>",
+            "</body></html>",
+        ]
+    )
