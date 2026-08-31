@@ -15,6 +15,166 @@ accurate — it is the first thing anyone reads.
 
 *The latest work is first. Earlier sessions follow below.*
 
+### The thinking was never lost; it had never worked on Ollama — 31 August
+
+The maintainer reported that Zaram had stopped showing the model's working.
+Nothing had been removed. They had switched from TabbyAPI to Ollama, and the
+reasoning panel had never worked on the Ollama path at all — so a feature that
+had only ever run on one of two engines read, correctly from outside, as a
+regression.
+
+> `ReasoningSplitter` scans the **content** stream for `<think>`. Ollama does
+> not put one there. Measured against Ollama 0.33.2 with `qwen3-14b-8k`: with
+> `think` unset the reply carries no tag of any kind — the model is answering
+> in non-thinking mode — and with `think: true` the working arrives in its own
+> `thinking` field, **3,838 characters** of it on "What is 17 times 23?".
+
+**This is the defect `openai_compatible_engine` already fixed, in a second
+engine nobody revisited.** That module's docstring describes it exactly:
+providers that split a reasoning model's stream "put the thinking in a second
+delta field. This engine read only `content`, so on those providers the thinking
+was dropped." TabbyAPI's `reasoning_content` was fixed; Ollama's `thinking` was
+not, and the two engines were never compared.
+
+`OllamaEngine` now asks `/api/show` whether a model declares the `thinking`
+capability — measured, not inferred from the name: `qwen3-14b-8k` reports
+`['completion', 'tools', 'thinking']`, `bge-m3` reports `['embedding']` — sends
+`think: true` where it does, and re-tags the `thinking` field back into
+`<think>`…`</think>`. Re-tagged rather than given a channel of its own, so it
+inherits the reasoning event, the transcript rule, and the guarantee that
+thinking never enters `streamingText` and therefore never reaches Kokoro.
+
+Two directions that are deliberately not symmetric. The capability check
+resolves **any doubt to no**, because Ollama refuses the whole request for a
+model that cannot think: a wrong yes costs the answer to gain a display, a wrong
+no costs only the panel. And the tag is closed on the first non-empty *content*
+and again at end of stream, because an unclosed `<think>` makes the splitter
+file everything after it as reasoning — a reply that renders as working and
+never speaks.
+
+`tests/test_ollama_reasoning_reaches_the_panel.py` asserts the split through the
+real `ReasoningSplitter` rather than asserting the tag, since a tag the splitter
+does not sort is an empty panel with a passing test. It carries one
+`measure`-marked test against the running server, because every fake in the file
+would also pass against a server that ignores `think` entirely — which is the
+state the product was actually in.
+
+### The KV reserve was charged twice, so nothing fit — 31 August
+
+The three items the previous handoff left at the top are closed. All three were
+one shape: a number standing in for a quantity it did not measure.
+
+> **The residency gate was subtracting a cache allowance from the budget and
+> comparing it against weights that never included one.** A flat 20% of *card*
+> capacity came out of `resident_budget_bytes`, and every model was then
+> measured by its on-disk size — which is weights alone. One charge, two
+> places, and the deduction was a constant unrelated to whichever model was
+> being tested.
+>
+> Measured on the 12 GB card: budget 9.15 GB against `qwen3:14b` at 9.28 GB. It
+> missed by **0.13 GB**, while running perfectly well at 10.32 GB resident
+> beside the 0.66 GB embedder — 10.98 GB of 12.88. Every chat model installed
+> reported `fits_resident: false`, which is what produced "No model was
+> selected for this request".
+
+The allowance now travels with the model. `resident_budget_bytes` is capacity
+less the embedder; `resident_cost_bytes` is weights plus 20% for the model's own
+cache. Same two quantities, each counted once. `_headroom_bytes` lost the
+reserve on both paths, where it was pure double-counting — the sum path adds up
+`size_vram` figures that already contain their caches, and the driver path reads
+what the card reports as used, which contains every byte on it.
+
+Verdicts on the measured machine, all three now matching what the card does:
+`qwen3-14b-8k` fits, `gemma4:26b-a4b` does not (`/api/ps`: 9.30 GB of 18.25 GB
+on the card, the rest streaming from system RAM), and the estimate is asserted
+never to undercut the measurement — an allowance smaller than the real cache
+readmits the thrashing model while reporting a confident `fits: true`.
+`tests/test_residency_admits_a_model_that_runs.py` pins every number to
+`/api/tags`, `/api/ps` and `nvidia-smi` rather than to a recorded round figure.
+
+**The residency relaxation now runs for any empty field, not only for vision.**
+It was the narrower case: a model that cannot accept an image is not an answer,
+while a model that does not fit is a *slow* answer, and residency emptying the
+field on its own is both more common and the one with no capability question in
+it. `select_default_model`'s fit criterion is a strong preference rather than a
+hard gate, and the docstring that called it a hard gate has been corrected.
+Ranking still puts a model that fits first, so this changes the answer only when
+the honest alternative was no answer. Consent is re-applied on the retry and
+never relaxed — asserted directly, because that is the one way this becomes a
+rule 5 bypass. `rejected_default_candidates` no longer lists the model that was
+actually chosen, which became reachable the moment residency stopped refusing.
+
+**`lm_studio` no longer names a program in anything the user reads.** The
+display name is `Local server on 127.0.0.1:1234`, the note names LM Studio,
+TabbyAPI and llama.cpp as things that all serve that port and says Zaram does
+not know which, and `key_url` is empty — a link to lmstudio.ai is an instruction
+to install the wrong software. The provider *id* stays: it is written into model
+ids, per-task assignments and saved settings, so renaming it is a migration
+rather than a label fix, and it is now documented as historical in both the
+catalogue entry and the adapter.
+
+Also fixed, and it is the answer to "why does Zaram warm up on every question":
+**the embedder set no `keep_alive`.** The chat engine has sent `30m` since the
+last session; `runtimes/memory/embeddings.py` sent nothing, so bge-m3 inherited
+Ollama's five-minute default and was unloaded between questions. That is the
+same defect `warm_local_model` exists to fix, on the other model.
+
+> **The remaining half of the warm-up problem is not a bug, and the next
+> session should not go looking for one.** `keep_alive` prevents *idle*
+> unloading. It cannot prevent eviction: a chat model that does not fit beside
+> the embedder is evicted whenever recall runs, and reloaded on the next
+> question, forever. Warming is once per *load*, not once per model. The remedy
+> is model choice, which is what the gate above was supposed to be making and
+> was instead refusing to make.
+
+**Two more, both reported by the maintainer while the above was in flight.**
+
+*The search notice was misstating the setting.* `search_required` is a
+conjunction of three conditions — the question wants search, the switch is on,
+and search is worth running for the answering model — and `search_suppressed`
+was its plain negation, so the **economy** refusing was indistinguishable from
+the **switch** refusing. The notice named the switch either way, and a user who
+had turned web search on kept being told it was off. `search_suppressed_reason`
+now separates `"off"` from `"not_applicable"`; only the switch earns the
+sentence, and a classification without the field still discloses, because
+silence is the dangerous direction. Note the shape: one flag standing for two
+questions, which is the third time this pattern has been paid for here.
+
+*The picker could contradict its own verdict.* `describeFit` and `slowNote`
+quoted `size_bytes` against `resident_budget_bytes`, which was right only while
+the cache allowance was held back from the budget. Now that it is charged to the
+model, weights can sit under the budget on a model correctly graded too large —
+*"10.0 GB, and this machine has about 11.7 GB"* beside *too large*.
+`resident_cost_bytes` rides on the model payload and both sentences quote it,
+falling back to the on-disk size where no cost is reported, which is every model
+on an OpenAI-compatible server.
+
+Still open, and named so it is not rediscovered: the embedder is charged its
+**on-disk** 1.16 GB rather than its measured **0.66 GB** resident, which
+over-reserves by half a gigabyte in the safe direction; and the KV allowance is
+a fraction of weights rather than a figure computed from the model's own
+`num_ctx`, which `/api/ps` reports. Both are proxies standing in for
+measurements that are available. Neither is what broke the gate.
+
+Measured, with the condition, because a number without one is not a
+measurement: backend **2979 passing, 29 skipped, 9m46s**; frontend **393
+passing across 43 files**, `tsc` clean. The suite time is up from 3m41s because
+the reasoning fix above added a `measure`-marked test that really does generate
+against the resident model — the run that excludes it took 3m41s. Ollama up holding `gemma4:26b-a4b`, so
+the discovery branches executed; **TabbyAPI down**, which is where 8 of the 29
+skips come from — the previous session measured 21 with it running.
+
+One thing the full suite caught that a targeted run did not, and it is the
+reason to keep running the whole thing: `test_fit_reaches_the_picker.py` fakes
+the manager, and adding `resident_cost_bytes` to the payload broke seven tests
+in it. The file already carried a guard against exactly that drift — one test
+asserting the real `ProviderManager` exposes what `_payload` calls — and it now
+covers the third method too.
+
+**Unchanged and still the highest-value open item: Zaram is ~4x slower than the
+model it runs.** Nothing here measured it. The embedder `keep_alive` fix is a
+plausible contributor and is not evidence — time `/chat` with recall disabled.
+
 ### One defect wore four costumes: Zaram looked for models once — 31 August
 
 The maintainer said a model they had installed was missing from the picker. It
@@ -46,6 +206,36 @@ caller; the hardcoded `gemma3:latest` removed from `OllamaEngine`, the fourth
 instance of a class recorded three times, now guarded by a test that scans
 every engine module for *any* model name in source; and Escape no longer
 closing the conversation behind a popover.
+
+> **Zaram never disables Qwen3's thinking, and it costs ~10x on a short
+> question.** Measured on `qwen3-14b-8k`, identical prompt, minutes apart:
+> `"think": false` answered in **0.43s with 4 tokens**; the default — which is
+> what the engine sends — took **4.09s and generated 129 tokens**. 125 tokens
+> of deliberation to answer "Lisbon".
+>
+> This is the larger half of why the product feels slow on a reasoning model,
+> and it was found only by running the real backend rather than the scratch one.
+> The interface already handles the *output* correctly — `chatClient` routes
+> `<think>` blocks to a reasoning panel — so this is a cost problem, not a
+> correctness one.
+>
+> **The fix is a product decision and must not become a classifier.**
+> `CLAUDE.md`: difficulty is *"not decidable in advance, so Zaram does not
+> predict it — it reacts to it with an offer under the reply."* The shapes that
+> obey that rule are: default thinking off and offer "think harder" beneath a
+> weak answer, the same reactive pattern as "ask another"; or make it an
+> explicit setting. Predicting which questions deserve reasoning is the one
+> approach ruled out.
+
+> **The maintainer's real Zaram was pinned to `gemma4:26b-a4b` the whole
+> time.** Everything measured this session ran against a scratch data dir; the
+> live instance — a separate process on port 8420, started before the session
+> and never touched by it — was pinned to the 18 GB model that does not fit,
+> which is why their experience of the product has been ~3m20s per reply. Two
+> lessons: a scratch instance measures the code, never the user's setup; and
+> **check what is already listening on 8420 before concluding a backend is
+> down.** Three "the backend died, restarting" reports this session were
+> actually new backends failing to bind against a healthy one.
 
 > **Zaram is ~4x slower than the model it runs, measured.** Same machine, same
 > model, minutes apart: raw Ollama produced **274 tokens in 8.7s (31.6 tok/s)**;
