@@ -47,6 +47,22 @@ instance of a class recorded three times, now guarded by a test that scans
 every engine module for *any* model name in source; and Escape no longer
 closing the conversation behind a popover.
 
+> **Zaram is ~4x slower than the model it runs, measured.** Same machine, same
+> model, minutes apart: raw Ollama produced **274 tokens in 8.7s (31.6 tok/s)**;
+> the same prompt through `POST /chat` produced **210 words in 31.2s**, after a
+> **22.9s** first message. `bge-m3` was **not resident** while the chat model
+> was, so an embedder loading and unloading around every message is the first
+> suspect — but it is a suspect, not a finding, and the next session should time
+> `/chat` with recall disabled rather than assume it.
+>
+> This is the highest-value open item, and the reason is the maintainer's own
+> behaviour this session: they had already abandoned `qwen3:14b` as "too slow"
+> before Zaram was involved. That judgement was correct — at Ollama's default
+> context it spills a 12 GB card — but it is the same judgement a user will make
+> about *Zaram* if the product adds this much on top of whatever they run. The
+> daily-driver thesis in `CLAUDE.md` is speed; a 4x tax on the one thing being
+> sold is a product problem, not a performance detail.
+
 > **A download size is not a residency measurement, and quoting one as the
 > other cost the maintainer a four-hour download.** `qwen3:14b` was recommended
 > as "~9 GB, fits" from its file size. Its resident size at Ollama's default

@@ -31,29 +31,41 @@ Paste this into a new session:
 >
 > What is left, in the order I would take it:
 >
-> 1. **The residency gate is over-conservative and it is now visibly wrong.**
+> 1. **Zaram is ~4x slower than the model it is running, and this is the
+>    finding that matters most.** Measured on the same machine, same model,
+>    minutes apart: raw Ollama generated **274 tokens in 8.7s (31.6 tok/s)**;
+>    the same prompt through `POST /chat` produced **210 words in 31.2s**, with
+>    a **22.9s** first message before that. `bge-m3` was **not resident** while
+>    the chat model was, so recall is the first suspect — an embedder loading
+>    and unloading around every message would cost exactly this. The maintainer
+>    abandoned a perfectly good local model as "too slow" once already; if the
+>    product adds this much on top of whatever they run, that judgement gets
+>    made again about Zaram itself. Measure before assuming it is recall:
+>    time `/chat` with recall disabled and compare.
+>
+> 2. **The residency gate is over-conservative and it is now visibly wrong.**
 >    `/providers/models` reports `fits_resident: false` for `qwen3-14b-8k`,
 >    which measurably runs at 10.32 GB beside a 0.66 GB embedder on a 12 GB
 >    card. It fits. The gate double-counts: it reserves 20% of VRAM for KV
 >    cache *and* the model's own `num_ctx` already bounds that cache. Every
 >    chat model on this machine now reads `fits=false`, so auto-routing has an
 >    empty candidate set and only an explicit pin works.
-> 2. **The residency relaxation is vision-only.** `select_model_for_task`
+> 3. **The residency relaxation is vision-only.** `select_model_for_task`
 >    relaxes the fit filter when `requires_vision` empties the field, and does
 >    not when residency alone empties it — so Zaram refuses rather than
 >    answering slowly. `CLAUDE.md`: *"VRAM limits route a task; they do not
->    reject a vertical… warn, never block."* Together with (1) this is why the
+>    reject a vertical… warn, never block."* Together with (2) this is why the
 >    product said "No model was selected" on a machine with three chat models
 >    installed.
-> 3. **`lm_studio` is a lie in the interface.** Zaram labels any
+> 4. **`lm_studio` is a lie in the interface.** Zaram labels any
 >    OpenAI-compatible server on 127.0.0.1:1234 as `lm_studio`. The maintainer
 >    runs TabbyAPI there, so the picker named a product they do not have, and
 >    that single mislabel cost a long and angry detour. Report the port, or ask
 >    the server what it is; never guess the product.
-> 4. **The model-pull executor** — unchanged, still half built.
+> 5. **The model-pull executor** — unchanged, still half built.
 >    `providers/model_manifest.py` and `models.manifest.json` are committed and
 >    still have **no caller and no tests**.
-> 5. **Phase 0 / packaging** — still the actual blocker, unchanged.
+> 6. **Phase 0 / packaging** — still the actual blocker, unchanged.
 >
 > **Do not delete the TabbyAPI model.** The maintainer asked for it and it was
 > deliberately not done — see "Held, deliberately" below.
@@ -137,6 +149,24 @@ Ollama holds:
 
 `qwen3-14b-8k` was created with a two-line Modelfile over `qwen3:14b`; it
 re-uses the same blobs, so it cost no download.
+
+**Timings, all measured 31 August on this machine:**
+
+| path | result |
+|---|---|
+| Ollama direct, warm, `qwen3-14b-8k` | 274 tokens in 8.7s — **31.6 tok/s** |
+| Ollama direct, warm, `qwen3:14b` (default ctx, spilling) | **12.6 tok/s** |
+| Through Zaram `/chat`, first message of a session | **22.9s** |
+| Through Zaram `/chat`, warm, 210 words | **31.2s** |
+
+The last two rows are the open question in item 1. The gap between 8.7s and
+31.2s is the product, not the model.
+
+**The maintainer had already tried `qwen3:14b` before this session and
+abandoned it as too slow.** That judgement was correct and the cause is now
+known: at Ollama's default context it needs 12.18 GB on a 12 GB card and
+spills. Nothing was wrong with their reasoning or the model — only with the
+context setting, which nothing in the product surfaces.
 
 **TabbyAPI is not running** and its `Qwen3.8-27B-exl3-2.20bpw` is untouched on
 disk. Start it from `C:\Users\user\tabbyAPI` with
