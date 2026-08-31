@@ -11,9 +11,74 @@ accurate — it is the first thing anyone reads.
 
 ---
 
-## Current state — 30 August 2026
+## Current state — 31 August 2026
 
 *The latest work is first. Earlier sessions follow below.*
+
+### One defect wore four costumes: Zaram looked for models once — 31 August
+
+The maintainer said a model they had installed was missing from the picker. It
+was diagnosed, in order, as a stopped server, a hardcoded model name, an empty
+candidate set and a mislabelled provider. Three of those were real and were
+fixed. None of them was the cause.
+
+> `ensure_scanned()` sets a flag on its first call. Discovery ran **once per
+> backend process** and never again, so any inference server started after
+> Zaram was invisible until Zaram itself was restarted.
+
+Measured: TabbyAPI serving `Qwen3.8-27B-exl3-2.20bpw`, confirmed answering on
+127.0.0.1:1234, while `/providers/models` returned only the two Ollama models
+found at boot. **From outside, "Zaram lost my model" and "Zaram has not looked
+since it started" are the same picture**, and the first is the one a person
+concludes. `POST /providers/rescan`, with the offer in the model panel at the
+moment of doubt. `CLAUDE.md` had specified it and named it — *"Re-runnable from
+Settings as re-scan"* — and it had never been built.
+
+**The diagnosis cost hours it should not have.** The whole thing was two steps:
+start the server, then look at whether Zaram lists it. The first step's
+conclusion was asserted twice without doing the second.
+
+Also shipped: the routing chip beside the composer (mode, plus separate local
+and cloud model lists, each naming its data policy and, where it will not fit,
+the numbers); "ask another" under a reply, which makes `chosenBy: 'request'`
+reachable for the first time — that path was complete end to end with no
+caller; the hardcoded `gemma3:latest` removed from `OllamaEngine`, the fourth
+instance of a class recorded three times, now guarded by a test that scans
+every engine module for *any* model name in source; and Escape no longer
+closing the conversation behind a popover.
+
+> **A download size is not a residency measurement, and quoting one as the
+> other cost the maintainer a four-hour download.** `qwen3:14b` was recommended
+> as "~9 GB, fits" from its file size. Its resident size at Ollama's default
+> context is **12.18 GB** — 97% of a 12 GB card, leaving no room for the 0.66 GB
+> embedder that recall needs resident. `num_ctx 8192` brings it to **10.32 GB**
+> and it runs at **31.6 tok/s** warm, against gemma4's ~3m20s.
+>
+> `CLAUDE.md` already warns about this substitution and notes the provider
+> layer makes it in code, using on-disk size as a proxy for resident VRAM. The
+> note said it "never changes which model is selected". That is no longer true
+> — see below.
+
+> **The residency gate is now visibly wrong, and it is the top item for the
+> next session.** `/providers/models` reports `fits_resident: false` for every
+> chat model on this machine, including one measured running at 10.32 GB beside
+> the embedder on a 12 GB card. It double-counts: a 20% KV reserve is taken out
+> of the budget *and* the model's own `num_ctx` already bounds that cache. With
+> every candidate excluded, auto-routing has an empty field and only an
+> explicit pin works — which is what produced "No model was selected for this
+> request" on a machine with three chat models installed.
+>
+> Compounding it: `select_model_for_task` relaxes the fit filter when
+> `requires_vision` empties the field, and **not** when residency alone empties
+> it. `CLAUDE.md` is explicit that this is backwards — *"VRAM limits route a
+> task; they do not reject a vertical… warn, never block."*
+
+> **`lm_studio` is a lie in the interface.** Zaram labels any OpenAI-compatible
+> server on 127.0.0.1:1234 as `lm_studio`. The maintainer runs TabbyAPI there,
+> so the picker named a product they do not have and do not run, and that one
+> mislabel turned a diagnosis into a long argument about a program that was
+> never installed. Report the port, or ask the server what it is. Never guess
+> the product.
 
 ### The session's work is committed, and a skip was not what it said — 30 August
 
