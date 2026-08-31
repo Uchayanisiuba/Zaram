@@ -31,7 +31,26 @@ Paste this into a new session:
 >
 > What is left, in the order I would take it:
 >
-> 1. **Zaram is ~4x slower than the model it is running, and this is the
+> 1. **Zaram never disables Qwen3's thinking, and it costs ~10x on short
+>    questions.** Measured on `qwen3-14b-8k`, same prompt, minutes apart:
+>    `"think": false` answered in **0.43s with 4 tokens**; the default, which is
+>    what Zaram sends, took **4.09s and generated 129 tokens** — 125 tokens of
+>    deliberation to say "Lisbon". The engine never sets the flag, so every
+>    reply pays for a chain of thought whether the question needs one or not.
+>
+>    **The fix is a product decision, not a patch.** `CLAUDE.md` is explicit
+>    that difficulty is *"not decidable in advance"*, so Zaram must not try to
+>    predict which questions deserve reasoning. The shapes that fit the rules:
+>    default it off and offer "think harder" under a weak reply — the same
+>    reactive-offer pattern as "ask another" — or make it the user's setting.
+>    Do not build a classifier for it.
+>
+>    Note the interface already handles the *output* correctly: `chatClient`
+>    routes `<think>` blocks to a reasoning panel, so this is purely a cost
+>    problem, not a correctness one.
+>
+> 2. **Zaram is ~4x slower than the model it is running, over and above the
+>    thinking cost.**
 >    finding that matters most.** Measured on the same machine, same model,
 >    minutes apart: raw Ollama generated **274 tokens in 8.7s (31.6 tok/s)**;
 >    the same prompt through `POST /chat` produced **210 words in 31.2s**, with
@@ -43,29 +62,29 @@ Paste this into a new session:
 >    made again about Zaram itself. Measure before assuming it is recall:
 >    time `/chat` with recall disabled and compare.
 >
-> 2. **The residency gate is over-conservative and it is now visibly wrong.**
+> 3. **The residency gate is over-conservative and it is now visibly wrong.**
 >    `/providers/models` reports `fits_resident: false` for `qwen3-14b-8k`,
 >    which measurably runs at 10.32 GB beside a 0.66 GB embedder on a 12 GB
 >    card. It fits. The gate double-counts: it reserves 20% of VRAM for KV
 >    cache *and* the model's own `num_ctx` already bounds that cache. Every
 >    chat model on this machine now reads `fits=false`, so auto-routing has an
 >    empty candidate set and only an explicit pin works.
-> 3. **The residency relaxation is vision-only.** `select_model_for_task`
+> 4. **The residency relaxation is vision-only.** `select_model_for_task`
 >    relaxes the fit filter when `requires_vision` empties the field, and does
 >    not when residency alone empties it — so Zaram refuses rather than
 >    answering slowly. `CLAUDE.md`: *"VRAM limits route a task; they do not
 >    reject a vertical… warn, never block."* Together with (2) this is why the
 >    product said "No model was selected" on a machine with three chat models
 >    installed.
-> 4. **`lm_studio` is a lie in the interface.** Zaram labels any
+> 5. **`lm_studio` is a lie in the interface.** Zaram labels any
 >    OpenAI-compatible server on 127.0.0.1:1234 as `lm_studio`. The maintainer
 >    runs TabbyAPI there, so the picker named a product they do not have, and
 >    that single mislabel cost a long and angry detour. Report the port, or ask
 >    the server what it is; never guess the product.
-> 5. **The model-pull executor** — unchanged, still half built.
+> 6. **The model-pull executor** — unchanged, still half built.
 >    `providers/model_manifest.py` and `models.manifest.json` are committed and
 >    still have **no caller and no tests**.
-> 6. **Phase 0 / packaging** — still the actual blocker, unchanged.
+> 7. **Phase 0 / packaging** — still the actual blocker, unchanged.
 >
 > **Do not delete the TabbyAPI model.** The maintainer asked for it and it was
 > deliberately not done — see "Held, deliberately" below.
