@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
 import * as THREE from 'three'
-import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { useEmbodimentState, type EmbodimentState } from '@/hooks/useEmbodimentState'
 import { useSpeechStore } from '@/stores/speechStore'
@@ -169,7 +168,7 @@ function frameFraction(): number {
  *  the helmet goes silver. */
 function envIntensity(): number {
   const raw = Number(new URLSearchParams(window.location.search).get('envIntensity'))
-  return Number.isFinite(raw) && raw >= 0 ? raw : 0.5
+  return Number.isFinite(raw) && raw >= 0 ? raw : 3
 }
 
 /**
@@ -188,86 +187,102 @@ function lightScale(): number {
 }
 
 /**
- * How much the room is blurred before the visor reflects it.
+ * How much the studio is blurred before anything reflects it.
  *
- * **Softening the lamps is not the same as softening the room.**
- * `softenAreaLights` removes the hard highlight, and the room still has walls
- * and furniture in it — dark boxes that resolve on a near-mirror visor as
- * recognisable blobs the moment the reflection is bright enough to see. So the
- * visor could be black and clean, or reflective and cluttered, and neither is
- * what a dark glass faceplate should look like.
+ * **A softbox is still a rectangle, and a mirror shows you the rectangle.** The
+ * panels below removed the furniture from the visor and left their own hard
+ * edges in its place — a bright quadrilateral sliding across the faceplate,
+ * which is tidier than a reflected armchair and just as wrong. Blur rounds the
+ * edges off into the gradient the panel was standing in for.
  *
- * A little blur separates the two. It keeps the sheen — the reflection is still
- * there and still moves with the head — while smearing the room's structure
- * below the point where it reads as objects. Held deliberately low: this is the
- * setting that, pushed far, flattened the whole character in an earlier pass,
- * because on a gloss surface most of the brightness you see is a sharp
- * reflection. Blur enough to lose the furniture, not enough to lose the shine.
+ * This is cheap now in a way it was not before. Blurring the old furnished room
+ * flattened the whole character, because the crisp reflections it destroyed were
+ * what gave glossy black its form. There is nothing crisp in this environment
+ * worth keeping, so the blur only ever removes an artefact.
+ *
+ * **Blur and intensity trade off directly on a mirror**, so they are tuned as a
+ * pair rather than one at a time: spreading a panel lowers the radiance any one
+ * reflected direction sees, and raising the blur without raising the intensity
+ * takes the visor straight back to flat black. Measured on the way here — 3.0
+ * with 0.5 of blur reads as glossy dark glass; the same intensity at 0.9 reads
+ * as dead.
  *
  * Overridable as `?envBlur=`.
  */
 function envBlur(): number {
   const raw = Number(new URLSearchParams(window.location.search).get('envBlur'))
-  return Number.isFinite(raw) && raw >= 0 ? raw : 0.35
+  return Number.isFinite(raw) && raw >= 0 ? raw : 0.5
 }
 
 /**
- * How far each of the room's area lights is spread before it is reflected.
+ * The environment the character reflects: softboxes in a dark room.
  *
- * **The harsh streak down the visor is one lamp, and this softens that lamp
- * rather than the whole room.** `RoomEnvironment` is a little room lit by six
- * emissive panels, and `light4` — a flat 4.4x5.4 panel on the +Z wall, slightly
- * left of centre and above eye level — sits exactly where a near-mirror visor
- * facing the viewer takes its reflection from. On a curved surface that panel
- * compresses into a hard vertical smear straight over the eyes, on the one
- * surface whose whole job is to be read.
+ * **Built rather than downloaded, and it replaces `RoomEnvironment`.** That room
+ * is furnished — it has walls, a floor and boxes in it — and the visor is a
+ * near-mirror, so the moment the reflection is bright enough to see at all you
+ * are looking at recognisable furniture sliding across the character's face. The
+ * only two settings it offered were flat black and a mirror with a room in it.
  *
- * **Blurring the generated environment was tried and reverted, and the reason
- * matters.** It does remove the streak, and it removes the crisp reflections
- * everywhere else at the same time — which is what gives glossy black armour its
- * form. The character came out flat and read *darker* than before despite more
- * light in the scene, because on a gloss surface most of the brightness you see
- * is a sharp reflection. Softening the environment and then adding directional
- * light back could not recover it: it was never a brightness problem.
+ * **What the key art shows is a studio, and a studio is large soft sources in a
+ * dark space.** That is what this is: three broad, low-intensity panels and a
+ * dark shell. Every source is big enough that its reflection is a gradient
+ * rather than a shape, which is what makes a glossy black faceplate read as
+ * glossy black rather than as a mirror — the same reason a photographer shooting
+ * a black car uses a six-foot softbox and not a bare head.
  *
- * So: grow each panel and dim it by the area it gained. Total emitted power is
- * unchanged, so the room lights the character exactly as hard as it did before,
- * but every source is broad enough that none of them resolves into a shape on
- * the visor. It is the difference between a bare bulb and a softbox, and it is
- * the same fix a photographer would make.
+ * **The shell is dark grey, not black, and that matters.** A black surround
+ * gives the visor nothing to reflect between the panels, and the result is the
+ * flat dead faceplate this was built to fix. The gradient between panel and
+ * shell *is* the reflection.
  *
- * Overridable as `?lightSpread=`; `1` restores the untouched room.
+ * An `.hdr` would do the same job and was rejected on two counts: fetching one
+ * is a request no gate in this product can see, and bundling one puts megabytes
+ * into an installer that a user on metered data already has to finish.
  */
-function lightSpread(): number {
-  const raw = Number(new URLSearchParams(window.location.search).get('lightSpread'))
-  return Number.isFinite(raw) && raw > 0 ? raw : 3.4
-}
+function studioEnvironment(): THREE.Scene {
+  const scene = new THREE.Scene()
+  const box = new THREE.BoxGeometry()
+  box.deleteAttribute('uv')
 
-/**
- * Broaden every emissive panel in a generated environment, preserving its power.
- *
- * Area lights are found by `emissiveIntensity` above 1 rather than by name or
- * index, because the room's own walls sit at the default of 1 and the panels run
- * from 17 to 100 — a filter that survives three.js renaming or reordering them,
- * which a positional lookup would not.
- */
-function softenAreaLights(room: THREE.Object3D, spread: number): void {
-  if (spread === 1) return
-  room.traverse((o) => {
-    const mesh = o as THREE.Mesh
-    const mat = mesh.material as THREE.MeshLambertMaterial | undefined
-    if (!mesh.isMesh || !mat || Array.isArray(mat)) return
-    const intensity = mat.emissiveIntensity
-    if (!(intensity > 1)) return
-    // A panel is flat: two large axes and one thin one. Growing the thin axis
-    // would turn the lamp into a block and change where it points.
-    const axes = ['x', 'y', 'z'] as const
-    const thin = axes.reduce((a, b) => (mesh.scale[a] <= mesh.scale[b] ? a : b))
-    for (const axis of axes) if (axis !== thin) mesh.scale[axis] *= spread
-    // Area went up by `spread` squared, so radiance comes down by the same,
-    // and the total light in the room is where it was.
-    mat.emissiveIntensity = intensity / (spread * spread)
-  })
+  const shell = new THREE.Mesh(
+    box,
+    new THREE.MeshStandardMaterial({ side: THREE.BackSide, color: 0x11151f, roughness: 1 }),
+  )
+  shell.scale.set(40, 34, 40)
+  shell.position.set(0, 12, 0)
+  scene.add(shell)
+
+  // Emissive-only, the same construction `RoomEnvironment` uses for its lamps.
+  const panel = (
+    intensity: number,
+    colour: number,
+    position: [number, number, number],
+    scale: [number, number, number],
+  ) => {
+    const mesh = new THREE.Mesh(
+      box,
+      new THREE.MeshLambertMaterial({ color: 0x000000, emissive: colour, emissiveIntensity: intensity }),
+    )
+    mesh.position.set(...position)
+    mesh.scale.set(...scale)
+    scene.add(mesh)
+    return mesh
+  }
+
+  // Key: a wide, shallow softbox overhead and slightly forward — the source
+  // that lands on the crown of the helmet and gives the visor its top gradient.
+  panel(4.2, 0xffffff, [0, 26, 9], [22, 0.4, 16])
+  // Fill: a tall panel off to camera-left, cool and much dimmer, to keep the
+  // shaded side of a black character from closing up entirely.
+  panel(1.5, 0xbcd0ff, [-19, 12, 6], [0.4, 20, 22])
+  // Kicker: behind and right, dimmer still. It is what puts the bright edge
+  // down the side of the helmet that reads as a rim rather than as a lamp.
+  panel(1.1, 0xd8e4ff, [17, 14, -13], [0.4, 16, 16])
+  // A dim floor bounce. Without it the underside of the jaw and the chest read
+  // as a hole rather than as shadow.
+  panel(0.35, 0x8fa4c8, [0, -3, 6], [26, 0.4, 20])
+
+  return scene
 }
 
 /**
@@ -381,6 +396,9 @@ export default function RobotAvatar({ px = 320, src = '/avatars/zaram-robo.glb' 
      *  model is measured, because its size and height come from the head. */
     let glow: THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicMaterial> | null = null
     let framing = 'not measured'
+    /** How many meshes needed a tangent frame computed for them, reported
+     *  because a GLB that starts shipping tangents should stop needing this. */
+    let tangentsAdded = 0
     let mouth: FacePanel | null = null
     const bags = new Map<EmbodimentState, ShuffleBag<string>>()
     const actions = new Map<string, THREE.AnimationAction>()
@@ -409,9 +427,7 @@ export default function RobotAvatar({ px = 320, src = '/avatars/zaram-robo.glb' 
     // several megabytes, and if it were ever fetched rather than bundled it
     // would be a request no gate in this product can see.
     const pmrem = new THREE.PMREMGenerator(renderer)
-    const room = new RoomEnvironment()
-    softenAreaLights(room, lightSpread())
-    const envRT = pmrem.fromScene(room, envBlur())
+    const envRT = pmrem.fromScene(studioEnvironment(), envBlur())
     scene.environment = envRT.texture
     // Slightly under neutral, because the character is glossy black and the
     // environment is what gives black armour its form — too much and the
@@ -665,6 +681,37 @@ export default function RobotAvatar({ px = 320, src = '/avatars/zaram-robo.glb' 
         const name = (mat.name || '').toLowerCase()
         if (!eyes && name.includes('eye')) eyes = preparePanel(mesh, '/avatars/face/eyes_atlas_3x3_alpha.png')
         else if (!mouth && name.includes('mouth')) mouth = preparePanel(mesh, '/avatars/face/mouth_atlas_3x3_alpha.png')
+      })
+
+      // **Tangents, because without them a normal map seams at every UV island
+      // edge.**
+      //
+      // This GLB ships POSITION, NORMAL, TEXCOORD_0, JOINTS_0 and WEIGHTS_0 —
+      // and no TANGENT. When the attribute is absent three.js falls back to
+      // deriving a tangent frame per fragment from screen-space derivatives of
+      // position and UV, which is continuous *within* a UV island and
+      // discontinuous *across* one. The two sides of a seam then perturb their
+      // normals in different frames, and the join lights differently: a hairline
+      // of wrong shading tracing every island border, which on this character
+      // runs down both sides of the face.
+      //
+      // Computing them per vertex puts the frame on the mesh instead of on the
+      // screen, so it is the same on both sides of a seam. It is not free of
+      // error — Blender bakes against MikkTSpace and this is three's own
+      // solver, so the frames differ slightly — but a small constant difference
+      // across a whole surface is invisible, while a discontinuity at a line is
+      // exactly what the eye is built to find.
+      //
+      // Guarded rather than assumed: `computeTangents` needs indexed geometry
+      // with normals and UVs, and throws a console error without them.
+      root.traverse((o) => {
+        const mesh = o as THREE.Mesh
+        if (!mesh.isMesh) return
+        const g = mesh.geometry
+        if (!g?.index || !g.attributes.normal || !g.attributes.uv) return
+        if (g.attributes.tangent) return
+        g.computeTangents()
+        tangentsAdded++
       })
 
       scene.add(root)
@@ -983,6 +1030,7 @@ export default function RobotAvatar({ px = 320, src = '/avatars/zaram-robo.glb' 
           `  clips failed: ${failed.join(', ') || 'none'}\n` +
           `  ${trackNote}\n` +
           `  face aspect: ${aspectNotes.join(' | ') || 'both square'}\n` +
+          `  tangents computed for ${tangentsAdded} mesh(es) — the GLB ships none\n` +
           `  bones with no track (${unanimated.length}): ${unanimated.slice(0, 12).join(', ') || 'none'}${unanimated.length > 12 ? ', …' : ''}\n` +
           `  rest-pose check: ${restReport || 'not run'}\n` +
           `  states with clips: ${[...bags.keys()].join(', ') || 'none'}\n` +
