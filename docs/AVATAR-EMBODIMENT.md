@@ -171,7 +171,54 @@ face aspect: both square
 tracks came back on their own. The retarget code stays for avatars users bring
 themselves, where the rests genuinely may differ.
 
-## Open problem — six clips bind to nothing
+## Solved 2 September 2026 — the six clips, and the two-skeleton rig
+
+**The character exists in Maya as two skeletons, and which one an export was
+selected from decides whether it is plug-and-play.**
+
+| | Namespace | Bones | Naming |
+|---|---|---|---|
+| Export skeleton | `Robot_All_01` | 65 | Mixamo (`LeftArm`, `LeftForeArm`) |
+| Advanced Skeleton | `Robot_Rig_0001` | 90 | AS (`Shoulder_L`, `Elbow_L`) |
+
+The three idles came from `Robot_All_01` and bind directly. The six
+`Listening`/`Talk`/`Thinking` clips came from the Advanced Skeleton
+`DeformationSystem`, so nothing bound them by name and three states had no body
+animation at all.
+
+`avatar-source/retarget_advanced_skeleton.py` maps the two conventions and bakes
+onto the character's armature. **64 of 65 bones map.** `Spine1` is the single
+omission — the source has two bones between pelvis and neck where the character
+has three, and splitting one rotation across two joints is a guess about where a
+bend belongs, which shows as a wrong silhouette rather than a stiff one. Twist
+joints, `Cup`, `Eye` and `Jaw` have no counterpart and are dropped.
+
+### Two retargets, two different maths, and they are not interchangeable
+
+- **`retarget_animations.py`** copies the **pose** directly, correct because the
+  idles are the same skeleton as the character. Those files carry **no bind
+  pose** — exported skeleton-only, so Blender falls back to frame 1 — which is
+  why a rest-relative approach fails on them and produced a T-pose for a session.
+- **`retarget_advanced_skeleton.py`** transfers each bone's rotation **away from
+  its own bind pose**, correct because those files *do* have a real bind — rest
+  and frame 1 differ by 179 degrees, confirmed with `probe_advanced_skeleton.py`
+  before a line of it was written.
+
+Picking the wrong one fails silently and looks like a rigging fault.
+
+### Two armatures per file, which cost the first run
+
+Both the character GLB and the source FBXs carry a vestigial `DeformationSystem`
+of one bone (`Root_M`) beside the real skeleton. Taking the first armature found
+picked the stub and mapped nothing — reported as `0/64 bones mapped`, which reads
+as a broken bone map rather than a wrong armature. Take the one with the most
+bones.
+
+**Do not re-export the character GLB to remove it.** It is inert: nothing binds
+to it and the renderer never touches it. Re-exporting would revert the mouth UV
+fix and risk the rest pose all nine clips are baked against, for no gain.
+
+## Superseded — the original problem statement
 
 `Listening 1/2`, `Talk_1/2/3` and `Thinking` in `avatar-source/animations/` were
 exported against an **Advanced Skeleton** rig — namespace `Robot_Rig_0001:`,
