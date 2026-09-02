@@ -15,6 +15,111 @@ accurate — it is the first thing anyone reads.
 
 *The latest work is first. Earlier sessions follow below.*
 
+**Everything below from 31 August is uncommitted** — 33 changed or new files on
+`Zaram-V0.1`, none pushed. Read the entries before committing; several touch the
+same file for different reasons.
+
+**Ready-to-paste prompts for each of these live in `docs/NEXT-SESSION-PROMPTS.md`.**
+
+#### Open, in the order a session should take them
+
+| # | What | Why it is where it is |
+|---|---|---|
+| 1 | **Zaram is ~4x slower than the model it runs** | Measured 31 Aug and still unexplained. The daily-driver thesis is speed; a 4x tax on the one thing being sold is a product problem. Time `/chat` with recall disabled — do not assume the embedder. |
+| 2 | **PDF export cannot run on Windows** | WeasyPrint needs the MSYS2 GTK runtime. `CLAUDE.md` promises PDF preview in v1 and the installer is already the stated blocker, so this is scope, not polish. |
+| 3 | **Cloud keys are plaintext on disk** | `cloud-connections.json` is as strong as the dev API-secret fallback and no stronger. The OS keychain is the fix. Shipped deliberately and written down rather than glossed. |
+| 4 | **`context_budget` is Ollama-only** | It reads `num_ctx` from `/api/ps`, so a TabbyAPI model gets a conservative assumed window instead of its real one. `/v1/model` reports it. TabbyAPI is now running, so this can finally be written against a real payload. |
+| 5 | **Two residency proxies stand in for measurements** | The embedder is charged its on-disk 1.16 GB rather than its measured 0.66 GB resident, and the KV allowance is a fraction of weights rather than computed from the model's own `num_ctx`. Both err safe. Neither is what broke the gate. |
+| 6 | **`lm_studio` is still the provider id** | The label is fixed everywhere a user reads it. The id is written into model ids, per-task assignments and saved settings, so changing it is a migration. |
+| 7 | **No workflow publishes the site** | `gh-pages` was pushed by hand. `site/` and the live site can drift with nothing reporting it. They match today. |
+| 8 | **Voice and the business layer are unverified** | Neither is claimed in `core/identity.py` because neither was confirmed reachable from chat. Verify before adding them to what Zaram says it can do. |
+
+### Zaram described itself as a generic assistant — 31 August
+
+Asked what it could do, it got the memory half right and then improvised:
+*"questions, summaries, drafts, planning"*, which is the average assistant the
+weights were trained on rather than this product, and *"Earlier you asked about
+web search; I don't have that unless it's provided"* — which was false. Search
+exists, is governed, and was switched **on** at the time.
+
+`core/identity.py` already carries the lesson in a narrower form: a rule that
+removes a wrong answer without supplying the right one leaves the model
+improvising, and what it reaches for is the prompt itself. `_WHAT_ZARAM_IS` said
+what Zaram *is* and nothing about what it *does*, so the doing was left to the
+weights.
+
+Two additions. The preamble now names what Zaram can do **in a conversation**,
+and — the load-bearing half — what it **cannot start**: `/artifacts/generate` is
+not reachable from natural language, as `main.py` says in as many words, so a
+model offering to write the proposal cannot deliver one. That is rule 9's
+failure with the promise made a turn early. It names where those controls live
+instead.
+
+And **web search state is now a supplied fact**, beside the model name and the
+date, read through the planner's own `web_search_enabled` so the identity block
+cannot disagree with what routing actually does. Unknown says nothing, because a
+guess either way is a claim about whether the person's questions reach the
+internet.
+
+Verified against the running product with `Qwen3.8-27B-exl3-2.20bpw`: it now
+lists reading attachments, naming the answering model and its locality, using
+search while stating it does not control it, and the four things done in the
+interface instead.
+
+### Two reports, both real, both found only by driving the app — 31 August
+
+**"Warming up on every question."** Three defects in a line, and the first two
+hid the third.
+
+1. `swap_preflight` asked for the model's size before it asked whether the
+   model was already loaded, and answered "cannot determine" when the size was
+   unknown. No OpenAI-compatible server reports a size, so for every TabbyAPI
+   model that was *always*. Residency needs neither a size nor a budget; asking
+   the unanswerable question first made the answerable one unreachable.
+2. `chatClient.ts` then dropped `kind: "resident"` on the floor. `SwapPlan` has
+   four kinds and the parser allowed three. **This is the second kind that
+   parser has lost, one at a time, for the same reason** — `oversized` went
+   first, and the comment written when *that* was fixed asserted `resident` "is
+   deliberately never sent", which was neither deliberate nor true.
+3. So `chatStore`'s `resident` branch, whose only job is to cancel the timer
+   that guesses silence means a cold model, had never once run.
+
+`test_the_selected_model_is_the_one_preloaded` and
+`chatClient.test.ts > still drops a kind it has no meaning for` both passed
+throughout. The second **asserted the bug as the contract**.
+
+> Found by opening the app, sending two messages and watching the orb. Every
+> layer tested green, the backend was verified emitting `{"kind": "resident"}`
+> by `curl`, and the label still read *"Warming up · Starting the local model"*
+> on the third consecutive reply. Verified fixed the same way: the orb now
+> reads **"Thinking · Working on this machine."** mid-generation.
+
+**A connected cloud provider did not survive a restart.** `connect` wrote the
+key to `os.environ` and nowhere else. The module docstring claimed persistence
+was "Electron's `safeStorage` … the reason there is no file path in here";
+nothing implemented it. So a key entered in Settings lasted exactly as long as
+the process, and the next launch restored whatever the machine's environment
+held — on this machine a Windows *User* variable reading `your-new-key`, which
+had been silently overwriting a real key for weeks and made OpenRouter answer
+401.
+
+Connections now persist to `cloud-connections.json` under the data directory,
+and **saved beats the environment** rather than the other way round: typing a
+key into the application is a more deliberate and more recent statement than a
+variable someone exported once and forgot. Removals are recorded too, because
+without that the same stale variable resurrects a provider the user deleted and
+there is no way to be rid of it from inside the app. The keys are plaintext in
+the user's own data directory, which is exactly as strong as the development
+API-secret fallback and no stronger; the OS keychain is the real fix and the
+docstring now says so instead of claiming it was already done.
+
+Also: `LocalDispatchEngine` had no `warm`, so `ModelsRuntime.warm_local_model`
+hit its `if not callable(warm): return False` guard and **the preload has been
+dead for every local model** since that wrapper landed. It dispatches by
+provider now. A second local server is deliberately *not* warmed — the only way
+to preload one is a real one-token completion, which is a hidden inference the
+user was never offered.
+
 ### The thinking was never lost; it had never worked on Ollama — 31 August
 
 The maintainer reported that Zaram had stopped showing the model's working.
@@ -3438,6 +3543,39 @@ the one Phase 1 item left~~ — **wrong, see above: 1.4 had already shipped.**
 > For search: it is on, `duckduckgo.com` is allowed, and the question has to
 > actually look like it needs live information — `needs_search()` decides.
 > "Are you connected to the cloud?" is not such a question, so no search runs.
+>
+> ### The robot avatar renders, and its rig does not match its animations
+>
+> **2 September 2026. Detail in `docs/AVATAR-EMBODIMENT.md` — read that before
+> touching the avatar**, because most of what matters is measurements and they
+> are expensive to re-derive.
+>
+> `RobotAvatar.tsx` replaces the sample VRM on the landing. Verified running:
+> the character loads, both LED face panels render, three idle clips play and
+> crossfade between variants, framing derives from the geometry, reflections
+> come from a procedural `RoomEnvironment` with no file and no network. 42 tests
+> pass, typecheck clean, **nothing committed**.
+>
+> **The blocker is a rig mismatch and it is not fixable at runtime.** The
+> character went Maya → FBX → Blender → glTF and the animations went Maya → FBX →
+> browser, so Blender rewrote the bone rest orientation on one and not the other.
+> Measured: `Hips` off by 88.5°, `LeftArm` by 74.5°, `Spine` by 1.0°. Three
+> standard retargeting formulas were tried and all three fail differently — the
+> one kept animates the torso and head correctly and leaves the arms in a T-pose.
+> **Do not iterate on the formula.** Re-import the character into Blender with
+> Automatic Bone Orientation on, or take the animations through the same .blend.
+> The code is self-correcting: the load log says `rest poses disagree` today and
+> will say `fingers included` with `0/NN tracks retargeted` once they match, with
+> no code change.
+>
+> Also open: six of the nine authored clips were exported against an Advanced
+> Skeleton rig (`Robot_Rig_0001:Head_M`, 92 joints) rather than the character's
+> (`Robot_All_01:`, 65 joints) — zero overlap, so they bind to nothing and are
+> not shipped. And the mouth's UV island still clips `oh` by 21px; `v0` 0.3926 →
+> 0.3125 closes it.
+>
+> Unverified: lip sync (needs the backend running) and the avatar's GPU cost,
+> which `CLAUDE.md` still calls the measurement that decides.
 >
 > ### The avatar became a character, and the character became the mascot
 >
