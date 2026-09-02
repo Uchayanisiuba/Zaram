@@ -11,6 +11,7 @@ import {
   type EyeCell, type MouthCell, type UvIsland,
 } from '@/lib/faceAtlas'
 import { ShuffleBag, clipsByState, clipNameOf, type AnimationManifest } from '@/lib/animationSet'
+import { STATE_PULSE, pulseAt, pulseBrightness } from '@/lib/embodimentPulse'
 
 THREE.Cache.enabled = true
 
@@ -66,16 +67,15 @@ function numberParam(name: string, fallback: number, min = -Infinity): number {
   return Number.isFinite(value) && value >= min ? value : fallback
 }
 
-/** The rim light is the state channel. Deliberately the same three values as
- *  `VrmAvatar` — two renderers reporting one state in different colours is the
- *  defect the 13 August narrowing was written to stop. */
-const RIM_COLOUR: Record<EmbodimentState, number> = {
-  idle: 0x93a3b8,
-  thinking: 0x78dcf0,
-  listening: 0x78dcf0,
-  speaking: 0x78dcf0,
-  swapping: 0x64748b,
-}
+// The rim light reads `STATE_PULSE` as well, so there is exactly one table in
+// the product for what a state looks like. It used to hold its own five values
+// and three of them disagreed with the orb's.
+//
+// Measured 2 September 2026: this light is invisible on this character, because
+// the body is metallic and a metal returns no diffuse — a back-placed light has
+// almost nothing at the angle that would send its specular to the camera. It is
+// left wired to the same table anyway, so that if it is ever repositioned it is
+// already correct rather than quietly wrong. See the doc's open section.
 
 /** Which eye cell a state wears. Blink overrides it briefly; nothing else does,
  *  because an expression not derived from a state is a personality. */
@@ -599,7 +599,7 @@ export default function RobotAvatar({ px = 320, src = '/avatars/zaram-robo.glb' 
     scene.add(fill)
     scene.add(new THREE.AmbientLight(0xffffff, 0.34 * lit))
     const rimGain = rimScale()
-    const rim = new THREE.DirectionalLight(RIM_COLOUR.idle, 2.2 * rimGain)
+    const rim = new THREE.DirectionalLight(STATE_PULSE.idle.colour, 2.2 * rimGain)
     rim.position.set(-1.4, 0.6, -1)
     scene.add(rim)
 
@@ -622,6 +622,11 @@ export default function RobotAvatar({ px = 320, src = '/avatars/zaram-robo.glb' 
     let smileAt = gapMin + Math.random() * (gapMax - gapMin)
     let smileFor = 0
     const rimTarget = new THREE.Color()
+    const glowTarget = new THREE.Color()
+    // `docs/UI-SPEC.md`: respect `prefers-reduced-motion`. The orb disables its
+    // breath under it and so does this — the colour still reports the state, so
+    // nothing is lost but the movement.
+    const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
 
     // ----------------------------------------------------------------- face
 
@@ -1253,20 +1258,31 @@ export default function RobotAvatar({ px = 320, src = '/avatars/zaram-robo.glb' 
       const s = stateRef.current
 
       const k = approachRate(dt, RIM_EASE_SECONDS)
-      rimTarget.setHex(RIM_COLOUR[s])
+      rimTarget.setHex(STATE_PULSE[s].colour)
       rim.color.lerp(rimTarget, k)
       rim.intensity = THREE.MathUtils.lerp(rim.intensity, (s === 'swapping' ? 1.1 : 2.2) * rimGain, k)
-      // The glow rides the same eased colour as the rim, off the same table, so
-      // the two can never disagree about what state the system is in. Dimmer
-      // while swapping for the same reason the rim is: a swap is the one state
-      // that should read as the character receding rather than working.
+      // **The glow is the orb's glow, on the orb's own table.** Colour, relative
+      // brightness and breath all come from `STATE_PULSE`, which `LivingOrb`
+      // reads too — so a user who switches renderers does not have to re-learn
+      // what a colour means, and the two cannot drift apart without one edit
+      // moving both. Before this they disagreed on three of five states: the orb
+      // gave thinking violet and speaking emerald where the avatar gave one cyan
+      // to both.
       if (glow) {
-        glow.material.color.copy(rim.color)
+        glowTarget.setHex(STATE_PULSE[s].colour)
+        glow.material.color.lerp(glowTarget, k)
         glow.material.opacity = THREE.MathUtils.lerp(
           glow.material.opacity,
-          s === 'swapping' ? glowOpacity() * 0.5 : glowOpacity(),
+          glowOpacity() * pulseBrightness(s),
           k,
         )
+        // The breath. The orb hands its keyframes to Framer Motion; there is no
+        // Framer in a render loop, so the same array is interpolated on the same
+        // period against the same clock — every working state faster than idle,
+        // and swapping slower, which is the rhythm carrying as much of the
+        // meaning as the hue does.
+        const breath = reducedMotion ? 1 : pulseAt(s, now)
+        glow.scale.setScalar(breath)
       }
 
       // A state change draws a fresh variant, so returning to idle after a
