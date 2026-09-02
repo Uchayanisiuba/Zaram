@@ -17,17 +17,25 @@ import * as THREE from 'three'
  * sliced composite of two mouths. Everything here snaps.
  */
 
-/** Atlas layout. Both atlases are 3x2 cells of 256px, so one cell is a third
- *  of the width and half the height. Written as constants rather than read
- *  from the manifest because the *shape* is structural — a manifest that
- *  disagreed would be a broken manifest, not a different layout. */
+/** Atlas layout. Both atlases are 3x3 cells of 256px, so one cell is a third
+ *  of the width and a third of the height. Written as constants rather than
+ *  read from the manifest because the *shape* is structural — a manifest that
+ *  disagreed would be a broken manifest, not a different layout.
+ *
+ *  **Grown from 3x2 for the seventh mouth cell.** All six were visemes and
+ *  `visemeAt` can emit any of them mid-sentence, so none could be given up for
+ *  an expression. A third row costs nothing anywhere else: the cell stays
+ *  square, and a mesh's UV island is normalised *inside* its cell, so no island
+ *  moved and no patch had to be re-modelled. The eyes carry the third row empty
+ *  rather than making the layout per-atlas and threading that through every
+ *  caller. */
 const COLS = 3
-const ROWS = 2
+const ROWS = 3
 export const CELL_W = 1 / COLS
 export const CELL_H = 1 / ROWS
 
 export type EyeCell = 'open' | 'blink' | 'thinking' | 'listening' | 'swapping' | 'warming'
-export type MouthCell = 'sil' | 'aa' | 'ih' | 'ou' | 'ee' | 'oh'
+export type MouthCell = 'sil' | 'aa' | 'ih' | 'ou' | 'ee' | 'oh' | 'smile'
 
 /** Cell order within each atlas, top-left to bottom-right *in UV terms*.
  *
@@ -35,7 +43,10 @@ export type MouthCell = 'sil' | 'aa' | 'ih' | 'ou' | 'ee' | 'oh'
  *  when nothing has asked for anything, so a face with no driver attached is a
  *  calm face rather than a garbled one. */
 export const EYE_CELLS: EyeCell[] = ['open', 'blink', 'thinking', 'listening', 'swapping', 'warming']
-export const MOUTH_CELLS: MouthCell[] = ['sil', 'aa', 'ih', 'ou', 'ee', 'oh']
+/** `smile` is the one cell here that is not a viseme. It is an idle expression,
+ *  never reachable from `visemeAt`, and it lives at the end so the six speech
+ *  shapes keep the indices they were authored at. */
+export const MOUTH_CELLS: MouthCell[] = ['sil', 'aa', 'ih', 'ou', 'ee', 'oh', 'smile']
 
 /**
  * Where a cell sits in the texture, in glTF UV space.

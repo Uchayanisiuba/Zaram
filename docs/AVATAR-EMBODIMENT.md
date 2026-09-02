@@ -279,6 +279,38 @@ All on `RobotAvatar`, all read from the URL:
 | `?avatarBg=%23404858` | Flat backdrop, for reading the silhouette |
 | `?noAnim=1` | Loads the character and plays nothing — separates model faults from animation faults |
 | `?fingerCurl=0.4` | Tunes the static finger pose |
+| `?lightScale=5.5` | Multiplies key, fill and ambient. Not the rim — that is the state channel |
+| `?envIntensity=0.15` | How reflective the character is. Raise and it goes mirror-like, not brighter |
+| `?lightSpread=3.4` | How broad the room's area lights are. `1` restores the untouched room |
+| `?glow=0.5` | The state glow's opacity behind the character |
+
+## Lighting, and the two knobs that are not interchangeable
+
+Settled 2 September 2026 against the character key art, after several passes that
+each fixed one thing and broke another.
+
+**Brightness and reflectivity are separate controls, and confusing them is what
+cost the time.** `environmentIntensity` makes the character *reflective*; the
+lights make it *bright*. On a glossy black character it is tempting to reach for
+the environment for both, and it does not work — the visor is a near-mirror, so
+it goes milky long before the armour looks lit. Measured: body readable at 2.0,
+frosted glass at 3.2. The shipped balance is the opposite of the first instinct:
+environment **down** to 0.15, lights **up** to 5.5.
+
+**The pale streak on the visor was one lamp, not the room.** `RoomEnvironment`'s
+`light4` — a flat 4.4x5.4 panel on the +Z wall, above and slightly left — sits
+exactly where a mirror-like visor facing the viewer takes its reflection from.
+`softenAreaLights` grows every emissive panel and dims it by the area gained, so
+total emitted power is unchanged and no source is compact enough to resolve into
+a shape. A bare bulb becomes a softbox.
+
+**Blurring the whole environment was tried and reverted.** It removes the streak
+and removes the crisp reflections everywhere else, which is what gives glossy
+black its form — the character came out flat and read *darker* than before
+despite more light in the scene. Adding directional light back could not recover
+it, because on a gloss surface most of the brightness you see is a sharp
+reflection. A gradient environment was tried for the same reason and failed the
+same way.
 
 ## Where to start
 

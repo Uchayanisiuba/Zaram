@@ -26,7 +26,7 @@ import json
 import os
 
 CELL = 256
-COLS, ROWS = 3, 2
+COLS, ROWS = 3, 3
 LIT = (129, 140, 248)
 
 
@@ -94,12 +94,12 @@ def template(atlas: str, out: str, label: str) -> tuple[int, int, int, int]:
 if __name__ == "__main__":
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
     print("runtime atlases with alpha:")
-    alpha_from_luminance("eyes_atlas_3x2.png", "eyes_atlas_3x2_alpha.png")
-    alpha_from_luminance("mouth_atlas_3x2.png", "mouth_atlas_3x2_alpha.png")
+    alpha_from_luminance("eyes_atlas_3x3.png", "eyes_atlas_3x3_alpha.png")
+    alpha_from_luminance("mouth_atlas_3x3.png", "mouth_atlas_3x3_alpha.png")
 
     print("UV templates:")
-    eyes_box = template("eyes_atlas_3x2.png", "eyes_uv_template.png", "eyes")
-    mouth_box = template("mouth_atlas_3x2.png", "mouth_uv_template.png", "mouth")
+    eyes_box = template("eyes_atlas_3x3.png", "eyes_uv_template.png", "eyes")
+    mouth_box = template("mouth_atlas_3x3.png", "mouth_uv_template.png", "mouth")
 
     def rec(box):
         w, h = box[2] - box[0] + 1, box[3] - box[1] + 1
