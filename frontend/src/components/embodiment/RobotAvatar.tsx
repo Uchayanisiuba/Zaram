@@ -111,6 +111,16 @@ const EYES_FOR_STATE: Record<EmbodimentState, EyeCell> = {
  * long as it shows — a blink over an already-curved eye reads as a glitch rather
  * than as a blink.
  */
+/**
+ * How long the mouth trails the eyes through an expression change.
+ *
+ * The eyes lead and the mouth follows, because a face whose halves change on the
+ * same frame reads as a panel being repainted rather than as an expression
+ * arriving. Long enough to be felt, short enough that the two still land as one
+ * gesture.
+ */
+const MOUTH_FOLLOW_SECONDS = 1
+
 const SMILE_SECONDS = 12.8
 const SMILE_GAP_MIN = 14
 const SMILE_GAP_MAX = 32
@@ -618,6 +628,10 @@ export default function RobotAvatar({ px = 320, src = '/avatars/zaram-robo.glb' 
 
     const clock = new THREE.Clock()
     let blinkAt = 2 + Math.random() * 3
+    /** What the mouth is currently wearing, which trails what the eyes are. */
+    let mouthLagged: { state: EmbodimentState; smiling: boolean } = { state: 'idle', smiling: false }
+    /** When the eyes last changed to something the mouth has not caught up to. */
+    let mouthPending: number | null = null
     const [gapMin, gapMax] = smileGap()
     let smileAt = gapMin + Math.random() * (gapMax - gapMin)
     let smileFor = 0
@@ -1328,14 +1342,41 @@ export default function RobotAvatar({ px = 320, src = '/avatars/zaram-robo.glb' 
         EYE_CELLS.indexOf(smiling ? 'happy' : blinking ? 'blink' : EYES_FOR_STATE[s]),
       )
 
+      // **The mouth follows the eyes rather than moving with them.**
+      //
+      // A face whose halves change on the same frame reads as a panel being
+      // repainted, because nothing on a real face moves in lockstep — the eyes
+      // reach an expression first and the mouth arrives behind them. A second is
+      // long enough to be felt and short enough that the two still read as one
+      // gesture rather than as two events.
+      //
+      // **Except when speech starts, and that exception is not a nicety.** Lip
+      // sync is scrubbed against `audio.currentTime`, so a mouth that held the
+      // previous expression for a second would begin a second into the audio and
+      // stay wrong for the whole utterance — the one failure lip sync cannot
+      // absorb. Speech takes the mouth immediately; everything else waits.
+      if (mouthLagged.state !== s || mouthLagged.smiling !== smiling) {
+        if (mouthPending === null) mouthPending = now
+        if (s === 'speaking' || now - mouthPending >= MOUTH_FOLLOW_SECONDS) {
+          mouthLagged = { state: s, smiling }
+          mouthPending = null
+        }
+      } else {
+        mouthPending = null
+      }
+
       // Lip sync runs off Kokoro's own phoneme timings scrubbed against
       // playback position, not a cycle — `audio.currentTime` is the clock,
       // because an elapsed counter drifts the moment audio buffers.
       const { audio, track } = useSpeechStore.getState()
       let shape: MouthCell = 'sil'
-      if (s === 'speaking' && audio && track.length > 0) shape = visemeAt(track, audio.currentTime)
-      else if (s === 'speaking') shape = Math.sin(now * 9) > 0 ? 'aa' : 'ih'
-      else if (smiling) shape = 'smile'
+      if (mouthLagged.state === 'speaking' && audio && track.length > 0) {
+        shape = visemeAt(track, audio.currentTime)
+      } else if (mouthLagged.state === 'speaking') {
+        shape = Math.sin(now * 9) > 0 ? 'aa' : 'ih'
+      } else if (mouthLagged.smiling) {
+        shape = 'smile'
+      }
       showCell(mouth, MOUTH_CELLS.indexOf(shape))
 
       renderer.render(scene, camera)
