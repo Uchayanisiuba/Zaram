@@ -283,7 +283,8 @@ All on `RobotAvatar`, all read from the URL:
 | `?envIntensity=0.5` | How reflective the character is. Raise and it goes mirror-like, not brighter |
 | `?envBlur=0.35` | How much the room smears before the visor reflects it |
 | `?lightSpread=3.4` | How broad the room's area lights are. `1` restores the untouched room |
-| `?glow=0.5` | The state glow's opacity behind the character |
+| `?glow=1` | The state glow's opacity behind the character |
+| `?smileEvery=3` | Seconds between idle smiles. Shipped at 14–32, which is too long to sit through |
 
 ## Lighting, and the two knobs that are not interchangeable
 

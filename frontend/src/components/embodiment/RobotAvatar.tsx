@@ -87,6 +87,17 @@ const SMILE_SECONDS = 12.8
 const SMILE_GAP_MIN = 14
 const SMILE_GAP_MAX = 32
 
+/** How long to wait between smiles, overridable as `?smileEvery=2`.
+ *
+ *  Here because the shipped gap is 14-32 seconds and nobody should have to sit
+ *  through that to check a sprite. The same reason `?noAnim=1` exists: the
+ *  alternative is editing a constant, rebuilding, and remembering to put it
+ *  back — which is how a debug value ships. */
+function smileGap(): [number, number] {
+  const raw = Number(new URLSearchParams(window.location.search).get('smileEvery'))
+  return Number.isFinite(raw) && raw > 0 ? [raw, raw] : [SMILE_GAP_MIN, SMILE_GAP_MAX]
+}
+
 /** How long a state change takes to cross into its new clip. Long enough to
  *  read as a transition rather than a cut, short enough that a state lasting
  *  under a second is not still arriving when it ends. */
@@ -306,10 +317,16 @@ function glowTexture(): THREE.DataTexture {
 const GLOW_RADIUS = 2.7
 
 /** Overridable as `?glow=`, because "not as bright as the orb" is a judgement
- *  about how it looks beside the orb and cannot be reasoned to a number. */
+ *  about how it looks beside the orb and cannot be reasoned to a number.
+ *
+ *  **Raised from 0.5, which was invisible.** A slate-grey disc at half opacity
+ *  behind a near-black character on a near-black page is present in the buffer
+ *  and absent to the eye — indistinguishable from the mesh having failed to
+ *  build, which is exactly how it was first reported. A dimmer default is only
+ *  restraint if the restraint can be seen. */
 function glowOpacity(): number {
   const raw = Number(new URLSearchParams(window.location.search).get('glow'))
-  return Number.isFinite(raw) && raw >= 0 ? raw : 0.5
+  return Number.isFinite(raw) && raw >= 0 ? raw : 1
 }
 
 /** The world-space box a loaded model actually occupies, as one readable line. */
@@ -461,7 +478,8 @@ export default function RobotAvatar({ px = 320, src = '/avatars/zaram-robo.glb' 
 
     const clock = new THREE.Clock()
     let blinkAt = 2 + Math.random() * 3
-    let smileAt = SMILE_GAP_MIN + Math.random() * (SMILE_GAP_MAX - SMILE_GAP_MIN)
+    const [gapMin, gapMax] = smileGap()
+    let smileAt = gapMin + Math.random() * (gapMax - gapMin)
     let smileFor = 0
     const rimTarget = new THREE.Color()
 
@@ -1077,7 +1095,7 @@ export default function RobotAvatar({ px = 320, src = '/avatars/zaram-robo.glb' 
         smileAt -= dt
         if (smileAt <= 0) {
           smileFor = SMILE_SECONDS
-          smileAt = SMILE_GAP_MIN + Math.random() * (SMILE_GAP_MAX - SMILE_GAP_MIN)
+          smileAt = gapMin + Math.random() * (gapMax - gapMin)
         }
         if (smileFor > 0) {
           smileFor -= dt
