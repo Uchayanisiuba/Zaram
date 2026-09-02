@@ -1,0 +1,8 @@
+{
+  "version": "zaram-anim-v1",
+  "clips": [
+    { "file": "idle_a.glb", "state": "idle", "role": "loop" },
+    { "file": "idle_b.glb", "state": "idle", "role": "loop" },
+    { "file": "idle_c.glb", "state": "idle", "role": "loop" }
+  ]
+}

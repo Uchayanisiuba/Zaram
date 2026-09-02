@@ -18,10 +18,16 @@ import { useEmbodimentStore } from '@/stores/embodimentStore'
  * pays for it. The packaging discipline that refused 321 MB for OCR should not
  * quietly accept a megabyte here.
  *
- * `VrmAvatar` does not import from `LivingOrb` and `LivingOrb` does not know
- * this file exists. Both read `useEmbodimentState()` and nothing else.
+ * Neither renderer imports from `LivingOrb` and `LivingOrb` does not know this
+ * file exists. All of them read `useEmbodimentState()` and nothing else.
+ *
+ * **The shipped character is a glTF robot, not a VRM.** `RobotAvatar` and
+ * `VrmAvatar` are separate modules for the same reason this import is lazy:
+ * only one is ever mounted, so only one is ever fetched, and the character that
+ * ships keeps `@pixiv/three-vrm` out of the bundle entirely. The VRM path stays
+ * for avatars users bring themselves.
  */
-const VrmAvatar = lazy(() => import('./VrmAvatar'))
+const RobotAvatar = lazy(() => import('./RobotAvatar'))
 
 type EmbodimentProps = ComponentProps<typeof LivingOrb>
 
@@ -35,7 +41,7 @@ export default function Embodiment(props: EmbodimentProps) {
 
   return (
     <Suspense fallback={<LivingOrb {...props} />}>
-      <VrmAvatar px={props.px} />
+      <RobotAvatar px={props.px} />
     </Suspense>
   )
 }
