@@ -19,17 +19,21 @@ import { VISEMES } from './visemes'
 import * as THREE from 'three'
 
 describe('cellRect', () => {
-  it('puts the rest cell on the bottom row of the PNG, which is the TOP in glTF v', () => {
-    // Cell 0 is `sil` / eyes-open. The atlas writes it into the lower half of
-    // the image; glTF's v runs downward from the top, so that half begins at
-    // v = 0.5. Getting this backwards is the flip described above.
-    expect(cellRect(0)).toEqual({ x: 0, y: 0.5, w: CELL_W, h: CELL_H })
+  it('puts the rest cell on the bottom row of the PNG, which is the LAST in glTF v', () => {
+    // Cell 0 is `sil` / eyes-open. The atlas writes it into the bottom row of
+    // the image; glTF's v runs downward from the top, so on a three-row atlas
+    // that row begins at v = 2/3. Getting this backwards is the flip described
+    // above, and it survives a layout change only because `cellRect` is the one
+    // place that knows about it.
+    expect(cellRect(0)).toEqual({ x: 0, y: 2 * CELL_H, w: CELL_W, h: CELL_H })
   })
 
-  it('walks the top PNG row for cells 3-5', () => {
-    expect(cellRect(3).y).toBe(0)
-    expect(cellRect(4)).toMatchObject({ x: CELL_W, y: 0 })
-    expect(cellRect(5)).toMatchObject({ x: 2 * CELL_W, y: 0 })
+  it('walks the middle PNG row for cells 3-5 and the top row for 6-8', () => {
+    expect(cellRect(3)).toMatchObject({ x: 0, y: CELL_H })
+    expect(cellRect(4)).toMatchObject({ x: CELL_W, y: CELL_H })
+    expect(cellRect(5)).toMatchObject({ x: 2 * CELL_W, y: CELL_H })
+    // `smile` is cell 6 — the row the atlas grew to hold it.
+    expect(cellRect(6)).toMatchObject({ x: 0, y: 0 })
   })
 
   it('advances a third of the atlas per column', () => {
@@ -46,13 +50,13 @@ describe('transformForCell', () => {
     // square in texels and the patches are not.
     const t = transformForCell(0)
     expect(t.repeat.x).toBeCloseTo(1 / 3, 10)
-    expect(t.repeat.y).toBeCloseTo(1 / 2, 10)
+    expect(t.repeat.y).toBeCloseTo(1 / 3, 10)
     expect(t.offset.x).toBeCloseTo(0, 10)
-    expect(t.offset.y).toBeCloseTo(0.5, 10)
+    expect(t.offset.y).toBeCloseTo(2 / 3, 10)
   })
 
   it('maps a full 0-1 island exactly onto its cell, for every cell', () => {
-    for (let i = 0; i < 6; i++) {
+    for (let i = 0; i < 9; i++) {
       const t = transformForCell(i)
       const cell = cellRect(i)
       expect(0 * t.repeat.x + t.offset.x).toBeCloseTo(cell.x, 10)
@@ -63,7 +67,7 @@ describe('transformForCell', () => {
   })
 
   it('keeps every cell inside the atlas', () => {
-    for (let i = 0; i < 6; i++) {
+    for (let i = 0; i < 9; i++) {
       const t = transformForCell(i)
       expect(t.offset.x).toBeGreaterThanOrEqual(0)
       expect(t.offset.y).toBeGreaterThanOrEqual(0)
@@ -76,10 +80,16 @@ describe('transformForCell', () => {
 describe('texelAspect', () => {
   it('reports the shipped eye patch as square', () => {
     // Measured off the GLB: island u -0.0025..0.998, v 0.2937..0.6455 on a
-    // patch 0.3044 x 0.1075 in mesh units, against a 768x512 atlas. This is
+    // patch 0.3044 x 0.1075 in mesh units, against the 768x768 atlas. This is
     // the check that says the eyes were never the problem.
+    //
+    // The atlas grew a row and this number did not move, which is the point:
+    // `CELL_H` fell from 1/2 to 1/3 as the height rose from 512 to 768, so a
+    // cell is still 256 texels tall and an island still spans the same fraction
+    // of it. Passing the old 512 here reports 1.51 and looks like a regression
+    // in the modelling.
     const ratio = texelAspect(
-      { u0: -0.0025, u1: 0.998, v0: 0.2937, v1: 0.6455 }, 0.3044, 0.1075, 768, 512,
+      { u0: -0.0025, u1: 0.998, v0: 0.2937, v1: 0.6455 }, 0.3044, 0.1075, 768, 768,
     )
     expect(ratio).toBeGreaterThan(0.98)
     expect(ratio).toBeLessThan(1.02)
@@ -90,13 +100,13 @@ describe('texelAspect', () => {
     // its island covers only a quarter of the cell's height. A modelling fix,
     // which is why this is reported rather than corrected.
     const ratio = texelAspect(
-      { u0: 0.0559, u1: 0.9318, v0: 0.4336, v1: 0.6799 }, 0.2483, 0.0901, 768, 512,
+      { u0: 0.0559, u1: 0.9318, v0: 0.4336, v1: 0.6799 }, 0.2483, 0.0901, 768, 768,
     )
     expect(ratio).toBeGreaterThan(1.2)
   })
 
   it('refuses to divide by a degenerate patch', () => {
-    expect(texelAspect({ u0: 0, u1: 1, v0: 0, v1: 1 }, 0, 1, 768, 512)).toBeNaN()
+    expect(texelAspect({ u0: 0, u1: 1, v0: 0, v1: 1 }, 0, 1, 768, 768)).toBeNaN()
   })
 })
 
@@ -139,6 +149,14 @@ describe('the atlas manifest agrees with the code that reads it', () => {
       .sort((a, b) => (a[1] as { index: number }).index - (b[1] as { index: number }).index)
       .map(([name]) => name)
     expect(byIndex).toEqual(EYE_CELLS)
+  })
+
+  it('keeps the smile out of the speech path', () => {
+    // `smile` is an idle expression, not a phoneme. If it ever became reachable
+    // from `visemeAt` the character would grin mid-word, which is the exact
+    // failure the state-derived rule exists to prevent.
+    expect(VISEMES).not.toContain('smile')
+    expect(MOUTH_CELLS).toContain('smile')
   })
 
   it('covers every viseme the speech path can emit', () => {

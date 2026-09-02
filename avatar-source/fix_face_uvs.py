@@ -50,7 +50,7 @@ GLB = os.path.join(ROOT, "frontend", "public", "avatars", "zaram-robo.glb")
 FACE = os.path.join(ROOT, "frontend", "public", "avatars", "face")
 
 CELL = 256
-COLS, ROWS = 3, 2
+COLS, ROWS = 3, 3
 ATLAS_W, ATLAS_H = COLS * CELL, ROWS * CELL
 
 # Cell order within each atlas, matching `faceAtlas.ts`. Index 0 is the rest
@@ -58,13 +58,13 @@ ATLAS_W, ATLAS_H = COLS * CELL, ROWS * CELL
 # is such an easy mistake to make.
 PANELS = {
     "mouth": {
-        "atlas": "mouth_atlas_3x2_alpha.png",
-        "cells": ["sil", "aa", "ih", "ou", "ee", "oh"],
+        "atlas": "mouth_atlas_3x3_alpha.png",
+        "cells": ["sil", "aa", "ih", "ou", "ee", "oh", "smile"],
         "material": "mouth",
         "write": True,
     },
     "eyes": {
-        "atlas": "eyes_atlas_3x2_alpha.png",
+        "atlas": "eyes_atlas_3x3_alpha.png",
         "cells": ["open", "blink", "thinking", "listening", "swapping", "warming"],
         "material": "eye",
         # **Measured and deliberately left alone.** The eye island clips three

@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import * as THREE from 'three'
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { useEmbodimentState, type EmbodimentState } from '@/hooks/useEmbodimentState'
 import { useSpeechStore } from '@/stores/speechStore'
-import { visemeAt, type Viseme } from '@/lib/visemes'
+import { visemeAt } from '@/lib/visemes'
 import { inspectAvatar } from '@/lib/vrmSafety'
 import { renderScaleFor, approachRate, applyTextureFiltering, RIM_EASE_SECONDS } from '@/lib/renderTuning'
 import {
@@ -59,6 +59,27 @@ const EYES_FOR_STATE: Record<EmbodimentState, EyeCell> = {
   swapping: 'swapping',
 }
 
+/**
+ * How often the idle mouth breaks from `sil` into a smile, and for how long.
+ *
+ * **This is the one expression here not derived from a system state, and that is
+ * a deliberate exception the maintainer asked for.** `CLAUDE.md` says the rest
+ * face is `sil`, a flat line, not a smile, on the grounds that a face showing
+ * expressions of its own reads as a *someone* rather than as a status indicator.
+ * The precedent that makes it survivable is blink: already here, already not
+ * state-derived, and read as liveliness rather than as mood because it carries
+ * no meaning and resolves immediately.
+ *
+ * So the same discipline applies. Rare enough that it is never the thing you are
+ * looking at, short enough to read as a beat rather than a mood, and **idle
+ * only** — during thinking, listening, speaking or swapping the mouth belongs to
+ * the state and to lip sync, and an expression arriving over those would be the
+ * character editorialising about the work.
+ */
+const SMILE_SECONDS = 3.2
+const SMILE_GAP_MIN = 14
+const SMILE_GAP_MAX = 32
+
 /** How long a state change takes to cross into its new clip. Long enough to
  *  read as a transition rather than a cut, short enough that a state lasting
  *  under a second is not still arriving when it ends. */
@@ -108,7 +129,7 @@ function fingerCurl(): number {
 
 /** Atlas dimensions, needed to turn UV spans into texel counts. */
 const ATLAS_W = 768
-const ATLAS_H = 512
+const ATLAS_H = 768
 
 /**
  * How much of the vertical view the head should fill.
@@ -123,6 +144,144 @@ function frameFraction(): number {
   const raw = Number(new URLSearchParams(window.location.search).get('headFraction'))
   return raw > 0.02 && raw <= 1 ? raw : 0.5
 }
+
+/** How hard the environment lights the armour. Overridable as `?envIntensity=`,
+ *  because this and the framing are the two numbers that can only be settled by
+ *  looking — too low and a glossy black character is a silhouette, too high and
+ *  the helmet goes silver. */
+function envIntensity(): number {
+  const raw = Number(new URLSearchParams(window.location.search).get('envIntensity'))
+  return Number.isFinite(raw) && raw >= 0 ? raw : 0.15
+}
+
+/**
+ * A single multiplier on the key, fill and ambient, so "too dark" has one knob.
+ *
+ * **The rim is deliberately not scaled.** It is the state channel, and its
+ * brightness is part of how a state reads; scaling it with the room would make
+ * the working state look different on a bright build than on a dark one, which
+ * is the one thing the indicator must not do.
+ *
+ * Overridable as `?lightScale=`.
+ */
+function lightScale(): number {
+  const raw = Number(new URLSearchParams(window.location.search).get('lightScale'))
+  return Number.isFinite(raw) && raw > 0 ? raw : 5.5
+}
+
+/**
+ * How far each of the room's area lights is spread before it is reflected.
+ *
+ * **The harsh streak down the visor is one lamp, and this softens that lamp
+ * rather than the whole room.** `RoomEnvironment` is a little room lit by six
+ * emissive panels, and `light4` — a flat 4.4x5.4 panel on the +Z wall, slightly
+ * left of centre and above eye level — sits exactly where a near-mirror visor
+ * facing the viewer takes its reflection from. On a curved surface that panel
+ * compresses into a hard vertical smear straight over the eyes, on the one
+ * surface whose whole job is to be read.
+ *
+ * **Blurring the generated environment was tried and reverted, and the reason
+ * matters.** It does remove the streak, and it removes the crisp reflections
+ * everywhere else at the same time — which is what gives glossy black armour its
+ * form. The character came out flat and read *darker* than before despite more
+ * light in the scene, because on a gloss surface most of the brightness you see
+ * is a sharp reflection. Softening the environment and then adding directional
+ * light back could not recover it: it was never a brightness problem.
+ *
+ * So: grow each panel and dim it by the area it gained. Total emitted power is
+ * unchanged, so the room lights the character exactly as hard as it did before,
+ * but every source is broad enough that none of them resolves into a shape on
+ * the visor. It is the difference between a bare bulb and a softbox, and it is
+ * the same fix a photographer would make.
+ *
+ * Overridable as `?lightSpread=`; `1` restores the untouched room.
+ */
+function lightSpread(): number {
+  const raw = Number(new URLSearchParams(window.location.search).get('lightSpread'))
+  return Number.isFinite(raw) && raw > 0 ? raw : 3.4
+}
+
+/**
+ * Broaden every emissive panel in a generated environment, preserving its power.
+ *
+ * Area lights are found by `emissiveIntensity` above 1 rather than by name or
+ * index, because the room's own walls sit at the default of 1 and the panels run
+ * from 17 to 100 — a filter that survives three.js renaming or reordering them,
+ * which a positional lookup would not.
+ */
+function softenAreaLights(room: THREE.Object3D, spread: number): void {
+  if (spread === 1) return
+  room.traverse((o) => {
+    const mesh = o as THREE.Mesh
+    const mat = mesh.material as THREE.MeshLambertMaterial | undefined
+    if (!mesh.isMesh || !mat || Array.isArray(mat)) return
+    const intensity = mat.emissiveIntensity
+    if (!(intensity > 1)) return
+    // A panel is flat: two large axes and one thin one. Growing the thin axis
+    // would turn the lamp into a block and change where it points.
+    const axes = ['x', 'y', 'z'] as const
+    const thin = axes.reduce((a, b) => (mesh.scale[a] <= mesh.scale[b] ? a : b))
+    for (const axis of axes) if (axis !== thin) mesh.scale[axis] *= spread
+    // Area went up by `spread` squared, so radiance comes down by the same,
+    // and the total light in the room is where it was.
+    mat.emissiveIntensity = intensity / (spread * spread)
+  })
+}
+
+/**
+ * The soft disc of light behind the character.
+ *
+ * Radial, smooth, and with no edge anywhere in it — a falloff that reaches zero
+ * before the quad does, so what the viewer sees is a glow rather than a sprite
+ * with a rim. Generated rather than shipped for the same reason the environment
+ * is: it is four lines of maths and it would otherwise be a PNG in the bundle.
+ */
+function glowTexture(): THREE.DataTexture {
+  const S = 128
+  const data = new Uint8Array(S * S * 4)
+  for (let y = 0; y < S; y++) {
+    for (let x = 0; x < S; x++) {
+      const dx = ((x + 0.5) / S) * 2 - 1
+      const dy = ((y + 0.5) / S) * 2 - 1
+      const r = Math.min(1, Math.hypot(dx, dy))
+      // Squared falloff with a soft shoulder. A linear one has a visible edge
+      // where it meets zero; this one arrives there without announcing it.
+      const a = Math.pow(1 - r, 2.4)
+      const i = (y * S + x) * 4
+      data[i] = 255
+      data[i + 1] = 255
+      data[i + 2] = 255
+      data[i + 3] = Math.round(a * 255)
+    }
+  }
+  const tex = new THREE.DataTexture(data, S, S, THREE.RGBAFormat, THREE.UnsignedByteType)
+  tex.needsUpdate = true
+  return tex
+}
+
+/**
+ * How bright the state glow is allowed to get, and how large.
+ *
+ * **Deliberately below the orb on both counts.** The orb is the system-state
+ * indicator on the landing and this is the same channel rendered a second way;
+ * a backlight that competes with it would leave two things of equal weight
+ * reporting one fact, which is the defect the 13 August narrowing was written
+ * to stop. Reading as an atmosphere the character sits in, rather than as an
+ * indicator of its own, is what keeps the orb the thing that is trusted.
+ *
+ * The radius is a multiple of the head's height so it scales with whatever
+ * avatar is loaded, the same rule the camera framing follows.
+ */
+const GLOW_RADIUS = 2.7
+
+/** Overridable as `?glow=`, because "not as bright as the orb" is a judgement
+ *  about how it looks beside the orb and cannot be reasoned to a number. */
+function glowOpacity(): number {
+  const raw = Number(new URLSearchParams(window.location.search).get('glow'))
+  return Number.isFinite(raw) && raw >= 0 ? raw : 0.5
+}
+
+/** The world-space box a loaded model actually occupies, as one readable line. */
 
 /** The world-space box a loaded model actually occupies, as one readable line. */
 function boundsLine(o: THREE.Object3D | null): string {
@@ -170,6 +329,9 @@ export default function RobotAvatar({ px = 320, src = '/avatars/zaram-robo.glb' 
      *  were dropped from every clip and have to be posed instead. */
     let posedFingers = false
     let eyes: FacePanel | null = null
+    /** The soft disc behind the character, coloured by state. Built once the
+     *  model is measured, because its size and height come from the head. */
+    let glow: THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicMaterial> | null = null
     let framing = 'not measured'
     let mouth: FacePanel | null = null
     const bags = new Map<EmbodimentState, ShuffleBag<string>>()
@@ -192,14 +354,16 @@ export default function RobotAvatar({ px = 320, src = '/avatars/zaram-robo.glb' 
     renderer.toneMappingExposure = 0.88
     mount.appendChild(renderer.domElement)
 
-    // A metal with nothing to reflect renders black. `RoomEnvironment` is
-    // generated from geometry in this process — no image, no fetch, nothing
-    // added to the installer — which is what lets the visor and the armour
-    // carry reflections without breaking the rule that nothing is downloaded.
-    // An .hdr would be several megabytes, and if it were ever fetched rather
-    // than bundled it would be a request no gate in this product can see.
+    // A metal with nothing to reflect renders black. The environment is
+    // generated in this process — no image, no fetch, nothing added to the
+    // installer — which is what lets the visor and the armour carry reflections
+    // without breaking the rule that nothing is downloaded. An .hdr would be
+    // several megabytes, and if it were ever fetched rather than bundled it
+    // would be a request no gate in this product can see.
     const pmrem = new THREE.PMREMGenerator(renderer)
-    const envRT = pmrem.fromScene(new RoomEnvironment(), 0.04)
+    const room = new RoomEnvironment()
+    softenAreaLights(room, lightSpread())
+    const envRT = pmrem.fromScene(room)
     scene.environment = envRT.texture
     // Slightly under neutral, because the character is glossy black and the
     // environment is what gives black armour its form — too much and the
@@ -208,7 +372,13 @@ export default function RobotAvatar({ px = 320, src = '/avatars/zaram-robo.glb' 
     // only a shiny blob, it looked like a black body lost against a black
     // backdrop, and the real cause was a collapsed skeleton hiding everything
     // below the helmet. Brightness was never the problem.
-    scene.environmentIntensity = 0.32
+    // **Held low deliberately, and lower than it used to be.** The environment
+    // is what makes the character *reflective*, and the key art it is matched
+    // against is soft and diffuse rather than mirror-like — black fabric and
+    // matte armour with glowing accents, not chrome. Brightness comes from the
+    // lights instead, which is the split that lets the body read while the visor
+    // stays dark enough for the LEDs to carry.
+    scene.environmentIntensity = envIntensity()
 
     // Debug only: a flat backdrop makes the silhouette obvious when the
     // question is *where* the model is rather than how it looks.
@@ -220,17 +390,26 @@ export default function RobotAvatar({ px = 320, src = '/avatars/zaram-robo.glb' 
     // hard white specular streak straight across the face — the one surface
     // whose job is to be read. Moved up and back so the highlight lands on the
     // crown of the helmet instead.
-    const key = new THREE.DirectionalLight(0xffffff, 1.15)
+    // **Brightness comes from the lights, not from the environment**, and that
+    // split is the whole reason the character can be lit and still wear a black
+    // visor. Raising `environmentIntensity` lifts everything the environment
+    // touches, and the visor is a near-mirror, so it goes milky long before the
+    // armour looks lit — measured on the way here: readable body at 2.0, frosted
+    // glass at 3.2. A directional light lands on the armour's diffuse and misses
+    // the visor, because the key sits above and to the side precisely so its
+    // specular falls on the crown of the helmet instead of the face.
+    const lit = lightScale()
+    const key = new THREE.DirectionalLight(0xffffff, 1.15 * lit)
     key.position.set(1.3, 1.9, 0.35)
     scene.add(key)
     // A cool fill from the far side, kept low and pushed behind the shoulder
     // line. It exists to separate the arms from the torso on a character that
     // is black on black; anything more frontal than this just adds a second
     // reflection to the visor.
-    const fill = new THREE.DirectionalLight(0xa8c0ff, 0.3)
+    const fill = new THREE.DirectionalLight(0xa8c0ff, 0.3 * lit)
     fill.position.set(-1.5, 0.7, -0.4)
     scene.add(fill)
-    scene.add(new THREE.AmbientLight(0xffffff, 0.34))
+    scene.add(new THREE.AmbientLight(0xffffff, 0.34 * lit))
     const rim = new THREE.DirectionalLight(RIM_COLOUR.idle, 2.2)
     rim.position.set(-1.4, 0.6, -1)
     scene.add(rim)
@@ -250,6 +429,8 @@ export default function RobotAvatar({ px = 320, src = '/avatars/zaram-robo.glb' 
 
     const clock = new THREE.Clock()
     let blinkAt = 2 + Math.random() * 3
+    let smileAt = SMILE_GAP_MIN + Math.random() * (SMILE_GAP_MAX - SMILE_GAP_MIN)
+    let smileFor = 0
     const rimTarget = new THREE.Color()
 
     // ----------------------------------------------------------------- face
@@ -432,8 +613,8 @@ export default function RobotAvatar({ px = 320, src = '/avatars/zaram-robo.glb' 
         const mat = mesh.material as THREE.Material | undefined
         if (!(mesh as THREE.Mesh).isMesh || !mat || Array.isArray(mat)) return
         const name = (mat.name || '').toLowerCase()
-        if (!eyes && name.includes('eye')) eyes = preparePanel(mesh, '/avatars/face/eyes_atlas_3x2_alpha.png')
-        else if (!mouth && name.includes('mouth')) mouth = preparePanel(mesh, '/avatars/face/mouth_atlas_3x2_alpha.png')
+        if (!eyes && name.includes('eye')) eyes = preparePanel(mesh, '/avatars/face/eyes_atlas_3x3_alpha.png')
+        else if (!mouth && name.includes('mouth')) mouth = preparePanel(mesh, '/avatars/face/mouth_atlas_3x3_alpha.png')
       })
 
       scene.add(root)
@@ -477,6 +658,51 @@ export default function RobotAvatar({ px = 320, src = '/avatars/zaram-robo.glb' 
       camera.position.set(0, centreY, dist)
       camera.lookAt(0, centreY, 0)
       framing = `head ${headBase.y.toFixed(3)}-${headTop.toFixed(3)}m (${headHeight.toFixed(3)}m), centre ${centreY.toFixed(3)}m, camera z ${dist.toFixed(3)}m`
+
+      // The state glow, behind the character and facing the camera.
+      //
+      // Sized and placed off the measured head rather than off constants, the
+      // same rule the camera follows, so an avatar of another scale gets a glow
+      // in proportion instead of a halo or a dot. Behind the model's own depth
+      // so it never washes over the shell — additive blending on top of the
+      // character would lift the black armour and cost the silhouette.
+      const glowRadius = headHeight * GLOW_RADIUS
+      glow = new THREE.Mesh(
+        new THREE.PlaneGeometry(glowRadius * 2, glowRadius * 2),
+        new THREE.MeshBasicMaterial({
+          map: glowTexture(),
+          transparent: true,
+          depthWrite: false,
+          // **Depth-tested, and it has to be.** Transparent objects draw after
+          // opaque ones, so with the test off the glow paints straight over the
+          // character it is supposed to be behind — the chest went hazy and the
+          // armour lost its black. Tested against the depth the character has
+          // already written, it is occluded exactly where the character is,
+          // which is what "behind" means. It still writes no depth of its own,
+          // so it occludes nothing.
+          depthTest: true,
+          // **Normal, not additive, and the canvas is why.** The renderer draws
+          // on a transparent canvas that the landing composites over its own
+          // background, and additive blending contributes colour without ever
+          // building alpha — so an additive glow is mathematically present and
+          // completely invisible to the page behind it. It looked like the mesh
+          // had failed to build.
+          blending: THREE.NormalBlending,
+          toneMapped: false,
+          opacity: glowOpacity(),
+        }),
+      )
+      // Below the head's own centre, so it reads as light behind the character
+      // rather than as a halo around its helmet. Centred on the head it looked
+      // like a saint; dropped towards the chest it looks like the character is
+      // standing in front of something.
+      glow.position.set(
+        0,
+        centreY - headHeight * 0.55,
+        box.isEmpty() ? -0.4 : box.min.z - glowRadius * 0.25,
+      )
+      glow.renderOrder = -1
+      scene.add(glow)
 
       // Captured before a single clip plays, because that is the only moment
       // the skeleton is still in its authored rest pose — once an action runs,
@@ -781,6 +1007,18 @@ export default function RobotAvatar({ px = 320, src = '/avatars/zaram-robo.glb' 
       rimTarget.setHex(RIM_COLOUR[s])
       rim.color.lerp(rimTarget, k)
       rim.intensity = THREE.MathUtils.lerp(rim.intensity, s === 'swapping' ? 1.1 : 2.2, k)
+      // The glow rides the same eased colour as the rim, off the same table, so
+      // the two can never disagree about what state the system is in. Dimmer
+      // while swapping for the same reason the rim is: a swap is the one state
+      // that should read as the character receding rather than working.
+      if (glow) {
+        glow.material.color.copy(rim.color)
+        glow.material.opacity = THREE.MathUtils.lerp(
+          glow.material.opacity,
+          s === 'swapping' ? glowOpacity() * 0.5 : glowOpacity(),
+          k,
+        )
+      }
 
       // A state change draws a fresh variant, so returning to idle after a
       // reply is a different idle than the one before it.
@@ -806,10 +1044,26 @@ export default function RobotAvatar({ px = 320, src = '/avatars/zaram-robo.glb' 
       // playback position, not a cycle — `audio.currentTime` is the clock,
       // because an elapsed counter drifts the moment audio buffers.
       const { audio, track } = useSpeechStore.getState()
-      let shape: Viseme = 'sil'
+      let shape: MouthCell = 'sil'
       if (s === 'speaking' && audio && track.length > 0) shape = visemeAt(track, audio.currentTime)
       else if (s === 'speaking') shape = Math.sin(now * 9) > 0 ? 'aa' : 'ih'
-      showCell(mouth, MOUTH_CELLS.indexOf(shape as MouthCell))
+      else if (s === 'idle') {
+        // Only while idle, and the timer is reset on the way out rather than
+        // paused: a smile half-finished when a reply arrives should not be
+        // waiting to resume over the answer.
+        smileAt -= dt
+        if (smileAt <= 0) {
+          smileFor = SMILE_SECONDS
+          smileAt = SMILE_GAP_MIN + Math.random() * (SMILE_GAP_MAX - SMILE_GAP_MIN)
+        }
+        if (smileFor > 0) {
+          smileFor -= dt
+          shape = 'smile'
+        }
+      } else {
+        smileFor = 0
+      }
+      showCell(mouth, MOUTH_CELLS.indexOf(shape))
 
       renderer.render(scene, camera)
     }
