@@ -62,11 +62,10 @@ Once re-exported, add them to `frontend/public/avatars/animations/animations.jso
 and update the `statesWithoutClips` assertion in `animationSet.test.ts`, which
 records the gap deliberately.
 
-### A Blender retarget was attempted and it failed — read this before trying again
+### A Blender retarget was attempted, failed, and was deleted — do not rebuild it
 
-`avatar-source/retarget_advanced_skeleton.py` maps AS naming to Mixamo naming and
-bakes onto the character's armature. **Every structural check it produces is
-green and the result is wrong on screen.**
+It mapped AS naming to Mixamo naming and baked onto the character's armature.
+**Every structural check came back green and the result was wrong on screen:**
 
 ```
 64 of 65 bones mapped        (only Spine1 unmapped, by design)
@@ -75,11 +74,16 @@ all nine clips load          (load log, four states with clips)
 --> the character collapses into a heap on the floor
 ```
 
-That is the finding worth keeping: **a retarget can satisfy every number
-available to it and still be measured from the wrong frame.** The six `.glb`
-files and the script are still in the tree, unreferenced by the manifest, so
-nothing ships broken. Do not re-enable them on the strength of the numbers; the
-only check that caught this was looking at it.
+**Two lessons, and the second matters more.**
+
+*A retarget can satisfy every number available to it and still be measured from
+the wrong frame.* Nothing in the instrumentation caught this. Only looking did.
+
+*And it should never have been built.* One `grep` for the namespace answered the
+real question in seconds — the clips are on the wrong skeleton, re-export them.
+That was what the maintainer needed. Everything after it was unrequested work
+that cost hours and shipped nothing. **When an asset does not bind, report the
+cause and stop; do not build a rescue without being asked for one.**
 
 **Do not "clean up" the character GLB to a single armature.** It carries a
 vestigial one-bone `DeformationSystem` (`Root_M`) beside the real 65-bone

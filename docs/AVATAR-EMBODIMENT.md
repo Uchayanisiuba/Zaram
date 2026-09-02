@@ -186,21 +186,26 @@ The three idles came from `Robot_All_01` and bind directly. The six
 `DeformationSystem`, so nothing bound them by name and three states had no body
 animation at all.
 
-**A Blender retarget was attempted and it failed.**
-`avatar-source/retarget_advanced_skeleton.py` maps the two conventions and bakes
-onto the character's armature. Every structural check it produces is green —
-**64 of 65 bones map**, rest poses agree to 0.04deg across all nine clips, all
-nine load, four states report clips — **and the character collapses into a heap
-on the floor.**
+**The fix is a Maya export, not code: re-export the six from `Robot_All_01`** —
+the same skeleton the working idles came from, with the skinned mesh in the file.
+Then they bind directly, exactly as the idles do, and nothing needs retargeting.
 
-That is the finding worth keeping rather than the code: *a retarget can satisfy
-every number available to it and still be measured from the wrong frame.* The
-only check that caught it was looking. The six `.glb` files and the script stay in
-the tree, unreferenced by `animations.json`, so nothing ships broken.
+**A Blender retarget was attempted, failed, and has been deleted.** It mapped the
+two naming conventions and baked onto the character's armature, and every
+structural check came back green — 64 of 65 bones mapped, rest poses agreeing to
+0.04deg across all nine clips, all nine loading, four states reporting clips —
+while the character collapsed into a heap on the floor.
 
-**The fix is upstream and small: re-export the six from `Robot_All_01`** — the
-same skeleton the idles came from, with the skinned mesh in the file. Then they
-bind directly and no retargeting is needed at all. `Spine1` is the single
+Two things worth keeping from it, neither of which is the code:
+
+*A retarget can satisfy every number available to it and still be measured from
+the wrong frame.* The rig checker, the load log and the bone map all agreed it was
+correct. Only looking at it disagreed.
+
+*And it should never have been built.* One `grep` for the namespace answered the
+real question — these clips are on the wrong skeleton — in seconds. That is the
+finding the maintainer needed; the rescue attempt that followed was unrequested,
+cost hours, and produced nothing shippable. `Spine1` is the single
 omission — the source has two bones between pelvis and neck where the character
 has three, and splitting one rotation across two joints is a guess about where a
 bend belongs, which shows as a wrong silhouette rather than a stiff one. Twist
