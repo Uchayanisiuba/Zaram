@@ -65,7 +65,7 @@ PANELS = {
     },
     "eyes": {
         "atlas": "eyes_atlas_3x3_alpha.png",
-        "cells": ["open", "blink", "thinking", "listening", "swapping", "warming"],
+        "cells": ["open", "blink", "thinking", "listening", "swapping", "warming", "happy"],
         "material": "eye",
         # **Measured and deliberately left alone.** The eye island clips three
         # frames by 3px, and closing that would pull its texel aspect from 1.005

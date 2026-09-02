@@ -34,7 +34,7 @@ const ROWS = 3
 export const CELL_W = 1 / COLS
 export const CELL_H = 1 / ROWS
 
-export type EyeCell = 'open' | 'blink' | 'thinking' | 'listening' | 'swapping' | 'warming'
+export type EyeCell = 'open' | 'blink' | 'thinking' | 'listening' | 'swapping' | 'warming' | 'happy'
 export type MouthCell = 'sil' | 'aa' | 'ih' | 'ou' | 'ee' | 'oh' | 'smile'
 
 /** Cell order within each atlas, top-left to bottom-right *in UV terms*.
@@ -42,7 +42,9 @@ export type MouthCell = 'sil' | 'aa' | 'ih' | 'ou' | 'ee' | 'oh' | 'smile'
  *  Index 0 is the rest state on both atlases, deliberately: it is what shows
  *  when nothing has asked for anything, so a face with no driver attached is a
  *  calm face rather than a garbled one. */
-export const EYE_CELLS: EyeCell[] = ['open', 'blink', 'thinking', 'listening', 'swapping', 'warming']
+/** `happy` is the eyes' half of the idle smile — not a state, and like `smile`
+ *  it lives at the end so the six state cells keep their authored indices. */
+export const EYE_CELLS: EyeCell[] = ['open', 'blink', 'thinking', 'listening', 'swapping', 'warming', 'happy']
 /** `smile` is the one cell here that is not a viseme. It is an idle expression,
  *  never reachable from `visemeAt`, and it lives at the end so the six speech
  *  shapes keep the indices they were authored at. */

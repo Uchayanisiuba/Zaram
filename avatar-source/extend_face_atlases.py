@@ -46,7 +46,7 @@ NEW_ROWS = 3
 MANIFEST = os.path.join(FACE, "manifest.json")
 
 MOUTH_CELLS = ["sil", "aa", "ih", "ou", "ee", "oh", "smile"]
-EYE_CELLS = ["open", "blink", "thinking", "listening", "swapping", "warming"]
+EYE_CELLS = ["open", "blink", "thinking", "listening", "swapping", "warming", "happy"]
 
 
 def cell_origin(index, rows):
@@ -112,6 +112,49 @@ def draw_smile(img, index, pitch, radius, colour, supersample):
     img.paste(cell, (ox, oy))
 
 
+def draw_happy_eyes(img, index, pitch, radius, colour, supersample):
+    """Smiling eyes: each eye narrowed to an upward arc.
+
+    **This is the convention, not an invention.** Across social robots that
+    express with screens rather than faces — Cozmo, Vector, Eilik — a happy eye
+    is the neutral eye narrowed with its lower lid pushed up into a curve, which
+    on a low-resolution panel resolves to an upward arc. It is the same thing the
+    `^ ^` emoticon abbreviates, and it is what the real muscle does: a genuine
+    smile raises the lower lid and squeezes the eye into a crescent, which is why
+    a smile with unchanged eyes reads as insincere.
+
+    Drawn on the same 8 columns each open eye already occupies, so the arcs sit
+    exactly where the eyes were rather than appearing beside them. Three dot rows
+    thick, which is what keeps it distinct from `blink` — a two-row flat line at
+    the same height. A thin arc would read as a blink caught mid-frame.
+    """
+    ox, oy = cell_origin(index, NEW_ROWS)
+
+    # Columns measured off the shipped `open` cell: x 32..95 and 160..223, which
+    # on an 8px lattice is cols 4..11 and 20..27.
+    eyes = [range(4, 12), range(20, 28)]
+    # Ends at row 17, centre at 13. Kept above row 20 because the eye patch's UV
+    # island stops at cell row 165 and anything below it is simply not drawn.
+    rows = [17, 15, 14, 13, 13, 14, 15, 17]
+    thickness = 3
+
+    s = supersample
+    layer = Image.new("RGBA", (CELL * s, CELL * s), (0, 0, 0, 0))
+    d = ImageDraw.Draw(layer)
+    for cols in eyes:
+        for col, top in zip(cols, rows):
+            for row in range(top, top + thickness):
+                cx = (col * pitch + pitch // 2) * s
+                cy = (row * pitch + pitch // 2) * s
+                r = radius * s
+                d.ellipse([cx - r, cy - r, cx + r, cy + r], fill=colour + (255,))
+    layer = layer.resize((CELL, CELL), Image.LANCZOS)
+
+    cell = Image.new("RGBA", (CELL, CELL), (0, 0, 0, 255))
+    cell.alpha_composite(layer)
+    img.paste(cell, (ox, oy))
+
+
 def main():
     manifest = json.load(open(MANIFEST))
     pitch = manifest["pitch"]
@@ -139,6 +182,8 @@ def main():
             note = "migrated"
         if name == "mouth":
             draw_smile(out, cells.index("smile"), pitch, radius, colour, supersample)
+        else:
+            draw_happy_eyes(out, cells.index("happy"), pitch, radius, colour, supersample)
         out.save(new)
         print("[face] %s %s (%d cells)" % (note, os.path.basename(new), len(cells)))
 
