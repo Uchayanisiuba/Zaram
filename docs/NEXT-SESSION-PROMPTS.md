@@ -154,4 +154,4 @@ the load log is the only place that would tell you.
 > else.
 >
 > Debug switches: `?noAnim=1`, `?headFraction=0.9`, `?smileEvery=4`,
-> `?envIntensity=1.8`, `?rough=2.1`, `?glow=1`, `?avatarBg=%23404858`.
+> `?envIntensity=1.8`, `?rough=2.1`, `?normal=1`, `?glow=0.35`, `?avatarBg=%23404858`.
