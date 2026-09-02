@@ -241,7 +241,7 @@ function frameFraction(): number {
  *  looking — too low and a glossy black character is a silhouette, too high and
  *  the helmet goes silver. */
 function envIntensity(): number {
-  return numberParam('envIntensity', 1.8, 0)
+  return numberParam('envIntensity', 1.4, 0)
 }
 
 /**
@@ -254,6 +254,19 @@ function envIntensity(): number {
  *
  * Overridable as `?lightScale=`.
  */
+/**
+ * A multiplier on the rim light, for looking at what it contributes.
+ *
+ * **Separate from `lightScale` on purpose, and defaulting to 1.** The rim is the
+ * state channel — slate at rest, cyan while working — and its brightness is part
+ * of how a state reads, so it must not move when the room does. This knob exists
+ * to answer "is the rim doing anything", which on a character lit mostly by its
+ * environment is a fair question, and not to tune it away.
+ */
+function rimScale(): number {
+  return numberParam('rim', 1, 0)
+}
+
 function lightScale(): number {
   return numberParam('lightScale', 0.25, 0.01)
 }
@@ -404,9 +417,15 @@ function glowTexture(): THREE.DataTexture {
       const dx = ((x + 0.5) / S) * 2 - 1
       const dy = ((y + 0.5) / S) * 2 - 1
       const r = Math.min(1, Math.hypot(dx, dy))
-      // Squared falloff with a soft shoulder. A linear one has a visible edge
-      // where it meets zero; this one arrives there without announcing it.
-      const a = Math.pow(1 - r, 2.4)
+      // **A gentle falloff, because the size is capped and opacity saturates.**
+      // The disc has to fit inside the frustum or it clips against the canvas,
+      // and `material.opacity` stops doing anything above 1 — measured, 1.6 and
+      // 2.6 render identically. So the only remaining way to make the glow read
+      // is to fill more of the radius it is allowed: a 2.4 exponent concentrates
+      // almost everything in the middle and leaves the outer half nearly empty.
+      // 1.4 spreads it while still arriving at exactly zero on the edge, which is
+      // what keeps the boundary invisible.
+      const a = Math.pow(1 - r, 1.4)
       const i = (y * S + x) * 4
       data[i] = 255
       data[i + 1] = 255
@@ -443,7 +462,7 @@ const GLOW_RADIUS = 2.7
  *  build, which is exactly how it was first reported. A dimmer default is only
  *  restraint if the restraint can be seen. */
 function glowOpacity(): number {
-  return numberParam('glow', 0.35, 0)
+  return numberParam('glow', 0.85, 0)
 }
 
 /** The world-space box a loaded model actually occupies, as one readable line. */
@@ -579,7 +598,8 @@ export default function RobotAvatar({ px = 320, src = '/avatars/zaram-robo.glb' 
     fill.position.set(-1.5, 0.7, -0.4)
     scene.add(fill)
     scene.add(new THREE.AmbientLight(0xffffff, 0.34 * lit))
-    const rim = new THREE.DirectionalLight(RIM_COLOUR.idle, 2.2)
+    const rimGain = rimScale()
+    const rim = new THREE.DirectionalLight(RIM_COLOUR.idle, 2.2 * rimGain)
     rim.position.set(-1.4, 0.6, -1)
     scene.add(rim)
 
@@ -893,10 +913,11 @@ export default function RobotAvatar({ px = 320, src = '/avatars/zaram-robo.glb' 
       // wrong with the gradient.
       //
       // So take whichever is smaller: the head-relative size, or what actually
-      // fits. The `0.9` leaves the outer tenth of the falloff inside the frame,
-      // because a gradient truncated at 10% opacity still shows an edge.
+      // fits. The margin can be small because the falloff reaches *exactly* zero
+      // at the inscribed circle — there is no residue to cut — and every pixel of
+      // slack is glow the viewer does not get.
       const glowZ = box.isEmpty() ? -0.4 : box.min.z - headHeight * GLOW_RADIUS * 0.25
-      const glowHalfExtent = Math.tan(fov / 2) * (dist - glowZ) * 0.9
+      const glowHalfExtent = Math.tan(fov / 2) * (dist - glowZ) * 0.98
       const glowRadius = Math.min(headHeight * GLOW_RADIUS, glowHalfExtent)
       glow = new THREE.Mesh(
         new THREE.PlaneGeometry(glowRadius * 2, glowRadius * 2),
@@ -1234,7 +1255,7 @@ export default function RobotAvatar({ px = 320, src = '/avatars/zaram-robo.glb' 
       const k = approachRate(dt, RIM_EASE_SECONDS)
       rimTarget.setHex(RIM_COLOUR[s])
       rim.color.lerp(rimTarget, k)
-      rim.intensity = THREE.MathUtils.lerp(rim.intensity, s === 'swapping' ? 1.1 : 2.2, k)
+      rim.intensity = THREE.MathUtils.lerp(rim.intensity, (s === 'swapping' ? 1.1 : 2.2) * rimGain, k)
       // The glow rides the same eased colour as the rim, off the same table, so
       // the two can never disagree about what state the system is in. Dimmer
       // while swapping for the same reason the rim is: a swap is the one state
