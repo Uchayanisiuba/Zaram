@@ -6,6 +6,7 @@
  *
  * Architecture: Reads orbStore for state, renders globe image with dynamic effects.
  */
+import { STATE_PULSE } from '@/lib/embodimentPulse';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useOrbStore } from '@/stores';
 import { useIsReducedMotion } from '@/hooks/useReducedMotion';
@@ -89,8 +90,12 @@ interface StateConfig {
   // maintained across five states for no effect — the same shape as this
   // repository's unreachable modules, in config rather than in code. Removed
   // from the type first, so the compiler named every state that had to change.
-  scale: number[];
-  scaleDuration: number;
+  // `scale` and `scaleDuration` were here and are now read from `STATE_PULSE`,
+  // which `RobotAvatar` reads too. Left in place they would be five more sets of
+  // numbers maintained for no effect — the same defect this type already had
+  // once, with `ring1Duration` and `ring2Duration`, and removed for the same
+  // reason: take it out of the type first, so the compiler names every state
+  // that has to change.
   filter: string;
 }
 
@@ -101,45 +106,50 @@ interface StateConfig {
 // orb at runtime, with nothing failing at build time. This is the same remedy
 // M6 applied to the surface list — let the compiler name every file that needs
 // an entry.
+// `glowColor` and `scale`/`scaleDuration` are **derived from `STATE_PULSE`**
+// rather than written here, because `RobotAvatar` renders the same five states
+// and `CLAUDE.md` is explicit that two renderers reporting one state in
+// different colours is a defect. They did disagree — the avatar had one cyan
+// where this file has violet, emerald and cyan — and nothing would ever have
+// caught it, because the two components shared no code. The remaining entries
+// are orb-only chrome: a second glow stop, two rings and a drop shadow that the
+// avatar has no equivalent for.
+const glowOf = (state: OrbState, alpha: number) => {
+  const c = STATE_PULSE[state].colour
+  return `rgba(${(c >> 16) & 255},${(c >> 8) & 255},${c & 255},${alpha})`
+}
+
 const STATE_CONFIG: Record<OrbState, StateConfig> = {
   idle: {
-    glowColor: 'rgba(99,102,241,0.30)',
+    glowColor: glowOf('idle', 0.30),
     glowColor2: 'rgba(168,85,247,0.18)',
     ring1Color: 'rgba(34,211,238,0.18)',
     ring2Color: 'rgba(168,85,247,0.28)',
-    scale: [1, 1.06, 1],
     // 8s, up from 5s. Idle has no ripples — the pulse the eye reads as one is
     // this breath — and on the landing state it runs continuously, forever,
     // behind whatever the user is actually doing. `UI-SPEC`: calm over
     // delight, and motion has a budget.
-    scaleDuration: 8,
     filter: 'drop-shadow(0 0 28px rgba(99,102,241,0.45))',
   },
   listening: {
-    glowColor: 'rgba(34,211,238,0.45)',
+    glowColor: glowOf('listening', 0.45),
     glowColor2: 'rgba(6,182,212,0.28)',
     ring1Color: 'rgba(34,211,238,0.40)',
     ring2Color: 'rgba(99,102,241,0.35)',
-    scale: [1.08, 1.14, 1.08],
-    scaleDuration: 2,
     filter: 'drop-shadow(0 0 36px rgba(34,211,238,0.65))',
   },
   thinking: {
-    glowColor: 'rgba(168,85,247,0.45)',
+    glowColor: glowOf('thinking', 0.45),
     glowColor2: 'rgba(99,102,241,0.32)',
     ring1Color: 'rgba(168,85,247,0.40)',
     ring2Color: 'rgba(34,211,238,0.35)',
-    scale: [1, 1.05, 1.02, 1.07, 1],
-    scaleDuration: 1.6,
     filter: 'drop-shadow(0 0 40px rgba(168,85,247,0.65))',
   },
   speaking: {
-    glowColor: 'rgba(16,185,129,0.35)',
+    glowColor: glowOf('speaking', 0.35),
     glowColor2: 'rgba(34,211,238,0.28)',
     ring1Color: 'rgba(16,185,129,0.35)',
     ring2Color: 'rgba(34,211,238,0.30)',
-    scale: [1, 1.04, 1.08, 1.04, 1],
-    scaleDuration: 1,
     filter: 'drop-shadow(0 0 32px rgba(16,185,129,0.55))',
   },
   // Dimmer and slower than every other state, deliberately.
@@ -155,12 +165,10 @@ const STATE_CONFIG: Record<OrbState, StateConfig> = {
   // a swap is neither. Spending one of them here would break a meaning that is
   // reused precisely so it needs no legend.
   swapping: {
-    glowColor: 'rgba(100,116,139,0.30)',
+    glowColor: glowOf('swapping', 0.30),
     glowColor2: 'rgba(71,85,105,0.20)',
     ring1Color: 'rgba(148,163,184,0.22)',
     ring2Color: 'rgba(100,116,139,0.28)',
-    scale: [1, 1.03, 1],
-    scaleDuration: 4,
     filter: 'drop-shadow(0 0 20px rgba(100,116,139,0.35))',
   },
 };
@@ -205,7 +213,7 @@ const LivingOrb = ({
 
   // Deepen or soften the breath without altering its timing. The per-state
   // values are deviations from 1, so only the distance from 1 is scaled.
-  const scaleKeyframes = (cfg.scale as number[]).map(
+  const scaleKeyframes = ([...STATE_PULSE[state].pulse] as number[]).map(
     (v) => 1 + (v - 1) * pulseAmplitude,
   );
 
@@ -233,7 +241,7 @@ const LivingOrb = ({
           scale: frames(scaleKeyframes, reduced),
           opacity: frames(state === 'idle' ? [0.7, 1, 0.7] : [0.8, 1, 0.8], reduced),
         }}
-        transition={loop(cfg.scaleDuration, reduced)}
+        transition={loop(STATE_PULSE[state].pulseSeconds, reduced)}
       />
 
       {/* Thinking multi-color pulse overlay */}
@@ -365,7 +373,7 @@ const LivingOrb = ({
           // that carries meaning without moving.
           opacity: state === 'swapping' ? frames([0.85, 0.5, 0.85], reduced) : 1,
         }}
-        transition={loop(cfg.scaleDuration, reduced)}
+        transition={loop(STATE_PULSE[state].pulseSeconds, reduced)}
       />
 
       {/* Inner pulse dot. Shown by rendered diameter rather than preset name:
