@@ -1,0 +1,30 @@
+{
+  "cell_px": 256,
+  "instruction": "Map each face patch's UV island to the FULL cell, corner to corner (the red border in the template). Keep the patch's world aspect square, because the cell is square \u2014 a non-square patch stretches the dot grid. The union box shows where content actually falls; everything outside it is transparent margin and is meant to be.",
+  "eyes": {
+    "union_px": [
+      24,
+      72,
+      231,
+      167
+    ],
+    "union_size_px": [
+      208,
+      96
+    ],
+    "union_aspect": 2.1667
+  },
+  "mouth": {
+    "union_px": [
+      40,
+      80,
+      215,
+      191
+    ],
+    "union_size_px": [
+      176,
+      112
+    ],
+    "union_aspect": 1.5714
+  }
+}

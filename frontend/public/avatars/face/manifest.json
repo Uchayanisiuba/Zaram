@@ -1,0 +1,127 @@
+{
+  "alpha": 255,
+  "atlases": {
+    "eyes": {
+      "expressions": {
+        "blink": {
+          "index": 1,
+          "offset": [
+            0.3333333333333333,
+            0.0
+          ]
+        },
+        "listening": {
+          "index": 3,
+          "offset": [
+            0.0,
+            0.5
+          ]
+        },
+        "open": {
+          "index": 0,
+          "offset": [
+            0.0,
+            0.0
+          ]
+        },
+        "swapping": {
+          "index": 4,
+          "offset": [
+            0.3333333333333333,
+            0.5
+          ]
+        },
+        "thinking": {
+          "index": 2,
+          "offset": [
+            0.6666666666666666,
+            0.0
+          ]
+        },
+        "warming": {
+          "index": 5,
+          "offset": [
+            0.6666666666666666,
+            0.5
+          ]
+        }
+      },
+      "filename": "eyes_atlas_3x2.png",
+      "size": [
+        768,
+        512
+      ]
+    },
+    "mouth": {
+      "expressions": {
+        "aa": {
+          "index": 1,
+          "offset": [
+            0.3333333333333333,
+            0.0
+          ]
+        },
+        "ee": {
+          "index": 4,
+          "offset": [
+            0.3333333333333333,
+            0.5
+          ]
+        },
+        "ih": {
+          "index": 2,
+          "offset": [
+            0.6666666666666666,
+            0.0
+          ]
+        },
+        "oh": {
+          "index": 5,
+          "offset": [
+            0.6666666666666666,
+            0.5
+          ]
+        },
+        "ou": {
+          "index": 3,
+          "offset": [
+            0.0,
+            0.5
+          ]
+        },
+        "sil": {
+          "index": 0,
+          "offset": [
+            0.0,
+            0.0
+          ]
+        }
+      },
+      "filename": "mouth_atlas_3x2.png",
+      "size": [
+        768,
+        512
+      ]
+    }
+  },
+  "background": "#000000",
+  "dim_colour": "#2D3157",
+  "dot_radius": 3,
+  "filtering": "linear + mipmaps",
+  "frame": {
+    "height": 256,
+    "width": 256
+  },
+  "grid": {
+    "cols": 32,
+    "rows": 32
+  },
+  "lit_colour": "#818cf8",
+  "pitch": 8,
+  "repeat": [
+    0.3333333333333333,
+    0.5
+  ],
+  "supersample": 4,
+  "version": "zaram-led-face-v3"
+}
