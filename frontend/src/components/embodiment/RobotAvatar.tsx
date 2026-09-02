@@ -37,6 +37,35 @@ THREE.Cache.enabled = true
  * every variant of a state settles into the same read.
  */
 
+/**
+ * A number from the query string, or the fallback.
+ *
+ * **This exists because `Number(null)` is `0`, and that cost this session
+ * several hours of chasing lighting that was not the lighting.**
+ * `URLSearchParams.get` returns `null` for an absent key, `Number(null)` is `0`
+ * rather than `NaN`, and `0` is finite and `>= 0` — so every guard written as
+ * `Number.isFinite(raw) && raw >= 0 ? raw : fallback` silently returned **zero**
+ * whenever the parameter was missing, which is to say always, outside a debug
+ * URL.
+ *
+ * The failures it produced all looked like something else. The environment
+ * intensity read 0, so the character rendered black and the fix was assumed to
+ * be in the environment — four of them were rebuilt. The glow opacity read 0, so
+ * the glow was invisible and was assumed not to be rendering. The normal scale
+ * read 0, flattening the surface. Every one of those was diagnosed as a
+ * different bug, and passing the value explicitly in the URL "fixed" it each
+ * time, which is exactly what made the parameter look innocent.
+ *
+ * Guards written `raw > 0` escaped by accident, because `0 > 0` is false. That
+ * is not a defence, it is a coin toss, so every reader goes through here now.
+ */
+function numberParam(name: string, fallback: number, min = -Infinity): number {
+  const raw = new URLSearchParams(window.location.search).get(name)
+  if (raw === null) return fallback
+  const value = Number(raw)
+  return Number.isFinite(value) && value >= min ? value : fallback
+}
+
 /** The rim light is the state channel. Deliberately the same three values as
  *  `VrmAvatar` — two renderers reporting one state in different colours is the
  *  defect the 13 August narrowing was written to stop. */
@@ -93,8 +122,8 @@ const SMILE_GAP_MAX = 32
  *  alternative is editing a constant, rebuilding, and remembering to put it
  *  back — which is how a debug value ships. */
 function smileGap(): [number, number] {
-  const raw = Number(new URLSearchParams(window.location.search).get('smileEvery'))
-  return Number.isFinite(raw) && raw > 0 ? [raw, raw] : [SMILE_GAP_MIN, SMILE_GAP_MAX]
+  const every = numberParam('smileEvery', 0, 0.1)
+  return every > 0 ? [every, every] : [SMILE_GAP_MIN, SMILE_GAP_MAX]
 }
 
 /** How long a state change takes to cross into its new clip. Long enough to
@@ -140,8 +169,7 @@ const RIG_MATCH_TOLERANCE = 0.05
  *  rather than animated. Distal joints curl further, which is the difference
  *  between a relaxed hand and a flat one. */
 function fingerCurl(): number {
-  const raw = Number(new URLSearchParams(window.location.search).get('fingerCurl'))
-  return Number.isFinite(raw) && raw !== 0 ? raw : 0.32
+  return numberParam('fingerCurl', 0.32, 0.01)
 }
 
 /**
@@ -165,8 +193,29 @@ function fingerCurl(): number {
  * Overridable as `?rough=`; `1` is the material exactly as exported.
  */
 function roughnessBoost(): number {
-  const raw = Number(new URLSearchParams(window.location.search).get('rough'))
-  return Number.isFinite(raw) && raw > 0 ? raw : 2.1
+  return numberParam('rough', 2.1, 0.01)
+}
+
+/**
+ * How hard the normal map is applied, against the 1.0 the GLB asks for.
+ *
+ * **Left at 1, after 0.8 was tried and measured as a large regression.** The
+ * intuition was that the map's fine grain is authored for a close render and
+ * only reads as noise at the size the avatar occupies on the landing. What
+ * actually happens is that easing it back takes most of the shell's light with
+ * it: on a near-mirror surface the normal detail is what tilts micro-facets
+ * toward the bright half of the sky, and flattening it points them all at the
+ * dark ground instead. At 0.8 the helmet went from readable to nearly black,
+ * with everything else held constant.
+ *
+ * So this is a knob rather than a correction, and the default is the map as
+ * exported. Worth remembering that on a glossy asset the normal map is a
+ * *lighting* control, not only a detail one.
+ *
+ * Overridable as `?normal=`; `1` is the map exactly as exported, `0` disables it.
+ */
+function normalStrength(): number {
+  return numberParam('normal', 1, 0)
 }
 
 /** Atlas dimensions, needed to turn UV spans into texel counts. */
@@ -183,8 +232,8 @@ const ATLAS_H = 768
  * the fastest way to answer "which way is it facing and where is it standing".
  */
 function frameFraction(): number {
-  const raw = Number(new URLSearchParams(window.location.search).get('headFraction'))
-  return raw > 0.02 && raw <= 1 ? raw : 0.5
+  const value = numberParam('headFraction', 0.5, 0.02)
+  return value <= 1 ? value : 0.5
 }
 
 /** How hard the environment lights the armour. Overridable as `?envIntensity=`,
@@ -192,8 +241,7 @@ function frameFraction(): number {
  *  looking — too low and a glossy black character is a silhouette, too high and
  *  the helmet goes silver. */
 function envIntensity(): number {
-  const raw = Number(new URLSearchParams(window.location.search).get('envIntensity'))
-  return Number.isFinite(raw) && raw >= 0 ? raw : 1.8
+  return numberParam('envIntensity', 1.8, 0)
 }
 
 /**
@@ -207,8 +255,7 @@ function envIntensity(): number {
  * Overridable as `?lightScale=`.
  */
 function lightScale(): number {
-  const raw = Number(new URLSearchParams(window.location.search).get('lightScale'))
-  return Number.isFinite(raw) && raw > 0 ? raw : 1
+  return numberParam('lightScale', 1, 0.01)
 }
 
 /**
@@ -368,8 +415,7 @@ const GLOW_RADIUS = 2.7
  *  build, which is exactly how it was first reported. A dimmer default is only
  *  restraint if the restraint can be seen. */
 function glowOpacity(): number {
-  const raw = Number(new URLSearchParams(window.location.search).get('glow'))
-  return Number.isFinite(raw) && raw >= 0 ? raw : 1
+  return numberParam('glow', 0.35, 0)
 }
 
 /** The world-space box a loaded model actually occupies, as one readable line. */
@@ -716,15 +762,16 @@ export default function RobotAvatar({ px = 320, src = '/avatars/zaram-robo.glb' 
       // Dull the shell without touching the faceplate. Multiplicative, so the
       // material's own variation survives — see `roughnessBoost`.
       const boost = roughnessBoost()
-      if (boost !== 1) {
-        root.traverse((o) => {
-          const mesh = o as THREE.Mesh
-          const mat = mesh.material as THREE.MeshStandardMaterial | undefined
-          if (!mesh.isMesh || !mat || Array.isArray(mat)) return
-          if (typeof mat.roughness !== 'number') return
-          mat.roughness *= boost
-        })
-      }
+      const normal = normalStrength()
+      root.traverse((o) => {
+        const mesh = o as THREE.Mesh
+        const mat = mesh.material as THREE.MeshStandardMaterial | undefined
+        if (!mesh.isMesh || !mat || Array.isArray(mat)) return
+        if (typeof mat.roughness === 'number') mat.roughness *= boost
+        // `normalScale` is a Vector2 — one component per tangent axis — and
+        // scaling both equally is the only form that does not skew the surface.
+        if (mat.normalScale) mat.normalScale.set(normal, normal)
+      })
 
       // **Tangents, because without them a normal map seams at every UV island
       // edge.**
