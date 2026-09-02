@@ -112,16 +112,20 @@ describe('the shipped animation manifest', () => {
     // rim light and face. This asserts the *known* gap so that filling it is a
     // deliberate edit here rather than something nobody notices either way.
     //
-    // It was four states. Six clips had been exported against an Advanced
-    // Skeleton rig (`Shoulder_L`, `Elbow_L`) rather than the character's own
-    // `Robot_All_01`, so nothing bound them by name;
-    // `avatar-source/retarget_advanced_skeleton.py` maps the two conventions and
-    // bakes them onto the character's armature, which left only `swapping`.
+    // Six clips were exported against an Advanced Skeleton rig (`Shoulder_L`,
+    // `Elbow_L`) rather than the character's own `Robot_All_01`, so nothing
+    // binds them by name.
     //
-    // **`swapping` is a deliberate omission rather than a missing export.** It
-    // is the one state where nothing is resident and no work is happening, and
-    // `CLAUDE.md` is explicit that it should read as the character receding —
-    // holding still while the glow dims says that better than any clip would.
-    expect(statesWithoutClips(manifest, ALL).sort()).toEqual(['swapping'])
+    // `avatar-source/retarget_advanced_skeleton.py` maps the two conventions and
+    // every structural check it produces is green — 64 of 65 bones mapped, rest
+    // poses agreeing to 0.04deg, all nine clips loading. **And the result is
+    // wrong on screen: the character collapses into a heap.** Which is the
+    // lesson rather than the bug — a retarget can satisfy every number available
+    // to it and still be measured from the wrong frame, and only looking says
+    // so. The clips stay out of the manifest until the source is re-exported
+    // from `Robot_All_01`.
+    expect(statesWithoutClips(manifest, ALL).sort()).toEqual([
+      'listening', 'speaking', 'swapping', 'thinking',
+    ])
   })
 })

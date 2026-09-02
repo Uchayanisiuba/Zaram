@@ -171,7 +171,7 @@ face aspect: both square
 tracks came back on their own. The retarget code stays for avatars users bring
 themselves, where the rests genuinely may differ.
 
-## Solved 2 September 2026 — the six clips, and the two-skeleton rig
+## Open — the six clips, and the two-skeleton rig
 
 **The character exists in Maya as two skeletons, and which one an export was
 selected from decides whether it is plug-and-play.**
@@ -186,8 +186,21 @@ The three idles came from `Robot_All_01` and bind directly. The six
 `DeformationSystem`, so nothing bound them by name and three states had no body
 animation at all.
 
+**A Blender retarget was attempted and it failed.**
 `avatar-source/retarget_advanced_skeleton.py` maps the two conventions and bakes
-onto the character's armature. **64 of 65 bones map.** `Spine1` is the single
+onto the character's armature. Every structural check it produces is green —
+**64 of 65 bones map**, rest poses agree to 0.04deg across all nine clips, all
+nine load, four states report clips — **and the character collapses into a heap
+on the floor.**
+
+That is the finding worth keeping rather than the code: *a retarget can satisfy
+every number available to it and still be measured from the wrong frame.* The
+only check that caught it was looking. The six `.glb` files and the script stay in
+the tree, unreferenced by `animations.json`, so nothing ships broken.
+
+**The fix is upstream and small: re-export the six from `Robot_All_01`** — the
+same skeleton the idles came from, with the skinned mesh in the file. Then they
+bind directly and no retargeting is needed at all. `Spine1` is the single
 omission — the source has two bones between pelvis and neck where the character
 has three, and splitting one rotation across two joints is a guess about where a
 bend belongs, which shows as a wrong silhouette rather than a stiff one. Twist
