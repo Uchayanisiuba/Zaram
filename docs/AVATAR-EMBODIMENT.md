@@ -291,6 +291,8 @@ All on `RobotAvatar`, all read from the URL:
 | `?lightSpread=3.4` | How broad the room's area lights are. `1` restores the untouched room |
 | `?glow=1` | The state glow's opacity behind the character |
 | `?rough=2.1` | Roughness multiplier. `1` is the material as exported; higher is matter |
+| `?normal=1` | Normal map strength. Below 1 is markedly *darker*, not just flatter |
+| `?lightScale=0.6` | Key, fill and ambient. Never the rim — that is the state channel |
 | `?envIntensity=1.8` | How bright. Raise with `rough` or the shell goes chrome |
 | `?smileEvery=3` | Seconds between idle smiles. Shipped at 14–32, which is too long to sit through |
 
@@ -392,7 +394,9 @@ Shipped defaults, chosen by the maintainer off screenshots:
 ```
 envIntensity  1.8     how bright
 rough         2.1     how matte  (1 = the material exactly as exported)
-lightScale    1       key/fill/ambient multiplier; the rim is never scaled
+lightScale    0.6     key/fill/ambient multiplier; the rim is never scaled
+normal        1       normal map strength. 0.8 was tried and is markedly darker
+glow          0.35    the state glow's opacity
 ```
 
 **Baking the EXR itself was tried, worked, and was reverted.** 64x32 RGBE is 8 KB

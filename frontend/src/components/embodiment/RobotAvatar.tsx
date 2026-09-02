@@ -255,7 +255,7 @@ function envIntensity(): number {
  * Overridable as `?lightScale=`.
  */
 function lightScale(): number {
-  return numberParam('lightScale', 1, 0.01)
+  return numberParam('lightScale', 0.6, 0.01)
 }
 
 /**
@@ -853,7 +853,23 @@ export default function RobotAvatar({ px = 320, src = '/avatars/zaram-robo.glb' 
       // in proportion instead of a halo or a dot. Behind the model's own depth
       // so it never washes over the shell — additive blending on top of the
       // character would lift the black armour and cost the silhouette.
-      const glowRadius = headHeight * GLOW_RADIUS
+      // **Sized to fit the frustum, not only to the head, because the canvas is
+      // the thing that was cutting it.**
+      //
+      // A radius derived from the head alone is framing-independent in world
+      // units and emphatically not in *view* units: at the shipped framing the
+      // disc is wider than the visible box, so the falloff never reaches zero on
+      // screen and the viewer sees it stop at a straight vertical line down each
+      // side. It reads as a rectangle behind the character — which is exactly
+      // what it looked like, and it is a clipping artefact rather than anything
+      // wrong with the gradient.
+      //
+      // So take whichever is smaller: the head-relative size, or what actually
+      // fits. The `0.9` leaves the outer tenth of the falloff inside the frame,
+      // because a gradient truncated at 10% opacity still shows an edge.
+      const glowZ = box.isEmpty() ? -0.4 : box.min.z - headHeight * GLOW_RADIUS * 0.25
+      const glowHalfExtent = Math.tan(fov / 2) * (dist - glowZ) * 0.9
+      const glowRadius = Math.min(headHeight * GLOW_RADIUS, glowHalfExtent)
       glow = new THREE.Mesh(
         new THREE.PlaneGeometry(glowRadius * 2, glowRadius * 2),
         new THREE.MeshBasicMaterial({
@@ -883,11 +899,7 @@ export default function RobotAvatar({ px = 320, src = '/avatars/zaram-robo.glb' 
       // rather than as a halo around its helmet. Centred on the head it looked
       // like a saint; dropped towards the chest it looks like the character is
       // standing in front of something.
-      glow.position.set(
-        0,
-        centreY - headHeight * 0.55,
-        box.isEmpty() ? -0.4 : box.min.z - glowRadius * 0.25,
-      )
+      glow.position.set(0, centreY - headHeight * 0.55, glowZ)
       glow.renderOrder = -1
       scene.add(glow)
 
