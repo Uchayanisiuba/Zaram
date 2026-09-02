@@ -96,6 +96,14 @@ the load log is the only place that would tell you.
 
 ## Things that cost this session time
 
+- **`Number(null)` is `0`, not `NaN`.** Every URL knob guarded as
+  `Number.isFinite(raw) && raw >= 0` silently returned zero when the parameter was
+  absent. `envIntensity`, `glow` and `normal` were all switched off by default,
+  and each was diagnosed as a different bug — the dark character was blamed on the
+  environment and **four environments were rebuilt** chasing it. Passing the value
+  in the URL "fixed" it every time, which is what kept the parameter looking
+  innocent. **When a debug override makes a problem disappear, that is evidence
+  about the override.** All readers now go through `numberParam`.
 - **A number in the log nobody read.** `65/195 tracks kept` named the bug for two
   whole rounds of "fixing" it. 195 is 65 bones × 3 channels of a Maya take that
   should not have been in the file.
