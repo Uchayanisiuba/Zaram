@@ -294,6 +294,38 @@ All on `RobotAvatar`, all read from the URL:
 | `?envIntensity=1.8` | How bright. Raise with `rough` or the shell goes chrome |
 | `?smileEvery=3` | Seconds between idle smiles. Shipped at 14–32, which is too long to sit through |
 
+## The bug underneath the whole lighting saga
+
+**`Number(null)` is `0`, not `NaN`.** Every URL knob was written as
+
+```ts
+const raw = Number(new URLSearchParams(location.search).get('envIntensity'))
+return Number.isFinite(raw) && raw >= 0 ? raw : 1.8
+```
+
+`URLSearchParams.get` returns `null` for an absent key, `Number(null)` is `0`,
+and `0` is finite and `>= 0` — so the guard passed and the function returned
+**zero** whenever the parameter was not in the URL. Which is to say always,
+outside a debug link.
+
+Three knobs were affected and each failure was diagnosed as something else:
+
+| Knob | Silently | Looked like |
+|---|---|---|
+| `envIntensity` | 0 | The environment is wrong. **Four were rebuilt.** |
+| `glow` | 0 | The glow mesh is not rendering |
+| `normal` | 0 | The normal map is weak or missing |
+
+Passing the value explicitly in the URL "fixed" it every time, which is precisely
+what kept the parameter looking innocent — the comparison that would have exposed
+it, defaults against the same values written out, was never run until late.
+
+Guards written `raw > 0` escaped by accident, because `0 > 0` is false. That is a
+coin toss rather than a defence, so every reader now goes through `numberParam`.
+
+**The lesson is more general than the bug:** when a debug override makes a
+problem disappear, that is evidence about the override, not only about the value.
+
 ## Lighting — settled 2 September 2026, after five attempts
 
 **Four environments were built and thrown away before this one, and the reason
