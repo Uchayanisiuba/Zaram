@@ -36,13 +36,16 @@ stays for avatars users bring themselves. See `CLAUDE.md`.
 | `lib/animationSet.ts` + test | Clip manifest types, `ShuffleBag`, state grouping |
 | `lib/renderTuning.ts` | `renderScaleFor` / `approachRate` / `applyTextureFiltering`, extracted from `VrmAvatar` so a second renderer could share them without pulling in `@pixiv/three-vrm` |
 | `components/embodiment/Embodiment.tsx` | Now lazy-imports `RobotAvatar` instead of `VrmAvatar` |
-| `public/avatars/zaram-robo.glb` | The character, 11.2 MB |
+| `public/avatars/zaram-robo.glb` | The character, 11.3 MB. Replaced from `avatar-source`; see the re-import steps below |
 | `public/avatars/face/` | Atlases, alpha versions, UV templates, `manifest.json`, `uv_guide.json`, and the generator that makes them |
 | `public/avatars/animations/` | Three idle `.glb` clips and `animations.json` |
 | `avatar-source/` | The maintainer's exports, not served |
 | `avatar-source/retarget_animations.py` | Blender: bakes the idle FBXs onto the character's own rig |
 | `avatar-source/probe_rest_poses.py` | Blender: what the clip FBXs' rest pose actually is |
 | `avatar-source/fix_face_uvs.py` | Measures face UV islands against the sprites, and rewrites them |
+| `avatar-source/extend_face_atlases.py` | Grows the atlases to 3x3 and draws the idle smile and happy eyes |
+| `avatar-source/probe_studio_reference.py` | Measures `forest.exr` into the elevation profile the environment is built from |
+| `avatar-source/bake_studio_environment.py` | Bakes that EXR to an embedded 8 KB equirect. Built, verified, not shipped |
 | `frontend/scripts/check-rig-agreement.mjs` | Reads the GLBs and asserts the rigs agree |
 
 ## Verified working
@@ -54,8 +57,11 @@ Read off the load log with the product running:
 - Three idle clips load and play with the arms down; variants crossfade
 - Fingers animate from the mocap; nothing is posed statically any more
 - Framing derived from the geometry — see below
-- `RoomEnvironment` reflections, procedural, no file and no network
-- Frontend suite green (439 tests), typecheck clean
+- Environment rebuilt from measured `forest.exr` values; procedural, no file, no network
+- Idle smile with matching arced eyes, 12.8s, idle only
+- State glow behind the character, on the rim's own eased colour
+- Tangents computed at load — the GLB ships none
+- Frontend suite green (440 tests), typecheck clean
 
 ## The measurements, so nobody re-derives them
 
@@ -284,44 +290,102 @@ All on `RobotAvatar`, all read from the URL:
 | `?envBlur=0.35` | How much the room smears before the visor reflects it |
 | `?lightSpread=3.4` | How broad the room's area lights are. `1` restores the untouched room |
 | `?glow=1` | The state glow's opacity behind the character |
+| `?rough=2.1` | Roughness multiplier. `1` is the material as exported; higher is matter |
+| `?envIntensity=1.8` | How bright. Raise with `rough` or the shell goes chrome |
 | `?smileEvery=3` | Seconds between idle smiles. Shipped at 14–32, which is too long to sit through |
 
-## Lighting, and the two knobs that are not interchangeable
+## Lighting — settled 2 September 2026, after five attempts
 
-Settled 2 September 2026 against the character key art, after several passes that
-each fixed one thing and broke another.
+**Four environments were built and thrown away before this one, and the reason
+each failed is the useful part.**
 
-**Brightness and reflectivity are separate controls, and confusing them is what
-cost the time.** `environmentIntensity` makes the character *reflective*; the
-lights make it *bright*. On a glossy black character it is tempting to reach for
-the environment for both, and it does not work — the visor is a near-mirror, so
-it goes milky long before the armour looks lit. Measured: body readable at 2.0,
-frosted glass at 3.2. The shipped balance is the opposite of the first instinct:
-environment **down** to 0.5, lights **up** to 5.5.
+| Attempt | Failed because |
+|---|---|
+| `RoomEnvironment`, sharp | It is *furnished*. A near-mirror visor showed recognisable armchairs sliding across the face |
+| `RoomEnvironment`, blurred | Blur removes the crisp reflections that give glossy black its form. The character read **darker** with more light in the scene |
+| Vertical gradient | One hue over the whole sphere reads as artificial. Needed 6x intensity to look lit, at which point the visor went milky |
+| Softbox panels in a dark shell | A softbox is a rectangle, and a mirror shows you the rectangle. Moving the panels behind the character took the visor back to black |
 
-**Three settings, not two, and the third is the visor.** Softening the lamps is
-not the same as softening the room: the room still has walls and furniture, and
-on a near-mirror faceplate those resolve into recognisable blobs the moment the
-reflection is bright enough to see at all. So the visor could be flat black or
-reflective-and-cluttered and neither is right. `envBlur` separates them — it
-keeps the sheen and smears the structure below the point where it reads as
-objects. Landed by looking: flat at 0.15, furniture visible at 0.6 unblurred,
-silver at 1.1. Shipped at 0.5 with 0.35 of blur.
+All four were guesses at what a captured environment looks like. The fifth is
+measured.
 
-**The pale streak on the visor was one lamp, not the room.** `RoomEnvironment`'s
-`light4` — a flat 4.4x5.4 panel on the +Z wall, above and slightly left — sits
-exactly where a mirror-like visor facing the viewer takes its reflection from.
-`softenAreaLights` grows every emissive panel and dims it by the area gained, so
-total emitted power is unchanged and no source is compact enough to resolve into
-a shape. A bare bulb becomes a softbox.
+### What shipped
 
-**Blurring the whole environment was tried and reverted.** It removes the streak
-and removes the crisp reflections everywhere else, which is what gives glossy
-black its form — the character came out flat and read *darker* than before
-despite more light in the scene. Adding directional light back could not recover
-it, because on a gloss surface most of the brightness you see is a sharp
-reflection. A gradient environment was tried for the same reason and failed the
-same way.
+`FOREST_PROFILE` in `RobotAvatar.tsx` is the elevation profile of Blender's
+`forest` studio light — sixteen bands of mean linear RGB, printed by
+`avatar-source/probe_studio_reference.py`. `studioEnvironment()` interpolates it
+into a 64x32 equirect at runtime. No image ships; the environment is arithmetic
+over 48 measured numbers.
+
+Source: `forest.exr` from `datafiles/studiolights/world`, **CC0**, Greg Zaal /
+Poly Haven (originally `ninomaru_teien`), per the `license.txt` beside it.
+
+**Two measured features do the work, and neither survived being invented:**
+
+```
+ground (v 0.03-0.47)   lum 0.08-0.16   WARM   R > G > B
+horizon step           0.42 -> 2.53 between bands 8 and 9
+sky    (v 0.65-0.97)   lum 1.3-1.56    COOL   B > G > R
+overall                peak 81.75, mean 0.78, peak/mean 105
+```
+
+A single-hue gradient has neither, which is why three of them read as plastic.
+The horizon *step* is what puts a defined bright edge along the top of the helmet
+instead of a soft wash.
+
+**The sun is placed behind the character, and that is the one departure from the
+source.** A mirror facing the viewer reflects the hemisphere *behind the viewer*,
+so a bright feature in front is painted straight across the faceplate. Behind, the
+same light rims the helmet while the visor reflects dark ground and even sky —
+which is why the Blender reference has a dark faceplate under a bright
+environment.
+
+### Brightness and gloss are different knobs
+
+**This is the thing that cost the most time.** The shell rendered as chrome where
+the reference is matte, and turning the environment down far enough to stop it
+blowing out took the whole character to a silhouette — because on a near-mirror
+almost all the brightness you see *is* the reflection.
+
+`roughnessBoost` separates them. A **multiplier** on `material.roughness`, not a
+floor: the visor's near-zero roughness stays the glossiest thing on the character
+while the helmet's mid roughness moves far enough to stop mirroring. A floor would
+have flattened both and taken the faceplate with it. three.js multiplies by the
+map's green channel and clamps to 1, so values above 1 are meaningful and cannot
+overshoot.
+
+With roughness handled, intensity could come back up without chrome returning.
+Shipped defaults, chosen by the maintainer off screenshots:
+
+```
+envIntensity  1.8     how bright
+rough         2.1     how matte  (1 = the material exactly as exported)
+lightScale    1       key/fill/ambient multiplier; the rim is never scaled
+```
+
+**Baking the EXR itself was tried, worked, and was reverted.** 64x32 RGBE is 8 KB
+embedded — no fetch, no installer weight, and it looked right. Reverted on the
+maintainer's call that the environment stays generated in code. If it is ever
+wanted back, `avatar-source/bake_studio_environment.py` still produces it.
+
+## The GLB is replaced from `avatar-source`, and two things do not survive it
+
+```bash
+cp "avatar-source/Zaram_Robo _.glb" frontend/public/avatars/zaram-robo.glb
+py avatar-source/fix_face_uvs.py --apply          # the mouth island fix
+node frontend/scripts/check-rig-agreement.mjs     # the clips must still bind
+```
+
+**The mouth UV fix is a buffer edit, not a code path**, so a new GLB arrives
+without it and `oh` clips by 21px again. This has now been missed twice. And the
+rig check is not optional: the baked idle clips are bound to a specific rest pose,
+and a re-export that moved it would put the character back in a T-pose.
+
+**Tangents are computed at load** because the GLB ships none. Without them three.js
+derives a tangent frame from screen-space derivatives, which is discontinuous
+across UV islands — a hairline of wrong shading down both sides of the face. The
+load log reports how many meshes needed it, so a GLB that starts shipping tangents
+will say so instead of silently keeping the workaround.
 
 ## Where to start
 
