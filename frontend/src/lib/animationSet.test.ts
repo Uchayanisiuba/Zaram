@@ -111,11 +111,17 @@ describe('the shipped animation manifest', () => {
     // Not a failure — a state with no clip holds its current pose and keeps its
     // rim light and face. This asserts the *known* gap so that filling it is a
     // deliberate edit here rather than something nobody notices either way.
-    // Six of the nine authored clips were exported against an Advanced Skeleton
-    // rig (`Head_M`) instead of the character's own (`Robot_All_01:Head`), so
-    // they bind to nothing and are not shipped until they are retargeted.
-    expect(statesWithoutClips(manifest, ALL).sort()).toEqual([
-      'listening', 'speaking', 'swapping', 'thinking',
-    ])
+    //
+    // It was four states. Six clips had been exported against an Advanced
+    // Skeleton rig (`Shoulder_L`, `Elbow_L`) rather than the character's own
+    // `Robot_All_01`, so nothing bound them by name;
+    // `avatar-source/retarget_advanced_skeleton.py` maps the two conventions and
+    // bakes them onto the character's armature, which left only `swapping`.
+    //
+    // **`swapping` is a deliberate omission rather than a missing export.** It
+    // is the one state where nothing is resident and no work is happening, and
+    // `CLAUDE.md` is explicit that it should read as the character receding —
+    // holding still while the glow dims says that better than any clip would.
+    expect(statesWithoutClips(manifest, ALL).sort()).toEqual(['swapping'])
   })
 })

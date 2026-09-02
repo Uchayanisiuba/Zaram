@@ -121,9 +121,15 @@ const EYES_FOR_STATE: Record<EmbodimentState, EyeCell> = {
  */
 const MOUTH_FOLLOW_SECONDS = 1
 
-const SMILE_SECONDS = 12.8
+// **Both the gap and the hold are drawn fresh each time, and that is the
+// point.** A fixed hold with a random gap still has a signature: the smile is
+// always exactly as long, so a viewer learns its shape even without learning its
+// rhythm, and the pattern is spottable on a surface that sits on screen all day.
+// Two independent ranges give a schedule with no period to find.
+const SMILE_HOLD_MIN = 7
+const SMILE_HOLD_MAX = 16
 const SMILE_GAP_MIN = 14
-const SMILE_GAP_MAX = 32
+const SMILE_GAP_MAX = 38
 
 /** How long to wait between smiles, overridable as `?smileEvery=2`.
  *
@@ -1323,7 +1329,7 @@ export default function RobotAvatar({ px = 320, src = '/avatars/zaram-robo.glb' 
         // over the answer.
         smileAt -= dt
         if (smileAt <= 0) {
-          smileFor = SMILE_SECONDS
+          smileFor = SMILE_HOLD_MIN + Math.random() * (SMILE_HOLD_MAX - SMILE_HOLD_MIN)
           smileAt = gapMin + Math.random() * (gapMax - gapMin)
         }
         if (smileFor > 0) {
