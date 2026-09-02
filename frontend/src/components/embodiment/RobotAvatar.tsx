@@ -255,7 +255,7 @@ function envIntensity(): number {
  * Overridable as `?lightScale=`.
  */
 function lightScale(): number {
-  return numberParam('lightScale', 0.6, 0.01)
+  return numberParam('lightScale', 0.25, 0.01)
 }
 
 /**
@@ -285,6 +285,32 @@ const FOREST_PROFILE: readonly (readonly [number, number, number])[] = [
   [0.445, 0.425, 0.263], [2.751, 2.507, 2.119], [1.341, 1.438, 1.603], [1.171, 1.326, 1.610],
   [1.179, 1.388, 1.797], [1.298, 1.552, 2.136], [1.103, 1.371, 1.950], [1.298, 1.573, 2.217],
 ]
+
+/**
+ * How much the sky half of the environment is dimmed, leaving the ground alone.
+ *
+ * **This is the knob that dims the body without touching the visor, and it
+ * exists because neither of the obvious two can.** `lightScale` cannot: measured
+ * at 0.3 against 0.6 the character is near-indistinguishable, because the three
+ * lights contribute very little here and the environment does nearly all of it.
+ * `envIntensity` can, and it takes the visor down with it — halving it visibly
+ * weakens the faceplate's gradient, which is the part that was working.
+ *
+ * The separation is possible because the two surfaces sample *different parts*
+ * of the same environment. The shell is rough, so it integrates a wide cone and
+ * is dominated by the bright sky. The visor is a mirror aimed at the viewer, so
+ * it samples one direction — and with the sun deliberately placed behind the
+ * character, that direction is the dark ground. Dimming the sky bands therefore
+ * lands almost entirely on the body.
+ *
+ * Applied above the horizon only, which the measured profile puts at band 8: the
+ * step from 0.42 to 2.53 between bands 8 and 9 *is* the horizon.
+ *
+ * Overridable as `?sky=`; `1` is the environment as measured.
+ */
+function skyScale(): number {
+  return numberParam('sky', 0.5, 0)
+}
 
 /**
  * The environment the character reflects: `forest` rebuilt from its own numbers.
@@ -319,6 +345,7 @@ const FOREST_PROFILE: readonly (readonly [number, number, number])[] = [
 function studioEnvironment(): THREE.DataTexture {
   const width = 64
   const height = 32
+  const sky = skyScale()
   const data = new Float32Array(width * height * 4)
 
   for (let y = 0; y < height; y++) {
@@ -347,9 +374,10 @@ function studioEnvironment(): THREE.DataTexture {
       const lobe = 0.7 + 1.9 * Math.pow(toward, 2.5)
 
       const i = (y * width + x) * 4
-      data[i] = (low[0] + (high[0] - low[0]) * mix) * lobe
-      data[i + 1] = (low[1] + (high[1] - low[1]) * mix) * lobe
-      data[i + 2] = (low[2] + (high[2] - low[2]) * mix) * lobe
+      const gain = lobe * (band >= 8 ? sky : 1)
+      data[i] = (low[0] + (high[0] - low[0]) * mix) * gain
+      data[i + 1] = (low[1] + (high[1] - low[1]) * mix) * gain
+      data[i + 2] = (low[2] + (high[2] - low[2]) * mix) * gain
       data[i + 3] = 1
     }
   }
