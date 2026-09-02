@@ -71,12 +71,19 @@ const EYES_FOR_STATE: Record<EmbodimentState, EyeCell> = {
  * no meaning and resolves immediately.
  *
  * So the same discipline applies. Rare enough that it is never the thing you are
- * looking at, short enough to read as a beat rather than a mood, and **idle
- * only** — during thinking, listening, speaking or swapping the mouth belongs to
- * the state and to lip sync, and an expression arriving over those would be the
- * character editorialising about the work.
+ * looking at, and **idle only** — during thinking, listening, speaking or
+ * swapping the face belongs to the state and to lip sync, and an expression
+ * arriving over those would be the character editorialising about the work.
+ *
+ * **The eyes smile with the mouth**, because a mouth that curves while the eyes
+ * hold still is the shape of an insincere smile and reads as one. A real smile
+ * raises the lower lid and squeezes the eye into a crescent; every social robot
+ * that expresses through a screen rather than a face abbreviates that the same
+ * way, as an upward arc. `happy` is that arc, and it suppresses the blink for as
+ * long as it shows — a blink over an already-curved eye reads as a glitch rather
+ * than as a blink.
  */
-const SMILE_SECONDS = 3.2
+const SMILE_SECONDS = 12.8
 const SMILE_GAP_MIN = 14
 const SMILE_GAP_MAX = 32
 
@@ -151,7 +158,7 @@ function frameFraction(): number {
  *  the helmet goes silver. */
 function envIntensity(): number {
   const raw = Number(new URLSearchParams(window.location.search).get('envIntensity'))
-  return Number.isFinite(raw) && raw >= 0 ? raw : 0.15
+  return Number.isFinite(raw) && raw >= 0 ? raw : 0.5
 }
 
 /**
@@ -167,6 +174,30 @@ function envIntensity(): number {
 function lightScale(): number {
   const raw = Number(new URLSearchParams(window.location.search).get('lightScale'))
   return Number.isFinite(raw) && raw > 0 ? raw : 5.5
+}
+
+/**
+ * How much the room is blurred before the visor reflects it.
+ *
+ * **Softening the lamps is not the same as softening the room.**
+ * `softenAreaLights` removes the hard highlight, and the room still has walls
+ * and furniture in it — dark boxes that resolve on a near-mirror visor as
+ * recognisable blobs the moment the reflection is bright enough to see. So the
+ * visor could be black and clean, or reflective and cluttered, and neither is
+ * what a dark glass faceplate should look like.
+ *
+ * A little blur separates the two. It keeps the sheen — the reflection is still
+ * there and still moves with the head — while smearing the room's structure
+ * below the point where it reads as objects. Held deliberately low: this is the
+ * setting that, pushed far, flattened the whole character in an earlier pass,
+ * because on a gloss surface most of the brightness you see is a sharp
+ * reflection. Blur enough to lose the furniture, not enough to lose the shine.
+ *
+ * Overridable as `?envBlur=`.
+ */
+function envBlur(): number {
+  const raw = Number(new URLSearchParams(window.location.search).get('envBlur'))
+  return Number.isFinite(raw) && raw >= 0 ? raw : 0.35
 }
 
 /**
@@ -363,7 +394,7 @@ export default function RobotAvatar({ px = 320, src = '/avatars/zaram-robo.glb' 
     const pmrem = new THREE.PMREMGenerator(renderer)
     const room = new RoomEnvironment()
     softenAreaLights(room, lightSpread())
-    const envRT = pmrem.fromScene(room)
+    const envRT = pmrem.fromScene(room, envBlur())
     scene.environment = envRT.texture
     // Slightly under neutral, because the character is glossy black and the
     // environment is what gives black armour its form — too much and the
@@ -372,12 +403,13 @@ export default function RobotAvatar({ px = 320, src = '/avatars/zaram-robo.glb' 
     // only a shiny blob, it looked like a black body lost against a black
     // backdrop, and the real cause was a collapsed skeleton hiding everything
     // below the helmet. Brightness was never the problem.
-    // **Held low deliberately, and lower than it used to be.** The environment
-    // is what makes the character *reflective*, and the key art it is matched
-    // against is soft and diffuse rather than mirror-like — black fabric and
-    // matte armour with glowing accents, not chrome. Brightness comes from the
-    // lights instead, which is the split that lets the body read while the visor
-    // stays dark enough for the LEDs to carry.
+    // **The visor's sheen lives here, and it is the third setting of three.**
+    // The environment makes the character *reflective*; the lights make it
+    // *bright*; the blur decides whether the reflection resolves into objects.
+    // Too low and the faceplate is flat black — dead glass with a sticker on it.
+    // Too high and the helmet goes silver and the room's furniture appears in
+    // it. Landed by looking: flat at 0.15, recognisable furniture at 0.6 unblurred,
+    // silver at 1.1.
     scene.environmentIntensity = envIntensity()
 
     // Debug only: a flat backdrop makes the silhouette obvious when the
@@ -1035,10 +1067,33 @@ export default function RobotAvatar({ px = 320, src = '/avatars/zaram-robo.glb' 
       }
       mixer?.update(dt)
 
+      // Run the idle expression before the eyes, because both halves of the
+      // face wear it and the eyes are drawn first.
+      let smiling = false
+      if (s === 'idle') {
+        // The timer is reset on the way out rather than paused: a smile
+        // half-finished when a reply arrives should not be waiting to resume
+        // over the answer.
+        smileAt -= dt
+        if (smileAt <= 0) {
+          smileFor = SMILE_SECONDS
+          smileAt = SMILE_GAP_MIN + Math.random() * (SMILE_GAP_MAX - SMILE_GAP_MIN)
+        }
+        if (smileFor > 0) {
+          smileFor -= dt
+          smiling = true
+        }
+      } else {
+        smileFor = 0
+      }
+
       blinkAt -= dt
       const blinking = blinkAt < 0.12
       if (blinkAt < 0) blinkAt = 2.5 + Math.random() * 3.5
-      showCell(eyes, EYE_CELLS.indexOf(blinking ? 'blink' : EYES_FOR_STATE[s]))
+      showCell(
+        eyes,
+        EYE_CELLS.indexOf(smiling ? 'happy' : blinking ? 'blink' : EYES_FOR_STATE[s]),
+      )
 
       // Lip sync runs off Kokoro's own phoneme timings scrubbed against
       // playback position, not a cycle — `audio.currentTime` is the clock,
@@ -1047,22 +1102,7 @@ export default function RobotAvatar({ px = 320, src = '/avatars/zaram-robo.glb' 
       let shape: MouthCell = 'sil'
       if (s === 'speaking' && audio && track.length > 0) shape = visemeAt(track, audio.currentTime)
       else if (s === 'speaking') shape = Math.sin(now * 9) > 0 ? 'aa' : 'ih'
-      else if (s === 'idle') {
-        // Only while idle, and the timer is reset on the way out rather than
-        // paused: a smile half-finished when a reply arrives should not be
-        // waiting to resume over the answer.
-        smileAt -= dt
-        if (smileAt <= 0) {
-          smileFor = SMILE_SECONDS
-          smileAt = SMILE_GAP_MIN + Math.random() * (SMILE_GAP_MAX - SMILE_GAP_MIN)
-        }
-        if (smileFor > 0) {
-          smileFor -= dt
-          shape = 'smile'
-        }
-      } else {
-        smileFor = 0
-      }
+      else if (smiling) shape = 'smile'
       showCell(mouth, MOUTH_CELLS.indexOf(shape))
 
       renderer.render(scene, camera)

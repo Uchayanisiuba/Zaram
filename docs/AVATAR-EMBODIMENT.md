@@ -280,7 +280,8 @@ All on `RobotAvatar`, all read from the URL:
 | `?noAnim=1` | Loads the character and plays nothing — separates model faults from animation faults |
 | `?fingerCurl=0.4` | Tunes the static finger pose |
 | `?lightScale=5.5` | Multiplies key, fill and ambient. Not the rim — that is the state channel |
-| `?envIntensity=0.15` | How reflective the character is. Raise and it goes mirror-like, not brighter |
+| `?envIntensity=0.5` | How reflective the character is. Raise and it goes mirror-like, not brighter |
+| `?envBlur=0.35` | How much the room smears before the visor reflects it |
 | `?lightSpread=3.4` | How broad the room's area lights are. `1` restores the untouched room |
 | `?glow=0.5` | The state glow's opacity behind the character |
 
@@ -295,7 +296,16 @@ lights make it *bright*. On a glossy black character it is tempting to reach for
 the environment for both, and it does not work — the visor is a near-mirror, so
 it goes milky long before the armour looks lit. Measured: body readable at 2.0,
 frosted glass at 3.2. The shipped balance is the opposite of the first instinct:
-environment **down** to 0.15, lights **up** to 5.5.
+environment **down** to 0.5, lights **up** to 5.5.
+
+**Three settings, not two, and the third is the visor.** Softening the lamps is
+not the same as softening the room: the room still has walls and furniture, and
+on a near-mirror faceplate those resolve into recognisable blobs the moment the
+reflection is bright enough to see at all. So the visor could be flat black or
+reflective-and-cluttered and neither is right. `envBlur` separates them — it
+keeps the sheen and smears the structure below the point where it reads as
+objects. Landed by looking: flat at 0.15, furniture visible at 0.6 unblurred,
+silver at 1.1. Shipped at 0.5 with 0.35 of blur.
 
 **The pale streak on the visor was one lamp, not the room.** `RoomEnvironment`'s
 `light4` — a flat 4.4x5.4 panel on the +Z wall, above and slightly left — sits
