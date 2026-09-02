@@ -144,6 +144,31 @@ function fingerCurl(): number {
   return Number.isFinite(raw) && raw !== 0 ? raw : 0.32
 }
 
+/**
+ * How much rougher every surface is made than the GLB asks for.
+ *
+ * **The helmet was chrome and the reference is matte, and that is a gloss
+ * problem rather than a brightness one.** Turning the environment down far
+ * enough to stop the shell blowing out took the whole character to a
+ * silhouette, because on a near-mirror almost all the brightness you see *is*
+ * the reflection — dimming it removes the surface along with the glare.
+ *
+ * Roughness is the control that separates them. A **multiplier** rather than a
+ * floor, because it preserves the material's own relative gloss: the visor's
+ * near-zero roughness stays the glossiest thing on the character while the
+ * helmet's mid roughness moves far enough to stop mirroring. A floor would have
+ * flattened both and taken the faceplate with it.
+ *
+ * three.js multiplies `material.roughness` by the map's green channel and then
+ * clamps to 1, so values above 1 are meaningful here and cannot overshoot.
+ *
+ * Overridable as `?rough=`; `1` is the material exactly as exported.
+ */
+function roughnessBoost(): number {
+  const raw = Number(new URLSearchParams(window.location.search).get('rough'))
+  return Number.isFinite(raw) && raw > 0 ? raw : 2.1
+}
+
 /** Atlas dimensions, needed to turn UV spans into texel counts. */
 const ATLAS_W = 768
 const ATLAS_H = 768
@@ -168,7 +193,7 @@ function frameFraction(): number {
  *  the helmet goes silver. */
 function envIntensity(): number {
   const raw = Number(new URLSearchParams(window.location.search).get('envIntensity'))
-  return Number.isFinite(raw) && raw >= 0 ? raw : 3
+  return Number.isFinite(raw) && raw >= 0 ? raw : 1.8
 }
 
 /**
@@ -183,106 +208,109 @@ function envIntensity(): number {
  */
 function lightScale(): number {
   const raw = Number(new URLSearchParams(window.location.search).get('lightScale'))
-  return Number.isFinite(raw) && raw > 0 ? raw : 5.5
+  return Number.isFinite(raw) && raw > 0 ? raw : 1
 }
 
 /**
- * How much the studio is blurred before anything reflects it.
+ * The elevation profile of Blender's `forest` studio light, measured.
  *
- * **A softbox is still a rectangle, and a mirror shows you the rectangle.** The
- * panels below removed the furniture from the visor and left their own hard
- * edges in its place — a bright quadrilateral sliding across the faceplate,
- * which is tidier than a reflected armchair and just as wrong. Blur rounds the
- * edges off into the gradient the panel was standing in for.
+ * Sixteen bands from nadir to zenith, mean linear RGB, straight off the file —
+ * `avatar-source/probe_studio_reference.py` prints exactly this table. Copying
+ * the numbers rather than the pixels is the whole approach: the environment
+ * stays generated in code, and it stops being a guess.
  *
- * This is cheap now in a way it was not before. Blurring the old furnished room
- * flattened the whole character, because the crisp reflections it destroyed were
- * what gave glossy black its form. There is nothing crisp in this environment
- * worth keeping, so the blur only ever removes an artefact.
+ * **Two features in here do all the work, and neither survived being invented.**
+ * The sky is *cool* — blue above green above red — while the ground is *warm*,
+ * red above green above blue, and about fourteen times darker. Every hand-built
+ * environment before this used one colour for the whole sphere, and a
+ * single-hue gradient reads as artificial the moment it lands on a curved
+ * surface. And the transition is abrupt: band 8 to band 9, across the horizon,
+ * jumps from 0.42 to 2.53. That step is what puts a defined bright edge along
+ * the top of the helmet instead of a soft wash.
  *
- * **Blur and intensity trade off directly on a mirror**, so they are tuned as a
- * pair rather than one at a time: spreading a panel lowers the radiance any one
- * reflected direction sees, and raising the blur without raising the intensity
- * takes the visor straight back to flat black. Measured on the way here — 3.0
- * with 0.5 of blur reads as glossy dark glass; the same intensity at 0.9 reads
- * as dead.
- *
- * Overridable as `?envBlur=`.
+ * Band 9's mean of 2.53 carries a peak of 81.75 — the sun through the trees.
+ * Where that lands is a decision rather than a measurement, and it is made
+ * below.
  */
-function envBlur(): number {
-  const raw = Number(new URLSearchParams(window.location.search).get('envBlur'))
-  return Number.isFinite(raw) && raw >= 0 ? raw : 0.5
-}
+const FOREST_PROFILE: readonly (readonly [number, number, number])[] = [
+  [0.088, 0.078, 0.068], [0.094, 0.084, 0.074], [0.108, 0.094, 0.079], [0.126, 0.105, 0.083],
+  [0.161, 0.128, 0.093], [0.196, 0.153, 0.104], [0.172, 0.142, 0.090], [0.137, 0.124, 0.069],
+  [0.445, 0.425, 0.263], [2.751, 2.507, 2.119], [1.341, 1.438, 1.603], [1.171, 1.326, 1.610],
+  [1.179, 1.388, 1.797], [1.298, 1.552, 2.136], [1.103, 1.371, 1.950], [1.298, 1.573, 2.217],
+]
 
 /**
- * The environment the character reflects: softboxes in a dark room.
+ * The environment the character reflects: `forest` rebuilt from its own numbers.
  *
- * **Built rather than downloaded, and it replaces `RoomEnvironment`.** That room
- * is furnished — it has walls, a floor and boxes in it — and the visor is a
- * near-mirror, so the moment the reflection is bright enough to see at all you
- * are looking at recognisable furniture sliding across the character's face. The
- * only two settings it offered were flat black and a mirror with a room in it.
+ * **Three hand-built environments failed here before this one, each differently,
+ * and the difference now is that this one is measured.** `RoomEnvironment` is
+ * furnished, so a near-mirror visor showed recognisable armchairs sliding across
+ * the character's face. A plain vertical gradient read flat and needed six times
+ * the intensity to look lit. Soft panels in a dark shell painted a bright
+ * rectangle over the faceplate, and moving them behind the character to get it
+ * off the face took the visor back to black. All three were guesses at what a
+ * captured environment looks like.
  *
- * **What the key art shows is a studio, and a studio is large soft sources in a
- * dark space.** That is what this is: three broad, low-intensity panels and a
- * dark shell. Every source is big enough that its reflection is a gradient
- * rather than a shape, which is what makes a glossy black faceplate read as
- * glossy black rather than as a mirror — the same reason a photographer shooting
- * a black car uses a six-foot softbox and not a bare head.
+ * `forest.exr` is the studio light the reference render was lit with, and it is
+ * CC0 — Greg Zaal / Poly Haven, per the `license.txt` beside it in Blender's
+ * `datafiles/studiolights/world`. So the profile above is lifted from it
+ * directly, and this function is the same environment expressed as arithmetic:
+ * no image in the bundle, no file, and nothing to fetch.
  *
- * **The shell is dark grey, not black, and that matters.** A black surround
- * gives the visor nothing to reflect between the panels, and the result is the
- * flat dead faceplate this was built to fix. The gradient between panel and
- * shell *is* the reflection.
+ * **The sun is deliberately placed behind the character**, and that is the one
+ * departure from the source. A mirror facing the viewer reflects the hemisphere
+ * *behind the viewer*, so a bright feature in front is painted straight across
+ * the faceplate — which is the reflection the maintainer has rejected twice. Put
+ * it behind and the same light still rims the helmet and lifts the shoulders,
+ * while what the visor reflects is the dark ground and the even part of the sky.
+ * That is how a glossy black prop is lit in a real studio, and it is why the
+ * reference render has a dark faceplate despite a bright environment.
  *
- * An `.hdr` would do the same job and was rejected on two counts: fetching one
- * is a request no gate in this product can see, and bundling one puts megabytes
- * into an installer that a user on metered data already has to finish.
+ * 64x32, which is the resolution the reflection wants: coarse enough that it
+ * reads as a soft mottled gradient rather than a sharp picture of anywhere.
  */
-function studioEnvironment(): THREE.Scene {
-  const scene = new THREE.Scene()
-  const box = new THREE.BoxGeometry()
-  box.deleteAttribute('uv')
+function studioEnvironment(): THREE.DataTexture {
+  const width = 64
+  const height = 32
+  const data = new Float32Array(width * height * 4)
 
-  const shell = new THREE.Mesh(
-    box,
-    new THREE.MeshStandardMaterial({ side: THREE.BackSide, color: 0x11151f, roughness: 1 }),
-  )
-  shell.scale.set(40, 34, 40)
-  shell.position.set(0, 12, 0)
-  scene.add(shell)
+  for (let y = 0; y < height; y++) {
+    // three.js samples an equirect as `v = asin(dir.y)/PI + 0.5`, so v = 1 is
+    // the zenith, and a `DataTexture` has `flipY = false` — row 0 is v = 0, the
+    // nadir. Blender's rows are bottom-up, so the measured table is already in
+    // this order. Getting it backwards lights the character from underneath,
+    // which happened once and looked like a material fault rather than a
+    // coordinate one.
+    const v = (y + 0.5) / height
+    const band = v * (FOREST_PROFILE.length - 1)
+    const low = FOREST_PROFILE[Math.floor(band)]
+    const high = FOREST_PROFILE[Math.min(FOREST_PROFILE.length - 1, Math.floor(band) + 1)]
+    const mix = band - Math.floor(band)
 
-  // Emissive-only, the same construction `RoomEnvironment` uses for its lamps.
-  const panel = (
-    intensity: number,
-    colour: number,
-    position: [number, number, number],
-    scale: [number, number, number],
-  ) => {
-    const mesh = new THREE.Mesh(
-      box,
-      new THREE.MeshLambertMaterial({ color: 0x000000, emissive: colour, emissiveIntensity: intensity }),
-    )
-    mesh.position.set(...position)
-    mesh.scale.set(...scale)
-    scene.add(mesh)
-    return mesh
+    for (let x = 0; x < width; x++) {
+      // Azimuth, in the sampler's own terms: `u = atan2(z, x)/2PI + 0.5`, so
+      // u = 0.75 is +Z, straight at the camera, and u = 0.25 is directly behind
+      // the character. The lobe is centred there.
+      const u = (x + 0.5) / width
+      // A wide cosine rather than a disc. The source's sun is a point with a
+      // peak of 81.75, and reproducing that faithfully would put a hard white
+      // dot on the visor every time the head turned past it. Spread over a third
+      // of the sphere it delivers the same light with no shape to reflect.
+      const toward = Math.cos((u - 0.25) * Math.PI * 2) * 0.5 + 0.5
+      const lobe = 0.7 + 1.9 * Math.pow(toward, 2.5)
+
+      const i = (y * width + x) * 4
+      data[i] = (low[0] + (high[0] - low[0]) * mix) * lobe
+      data[i + 1] = (low[1] + (high[1] - low[1]) * mix) * lobe
+      data[i + 2] = (low[2] + (high[2] - low[2]) * mix) * lobe
+      data[i + 3] = 1
+    }
   }
 
-  // Key: a wide, shallow softbox overhead and slightly forward — the source
-  // that lands on the crown of the helmet and gives the visor its top gradient.
-  panel(4.2, 0xffffff, [0, 26, 9], [22, 0.4, 16])
-  // Fill: a tall panel off to camera-left, cool and much dimmer, to keep the
-  // shaded side of a black character from closing up entirely.
-  panel(1.5, 0xbcd0ff, [-19, 12, 6], [0.4, 20, 22])
-  // Kicker: behind and right, dimmer still. It is what puts the bright edge
-  // down the side of the helmet that reads as a rim rather than as a lamp.
-  panel(1.1, 0xd8e4ff, [17, 14, -13], [0.4, 16, 16])
-  // A dim floor bounce. Without it the underside of the jaw and the chest read
-  // as a hole rather than as shadow.
-  panel(0.35, 0x8fa4c8, [0, -3, 6], [26, 0.4, 20])
-
-  return scene
+  const texture = new THREE.DataTexture(data, width, height, THREE.RGBAFormat, THREE.FloatType)
+  texture.mapping = THREE.EquirectangularReflectionMapping
+  texture.needsUpdate = true
+  return texture
 }
 
 /**
@@ -427,7 +455,9 @@ export default function RobotAvatar({ px = 320, src = '/avatars/zaram-robo.glb' 
     // several megabytes, and if it were ever fetched rather than bundled it
     // would be a request no gate in this product can see.
     const pmrem = new THREE.PMREMGenerator(renderer)
-    const envRT = pmrem.fromScene(studioEnvironment(), envBlur())
+    const envSource = studioEnvironment()
+    const envRT = pmrem.fromEquirectangular(envSource)
+    envSource.dispose()
     scene.environment = envRT.texture
     // Slightly under neutral, because the character is glossy black and the
     // environment is what gives black armour its form — too much and the
@@ -682,6 +712,19 @@ export default function RobotAvatar({ px = 320, src = '/avatars/zaram-robo.glb' 
         if (!eyes && name.includes('eye')) eyes = preparePanel(mesh, '/avatars/face/eyes_atlas_3x3_alpha.png')
         else if (!mouth && name.includes('mouth')) mouth = preparePanel(mesh, '/avatars/face/mouth_atlas_3x3_alpha.png')
       })
+
+      // Dull the shell without touching the faceplate. Multiplicative, so the
+      // material's own variation survives — see `roughnessBoost`.
+      const boost = roughnessBoost()
+      if (boost !== 1) {
+        root.traverse((o) => {
+          const mesh = o as THREE.Mesh
+          const mat = mesh.material as THREE.MeshStandardMaterial | undefined
+          if (!mesh.isMesh || !mat || Array.isArray(mat)) return
+          if (typeof mat.roughness !== 'number') return
+          mat.roughness *= boost
+        })
+      }
 
       // **Tangents, because without them a normal map seams at every UV island
       // edge.**
