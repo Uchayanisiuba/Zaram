@@ -292,7 +292,27 @@ All on `RobotAvatar`, all read from the URL:
 | `?glow=1` | The state glow's opacity behind the character |
 | `?rough=2.1` | Roughness multiplier. `1` is the material as exported; higher is matter |
 | `?normal=1` | Normal map strength. Below 1 is markedly *darker*, not just flatter |
-| `?lightScale=0.6` | Key, fill and ambient. Never the rim — that is the state channel |
+| `?lightScale=0.25` | Key, fill and ambient. Never the rim — that is the state channel. Contributes very little here |
+| `?sky=0.5` | Dims the sky bands only. **This is the knob for the body's exposure** |
+
+### Dimming the body without dimming the visor
+
+Neither obvious knob does it, and both were measured before this one was built.
+`lightScale` **cannot**: at 0.3 against 0.6 the character is
+near-indistinguishable, because the three lights contribute very little and the
+environment does nearly all the lighting. `envIntensity` **can**, and it takes the
+visor with it — halving it visibly weakens the faceplate gradient, which is the
+part that was working.
+
+`skyScale` separates them, and it is only possible because the environment is
+ours to shape. The two surfaces sample *different parts* of it: the shell is
+rough, integrates a wide cone, and is dominated by the bright sky; the visor is a
+mirror aimed at the viewer, so it samples one direction, and with the sun placed
+behind the character that direction is the dark ground. Dimming the sky bands
+therefore lands almost entirely on the body.
+
+Applied above band 8, which the measured profile identifies as the horizon — the
+0.42 to 2.53 step between bands 8 and 9 *is* the horizon.
 | `?envIntensity=1.8` | How bright. Raise with `rough` or the shell goes chrome |
 | `?smileEvery=3` | Seconds between idle smiles. Shipped at 14–32, which is too long to sit through |
 
@@ -394,7 +414,8 @@ Shipped defaults, chosen by the maintainer off screenshots:
 ```
 envIntensity  1.8     how bright
 rough         2.1     how matte  (1 = the material exactly as exported)
-lightScale    0.6     key/fill/ambient multiplier; the rim is never scaled
+lightScale    0.25    key/fill/ambient multiplier; the rim is never scaled
+sky           0.5     dims the sky half only — the body knob, see below
 normal        1       normal map strength. 0.8 was tried and is markedly darker
 glow          0.35    the state glow's opacity
 ```
