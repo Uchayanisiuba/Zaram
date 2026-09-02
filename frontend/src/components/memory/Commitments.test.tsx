@@ -31,12 +31,24 @@ afterEach(cleanup);
 const CLAUSE = 'A deposit of GBP 1,200 is due by 1 September 2026 before work begins.';
 const QUESTION_CLAUSE = 'Payment terms: 30 days from the invoice date.';
 
+/**
+ * A date that is always still ahead, because "open, not overdue" is what these
+ * tests are about.
+ *
+ * It was a literal `2026-09-01`, which made the suite tell the truth until that
+ * morning and then fail every run afterwards — not as a regression anyone could
+ * act on, but as one permanently red test that every future reader has to
+ * re-diagnose before trusting the other 438. A fixture that encodes today is a
+ * fixture with an expiry date on it.
+ */
+const STILL_DUE = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+
 function obligation(over: Partial<Obligation> = {}): Obligation {
   return {
     id: 'obl_1',
     kind: 'payment',
     summary: 'Payment of GBP 1,200.00 due',
-    due: '2026-09-01',
+    due: STILL_DUE,
     source_clause: { text: CLAUSE, start: 468, end: 537 },
     source_document_id: 'C:\\Users\\a\\uploads\\northwind-sow.txt',
     direction: 'unknown',
