@@ -3,12 +3,6 @@
   "clips": [
     { "file": "idle_a.glb", "state": "idle", "role": "loop" },
     { "file": "idle_b.glb", "state": "idle", "role": "loop" },
-    { "file": "idle_c.glb", "state": "idle", "role": "loop" },
-    { "file": "listening_a.glb", "state": "listening", "role": "loop" },
-    { "file": "listening_b.glb", "state": "listening", "role": "loop" },
-    { "file": "speaking_a.glb", "state": "speaking", "role": "loop" },
-    { "file": "speaking_b.glb", "state": "speaking", "role": "loop" },
-    { "file": "speaking_c.glb", "state": "speaking", "role": "loop" },
-    { "file": "thinking_a.glb", "state": "thinking", "role": "loop" }
+    { "file": "idle_c.glb", "state": "idle", "role": "loop" }
   ]
 }
