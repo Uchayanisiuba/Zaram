@@ -228,6 +228,36 @@ a half-percent error for a six-percent one to recover one dot row at the edge of
 decision every run rather than letting it become an omission nobody remembers
 making.
 
+## Open: the rim light reports nothing, and it is supposed to be the state channel
+
+**Measured 2 September 2026 and left as found, because the fix is a design
+decision rather than a number.** `CLAUDE.md` names the rim light as the channel
+that reports system state — slate at rest, cyan while working. On this character
+it is invisible. `?rim=0` and `?rim=1` render indistinguishably, and so does
+`?rim=5`.
+
+The cause is the material. The body is metallic, and metals have no diffuse
+response, so a light contributes only where its specular lobe reaches the camera.
+The rim sits behind and to the side at `(-1.4, 0.6, -1)` — deliberately, to avoid
+putting a highlight on the visor — which means for a viewer in front there is
+almost no geometry at the angle that would return it. A back light rims a
+*dielectric* beautifully and a metal barely at all.
+
+So state currently reaches the viewer through two other channels, both working:
+the **eye cells** (`EYES_FOR_STATE`, a distinct sprite per state) and the **glow**,
+which rides the same `RIM_COLOUR` table so it cannot disagree with the rim about
+anything.
+
+Three ways forward, none taken here:
+
+1. **Accept it** and rename the channel in `CLAUDE.md` — the eyes and the glow do
+   the job, and they do it more legibly than a rim ever would at 320px.
+2. **Move the rim** to a grazing position where a metal will return it, accepting
+   that a highlight may land somewhere the visor can see.
+3. **Drop the rim light** and let the glow be the whole non-face channel.
+
+This is a rule-versus-code disagreement, so it is the maintainer's call.
+
 ## Unverified
 
 - **Lip sync.** The mouth renders and cell selection works, but `visemeAt` needs
@@ -412,12 +442,13 @@ With roughness handled, intensity could come back up without chrome returning.
 Shipped defaults, chosen by the maintainer off screenshots:
 
 ```
-envIntensity  1.8     how bright
+envIntensity  1.4     how bright
 rough         2.1     how matte  (1 = the material exactly as exported)
 lightScale    0.25    key/fill/ambient multiplier; the rim is never scaled
 sky           0.5     dims the sky half only — the body knob, see below
 normal        1       normal map strength. 0.8 was tried and is markedly darker
-glow          0.35    the state glow's opacity
+glow          0.85    the state glow's opacity. Above 1 does nothing — alpha clamps
+rim           1       rim multiplier. Debug only; the rim is invisible here, see below
 ```
 
 **Baking the EXR itself was tried, worked, and was reverted.** 64x32 RGBE is 8 KB
