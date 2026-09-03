@@ -1,0 +1,50 @@
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "C:\\Zaram"
+      ]
+    },
+    "context7": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@upstash/context7-mcp"
+      ]
+    },
+    "playwright": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@playwright/mcp@latest",
+        "--browser",
+        "chromium"
+      ]
+    },
+    "figma": {
+      "command": "npx",
+      "args": [
+        "@sethdouglasford/mcp-figma@latest"
+      ]
+    },
+    "blender": {
+      "command": "C:\\Zaram\\.mcp-venv\\Scripts\\blender-mcp.exe",
+      "args": []
+    },
+    "unreal": {
+      "command": "uvx",
+      "args": [
+        "unreal-mcp"
+      ]
+    },
+    "davinci": {
+      "command": "uvx",
+      "args": [
+        "davinci-resolve-mcp"
+      ]
+    }
+  }
+}
