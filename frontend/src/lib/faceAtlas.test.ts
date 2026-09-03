@@ -15,30 +15,35 @@ import { describe, it, expect } from 'vitest'
 // compile rather than at run — which is the failure worth catching early.
 import manifest from '../../public/avatars/face/manifest.json'
 import { cellRect, transformForCell, texelAspect, uvIslandOf, CELL_W, CELL_H, EYE_CELLS, MOUTH_CELLS } from './faceAtlas'
+
+/** Every cell the layout holds, derived rather than restated. */
+const COLS_TIMES_ROWS = Math.round(1 / CELL_W) * Math.round(1 / CELL_H)
 import { VISEMES } from './visemes'
 import * as THREE from 'three'
 
 describe('cellRect', () => {
   it('puts the rest cell on the bottom row of the PNG, which is the LAST in glTF v', () => {
     // Cell 0 is `sil` / eyes-open. The atlas writes it into the bottom row of
-    // the image; glTF's v runs downward from the top, so on a three-row atlas
-    // that row begins at v = 2/3. Getting this backwards is the flip described
+    // the image; glTF's v runs downward from the top, so on a four-row atlas
+    // that row begins at v = 3/4. Getting this backwards is the flip described
     // above, and it survives a layout change only because `cellRect` is the one
-    // place that knows about it.
-    expect(cellRect(0)).toEqual({ x: 0, y: 2 * CELL_H, w: CELL_W, h: CELL_H })
+    // place that knows about it — this assertion has now outlived two of them,
+    // 3x2 to 3x3 and 3x3 to 4x4, by being written against `ROWS` rather than a
+    // literal.
+    expect(cellRect(0)).toEqual({ x: 0, y: 3 * CELL_H, w: CELL_W, h: CELL_H })
   })
 
-  it('walks the middle PNG row for cells 3-5 and the top row for 6-8', () => {
-    expect(cellRect(3)).toMatchObject({ x: 0, y: CELL_H })
-    expect(cellRect(4)).toMatchObject({ x: CELL_W, y: CELL_H })
-    expect(cellRect(5)).toMatchObject({ x: 2 * CELL_W, y: CELL_H })
-    // `smile` is cell 6 — the row the atlas grew to hold it.
-    expect(cellRect(6)).toMatchObject({ x: 0, y: 0 })
+  it('fills a PNG row per four cells, bottom row first', () => {
+    expect(cellRect(3)).toMatchObject({ x: 3 * CELL_W, y: 3 * CELL_H })
+    // Cell 4 starts the next row up.
+    expect(cellRect(4)).toMatchObject({ x: 0, y: 2 * CELL_H })
+    expect(cellRect(7)).toMatchObject({ x: 3 * CELL_W, y: 2 * CELL_H })
+    expect(cellRect(8)).toMatchObject({ x: 0, y: CELL_H })
   })
 
-  it('advances a third of the atlas per column', () => {
-    expect(cellRect(1).x).toBeCloseTo(1 / 3, 10)
-    expect(cellRect(2).x).toBeCloseTo(2 / 3, 10)
+  it('advances a quarter of the atlas per column', () => {
+    expect(cellRect(1).x).toBeCloseTo(1 / 4, 10)
+    expect(cellRect(2).x).toBeCloseTo(2 / 4, 10)
   })
 })
 
@@ -49,14 +54,14 @@ describe('transformForCell', () => {
     // clipping bug on the mouth and warped every sprite instead: the cell is
     // square in texels and the patches are not.
     const t = transformForCell(0)
-    expect(t.repeat.x).toBeCloseTo(1 / 3, 10)
-    expect(t.repeat.y).toBeCloseTo(1 / 3, 10)
+    expect(t.repeat.x).toBeCloseTo(1 / 4, 10)
+    expect(t.repeat.y).toBeCloseTo(1 / 4, 10)
     expect(t.offset.x).toBeCloseTo(0, 10)
-    expect(t.offset.y).toBeCloseTo(2 / 3, 10)
+    expect(t.offset.y).toBeCloseTo(3 / 4, 10)
   })
 
   it('maps a full 0-1 island exactly onto its cell, for every cell', () => {
-    for (let i = 0; i < 9; i++) {
+    for (let i = 0; i < COLS_TIMES_ROWS; i++) {
       const t = transformForCell(i)
       const cell = cellRect(i)
       expect(0 * t.repeat.x + t.offset.x).toBeCloseTo(cell.x, 10)
@@ -67,7 +72,7 @@ describe('transformForCell', () => {
   })
 
   it('keeps every cell inside the atlas', () => {
-    for (let i = 0; i < 9; i++) {
+    for (let i = 0; i < COLS_TIMES_ROWS; i++) {
       const t = transformForCell(i)
       expect(t.offset.x).toBeGreaterThanOrEqual(0)
       expect(t.offset.y).toBeGreaterThanOrEqual(0)
@@ -83,13 +88,13 @@ describe('texelAspect', () => {
     // patch 0.3044 x 0.1075 in mesh units, against the 768x768 atlas. This is
     // the check that says the eyes were never the problem.
     //
-    // The atlas grew a row and this number did not move, which is the point:
-    // `CELL_H` fell from 1/2 to 1/3 as the height rose from 512 to 768, so a
-    // cell is still 256 texels tall and an island still spans the same fraction
-    // of it. Passing the old 512 here reports 1.51 and looks like a regression
-    // in the modelling.
+    // The atlas has grown twice and this number has not moved, which is the
+    // point: `CELL_H` fell 1/2 -> 1/3 -> 1/4 as the height rose 512 -> 768 ->
+    // 1024, so a cell is still 256 texels tall and an island still spans the
+    // same fraction of it. Passing the wrong atlas size here reports a ratio
+    // that looks like a regression in the modelling.
     const ratio = texelAspect(
-      { u0: -0.0025, u1: 0.998, v0: 0.2937, v1: 0.6455 }, 0.3044, 0.1075, 768, 768,
+      { u0: -0.0025, u1: 0.998, v0: 0.2937, v1: 0.6455 }, 0.3044, 0.1075, 1024, 1024,
     )
     expect(ratio).toBeGreaterThan(0.98)
     expect(ratio).toBeLessThan(1.02)

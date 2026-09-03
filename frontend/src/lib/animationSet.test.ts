@@ -112,20 +112,32 @@ describe('the shipped animation manifest', () => {
     // rim light and face. This asserts the *known* gap so that filling it is a
     // deliberate edit here rather than something nobody notices either way.
     //
-    // Six clips were exported against an Advanced Skeleton rig (`Shoulder_L`,
-    // `Elbow_L`) rather than the character's own `Robot_All_01`, so nothing
-    // binds them by name.
+    // Every clip is now exported from the character's own `Robot_All_01`, which
+    // is what closed this gap: nine FBXs, 65 joints each, binding by name with
+    // no retargeting convention at all — only the doubled
+    // `Robot_Rig_0001:Robot_All_01:` prefix handled in `sanitize`.
     //
-    // `avatar-source/retarget_advanced_skeleton.py` maps the two conventions and
-    // every structural check it produces is green — 64 of 65 bones mapped, rest
-    // poses agreeing to 0.04deg, all nine clips loading. **And the result is
-    // wrong on screen: the character collapses into a heap.** Which is the
-    // lesson rather than the bug — a retarget can satisfy every number available
-    // to it and still be measured from the wrong frame, and only looking says
-    // so. The clips stay out of the manifest until the source is re-exported
-    // from `Robot_All_01`.
-    expect(statesWithoutClips(manifest, ALL).sort()).toEqual([
-      'listening', 'speaking', 'swapping', 'thinking',
-    ])
+    // The earlier six were on an Advanced Skeleton rig (`Shoulder_L`,
+    // `Elbow_L`), sharing no bone name with the character.
+    // `retarget_animations.py` now reads the namespace out of each FBX and
+    // refuses one on the wrong rig, because such a clip imports perfectly
+    // happily and matches zero bones — and a clean run over zero bones reads
+    // exactly like success.
+    //
+    // `swapping` is not waiting on an export and never will be. It is a moment
+    // rather than a posture — there is no mocap of "changing which model
+    // answers" to shoot — so `RobotAvatar` borrows a random idle clip for the
+    // body and reports the swap through the glow and a held smile. This
+    // assertion stays as it is: the state genuinely has no clip of its own, and
+    // recording that is what makes the borrow visible rather than accidental.
+    //
+    // A name-mapping retarget of the old exports was tried and deleted. Every
+    // structural check it produced was green — 64 of 65 bones mapped, rest poses
+    // agreeing to 0.04deg, all nine clips loading — **and the result was wrong
+    // on screen: the character collapsed into a heap.** Which is the lesson
+    // rather than the bug: a retarget can satisfy every number available to it
+    // and still be measured from the wrong frame, and only looking says so. The
+    // rest stay out of the manifest until their source is re-exported too.
+    expect(statesWithoutClips(manifest, ALL).sort()).toEqual(['swapping'])
   })
 })

@@ -17,8 +17,8 @@ import * as THREE from 'three'
  * sliced composite of two mouths. Everything here snaps.
  */
 
-/** Atlas layout. Both atlases are 3x3 cells of 256px, so one cell is a third
- *  of the width and a third of the height. Written as constants rather than
+/** Atlas layout. Both atlases are 4x4 cells of 256px, so one cell is a quarter
+ *  of the width and a quarter of the height. Written as constants rather than
  *  read from the manifest because the *shape* is structural — a manifest that
  *  disagreed would be a broken manifest, not a different layout.
  *
@@ -29,13 +29,17 @@ import * as THREE from 'three'
  *  moved and no patch had to be re-modelled. The eyes carry the third row empty
  *  rather than making the layout per-atlas and threading that through every
  *  caller. */
-const COLS = 3
-const ROWS = 3
+const COLS = 4
+const ROWS = 4
 export const CELL_W = 1 / COLS
 export const CELL_H = 1 / ROWS
 
-export type EyeCell = 'open' | 'blink' | 'thinking' | 'listening' | 'swapping' | 'warming' | 'happy'
-export type MouthCell = 'sil' | 'aa' | 'ih' | 'ou' | 'ee' | 'oh' | 'smile'
+export type EyeCell =
+  | 'open' | 'blink' | 'thinking' | 'listening' | 'swapping' | 'warming'
+  | 'happy' | 'happy_blink'
+export type MouthCell =
+  | 'sil' | 'aa' | 'ih' | 'ou' | 'ee' | 'oh'
+  | 'smile'
 
 /** Cell order within each atlas, top-left to bottom-right *in UV terms*.
  *
@@ -43,12 +47,37 @@ export type MouthCell = 'sil' | 'aa' | 'ih' | 'ou' | 'ee' | 'oh' | 'smile'
  *  when nothing has asked for anything, so a face with no driver attached is a
  *  calm face rather than a garbled one. */
 /** `happy` is the eyes' half of the idle smile — not a state, and like `smile`
- *  it lives at the end so the six state cells keep their authored indices. */
-export const EYE_CELLS: EyeCell[] = ['open', 'blink', 'thinking', 'listening', 'swapping', 'warming', 'happy']
-/** `smile` is the one cell here that is not a viseme. It is an idle expression,
- *  never reachable from `visemeAt`, and it lives at the end so the six speech
- *  shapes keep the indices they were authored at. */
-export const MOUTH_CELLS: MouthCell[] = ['sil', 'aa', 'ih', 'ou', 'ee', 'oh', 'smile']
+ *  it lives at the end so the six state cells keep their authored indices.
+ *
+ *  `happy_blink` is a shallower `happy`, and it exists because `smiling` used to
+ *  suppress blinking outright: a blink over an already-curved eye reads as a
+ *  glitch, so the eye simply stopped blinking for the length of a smile. That
+ *  was survivable while the smile was rare. Now that the idle face alternates
+ *  into it, a face frozen for six to ten seconds at a time reads as dead rather
+ *  than as warm, and the fix is a crescent that can close rather than a rule
+ *  that stops the blink. */
+export const EYE_CELLS: EyeCell[] = [
+  'open', 'blink', 'thinking', 'listening', 'swapping', 'warming',
+  'happy', 'happy_blink',
+]
+/** Indices 0-5 are the VRM 1.0 presets `visemeAt` can emit, and they keep the
+ *  order they were authored in — every VRM a user brings carries exactly those,
+ *  so a seventh viseme would render here and nowhere else.
+ *
+ *  `smile` at index 6 is the only cell here that is not a viseme, and it is
+ *  unreachable from `visemeAt` — an idle expression rather than a phoneme.
+ *
+ *  Nothing else is invented. A talk ladder was drawn for the case where speech
+ *  plays with no viseme track and then removed: shapes no phoneme maps to are a
+ *  second mouth vocabulary to keep in step with the first, and the visemes
+ *  already span the range the fallback needs.
+ *
+ *  `thinking` deliberately has no mouth of its own — it wears `sil`, and the
+ *  state reads through the narrowed eyes and the glow instead. */
+export const MOUTH_CELLS: MouthCell[] = [
+  'sil', 'aa', 'ih', 'ou', 'ee', 'oh',
+  'smile',
+]
 
 /**
  * Where a cell sits in the texture, in glTF UV space.

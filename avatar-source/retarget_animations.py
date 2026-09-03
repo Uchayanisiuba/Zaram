@@ -46,6 +46,7 @@ different question and answers it wrongly.
 
 import math
 import os
+import re
 import sys
 
 import bpy
@@ -56,17 +57,36 @@ CHARACTER = os.path.join(ROOT, "frontend", "public", "avatars", "zaram-robo.glb"
 SOURCE = os.path.join(ROOT, "avatar-source", "animations")
 OUT = os.path.join(ROOT, "frontend", "public", "avatars", "animations")
 
-# Which source FBX becomes which shipped clip. Only the idles are here: the other
-# six exports are on an Advanced Skeleton rig (namespace Robot_Rig_0001, 92
-# joints, Head_M naming) with **zero** bone-name overlap with the character's
-# Robot_All_01, so nothing this script does can bind them. Confirmed by reading
-# the files: each contains one namespace and it is not the character's. They need
-# retargeting onto Robot_All_01 in Maya first.
+# Which source FBX becomes which shipped clip. The clips still missing are on the
+# Advanced Skeleton rig (namespace Robot_Rig_0001, 92 joints, Head_M naming) with
+# **zero** bone-name overlap with the character's Robot_All_01, so nothing this
+# script does can bind them. They are re-exported from Robot_All_01 in Maya one
+# at a time, which is what the Listening pair already is.
 CLIPS = [
     ("Idle.fbx", "idle_a"),
     ("Idle_01.fbx", "idle_b"),
     ("Idle_02.fbx", "idle_c"),
+    ("Listening 1.fbx", "listening_a"),
+    ("Listening 2.fbx", "listening_b"),
+    ("Talk_1.fbx", "speaking_a"),
+    ("Talk_2.fbx", "speaking_b"),
+    ("Talk_3.fbx", "speaking_c"),
+    ("Thinking.fbx", "thinking_a"),
 ]
+
+
+def on_character_rig(path):
+    """True if this FBX was exported from `Robot_All_01`, read from the file.
+
+    The re-export happens one clip at a time in Maya, so the directory holds a
+    mixture. Checked before Blender is asked to do anything, because an
+    Advanced Skeleton clip imports perfectly happily and matches zero bones --
+    and a clean run over zero bones reads exactly like success.
+    """
+    with open(path, "rb") as fh:
+        head = fh.read()
+    models = re.findall(b"([ -~]{2,120}?)" + bytes([0, 1]) + b"Model", head)
+    return bool(models) and b"Robot_All_01" in models[0]
 
 
 def sanitize(name):
@@ -77,15 +97,30 @@ def sanitize(name):
     Blender keeps the colon on FBX import, so the two rigs can spell the same
     joint differently. Matching on the raw name finds nothing and reports it as
     a clean run over zero bones, which reads exactly like success.
+
+    Compared on the trailing segment, because a clip exported from inside the rig
+    namespace spells the joint `Robot_Rig_0001:Robot_All_01:Hips` where the
+    character spells it `Robot_All_01:Hips`. The bare name is unique across the
+    65 joints, and matching the full string finds nothing -- the same
+    zero-bones-reads-as-success failure above, reached by a second route.
     """
-    return "".join(c for c in name if c.isalnum()).lower()
+    return "".join(c for c in name.split(":")[-1] if c.isalnum()).lower()
 
 
 def armature_of(objects):
-    for o in objects:
-        if o.type == "ARMATURE":
-            return o
-    return None
+    """The armature with the most bones, never simply the first.
+
+    The character GLB carries two: the real 65-bone `Armature` and a vestigial
+    one-bone `DeformationSystem` (`Root_M`) that nothing binds to. Blender's glTF
+    importer returns the vestigial one first, so taking the first armature made
+    *it* the character -- and then left the real one in the scene to be picked up
+    as the animation source, which reports as `carries no action` and reads like
+    a bad export rather than a wrong armature.
+    """
+    arms = [o for o in objects if o.type == "ARMATURE"]
+    if not arms:
+        return None
+    return max(arms, key=lambda o: len(o.data.bones))
 
 
 def import_character():
@@ -101,10 +136,12 @@ def import_character():
     arm = armature_of(bpy.context.scene.objects)
     if arm is None:
         sys.exit("no armature in the character GLB")
-    for o in list(bpy.context.scene.objects):
-        if o.type != "ARMATURE":
-            bpy.data.objects.remove(o, do_unlink=True)
     arm.name = "ZaramRig"
+    # Everything else goes, the second armature included -- otherwise it is still
+    # in the scene when the clip is imported and is what `import_source` finds.
+    for o in list(bpy.context.scene.objects):
+        if o is not arm:
+            bpy.data.objects.remove(o, do_unlink=True)
     return arm
 
 
@@ -255,10 +292,20 @@ def main():
     os.makedirs(OUT, exist_ok=True)
     wrote = []
 
+    # `-- listening_a` rebuilds just that one, so adding a clip does not
+    # re-export the ones already working.
+    wanted = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
+
     for source_name, clip_name in CLIPS:
+        if wanted and clip_name not in wanted:
+            continue
         path = os.path.join(SOURCE, source_name)
         if not os.path.exists(path):
             print("[retarget] MISSING %s" % source_name)
+            continue
+        if not on_character_rig(path):
+            print("[retarget] %s is still on the Advanced Skeleton rig "
+                  "-- re-export from Robot_All_01" % source_name)
             continue
 
         target = import_character()
