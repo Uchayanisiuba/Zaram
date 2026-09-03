@@ -14,8 +14,41 @@ from .runtime import KnowledgeRuntime
 from .protocol import KnowledgeResult
 
 
-# Singleton runtime instance
-_runtime = KnowledgeRuntime()
+# Singleton runtime instance.
+#
+# **This one is wired to nothing, and that was the bug.** `KnowledgeRuntime()`
+# with no arguments has `internet_runtime=None`, `memory_runtime=None` and an
+# empty provider list — so `search()` queried no web and no memory, and
+# `list_providers()` returned nothing. `POST /knowledge/search` therefore
+# answered every query with zero results, and the provider-health block in
+# `main.py` reported on an object with no providers to report.
+#
+# Meanwhile `bootstrapper._init_knowledge_runtime` builds a *different*
+# instance, with the internet runtime, the memory runtime and twelve
+# providers, and registers it for the capability router — which is why chat
+# searched the web correctly while the HTTP endpoint did not. Two instances,
+# different capabilities, and which one answered depended on how you arrived.
+#
+# The same shape the bootstrapper's own comment already records one layer
+# down: registering something looked like wiring and was not.
+_fallback_runtime = KnowledgeRuntime()
+
+#: The wired instance, handed over by the bootstrapper at boot.
+#:
+#: Kept as an override rather than by constructing the real thing here,
+#: because this module must stay importable with no event loop, no Spine and
+#: no network — it is imported by tests and by tools that only want
+#: `classify_query`. Unset, everything behaves exactly as it did.
+_runtime: KnowledgeRuntime | None = None
+
+
+def set_runtime(runtime: KnowledgeRuntime | None) -> None:
+    """Hand this module the wired runtime, or ``None`` to fall back.
+
+    Called once, by the bootstrapper, after the providers are registered.
+    """
+    global _runtime
+    _runtime = runtime
 
 
 def search_knowledge(query: str, persona: str = "zaram_prime", max_results: int = 6) -> dict:
@@ -25,7 +58,10 @@ def search_knowledge(query: str, persona: str = "zaram_prime", max_results: int 
     The return format matches the historical knowledge_service API.
     """
     start = time.time()
-    response = _runtime.search(query, max_results=max_results)
+    # Through `get_runtime()` rather than the module global, so this reaches
+    # the wired instance when the app has booted. Reading the global directly
+    # is what pinned this endpoint to the empty one.
+    response = get_runtime().search(query, max_results=max_results)
     latency_ms = (time.time() - start) * 1000
 
     return {
@@ -75,5 +111,12 @@ def classify_query(query: str) -> str:
 
 
 def get_runtime() -> KnowledgeRuntime:
-    """Get the singleton KnowledgeRuntime instance."""
-    return _runtime
+    """The wired runtime if the app has booted, else the empty fallback.
+
+    The fallback is kept rather than raising, because this module is imported
+    in contexts that never boot — tests, and callers that only want
+    `classify_query`. An empty result set is the honest answer there; what was
+    wrong was serving it from a booted app that had a working runtime sitting
+    beside it.
+    """
+    return _runtime if _runtime is not None else _fallback_runtime

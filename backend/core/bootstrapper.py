@@ -14,6 +14,7 @@ class KernelBootstrapper:
         self.speech_runtime = None
         self.memory_runtime = None
         self.documents_runtime = None
+        self.mcp_runtime = None
         self.semantic_router = None
         self.egress_gate = None
 
@@ -217,6 +218,16 @@ class KernelBootstrapper:
         runtime.register(PlaceholderProvider("future_gmail"))
         runtime.register(PlaceholderProvider("future_notion"))
         runtime.register(PlaceholderProvider("future_drive"))
+
+        # Hand the wired runtime to the legacy facade, which otherwise answers
+        # from an unwired `KnowledgeRuntime()` of its own — no internet, no
+        # memory, no providers. `POST /knowledge/search` and the provider-health
+        # block both read it, so both reported nothing while this instance sat
+        # beside them working. Set last, after every provider is registered, so
+        # nothing can observe a half-built runtime.
+        from knowledge.knowledge_service import set_runtime
+
+        set_runtime(runtime)
         return runtime
 
     async def _register_runtimes(self):
@@ -288,6 +299,23 @@ class KernelBootstrapper:
         self.registry.register(self.documents_runtime)
         await self.documents_runtime.initialize()
         register_runtime_for_health(self.documents_runtime)
+
+        # Tools other people wrote. Registered here rather than left to a
+        # caller that does not exist yet, because an unregistered runtime is
+        # this repository's most-repeated failure — fifteen complete, tested,
+        # unreachable subsystems, and the way each one got there was exactly
+        # this line being deferred.
+        #
+        # `initialize` connects to nothing: a configured server is a stranger's
+        # subprocess, and a cold `npx` one costs tens of seconds, so putting
+        # them on the boot path would make Zaram's launch depend on somebody
+        # else's package manager. They attach on first use.
+        from runtimes.mcp.runtime import McpRuntime
+
+        self.mcp_runtime = McpRuntime()
+        self.registry.register(self.mcp_runtime)
+        await self.mcp_runtime.initialize()
+        register_runtime_for_health(self.mcp_runtime)
 
         # An invoice is a table of line items, not paragraphs, so the documents
         # runtime needs a way to read an answer into fields. It is handed a
