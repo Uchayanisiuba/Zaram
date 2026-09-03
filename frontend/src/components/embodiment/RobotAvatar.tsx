@@ -99,9 +99,14 @@ const EYES_FOR_STATE: Record<EmbodimentState, EyeCell> = {
  * no meaning and resolves immediately.
  *
  * So the same discipline applies. Rare enough that it is never the thing you are
- * looking at, and **idle only** — during thinking, listening, speaking or
- * swapping the face belongs to the state and to lip sync, and an expression
- * arriving over those would be the character editorialising about the work.
+ * looking at, and **idle only** — during thinking, listening or speaking the
+ * face belongs to the state and to lip sync, and an expression arriving over
+ * those would be the character editorialising about the work.
+ *
+ * `swapping` smiles too, and it is not this timer. It is held for the whole
+ * state rather than drawn from a schedule, because a swap is a wait the user
+ * sits through and the body is borrowing an idle clip for it. See the frame
+ * loop.
  *
  * **The eyes smile with the mouth**, because a mouth that curves while the eyes
  * hold still is the shape of an insincere smile and reads as one. A real smile
@@ -121,15 +126,38 @@ const EYES_FOR_STATE: Record<EmbodimentState, EyeCell> = {
  */
 const MOUTH_FOLLOW_SECONDS = 1
 
-// **Both the gap and the hold are drawn fresh each time, and that is the
-// point.** A fixed hold with a random gap still has a signature: the smile is
-// always exactly as long, so a viewer learns its shape even without learning its
-// rhythm, and the pattern is spottable on a surface that sits on screen all day.
-// Two independent ranges give a schedule with no period to find.
-const SMILE_HOLD_MIN = 7
-const SMILE_HOLD_MAX = 16
-const SMILE_GAP_MIN = 14
-const SMILE_GAP_MAX = 38
+// **The idle face alternates between two held shapes rather than flashing a
+// rare smile, and both durations are drawn fresh each time.** A fixed hold with
+// a random gap still has a signature: the smile is always exactly as long, so a
+// viewer learns its shape even without learning its rhythm, and the pattern is
+// spottable on a surface that sits on screen all day. Two independent ranges
+// give a schedule with no period to find.
+//
+// **The floor is six seconds and it is the load-bearing number.** Anything
+// quicker reads as the panel switching rather than as the face settling — the
+// maintainer's own words, and the reason the ranges start where they do.
+//
+// **Neutral is the longer of the two, deliberately.** `CLAUDE.md` says the rest
+// face is `sil`, not a smile, and a face smiling as often as not stops having a
+// rest state at all: the smile stops being an event and becomes the face. At
+// roughly a third of idle it still arrives, which is the part that reads as
+// warmth.
+//
+// **Widened 45% rarer on 3 September 2026, at the maintainer's request, and the
+// arithmetic is here because "rarer" is ambiguous and the next reader deserves
+// to know which reading was taken.** Rarity is taken as *how often a smile
+// occurs*, not as how long one lasts, so the smile hold is untouched and the
+// neutral phase absorbs all of it. A cycle averaged 22s (14 neutral + 8 smile),
+// which is 164 smiles an hour; 45% fewer is 90, which is a 40s cycle, which
+// makes the neutral average 32s. The spread is kept proportional to what it was.
+//
+// The side effect is the one worth wanting: the smile falls from ~36% of idle
+// to ~20%, which moves the code back toward `CLAUDE.md`'s "rare enough that it
+// is never the thing you are looking at" rather than further from it.
+const NEUTRAL_HOLD_MIN = 23
+const NEUTRAL_HOLD_MAX = 41
+const SMILE_HOLD_MIN = 6
+const SMILE_HOLD_MAX = 10
 
 /** How long to wait between smiles, overridable as `?smileEvery=2`.
  *
@@ -137,9 +165,52 @@ const SMILE_GAP_MAX = 38
  *  through that to check a sprite. The same reason `?noAnim=1` exists: the
  *  alternative is editing a constant, rebuilding, and remembering to put it
  *  back — which is how a debug value ships. */
-function smileGap(): [number, number] {
+function neutralHold(): [number, number] {
   const every = numberParam('smileEvery', 0, 0.1)
-  return every > 0 ? [every, every] : [SMILE_GAP_MIN, SMILE_GAP_MAX]
+  return every > 0 ? [every, every] : [NEUTRAL_HOLD_MIN, NEUTRAL_HOLD_MAX]
+}
+
+/** How long a smile is held, overridable as `?smileHold=`. */
+function smileHold(): [number, number] {
+  const held = numberParam('smileHold', 0, 0.1)
+  return held > 0 ? [held, held] : [SMILE_HOLD_MIN, SMILE_HOLD_MAX]
+}
+
+/** The mouth shapes speech walks when it is playing with no viseme track.
+ *
+ *  **Real visemes, in the proportions English uses them.** An earlier version
+ *  invented three shapes for this — a small/medium/wide "talk ladder" — and it
+ *  was the wrong idea twice over: the mouth would speak in shapes no phoneme
+ *  maps to, and the atlas would carry a second vocabulary to keep in step with
+ *  the first. The visemes already span the range, so the fallback uses them.
+ *
+ *  `ih` is weighted heaviest because `visemes.ts` maps most consonants onto it —
+ *  it is the small neutral opening the jaw spends most of a sentence near — and
+ *  `sil` appears because bilabials genuinely close the mouth, which is the one
+ *  distinction that reads at a glance.
+ *
+ *  Stepped by a hash rather than in order, so it does not visibly loop. */
+const FALLBACK_VISEMES: MouthCell[] = ['ih', 'aa', 'ee', 'ih', 'ou', 'oh', 'ih', 'sil']
+
+/** Roughly the 7-8 shapes a second `visemes.ts` measures real speech at. */
+const TALK_STEPS_PER_SECOND = 7
+
+/**
+ * A 32-bit avalanche mix, used to pick a ladder rung per step.
+ *
+ * **A plain multiply is not enough here, and it was measured rather than
+ * assumed.** `(step * 2654435761) >>> 0` looked random and repeated with a
+ * period of about seven steps — which at seven steps a second is a one-second
+ * loop, the exact thing stepping by hash was meant to avoid. It was caught by
+ * two screenshots a second apart landing on the same shape. This mixes properly:
+ * over 200 steps a value repeats seven steps later 34 times against a chance
+ * expectation of 33.
+ */
+function mixStep(step: number): number {
+  let h = step | 0
+  h = Math.imul(h ^ (h >>> 16), 2246822507)
+  h = Math.imul(h ^ (h >>> 13), 3266489909)
+  return (h ^ (h >>> 16)) >>> 0
 }
 
 /** How long a state change takes to cross into its new clip. Long enough to
@@ -207,9 +278,17 @@ function fingerCurl(): number {
  * clamps to 1, so values above 1 are meaningful here and cannot overshoot.
  *
  * Overridable as `?rough=`; `1` is the material exactly as exported.
+ *
+ * **2.1 -> 1.68 on 2 September 2026, at the maintainer's request for "20% more
+ * shiny".** Gloss is the reciprocal of roughness, and this multiplier is the
+ * only control over it here, so a fifth more shine is a fifth less roughening:
+ * 2.1 x 0.8. Applied to the multiplier rather than to the material, which keeps
+ * the property the comment above argues for — every surface moves by the same
+ * proportion, so the visor stays the glossiest thing on the character and the
+ * shell stays short of the chrome it started as.
  */
 function roughnessBoost(): number {
-  return numberParam('rough', 2.1, 0.01)
+  return numberParam('rough', 1.68, 0.01)
 }
 
 /**
@@ -638,9 +717,14 @@ export default function RobotAvatar({ px = 320, src = '/avatars/zaram-robo.glb' 
     let mouthLagged: { state: EmbodimentState; smiling: boolean } = { state: 'idle', smiling: false }
     /** When the eyes last changed to something the mouth has not caught up to. */
     let mouthPending: number | null = null
-    const [gapMin, gapMax] = smileGap()
-    let smileAt = gapMin + Math.random() * (gapMax - gapMin)
-    let smileFor = 0
+    const faceDebug = new URLSearchParams(window.location.search).has('faceDebug')
+    const [neutralMin, neutralMax] = neutralHold()
+    const [smileMin, smileMax] = smileHold()
+    const pick = (lo: number, hi: number) => lo + Math.random() * (hi - lo)
+    // The idle face starts neutral, so the first thing a viewer sees is the
+    // rest state rather than an expression.
+    let idleSmiling = false
+    let idlePhaseLeft = pick(neutralMin, neutralMax)
     const rimTarget = new THREE.Color()
     const glowTarget = new THREE.Color()
     // `docs/UI-SPEC.md`: respect `prefers-reduced-motion`. The orb disables its
@@ -743,8 +827,20 @@ export default function RobotAvatar({ px = 320, src = '/avatars/zaram-robo.glb' 
 
     // ------------------------------------------------------------ animation
 
+    /**
+     * The clips a state plays, falling back to idle where it has none.
+     *
+     * **`swapping` is the case this exists for, and it is a borrow rather than
+     * a gap.** A model swap is a moment, not a posture — there is no mocap of
+     * "changing which model answers" to shoot, and inventing one would be the
+     * character acting out plumbing. So the body keeps doing what it was doing,
+     * drawn from the idle set, and the swap is reported by the glow and by the
+     * face. `ShuffleBag` picks it without repeating the one just played.
+     */
+    const bagFor = (s: EmbodimentState) => bags.get(s) ?? bags.get('idle')
+
     const playFor = (s: EmbodimentState, fade: number) => {
-      const name = bags.get(s)?.next()
+      const name = bagFor(s)?.next()
       const next = name ? actions.get(name) : undefined
       // No clip for this state: hold whatever is playing rather than snapping
       // to rest. A missing export is a gap in the asset set, not a reason for
@@ -778,7 +874,7 @@ export default function RobotAvatar({ px = 320, src = '/avatars/zaram-robo.glb' 
     const cycleVariant = () => {
       const s = playing
       if (!s || !current) return
-      if ((bags.get(s)?.size ?? 0) < 2) return
+      if ((bagFor(s)?.size ?? 0) < 2) return
       playFor(s, VARIANT_FADE_SECONDS)
     }
 
@@ -828,8 +924,8 @@ export default function RobotAvatar({ px = 320, src = '/avatars/zaram-robo.glb' 
         const mat = mesh.material as THREE.Material | undefined
         if (!(mesh as THREE.Mesh).isMesh || !mat || Array.isArray(mat)) return
         const name = (mat.name || '').toLowerCase()
-        if (!eyes && name.includes('eye')) eyes = preparePanel(mesh, '/avatars/face/eyes_atlas_3x3_alpha.png')
-        else if (!mouth && name.includes('mouth')) mouth = preparePanel(mesh, '/avatars/face/mouth_atlas_3x3_alpha.png')
+        if (!eyes && name.includes('eye')) eyes = preparePanel(mesh, '/avatars/face/eyes_atlas_4x4_alpha.png')
+        else if (!mouth && name.includes('mouth')) mouth = preparePanel(mesh, '/avatars/face/mouth_atlas_4x4_alpha.png')
       })
 
       // Dull the shell without touching the faceplate. Multiplicative, so the
@@ -1323,30 +1419,49 @@ export default function RobotAvatar({ px = 320, src = '/avatars/zaram-robo.glb' 
       // Run the idle expression before the eyes, because both halves of the
       // face wear it and the eyes are drawn first.
       let smiling = false
-      if (s === 'idle') {
-        // The timer is reset on the way out rather than paused: a smile
-        // half-finished when a reply arrives should not be waiting to resume
-        // over the answer.
-        smileAt -= dt
-        if (smileAt <= 0) {
-          smileFor = SMILE_HOLD_MIN + Math.random() * (SMILE_HOLD_MAX - SMILE_HOLD_MIN)
-          smileAt = gapMin + Math.random() * (gapMax - gapMin)
+      if (s === 'swapping') {
+        // **The one state that smiles on purpose rather than on a timer.**
+        // Swapping is the only transition the user is made to wait through, and
+        // the body is borrowing an idle clip for it, so without this the face
+        // would sit at `sil` and the state would read as the character having
+        // stalled. A smile held for its duration says the wait is expected.
+        //
+        // It costs the `swapping` eye cell, which `happy` covers over. Worth it:
+        // a crescent eye is legible at this size and a status glyph in the same
+        // panel is not.
+        //
+        // Not a personality exception, for the same reason the idle smile is
+        // not — it is derived from the state, arrives with it and leaves with
+        // it. The stagger below is what makes it land as an expression rather
+        // than as a repaint: eyes first, mouth a second behind.
+        smiling = true
+      } else if (s === 'idle') {
+        idlePhaseLeft -= dt
+        if (idlePhaseLeft <= 0) {
+          idleSmiling = !idleSmiling
+          idlePhaseLeft = idleSmiling ? pick(smileMin, smileMax) : pick(neutralMin, neutralMax)
         }
-        if (smileFor > 0) {
-          smileFor -= dt
-          smiling = true
-        }
+        smiling = idleSmiling
       } else {
-        smileFor = 0
+        // Reset on the way out rather than pause: a smile half-finished when a
+        // reply arrives should not be waiting to resume over the answer, and
+        // the face should come back to idle at rest rather than mid-expression.
+        idleSmiling = false
+        idlePhaseLeft = pick(neutralMin, neutralMax)
       }
 
       blinkAt -= dt
       const blinking = blinkAt < 0.12
       if (blinkAt < 0) blinkAt = 2.5 + Math.random() * 3.5
-      showCell(
-        eyes,
-        EYE_CELLS.indexOf(smiling ? 'happy' : blinking ? 'blink' : EYES_FOR_STATE[s]),
+      // A smile no longer stops the blink — it changes which blink. `happy`
+      // suppressing it outright was fine while the smile was rare; held for
+      // seconds at a time it froze the one signal that says the face is live.
+      const eyeCell = EYE_CELLS.indexOf(
+        smiling
+          ? blinking ? 'happy_blink' : 'happy'
+          : blinking ? 'blink' : EYES_FOR_STATE[s],
       )
+      showCell(eyes, eyeCell)
 
       // **The mouth follows the eyes rather than moving with them.**
       //
@@ -1379,11 +1494,35 @@ export default function RobotAvatar({ px = 320, src = '/avatars/zaram-robo.glb' 
       if (mouthLagged.state === 'speaking' && audio && track.length > 0) {
         shape = visemeAt(track, audio.currentTime)
       } else if (mouthLagged.state === 'speaking') {
-        shape = Math.sin(now * 9) > 0 ? 'aa' : 'ih'
+        // Hashed rather than walked in order: a six-frame ladder stepped in
+        // sequence is a visible loop at this rate.
+        const step = Math.floor(now * TALK_STEPS_PER_SECOND)
+        shape = FALLBACK_VISEMES[mixStep(step) % FALLBACK_VISEMES.length]
       } else if (mouthLagged.smiling) {
         shape = 'smile'
       }
       showCell(mouth, MOUTH_CELLS.indexOf(shape))
+
+      // **`?faceDebug=1` reports which cell each panel is showing.**
+      //
+      // The face is the hardest thing here to verify and the WebGL buffer
+      // cannot be read back after a frame, so the only instrument was a
+      // screenshot — and two cells that differ by a few dots are not tellable
+      // apart in one. That cost this file real time twice: a mouth stuck in the
+      // speaking fallback that could not be reproduced, and a ladder whose hash
+      // repeated every seven steps, which is what made two screenshots a second
+      // apart land on the same shape and look like a stuck mouth again.
+      //
+      // Off unless asked for, and read-only.
+      if (faceDebug) {
+        ;(window as unknown as { __zaramFace?: unknown }).__zaramFace = {
+          state: s,
+          mouthState: mouthLagged.state,
+          smiling,
+          mouth: shape,
+          eyes: EYE_CELLS[eyeCell],
+        }
+      }
 
       renderer.render(scene, camera)
     }

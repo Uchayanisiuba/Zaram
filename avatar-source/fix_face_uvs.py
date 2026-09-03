@@ -58,13 +58,13 @@ ATLAS_W, ATLAS_H = COLS * CELL, ROWS * CELL
 # is such an easy mistake to make.
 PANELS = {
     "mouth": {
-        "atlas": "mouth_atlas_3x3_alpha.png",
+        "atlas": "mouth_atlas_4x4_alpha.png",
         "cells": ["sil", "aa", "ih", "ou", "ee", "oh", "smile"],
         "material": "mouth",
         "write": True,
     },
     "eyes": {
-        "atlas": "eyes_atlas_3x3_alpha.png",
+        "atlas": "eyes_atlas_4x4_alpha.png",
         "cells": ["open", "blink", "thinking", "listening", "swapping", "warming", "happy"],
         "material": "eye",
         # **Measured and deliberately left alone.** The eye island clips three
