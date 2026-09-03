@@ -55,8 +55,65 @@ _WHAT_ZARAM_IS = (
     "came from, and it puts that knowledge in front of whichever model is "
     "answering. The model can change; what the person knows does not.\n"
     "\n"
+    "In this conversation you can: answer from what was recalled and name the "
+    "document or fact each claim came from; read files and images the person "
+    "attaches to a message; make a document, spreadsheet, chart or slide deck "
+    "from what has just been said, which arrives as a file card in the "
+    "conversation; and say which model answered and whether it ran on "
+    "this machine or somewhere else. Zaram chooses that model for each "
+    "question, from the ones installed here and any the person has connected.\n"
+    "\n"
+    "The person does these in the interface, not by asking you, and you cannot "
+    "start any of them: adding folders and files to Knowledge, correcting or "
+    "deleting a stored fact, and opening the log of everything that has left "
+    "the machine. Say where those live rather than offering to do them.\n"
+    "\n"
+    "If something you need was not recalled, say what is missing and ask for "
+    "it. Do not fill the gap by inventing it.\n"
+    "\n"
     "Zaram was made by Uche Anisiuba."
 )
+#: **The capability paragraphs are supplied for the same reason the maker is.**
+#:
+#: Asked what it could do, 31 August 2026, Zaram answered accurately about
+#: memory and then improvised the rest — *"questions, summaries, drafts,
+#: planning"*, which is a generic assistant's answer rather than this product's,
+#: and *"Earlier you asked about web search; I don't have that unless it's
+#: provided"*, which was wrong: search exists, is governed, and was switched
+#: **on** at the time.
+#:
+#: This file already records why. A description that says what Zaram *is* and
+#: not what it *does* leaves the doing to the weights, and what the weights
+#: reach for is the average assistant they were trained on. The remedy is the
+#: one `CLAUDE.md` states — identity is a fact the system supplies — extended
+#: from what Zaram is to what it can currently do.
+#:
+#: **Document generation was in the refusal list and should never have been —
+#: corrected 1 September 2026.** The reasoning below was sound and the fact it
+#: rested on was wrong, which is the more dangerous combination.
+#:
+#: `main.py` says `/artifacts/generate` is "not yet reachable from natural
+#: language". That is true of **the HTTP endpoint** and was generalised here
+#: into "generating documents" as a whole, which is false: the conversation
+#: reaches documents by a different route entirely. `planner.py` maps a
+#: document intent to `document.generate`, `dispatcher.py` routes `document.*`
+#: to `DocumentsRuntime`, and that calls `ArtifactService.create_document`.
+#: `bootstrapper.py` registers and initialises the runtime at boot. Two routes
+#: to one capability; one of them is unbuilt and the other has been working.
+#:
+#: What the refusal produced was worse than the improvising it replaced. Asked
+#: to make a new version of a CV, Zaram said *"I can't generate a document
+#: here… document generation is done in the interface's document tools"* — and
+#: **there are no such tools**: `artifactsClient.ts` has no generate call and
+#: nothing in the interface posts to that endpoint. So the fix for a model
+#: inventing a capability was a model denying a real one and directing the
+#: person to a screen that does not exist. A wrong refusal is not the safe
+#: side of rule 9; it is the same failure pointed the other way.
+#:
+#: The rest of the second paragraph stands, and it is a *refusal* list.
+#: Rule 9 is precisely about the damage done when generation
+#: promises what it cannot ground. Naming where those controls live is a true
+#: answer; offering to press them is not.
 #: **The maker is a supplied fact, and it had to be, because a prohibition
 #: alone left nothing to say.**
 #:
@@ -263,6 +320,38 @@ def _manner_line(manner: str) -> Optional[str]:
     )
 
 
+def _search_line(enabled: Optional[bool]) -> Optional[str]:
+    """Whether web search is on, as a supplied fact rather than a guess.
+
+    **A model cannot see its own tooling, and asked about it, it answers from
+    training data.** Measured 31 August 2026 with search switched on: *"Earlier
+    you asked about web search; I don't have that unless it's provided."* The
+    switch was on, the planner was routing search-shaped questions to it, and
+    the product told the user the opposite about its own configuration.
+
+    That is the same class as the date and the model name — a fact about the
+    present that exists only out here — so it is handed over the same way.
+
+    ``None`` when the caller does not know, and then nothing is said at all.
+    Silence is right there: a guess in either direction is a claim about
+    whether the person's questions reach the internet.
+    """
+    if enabled is None:
+        return None
+    if enabled:
+        return (
+            "Web search is on. When a question needs current information Zaram "
+            "may look it up, and anything found is shown to the person as a "
+            "source. You do not decide this and you cannot turn it off."
+        )
+    return (
+        "Web search is off, so nothing in this conversation comes from the "
+        "internet. If a question needs current information, say that search is "
+        "off and that your answer comes only from what the model already "
+        "knows. Do not present training data as though it were current."
+    )
+
+
 def identity_preamble(
     *,
     model: Optional[str] = None,
@@ -270,6 +359,7 @@ def identity_preamble(
     assistant_name: str = "",
     manner: str = "",
     today: str = "",
+    web_search: Optional[bool] = None,
 ) -> str:
     """The identity block that goes in front of everything else.
 
@@ -282,9 +372,9 @@ def identity_preamble(
     `assistant_name` and `manner` are the user's, and they are the reason this
     function has an order rather than a list of parts:
 
-    1. what Zaram is,
+    1. what Zaram is and what it can currently do,
     2. what the person calls it,
-    3. what is answering right now,
+    3. what is answering right now, the date, and whether search is on,
     4. **their manner**,
     5. how to answer about itself,
     6. honesty.
@@ -310,6 +400,12 @@ def identity_preamble(
     when = _today_line(today)
     if when:
         parts.append(when)
+
+    # Same class again: a fact about the present that the weights cannot know.
+    # Before the manner, so a supplied character cannot talk over it.
+    searching = _search_line(web_search)
+    if searching:
+        parts.append(searching)
 
     style = _manner_line(manner)
     if style:
