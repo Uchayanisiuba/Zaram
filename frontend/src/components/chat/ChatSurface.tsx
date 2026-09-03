@@ -12,7 +12,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence, type Variants } from 'framer-motion';
-import { Paperclip, Send, Square } from 'lucide-react';
+import { Eye, Paperclip, Send, Square } from 'lucide-react';
 import ArtifactCard from '@/components/ArtifactCard';
 import AttachmentChips from '@/components/chat/AttachmentChips';
 import RoutingControl from '@/components/chat/RoutingControl';
@@ -43,6 +43,8 @@ import { AnsweredBy } from './AnsweredBy';
 import SpeakButton from './SpeakButton';
 import ReasoningPanel from './ReasoningPanel';
 import CitationPanel from './CitationPanel';
+import CodePreviewPanel from './CodePreviewPanel';
+import { extractPreviewable, type PreviewableBlock } from '@/lib/previewableCode';
 import {
   useLayoutStore,
   CHAT_MIN,
@@ -93,6 +95,11 @@ interface Props {
 
 export default function ChatSurface({ navigate }: Props) {
   const reduced = useIsReducedMotion();
+
+  // Markup from a reply, brought forward over the orb. Held here rather than
+  // per-message so only one preview is open at a time — two of these would
+  // stack in the same fixed region and the lower one would be unreachable.
+  const [codePreview, setCodePreview] = useState<PreviewableBlock | null>(null);
 
   const messages = useChatStore((s) => s.messages);
   const streamingText = useChatStore((s) => s.streamingText);
@@ -731,6 +738,29 @@ export default function ChatSurface({ navigate }: Props) {
                       hear a reply and nothing saying why — which reads as a
                       broken voice extra rather than as a deliberate default. */}
                   {msg.role === 'assistant' && <SpeakButton text={stripMarkers(msg.text)} />}
+                  {/* A page written in this reply can be looked at, not only
+                      read. Offered only when the reply actually contains one:
+                      an always-present button that usually does nothing is the
+                      standing tax rule 7h refuses — the offer belongs at the
+                      moment of doubt, which is the moment markup arrives. */}
+                  {msg.role === 'assistant' &&
+                    (() => {
+                      const block = extractPreviewable(msg.text);
+                      if (!block) return null;
+                      return (
+                        <button
+                          onClick={() => setCodePreview(block)}
+                          className="mt-1.5 flex items-center gap-1.5 rounded-lg px-2 py-1 text-[11px] hover:bg-white/5"
+                          style={{
+                            border: '1px solid var(--color-border)',
+                            color: 'var(--color-text-muted)',
+                          }}
+                        >
+                          <Eye size={12} />
+                          Preview {block.label}
+                        </button>
+                      );
+                    })()}
                   {/* Files made by this reply. CLAUDE.md: generated files
                       appear as cards in the conversation. */}
                   {msg.artifacts?.map((artifact) => (
@@ -999,6 +1029,14 @@ export default function ChatSurface({ navigate }: Props) {
       </motion.div>
         </>
       )}
+
+      {/* Markup written in a reply, brought forward over the orb — the same
+          treatment a citation and a generated document already get. */}
+      <AnimatePresence>
+        {codePreview && (
+          <CodePreviewPanel block={codePreview} onClose={() => setCodePreview(null)} />
+        )}
+      </AnimatePresence>
 
       {/* The citation panel, anchored beside the conversation. */}
       <AnimatePresence>
