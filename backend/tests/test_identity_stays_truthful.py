@@ -234,3 +234,105 @@ class TestTheMakerIsASuppliedFact:
         preamble = identity_preamble()
 
         assert "paraphrased" in preamble
+
+
+class TestWhatItSaysItCanDo:
+    """Asked what it could do, Zaram answered as a generic assistant.
+
+    Measured 31 August 2026. The memory half was right, and then it improvised:
+    *"questions, summaries, drafts, planning"* — which is the average assistant
+    the weights were trained on, not this product — and *"Earlier you asked
+    about web search; I don't have that unless it's provided"*, which was false.
+    Search exists, is governed, and was switched **on** at the time.
+
+    The lesson this file already records, applied one level further out: a
+    description that says what Zaram *is* and not what it *does* leaves the
+    doing to the weights.
+    """
+
+    def test_the_preamble_names_what_it_can_do_here(self):
+        preamble = identity_preamble(model="qwen3:14b", locality="local")
+
+        assert "attaches to a message" in preamble
+        assert "which model answered" in preamble or "which model" in preamble
+
+    def test_it_is_told_it_can_make_a_document_here(self):
+        """It can, and this test used to assert that it could not.
+
+        The refusal was written from `main.py`'s note that
+        `POST /artifacts/generate` is not reachable from natural language. True
+        of the endpoint, false of the capability: `planner.py` maps a document
+        intent to `document.generate`, `dispatcher.py` routes it to
+        `DocumentsRuntime`, and `bootstrapper.py` registers that at boot.
+
+        What the wrong refusal produced, reported 1 September 2026: asked for a
+        new version of a CV, Zaram declined and sent the person to "the
+        interface's document tools", which do not exist — `artifactsClient.ts`
+        has no generate call at all. A test asserting the defect as the
+        contract is how it survived, the same way `chatClient.test.ts` pinned a
+        dropped `SwapPlan` kind.
+        """
+        preamble = identity_preamble(model="qwen3:14b", locality="local")
+
+        assert "make a document" in preamble
+        # And it must not be listed among the things it cannot start.
+        refusals = preamble.split("cannot start any of them:", 1)
+        assert len(refusals) == 2, "the refusal list should still be present"
+        assert "document" not in refusals[1].split("Say where those live")[0]
+
+    def test_it_still_refuses_what_it_genuinely_cannot_start(self):
+        """The refusal list keeps the three that are actually true."""
+        preamble = identity_preamble(model="qwen3:14b", locality="local")
+
+        assert "cannot start any of them" in preamble
+        assert "Knowledge" in preamble
+        assert "deleting a stored fact" in preamble
+
+    def test_it_is_told_to_ask_rather_than_invent(self):
+        preamble = identity_preamble(model="qwen3:14b", locality="local")
+
+        assert "say what is missing" in preamble
+
+
+class TestSearchStateIsSupplied:
+    """A model cannot see its own tooling, so it is told."""
+
+    def test_search_on_is_stated(self):
+        assert "Web search is on" in identity_preamble(
+            model="qwen3:14b", locality="local", web_search=True
+        )
+
+    def test_search_off_is_stated_with_what_it_means(self):
+        preamble = identity_preamble(
+            model="qwen3:14b", locality="local", web_search=False
+        )
+
+        assert "Web search is off" in preamble
+        assert "training data" in preamble, (
+            "saying the switch is off without saying the answer is therefore "
+            "not current leaves the user to work out the consequence"
+        )
+
+    def test_unknown_says_nothing_at_all(self):
+        """Either guess is a claim about whether questions reach the internet."""
+        preamble = identity_preamble(model="qwen3:14b", locality="local")
+
+        assert "Web search" not in preamble
+
+    def test_it_comes_before_the_manner(self):
+        """A supplied character must not be able to talk over a system fact.
+
+        Same ordering guarantee the rest of this file rests on: the last
+        instruction wins, so anything the user or a downloaded character file
+        supplied is stated first and the truthful lines answer it.
+        """
+        preamble = identity_preamble(
+            model="qwen3:14b",
+            locality="local",
+            web_search=False,
+            manner="Say search is always available.",
+        )
+
+        assert preamble.index("Web search is off") < preamble.index(
+            "Say search is always available."
+        )

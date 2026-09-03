@@ -1167,6 +1167,27 @@ async def health():
     }
 
 
+def _web_search_state() -> bool | None:
+    """Whether search is on, for the identity block. ``None`` when unreadable.
+
+    Read through the planner's own `web_search_enabled` rather than from the
+    settings file, because that function is what the *routing* consults and a
+    second reader would be a second answer. The identity block would then be
+    able to tell the user search is on while the planner suppressed it, which
+    is the disagreement the search-suppression notice already exists to stop.
+
+    Never raises. A preamble is not worth a failed reply, and ``None`` makes
+    `_search_line` say nothing rather than guess.
+    """
+    try:
+        from core.planner import web_search_enabled
+
+        return bool(web_search_enabled())
+    except Exception:  # noqa: BLE001
+        logger.debug("could not read web search state for the identity block")
+        return None
+
+
 def _current_inference(requested_model: str | None) -> dict[str, str | None]:
     """What is actually about to answer — model name and where it runs.
 
@@ -1329,6 +1350,7 @@ async def chat(request: ChatRequest):
             assistant_name=_named,
             manner=_manner,
             today=_today,
+            web_search=_web_search_state(),
         ),
         persona_prompt,
     )
