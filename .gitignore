@@ -124,6 +124,13 @@ artifacts.db-shm
 backend/artifacts.db*
 backend/generated/
 
+# Image models and the pipeline configuration beside them. A Stable Diffusion
+# checkpoint is 6.9 GB and the config is somebody else's 3 MB of tokenizer
+# vocabularies — neither is ours to redistribute, and the first would not fit
+# in a repository anyway. `imaging/local_sdxl.py` names both and says what to
+# do when they are absent, which is refuse rather than fetch.
+backend/models/
+
 # Ingest records: which folders the user pointed at, every file in them, and
 # what was extracted. The paths alone describe someone's whole working life —
 # clients, projects, what they are being paid — so this is as private as the

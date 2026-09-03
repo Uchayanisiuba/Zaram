@@ -389,7 +389,13 @@ class TestCharts:
         assert "<table>" in html
 
     def test_exporting_a_document_as_png_says_what_is_wrong(self, document_html):
-        with pytest.raises(ValueError, match="does not contain one"):
+        # "contains neither" rather than "does not contain one": the exporter
+        # now serves both PNG-carrying kinds — a chart drawn from the user's
+        # numbers and a picture drawn from a prompt — because both embed the
+        # image in their HTML the same way and getting it back out is the same
+        # base64 decode. The old wording said png was "only meaningful for a
+        # chart", which stopped being true when the image kind landed.
+        with pytest.raises(ValueError, match="contains neither"):
             export.render(document_html, "png")
 
 

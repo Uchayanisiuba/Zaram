@@ -43,6 +43,20 @@ class EventType(str, Enum):
     #: A file Zaram made. Rendered as a card in the conversation and, from the
     #: same record, as a row in Work.
     ARTIFACT = "artifact"
+    #: How far through drawing a picture the machine is.
+    #:
+    #: Distinct from STATUS, which says *what* is happening; this says how much
+    #: of it is done, and it is the only event in this file carrying a
+    #: measured fraction. With code you watch it being written, so the wait
+    #: explains itself. An image is silent for its whole duration unless
+    #: something reports it — and a diffusion pipeline emits a callback per
+    #: denoising step, so the number here is measured rather than guessed.
+    #:
+    #: There is deliberately no time remaining, here or in the payload.
+    #: Seconds-left is a guess until several steps have run, and a confident
+    #: wrong number is worse than no number — the same discipline `vram_bytes`
+    #: keeps by returning `None` rather than `0`.
+    IMAGE_PROGRESS = "image_progress"
     #: A model has to be loaded before this reply can start.
     #:
     #: Emitted *before* generation, not while it stalls. CLAUDE.md requires a
@@ -74,6 +88,19 @@ class EventType(str, Enum):
     #: attribution that arrives after the answer is a footnote, and the
     #: question "where did this come from" is asked while reading, not after.
     ANSWERING = "answering"
+    #: A tool the model asked to run, and what Zaram decided about it.
+    #:
+    #: Distinct from NOTICE because it carries the *decision* in a shape a
+    #: surface can act on — `verdict` is one of allow / confirm / refuse, and
+    #: the confirm case is a question the user has to answer before anything
+    #: runs. `McpRuntime.execute` returns that question rather than asking it,
+    #: because a runtime has no user; this is the channel it comes back on.
+    #:
+    #: It is also the record of an ordinary successful call, so a reply that
+    #: used somebody's Blender session says so in the conversation rather than
+    #: only in the egress log. Rule 3 logs the bytes; this is the half a person
+    #: reads.
+    TOOL_CALL = "tool_call"
     #: Which stored conversation this reply is being written into.
     #:
     #: Sent when the backend *started* one, which is the only case a client
@@ -289,6 +316,48 @@ class StreamEvent:
         return StreamEvent(
             type=EventType.ARTIFACT,
             data=record,
+            correlation_id=correlation_id,
+        )
+
+    @staticmethod
+    def tool_call(
+        server: str,
+        tool: str,
+        verdict: str,
+        reason: str = "",
+        correlation_id: str = "",
+    ) -> StreamEvent:
+        """One tool call, and what the gate said about it.
+
+        `verdict` is the gate's word, not the model's: "allow" means it ran,
+        "confirm" means it is waiting on the user, "refuse" means it will not
+        run and `reason` says what would change that. A refusal that does not
+        say how to permit the thing reads as a broken product — the note
+        `CLAUDE.md` makes about disabled capabilities being visible rather
+        than silent.
+        """
+        return StreamEvent(
+            type=EventType.TOOL_CALL,
+            data={
+                "server": server,
+                "tool": tool,
+                "verdict": verdict,
+                "reason": reason,
+            },
+            correlation_id=correlation_id,
+        )
+
+    @staticmethod
+    def image_progress(update: dict, correlation_id: str = "") -> StreamEvent:
+        """One denoising step's worth of progress.
+
+        The payload is passed through rather than rebuilt, so the fields the
+        provider measured are the fields the card draws — a translation layer
+        here would be a second place for "step" and "percent" to disagree.
+        """
+        return StreamEvent(
+            type=EventType.IMAGE_PROGRESS,
+            data=update,
             correlation_id=correlation_id,
         )
 

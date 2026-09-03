@@ -48,6 +48,22 @@ _TRUTHY = {"1", "true", "yes", "on"}
 SEARCH_HOST = "duckduckgo.com"
 
 
+#: What a tool request plans: look at what is attached, then answer with it.
+#:
+#: Two steps rather than one, and shaped exactly like the search pair above,
+#: because the planner cannot know which tool is wanted — only the model can,
+#: and only once it has seen what the user attached. `mcp.list_tools` is
+#: internal (its payload is context, never prose), and the generation step that
+#: follows is where the choice is made.
+#:
+#: **`mcp.call` is deliberately not planned.** A plan naming the tool up front
+#: would be the planner guessing, and worse, it would be a *permission* decided
+#: before `policy.decide` ran. The call is dispatched by the engine after the
+#: model has chosen and the gate has answered — selection is ordering, the gate
+#: is the boundary, and they must not be the same step.
+_TOOL_CAPABILITIES = ["mcp.list_tools", "reasoning.generate"]
+
+
 #: Where the current request's model runs: ``"local"``, ``"cloud"`` or ``None``.
 #:
 #: A `ContextVar`, not a module global, because two chat requests naming
@@ -246,6 +262,14 @@ class IntentType(Enum):
     MULTI_STEP = "multi_step"
     #: "Write that up as a proposal." Produces a file, generative tier.
     DOCUMENT = "document"
+    #: "Draw me a logo." Produces a picture, also generative tier.
+    #:
+    #: Separate from `VISION`, which is the *inbound* direction — looking at an
+    #: image the user supplied. One intent covering both would have to be
+    #: resolved back into two at the point of routing, from the presence of an
+    #: attachment, which is a guess about what somebody meant rather than a
+    #: classification of what they said.
+    IMAGE = "image"
     #: "Why does this function return None." Answered by `reasoning.generate`
     #: like an ordinary question — this intent exists to select a *model*, not
     #: a capability, which is the one thing no other intent here does.
@@ -279,6 +303,19 @@ class IntentClassification:
     capabilities: list[str] = field(default_factory=list)
     requires_search: bool = False
     requires_vision: bool = False
+    #: The reply should be a picture rather than prose.
+    #:
+    #: The **other** modality question, and it is not the negation or the
+    #: partner of `requires_vision` — reading an image and drawing one are
+    #: different abilities, held by different models, and `CLAUDE.md` names
+    #: collapsing them as the error that gets a text model asked to draw.
+    #:
+    #: This is a precondition, so a caller that cannot satisfy it must refuse
+    #: rather than answer. That is the whole reason the field exists: without
+    #: it "draw me a logo" reaches an ordinary chat model, which writes a
+    #: confident paragraph about a picture it never made. Rule 9 in a new
+    #: medium, and the silent version of it.
+    requires_image_output: bool = False
     requires_speech: bool = False
     #: The question wanted live information and the policy refused it.
     #:
@@ -336,9 +373,11 @@ class IntentRouter:
         "speech.stream": IntentType.SPEECH,
         "filesystem.search": IntentType.FILESYSTEM,
         "filesystem.open": IntentType.FILESYSTEM,
-        "tool.git": IntentType.TOOL,
-        "tool.vscode": IntentType.TOOL,
-        "tool.terminal": IntentType.TOOL,
+        # `tool.*` used to be three entries here — git, vscode, terminal — and
+        # no runtime provided any of them. What serves this intent is whatever
+        # MCP server the user attached, which is the point of being a client.
+        "mcp.list_tools": IntentType.TOOL,
+        "mcp.call": IntentType.TOOL,
     }
 
     # Keywords for intent detection.
@@ -350,6 +389,23 @@ class IntentRouter:
     # filesystem via "search". Every invoice prompt in the business layer went
     # to text-to-speech.
     _VISION_KEYWORDS = {"image", "photo", "picture", "screenshot", "see", "look", "visual"}
+    #: Asking for a picture to be *made*, which every one of these overlaps
+    #: with `_VISION_KEYWORDS` on — "draw me a picture" contains "picture" —
+    #: so this set is checked first and every entry is a phrase rather than a
+    #: word.
+    #:
+    #: Phrases, and tightly, for the same reason `_CODE_KEYWORDS` is tight:
+    #: this only runs when the embedder is unavailable, and a false positive
+    #: sends an ordinary request to a refusal about image models. Bare "draw"
+    #: is the one that would do it — "draw up a contract" is a document, and
+    #: this must not take it.
+    _IMAGE_KEYWORDS = {
+        "draw me", "draw a picture", "draw an image",
+        "generate an image", "generate a picture", "generate an illustration",
+        "create an image", "create a picture",
+        "make me an image", "make me a picture",
+        "illustration of", "logo for", "paint me", "photorealistic",
+    }
     _SPEECH_KEYWORDS = {"speak", "say", "voice", "audio", "talk", "pronounce", "read aloud",
                         "out loud", "aloud"}
     _FILESYSTEM_KEYWORDS = {"file", "open", "read", "search", "find", "directory", "folder"}
@@ -405,7 +461,12 @@ class IntentRouter:
         """
         return cls._matcher(keywords).findall(prompt_lower)
 
-    def __init__(self, event_bus: Any | None = None, semantic_router: Any | None = None) -> None:
+    def __init__(
+        self,
+        event_bus: Any | None = None,
+        semantic_router: Any | None = None,
+        tool_vocabulary: Any | None = None,
+    ) -> None:
         """`semantic_router` is optional so every existing caller still works.
 
         CLAUDE.md routes with embeddings; this class was keyword-based. Rather
@@ -414,9 +475,45 @@ class IntentRouter:
         is unreachable, and a keyword router is predictable where similarity
         over hash vectors is arbitrary. Deleting the keywords would have made
         an Ollama outage into a broken product rather than a duller one.
+
+        `tool_vocabulary` is a callable returning the names of the servers the
+        user has attached, and it is what makes the tool route reachable in
+        practice rather than only in principle. `_TOOL_KEYWORDS` was written
+        for a terminal capability — git, commit, push, run — so with Blender
+        attached, *"what is in my blender scene"* matched nothing and the
+        attached server was never consulted. The route existed and almost
+        nothing travelled it.
+
+        It is deliberately **not** a question put to the user, and not a fixed
+        list of applications Zaram has heard of. Attaching a server is already
+        the user saying they want it; reading the names back is rule 7e's
+        "never ask what the system can answer from behaviour", and it means a
+        server nobody at Zaram has heard of works on the day it is written.
+
+        Injected rather than imported, like `McpRuntime`'s ranker, so `core/`
+        keeps no import-time dependency on a runtime. Absent is a supported
+        state and degrades to the old keyword set.
         """
         self._event_bus = event_bus
         self._semantic = semantic_router
+        self._tool_vocabulary = tool_vocabulary
+
+    def _tool_keywords(self) -> set[str]:
+        """The tool words for *this* machine: the fixed set plus what is attached."""
+        if self._tool_vocabulary is None:
+            return self._TOOL_KEYWORDS
+        try:
+            attached = {
+                str(name).lower().strip()
+                for name in (self._tool_vocabulary() or ())
+                if str(name).strip()
+            }
+        except Exception:
+            # Classification must never be the thing that fails a request; a
+            # broken config means duller routing, not no answer.
+            logger.exception("Could not read the attached tool vocabulary")
+            return self._TOOL_KEYWORDS
+        return self._TOOL_KEYWORDS | attached
 
     def classify(self, prompt: str) -> IntentClassification:
         """Classify a user prompt into an intent.
@@ -461,6 +558,17 @@ class IntentRouter:
             detail="Query classifier detected time-sensitive or factual query",
         ))
 
+        # Check for image-generation phrases. Before vision, because every one
+        # of them contains a vision keyword.
+        image_hits = self._matches(prompt_lower, self._IMAGE_KEYWORDS)
+        image_matched = bool(image_hits)
+        signals.append(IntentSignal(
+            name="image_phrases",
+            weight=0.7,
+            matched=image_matched,
+            detail=f"Image-generation phrases found: {image_hits}",
+        ))
+
         # Check for vision keywords
         vision_hits = self._matches(prompt_lower, self._VISION_KEYWORDS)
         vision_matched = bool(vision_hits)
@@ -492,7 +600,7 @@ class IntentRouter:
         ))
 
         # Check for tool keywords
-        tool_hits = self._matches(prompt_lower, self._TOOL_KEYWORDS)
+        tool_hits = self._matches(prompt_lower, self._tool_keywords())
         tool_matched = bool(tool_hits)
         signals.append(IntentSignal(
             name="tool_keywords",
@@ -512,7 +620,13 @@ class IntentRouter:
         ))
 
         # Determine intent type based on signals
-        if vision_matched:
+        if image_matched:
+            # Ahead of vision deliberately: "draw me a picture" matches both,
+            # and only one of the two readings is what anybody meant.
+            intent_type = IntentType.IMAGE
+            confidence = 0.85
+            capabilities = ["image.generate"]
+        elif vision_matched:
             intent_type = IntentType.VISION
             confidence = 0.85
             capabilities = ["vision.analyze"]
@@ -527,7 +641,7 @@ class IntentRouter:
         elif tool_matched:
             intent_type = IntentType.TOOL
             confidence = 0.65
-            capabilities = ["tool.terminal"]
+            capabilities = _TOOL_CAPABILITIES
         elif search_required:
             intent_type = IntentType.MULTI_STEP
             confidence = 0.80
@@ -554,7 +668,13 @@ class IntentRouter:
             confidence=confidence,
             capabilities=capabilities,
             requires_search=search_required,
-            requires_vision=vision_matched,
+            # Not both. Every image-generation phrase contains a vision
+            # keyword, so without this exclusion "draw me a picture" reports
+            # that it needs a model which can *read* images as well as draw
+            # them — two gates ANDed together, and a candidate set that empties
+            # for a reason nobody asked for.
+            requires_vision=vision_matched and not image_matched,
+            requires_image_output=image_matched,
             requires_speech=speech_matched,
             search_suppressed=search_wanted and not search_required,
             search_suppressed_reason=suppression_reason(search_wanted, search_required),
@@ -569,10 +689,11 @@ class IntentRouter:
     #: to anything must not take the request down — see the `.get` below.
     _SEMANTIC_CAPABILITIES: dict[str, list[str]] = {
         "document": ["document.generate"],
+        "image": ["image.generate"],
         "vision": ["vision.analyze"],
         "speech": ["speech.tts"],
         "filesystem": ["filesystem.search"],
-        "tool": ["tool.terminal"],
+        "tool": _TOOL_CAPABILITIES,
         "search": ["knowledge.search", "reasoning.generate"],
         "conversation": ["reasoning.generate"],
         #: Same capability as conversation, on purpose. A coding question is
@@ -662,6 +783,7 @@ class IntentRouter:
             capabilities=capabilities,
             requires_search=requires_search,
             requires_vision=decision.intent == "vision",
+            requires_image_output=decision.intent == "image",
             requires_speech=decision.intent == "speech",
             search_suppressed=wants_search and not requires_search,
             search_suppressed_reason=suppression_reason(wants_search, requires_search),
@@ -685,9 +807,10 @@ class IntentRouter:
             IntentType.VISION: "vision.analyze",
             IntentType.SPEECH: "speech.tts",
             IntentType.FILESYSTEM: "filesystem.search",
-            IntentType.TOOL: "tool.terminal",
+            IntentType.TOOL: "mcp.list_tools",
             IntentType.MULTI_STEP: "knowledge.search",
             IntentType.CODE: "reasoning.generate",
+            IntentType.IMAGE: "image.generate",
         }
         return mapping.get(intent, "reasoning.generate")
 
@@ -704,8 +827,23 @@ class IntentPlanner:
         self,
         router: IntentRouter | None = None,
         semantic_router: Any | None = None,
+        tool_vocabulary: Any | None = None,
     ) -> None:
-        self._router = router or IntentRouter(semantic_router=semantic_router)
+        self._router = router or IntentRouter(
+            semantic_router=semantic_router,
+            tool_vocabulary=tool_vocabulary,
+        )
+
+    def set_tool_vocabulary(self, vocabulary: Any | None) -> None:
+        """Tell the router which servers are attached.
+
+        A setter as well as a constructor argument because the MCP runtime is
+        registered *after* the engine is built — servers are not connected at
+        boot, since putting a stranger's `npx` subprocess on the critical path
+        of Zaram launching costs tens of seconds. Late binding is what lets the
+        vocabulary follow the user attaching a server without a restart.
+        """
+        self._router._tool_vocabulary = vocabulary
 
     def classify_intent(self, prompt: str) -> IntentClassification:
         """Classify a user prompt into an intent."""
@@ -788,6 +926,29 @@ class IntentPlanner:
                 ExecutionStep(
                     capability_id="knowledge.search",
                     input_data={"query": prompt, "persona": "zaram_prime"},
+                    depends_on=[],
+                ),
+                ExecutionStep(
+                    capability_id="reasoning.generate",
+                    input_data={"prompt": prompt},
+                    depends_on=[0],
+                ),
+            ]
+        elif classification.intent_type is IntentType.TOOL:
+            # Same shape as the search pair above: gather, then answer with
+            # what was gathered. The list step is what puts the user's attached
+            # servers in front of the model at all.
+            #
+            # It degrades well by construction, which is what makes it safe to
+            # route here on keywords as noisy as "run" and "execute". With no
+            # servers attached the list comes back empty, nothing is added to
+            # the prompt, and the second step answers the question as an
+            # ordinary reply — the same graceful direction `_drop_unavailable_steps`
+            # takes, reached without needing a runtime to be missing.
+            plan_steps = [
+                ExecutionStep(
+                    capability_id="mcp.list_tools",
+                    input_data={"query": prompt},
                     depends_on=[],
                 ),
                 ExecutionStep(

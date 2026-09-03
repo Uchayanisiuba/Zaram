@@ -14,6 +14,9 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence, type Variants } from 'framer-motion';
 import { Eye, Paperclip, Send, Square } from 'lucide-react';
 import ArtifactCard from '@/components/ArtifactCard';
+import ArtifactGrid from '@/components/ArtifactGrid';
+import ImageProgressCard from '@/components/ImageProgressCard';
+import { groupArtifacts } from '@/lib/artifactGroups';
 import AttachmentChips from '@/components/chat/AttachmentChips';
 import RoutingControl from '@/components/chat/RoutingControl';
 import { filesFromClipboard, withPasteName } from '@/lib/pastedFiles';
@@ -107,6 +110,7 @@ export default function ChatSurface({ navigate }: Props) {
   const streamingSources = useChatStore((s) => s.streamingSources);
   const streamingArtifacts = useChatStore((s) => s.streamingArtifacts);
   const streamingNotices = useChatStore((s) => s.streamingNotices);
+  const streamingImageProgress = useChatStore((s) => s.streamingImageProgress);
   const streamingAnsweredBy = useChatStore((s) => s.streamingAnsweredBy);
   const isStreaming = useChatStore((s) => s.isStreaming);
   const connectionError = useChatStore((s) => s.connectionError);
@@ -762,10 +766,22 @@ export default function ChatSurface({ navigate }: Props) {
                       );
                     })()}
                   {/* Files made by this reply. CLAUDE.md: generated files
-                      appear as cards in the conversation. */}
-                  {msg.artifacts?.map((artifact) => (
-                    <ArtifactCard key={artifact.id} artifact={artifact} />
-                  ))}
+                      appear as cards in the conversation.
+
+                      A run of pictures is one card with a grid rather than one
+                      card each — four cards for one request floods the
+                      transcript with what is really a single answer. See
+                      `groupArtifacts` for why the run has to be consecutive. */}
+                  {groupArtifacts(msg.artifacts ?? []).map((group) =>
+                    group.kind === 'gallery' ? (
+                      <ArtifactGrid
+                        key={group.artifacts[0].id}
+                        artifacts={group.artifacts}
+                      />
+                    ) : (
+                      <ArtifactCard key={group.artifact.id} artifact={group.artifact} />
+                    ),
+                  )}
                   {msg.notices?.map((notice, i) => (
                     <NoticeCard
                       key={i}
@@ -833,9 +849,21 @@ export default function ChatSurface({ navigate }: Props) {
                       onOpenSource={(s, el) => s.url && openSourcePanel(s.url, el)}
                     />
                   )}
-                  {streamingArtifacts.map((artifact) => (
-                    <ArtifactCard key={artifact.id} artifact={artifact} />
-                  ))}
+                  {/* The bar, while the picture is being drawn.
+                      Before the artifacts, because it is replaced by them —
+                      showing it underneath would make the finished image
+                      appear above its own progress. */}
+                  <ImageProgressCard progress={streamingImageProgress} />
+                  {groupArtifacts(streamingArtifacts).map((group) =>
+                    group.kind === 'gallery' ? (
+                      <ArtifactGrid
+                        key={group.artifacts[0].id}
+                        artifacts={group.artifacts}
+                      />
+                    ) : (
+                      <ArtifactCard key={group.artifact.id} artifact={group.artifact} />
+                    ),
+                  )}
                   {streamingNotices.map((notice, i) => (
                     <NoticeCard
                       key={i}

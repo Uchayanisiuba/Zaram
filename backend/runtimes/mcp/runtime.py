@@ -296,6 +296,16 @@ class McpRuntime:
             "provenance": Provenance.TOOL_OUTPUT.value,
         }
 
+    def server_names(self) -> List[str]:
+        """What the user called the servers they attached.
+
+        Read by the planner as routing vocabulary: with Blender attached,
+        "blender" becomes a word that means *tool request* on this machine.
+        Configured, not connected — this must answer without starting anybody's
+        subprocess, because it is consulted on the way to classifying a prompt.
+        """
+        return list(self._store.load().keys())
+
     def grant(self, server_id: str, tool_name: str) -> None:
         """Record that the user allowed this tool, so it stops asking."""
         self._store.grant(server_id, tool_name)

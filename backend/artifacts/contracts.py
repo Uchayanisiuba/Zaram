@@ -59,6 +59,20 @@ class ArtifactKind(str, Enum):
     #: the user asked for a deck, so the outline is what gets previewed and
     #: `.pptx` is what gets written by default.
     DECK = "deck"
+    #: A picture Zaram drew, from a prompt rather than from data.
+    #:
+    #: Distinct from `CHART`, which is also a PNG and is not the same thing: a
+    #: chart is *derived from numbers the user has* and always carries the data
+    #: table that makes it checkable, while an image is drawn from a
+    #: description and has no numbers behind it to check. Folding the two
+    #: together would either put an empty data table under every picture or
+    #: quietly drop the one under every chart, and the second is the relief
+    #: `export/chart.py` says is mandatory rather than decorative.
+    #:
+    #: Both export as `.png` through the same exporter, because both embed the
+    #: image in their HTML as a data URI and getting it back out is a base64
+    #: decode either way.
+    IMAGE = "image"
 
 
 class Origin(str, Enum):

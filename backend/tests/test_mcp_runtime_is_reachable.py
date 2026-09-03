@@ -8,6 +8,17 @@ suite stayed green while the feature did not exist.
 
 So the first assertion here is not about behaviour. It is that the bootstrapper
 registers the thing.
+
+**And registration is not reachability, which this file's name claimed and its
+assertions did not support.** For a fortnight after it went green, `planner.py`
+contained no occurrence of "mcp": nothing could plan `mcp.call`, so no question
+ever arrived at the client, and the sixteenth unreachable subsystem was the one
+whose test file existed to prevent a sixteenth. Being registered is necessary
+and it is not the claim the filename makes.
+
+The route itself — what the planner emits, what the dispatcher carries, what
+the engine does with the payload, and which component decides permission — is
+`test_mcp_reaches_chat.py`. Read the two together; this one is the boot half.
 """
 
 from __future__ import annotations

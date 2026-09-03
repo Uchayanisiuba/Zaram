@@ -209,6 +209,39 @@ class ModelInfo:
         return self.specialisation is None
 
     @property
+    def emits_image(self) -> bool:
+        """Whether this model can **draw** a picture, as opposed to read one.
+
+        A property rather than a stored field, deliberately, and derived from
+        what discovery already recorded rather than from a new flag nothing
+        sets — a field that every adapter has to remember is a field most of
+        them forget, which is precisely how ``supports_vision`` came to be read
+        by a gate while nothing populated it.
+
+        Two sources, and both are already written by the OpenRouter
+        discoverer: ``output_modalities`` in metadata, which is the direct
+        statement, and ``ModelCategory.IMAGE``, which that discoverer sets for
+        a model that emits images and no text.
+
+        **This is a precondition, never a score.** "Can this model draw"
+        answers yes or no; it does not answer "how well". `CLAUDE.md` names
+        merging the two as this codebase's most expensive recurring error, and
+        its modality form is the worst of them: a text model asked to draw
+        answers with confident prose about a picture it never made, which is
+        rule 9's failure wearing a new medium.
+
+        A local Ollama chat model returns False, and that is the correct
+        answer. Nothing served through Ollama emits images, so a machine with
+        only local models must be told images cannot be drawn by a *model* —
+        which is not the same as saying they cannot be drawn, because the
+        local SDXL pipeline is not a model in this registry at all.
+        """
+        emits = self.metadata.get("output_modalities")
+        if isinstance(emits, (list, tuple, set)) and "image" in emits:
+            return True
+        return self.category is ModelCategory.IMAGE
+
+    @property
     def data_policy_known(self) -> bool:
         """Whether anyone has established what this provider does with prompts."""
         return self.data_policy is not None
@@ -241,6 +274,10 @@ class ModelInfo:
             "quantization": self.quantization,
             "capabilities": sorted(self.capabilities),
             "supports_vision": self.supports_vision,
+            # Reading and drawing, side by side and never one number. The
+            # picker shows them as two separate things for the same reason the
+            # gate treats them as two separate questions.
+            "emits_image": self.emits_image,
             "supports_embedding": self.supports_embedding,
             "supports_tools": self.supports_tools,
             "recommended_use": self.recommended_use,

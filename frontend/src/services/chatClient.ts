@@ -113,6 +113,25 @@ export function hostOf(url: string): string | null {
   }
 }
 
+/** How far through drawing a picture the machine is.
+ *
+ *  Mirrors `ImageProgress` in `imaging/contracts.py`, field for field, and
+ *  carries **no time remaining** — there is no field here that could hold one,
+ *  which is the point. A diffusion pipeline emits a callback per denoising
+ *  step, so `step` and `percent` are counted; seconds-left would be an
+ *  extrapolation from nothing at the moment it would first be shown.
+ *
+ *  Defined here rather than in the component that draws it: this is what the
+ *  backend sends, and a transport type living inside a component is one the
+ *  next surface has to import a component to read. */
+export interface ImageProgress {
+  step: number;
+  total_steps: number;
+  index: number;
+  count: number;
+  percent: number;
+}
+
 export type ChatEvent =
   | { type: 'token'; content: string }
   /** The model's working, from a `<think>` block, with the tags removed.
@@ -127,6 +146,14 @@ export type ChatEvent =
   /** A file Zaram made. The same record Work draws a row from, so the card in
    *  the conversation and the row in Work cannot disagree about what exists. */
   | { type: 'artifact'; artifact: Artifact & { download_url: string } }
+  /** How far through drawing a picture the machine is.
+   *
+   *  Its own event rather than a `status`, because this carries a *measured
+   *  fraction* — a diffusion pipeline emits a callback per denoising step, so
+   *  "step 7 of 30" is counted rather than estimated. There is deliberately no
+   *  time remaining in it: seconds-left is a guess until several steps have
+   *  run, and a confident wrong number is worse than none. */
+  | { type: 'image_progress'; progress: ImageProgress }
   /** Something the user needs to know that is not part of the answer — the
    *  first case is a file ingest could not read. Kept separate from `token` so
    *  it is never rendered as the model speaking, and from `error` because
@@ -504,6 +531,28 @@ function parseLine(line: string): ChatEvent | null {
         artifact: {
           ...artifact,
           download_url: artifact.download_url ?? `/artifacts/${artifact.id}/download`,
+        },
+      };
+    }
+
+    case 'image_progress': {
+      // Every field is read as a number and none is defaulted to something
+      // plausible: a bar drawn from an invented denominator is a rendered
+      // value nobody measured, which is the thing the UI principles forbid.
+      // A payload that cannot supply them is dropped instead.
+      const step = Number(data.step);
+      const total = Number(data.total_steps);
+      const percent = Number(data.percent);
+      if (!Number.isFinite(step) || !Number.isFinite(total) || total < 1) return null;
+      if (!Number.isFinite(percent)) return null;
+      return {
+        type: 'image_progress',
+        progress: {
+          step,
+          total_steps: total,
+          index: Number(data.index) || 1,
+          count: Number(data.count) || 1,
+          percent: Math.max(0, Math.min(100, Math.round(percent))),
         },
       };
     }

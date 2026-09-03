@@ -17,6 +17,7 @@ import {
   ChatTransportError,
   type ChatSource,
   type ChatRequest,
+  type ImageProgress,
 } from '@/services/chatClient';
 import type { Artifact } from '@/services/artifactsClient';
 import { useSystemStore } from '@/stores/systemStore';
@@ -96,6 +97,14 @@ interface ChatState {
   streamingArtifacts: Artifact[];
   /** Notices for the in-flight reply. Arrive last, after the answer. */
   streamingNotices: ChatNotice[];
+  /** How far through drawing a picture the machine is, or `null`.
+   *
+   *  Held rather than accumulated: only the latest matters, and keeping the
+   *  history of a bar would be a list of numbers nobody reads twice. Cleared
+   *  when the artifact arrives, because at that point the picture *is* the
+   *  progress report — a bar left at 100% beside the finished image is a
+   *  second claim about the same thing. */
+  streamingImageProgress: ImageProgress | null;
   /** Who is answering the in-flight reply. Arrives before the first token, so
    *  the attribution is on screen while the answer is being read rather than
    *  appearing under it once the reading is done. */
@@ -199,6 +208,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   streamingSources: [],
   streamingArtifacts: [],
   streamingNotices: [],
+  streamingImageProgress: null,
   streamingAnsweredBy: null,
   isStreaming: false,
   connectionError: null,
@@ -365,7 +375,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
             // A file was written. It appears under the reply that produced it
             // and, from the same record, as a row in Work.
             artifacts.push(event.artifact);
-            set({ streamingArtifacts: [...artifacts] });
+            // The picture replaces its own progress bar. Leaving the bar up
+            // beside the finished image would be two claims about one thing,
+            // and the second one is stale the moment the first arrives.
+            set({ streamingArtifacts: [...artifacts], streamingImageProgress: null });
+            break;
+          }
+
+          case 'image_progress': {
+            // Latest wins. This fires once per denoising step — thirty times
+            // for one image — so accumulating would build a list whose only
+            // useful member is the last one.
+            set({ streamingImageProgress: event.progress });
             break;
           }
 
@@ -511,6 +532,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       streamingSources: [],
       streamingArtifacts: [],
       streamingNotices: [],
+      streamingImageProgress: null,
       streamingAnsweredBy: null,
       isStreaming: false,
     }));
@@ -549,6 +571,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       streamingReasoning: '',
       streamingSources: [],
       streamingNotices: [],
+      streamingImageProgress: null,
       streamingAnsweredBy: null,
     });
   },
@@ -563,6 +586,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       streamingSources: [],
       streamingArtifacts: [],
       streamingNotices: [],
+      streamingImageProgress: null,
       streamingAnsweredBy: null,
       isStreaming: false,
       connectionError: null,
@@ -622,6 +646,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         streamingSources: [],
         streamingArtifacts: [],
         streamingNotices: [],
+        streamingImageProgress: null,
         streamingAnsweredBy: null,
         isStreaming: false,
         connectionError: null,
