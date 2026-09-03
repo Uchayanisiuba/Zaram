@@ -103,16 +103,23 @@ def _catalogued(
 def two_server_machine():
     """The maintainer's machine, in miniature: 12 GB, Ollama and TabbyAPI.
 
-    Budget: 12 GB less the 1.16 GB embedder less a 20% KV reserve = ~8.44 GB.
-    TabbyAPI is discovered as "lm_studio" — it serves the LM Studio port and
-    the adapter pointed at that port is what finds it.
+    Budget: 12 GB less the 1.16 GB embedder = ~10.84 GB, with each model
+    charged its own weights plus a 20% KV allowance. Re-pinned 31 August 2026
+    when that allowance moved off the card and onto the model; see the fixture
+    in `test_swap_preflight.py` for why.
+
+    TabbyAPI is discovered under the `lm_studio` provider id, which is a
+    historical label rather than a claim about the program: nothing in the
+    `/v1/models` contract says which server is on the port. The interface names
+    the port. This fixture is the case that proved it — the maintainer runs
+    TabbyAPI here and has never installed LM Studio.
     """
     mgr = ProviderManager()
     mgr.catalog.upsert_all([
         _catalogued("ollama:bge-m3:latest", "bge-m3:latest", "ollama", 1.16,
                     ModelCategory.EMBEDDING),
         _catalogued("ollama:gemma3:latest", "gemma3:latest", "ollama", 3.3),
-        _catalogued("ollama:qwen3:latest", "qwen3:latest", "ollama", 6.0),
+        _catalogued("ollama:qwen3:latest", "qwen3:latest", "ollama", 8.0),
         _catalogued("ollama:llama3.2:latest", "llama3.2:latest", "ollama", 2.0),
         # Discovery cannot size a model served over the OpenAI contract, so the
         # catalog carries no size for it either. That is the real shape.
@@ -256,9 +263,10 @@ class TestTheDecisionThatWasWrong:
     ):
         """Both servers report sizes, so the attributable sum can answer.
 
-        3.0 GB held by the second server against an ~8.44 GB budget leaves
-        ~5.44 GB, and the 6 GB model does not fit in it. The old code counted
-        only Ollama's empty map and graded this `load`.
+        3.0 GB held by the second server against an ~10.84 GB budget leaves
+        ~7.84 GB, and the 8 GB model costs 9.6 with its cache, so it does not
+        fit in it. The old code counted only Ollama's empty map and graded this
+        `load`.
         """
         two_server_machine.registry.register_model_provider(_Server("ollama", {}))
         two_server_machine.registry.register_model_provider(
@@ -521,3 +529,56 @@ class TestAgainstTheRealServersOnThisMachine:
             pytest.skip("no card whose capacity can be read")
 
         assert profiler.vram_used_bytes() is not None
+
+
+class TestASizelessModelIsStillKnownToBeResident:
+    """Warming up on every message, reported by the maintainer 31 August 2026.
+
+    `swap_preflight` asked for the model's size before it asked whether the
+    model was already loaded, and returned "cannot determine" when the size was
+    unknown. No OpenAI-compatible server reports a size, so for every TabbyAPI
+    model that was always: no `model_load` event reached the interface, the
+    frontend fell back to its timer, and the orb read **Warming up** on replies
+    that arrived in under a second from weights that had not moved.
+
+    Residency is answerable from the residency map alone. It needs no budget
+    and no size, and asking the unanswerable question first is what made the
+    answerable one unreachable.
+    """
+
+    def test_a_resident_model_with_no_size_reports_resident(
+        self, two_server_machine
+    ):
+        two_server_machine.registry.register_model_provider(_Server("ollama", {}))
+        two_server_machine.registry.register_model_provider(
+            _Server("lm_studio", {"Qwen3.8-27B-exl3-2.20bpw": None})
+        )
+
+        plan = two_server_machine.swap_preflight(
+            "lm_studio:Qwen3.8-27B-exl3-2.20bpw"
+        )
+
+        assert plan is not None, (
+            "returning None here emits no model_load event, and the interface "
+            "then guesses that silence means a cold model"
+        )
+        assert plan.kind == "resident"
+        assert plan.requires_swap is False
+
+    def test_a_sizeless_model_that_is_not_loaded_still_says_nothing(
+        self, two_server_machine
+    ):
+        """The guard against fixing this by inventing a verdict.
+
+        Not resident and no size is genuinely undecidable: we cannot say
+        whether loading it would displace anything. Silence is correct there,
+        and it is a different answer from the one above.
+        """
+        two_server_machine.registry.register_model_provider(_Server("ollama", {}))
+        two_server_machine.registry.register_model_provider(
+            _Server("lm_studio", {})
+        )
+
+        assert two_server_machine.swap_preflight(
+            "lm_studio:Qwen3.8-27B-exl3-2.20bpw"
+        ) is None

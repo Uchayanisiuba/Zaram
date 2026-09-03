@@ -30,18 +30,32 @@ from .scanner import ProviderScanner
 
 logger = logging.getLogger(__name__)
 
-#: Fraction of VRAM held back from the residency budget.
+#: What a model's KV cache costs, as a fraction of its own weights.
 #:
-#: Weights are not the whole cost — the KV cache grows with context length and
-#: concurrency, and the display server wants a slice on a desktop GPU. A model
-#: sized to exactly the free VRAM will fit at load and thrash a few thousand
-#: tokens into a conversation, which is worse than not choosing it, because the
-#: failure arrives later and looks like the product being slow.
+#: Weights are not the whole cost — the cache grows with context length — so a
+#: model sized to exactly the free VRAM fits at load and thrashes a few
+#: thousand tokens into a conversation. That failure arrives late and looks
+#: like the product being slow, which is why an allowance exists at all.
 #:
-#: This number is a judgement, not a measurement, and it is the weakest part of
-#: the heuristic. The honest fix is to compute the reserve from the model's own
-#: context length; until someone measures it, this stays deliberately generous.
-_KV_CACHE_RESERVE_FRACTION = 0.20
+#: **It is charged against the model, not against the card, and that is the
+#: correction.** It used to be a flat 20% of VRAM held back from the budget,
+#: which is a tax unrelated to the model being tested: identical for a 3 GB
+#: model and a 30 GB one, and 4.8 GB on a 24 GB card no matter what is being
+#: loaded. Measured 31 August 2026 on the 12 GB card it excluded *every* chat
+#: model installed — `qwen3:14b` missed the budget by 0.13 GB while running
+#: perfectly well beside the embedder — and an empty candidate set is what
+#: produced "No model was selected for this request".
+#:
+#: The number stays a judgement, but it is now a judgement in the right units
+#: and checked against one real measurement: `qwen3-14b-8k` is 9.28 GB on disk
+#: and **10.32 GB resident at `num_ctx 8192`**, a cache of 11% of its weights.
+#: 20% keeps roughly the margin that reading is worth, and errs large, which is
+#: the direction that costs a swap rather than a wrong answer.
+#:
+#: The remaining honest fix is to read the model's own `num_ctx` — `/api/ps`
+#: reports it — and size the cache from the architecture rather than from the
+#: weights. That is a measurement; this is still a proxy.
+_KV_CACHE_ALLOWANCE_FRACTION = 0.20
 
 
 def _same_model(a: str, b: str) -> bool:
@@ -211,14 +225,36 @@ class ProviderManager:
         zero, and callers must not treat it as one: on those machines the fit
         test is skipped rather than failed, because inventing a number here is
         the false-zero bug that ``HardwareProfile.vram_known`` exists to stop.
+
+        **The KV allowance is no longer deducted here.** It belongs to the
+        model being tested, not to the card — see
+        `_KV_CACHE_ALLOWANCE_FRACTION` and `resident_cost_bytes`. Deducting it
+        from the budget *and* comparing against weights that exclude the cache
+        was one charge in two places, and it excluded every model on a machine
+        that ran one of them fine.
         """
         hardware = self.hardware_profile()
         if not hardware.vram_known:
             return None
 
         vram = hardware.vram_bytes or 0
-        reserve = int(vram * _KV_CACHE_RESERVE_FRACTION)
-        return max(vram - self.embedding_footprint_bytes() - reserve, 0)
+        return max(vram - self.embedding_footprint_bytes(), 0)
+
+    def resident_cost_bytes(self, model: ModelInfo) -> Optional[int]:
+        """What ``model`` actually claims on the card, weights plus its cache.
+
+        ``None`` when the model does not report a size, which is every model on
+        an OpenAI-compatible server — no such route carries a memory figure.
+        Callers must read that as "cannot tell", never as zero.
+
+        This is the quantity every residency comparison wants, and using
+        ``size_bytes`` instead is what made the gate wrong: an on-disk figure
+        is the weights alone, so a model was measured against a budget that had
+        already been docked for a cache the figure did not include.
+        """
+        if model.size_bytes is None:
+            return None
+        return int(model.size_bytes * (1 + _KV_CACHE_ALLOWANCE_FRACTION))
 
     def swap_preflight(self, model_id: str) -> Optional["SwapPlan"]:
         """Will answering with ``model_id`` force a model out of VRAM?
@@ -254,22 +290,47 @@ class ProviderManager:
         nearest wrong thing.
         """
         model = self._resolve_model(model_id)
-        if model is None or model.size_bytes is None:
-            return None
-
-        budget = self.resident_budget_bytes()
-        if budget is None:
+        if model is None:
             return None
 
         resident = self._resident_models()
         if resident is None:
             return None
 
-        # Ollama tags are matched loosely because a request may name
-        # `gemma3` while `/api/ps` reports `gemma3:latest`. Treating those as
-        # different models would announce a swap before every single reply.
+        # **Asked before size, and that ordering is the fix.** Whether a model
+        # is already on the card is answerable from the residency map alone; it
+        # does not need a budget and it does not need the model's size.
+        #
+        # The checks used to run the other way round, so a model reporting no
+        # size returned `None` here — "cannot determine" — before residency was
+        # ever consulted. No OpenAI-compatible server reports a size, so for
+        # every TabbyAPI model that was *always*, and no `model_load` event was
+        # emitted at all. The interface then fell back to its timer, which
+        # guesses that silence means a cold model, and the orb read **Warming
+        # up** on every single message including ones answered in under a
+        # second by weights that had not moved.
+        #
+        # Measured in the running app, 31 August 2026, with
+        # `Qwen3.8-27B-exl3-2.20bpw` pinned: second message, model resident,
+        # "Warming up · Starting the local model. The first reply of a session
+        # takes longer."
+        #
+        # Ollama tags are matched loosely because a request may name `gemma3`
+        # while `/api/ps` reports `gemma3:latest`. Treating those as different
+        # models would announce a swap before every single reply.
         if _matches_resident(model_id, resident):
             return SwapPlan(kind="resident", model=model_id, evicts=[], bytes_needed=0)
+
+        # Weights plus the model's own cache, which is what loading it will
+        # actually claim. `bytes_needed` reaches the interface, so it has to be
+        # the number the card will see rather than the number on disk.
+        cost = self.resident_cost_bytes(model)
+        if cost is None:
+            return None
+
+        budget = self.resident_budget_bytes()
+        if budget is None:
+            return None
 
         # A model that does not fit even with the card cleared is not swapping
         # anything — there is nothing to evict that would make room. Ollama
@@ -286,18 +347,18 @@ class ProviderManager:
         # headroom can be unknown: whether a model is too big for the whole
         # card is decidable from capacity alone, so an unsizeable tenant must
         # not be allowed to suppress the one verdict it has no bearing on.
-        if model.size_bytes > budget:
+        if cost > budget:
             return SwapPlan(
                 kind="oversized", model=model_id, evicts=[],
-                bytes_needed=model.size_bytes,
+                bytes_needed=cost,
             )
 
         headroom = self._headroom_bytes(resident)
         if headroom is None:
             return None
 
-        if model.size_bytes <= headroom:
-            return SwapPlan(kind="load", model=model_id, evicts=[], bytes_needed=model.size_bytes)
+        if cost <= headroom:
+            return SwapPlan(kind="load", model=model_id, evicts=[], bytes_needed=cost)
 
         evicts = self._evictable_by(model, resident)
         if not evicts:
@@ -312,7 +373,7 @@ class ProviderManager:
             kind="swap",
             model=model_id,
             evicts=evicts,
-            bytes_needed=model.size_bytes,
+            bytes_needed=cost,
         )
 
     def _resolve_model(self, model_id: str) -> Optional[ModelInfo]:
@@ -421,19 +482,28 @@ class ProviderManager:
 
         **The sum**, when every resident chat model reports a size. Counted
         against ``resident_budget_bytes``, which has already deducted the
-        embedder and the KV reserve. Preferred because it is attributable: it
+        embedder. Preferred because it is attributable: it
         counts Zaram's own tenants and nothing else, so the answer does not
         move when an unrelated program takes a slice of the card.
 
         **The driver**, when it does not. A server that names the model it
         holds without sizing it — TabbyAPI, and any other OpenAI-compatible
         server — leaves the sum unanswerable, and an unanswerable sum is how
-        9.5 GB came to be invisible. This one is counted against capacity less
-        the reserve, because the measured figure already contains the embedder
-        if the embedder is loaded. Deducting it from the budget as well would
-        charge it twice, and charging it twice with the on-disk size standing
-        in for its resident footprint would over-deduct in the direction that
-        invents swaps.
+        9.5 GB came to be invisible. This one is counted against raw capacity,
+        because the measured figure already contains the embedder if the
+        embedder is loaded. Deducting it from the budget as well would charge
+        it twice, and charging it twice with the on-disk size standing in for
+        its resident footprint would over-deduct in the direction that invents
+        swaps.
+
+        **Neither path deducts a KV reserve any more, and both used to.** The
+        sum path counts residency figures read from ``/api/ps`` as
+        ``size_vram`` — a model's cache is already inside that number — and the
+        driver path counts what the card actually reports as used, which
+        contains every byte of every cache on it. Holding back a further 20% of
+        capacity charged those caches a second time, and the caller compares
+        this against `resident_cost_bytes`, which carries the *incoming*
+        model's allowance. Once here, once there.
 
         When the embedder is *not* resident, room is left for it explicitly:
         recall runs on every exchange, so it is not an optional tenant.
@@ -456,7 +526,7 @@ class ProviderManager:
 
         profile = self.hardware_profile()
         total = profile.vram_bytes or 0
-        headroom = total - used - int(total * _KV_CACHE_RESERVE_FRACTION)
+        headroom = total - used
         if not any(self._is_embedding_model(name) for name in resident):
             headroom -= self.embedding_footprint_bytes()
         return max(headroom, 0)
@@ -508,11 +578,16 @@ class ProviderManager:
         Three answers, and the third matters: ``True``, ``False``, and ``None``
         for "cannot be determined" — either the budget is unknown or the model
         does not report a size. ``None`` is never promoted to ``True``.
+
+        Compared as *cost* against *capacity less the embedder*: both sides of
+        this inequality changed on 31 August 2026, in opposite directions, and
+        the pair has to move together. See `resident_cost_bytes`.
         """
         budget = self.resident_budget_bytes()
-        if budget is None or model.size_bytes is None:
+        cost = self.resident_cost_bytes(model)
+        if budget is None or cost is None:
             return None
-        return model.size_bytes <= budget
+        return cost <= budget
 
     def select_default_model(
         self, *, category: ModelCategory = ModelCategory.LLM
@@ -528,10 +603,14 @@ class ProviderManager:
         getting it wrong hurts:
 
         1. **Does it fit alongside the embedding model.** A model that forces a
-           swap is never the default, even when it is the largest thing
-           installed — the cost lands on every single exchange, and it is the
-           kind of slowness users attribute to the product rather than to a
-           setting. This is a hard gate, not a preference.
+           swap is not the default while anything else is available — the cost
+           lands on every single exchange, and it is the kind of slowness users
+           attribute to the product rather than to a setting.
+
+           **It is a strong preference, not a hard gate, and the difference is
+           what "No model was selected" cost.** A hard gate on a machine where
+           nothing fits leaves no default at all, so Zaram declines to answer a
+           question it can answer slowly. See `select_model_for_task`.
         2. **Is it general-purpose.** A coding fine-tune answering general
            questions is a category error that shows up as oddly-shaped answers
            rather than as an obvious failure, so it is harder to diagnose than
@@ -598,34 +677,51 @@ class ProviderManager:
         different sentence, and `CLAUDE.md` settles which one wins: **"VRAM
         limits route a task; they do not reject a vertical."**
 
-        So when a *required capability* empties the field, the residency filter
-        is relaxed and only then is the answer `None`. That ordering is the
-        whole point — capability first, speed second — and it keeps the two
-        questions apart rather than merging them into one refusal that names
-        the wrong reason. Consent filters are untouched by the retry.
+        So when the field empties, the residency filter is relaxed and only
+        then is the answer `None`. That ordering is the whole point —
+        capability first, speed second — and it keeps the two questions apart
+        rather than merging them into one refusal that names the wrong reason.
+        Consent filters are untouched by the retry.
+
+        **The relaxation used to run only for vision, and that was backwards.**
+        Residency emptying the field on its own is the *more* common case and
+        the one with no capability question in it at all: measured 31 August
+        2026, every chat model on the 12 GB card reported ``fits_resident:
+        false``, so auto-routing had nothing to rank and the user was told "No
+        model was selected for this request" on a machine with three chat
+        models installed — one of which was running fine. A slow answer was
+        available the whole time. `CLAUDE.md` settles it in the same sentence
+        that settled the vision case: **"VRAM limits route a task; they do not
+        reject a vertical… warn, never block."** A refusal is what a *consent*
+        filter is for.
+
+        Nothing is relaxed silently. Ranking still puts a model that fits ahead
+        of one that does not, so this changes the answer only when the honest
+        alternative was no answer, and `rejected_default_candidates` still
+        names residency as the reason a model was passed over.
 
         The caller still has to say the reply will be slow; `swap_preflight`
         already reports ``oversized`` and the chat stream already carries a
         `model_load` event for it. Warn, never block.
         """
         preference = self._routing_preference()
-        candidates = self._auto_candidates(category, preference)
 
-        # The gate. Before the ranking, never inside it.
-        if requires_vision:
-            candidates = [m for m in candidates if m.supports_vision]
-            if not candidates:
-                # Capability first, speed second. A model that does not fit is
-                # a slow answer; no model at all is a refusal, and refusing
-                # when something on the machine can do the job is the worse of
-                # the two. Consent is re-applied, never skipped.
-                candidates = [
-                    m
-                    for m in self._auto_candidates(
-                        category, preference, require_resident_fit=False
-                    )
-                    if m.supports_vision
-                ]
+        def field(*, require_resident_fit: bool) -> List[ModelInfo]:
+            models = self._auto_candidates(
+                category, preference, require_resident_fit=require_resident_fit
+            )
+            # The gate. Before the ranking, never inside it.
+            if requires_vision:
+                models = [m for m in models if m.supports_vision]
+            return models
+
+        candidates = field(require_resident_fit=True)
+        if not candidates:
+            # Capability first, speed second. A model that does not fit is a
+            # slow answer; no model at all is a refusal, and refusing when
+            # something on the machine can do the job is the worse of the two.
+            # Consent is re-applied, never skipped.
+            candidates = field(require_resident_fit=False)
 
         if not candidates:
             return None
@@ -772,9 +868,20 @@ class ProviderManager:
         reasons: a user told "no default model" deserves to know whether that
         was their data policy or their VRAM, since only one of those is
         something they can act on.
+
+        **The chosen model is never in this list, and that guard is new.** Only
+        consent can refuse now; residency merely passes a model over, so on a
+        machine where nothing fits the model that does not fit is also the
+        model that answers. Listing it as rejected would put two contradictory
+        sentences on one row of the picker.
         """
+        chosen = self.select_default_model(category=category)
+        chosen_id = chosen.id if chosen is not None else None
+
         rejected: List[tuple[ModelInfo, str]] = []
         for model in self.list_models(category=category, available_only=True):
+            if model.id == chosen_id:
+                continue
             if not model.selectable_by_default:
                 reason = (
                     "data policy is unknown"

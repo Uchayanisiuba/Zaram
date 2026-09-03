@@ -24,7 +24,8 @@ function model(over: Partial<DiscoveredModel> = {}): DiscoveredModel {
     selectableByDefault: true,
     fitsResident: true,
     sizeBytes: 4_000_000_000,
-    residentBudgetBytes: 9_100_000_000,
+    residentCostBytes: 4_800_000_000,
+    residentBudgetBytes: 11_700_000_000,
     category: 'llm',
     ...over,
   };

@@ -64,6 +64,18 @@ class _Manager:
     def resident_budget_bytes(self) -> int | None:
         return self._budget
 
+    def resident_cost_bytes(self, model: ModelInfo) -> int | None:
+        """Weights plus the model's own KV cache, which is what the row quotes.
+
+        The fake charges the allowance the real manager charges, because the
+        picker's sentence and the picker's verdict have to be the same
+        quantity — a row reading "10.0 GB, and this machine has about 11.7 GB"
+        beside a verdict of *too large* argues with itself.
+        """
+        if model.size_bytes is None:
+            return None
+        return int(model.size_bytes * 1.2)
+
     def model_fits_resident(self, model: ModelInfo) -> bool | None:
         if self._budget is None or model.size_bytes is None:
             return None
@@ -164,3 +176,4 @@ class TestTheRealManagerAnswersTheSameWay:
 
         assert callable(getattr(ProviderManager, "model_fits_resident", None))
         assert callable(getattr(ProviderManager, "resident_budget_bytes", None))
+        assert callable(getattr(ProviderManager, "resident_cost_bytes", None))

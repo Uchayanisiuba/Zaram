@@ -213,13 +213,27 @@ export interface DiscoveredModel {
    *  this: on the one fact a user is most likely to check, an admission beats
    *  a confident guess. */
   fitsResident: boolean | null;
-  /** On-disk size, or `null` where the provider does not report one. */
+  /** On-disk size, or `null` where the provider does not report one.
+   *
+   *  **Weights alone.** Not what the model claims on the card — see
+   *  `residentCostBytes`, and never compare this against the budget. */
   sizeBytes: number | null;
+  /** What the model actually claims in VRAM: weights plus its own KV cache.
+   *
+   *  This is the number `fitsResident` is decided on, so it is the number the
+   *  reason has to quote. Quoting `sizeBytes` instead was correct only while
+   *  the cache allowance was held back from the budget rather than charged to
+   *  the model; since it moved, a model can be graded too large while its
+   *  weights sit under the budget, and the row contradicts its own verdict.
+   *
+   *  `null` where the provider reports no size — every OpenAI-compatible
+   *  server, since no such route carries a memory figure. */
+  residentCostBytes: number | null;
   /** How much VRAM a chat model may claim on this machine, or `null`.
    *
-   *  Carried so the reason can name numbers. "18.2 GB, and this machine has
-   *  9.1 GB for a chat model" is a sentence someone can act on; "does not fit"
-   *  is a verdict they can only accept. */
+   *  Carried so the reason can name numbers. "21.6 GB, and this machine has
+   *  11.7 GB for a chat model" is a sentence someone can act on; "does not
+   *  fit" is a verdict they can only accept. */
   residentBudgetBytes: number | null;
   /** `llm`, `embedding`, and whatever the provider layer adds later.
    *
@@ -278,6 +292,8 @@ function toDiscoveredModel(m: Record<string, unknown>): DiscoveredModel {
     residentBudgetBytes:
       typeof m.resident_budget_bytes === 'number' ? m.resident_budget_bytes : null,
     sizeBytes: typeof m.size_bytes === 'number' ? m.size_bytes : null,
+    residentCostBytes:
+      typeof m.resident_cost_bytes === 'number' ? m.resident_cost_bytes : null,
     category: String(m.category ?? ''),
   };
 }

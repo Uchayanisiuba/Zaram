@@ -394,12 +394,18 @@ function gb(bytes: number): string {
  */
 export function describeFit(model: DiscoveredModel): string | null {
   if (model.fitsResident !== false) return null;
-  if (model.sizeBytes === null || model.residentBudgetBytes === null) {
+  // `residentCostBytes` is weights *plus the model's own KV cache*, and it is
+  // the quantity the verdict was decided on. Quoting `sizeBytes` here was
+  // right only while the cache allowance was held back from the budget; since
+  // it moved onto the model, weights can sit under the budget on a model
+  // correctly graded too large, and the row would argue with itself.
+  const claimed = model.residentCostBytes ?? model.sizeBytes;
+  if (claimed === null || model.residentBudgetBytes === null) {
     // Graded as not fitting, but without both numbers there is no sentence
     // worth writing. Say the short true thing rather than an empty comparison.
     return 'larger than this machine can hold';
   }
-  return `${gb(model.sizeBytes)}, and this machine has about ${gb(
+  return `${gb(claimed)}, and this machine has about ${gb(
     model.residentBudgetBytes,
   )} for a chat model`;
 }
