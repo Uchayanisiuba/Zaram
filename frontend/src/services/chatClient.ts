@@ -132,11 +132,18 @@ export type ChatEvent =
    *  it is never rendered as the model speaking, and from `error` because
    *  nothing failed in this exchange. `action` names where to go about it. */
   | { type: 'notice'; content: string; kind: string; action: string }
-  /** A model has to be loaded before the reply can start. Sent *before*
-   *  generation, so the orb can say why the wait is about to happen rather
-   *  than after the machine has already gone quiet. `kind` is `load` (cold
-   *  start, room to spare) or `swap` (something resident gets evicted). */
-  | { type: 'model_load'; kind: 'load' | 'swap' | 'oversized'; model: string; evicts: string[] }
+  /** What the reply is waiting for, sent *before* generation so the orb can
+   *  say why rather than going quiet and letting the user guess.
+   *
+   *  Four kinds, matching `SwapPlan`: `resident` (already loaded, nothing to
+   *  wait for), `load` (cold start with room to spare), `swap` (something
+   *  resident gets evicted) and `oversized` (larger than the whole budget). */
+  | {
+      type: 'model_load';
+      kind: 'resident' | 'load' | 'swap' | 'oversized';
+      model: string;
+      evicts: string[];
+    }
   /** The transcript this reply is being written into.
    *
    *  Sent only when the backend *started* one — the client already knows the
@@ -431,14 +438,31 @@ function parseLine(line: string): ChatEvent | null {
 
     case 'model_load': {
       const kind = String(data.kind ?? '');
-      // **`oversized` was being dropped here.** `SwapPlan` has four kinds and
-      // this listed two; `resident` is deliberately never sent, so the one
-      // missing case was the verdict that most needed saying — the model is
-      // larger than the whole VRAM budget and will run half on the processor.
-      // The backend graded it correctly, logged it, sent it, and the parser
-      // discarded it as unrecognised, so the user waited in silence for a
-      // condition the product already knew about.
-      if (kind !== 'load' && kind !== 'swap' && kind !== 'oversized') return null;
+      // **`SwapPlan` has four kinds and this parser has now dropped two of
+      // them, one at a time, for the same reason.** `oversized` went first.
+      // The comment that replaced it asserted `resident` "is deliberately
+      // never sent" — it was not deliberate and it was not true: the backend
+      // sends it on every reply whose model is already loaded, and discarding
+      // it here is what produced **Warming up** under a model that had not
+      // moved. `chatStore` has a `resident` branch whose whole job is to
+      // cancel that guess, and it was unreachable.
+      //
+      // Measured in the running app, 31 August 2026: the backend emitted
+      // `{"kind": "resident"}` for `Qwen3.8-27B-exl3-2.20bpw` on the third
+      // consecutive message and the orb still read "Warming up · Starting the
+      // local model."
+      //
+      // So the list is kept in step with `SwapPlan` rather than with whichever
+      // kinds someone happened to need, and a kind Zaram does not recognise
+      // is still dropped rather than coerced.
+      if (
+        kind !== 'resident' &&
+        kind !== 'load' &&
+        kind !== 'swap' &&
+        kind !== 'oversized'
+      ) {
+        return null;
+      }
       const model = String(data.model ?? '').trim();
       if (!model) return null;
       return {

@@ -387,10 +387,37 @@ describe('the model-load verdict is carried whole', () => {
     });
   });
 
-  it('still drops a kind it has no meaning for', async () => {
+  it('carries `resident`, which is what cancels the warming guess', async () => {
+    // **This test used to assert the opposite, and that is what kept the bug
+    // alive.** It was written when `resident` was believed never to be sent.
+    // The backend sends it on every reply whose model is already loaded, the
+    // parser discarded it, and `chatStore`'s `resident` branch — whose only
+    // job is to clear the timer that guesses silence means a cold model — was
+    // unreachable. The orb read "Warming up" under a model that had not moved,
+    // on every single message.
+    //
+    // Measured in the running app on 31 August 2026 with
+    // `Qwen3.8-27B-exl3-2.20bpw` pinned and resident.
     mockFetch(() =>
       streamingResponse([
         line({ type: 'model_load', data: { kind: 'resident', model: 'gemma3', evicts: [] } }),
+        token('hi'),
+        done(),
+      ]),
+    );
+
+    const events = await collect(streamChat({ text: 'hi' }));
+    expect(events.map((e) => e.type)).toEqual(['model_load', 'token', 'done']);
+    expect(events[0]).toMatchObject({ kind: 'resident', model: 'gemma3' });
+  });
+
+  it('still drops a kind it has no meaning for', async () => {
+    // The list tracks `SwapPlan`'s four kinds. Anything else is dropped rather
+    // than coerced, because a kind this client does not understand cannot be
+    // rendered into a sentence about what the machine is doing.
+    mockFetch(() =>
+      streamingResponse([
+        line({ type: 'model_load', data: { kind: 'defragmenting', model: 'gemma3', evicts: [] } }),
         token('hi'),
         done(),
       ]),

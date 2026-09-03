@@ -214,6 +214,14 @@ class StreamEvent:
         user can act on. Collapsing them would make `swapping` a synonym for
         "slow" and cost the distinction its meaning.
 
+        **`resident` is the fourth kind, and it carries no wait at all.** It
+        exists because the receiver has a timer that guesses "cold model" from
+        silence, and without a positive "already loaded" it cannot tell that
+        apart from "the pre-flight could not answer". It could, so a model in
+        VRAM was labelled *Warming up* on every reply. An event that says
+        nothing is happening is worth sending when the alternative is the
+        interface inventing something that is.
+
         Never emitted speculatively. The pre-flight returns `None` whenever it
         cannot tell, and no event is sent for that — announcing a swap that
         does not happen trains the user to ignore the indicator.

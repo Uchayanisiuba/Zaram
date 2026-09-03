@@ -388,7 +388,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
             // is. A specific answer must not be overwritten by a guess five
             // seconds later.
             clearTimeout(warmingTimer);
-            if (event.kind === 'swap') {
+            if (event.kind === 'resident') {
+              // Already in VRAM, so the wait is generation and the orb keeps
+              // saying `thinking`. This is the branch the whole event exists
+              // for: without a positive "loaded", the timer above could not
+              // tell a resident model from an unanswerable pre-flight, guessed
+              // cold for both, and put **Warming up** under every single
+              // question on a machine whose model had not moved.
+              //
+              // Nothing is set — `thinking` is already the activity — and that
+              // is the point. Cancelling the guess *is* the action.
+            } else if (event.kind === 'swap') {
               useSystemStore.getState().beginModelSwap(event.model);
             } else if (event.kind === 'oversized') {
               // Still a warming orb — it really is loading — but the label
