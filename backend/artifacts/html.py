@@ -27,7 +27,7 @@ format → format.
 from __future__ import annotations
 
 import html as html_escape
-from typing import Iterable, List, Sequence
+from typing import Iterable, List, Optional, Sequence
 
 from .contracts import (
     ArtifactSource,
@@ -557,6 +557,78 @@ def render_chart(
             f"<h1>{_esc(title)}</h1>",
             f'<img alt="{_esc(title)}" src="data:image/png;base64,{encoded}">',
             data_table,
+            _sources_section(sources, claims),
+            "</body></html>",
+        ]
+    )
+
+
+def render_image(
+    *,
+    title: str,
+    png: bytes,
+    prompt: str = "",
+    model: str = "",
+    locality: str = "",
+    seed: Optional[int] = None,
+    sources: Sequence[ArtifactSource] = (),
+    claims: Sequence[Claim] = (),
+) -> str:
+    """A generated picture, as HTML: the image, and how it was made.
+
+    Same shape as `render_chart` and for the same reason — HTML is the source
+    of truth for every artifact, so the picture is embedded as a data URI and
+    `ChartExporter` decodes it straight back out to a `.png`. That is what
+    makes the preview and the downloaded file the same thing rather than two
+    renderings that can drift, and it is why an image needs no exporter of its
+    own.
+
+    **The "how it was made" block is this kind's provenance.** A document
+    traces sentences to facts; a picture has no sentences, so what is traceable
+    is the prompt it was drawn from, the model that drew it, where that model
+    ran, and the seed — which is the only thing that makes the same image
+    askable-for a second time. Rule 2 says a generated claim traces to its
+    source, and for an image the prompt *is* the source.
+
+    ``locality`` is a plain sentence rather than a flag because it is the one
+    thing on this page a user might have to defend to somebody else: "on your
+    machine — nothing left the device" is the claim, and it is written into the
+    file so it survives being exported and sent.
+    """
+    import base64
+
+    encoded = base64.b64encode(png).decode("ascii")
+
+    rows: List[str] = []
+    if prompt:
+        rows.append(f"<li><strong>Drawn from</strong><br>{_esc(prompt)}</li>")
+    if model:
+        made_by = _esc(model)
+        if locality:
+            made_by += f" — {_esc(locality)}"
+        rows.append(f"<li><strong>Model</strong><br>{made_by}</li>")
+    if seed is not None:
+        rows.append(
+            f"<li><strong>Seed</strong><br><code>{seed}</code>"
+            "<br>The same prompt and seed produce the same image.</li>"
+        )
+
+    how = (
+        f'<section class="sources"><h2>How this was made</h2><ul>{"".join(rows)}</ul></section>'
+        if rows
+        else ""
+    )
+
+    return "\n".join(
+        [
+            "<!DOCTYPE html>",
+            '<html lang="en"><head><meta charset="utf-8">',
+            f"<title>{_esc(title)}</title>",
+            f"<style>{_STYLE}{_TABLE_STYLE}</style>",
+            "</head><body>",
+            f"<h1>{_esc(title)}</h1>",
+            f'<img alt="{_esc(prompt or title)}" src="data:image/png;base64,{encoded}">',
+            how,
             _sources_section(sources, claims),
             "</body></html>",
         ]

@@ -39,6 +39,7 @@ from .html import (
     render_cv,
     render_deck,
     render_document,
+    render_image,
     render_invoice,
     render_spreadsheet,
 )
@@ -65,6 +66,9 @@ DEFAULT_FORMAT = {
     # it. Handing back a format nobody can open in Word would be a worse
     # document however well it printed.
     ArtifactKind.CV: "docx",
+    # A picture is a picture. `ChartExporter` handles the extension for both
+    # image kinds, because both embed the PNG in their HTML the same way.
+    ArtifactKind.IMAGE: "png",
 }
 
 
@@ -372,6 +376,53 @@ class ArtifactService:
             title=title,
             filename=filename,
             kind=ArtifactKind.CHART,
+            fmt="png",
+            project_id=project_id,
+            conversation_id=conversation_id,
+            conversation_title=conversation_title,
+            sources=sources,
+            claims=claims,
+        )
+
+    def create_image(
+        self,
+        *,
+        title: str,
+        png: bytes,
+        prompt: str = "",
+        model: str = "",
+        locality: str = "",
+        seed: Optional[int] = None,
+        filename: str = "",
+        project_id: str = "",
+        conversation_id: str = "",
+        conversation_title: str = "",
+        sources: Sequence[ArtifactSource] = (),
+        claims: Sequence[Claim] = (),
+    ) -> Artifact:
+        """A generated picture, recorded like every other thing Zaram makes.
+
+        Down the same path a document goes down, which is the point: one output
+        directory that cannot be overwritten, one record, one download route,
+        one preview. An image that arrived through a second mechanism would be
+        a file the user could not find in Work and could not trace, and the
+        write-path guarantees would have to be re-proved for it.
+        """
+        html = render_image(
+            title=title,
+            png=png,
+            prompt=prompt,
+            model=model,
+            locality=locality,
+            seed=seed,
+            sources=sources,
+            claims=claims,
+        )
+        return self._persist(
+            html=html,
+            title=title,
+            filename=filename,
+            kind=ArtifactKind.IMAGE,
             fmt="png",
             project_id=project_id,
             conversation_id=conversation_id,

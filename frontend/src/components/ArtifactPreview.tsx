@@ -35,7 +35,13 @@ import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { motion } from 'framer-motion';
 import { X, Download, FileWarning, Loader2 } from 'lucide-react';
-import { downloadUrl, getArtifact, type Artifact } from '@/services/artifactsClient';
+import {
+  downloadArtifact,
+  getArtifact,
+  PICTORIAL_KINDS,
+  type Artifact,
+} from '@/services/artifactsClient';
+import { useArtifactImage } from '@/hooks/useArtifactImage';
 import { useLayoutStore } from '@/stores/layoutStore';
 import { useChatModeStore } from '@/stores/chatModeStore';
 import { useViewport } from '@/hooks/useViewport';
@@ -77,7 +83,24 @@ export default function ArtifactPreview({
   const { width: viewportWidth } = useViewport();
   const panelWidth = viewportWidth * chatFraction;
 
+  // **A picture previews as itself, not as the page it was embedded in.**
+  //
+  // For every other kind the HTML *is* the faithful preview, because the HTML
+  // is what WeasyPrint and the .docx exporter render from — so what is on
+  // screen is what downloads, structurally rather than by promise.
+  //
+  // For an image that reasoning inverts. The file that downloads is the PNG;
+  // the HTML is the envelope it was carried in, complete with an A4 sheet, a
+  // title and a "How this was made" list. Rendering the envelope would put a
+  // *document about the picture* in a panel opened to look at the picture, and
+  // would be the less faithful of the two — the exported file is the image
+  // itself.
+  const pictorial = PICTORIAL_KINDS.has(artifact.kind);
+  const picture = useArtifactImage(artifact.id, pictorial && artifact.exists);
+
   useEffect(() => {
+    if (pictorial) return;
+
     let cancelled = false;
     setHtml(null);
     setError(null);
@@ -102,7 +125,7 @@ export default function ArtifactPreview({
     return () => {
       cancelled = true;
     };
-  }, [artifact.id]);
+  }, [artifact.id, pictorial]);
 
   // Escape closes it, matching the citation panel. Registered on the window
   // because focus is inside a sandboxed iframe most of the time, where a
@@ -189,15 +212,25 @@ export default function ArtifactPreview({
             preview
           </span>
           <div className="flex-1" />
-          <a
-            href={downloadUrl(artifact.id)}
-            download={artifact.filename}
+          {/* A button rather than an anchor. `RequireApiSecret` authenticates
+              every request and the credential rides on a wrapper around
+              `fetch`; a link navigates without it and gets 401. */}
+          <button
+            type="button"
+            onClick={() => {
+              setError(null);
+              downloadArtifact(artifact.id, artifact.filename).catch((err: unknown) =>
+                setError(
+                  err instanceof Error ? err.message : 'Could not download that file.',
+                ),
+              );
+            }}
             className="flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[11px] hover:bg-white/5"
             style={{ border: '1px solid var(--color-border)', color: 'var(--color-text)' }}
           >
             <Download size={12} />
             Download
-          </a>
+          </button>
           <button
             onClick={onClose}
             aria-label="Close preview"
@@ -208,7 +241,38 @@ export default function ArtifactPreview({
         </div>
 
         <div className="flex-1 overflow-hidden">
-          {error ? (
+          {pictorial ? (
+            picture.error ? (
+              <div
+                className="flex h-full flex-col items-center justify-center gap-2 px-8 text-center"
+                style={{ color: 'var(--color-text-muted)' }}
+              >
+                <FileWarning size={20} />
+                <p className="text-xs leading-relaxed">{picture.error}</p>
+              </div>
+            ) : picture.url ? (
+              // Checkerboard-free flat ground rather than white: a generated
+              // image is as likely to be dark as light, and a white surround
+              // makes a dark one look like a hole in the panel.
+              <div
+                className="flex h-full items-center justify-center p-4"
+                style={{ background: 'var(--color-surface-sunken, #0b1120)' }}
+              >
+                <img
+                  src={picture.url}
+                  alt={artifact.filename}
+                  style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
+                />
+              </div>
+            ) : (
+              <div
+                className="flex h-full items-center justify-center"
+                style={{ color: 'var(--color-text-faint)' }}
+              >
+                <Loader2 size={16} className="animate-spin" />
+              </div>
+            )
+          ) : error ? (
             <div
               className="flex h-full flex-col items-center justify-center gap-2 px-8 text-center"
               style={{ color: 'var(--color-text-muted)' }}

@@ -28,6 +28,12 @@ from core.execution_context import ExecutionContext
 #: marker that only one side knows about is a marker rendered to the user.
 ARTIFACT_MARKER = "[ARTIFACT]"
 
+#: Prefix for one denoising step's worth of progress. Same shape and the same
+#: reason as `ARTIFACT_MARKER`: this generator is typed as yielding strings and
+#: several callers rely on that, so a structured payload travels as one marked
+#: line and the engine converts it before anything user-facing.
+PROGRESS_MARKER = "[IMAGE_PROGRESS]"
+
 logger = logging.getLogger(__name__)
 
 
@@ -69,6 +75,21 @@ class ExecutionDispatcher:
             )
 
             if hasattr(runtime, "execute"):
+                if step.capability_id.startswith("image."):
+                    # Drawing takes tens of seconds, so this one cannot use
+                    # `run_sync`: that blocks the calling thread until the
+                    # coroutine finishes, which would mean no progress could be
+                    # reported *and* nothing else could be yielded for the
+                    # whole wait. The picture would land with the bar still at
+                    # zero, which is the state this branch exists to fix.
+                    #
+                    # So the generation is started, and this generator turns
+                    # into the thing that reports it: it drains a queue the
+                    # provider fills from the sampling thread, one marker line
+                    # per denoising step.
+                    yield from self._execute_image_step(runtime, step)
+                    return
+
                 # run_sync, not asyncio.run: this generator is consumed on the
                 # FastAPI event loop thread, where asyncio.run() raises.
                 result = run_sync(runtime.execute(step.capability_id, step.input_data or {}))
@@ -103,6 +124,24 @@ class ExecutionDispatcher:
                             else "unknown"
                         )
                         yield f"[FALLBACK] {step.capability_id} failed: {error}\n"
+                elif step.capability_id.startswith("mcp."):
+                    # The payload *is* the point, so it is carried whole rather
+                    # than summarised into a status line. Same shape as
+                    # `knowledge.search`, which the engine already parses with
+                    # `json.loads`, and for the same reason: both are internal
+                    # steps whose output becomes context for the next one.
+                    #
+                    # Without this branch the generic `[OK] ... completed` below
+                    # caught it, and the tool list — the whole reason the step
+                    # ran — was discarded between the runtime returning it and
+                    # the engine looking for it. That is the shape of failure
+                    # this repository keeps finding: every layer reports
+                    # success and the payload never arrives.
+                    #
+                    # A refusal and a confirmation request are *answers*, not
+                    # failures, so they travel this path too. The engine decides
+                    # what to show; the dispatcher does not editorialise.
+                    yield json.dumps(result if isinstance(result, dict) else {"success": False})
                 elif isinstance(result, dict) and "error" in result:
                     yield f"[FALLBACK] {step.capability_id} failed: {result['error']}\n"
                 else:
@@ -199,6 +238,90 @@ class ExecutionDispatcher:
             )
             traceback.print_exc()
             yield self._fallback_response(step.capability_id, str(e))
+
+    # ------------------------------------------------------------------
+    # Drawing, which is the one step that reports itself while it runs
+    # ------------------------------------------------------------------
+
+    def _execute_image_step(self, runtime: Any, step: ExecutionStep) -> Iterator[str]:
+        """Run an image step, reporting each denoising step as it lands.
+
+        Why this is not `run_sync` like every other capability: that blocks the
+        calling thread until the coroutine returns, and drawing runs for tens
+        of seconds. Everything reportable would arrive at the end, which is the
+        same as reporting nothing — the wait is the whole problem being solved.
+
+        With code you watch it being written and the delay explains itself. An
+        image is silent for its entire duration unless something says
+        otherwise, and a diffusion pipeline emits a callback per step, so what
+        is reported here is **measured**. There is no time remaining in this
+        method and none in the payload: seconds-left is a guess until several
+        steps have run, and a confident wrong number is worse than no number.
+        """
+        import queue
+        import time
+
+        from core.async_bridge import _background_loop
+
+        updates: "queue.Queue[dict]" = queue.Queue()
+
+        payload = dict(step.input_data or {})
+        # Filled from the sampling thread; `Queue.put` is what makes that safe.
+        payload["progress_sink"] = updates.put
+
+        future = asyncio.run_coroutine_threadsafe(
+            runtime.execute(step.capability_id, payload), _background_loop()
+        )
+
+        def drain() -> Iterator[str]:
+            while True:
+                try:
+                    yield PROGRESS_MARKER + json.dumps(updates.get_nowait()) + "\n"
+                except queue.Empty:
+                    return
+
+        while not future.done():
+            yield from drain()
+            # Long enough not to spin a core, short enough that a step lands
+            # within one tick of finishing: SDXL steps take ~0.3s on the card
+            # this was measured on, and a bar that updates four times a second
+            # reads as continuous.
+            time.sleep(0.05)
+        yield from drain()
+
+        try:
+            result = future.result()
+        except Exception as error:  # pragma: no cover - defended, not expected
+            logger.exception("Image step raised")
+            yield f"[FALLBACK] {step.capability_id} failed: {error}\n"
+            return
+
+        if isinstance(result, dict) and result.get("success"):
+            # One marker line per picture, because each is its own artifact
+            # with its own record, path and download. The conversation draws a
+            # *batch* as one card with a grid in it, and that grouping is a
+            # rendering decision — making it a second artifact shape here would
+            # be something Work then has to understand too.
+            cards = result.get("artifacts") or (
+                [result["artifact"]] if result.get("artifact") else []
+            )
+            for card in cards:
+                yield ARTIFACT_MARKER + json.dumps(card) + "\n"
+            if not cards:
+                yield f"[FALLBACK] {step.capability_id} produced no image\n"
+            return
+
+        error = result.get("error", "unknown") if isinstance(result, dict) else "unknown"
+        remedy = result.get("remedy", "") if isinstance(result, dict) else ""
+        # `[ERROR]`, not `[FALLBACK]`, when nothing on the machine can draw.
+        # A fallback invites the engine to answer some other way, and the only
+        # other way available is a text model writing about a picture it never
+        # made — the exact failure this capability exists to prevent.
+        marker = (
+            "[ERROR]" if isinstance(result, dict) and result.get("unavailable")
+            else "[FALLBACK]"
+        )
+        yield f"{marker} {error}{(' ' + remedy) if remedy else ''}\n"
 
     # ------------------------------------------------------------------
     # Async dispatch with ExecutionContext (new interface)

@@ -161,10 +161,34 @@ NETWORK_LIBRARY_GATED = {
     "voice/providers/kokoro_onnx.py": "asks get_gate().check() before any weight, voice or vocab download; loads cached files offline",
 }
 
+#: Modules that import a network library **in order to switch its network off**.
+#:
+#: A different and stronger claim than "gated". A gated module asks the gate and
+#: then lets the library reach out; these never let it reach out at all, so
+#: there is nothing for the gate to be asked about. Asking would in fact be
+#: misleading — it would put an entry in the egress log for a request that is
+#: structurally impossible.
+#:
+#: The category exists because `imaging/local_sdxl.py` is the first module with
+#: this shape and neither of the existing lists describes it honestly. It is
+#: dormant in no sense — it runs on every image request — and it is not gated,
+#: because it makes no request to gate.
+#:
+#: Like the gated list, the reason is asserted rather than believed: see
+#: ``test_disarmed_exemptions_actually_disarm_the_library``.
+NETWORK_LIBRARY_DISARMED = {
+    "imaging/local_sdxl.py": (
+        "imports huggingface_hub only to force it offline; the pipeline "
+        "configuration is resolved from a local directory so there is nothing "
+        "to fetch"
+    ),
+}
+
 NETWORK_LIBRARY_EXEMPT = {
     **NETWORK_LIBRARY_DORMANT,
     **NETWORK_LIBRARY_GATED,
     **NETWORK_LIBRARY_REEXPORT,
+    **NETWORK_LIBRARY_DISARMED,
 }
 
 #: Calls that open a connection to somewhere.
@@ -521,6 +545,68 @@ class TestNothingBypassesTheGate:
             "means refusal is the *common* path, not the exceptional one, and "
             "an unhandled refusal is a 500 where the honest answer is "
             "'unavailable, and here is why'."
+        )
+
+    @pytest.mark.parametrize("rel,reason", sorted(NETWORK_LIBRARY_DISARMED.items()))
+    def test_disarmed_exemptions_actually_disarm_the_library(self, rel: str, reason: str):
+        """The claim asserted, and asserted at the level that actually works.
+
+        A disarmed exemption says the module imports a network library only to
+        switch its network off. Two things have to be in the source for that to
+        be true, and the second is the one that was got wrong first time:
+
+        * ``HF_HUB_OFFLINE`` appears — the switch is named;
+        * ``huggingface_hub.constants`` is imported, because **setting the
+          environment variable alone does nothing**. That library reads it once,
+          at import, into a module constant, and ``import diffusers`` has
+          already done so by the time this code runs. Measured 3 September
+          2026: with only the environment variable set, 3.2 MB of tokeniser and
+          config files were written into ``~/.cache/huggingface`` during a run
+          the suite reported as passing.
+
+        So this asserts the *effective* form of the guard rather than the form
+        that reads correctly. A test that accepted the environment variable
+        would be the same test that let the original bug through.
+
+        Not proof that nothing reaches the network — the AST cannot know that.
+        `test_local_image_generation.py` is the proof, and it gets it by
+        blocking sockets for the whole load and sample rather than by
+        inspecting a flag.
+        """
+        source = (BACKEND / rel).read_text(encoding="utf-8")
+        tree = ast.parse(source, filename=rel)
+
+        names_the_switch = any(
+            isinstance(node, ast.Constant)
+            and isinstance(node.value, str)
+            and "HF_HUB_OFFLINE" in node.value
+            for node in ast.walk(tree)
+        )
+        sets_the_constant = any(
+            isinstance(node, (ast.Import, ast.ImportFrom))
+            and any(
+                "huggingface_hub.constants" in (alias.name or "")
+                for alias in node.names
+            )
+            or (
+                isinstance(node, ast.ImportFrom)
+                and (node.module or "").startswith("huggingface_hub.constants")
+            )
+            for node in ast.walk(tree)
+        )
+
+        assert names_the_switch, (
+            f"{rel} is exempted because it {reason}, but nothing in it names "
+            "HF_HUB_OFFLINE. Either the switch moved — in which case say so "
+            "here — or the exemption is now false and the library is free to "
+            "fetch, unlogged."
+        )
+        assert sets_the_constant, (
+            f"{rel} names HF_HUB_OFFLINE but never touches "
+            "huggingface_hub.constants. The environment variable on its own is "
+            "read once at import and diffusers has already imported the "
+            "library, so a guard that only sets the variable does nothing at "
+            "all — which is exactly the bug this entry exists because of."
         )
 
     @pytest.mark.parametrize("rel,reason", sorted(NETWORK_LIBRARY_REEXPORT.items()))

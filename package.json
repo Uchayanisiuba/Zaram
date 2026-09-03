@@ -66,6 +66,7 @@
     "postinstall": "npm run install:desktop",
     "build:runtime": "node scripts/build-python-runtime.mjs",
     "check:runtime": "node scripts/check-runtime.mjs",
-    "check:reachability": "node scripts/check-reachability.mjs"
+    "check:reachability": "node scripts/check-reachability.mjs",
+    "dev:app": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/dev-app.ps1"
   }
 }

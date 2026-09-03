@@ -634,17 +634,27 @@ class ProviderManager:
         self,
         *,
         requires_vision: bool = False,
+        requires_image_output: bool = False,
         specialisation: Optional[str] = None,
         category: ModelCategory = ModelCategory.LLM,
     ) -> Optional[ModelInfo]:
         """The same selection, with this request's own requirements applied.
 
-        Two arguments, and **they are deliberately different kinds of thing**:
+        Three arguments, and **they are deliberately different kinds of
+        thing**:
 
         - ``requires_vision`` is a **gate**. A model that cannot accept an
           image is not a worse answer to "what is in this screenshot", it is
           not an answer at all — so it is removed before ranking rather than
           scored down inside it.
+        - ``requires_image_output`` is the **other** gate, and it is a
+          different question from the first one. Reading a picture and drawing
+          one are not degrees of the same ability, and `CLAUDE.md` names
+          collapsing them as the error that gets a text model asked to draw.
+          Added 3 September 2026: the flag it reads,
+          `ModelInfo.emits_image`, is derived from the output modalities
+          OpenRouter discovery already recorded and threw nothing away to
+          build.
         - ``specialisation`` is a **preference**. "A coding model is better at
           this" is a judgement, and the general model stays a real answer when
           no specialist is installed.
@@ -710,9 +720,33 @@ class ProviderManager:
             models = self._auto_candidates(
                 category, preference, require_resident_fit=require_resident_fit
             )
-            # The gate. Before the ranking, never inside it.
+
+            # A model that draws may be catalogued under either category, and
+            # asking for a picture must not depend on which.
+            # `_apply_modality` leaves a model that emits **both** text and
+            # images an `LLM` — correctly, since it can still hold the
+            # conversation — while one that emits images and no text becomes a
+            # `ModelCategory.IMAGE`. Filtering on the caller's category alone
+            # would therefore drop exactly one of those two, and which one
+            # depends on an argument default rather than on anything about the
+            # request. So the field is widened before the gate runs, and the
+            # gate is what decides.
+            if requires_image_output and category is not ModelCategory.IMAGE:
+                models = models + [
+                    m
+                    for m in self._auto_candidates(
+                        ModelCategory.IMAGE,
+                        preference,
+                        require_resident_fit=require_resident_fit,
+                    )
+                    if m not in models
+                ]
+
+            # The gates. Before the ranking, never inside it.
             if requires_vision:
                 models = [m for m in models if m.supports_vision]
+            if requires_image_output:
+                models = [m for m in models if m.emits_image]
             return models
 
         candidates = field(require_resident_fit=True)

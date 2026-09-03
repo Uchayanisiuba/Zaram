@@ -43,16 +43,38 @@ from core.contracts import (
     PlanState,
     TaskPriority,
 )
-from core.dispatcher import ARTIFACT_MARKER, ExecutionDispatcher
+from core.dispatcher import ARTIFACT_MARKER, PROGRESS_MARKER, ExecutionDispatcher
 from core.event_bus import EventBus, ZaramEvent
 from core.execution_context import ExecutionContext
 from core.planner import IntentClassification, IntentPlanner, IntentType
 from core.streaming_events import StreamEvent
+from core.tool_loop import (
+    ToolCall,
+    parse_call,
+    result_prompt,
+    strip_calls,
+    tool_instructions,
+)
 from core.registry import RuntimeRegistry
 from core.scheduler import RuntimeScheduler
 from core.task_queue import TaskQueue
 
 logger = logging.getLogger(__name__)
+
+#: Capabilities that must refuse rather than fall back to an ordinary answer.
+#:
+#: Everything else degrades on purpose — a keyword misroute should become a
+#: normal reply rather than an internal error on screen. These cannot, because
+#: for these the ordinary reply is *the failure*: a text model handed "draw me
+#: a logo" writes a fluent paragraph about a picture that does not exist, and
+#: nothing anywhere says the image was never made.
+_NEVER_DEGRADE = frozenset({"image.generate"})
+
+#: Spelled here rather than imported from `runtimes.mcp`, so `core/` keeps no
+#: import-time dependency on a runtime — the same seam `_memory_runtime` and
+#: `_scope_for` maintain. `test_mcp_reaches_chat` asserts the two agree, which
+#: is the difference between a comment claiming a relationship and a check.
+MCP_CALL = "mcp.call"
 
 
 def _scope_for(project_id: str | None) -> str | None:
@@ -218,6 +240,16 @@ class ExecutionEngine:
             kind="search",
             action="settings",
         )
+
+    def set_tool_vocabulary(self, vocabulary: Any | None) -> None:
+        """Which MCP servers are attached, for routing.
+
+        Forwarded to the planner rather than held here: this engine does not
+        classify, and a second copy of the vocabulary is a second thing to keep
+        in step. See `IntentPlanner.set_tool_vocabulary` for why it is a
+        callable and why it is attached after construction.
+        """
+        self._planner.set_tool_vocabulary(vocabulary)
 
     def set_notice_source(self, source: Any | None) -> None:
         """Provide a callable returning a one-off notice, or None.
@@ -392,6 +424,11 @@ class ExecutionEngine:
 
         step_results: dict[str, str] = {}
         failed_steps: list[dict[str, Any]] = []
+        #: Tools `mcp.list_tools` put in front of the model, if the plan had
+        #: that step and any server answered. Empty is the overwhelmingly
+        #: common case and it costs nothing: no instructions are added, no
+        #: buffering happens, and the reply streams exactly as it always did.
+        offered_tools: list[dict[str, Any]] = []
 
         for i, step in enumerate(plan.steps):
             self._publish("execution.step_started", {
@@ -504,12 +541,40 @@ class ExecutionEngine:
                 step.input_data = dict(step.input_data or {})
                 step.input_data["images"] = list(images)
 
+            # **A generation that may call a tool is buffered, not streamed.**
+            #
+            # `[TOOL_CALL]` arrives split across tokens exactly as `[M1]` does,
+            # so it cannot be recognised until the text is accumulated — and by
+            # then a streamed version has already been read. Buffering is the
+            # only way the marker stays off the screen.
+            #
+            # It costs the typewriter effect on these replies, which matters,
+            # because speed is the daily-driver thesis. So it is scoped as
+            # narrowly as it can be: only a generation step, and only when tools
+            # were actually offered. Every other reply in the product is
+            # untouched. When the provider layer grows a real tool-call channel
+            # the call leaves the text stream and this buffer goes with it.
+            buffering = bool(offered_tools) and step.capability_id == "reasoning.generate"
+
             try:
                 for token in self._dispatcher.execute_step(step, model, system_prompt):
                     step_output += token
-                    if internal:
+                    if internal or buffering:
                         continue
-                    if token.startswith(ARTIFACT_MARKER):
+                    if token.startswith(PROGRESS_MARKER):
+                        # Becomes a bar, never text. Same treatment as the
+                        # artifact marker below and for the same reason: a raw
+                        # marker on screen is a visible bug, so a malformed
+                        # payload is dropped with a log rather than printed.
+                        try:
+                            yield StreamEvent.image_progress(
+                                json.loads(token[len(PROGRESS_MARKER):].strip())
+                            )
+                        except json.JSONDecodeError:
+                            logger.exception(
+                                "Image step emitted an unparseable progress marker"
+                            )
+                    elif token.startswith(ARTIFACT_MARKER):
                         # Becomes a card, never text. Reaching the user as a
                         # raw marker would be a visible bug, so a malformed
                         # payload is dropped with a log rather than printed.
@@ -538,6 +603,25 @@ class ExecutionEngine:
                     except Exception:
                         pass
 
+                if buffering and not step_failed:
+                    # Nothing has reached the user yet for this step. Everything
+                    # they see — the call, the gate's verdict, and the answer —
+                    # comes out of here.
+                    spoken: list[str] = []
+                    for piece in self._run_tool_round(
+                        buffered=step_output,
+                        original_prompt=step.input_data.get("prompt", "") or prompt,
+                        model=model,
+                        system_prompt=system_prompt,
+                        spoken=spoken,
+                    ):
+                        yield piece
+                    # The transcript stores what was said, not the marker that
+                    # produced it. One stripper, every caller — the lesson the
+                    # citation markers cost when the caller that *spoke* was
+                    # the one missed.
+                    step_output = "".join(spoken)
+
             except Exception as exc:
                 step_failed = True
                 step_error = str(exc)
@@ -563,6 +647,21 @@ class ExecutionEngine:
                             if key and key not in seen_sources:
                                 seen_sources.add(key)
                                 yield _numbered(event)
+                elif step.capability_id == "mcp.list_tools":
+                    offered_tools = self._parse_tool_list(step_output)
+                    if offered_tools:
+                        system_prompt += tool_instructions(offered_tools)
+                        # Said out loud, because `CLAUDE.md` requires disabled
+                        # capabilities to be visible rather than silent — and
+                        # the inverse is just as true. A reply that quietly
+                        # used somebody's Blender session should not be the
+                        # first the user hears of it.
+                        yield StreamEvent.notice(
+                            f"{len(offered_tools)} attached tool"
+                            f"{'s are' if len(offered_tools) != 1 else ' is'} "
+                            "available for this question.",
+                            kind="tools",
+                        )
 
             self._publish("execution.step_completed" if not step_failed else "execution.step_failed", {
                 "correlation_id": plan.correlation_id,
@@ -739,7 +838,7 @@ class ExecutionEngine:
     #: Capabilities whose output is context for later steps, never shown to the
     #: user. Their raw payloads (JSON search results, for example) would
     #: otherwise be streamed into the reply.
-    INTERNAL_CAPABILITIES = frozenset({"knowledge.search"})
+    INTERNAL_CAPABILITIES = frozenset({"knowledge.search", "mcp.list_tools"})
 
     # ------------------------------------------------------------------
     # Search results as context
@@ -762,6 +861,26 @@ class ExecutionEngine:
             try:
                 self._router.resolve(step.capability_id)
             except Exception:
+                if step.capability_id in _NEVER_DEGRADE:
+                    # Kept deliberately, so the dispatcher refuses it out loud.
+                    #
+                    # The graceful degradation below is right for a misroute —
+                    # "what is my secret codeword" landing on `tool.terminal`
+                    # should quietly become an ordinary answer. It is wrong for
+                    # a request whose *whole point* is a thing prose cannot be.
+                    # Dropped, "draw me a logo" would fall through to
+                    # `reasoning.generate` and come back as a confident
+                    # paragraph about a picture that was never made, with
+                    # nothing on screen saying so — rule 9 in its silent form,
+                    # and the exact failure the images capability exists to
+                    # prevent.
+                    logger.info(
+                        "Engine: keeping step %s with no runtime, so it refuses "
+                        "rather than degrading to prose",
+                        step.capability_id,
+                    )
+                    available.append(step)
+                    continue
                 logger.info(
                     "Engine: dropping step %s — no runtime registered for it",
                     step.capability_id,
@@ -794,6 +913,158 @@ class ExecutionEngine:
             return []
         results = parsed.get("results") or []
         return [r for r in results if isinstance(r, dict)]
+
+    def _parse_tool_list(self, raw: str) -> list[dict[str, Any]]:
+        """Pull the tool list out of an `mcp.list_tools` payload.
+
+        Shaped like `_parse_search_results` and forgiving in the same way: a
+        payload that cannot be read means no tools, never an exception. The
+        request then answers as an ordinary reply, which is the right outcome —
+        a broken tool server must not be able to fail somebody's question.
+        """
+        try:
+            parsed = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            logger.info("Engine: mcp.list_tools output did not parse; continuing without tools")
+            return []
+        if not isinstance(parsed, dict) or not parsed.get("success"):
+            return []
+        tools = parsed.get("tools")
+        return [t for t in tools if isinstance(t, dict)] if isinstance(tools, list) else []
+
+    def _run_tool_round(
+        self,
+        *,
+        buffered: str,
+        original_prompt: str,
+        model: str | None,
+        system_prompt: str,
+        spoken: list[str],
+    ):
+        """One pass of: did the model call a tool, may it, and what did it say.
+
+        Yields what the user sees and appends the user-visible text to `spoken`,
+        so the caller can store the answer rather than the marker that produced
+        it.
+
+        **The gate is not consulted here and that is deliberate.** This method
+        asks `McpRuntime.execute`, which calls `policy.decide` itself. Reading
+        the verdict in two places is how a permission check becomes advisory —
+        and a shortlisted tool has earned nothing, which is the distinction
+        `CLAUDE.md` records paying for three times.
+        """
+        call = parse_call(buffered)
+        if call is None:
+            # No tool wanted. The ordinary reply, minus any half-written marker.
+            text = strip_calls(buffered)
+            spoken.append(text)
+            yield text
+            return
+
+        runtime = self._router.try_resolve(MCP_CALL)
+        if runtime is None:
+            # The list step ran, so this should be unreachable. Degrade rather
+            # than raise: the model has already written something.
+            text = strip_calls(buffered)
+            spoken.append(text)
+            yield text
+            return
+
+        result = run_sync(runtime.execute(MCP_CALL, {
+            "server": call.server,
+            "tool": call.tool,
+            "arguments": call.arguments,
+            # Never set from here. `confirmed` means a surface asked a person,
+            # and this method has not — if it set the flag, the model's own
+            # request would be its own permission.
+        }))
+        if not isinstance(result, dict):
+            result = {"success": False, "error": "the tool returned nothing readable"}
+
+        if result.get("refused"):
+            reason = result.get("reason", "")
+            yield StreamEvent.tool_call(call.server, call.tool, "refuse", reason)
+            yield from self._answer_without_the_tool(
+                original_prompt, call, reason, model, system_prompt, spoken,
+                preamble=f"Zaram refused to run `{call.tool}`. {reason}",
+            )
+            return
+
+        if result.get("needs_confirmation"):
+            reason = result.get("reason", "")
+            yield StreamEvent.tool_call(call.server, call.tool, "confirm", reason)
+            yield from self._answer_without_the_tool(
+                original_prompt, call, reason, model, system_prompt, spoken,
+                preamble=(
+                    f"`{call.tool}` on `{call.server}` needs your say-so before "
+                    f"it runs. {reason}"
+                ),
+            )
+            return
+
+        if not result.get("success"):
+            error = result.get("error", "unknown error")
+            yield StreamEvent.tool_call(call.server, call.tool, "refuse", error)
+            yield from self._answer_without_the_tool(
+                original_prompt, call, error, model, system_prompt, spoken,
+                preamble=f"`{call.tool}` failed: {error}",
+            )
+            return
+
+        yield StreamEvent.tool_call(call.server, call.tool, "allow", "ran")
+
+        # Asked again, with what came back. No tools are offered this time, so
+        # `MAX_TOOL_ROUNDS` is enforced by there being nothing to call rather
+        # than by a counter somebody has to remember to decrement.
+        follow_up = ExecutionStep(
+            capability_id="reasoning.generate",
+            input_data={"prompt": result_prompt(original_prompt, call, result.get("result"))},
+            depends_on=[],
+        )
+        for token in self._dispatcher.execute_step(follow_up, model, system_prompt):
+            spoken.append(token)
+            yield token
+
+    def _answer_without_the_tool(
+        self,
+        original_prompt: str,
+        call: "ToolCall",
+        reason: str,
+        model: str | None,
+        system_prompt: str,
+        spoken: list[str],
+        *,
+        preamble: str,
+    ):
+        """Say what happened, then answer as best the model can without it.
+
+        The preamble is not optional and is not a log line. A tool that was
+        refused or is waiting on the user has changed the answer, and a reply
+        that quietly omits that is the silent-degradation failure `CLAUDE.md`
+        names — *if a question would have used search and search is off, say
+        so rather than answering quietly without it.* The same holds one step
+        further along, where the capability exists and the permission does not.
+        """
+        notice = preamble.strip() + "\n\n"
+        spoken.append(notice)
+        yield notice
+
+        step = ExecutionStep(
+            capability_id="reasoning.generate",
+            input_data={
+                "prompt": (
+                    f"{original_prompt}\n\n---\n"
+                    f"You asked to run `{call.server}` / `{call.tool}`. It did "
+                    f"not run: {reason}\n"
+                    "Answer the question as well as you can without it, and be "
+                    "plain about what you could not check. Do not call a tool."
+                )
+            },
+            depends_on=[],
+        )
+        for token in self._dispatcher.execute_step(step, model, system_prompt):
+            spoken.append(token)
+            yield token
 
     def _augment_with_sources(self, system_prompt: str, sources: list[dict[str, Any]]) -> str:
         """Fold search results into the system prompt with citation markers."""

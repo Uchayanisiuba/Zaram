@@ -14,6 +14,7 @@ class KernelBootstrapper:
         self.speech_runtime = None
         self.memory_runtime = None
         self.documents_runtime = None
+        self.images_runtime = None
         self.mcp_runtime = None
         self.semantic_router = None
         self.egress_gate = None
@@ -290,15 +291,36 @@ class KernelBootstrapper:
         from artifacts.store import ArtifactStore, default_output_root
         from runtimes.documents.runtime import DocumentsRuntime
 
-        self.documents_runtime = DocumentsRuntime(
-            ArtifactService(
-                ArtifactRecords(default_db_path()), ArtifactStore(default_output_root())
-            ),
-            self.event_bus,
+        artifact_service = ArtifactService(
+            ArtifactRecords(default_db_path()), ArtifactStore(default_output_root())
         )
+
+        self.documents_runtime = DocumentsRuntime(artifact_service, self.event_bus)
         self.registry.register(self.documents_runtime)
         await self.documents_runtime.initialize()
         register_runtime_for_health(self.documents_runtime)
+
+        # --- Images Runtime ---
+        # The same tier and the same service as documents, sharing one
+        # `ArtifactService` deliberately: a picture is an artifact, so it goes
+        # to the one output directory, gets the one record and the one download
+        # route. A second service would be a second write path whose
+        # no-overwrite guarantee nobody had proved.
+        #
+        # Registered whether or not anything can draw. The runtime's refusal —
+        # with the reason and the size of the fix — is the behaviour a machine
+        # with no image model needs, and it can only be given by something that
+        # is actually wired in. An image capability that registers only when it
+        # works is one that says nothing on every machine where it does not.
+        from imaging.local_sdxl import SdxlProvider
+        from runtimes.images.runtime import ImagesRuntime
+
+        self.images_runtime = ImagesRuntime(
+            artifact_service, SdxlProvider(), self.event_bus
+        )
+        self.registry.register(self.images_runtime)
+        await self.images_runtime.initialize()
+        register_runtime_for_health(self.images_runtime)
 
         # Tools other people wrote. Registered here rather than left to a
         # caller that does not exist yet, because an unregistered runtime is
@@ -316,6 +338,22 @@ class KernelBootstrapper:
         self.registry.register(self.mcp_runtime)
         await self.mcp_runtime.initialize()
         register_runtime_for_health(self.mcp_runtime)
+
+        # **Registering it is not reaching it, and that distinction is the
+        # whole reason this line exists.** The runtime was registered here for
+        # a fortnight while `planner.py` contained no occurrence of "mcp", so
+        # no plan could name `mcp.call` and no question ever arrived. A test
+        # named `test_mcp_runtime_is_reachable` passed throughout, because it
+        # asserted the two lines above and called that reachability.
+        #
+        # This hands the planner the names of the attached servers, so
+        # "blender" is a word that means *tool request* on a machine with
+        # Blender attached and means nothing on one without. Passed as a
+        # callable rather than a list: servers are attached and detached while
+        # Zaram runs, and a snapshot taken at boot would be wrong by the time
+        # anybody used it.
+        if self.execution_engine is not None:
+            self.execution_engine.set_tool_vocabulary(self.mcp_runtime.server_names)
 
         # An invoice is a table of line items, not paragraphs, so the documents
         # runtime needs a way to read an answer into fields. It is handed a

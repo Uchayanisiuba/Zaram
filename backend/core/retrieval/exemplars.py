@@ -56,6 +56,29 @@ INTENT_EXEMPLARS: Dict[str, List[str]] = {
         "read the text in this picture",
         "what does this diagram show",
     ],
+    #: Drawing a picture, which is a different request from looking at one.
+    #:
+    #: The two neighbours are the difficulty, and they are close in embedding
+    #: space for an obvious reason: `vision` is also about images, and
+    #: `document` also produces a file. So every phrasing here carries a verb
+    #: of *making* — draw, generate, design, create — attached to a noun that
+    #: is a picture rather than a page.
+    #:
+    #: **"Chart" and "graph" are deliberately absent and belong to
+    #: `document`.** A chart is derived from numbers the user already has and
+    #: comes with the data table that makes it checkable; a picture is drawn
+    #: from a description and has nothing behind it to check. "Draw me a chart
+    #: of last quarter" must keep routing to `document`, and the exemplars are
+    #: where that is decided.
+    "image": [
+        "draw me a picture of a lighthouse at dawn",
+        "generate an image of a city street in the rain",
+        "make me a logo for my studio",
+        "create an illustration to go with this post",
+        "design a header image for the proposal",
+        "can you paint something in a watercolour style",
+        "render a photorealistic mockup of the product",
+    ],
     "speech": [
         "read that out loud",
         "say this back to me",
