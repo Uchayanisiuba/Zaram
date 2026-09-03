@@ -145,6 +145,96 @@ class TestTheNoticeReachesTheReply:
         assert engine._search_suppressed_notice(TIME_SENSITIVE) is None
 
 
+class TestTheNoticeDoesNotMisstateTheSetting:
+    """Reported by the maintainer, 31 August 2026: *"when web search is turned
+    on by the user it doesn't keep to keep popping up again"*.
+
+    `search_required` is a conjunction of three conditions — the question wants
+    search, the switch is on, and search is worth running for the answering
+    model — and `search_suppressed` was its plain negation. So the *economy*
+    refusing looked exactly like the *switch* refusing, and the notice named
+    the switch either way. A user who had turned search on was told on every
+    search-shaped question that it was off.
+
+    This codebase's recurring defect in a new place: one number standing for
+    two questions. The remedy is the same one it always is — say which quantity
+    is being asserted, and assert on that.
+
+    A notice that misstates a setting is worse than no notice. It sends the
+    user to a switch that is already where they want it, and the second time it
+    happens they stop believing the indicator — on the one surface whose whole
+    job is to be trusted.
+    """
+
+    #: Search-shaped without being time-sensitive, so the economy can refuse it.
+    #: Recency overrides the economy, so a "what happened this week" prompt
+    #: cannot reach the branch under test.
+    FACTUAL = "who is the chief executive of that company"
+
+    @contextmanager
+    def _answering_from(self, locality: str):
+        from core import planner
+
+        token = planner._search_locality.set(locality)
+        try:
+            yield
+        finally:
+            planner._search_locality.reset(token)
+
+    def test_the_economy_refusing_is_not_reported_as_the_switch(self, settings):
+        """The bug itself."""
+        with env(None):
+            settings.set_web_search(True)
+            with self._answering_from("cloud"):
+                classification = IntentRouter().classify(self.FACTUAL)
+
+        assert classification.requires_search is False, (
+            "this prompt must be one the economy declines, or the test is "
+            "asserting nothing"
+        )
+        assert classification.search_suppressed_reason == "not_applicable"
+        assert _engine()._search_suppressed_notice(self.FACTUAL) is None, (
+            "search is on; a notice saying it is off sends the user to a "
+            "switch already set the way they want it"
+        )
+
+    def test_the_switch_refusing_still_says_so(self, settings):
+        """The guard against fixing the false notice by removing the true one.
+
+        With the switch off, the disclosure `CLAUDE.md` requires is unchanged:
+        the reply came from the weights alone and the user is told.
+        """
+        with env(None):
+            with self._answering_from("cloud"):
+                classification = IntentRouter().classify(TIME_SENSITIVE)
+
+            assert classification.search_suppressed_reason == "off"
+            notice = _engine()._search_suppressed_notice(TIME_SENSITIVE)
+
+        assert notice is not None
+        assert "search is off" in notice.data["content"].lower()
+
+    def test_a_classifier_without_the_field_still_discloses(self, settings):
+        """Silence is the dangerous direction, so absence means "off".
+
+        A classification predating `search_suppressed_reason` must keep warning
+        rather than go quiet: the failure it prevents is a stale answer with
+        nothing on screen, and the failure it risks is a redundant line.
+        """
+        engine = _engine()
+
+        class Old:
+            def classify_intent(self, prompt):
+                class _C:
+                    search_suppressed = True
+
+                return _C()
+
+        engine._planner = Old()
+
+        assert engine._search_suppressed_notice(TIME_SENSITIVE) is not None
+
+
 class TestTheKeywordFallbackReachesTheCodeIntent:
     """The path that runs when the embedder is unavailable.
 

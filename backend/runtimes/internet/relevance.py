@@ -337,6 +337,18 @@ _TEMPORAL_MARKERS: tuple[tuple[float, frozenset[str]], ...] = (
 #: if they were is what makes a search product surface news for everything.
 _DEFAULT_TEMPORALITY = 0.35
 
+#: At or above this, a question is worth spending a dated-source request on.
+#:
+#: Set at the 0.55 band rather than the 0.8 one so that "who won", "what
+#: version", "current status" reach a dated source — those are the questions
+#: that read as stale without one, and none of them contains "latest". It sits
+#: above `_DEFAULT_TEMPORALITY` deliberately, which is what makes the extra
+#: request opt-in per question: an untimed question never pays for it, and a
+#: historical marker ("history", "founded", "definition") lands at 0.15 and is
+#: excluded outright. That is the "unless the user asks otherwise" half — read
+#: from the question's own words, so a misjudgement is reproducible.
+_NEWS_TEMPORALITY = 0.55
+
 
 def temporality_of(query: str) -> float:
     """How much this question is about *now*. 0–1.
@@ -553,9 +565,18 @@ def connectors_for(query: str, available: Sequence[str]) -> list[str]:
     """
     wanted = []
     code = _looks_like_code_question(query)
+    timely = temporality_of(query) >= _NEWS_TEMPORALITY
     for name in available:
         lowered = name.lower()
-        if "duckduckgo" in lowered or "brave" in lowered or "search" in lowered:
+        # News is checked before the general-search branch, because its id
+        # contains neither "duckduckgo" nor "search" today and must not start
+        # depending on that. It is the one connector gated on *when* rather than
+        # on *what*: a dated source earns its request on "what is the latest
+        # Nvidia GPU" and is dead weight on "who was Napoleon".
+        if "news" in lowered:
+            if timely:
+                wanted.append(name)
+        elif "duckduckgo" in lowered or "brave" in lowered or "search" in lowered:
             wanted.append(name)
         elif "github" in lowered:
             if code:

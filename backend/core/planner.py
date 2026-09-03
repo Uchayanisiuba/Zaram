@@ -95,6 +95,28 @@ def is_time_sensitive(prompt: str) -> bool:
     return bool(_RECENCY_RE.search(prompt or ""))
 
 
+def suppression_reason(wanted: bool, required: bool) -> str | None:
+    """Which of the two gates refused, for a question that wanted search.
+
+    ``None`` when nothing was refused — the question did not want search, or it
+    got it. Otherwise ``"off"`` for the user's switch and ``"not_applicable"``
+    for the local/cloud economy.
+
+    Shared by both classifier paths rather than computed twice. They already
+    drifted once: the semantic path did not consult `needs_search` at all, so a
+    time-sensitive question could be answered from training data with nothing
+    reporting a failure. Two copies of a rule is how that happens.
+
+    Asks `web_search_enabled` again rather than taking it as an argument, since
+    both callers have already called it and it reads env and settings live. A
+    parameter would let a stale value in through the one door this exists to
+    keep honest.
+    """
+    if not wanted or required:
+        return None
+    return "off" if not web_search_enabled() else "not_applicable"
+
+
 def search_applies_to(locality: str | None, prompt: str = "") -> bool:
     """Whether a search is worth running for a model that runs *here*.
 
@@ -267,6 +289,23 @@ class IntentClassification:
     #: from the weights alone with nothing on screen saying so, which is the
     #: most confidently wrong answer the product can give.
     search_suppressed: bool = False
+    #: *Why* it was suppressed. ``"off"``, ``"not_applicable"``, or ``None``.
+    #:
+    #: **One flag was standing for two reasons and the notice could only name
+    #: one of them.** `search_required` is the conjunction of three conditions
+    #: — the question wants search, the user's switch is on, and search is
+    #: worth running for the answering model — so `search_suppressed` went true
+    #: when *any* of the last two failed. The notice said "Web search is off"
+    #: either way, which meant a user who had turned search on kept being told
+    #: it was off. Reported by the maintainer, 31 August 2026.
+    #:
+    #: The two are not the same disclosure. ``"off"`` is a **disabled
+    #: capability**, which `CLAUDE.md` requires be visible rather than silent.
+    #: ``"not_applicable"`` is a **routing decision** — search is available and
+    #: was judged not to change this answer — and it is not a question that
+    #: turns on the calendar, because recency overrides the economy before this
+    #: is reached. See `search_applies_to`.
+    search_suppressed_reason: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
@@ -518,6 +557,7 @@ class IntentRouter:
             requires_vision=vision_matched,
             requires_speech=speech_matched,
             search_suppressed=search_wanted and not search_required,
+            search_suppressed_reason=suppression_reason(search_wanted, search_required),
             metadata={
                 "signals": [s.__dict__ for s in signals],
                 "prompt_length": len(prompt),
@@ -624,6 +664,7 @@ class IntentRouter:
             requires_vision=decision.intent == "vision",
             requires_speech=decision.intent == "speech",
             search_suppressed=wants_search and not requires_search,
+            search_suppressed_reason=suppression_reason(wants_search, requires_search),
             metadata={
                 "router": "semantic",
                 # The legible half. CLAUDE.md: show routing decisions in plain
