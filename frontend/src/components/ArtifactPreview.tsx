@@ -39,26 +39,14 @@ import { downloadUrl, getArtifact, type Artifact } from '@/services/artifactsCli
 import { useLayoutStore } from '@/stores/layoutStore';
 import { useChatModeStore } from '@/stores/chatModeStore';
 import { useViewport } from '@/hooks/useViewport';
+import { wrapForPreview } from '@/lib/previewableCode';
 
-/** Blocks every remote sub-resource the document might name.
+/** The CSP and page styling now live in `lib/previewableCode`, shared with the
+ *  in-conversation code preview.
  *
- *  Belt and braces beside the sandbox: `sandbox=""` already denies scripts and
- *  same-origin, but it does **not** stop an `<img>` fetching a remote URL, and
- *  that fetch is a beacon carrying the user's IP and the moment they opened the
- *  file. `default-src 'none'` with inline styles allowed keeps the document
- *  looking like itself while it can reach nothing. */
-const CSP =
-  "<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; " +
-  "style-src 'unsafe-inline'; img-src data:; font-src data:;\">";
-
-/** A readable page rather than the browser's default serif on white. */
-const FRAME_STYLE = `<style>
-  html, body { margin: 0; padding: 24px; background: #fff; color: #111;
-               font: 14px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif; }
-  img, table { max-width: 100%; }
-  table { border-collapse: collapse; }
-  td, th { border: 1px solid #ddd; padding: 6px 8px; }
-</style>`;
+ *  Two copies of a security header is drift waiting to happen: the one that
+ *  gets read is edited and the other keeps a weaker rule, with nothing
+ *  reporting the difference. One definition, both surfaces. */
 
 export default function ArtifactPreview({
   artifact,
@@ -105,7 +93,7 @@ export default function ArtifactPreview({
           setError('This document has no stored HTML, so it cannot be previewed here.');
           return;
         }
-        setHtml(CSP + FRAME_STYLE + source);
+        setHtml(wrapForPreview(source));
       })
       .catch((err) => {
         if (!cancelled) setError(err instanceof Error ? err.message : 'Could not read the document.');
