@@ -551,9 +551,34 @@ In scope:
   never file anything.
 - **Generative tools**: .docx, .pdf, .md, .xlsx, and charts from the user's own data,
   with provenance carried into the output
-- **Read-only MCP for Unreal and Blender**: inspect the scene, list actors, report on
-  materials and lighting. No writes. Read-only needs no undo, no sandbox and no
-  rollback, which is why it ships in v1 while scoped writes do not.
+- **MCP, as a client first — widened 1 September 2026.** This read *"read-only MCP
+  for Unreal and Blender"*, and both halves were narrower than the architecture.
+
+  **Zaram is an MCP client, and that is what "supports the apps people use" means.**
+  Any server may be attached — DaVinci, Office, a database, whatever someone has
+  written — and Zaram maintains none of them. The integration tests and the
+  *"permanent maintenance obligation"* warning below govern servers **Zaram itself
+  ships**, which is a much shorter list and is what a pack is for. Confusing the two
+  produces the exact roadmap the dependency section refuses: an integration per
+  application, each breaking on its host's next update.
+
+  **Writes are in scope, and they arrive after reads rather than beside them.**
+  Read-only still ships first because it needs no undo, no sandbox and no rollback —
+  not as a philosophical position but because those three are the work. A write
+  through MCP is mutative tier and the tier table applies unchanged: undo, confirm,
+  sandbox. Two further things it must carry, both already rules here — every byte a
+  tool sends is logged (rule 3 says so in as many words), and consent is per
+  destination and data class, asked once and then remembered (rule 7j), because a
+  dialog per call is a product nobody opens twice.
+
+  **A tool description is third-party text and never widens permission.** Selecting
+  which tools to put in front of the model may use similarity — it must, since a
+  local model's context cannot hold every tool of every attached server, and
+  `bge-m3` is already resident to do it. That selection is *ordering*, and the
+  permission gate runs afterwards on the tool actually chosen. Merging the two makes
+  a well-written description into privilege escalation, which is this codebase's
+  most expensive recurring bug wearing a new hat. `core/untrusted.py` already scans
+  untrusted content and is already called from recall; MCP is its second caller.
 - **The pack catalogue**, with unavailable packs shown greyed out and honestly graded
   against the user's hardware, licence and installed apps.
 - **Obligation extraction**: dates and commitments pulled from documents the user
@@ -836,9 +861,19 @@ Out of scope until v1 ships and is tested with real users:
 **Egress log → per-source policy → web search as its first governed source.**
 Search does not return before those two exist. Bytes cannot be logged retroactively.
 
-**Tools: generative → read-only inspection → scoped writes.**
-Priority order for integrations: documents (v1), Unreal read-only (v1),
-Unreal scoped writes, Blender, VS Code. Everything else waits for a user to ask.
+**Tools: generative → read-only inspection → scoped writes.** Unchanged as an
+order, and the reason is unchanged too: each step needs something the step before
+it did not. Writes need undo, confirm and sandbox, and those are the work rather
+than the permission.
+
+**The client comes before any server Zaram ships.** Attaching somebody else's MCP
+server covers more applications in a week than a year of first-party integrations
+would, at no maintenance cost — so the client, the attach flow, the confirm-once
+consent and the tool-selection budget are the v1 work. Servers Zaram writes itself
+are justified only where nobody else can: that is a pack, and the priority there is
+documents (v1), Unreal read-only, Unreal scoped writes, Blender, VS Code.
+Everything else waits for a user to ask, and "a user asked" now has a cheaper
+answer than building it — attach a server.
 
 Do not integrate an application because it is testable. Each integration is a
 permanent maintenance obligation that breaks on every host-app update.
