@@ -226,3 +226,12 @@ Logo_Image/_preview.png
 # interpreter in every clone and in every diff.
 /runtime/
 /.runtime-download/
+
+# The cloud key store. Plaintext on disk until the OS keychain lands —
+# committing it would publish the user's provider keys.
+backend/cloud-connections.json
+cloud-connections.json
+
+# Isolated venv for third-party MCP servers. Deliberately not the backend
+# venv: these pull the official MCP SDK, and the installer must not.
+.mcp-venv/
