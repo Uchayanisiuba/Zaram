@@ -4,6 +4,9 @@ import json
 import logging
 from collections.abc import Iterator
 from typing import Callable, Optional
+
+from core.reasoning import CLOSE_TAG, OPEN_TAG
+
 from .base_engine import ERROR_PREFIX, LLMEngine
 
 logger = logging.getLogger(__name__)
@@ -122,6 +125,8 @@ class OllamaEngine(LLMEngine):
         #: fresher name.
         self.default_model: Optional[str] = None
         self._wire_name = wire_name
+        #: Which models `/api/show` says can think. See `_supports_thinking`.
+        self._thinking_capable: dict[str, bool] = {}
 
     def _wire(self, model: Optional[str]) -> Optional[str]:
         """The name to put in the request body for `model`.
@@ -138,6 +143,44 @@ class OllamaEngine(LLMEngine):
             logger.debug("wire-name lookup failed for %r: %s", model, exc)
             return model
         return resolved or model
+
+    def _supports_thinking(self, model: Optional[str]) -> bool:
+        """Whether Ollama will accept ``think`` for this model. Never raises.
+
+        **Asked, not guessed.** `/api/show` lists `capabilities`, and
+        `thinking` is one of them — measured 31 August 2026:
+        `qwen3-14b-8k` reports ``['completion', 'tools', 'thinking']`` and
+        `bge-m3` reports ``['embedding']``. Inferring it from the model name
+        would be the same class of mistake as sizing a model against a VRAM
+        figure of ``0``: a guess about text the user is about to be shown.
+
+        **False on any doubt, and that direction is deliberate.** Ollama
+        refuses the whole request for a model that cannot think, so a wrong
+        ``True`` costs the *answer* to gain a *display*. A wrong ``False``
+        costs only the thinking panel, which is what the user had a moment ago
+        anyway. Never the other way round.
+
+        Cached per model for the life of the engine. Capabilities are a
+        property of the weights and do not change under a running server, and
+        the alternative is an extra loopback round trip before every message on
+        the one path whose whole thesis is speed.
+        """
+        if not model:
+            return False
+        if model in self._thinking_capable:
+            return self._thinking_capable[model]
+        supported = False
+        try:
+            response = requests.post(
+                f"{self.base_url}/api/show", json={"model": model}, timeout=2.0
+            )
+            response.raise_for_status()
+            capabilities = response.json().get("capabilities")
+            supported = isinstance(capabilities, list) and "thinking" in capabilities
+        except Exception as exc:
+            logger.debug("thinking-capability check failed for %r: %s", model, exc)
+        self._thinking_capable[model] = supported
+        return supported
 
     def _is_resident(self, model: Optional[str]) -> Optional[bool]:
         """Whether Ollama already holds `model`'s weights. Never raises.
@@ -374,6 +417,21 @@ class OllamaEngine(LLMEngine):
         # list answers oddly rather than failing, which is the worst of both.
         if attached:
             payload["images"] = attached
+        # **Ollama does not emit `<think>` tags, and Zaram was only looking for
+        # those.** Measured 31 August 2026 against Ollama 0.33.2 with
+        # `qwen3-14b-8k`: with `think` unset the reply contains no tag of any
+        # kind, and with `think: true` the working arrives in a separate
+        # `thinking` field — 3,838 characters of it on a one-line arithmetic
+        # question. So `ReasoningSplitter`, which scans the content stream for
+        # a tag, could never see anything from this engine and the thinking
+        # panel was empty for every local model.
+        #
+        # This is the same defect `openai_compatible_engine` already fixed for
+        # TabbyAPI's `reasoning_content`, in a second engine that nobody
+        # revisited — which is why the maintainer saw thinking on TabbyAPI and
+        # lost it on switching to Ollama, and read that as Zaram breaking.
+        if self._supports_thinking(payload["model"]):
+            payload["think"] = True
         logger.debug(
             "OllamaEngine.stream_response: model=%s images=%d prompt='%s...'",
             payload["model"],
@@ -400,11 +458,34 @@ class OllamaEngine(LLMEngine):
             response = requests.post(url, json=payload, stream=True, timeout=timeout)
             response.raise_for_status()
             token_count = 0
+            # **Re-tagged rather than given a channel of its own.** The tokens
+            # go back into `<think>` ... `</think>` so `ReasoningSplitter`
+            # handles them, which keeps one convention rather than two and
+            # inherits everything already built on it: the reasoning event, the
+            # transcript rule, and the guarantee that thinking never reaches
+            # `streamingText` and therefore never reaches Kokoro. The
+            # OpenAI-compatible engine makes the same choice for the same
+            # reason; a second channel would need all of that written twice.
+            in_thinking = False
             for line in response.iter_lines():
                 if line:
                     json_data = json.loads(line)
+                    thinking = json_data.get("thinking")
+                    if thinking:
+                        if not in_thinking:
+                            in_thinking = True
+                            yield OPEN_TAG
+                        yield thinking
                     if "response" in json_data:
                         text = json_data["response"]
+                        # Closed on the first *content*, not on an empty
+                        # thinking delta: Ollama is not obliged to send one,
+                        # and an unclosed tag makes the splitter file the whole
+                        # answer as thinking — a reply that renders as working
+                        # and never speaks.
+                        if in_thinking and text:
+                            in_thinking = False
+                            yield CLOSE_TAG
                         if "does not support image input" in text or "doesn't support image input" in text:
                             # Names no model, deliberately. This read
                             # "(qwen2.5vl:7b)" and pointed at something the
@@ -429,6 +510,12 @@ class OllamaEngine(LLMEngine):
                     if "error" in json_data:
                         yield ERROR_PREFIX + str(json_data["error"])
                         break
+            # A stream that ended while still thinking — the model was cut off,
+            # or answered with working and nothing else. The tag is closed
+            # anyway, because an unclosed one makes the splitter hold every
+            # subsequent character as reasoning.
+            if in_thinking:
+                yield CLOSE_TAG
             logger.debug("OllamaEngine.stream_response: done, %d tokens", token_count)
         except Exception as e:
             logger.warning("OllamaEngine.stream_response failed: %s: %s", type(e).__name__, e)
