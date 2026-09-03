@@ -434,23 +434,40 @@ PROVIDERS: Tuple[ProviderEntry, ...] = (
         ),
     ),
     ProviderEntry(
+        # **The id is a legacy label and is not a claim about the product.**
+        # Zaram finds an OpenAI-compatible server on this port; it has no way
+        # to know which one, because nothing in the `/v1/models` contract says.
+        # LM Studio serves it, so does TabbyAPI, so do LocalAI, vLLM, llama.cpp
+        # and Jan.
+        #
+        # Measured 31 August 2026: the maintainer runs TabbyAPI here, and the
+        # picker named a program they had never installed. That one word turned
+        # a diagnosis into a long argument about software that was not on the
+        # machine. The id stays — it is written into model ids, per-task
+        # assignments and saved settings, and renaming it is a migration rather
+        # than a label fix — but **nothing the user reads may repeat the
+        # guess**. Report the port, which is a fact.
         id="lm_studio",
-        display_name="LM Studio (on this machine)",
+        display_name="Local server on 127.0.0.1:1234",
         kind=ProviderKind.LOCAL_AI_SERVER,
-        # Deliberately without `/v1`, matching what LM Studio shows in its own
-        # server panel — and it exercises the other half of the engine's
+        # Deliberately without `/v1`, matching what these servers show in their
+        # own panels — and it exercises the other half of the engine's
         # normalisation, which is worth having in the manifest rather than only
         # in a test fixture.
         base_url="http://127.0.0.1:1234",
         chat_endpoint="http://127.0.0.1:1234/v1/chat/completions",
         compatibility=Compatibility.OPENAI,
         auth=AuthStyle.NONE,
-        key_url="https://lmstudio.ai/",
+        # No product page, for the same reason there is no product name: a link
+        # to lmstudio.ai is an instruction to install the wrong thing.
+        key_url="",
         support=Support.AVAILABLE,
         note=(
-            "Runs on your own machine. Nothing you type leaves the device, and "
-            "Zaram finds it on its own when the LM Studio server is running — no "
-            "key and no setup."
+            "An OpenAI-compatible server running on your own machine — LM "
+            "Studio, TabbyAPI, llama.cpp and others all serve this port. "
+            "Nothing you type leaves the device, and Zaram finds it on its own "
+            "while it is running: no key and no setup. Zaram does not name "
+            "which program it is, because the server does not say."
         ),
     ),
 )

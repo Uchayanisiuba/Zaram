@@ -264,7 +264,18 @@ class OpenAICompatibleAdapter:
 
 
 class LMStudioAdapter(OpenAICompatibleAdapter):
-    """LM Studio's local OpenAI-compatible server (auto-detected by the runtime)."""
+    """Whatever OpenAI-compatible server is on 127.0.0.1:1234, if anything.
+
+    **The class name and the `lm_studio` provider id are historical, and
+    neither is a claim about which program is answering.** Nothing in the
+    `/v1/models` contract identifies the server, and this port is served by LM
+    Studio, TabbyAPI, LocalAI, vLLM, llama.cpp and Jan alike. The catalogue
+    entry carries the reasoning and the user-facing string, which names the
+    port instead of guessing the product; see `providers/catalogue.py`.
+
+    Nothing here may infer a product name from a response either. `owned_by`
+    is set by the server operator and is not an identity.
+    """
 
     def __init__(self, base_url: str = LM_STUDIO_BASE_URL) -> None:
         super().__init__(

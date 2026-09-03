@@ -137,6 +137,76 @@ class LocalDispatchEngine(LLMEngine):
         self._engines[endpoint] = engine
         return engine
 
+    def warm(self, model: Optional[str] = None, *, timeout: Optional[float] = None) -> bool:
+        """Preload `model` on whichever local server actually holds it.
+
+        **This wrapper had no `warm` at all, and the preload died silently when
+        it was introduced.** `ModelsRuntime.warm_local_model` reaches the local
+        engine and asks::
+
+            warm = getattr(local, "warm", None)
+            if not callable(warm):
+                return False
+
+        `local` is this class. So the guard — written to tolerate an engine
+        that cannot preload — swallowed the fact that the engine which *can*
+        was one attribute further down, and every session since has paid a full
+        cold start on its first message. The state was reported honestly; the
+        preload the state exists to make unnecessary was never running.
+
+        `test_the_selected_model_is_the_one_preloaded` passed throughout,
+        because it injects a fake engine that has a `warm` method. That is the
+        shape `CLAUDE.md` names — a test asserting the scaffolding rather than
+        the contract — and the fix is the test at the bottom of
+        `test_local_dispatch.py`, which builds the real stack.
+
+        Dispatch is by provider, exactly as in `stream_response`. Nothing here
+        guesses from the model's name.
+        """
+        chosen = model or self._default_model
+        if not chosen:
+            return False
+
+        endpoint: Optional[str] = None
+        try:
+            endpoint = self._resolve_endpoint(chosen)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "local endpoint lookup failed for %r, warming on Ollama: %s", chosen, exc
+            )
+            endpoint = None
+
+        if endpoint is None:
+            warm = getattr(self._ollama, "warm", None)
+            if not callable(warm):
+                return False
+            # `timeout` is forwarded only when the caller set one, so Ollama's
+            # own `COLD_START_TIMEOUT` stays the single definition of how long
+            # a load may take. Duplicating that constant here is the failure
+            # `CLAUDE.md` describes as a number in one place that a gate reads
+            # in another.
+            if timeout is None:
+                return bool(warm(chosen))
+            return bool(warm(chosen, timeout=timeout))
+
+        # **A second local server gets no preload, and that is deliberate.**
+        # Ollama documents an empty prompt with `keep_alive` as the way to load
+        # weights without generating. No OpenAI-compatible server has an
+        # equivalent: the nearest thing is a real one-token completion, which
+        # is a *generation* — it runs the model, it appears in that server's
+        # logs as a request the user never made, and on a server configured
+        # with a template that rejects an empty message it fails outright.
+        #
+        # Spending a hidden inference to remove a wait is a trade the user has
+        # not been offered, so the honest answer is that this cannot be warmed.
+        # `False` already means exactly that to the caller, and the cold start
+        # is still announced by `model_load` when the message arrives.
+        logger.info(
+            "[LocalDispatch] no preload for %s: %s has no load-without-generate "
+            "route", chosen, endpoint,
+        )
+        return False
+
     def stream_response(
         self,
         prompt: str,

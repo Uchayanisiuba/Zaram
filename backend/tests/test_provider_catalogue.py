@@ -160,11 +160,24 @@ class TestWhatTheUserIsTold:
             if not entry.available:
                 assert entry.note.strip(), entry.id
 
-    def test_every_entry_says_where_to_get_a_key(self):
+    def test_every_entry_that_needs_a_key_says_where_to_get_one(self):
+        """A server that wants no key needs no signup link, and one local entry
+        must not have one.
+
+        The port-1234 entry is served by LM Studio, TabbyAPI, llama.cpp and
+        others, and nothing in the `/v1/models` contract says which. A link to
+        any one product page is an instruction to install the wrong thing —
+        which is what happened: the picker named LM Studio at a maintainer
+        running TabbyAPI, and that one word turned a diagnosis into a long
+        argument about software that was never on the machine.
+        """
         for entry in PROVIDERS:
             assert entry.id and entry.display_name and entry.base_url
             assert entry.chat_endpoint
-            assert entry.key_url.startswith("https://"), entry.id
+            if entry.auth is not AuthStyle.NONE:
+                assert entry.key_url.startswith("https://"), entry.id
+            elif entry.key_url:
+                assert entry.key_url.startswith("https://"), entry.id
 
     def test_ids_are_unique(self):
         ids = [entry.id for entry in PROVIDERS]

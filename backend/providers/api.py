@@ -76,12 +76,22 @@ def _payload(manager: ProviderManager, model) -> dict:
 
     `resident_budget_bytes` rides along on every row, redundantly. One number
     repeated is cheaper than a second round trip, and the picker needs it to
-    say something actionable — *"18.2 GB, and this machine has 9.1 GB for a
+    say something actionable — *"21.6 GB, and this machine has 11.7 GB for a
     chat model"* is a sentence a person can act on; *"does not fit"* is not.
+
+    **`resident_cost_bytes` is the number that sentence must use, and that is
+    why it is here.** The picker compared `size_bytes` — on-disk weights —
+    against the budget, which was correct only while the two sides were the
+    same quantity. Since the KV allowance moved onto the model they are not: a
+    model can be graded as not fitting while its *weights* are comfortably
+    under the budget, and the row would then read "10.0 GB, and this machine
+    has about 11.7 GB" beside a verdict of too large. The interface must not
+    contradict itself on the one indicator whose job is to be trusted.
     """
     payload = model.to_dict()
     payload["fits_resident"] = manager.model_fits_resident(model)
     payload["resident_budget_bytes"] = manager.resident_budget_bytes()
+    payload["resident_cost_bytes"] = manager.resident_cost_bytes(model)
     return payload
 
 

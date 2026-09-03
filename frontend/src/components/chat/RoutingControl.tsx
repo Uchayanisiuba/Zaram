@@ -78,9 +78,12 @@ function gb(bytes: number | null): string {
  *  `residentBudgetBytes` was carried across for. */
 export function slowNote(model: DiscoveredModel): string | null {
   if (model.fitsResident !== false) return null;
-  const size = gb(model.sizeBytes);
+  // Weights plus the model's own cache — the quantity `fitsResident` is
+  // decided on. See `describeFit` in SettingsWorkspace for why quoting the
+  // on-disk size here can contradict the verdict beside it.
+  const claimed = gb(model.residentCostBytes ?? model.sizeBytes);
   const budget = gb(model.residentBudgetBytes);
-  if (size && budget) return `slow — ${size} against ${budget} of VRAM`;
+  if (claimed && budget) return `slow — ${claimed} against ${budget} of VRAM`;
   return 'slow — larger than this machine can hold';
 }
 

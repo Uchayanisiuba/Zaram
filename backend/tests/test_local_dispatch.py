@@ -187,3 +187,80 @@ class TestTheDefaultIsAChoiceToo:
 
         assert out == "from-ollama"
         assert ollama.calls == [None]
+
+
+class TestThePreloadSurvivesTheWrapper:
+    """`warm` has to cross this class, and for a while nothing did.
+
+    `ModelsRuntime.warm_local_model` reaches the local engine and asks for a
+    `warm` attribute, returning False when there is none. `LocalDispatchEngine`
+    had none, so the preload died the moment this wrapper was introduced and
+    every session since paid a full cold start on its first message.
+
+    The existing preload tests all passed, because they inject a fake engine
+    that *has* a `warm` method — the scaffolding rather than the contract, and
+    the third instance of that shape found in one day. So the last test here
+    builds the real stack and asks it.
+    """
+
+    def test_an_ollama_model_is_warmed_on_ollama(self):
+        engine, ollama = _dispatch({})
+        ollama.warmed = []
+        ollama.warm = lambda m, **kw: ollama.warmed.append(m) or True
+
+        assert engine.warm("ollama:qwen3-14b-8k:latest") is True
+        assert ollama.warmed == ["ollama:qwen3-14b-8k:latest"]
+
+    def test_the_runtime_default_is_warmed_when_no_model_is_named(self):
+        """`warm_local_model` passes the selected model, but `warm()` with
+        nothing named must not fall through to whatever Ollama last held."""
+        engine, ollama = _dispatch({})
+        ollama.warmed = []
+        ollama.warm = lambda m, **kw: ollama.warmed.append(m) or True
+        engine.default_model = "ollama:qwen3-14b-8k:latest"
+
+        assert engine.warm() is True
+        assert ollama.warmed == ["ollama:qwen3-14b-8k:latest"]
+
+    def test_nothing_selected_warms_nothing(self):
+        engine, ollama = _dispatch({})
+        ollama.warm = lambda m, **kw: pytest.fail("warmed a model nobody chose")
+
+        assert engine.warm() is False
+
+    def test_a_second_local_server_is_not_warmed_by_generating(self):
+        """A one-token completion would load the weights and is still a
+        generation: it runs the model, appears in that server's log as a
+        request the user never made, and spends a hidden inference to remove a
+        wait nobody was asked about. `False` says so honestly, and the cold
+        start is still announced by `model_load` when the message arrives.
+        """
+        engine, ollama = _dispatch(
+            {"lm_studio:Qwen3.8-27B-exl3-2.20bpw": "http://127.0.0.1:1234"}
+        )
+        ollama.warm = lambda m, **kw: pytest.fail(
+            "a TabbyAPI model was warmed on Ollama — the exact confusion this "
+            "class exists to prevent"
+        )
+
+        assert engine.warm("lm_studio:Qwen3.8-27B-exl3-2.20bpw") is False
+
+    def test_the_real_engine_stack_exposes_warm(self):
+        """The guard the fake could never be.
+
+        Every other preload test in the suite injects an engine of its own, so
+        all of them passed while the shipped stack — `RoutedEngine` wrapping
+        `LocalDispatchEngine` wrapping `OllamaEngine` — had no reachable
+        `warm` at all. This asserts the attribute exists where
+        `warm_local_model` actually looks for it.
+        """
+        from runtimes.models.models_runtime import ModelsRuntime
+
+        runtime = ModelsRuntime(event_bus=None, provider_manager=None)
+        built = runtime._build_engine()
+        local = getattr(built, "_local", built)
+
+        assert callable(getattr(local, "warm", None)), (
+            "warm_local_model reaches this object and gives up when it has no "
+            "`warm`; without this the preload is dead and says nothing"
+        )

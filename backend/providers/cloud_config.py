@@ -18,16 +18,30 @@ which is the expensive half.
 
 Where a key lives
 -----------------
-In memory, and in the environment for the one legacy connection, and nowhere
-else this module writes. Persistence is Electron's `safeStorage`, which hands
-keys back as environment variables at launch — the shape `CLAUDE.md` names, and
-the reason there is no file path in here.
+In memory, and in ``cloud-connections.json`` under the user's data directory.
+
+**That file is new, and the paragraph it replaces was wrong in a way that cost
+a working key.** This used to read *"persistence is Electron's safeStorage …
+the reason there is no file path in here"*. Nothing implemented it. `connect`
+wrote the key to `os.environ` and stopped, so connecting a provider lasted
+exactly as long as the process, and the next launch restored whatever the
+machine's own environment held. On the maintainer's machine that was a Windows
+*User* variable reading ``your-new-key``, which overwrote a real key entered
+weeks earlier and made OpenRouter answer 401.
 
 The environment is still read at startup, so a key exported before launch keeps
 working exactly as it did. It is a *seed*, not the store: once there can be
 more than one connection, a pair of variables cannot represent the state, and
 pretending otherwise is how two halves of a system come to disagree about one
-value. The provider layer already carries a scar from precisely that — the
+value. **Saved connections load first and the environment only fills gaps**,
+because typing a key into the application is a more deliberate and more recent
+statement than a variable somebody exported once and forgot.
+
+The file is plaintext inside the user's own data directory, which is the same
+protection the development API-secret fallback relies on and no stronger. It is
+written 0600 where the platform honours it. Moving these into the OS keychain
+is the fix; saying they were already there while they were not is what this
+paragraph is now here to prevent. The provider layer already carries a scar from precisely that — the
 engine and the discoverer reading ``ZARAM_OPENAI_ENDPOINT`` differently
 produced a working chat beside a discovery asking for ``/v1/v1/models``.
 
@@ -130,6 +144,103 @@ class CloudConnection:
 
 
 _connections: Dict[str, CloudConnection] = {}
+
+#: Where connections are kept between runs.
+#:
+#: **Connecting a provider used to survive only until the backend restarted.**
+#: `connect` wrote the key into `os.environ` and nowhere else, so a key entered
+#: in Settings was gone on the next launch and the only thing that came back
+#: was whatever the operating system's own environment held. Measured 31 August
+#: 2026: a Windows *User* variable containing the literal string
+#: ``your-new-key`` was reloaded at every boot and sent to OpenRouter, which
+#: answered ``401 Missing Authentication header`` — a real key entered weeks
+#: earlier having been silently discarded at the first restart.
+_STORE_FILENAME = "cloud-connections.json"
+
+
+def _store_path():
+    from pathlib import Path
+
+    from core.paths import data_dir
+
+    return Path(data_dir()) / _STORE_FILENAME
+
+
+#: Providers the user removed on purpose.
+#:
+#: Without this, `disconnect` does not survive a restart either: the same stale
+#: environment variable that overwrote a saved key also resurrects a provider
+#: the user deliberately removed, and there is no way to be rid of it from
+#: inside the application. Unsetting the machine's own environment is not
+#: Zaram's to do, so the removal is recorded instead. Connecting again clears
+#: the record.
+_removed: set = set()
+
+
+def _save() -> None:
+    """Write the connections to disk. Never raises into a caller.
+
+    A failure to persist must not take down a connection that is otherwise
+    working in this process — the user would see the provider refuse for a
+    reason that has nothing to do with the provider.
+    """
+    import json
+
+    try:
+        path = _store_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "connections": [
+                {
+                    "provider_id": c.provider_id,
+                    "base_url": c.base_url,
+                    "api_key": c.api_key,
+                    "display_name": c.display_name,
+                }
+                for c in _connections.values()
+            ],
+            "removed": sorted(_removed),
+        }
+        path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        try:
+            path.chmod(0o600)
+        except OSError:
+            # Windows ACLs do not map onto this. The file is inside the user's
+            # own data directory, which is the same protection the development
+            # API-secret fallback relies on, and it is no stronger than that.
+            pass
+    except Exception:  # noqa: BLE001
+        logger.warning("could not persist cloud connections", exc_info=True)
+
+
+def _load() -> None:
+    """Restore saved connections into `_connections`. Never raises.
+
+    A corrupt file costs the saved providers and nothing else; local answering
+    and everything the environment supplies still work.
+    """
+    import json
+
+    try:
+        path = _store_path()
+        if not path.exists():
+            return
+        data = json.loads(path.read_text(encoding="utf-8")) or {}
+        _removed.clear()
+        _removed.update(str(p) for p in (data.get("removed") or []))
+        for row in data.get("connections") or []:
+            pid = str(row.get("provider_id") or "").strip()
+            base = str(row.get("base_url") or "").strip()
+            if not pid or not base:
+                continue
+            _connections[pid] = CloudConnection(
+                provider_id=pid,
+                base_url=base,
+                api_key=str(row.get("api_key") or ""),
+                display_name=str(row.get("display_name") or pid),
+            )
+    except Exception:  # noqa: BLE001
+        logger.warning("could not read saved cloud connections", exc_info=True)
 _providers_runtime: Any = None
 _models_runtime: Any = None
 
@@ -252,7 +363,11 @@ async def connect(
         if key:
             os.environ[GENERIC_KEY_ENV] = key
 
+    # Connecting again is the user changing their mind, so the removal record
+    # goes with it.
+    _removed.discard(connection_id)
     _register_adapter(_connections[connection_id])
+    _save()
     _reload_engine()
 
     logger.info("cloud provider connected: %s (%s)", connection_id, endpoint)
@@ -268,6 +383,8 @@ def disconnect(provider_id: str) -> Dict[str, Any]:
     runtime already refuses to create for a keyless OpenRouter.
     """
     _connections.pop(provider_id, None)
+    _removed.add(provider_id)
+    _save()
 
     if provider_id == LEGACY_PROVIDER_ID:
         os.environ.pop(GENERIC_ENDPOINT_ENV, None)
@@ -293,9 +410,24 @@ def seed_from_environment() -> None:
     for a configured provider, and the environment is an input to it rather than
     a parallel mechanism with its own bugs.
     """
+    # **Saved first, and the environment fills gaps rather than overwriting.**
+    # The other order is what cost the maintainer a working OpenRouter key: a
+    # stale `OPENROUTER_API_KEY=your-new-key` in the Windows *User* environment
+    # was reloaded at every boot and replaced the key entered in Settings, so
+    # the deliberate act lost to the forgotten one. A key someone typed into
+    # this application is the more recent and more deliberate statement of
+    # intent; an exported variable is a default for the case where nobody has
+    # made one.
+    _load()
+
     endpoint = (os.getenv(GENERIC_ENDPOINT_ENV) or "").strip()
     key = (os.getenv(GENERIC_KEY_ENV) or "").strip()
-    if endpoint and (key or _is_loopback(endpoint)):
+    if (
+        endpoint
+        and (key or _is_loopback(endpoint))
+        and LEGACY_PROVIDER_ID not in _connections
+        and LEGACY_PROVIDER_ID not in _removed
+    ):
         _connections[LEGACY_PROVIDER_ID] = CloudConnection(
             provider_id=LEGACY_PROVIDER_ID,
             base_url=endpoint,
@@ -304,7 +436,7 @@ def seed_from_environment() -> None:
         )
 
     router_key = (os.getenv("OPENROUTER_API_KEY") or "").strip()
-    if router_key:
+    if router_key and "openrouter" not in _connections and "openrouter" not in _removed:
         entry = catalogue.get("openrouter")
         _connections["openrouter"] = CloudConnection(
             provider_id="openrouter",
