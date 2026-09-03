@@ -261,6 +261,17 @@ class KnowledgeRuntime:
                     # by being assigned to `confidence` and to nothing else.
                     score=r.score,
                     type=__import__("knowledge.protocol", fromlist=["ResultType"]).ResultType.WEB,
+                    # **The date was dropped in this hop, exactly as `score`
+                    # was.** `KnowledgeResult` has carried a `published` field
+                    # and printed it in `to_dict` all along, and
+                    # `search_context` prints a `Published:` line whenever one
+                    # is present — but nothing ever filled it for a web result,
+                    # so the line never rendered and the model was handed
+                    # undated snippets with an instruction to treat them as
+                    # more recent than its training. An instruction to prefer
+                    # the newer source is not usable by a reader who cannot see
+                    # which source is newer.
+                    published=(r.metadata or {}).get("published") or None,
                     metadata=r.metadata, retrieved_at=r.retrieved_at,
                 )
                 result = self._authority.apply_to_result(result)

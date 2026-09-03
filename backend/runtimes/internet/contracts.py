@@ -9,6 +9,16 @@ import uuid
 
 class InternetConnectorType(str, Enum):
     DUCKDUCKGO = "duckduckgo"
+    #: Dated web results. Separate from `DUCKDUCKGO` because the distinction is
+    #: the date, not the host: `text()` returns no publication date at all, so
+    #: `relevance._recency_of` scored every general web result 0.5 — the value
+    #: it uses for "undated", which its own curve makes identical to a page
+    #: published 30 days ago. Recency was therefore a constant across the whole
+    #: web shortlist and contributed nothing to the ordering, which is why
+    #: answers read as though they came from the model's training data. `news()`
+    #: carries a date per result and is what gives that ranker something to
+    #: rank.
+    NEWS = "news"
     WIKIPEDIA = "wikipedia"
     RSS = "rss"
     GITHUB = "github"

@@ -178,6 +178,19 @@ class ExecutionEngine:
         Silent in every other case, including the far more common one where the
         question never needed search at all. `search_suppressed` is a separate
         field from `not requires_search` for exactly that reason.
+
+        **And silent when search is on but was judged not worth running.** This
+        used to fire on `search_suppressed` alone, which is true whenever
+        *either* gate refuses — so a user who had switched search on was told
+        "Web search is off" on every search-shaped question the economy skipped.
+        A notice that misstates the setting is worse than no notice: it sends
+        the user to a switch that is already where they want it.
+
+        That case is not a hidden staleness risk, which is what earns a
+        disclosure here. Recency overrides the economy before this point, so
+        anything reaching `not_applicable` is a question whose answer does not
+        turn on the calendar. Saying something anyway would put a line under
+        ordinary replies, which is the tax rule 7h exists to refuse.
         """
         from core.streaming_events import StreamEvent
 
@@ -189,6 +202,14 @@ class ExecutionEngine:
             return None
 
         if not getattr(classification, "search_suppressed", False):
+            return None
+
+        # Only the switch earns this sentence. `None` is treated as "off" so a
+        # classifier that predates the field keeps disclosing rather than going
+        # quiet — the failure that direction is a stale answer with nothing on
+        # screen, which is the one this notice exists to prevent.
+        reason = getattr(classification, "search_suppressed_reason", None)
+        if reason not in (None, "off"):
             return None
 
         return StreamEvent.notice(
@@ -955,11 +976,29 @@ class ExecutionEngine:
             logger.debug("Engine: swap pre-flight failed: %s", exc)
             return None
 
-        # `resident` is the common case and says nothing, deliberately: an
-        # event on every reply would be noise the frontend has to filter, and
-        # the orb already has a word for "working".
-        if plan is None or plan.kind == "resident":
+        # **`resident` used to say nothing, and silence was doing two jobs.**
+        #
+        # The reasoning was that an event on every reply is noise. What it
+        # actually produced: the frontend cannot distinguish "the model is
+        # loaded" from "we could not tell", because both arrived as nothing —
+        # so its 2.5-second fallback timer, which exists to guess that silence
+        # means a cold model, fired on a model already in VRAM and the orb read
+        # **Warming up** on every question.
+        #
+        # Reported by the maintainer, 31 August 2026, and it is this codebase's
+        # recurring defect once more: one signal standing for two answers. The
+        # remedy is the same one it always is — say which, and let the caller
+        # act on the difference.
+        #
+        # `None` now means only what it says: the question could not be
+        # answered. Nothing is announced speculatively either way.
+        if plan is None:
             return None
+
+        if plan.kind == "resident":
+            return StreamEvent.model_load(
+                kind="resident", model=plan.model, evicts=[],
+            )
 
         logger.info(
             "Engine: %s required before reply — %s%s",

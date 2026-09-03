@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import date as _date
 from enum import Enum
 from typing import Any, Dict, Optional
 
@@ -132,6 +133,15 @@ def format_search_results(query: str, search_result: Dict[str, Any]) -> str:
 
     parts = [SEARCH_MARKER, f"Query: {query}", ""]
 
+    # **Today's date, beside the sources rather than only in the system
+    # prompt.** `identity._today_line` already supplies it, but a date in a
+    # different block is not usable for the judgement being asked for here: the
+    # instruction below says to prefer a web source because it is more recent,
+    # and "more recent" is not checkable without both dates in view. A model
+    # that cannot check the claim falls back on what it already believes, which
+    # is the failure this whole block exists to prevent.
+    parts += [f"Today's date is {_date.today().isoformat()}.", ""]
+
     # Say what is in the block when it is not what the marker claims. The
     # marker is a sentinel — `needs_search` suppresses a second search on it
     # and `planner` splits the user's question out of it — so the honesty has
@@ -188,6 +198,18 @@ def format_search_results(query: str, search_result: Dict[str, Any]) -> str:
         parts += [
             "- Where a WEB source conflicts with your training data, trust the "
             "web source: it is more recent.",
+            # Undated is the common case for general web results — only the
+            # dated connectors carry a `Published:` line — and the honest
+            # instruction is not "assume it is current" but "say which it is".
+            # Rule 9's posture applied to recency: state the uncertainty rather
+            # than resolve it silently, since a confidently stale answer is the
+            # failure being fixed here.
+            "- A source with a Published date is the better authority on what "
+            "is current. Prefer the most recently published source where they "
+            "disagree, and say which date you relied on.",
+            "- A source with no Published date may be years old. Do not "
+            "present it as current; if the question depends on what is true "
+            "now and every source is undated, say so.",
             "- Do NOT mention your training data cutoff.",
             "- Do NOT say you don't have real-time access.",
         ]

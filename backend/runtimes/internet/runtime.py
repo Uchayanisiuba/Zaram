@@ -153,6 +153,115 @@ class DuckDuckGoConnector(BaseInternetConnector):
         return results
 
 
+class DuckDuckGoNewsConnector(BaseInternetConnector):
+    """DuckDuckGo news search — the same host, asked for dated results.
+
+    **This exists to feed `_recency_of`, not to add a source.** The ranking
+    already fuses relevance, authority and recency, and `temporality_of`
+    already decides how much recency should matter for a given question. Both
+    were correct and both were starved: `text()` returns no publication date,
+    so every general web result took the undated default of 0.5 and recency
+    had no variance to order on. A term that is constant across a shortlist
+    cannot change that shortlist's order.
+
+    `news()` returns a `date` per result, which is the one field that turns
+    that machinery on.
+
+    **It is a second connector rather than a replacement**, and the fan-out is
+    why that costs nothing on the clock: `search` gathers connectors
+    concurrently, so this adds one request in parallel rather than a second
+    round trip in series. The alternative considered and rejected was a
+    `timelimit` on `text()` — that is a *membership* filter, and a question
+    whose best answer is fourteen months old would return nothing. `CLAUDE.md`
+    records what selecting on the wrong quantity has already cost this
+    codebase three times; adding a dated source orders without excluding
+    anything.
+
+    It is not asked on every question. `connectors_for` gates it on
+    `temporality_of`, so "who was Napoleon" never pays for it — less egress,
+    not more, on the questions that do not want news.
+    """
+
+    def __init__(self):
+        super().__init__("ddg_news", InternetConnectorType.NEWS)
+        self._ddgs = None
+        self._init_ddgs()
+
+    def _init_ddgs(self):
+        # Same import indirection as `DuckDuckGoConnector`, for the same
+        # reason: the superseded `duckduckgo_search` answers successfully with
+        # zero results, which is a silent failure rather than a loud one.
+        from core.ddgs_import import DDGS
+
+        if DDGS is None:
+            self._available = False
+            self._last_error = "no DuckDuckGo package installed (pip install ddgs)"
+            return
+        self._ddgs = DDGS()
+
+    async def search(self, query: SearchQuery) -> list[SearchResult]:
+        # The gate owns the decision even though DDGS opens its own connection,
+        # exactly as in `DuckDuckGoConnector`. Under default deny the library is
+        # never reached and nothing leaves. The query string is the user's own
+        # question, which is the outbound text rule 3 exists to record — and
+        # this is a *separate* request from the general web one, so it is
+        # checked and logged separately rather than riding on that decision.
+        probe = "https://duckduckgo.com/?q=" + urllib.parse.quote(query.query) + "&iar=news"
+        try:
+            get_gate().check(probe, source="internet-runtime-news")
+        except EgressDenied as denied:
+            self._last_error = str(denied)
+            return []
+
+        if not self._ddgs:
+            self._init_ddgs()
+            if not self._ddgs:
+                return []
+
+        start = time.time()
+        results: list[SearchResult] = []
+
+        try:
+            loop = asyncio.get_event_loop()
+            ddgs_results = await loop.run_in_executor(
+                None,
+                lambda: list(self._ddgs.news(query.query, max_results=query.max_results)),
+            )
+
+            for r in ddgs_results:
+                # `news()` names the link `url`; `text()` names it `href`. Both
+                # are read because one connector's payload shape is not a thing
+                # to rely on across a library version.
+                url = r.get("url") or r.get("href") or ""
+                if not url:
+                    continue
+                published = (r.get("date") or "").strip()
+                results.append(SearchResult(
+                    title=r.get("title", ""),
+                    url=url,
+                    snippet=(r.get("body") or "")[:300],
+                    connector=self._connector_id,
+                    connector_type=self._connector_type,
+                    score=0.6,
+                    # `published` is the payload. `_recency_of` reads exactly
+                    # this key, and `KnowledgeResult.published` is filled from
+                    # it so the date reaches the prompt as well as the ranker —
+                    # a model handed six undated snippets has no way to prefer
+                    # them over what it already believes.
+                    metadata={
+                        "source": "ddg_news",
+                        "published": published,
+                        "outlet": (r.get("source") or "").strip(),
+                    },
+                ))
+
+            self._record_success((time.time() - start) * 1000)
+        except Exception as e:
+            self._record_error(str(e), (time.time() - start) * 1000)
+
+        return results
+
+
 class WikipediaConnector(BaseInternetConnector):
     """Wikipedia API connector."""
 
@@ -292,6 +401,8 @@ class RSSConnector(BaseInternetConnector):
 def create_connector(connector_type: InternetConnectorType, **kwargs) -> InternetConnector:
     if connector_type == InternetConnectorType.DUCKDUCKGO:
         return DuckDuckGoConnector()
+    elif connector_type == InternetConnectorType.NEWS:
+        return DuckDuckGoNewsConnector()
     elif connector_type == InternetConnectorType.WIKIPEDIA:
         return WikipediaConnector()
     elif connector_type == InternetConnectorType.GITHUB:
@@ -323,6 +434,7 @@ class InternetRuntimeImpl(InternetRuntime):
             InternetConnectorType.WIKIPEDIA,
             InternetConnectorType.GITHUB,
             InternetConnectorType.DUCKDUCKGO,
+            InternetConnectorType.NEWS,
             InternetConnectorType.RSS,
         ]
 
@@ -351,6 +463,7 @@ class InternetRuntimeImpl(InternetRuntime):
         self._state = InternetStatus.INITIALIZING
         # Register default connectors
         self.register_connector(DuckDuckGoConnector())
+        self.register_connector(DuckDuckGoNewsConnector())
         self.register_connector(WikipediaConnector())
         self.register_connector(GitHubConnector())
         self._state = InternetStatus.HEALTHY
@@ -556,8 +669,22 @@ class InternetRuntimeImpl(InternetRuntime):
             # results themselves.
             print(f"[InternetRuntime] Deep read unavailable: {error}")
 
-        # Cache results
-        await self._cache.set(cache_key, ranked, self._cache_ttl)
+        # Cache results, for less time the more the question was about *now*.
+        #
+        # One TTL for every question is wrong at both ends, and it is wrong in
+        # the direction that undoes the rest of this change: fifteen minutes of
+        # cached results for "what is the score" serves a stale answer to the
+        # exact query class that was just taught to prefer dated sources. A
+        # definition does not go stale in fifteen minutes and a scoreline does.
+        #
+        # The floor is a minute rather than zero because repeat-ask within a
+        # breath is a user pressing enter twice, not a demand for a second
+        # outbound request — rule 5's cost, avoided without lying about
+        # freshness.
+        from .relevance import temporality_of
+
+        ttl = max(60, int(self._cache_ttl * (1.0 - temporality_of(query.query))))
+        await self._cache.set(cache_key, ranked, ttl)
 
         self._stats["total_latency_ms"] += (time.time() - start) * 1000
         print(f"[InternetRuntime] Total results: {len(all_results)} -> ranked: {len(ranked)} (latency: {(time.time() - start) * 1000:.1f}ms)")
