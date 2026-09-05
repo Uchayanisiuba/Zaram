@@ -118,6 +118,7 @@ export default defineConfig(({ command }) => ({
       '/memory': { target: BACKEND, changeOrigin: true },
       '/egress': { target: BACKEND, changeOrigin: true },
       '/artifacts': { target: BACKEND, changeOrigin: true },
+      '/letterhead': { target: BACKEND, changeOrigin: true },
       '/projects': { target: BACKEND, changeOrigin: true },
       '/ingest': { target: BACKEND, changeOrigin: true },
       // A prefix missing from this list does not 404 — Vite answers with its

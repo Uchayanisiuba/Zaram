@@ -95,6 +95,7 @@ function createConfig(options) {
         '/health',
         '/ingest',
         '/knowledge',
+        '/letterhead',
         '/memory',
         '/models',
         '/obligations',
