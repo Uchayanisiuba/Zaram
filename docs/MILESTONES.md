@@ -17,7 +17,10 @@ accurate — it is the first thing anyone reads.
 
 **Everything below is committed on `main` and the working tree is clean.**
 `main` was five months stale until today; it is the trunk again. Nothing has
-been pushed — `main` is **10 commits ahead of `origin/main`**.
+been pushed — `main` is well ahead of `origin/main`, and the count is one
+`git rev-list --count origin/main..main` away. A number written here is wrong
+by one the moment writing it is itself a commit, which is how the last two
+handoffs disagreed with the repository.
 
 *Two sessions on this date. The second one is the first four sections.*
 

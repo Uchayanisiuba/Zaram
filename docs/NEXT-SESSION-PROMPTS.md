@@ -639,7 +639,8 @@ Paste from here down.
 Read `docs/MILESTONES.md` — the **Current state — 5 September 2026** block —
 before anything else. Then `CLAUDE.md` for the rules.
 
-`main` is the trunk and the working tree is clean. **10 commits are unpushed.**
+`main` is the trunk and the working tree is clean. **Nothing has been pushed;**
+`git rev-list --count origin/main..main` is the count.
 Do not push without being asked.
 
 The backend suite is **green**: 3,402 passed, 24 skipped, 0 failed, 0 errors,
