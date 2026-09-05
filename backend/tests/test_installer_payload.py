@@ -139,6 +139,10 @@ class TestNothingPrivateIsCarried:
             "backend/.venv/Scripts/python.exe",
             "backend/audio_cache/whatever.wav",
             "backend/uploads/a-client-contract.pdf",
+            # 6.9 GB of somebody else's weights, and it is on this machine:
+            # `default_model_dir()` is `data_dir()/models/image`, which in a
+            # checkout is under `backend/`.
+            "backend/models/image/sd_xl_base_1.0.safetensors",
         ],
     )
     def test_it_is_excluded(self, patterns, path):
@@ -178,6 +182,16 @@ class TestEveryRealFileIsAccountedFor:
                     continue
                 if suffix in {".db", ".db-wal", ".db-shm", ".sqlite", ".sqlite3"}:
                     continue  # user data, excluded on purpose and tested above
+                if suffix in {".safetensors", ".gguf", ".bin", ".pt", ".onnx"}:
+                    # Model weights the user brought, in the same category and
+                    # for the same reason: `data_dir()` is `backend/` in a
+                    # checkout, so `default_model_dir()` puts an SDXL
+                    # checkpoint here. It is excluded on purpose — see
+                    # `!backend/models` in electron-builder.yml, asserted above
+                    # — and it is emphatically not a file to "add to the
+                    # allow-list", which is what this test's message otherwise
+                    # advises. That advice would put 6.9 GB in the installer.
+                    continue
                 if suffix in {".bat", ".md", ".log", ".pyc"}:
                     continue  # tooling and notes; not needed at runtime
                 if name == "api-secret":

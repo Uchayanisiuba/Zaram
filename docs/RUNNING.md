@@ -155,6 +155,41 @@ and settings. Use it for anything that writes.
 
 ---
 
+## Getting the image model
+
+Zaram draws with **FLUX.1 [schnell]**, and ships no weights. What it needs is a
+diffusers-layout pipeline directory under `backend/models/image` — the folder,
+not a single `.safetensors`.
+
+```bash
+cd backend && venv/Scripts/python.exe -c "from huggingface_hub import snapshot_download; snapshot_download('magespace/FLUX.1-schnell-bnb-nf4', local_dir=r'models/image/flux1-schnell-nf4')"
+```
+
+**13.4 GB, and no account.** That mirror is chosen over Black Forest Labs' own
+upload for one reason: theirs is marked *gated*, so it needs a HuggingFace login
+and a token even though the licence is Apache 2.0. Open licence, gated door. The
+mirror is the same model, already quantised to NF4 — which is also why it is
+13.4 GB rather than the 57.9 GB the bf16 originals would cost to quantise on
+load.
+
+Two dependencies beyond `zaram[image]`: `bitsandbytes` reads the 4-bit weights,
+`sentencepiece` the T5 tokeniser. Both go in `backend/venv`.
+
+**Expect it to be slow and to stall.** Unauthenticated downloads are rate
+limited: measured 4 September 2026, the 6.69 GB transformer took 57 minutes, and
+`snapshot_download` hung outright after the small files and had to be restarted
+per-file. `hf_hub_download` on the two large files individually resumes and
+retries; a stalled `snapshot_download` does not recover on its own.
+
+**An interrupted download does not leave a working model, and Zaram says so.**
+`model_index.json` lands in the first seconds, so a half-finished fetch looks
+like a pipeline. `find_model` reads the index and checks that every component it
+names has weights beside it, and the availability message distinguishes *"only
+partly downloaded — it resumes where it stopped"* from *"no image model
+installed"*.
+
+---
+
 ## Running the suites
 
 ```bash

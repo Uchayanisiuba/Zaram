@@ -12,7 +12,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence, type Variants } from 'framer-motion';
-import { Eye, Paperclip, Send, Square } from 'lucide-react';
+import { ArrowDown, Download, Eye, Paperclip, Send, Square } from 'lucide-react';
 import ArtifactCard from '@/components/ArtifactCard';
 import ArtifactGrid from '@/components/ArtifactGrid';
 import ImageProgressCard from '@/components/ImageProgressCard';
@@ -47,7 +47,12 @@ import SpeakButton from './SpeakButton';
 import ReasoningPanel from './ReasoningPanel';
 import CitationPanel from './CitationPanel';
 import CodePreviewPanel from './CodePreviewPanel';
-import { extractPreviewable, type PreviewableBlock } from '@/lib/previewableCode';
+import {
+  extractPreviewable,
+  filenameFor,
+  savePreviewable,
+  type PreviewableBlock,
+} from '@/lib/previewableCode';
 import {
   useLayoutStore,
   CHAT_MIN,
@@ -96,6 +101,13 @@ interface Props {
   navigate: (id: WorkspaceId) => void;
 }
 
+/** How close to the end of the transcript still counts as the end.
+ *
+ *  A couple of lines, so a trailing margin or a sub-pixel rounding error is
+ *  not read as the user having deliberately scrolled away — which would leave
+ *  a jump control on screen pointing at nothing. */
+const NEAR_BOTTOM_PX = 48;
+
 export default function ChatSurface({ navigate }: Props) {
   const reduced = useIsReducedMotion();
 
@@ -116,6 +128,10 @@ export default function ChatSurface({ navigate }: Props) {
   const connectionError = useChatStore((s) => s.connectionError);
   const send = useChatStore((s) => s.send);
   const cancel = useChatStore((s) => s.cancel);
+  /** Rule 7i, for anything saved out of this conversation on purpose: a fact
+   *  kept while working on a project is about that work. Null is a real
+   *  answer — a conversation outside any project is not about one. */
+  const projectId = useChatStore((s) => s.projectId);
 
   /** Turn web search on, permit the search engine, then ask again.
    *
@@ -276,6 +292,88 @@ export default function ChatSurface({ navigate }: Props) {
   }, []);
   const scrollRef = useRef<HTMLDivElement>(null);
 
+  /**
+   * Whether the transcript is showing its own end.
+   *
+   * One piece of state answering two questions that must not disagree: the
+   * effect below follows the stream **only** while this is true, and the jump
+   * control renders only while it is false. Two separate flags would drift and
+   * produce the worst pair — a transcript that yanks you back to the bottom
+   * while it is also offering to take you there.
+   *
+   * **This used to be unconditional**, and that is the bug being fixed. A long
+   * reply scrolled the panel on every token whether or not the user was still
+   * reading paragraph one, and — because `behavior: 'smooth'` animates towards
+   * the `scrollHeight` measured *when the call was made* — a reply that kept
+   * growing during the animation landed short of its own end. So the two
+   * failures were the same failure: text below the fold, with nothing on
+   * screen saying there was more or offering to go there.
+   */
+  const [atBottom, setAtBottom] = useState(true);
+
+  /**
+   * Whether the scroll in flight is ours.
+   *
+   * A smooth programmatic scroll fires `scroll` on every frame of its own
+   * animation, and every one of those frames reports a position that is not
+   * yet the bottom. Read naively, the transcript would announce that the user
+   * had scrolled away the instant it started scrolling for them, pop the jump
+   * button up, and stop following mid-reply.
+   *
+   * Cleared by the bottom being reached, and by the pointer — a wheel, a
+   * touch, a drag on the scrollbar — because a browser cancels a smooth scroll
+   * the moment the user takes over, and after that no further frames arrive to
+   * clear it. Intent is the reliable signal here; position is not.
+   */
+  const following = useRef(false);
+
+  /**
+   * Put the end of the transcript on screen.
+   *
+   * **Assignment, not `scrollTo({ behavior: 'smooth' })`, and that is the
+   * actual bug this whole change was chasing.** Measured in the running app on
+   * 3 September 2026, against a transcript 2,470px tall in a 634px box: a
+   * smooth scroll to `scrollHeight` moved `scrollTop` from 0 to **0** and
+   * stayed there a full second later, while the same call with `'auto'`
+   * landed at 1,836px immediately. The old effect used smooth, unconditionally
+   * — so on this renderer the transcript never followed a reply at all, which
+   * is exactly the report: a long answer with its end hidden below the fold.
+   *
+   * Two failures were being read as one. The missing control is a real gap and
+   * the button above fixes it; the reason there was anything to jump *to* is
+   * this line. A jump control built on the same smooth call would have looked
+   * finished and done nothing, which is the failure mode `CLAUDE.md` records
+   * from the pointer-tracking gaze — tests green, mechanism dead, nobody
+   * looked at the screen.
+   *
+   * No animation is lost worth having. Motion has a budget here, and a
+   * transcript that keeps pace with a stream is the calmer of the two anyway:
+   * an animated scroll chasing a document that grows on every token never
+   * arrives, because it is easing towards a `scrollHeight` that has already
+   * moved.
+   */
+  const scrollToLatest = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    following.current = true;
+    setAtBottom(true);
+    el.scrollTop = el.scrollHeight;
+  }, []);
+
+  const handleScroll = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const bottom = el.scrollHeight - el.scrollTop - el.clientHeight <= NEAR_BOTTOM_PX;
+    if (bottom) following.current = false;
+    else if (following.current) return;
+    setAtBottom(bottom);
+  }, []);
+
+  /** The user has taken the scroll: anything after this is theirs, not ours. */
+  const releaseFollow = useCallback(() => {
+    following.current = false;
+  }, []);
+
   // Panels live in the orb region and the orb has to react to them, so this is
   // app-level state rather than local. Forgotten sources stay listed but struck
   // through, so a deletion is visibly confirmed rather than silently vanishing.
@@ -294,12 +392,12 @@ export default function ChatSurface({ navigate }: Props) {
     inputRef.current?.focus();
   }, []);
 
+  // Follow the reply, but only for someone who is already at the end of it.
+  // Scrolling up during a long answer is reading, not a mistake to be undone.
   useEffect(() => {
-    scrollRef.current?.scrollTo({
-      top: scrollRef.current.scrollHeight,
-      behavior: 'smooth',
-    });
-  }, [messages, streamingText]);
+    if (!atBottom) return;
+    scrollToLatest();
+  }, [messages, streamingText, atBottom, scrollToLatest]);
 
   // The Orb reports system state; it does not perform. Thinking while the
   // request is in flight, idle otherwise — but never over the top of speech.
@@ -592,8 +690,23 @@ export default function ChatSurface({ navigate }: Props) {
         />
       ) : (
         <>
-      {/* Transcript */}
-      <motion.div ref={scrollRef} className="flex-1 overflow-y-auto" variants={item}>
+      {/* Transcript.
+
+          Two elements where there was one: the scrolling box, and a positioned
+          parent for the control that has to sit *over* it. `min-h-0` on the
+          parent is what keeps the box scrolling rather than growing — a flex
+          child's default minimum is its content, so without it a long
+          transcript stretches the column and pushes the composer off screen,
+          which is the same symptom by a different route. */}
+      <motion.div className="relative flex-1 min-h-0" variants={item}>
+      <div
+        ref={scrollRef}
+        className="h-full overflow-y-auto"
+        onScroll={handleScroll}
+        onWheel={releaseFollow}
+        onTouchStart={releaseFollow}
+        onPointerDown={releaseFollow}
+      >
         <div className="flex flex-col gap-4 p-6">
           {isEmpty ? (
             <p
@@ -607,6 +720,12 @@ export default function ChatSurface({ navigate }: Props) {
               {messages.map((msg, msgIndex) => (
                 <div
                   key={msg.id}
+                  // Marks the bounds of one message in the DOM, so "Remember
+                  // this" can tell a selection made *here* from one made in
+                  // another reply or in the composer. Read by
+                  // `RememberAction`, which walks up from its own button
+                  // rather than being handed a ref per message.
+                  data-message-id={msg.id}
                   // Who said it is now carried by *side* as well as by label and
                   // colour. Both speakers used to stack down the left edge,
                   // which made a long exchange read as one continuous document
@@ -702,6 +821,27 @@ export default function ChatSurface({ navigate }: Props) {
                           }
                         : undefined
                     }
+                    // Keep this on purpose — an override on top of the capture
+                    // that already runs, not the way facts get in. Offered on
+                    // both speakers: a rate is as often in Zaram's summary of
+                    // what was agreed as in the sentence that stated it.
+                    //
+                    // `origin` is rule 7b and it is not cosmetic: a fact saved
+                    // off a reply is Zaram's own restatement, and recall ranks
+                    // it below a user document saying the same thing. That is
+                    // what stops Zaram citing itself.
+                    //
+                    // Withheld while a reply streams, because half a sentence
+                    // is not a fact.
+                    remember={
+                      isStreaming
+                        ? undefined
+                        : {
+                            origin:
+                              msg.role === 'user' ? 'conversation' : 'generated',
+                            projectId,
+                          }
+                    }
                     retryLabel="Ask again"
                   />
                   {/* Who answered. Above the citations because it is a claim
@@ -751,18 +891,38 @@ export default function ChatSurface({ navigate }: Props) {
                     (() => {
                       const block = extractPreviewable(msg.text);
                       if (!block) return null;
+                      const control =
+                        'flex items-center gap-1.5 rounded-lg px-2 py-1 text-[11px] hover:bg-white/5';
+                      const controlStyle = {
+                        border: '1px solid var(--color-border)',
+                        color: 'var(--color-text-muted)',
+                      };
                       return (
-                        <button
-                          onClick={() => setCodePreview(block)}
-                          className="mt-1.5 flex items-center gap-1.5 rounded-lg px-2 py-1 text-[11px] hover:bg-white/5"
-                          style={{
-                            border: '1px solid var(--color-border)',
-                            color: 'var(--color-text-muted)',
-                          }}
-                        >
-                          <Eye size={12} />
-                          Preview {block.label}
-                        </button>
+                        <div className="mt-1.5 flex items-center gap-1.5">
+                          <button
+                            onClick={() => setCodePreview(block)}
+                            className={control}
+                            style={controlStyle}
+                          >
+                            <Eye size={12} />
+                            Preview {block.label}
+                          </button>
+                          {/* Beside Preview, because looking at a page and
+                              keeping it are the two things anyone wants to do
+                              with one, and Copy — which takes the whole reply,
+                              prose, fence and all — is neither. It saves the
+                              markup the model wrote, not the framed and
+                              policy-wrapped version the preview runs. */}
+                          <button
+                            onClick={() => savePreviewable(block)}
+                            title={`Save as ${filenameFor(block)}`}
+                            className={control}
+                            style={controlStyle}
+                          >
+                            <Download size={12} />
+                            Save {block.label}
+                          </button>
+                        </div>
                       );
                     })()}
                   {/* Files made by this reply. CLAUDE.md: generated files
@@ -877,6 +1037,37 @@ export default function ChatSurface({ navigate }: Props) {
             </>
           )}
         </div>
+      </div>
+
+        {/* Back to the end of the conversation.
+            Present only when there is somewhere to go, which is rule 7h in its
+            smallest form: a button that is usually a no-op teaches people to
+            ignore it. It fades rather than bounces — motion has a budget, and
+            an arrow that jumps for attention is the thing this product's
+            interface principles call performing. */}
+        <AnimatePresence>
+          {!atBottom && (
+            <motion.button
+              type="button"
+              onClick={() => scrollToLatest()}
+              aria-label="Jump to the latest message"
+              title="Jump to the latest message"
+              initial={{ opacity: 0, y: 4 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 4 }}
+              transition={{ duration: 0.16 }}
+              className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10 flex h-8 w-8 items-center justify-center rounded-full shadow-lg"
+              style={{
+                background: 'var(--color-glass)',
+                border: '1px solid var(--color-border)',
+                backdropFilter: 'blur(12px) saturate(1.4)',
+                color: 'var(--color-text-muted)',
+              }}
+            >
+              <ArrowDown size={14} />
+            </motion.button>
+          )}
+        </AnimatePresence>
       </motion.div>
 
       {/* Input */}

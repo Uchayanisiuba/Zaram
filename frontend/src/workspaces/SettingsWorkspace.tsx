@@ -35,6 +35,7 @@
  * action, and it says that it is a network call before it makes one.
  */
 import { useCallback, useEffect, useState } from 'react';
+import LetterheadSection from '../components/settings/LetterheadSection';
 import {
   Volume2,
   Shield,
@@ -50,6 +51,8 @@ import {
   ExternalLink,
   AlertTriangle,
   Download,
+  ImageIcon,
+  FileText,
   Settings as SettingsIcon,
   UserRound,
 } from 'lucide-react';
@@ -441,6 +444,7 @@ export default function SettingsWorkspace() {
   const backendOnline = useSystemStore((s) => s.backendOnline);
   const routing = useSystemStore((s) => s.routing);
   const speech = useSystemStore((s) => s.speech);
+  const images = useSystemStore((s) => s.images);
   const refresh = useSystemStore((s) => s.refresh);
   const startPolling = useSystemStore((s) => s.startPolling);
 
@@ -1231,6 +1235,68 @@ export default function SettingsWorkspace() {
           />
         </Section>
 
+        {/* -------------------------------------------------------- Images */}
+        {/* The only place image generation is visible at all.
+
+            `CLAUDE.md` keeps tools out of the navigation — "tools never get
+            menu items, they are actions inside the conversation" — which is
+            right, and has a consequence: there is no button to press and
+            therefore no way to find out whether Zaram can draw. A capability
+            that is off silently reads as a broken product; one that is *on*
+            silently is one nobody discovers. This row is the answer to both.
+
+            It reports readiness and deliberately not residency. The model
+            loads on the first request rather than at launch, because SDXL is
+            ~7 GB and a 27B chat model with its cache is ~10.7 GB — on a 12 GB
+            card, holding both is not slow, it is impossible. */}
+        <Section
+          title="Images"
+          icon={<ImageIcon size={14} style={{ color: 'var(--color-indigo-light)' }} />}
+        >
+          <Row
+            label="Image generation"
+            value={
+              images === null ? 'unknown' : images.canDraw ? 'ready' : 'not installed'
+            }
+            state={images === null ? 'neutral' : images.canDraw ? 'good' : 'absent'}
+            detail={
+              images === null
+                ? 'Waiting for the backend to report.'
+                : images.canDraw
+                  ? `${images.provider} is on this machine and nothing is sent anywhere to use it. ` +
+                    'Ask for a picture in the conversation — there is no button, because ' +
+                    'tools are actions inside the conversation rather than menu items. ' +
+                    'The model loads on the first request, which takes a little under a ' +
+                    'minute; after that it stays resident until something else needs the room.'
+                  : // The backend's own words. It is the thing that knows which
+                    // of three absences it is looking at — no torch, no
+                    // diffusers, or no checkpoint — and each has a different
+                    // fix and a different download size. Composing a sentence
+                    // here would be guessing at which one.
+                    [images.reason, images.remedy].filter(Boolean).join('\n\n')
+            }
+          />
+        </Section>
+
+        {/* ---------------------------------------------------- Letterhead */}
+        {/* The way in that was missing. `artifacts/letterhead.py` has been able
+            to put a name, an address and a logo on every generated document
+            since it was written, and `Letterhead` was constructed in two places
+            in `main.py`, both without a logo — so every document Zaram has ever
+            produced went out unbranded. Its own first line is the cost: "an
+            invoice with no letterhead is a draft."
+
+            Settings is where this is visible and editable, never the only way
+            in. MILESTONES settles the capture as happening in chat — drop a
+            logo in the composer — and offered the first time a document is
+            generated without one. Rule 7e: no form before the first document. */}
+        <Section
+          title="Letterhead"
+          icon={<FileText size={14} style={{ color: 'var(--color-indigo-light)' }} />}
+        >
+          <LetterheadSection Row={Row} />
+        </Section>
+
         {/* ----------------------------------------------------- Character */}
         {/* Free, forever, on one machine: CLAUDE.md makes personalisation the
             retention engine rather than the revenue one.
@@ -1341,16 +1407,41 @@ export default function SettingsWorkspace() {
                 </div>
               </Row>
 
+              {/* **This row said "not installed" on a machine that speaks.**
+                  It read an empty voice list as an absent speech extra, and
+                  the list is empty on every working install: naming the pack's
+                  voices means asking huggingface.co, and rule 7g forbids a
+                  network call nobody consented to, so discovery is off by
+                  default. One signal standing for two answers, which is this
+                  codebase's recurring defect — and here it told the user that
+                  a feature they have does not exist.
+
+                  The two questions are now asked separately. *Is there speech*
+                  is `speech`, already read from `/health` for the row above.
+                  *Which voice speaks* is `defaultVoice`, which the backend can
+                  answer without a network call because it is the constant its
+                  own synthesiser resolves to. The picker still only appears
+                  when there is a list to pick from. */}
               <Row
                 label="Voice"
-                value={voices.length === 0 ? 'not installed' : character.voice || 'default'}
-                state={voices.length === 0 ? 'absent' : 'neutral'}
+                value={
+                  speech !== 'available'
+                    ? 'not installed'
+                    : character.voice || character.defaultVoice || 'default'
+                }
+                state={speech !== 'available' ? 'absent' : 'neutral'}
                 detail={
-                  voices.length === 0
+                  speech !== 'available'
                     ? 'Voices come with the speech extra, which is not installed — see Speech ' +
                       'above. A picker over an empty list would be a control that does nothing.'
-                    : 'Which voice speaks replies. Replies are spoken when the avatar is showing, ' +
-                      'which is a decision you already made by choosing a face.'
+                    : voices.length === 0
+                      ? 'This is the voice that speaks replies. The rest of the pack is not ' +
+                        'listed here because listing it means asking huggingface.co, and ' +
+                        'nothing reaches the network without you asking for it. Replies are ' +
+                        'spoken when the avatar is showing, which is a decision you already ' +
+                        'made by choosing a face.'
+                      : 'Which voice speaks replies. Replies are spoken when the avatar is showing, ' +
+                        'which is a decision you already made by choosing a face.'
                 }
               >
                 {voices.length > 0 && (

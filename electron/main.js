@@ -6,6 +6,7 @@ const crypto = require('crypto');
 const { app, ipcMain } = require('electron');
 
 const { createConfig } = require('./config');
+const { attachContextMenu } = require('./contextMenu');
 const { createLogger } = require('./logger');
 const { MAIN_EVENTS } = require('./ipc/channels');
 const { registerHandlers } = require('./ipc/handlers');
@@ -518,6 +519,12 @@ app.on('before-quit', () => {
 // Close-to-tray when a tray exists. Only the main window is affected; the
 // splash/error windows must always be allowed to close.
 app.on('browser-window-created', (_event, win) => {
+  // Electron ships no context menu at all, so right-clicking a generated image
+  // did nothing. Attached per window rather than once globally, because the
+  // splash and error windows are also windows and neither has anything to copy.
+  if (windows && win === windows.getMainWindow()) {
+    attachContextMenu(win, logger);
+  }
   if (windows && win === windows.getMainWindow()) {
     win.on('close', (e) => {
       if (!quitting && tray && win === windows.getMainWindow()) {

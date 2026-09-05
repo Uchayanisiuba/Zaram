@@ -58,6 +58,30 @@ and the mechanism is universal" is accurate and it is what gets funded.
 > top — it is what proves the pack abstraction, not what defines the audience.
 > See `CLAUDE.md`.
 
+> **The second clause changed on 3 September 2026, and the line is now: "Every
+> AI you use, in one place — that remembers you. Change the model, keep the
+> memory."** The first half was never the problem. *"Tells you the truth about
+> each one"* was carrying the data-policy labels, the routing attribution and
+> the egress log, and it carried them badly: "each one" only resolves to "AI"
+> on a second read, "truth" is a claim about our integrity rather than a
+> benefit to the reader, and it puts the give-something-up framing in the one
+> sentence that has to earn attention — which is the trade this file already
+> says has capped every privacy product at a niche.
+>
+> **What replaced it is the product, stated as an instruction.** Change the
+> model, keep the memory: portable, demonstrable in ten seconds, and it is what
+> `CLAUDE.md` means by *"a model switch is not a leak in the story, it is the
+> story"*. It also passes the test the old headline failed on 29 August — it
+> makes no claim about what does or does not leave, so no future feature can
+> make it false.
+>
+> The disclosure argument is not lost, it is **moved to where it is earned**:
+> the site's "You should know what you're paying with" and "You can see exactly
+> what left" sections, which state it with the evidence beside it rather than
+> as an adjective. `CLAUDE.md` still carries the older phrasing in its
+> acquisition-story paragraph; that version is not wrong, only earlier, and
+> syncing it is a judgement for whoever next edits that file.
+
 > **Corrected 29 August 2026, and the wrong version is worth keeping because it
 > is the one that got out.** This line read *"…that remembers you and sends
 > nothing anywhere"* for thirteen days, and it had been false since the cloud
@@ -105,6 +129,46 @@ sourced; check them before quoting them, because two of the four move.**
    summarising, rewriting, translating — run well on a 12B model on hardware people
    already own. Measured here, not estimated: `gemma4` reads a full statement of
    work and an invoice photograph at **23.75 tok/s on a 12 GB RTX 3060**.
+
+   > **The harness is the other half of "good enough", and this document did not
+   > say so until 3 September 2026.** A model's score is a property of the model
+   > *and the scaffolding around it*: the same weights move double digits on
+   > public benchmarks depending on how the question is assembled — what context
+   > is retrieved, in what order, how much of it fits, what the model is told
+   > about itself, and what it is instructed to do when it does not know. That
+   > scaffolding is called a harness, and it is most of the distance between a
+   > good answer and a confident wrong one.
+   >
+   > **Zaram is a harness that arrives with the user's documents already in
+   > it.** Not a plan — the parts are in the build and each one is a decision
+   > somebody made: recall with a relevance floor and a shortlist cut, citations
+   > numbered at the one point every source passes through, origin tagging so a
+   > restatement is not mistaken for a source, a context budget computed per
+   > model, identity and the date supplied as facts because a model cannot know
+   > either, intent routing by embedding rather than by a second model call, and
+   > a refusal path for the case where the context needed was not found.
+   >
+   > Two consequences, and the second is the one that is easy to miss.
+   >
+   > It is **why the "good enough" line above holds**: the 12B is not being
+   > asked cold, and the comparison people imagine — small local model versus
+   > frontier model — is not the comparison being run.
+   >
+   > And **it raises the cloud models too.** This is not a local-versus-cloud
+   > argument. The same paid model answers better through Zaram than in its own
+   > tab, because in its own tab it does not have the user's files, their last
+   > three turns, or an instruction to stop when it does not know. That matters
+   > for the reason the rest of this section already commits to: the claim is
+   > additive and does not require anyone else to do badly.
+   >
+   > **No number is attached, deliberately.** The retrieval half is measured —
+   > `test_recall_eval.py` and `test_recall_at_scale.py`, including at a
+   > thousand documents. Answer quality end to end is **not**, and inventing a
+   > figure here would be the same failure as filling in the Traction blank
+   > below. An answer-level eval is two to three days of work; the version
+   > worth having scores a model on *the user's own documents*, which is a
+   > measurement no public leaderboard can offer and nobody without the files on
+   > the device is positioned to make.
 
 2. **AI conversations stopped being private, in court, this year.** In **January
    2026** a federal court affirmed an order requiring OpenAI to produce **20 million
@@ -175,6 +239,13 @@ extracts it from documents it helped produce.
 
 No model provider will ship a memory that works equally well with a competitor's
 model. No company whose business is that your data leaves can promise that it did not.
+
+**And a harness is copyable; a harness with the user's documents in it is not.**
+Anyone can write better scaffolding — prompt construction, retrieval, a tool loop.
+What decides the answer is what that scaffolding has to reach for, and that is the
+user's own material, indexed on their machine. A wrapper around somebody's API can
+copy every technique in the build and still start every conversation with nothing
+to retrieve.
 
 ## Traction
 

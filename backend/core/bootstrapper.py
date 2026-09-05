@@ -312,11 +312,11 @@ class KernelBootstrapper:
         # with no image model needs, and it can only be given by something that
         # is actually wired in. An image capability that registers only when it
         # works is one that says nothing on every machine where it does not.
-        from imaging.local_sdxl import SdxlProvider
+        from imaging.local_flux import FluxProvider
         from runtimes.images.runtime import ImagesRuntime
 
         self.images_runtime = ImagesRuntime(
-            artifact_service, SdxlProvider(), self.event_bus
+            artifact_service, FluxProvider(), self.event_bus
         )
         self.registry.register(self.images_runtime)
         await self.images_runtime.initialize()

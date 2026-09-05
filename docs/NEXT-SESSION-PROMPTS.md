@@ -1,5 +1,13 @@
 # Next session — handoff
 
+> **Out of date at the top, current at the bottom.** The newest prompt is
+> *"Prompt for the next session — written 4 September 2026"*, near the end of
+> this file, and the authoritative state is the **Current state — 4 September**
+> block in `docs/MILESTONES.md`. Everything between here and that prompt is the
+> 3 September brief: still accurate about what was built and why, superseded on
+> status. Read it for reasoning, not for what is true today.
+
+
 Rewritten 3 September 2026, then **updated the same day once tasks 1 and 2 were
 built**. `docs/AVATAR-EMBODIMENT.md` holds the avatar detail;
 `docs/MILESTONES.md` remains the product-wide handoff.
@@ -404,7 +412,59 @@ and found nothing.
 
 ---
 
-## Prompt for the next session
+## Prompt for the next session — written 4 September 2026
+
+> Continue Zaram. Read the **Current state — 4 September** block at the top of
+> `docs/MILESTONES.md` first; it is the handoff and re-deriving it is expensive.
+> The sections below in this file are the 3 September brief and are still true
+> except where that block supersedes them.
+>
+> **Run the backend suite with `backend/venv/Scripts/python.exe`.** Not
+> `C:\Zaram\.venv`. The two environments differ in ways that decide outcomes —
+> `.venv` has no diffusers — and last session ran most of its suites in the
+> wrong one and had to redo them. `docs/RUNNING.md` says which; believe it.
+>
+> **Start here, and do not skip to the interesting work.** The running app is
+> served by a *second* `main.py` on `Python311\python.exe`, spawned by the
+> correct `backend/venv` process that Electron launched. That child holds port
+> 8420 and has **`torch 2.12.1+cpu`, `cuda: False`** and no diffusers. So image
+> generation cannot work in the app however good the provider is, everything
+> local and GPU-bound is quietly on the CPU, and **any test done "in the app" is
+> testing the wrong process.** The Current state block lists what has already
+> been ruled out — read it before investigating, because the obvious causes are
+> all eliminated. Do not install diffusers into the base interpreter to make the
+> symptom go away: its torch is CPU-only and it entrenches the split that has
+> already cost a 376 MB installer exclusion.
+>
+> **Then the egress hole.** Five suite failures share one cause: the
+> `/v1/model` probe that establishes whether a chat template opens the think
+> block is an extra request per message. The user is asked twice, the egress log
+> gets two entries, and `test_an_image_to_a_chat_approved_host_is_refused` fails
+> with *"the picture reached the transport"* — an image reaching a host approved
+> only for chat. Both halves matter: the consent hole, and the double dialog
+> that `CLAUDE.md` says kills daily use.
+>
+> **Then watch FLUX work in the app**, which could not be done last session
+> because of the interpreter. It is proven at the provider level —
+> `tests/test_flux_draws_locally.py` draws a blue dog and writes
+> `_flux_sample.png` for a person to open — but nobody has seen it come back
+> through the conversation with a progress bar, a preview panel and a Work
+> thumbnail. Ask for a picture; expect ~90 s for the first (the pipeline loads
+> from disk) and seconds after.
+>
+> **Nothing is committed.** 31 August, 3 September and 4 September are all
+> sitting uncommitted on `Zaram-V0.1`. Splitting them into a few commits is
+> probably worth more than one enormous one.
+>
+> **Left deliberately, with re-entry points:** capturing a letterhead *in chat*
+> rather than only in Settings, and offering it the first time a document is
+> generated without one — the store and routes exist, only the chat path is
+> missing (rule 7e: no form before the first document). And letting the model
+> design documents within format constraints, which is the maintainer's stated
+> direction for making generated PDFs and decks less plain; the shared theme and
+> a 16:9 deck are in place as the floor to design against.
+
+## Prompt for the 3 September session — superseded, kept for the brief below
 
 > Continue Zaram. Read `docs/NEXT-SESSION-PROMPTS.md` first — the "What happened
 > on 3 September" section at the top is the state; everything under it is the

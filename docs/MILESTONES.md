@@ -11,9 +11,412 @@ accurate — it is the first thing anyone reads.
 
 ---
 
-## Current state — 31 August 2026
+## Current state — 4 September 2026
 
 *The latest work is first. Earlier sessions follow below.*
+
+**Read this block, then the "Start here" section at the end of it. One thing is
+broken in a way that makes the running app misleading, and it is not what it
+looks like.**
+
+**Still uncommitted on `Zaram-V0.1`**, now carrying 3 and 4 September on top of
+31 August's 33 files. Nothing has been committed this session; a first commit
+should probably be split rather than made as one.
+
+### Start here: the app serves from a CPU-only interpreter
+
+**This is the highest-value thing to fix and it invalidates casual testing until
+it is.** Electron launches `backend/venv/Scripts/python.exe main.py` — correct,
+and logged as such. That process then spawns **a second `main.py` on the base
+interpreter**, `Python311\python.exe`, and the child is what holds port 8420.
+Kill the child and a fresh one takes the port within seconds.
+
+The child has fastapi, uvicorn and kokoro — so it serves, and it speaks, and
+nothing on screen looks wrong. It also has **`torch 2.12.1+cpu`, `cuda: False`**
+and no diffusers, where the venv it was launched from has `2.13.0+cu126`. So:
+
+* image generation cannot work in the running app, whatever the provider does;
+* anything else local and GPU-bound is silently on the CPU;
+* and a session that tests "in the app" is testing the wrong process.
+
+What has been ruled out, so the next session does not repeat it: `main.py`'s
+entry is a plain `uvicorn.run(app, ...)` under `__main__` with no reload;
+importing `main` in the venv spawns **no** child, so it happens during startup
+rather than import; `backend/venv/Scripts/python.exe` is a real 274 KB copy with
+a correct `pyvenv.cfg` and reports its own `sys.executable`; the only `.pth` in
+its site-packages is setuptools' shim; and no `Popen`/`execv`/`multiprocessing`
+call in the backend spawns Python. The child's command line is literally
+`"…Python311\python.exe" main.py`, which is not multiprocessing's spawn form.
+
+**Do not "fix" it by installing diffusers into the base interpreter.** Its torch
+is CPU-only, so that buys tens of minutes per image, and it would entrench the
+split `docs/RUNNING.md` already records as having cost a 376 MB installer
+exclusion that never matched. The fix is one interpreter.
+
+This is the third variant of the two-virtualenv trap in `RUNNING.md`, and the
+first where the product picks the wrong one *itself* rather than through a
+launcher's fallback order.
+
+### Which interpreter to run the suite in
+
+`backend/venv/Scripts/python.exe -m pytest -q`, as `docs/RUNNING.md` says.
+**This session ran most of its suites in `C:\Zaram\.venv` by mistake and had to
+re-run them.** The two environments differ in ways that decide outcomes — `.venv`
+has no diffusers at all — so a number without its interpreter is not a
+measurement. Re-run in `backend/venv`: **218 passed, 4 skipped** across this
+session's files.
+
+### Known failures, and they are not from this session's work
+
+Two, both in `tests/test_an_image_needs_its_own_consent.py`
+(`test_an_image_to_a_chat_approved_host_is_refused`, `test_the_refusal_is_recorded`),
+plus three in `tests/test_cloud_generation_invariant.py` when the whole suite
+runs. All five trace to one cause: the **`/v1/model` probe** that establishes
+whether a server's chat template opens the think block. It is an extra HTTP
+request per message, so the user is asked twice for one message, the egress log
+gets two entries, and in the image test **the picture reaches the transport**.
+
+That last one is a consent hole and the double-confirm is what `CLAUDE.md` says
+kills daily use. It arrived with the think-block fix, not with anything on
+3–4 September. **This is the second thing to take.**
+
+### What 4 September did
+
+*Detail for each is in its own section below.*
+
+* **Asking for a picture reaches the image runtime.** The semantic router
+  classified "Generate an Image of a blue dog" as `vision.analyze`; the keyword
+  phrases that would have caught it were unreachable, because `classify` returns
+  the moment the semantic router answers. Same defect the search block already
+  documented, one intent over. A deterministic phrase now overrides the router,
+  and a **typo does not cost the request** — `imgae`, `genrate`, `pictrue` all
+  land, bounded so `email` and `usage` do not.
+* **A reply that is all thinking says so** rather than leaving a blank bubble.
+* **The letterhead is reachable** — store, four routes, Settings section. It had
+  been fully built and unwired for weeks.
+* **A template teaches Zaram the letterhead** — `template_profile.py` was 400
+  tested lines with no importer, and could not have had one: nothing produced
+  its arguments. `artifacts/template_reader.py` is the missing piece.
+* **The deck is 16:9 and carries the shared theme.** It was 4:3 with no font,
+  size or colour set on any run.
+* **Right-click copies a generated image.** Electron ships no context menu at
+  all, so right-click did nothing.
+* **FLUX.1 [schnell] replaces SDXL**, proven by drawing before being wired.
+* **The voice is `am_michael`** again, after `bm_fable` and `am_onyx`. Four
+  defaults in two days; the measurements never predicted a single choice.
+
+### Traps this session paid for
+
+* **The browser pane cannot authenticate against a running backend.**
+  `electron/main.js:216` mints the credential per launch and hands it to the
+  renderer over IPC alone, so a tab at `localhost:5173` always shows "engine not
+  running". Verify UI with `tsc`, component tests and backend route tests; look
+  at the populated state in the real app.
+* **Recursive shell `grep` in this repo times out** — the tree is large. Use the
+  Grep tool.
+* **The Electron context menu needs a full app restart**, not a backend one: it
+  is main-process code.
+* **A test whose meaning depends on what is on disk is not a test.** The FLUX
+  negative-prompt test asserted `generate()` would raise because no weights
+  existed; once they did, it quietly loaded a 13 GB pipeline, drew a picture, and
+  failed on the missing exception.
+
+## Previous state — 3 September 2026
+
+*The latest work is first. Earlier sessions follow below.*
+
+**The open backlog is still the table under 31 August below** — nothing on it
+was taken this session, and nothing on it was closed by accident. This session's
+work is all repair of things the maintainer hit while using the product, plus
+one new capability (importing documents into a project).
+
+**Still uncommitted on `Zaram-V0.1`**, now including 31 August's 33 files.
+Backend suite green (3,189 passed, 18 skipped, ~22 min with Ollama up);
+frontend 465 passed across 49 files.
+
+### Eleven reports from driving the app — 3 September
+
+All eleven came from the maintainer using the product. Ten were fixed; one is a
+design question answered in prose rather than in code. Two further defects were
+found on the way and are recorded here rather than left.
+
+The last five arrived together from one sitting with the app, and the pattern
+across them is worth naming: **four were reported as one thing and were another
+underneath.** The down arrow would have been wired to an auto-scroll that had
+never worked. "It didn't generate an image" was a plan with no image step in it.
+"It gave me no response" was a reply that existed and had nowhere to go. Only
+"save this page" and the voice were what they looked like. Building each
+affordance as described would have shipped three controls that did nothing.
+
+#### "Warming up" on every question, still — and it was two bugs
+
+**An idle second server made residency unknown for the whole machine.**
+TabbyAPI was running on `127.0.0.1:1234` with **nothing loaded**, and its answer
+to `/v1/model` in that state is **503 with `{"detail": "No models are currently
+loaded."}`** — measured against the running server. `resident_models` read any
+HTTP error as "cannot tell", `ProviderManager._resident_models` merges every
+local provider and one unknown makes the merge unknown, so `swap_preflight`
+returned `None`, no `model_load` event was emitted, and the interface's
+2.5-second timer guessed a cold model on **every** message. The `resident`
+event whose entire job is to cancel that guess was never sent at all.
+
+It is the same shape as the three defects the 31 August session fixed: one
+signal standing for two answers. The LM Studio adapter is registered at that
+address on every machine, so any idle OpenAI-compatible server anywhere on the
+box was enough to do it. Measured before and after on the live server: `None`
+became `{}`.
+
+> A `measure`-marked test in `test_residency_sees_every_server.py` asserted
+> `assert resident` — *listening implies loaded* — and passed for as long as
+> the maintainer happened to have a model loaded. It went red the moment the
+> state it was blind to was the state of the machine. It now asserts the real
+> contract: a reachable server is never unknown, including when the answer is
+> nothing.
+
+**And a cloud reply claimed a local model was starting.** With a model reached
+through OpenRouter, the same timer produced *"Warming up · Starting the local
+model"* — false in both halves. `answering` already arrives ahead of the first
+token and carries locality, so `cloud` now cancels the guess; `local` and
+`null` still fall through to it, because a cold local model is a real wait and
+`null` is the backend saying it could not place the model.
+
+`chatStore.test.ts` is new and is the first test of this store's streaming at
+all, which is how a guess about local loading sat on the cloud path unnoticed.
+Fake timers; the contract is *when the guess fires and what cancels it*.
+
+#### "Generate an image of a blue dog" was answered in prose
+
+The images capability works on this machine and **the plan never contained an
+image step**. Measured against bge-m3 through the real `SemanticIntentRouter`:
+*"Generate an Image of a blue dog"* routes to **`vision.analyze`** — reading a
+picture, not drawing one — and *"draw a blue dog"* routes to `conversation`.
+`vision.analyze` has no registered runtime, so `_drop_unavailable_steps` treated
+it as an ordinary misroute, dropped it, and the request fell through to
+`reasoning.generate`. What came back was a fluent paragraph explaining that no
+image could be made, from a machine with SDXL installed and `can_draw: true`.
+
+`_NEVER_DEGRADE` and the runtime's own refusal were both built to stop exactly
+that paragraph, and neither ran, because there was no image step for them to
+protect.
+
+**The phrases were right and unreachable.** `classify` returns the moment
+`_classify_semantically` returns non-None, so on any machine whose embedder
+actually embeds, the keyword classifier is never consulted at all — the identical
+defect the search block in the same file already records, one intent over, in
+the same words. The two classifiers are not alternatives.
+
+So an unambiguous phrase now overrides the router, and the router keeps every
+case where no such phrase was written. This is not threshold tuning: *"what is
+in this image"* and *"generate an image of…"* share their rarest word, and
+similarity cannot separate reading from emitting. CLAUDE.md already settles it —
+*modality is a capability gate, never a ranking*.
+
+Verified against the real router afterwards: the two failing prompts reach
+`image.generate`, *"what is in this image"* is still vision, and *"draw up a
+contract"* is still a document. `tests/test_asking_for_a_picture_reaches_the_image_runtime.py`,
+19 cases against a fake router that answers wrong on purpose — a test needing a
+real embedder would be a test of bge-m3's geometry, which would go green the day
+that model changed.
+
+#### A long reply came back blank, twice
+
+Asked to build a portfolio site from a CV, `Qwen3.8-27B-exl3-2.20bpw` thought at
+length and the stream ended before it wrote `</think>`. Every token belonged to
+the working, the answer was empty, and what reached the screen was **a blank
+bubble with a collapsed *Thought process* beside it** and nothing anywhere saying
+the model had run out.
+
+`OpenAICompatibleEngine._tokens` already closes an unterminated block — without
+it the splitter holds the entire reply and the user sees nothing at all — and
+that was recorded last week as *"the honest failure rather than the safe one"*.
+It was the safer failure and it was not honest yet. `ReasoningSplitter` now says
+so in one sentence, and names the panel the working went to.
+
+Two details are load-bearing and both are asserted. It fires on *no answer was
+ever produced*, never on `in_reasoning` at flush time — the engine has closed the
+tag by then, so that flag says nothing useful. And **whitespace is not an
+answer**: a reasoning model's template puts a newline after the closing tag, so a
+reply truncated immediately afterwards emits `"
+
+"` and nothing else, which
+counted would put the blank bubble straight back. The second was found by a test
+failing, not by reading.
+
+One test changed rather than being left red. `test_reasoning_split.py` asserted
+`answer == ""` for an unclosed block; the empty string was the bug, not the
+contract. Its valuable half — the monologue must never reach the answer, where
+speech would read it aloud — is unchanged and still asserted.
+
+#### The transcript never followed the reply, and nothing offered to take you there
+
+Reported as *"some of the chat is hidden below the screen, there should be a
+down arrow"*. Two failures wearing one symptom.
+
+**The auto-scroll was a no-op on this renderer.** The effect had always called
+`scrollTo({ top: scrollHeight, behavior: 'smooth' })`. Measured in the running
+app against a 2,470px transcript in a 634px box: `scrollTop` went 0 → **0**, and
+was still 0 a second later; the identical call with `'auto'` landed at 1,836px
+immediately. So it is now an assignment, `el.scrollTop = el.scrollHeight`. No
+animation worth having is lost — an eased scroll chasing a document that grows
+on every token never arrives anyway, because it is easing towards a
+`scrollHeight` that has already moved.
+
+**The missing control is the other half**, and building it on the same smooth
+call would have produced a button that looked finished and did nothing — the
+pointer-tracking-gaze failure again. It renders only when there is somewhere to
+go, and following the stream is now conditional on the user already being at
+the end: scrolling up during a long answer is reading, not a mistake to undo.
+
+Two things the wiring has to get right, both of which cost a debugging pass.
+The transcript needed a positioned parent with `min-h-0` — a flex child's
+default minimum is its content, so a long transcript otherwise stretches the
+column rather than scrolling. And a smooth programmatic scroll reports "not at
+the bottom" on every frame of its own animation, so a `following` ref ignores
+those, cleared by reaching the end **or by the pointer** — a browser cancels a
+smooth scroll the moment the user takes over, after which no frames arrive to
+clear it. Intent is the reliable signal; position is not.
+
+*Verified in the running app: the layout holds, and the button appears on a real
+scroll and disappears at the end. The click-to-jump path could not be exercised
+end to end — a browser tab cannot present the per-launch API credential the
+desktop host mints, so the transcript could not be filled with real replies.*
+
+#### A page written in a reply could be looked at but not kept
+
+`Preview HTML` was the only thing on offer, and `Copy` takes the whole message —
+prose, fence and all. `savePreviewable` in `lib/previewableCode.ts` writes the
+block to disk, offered under the message and in the preview panel's header,
+because the panel is where someone decides the page is worth having.
+
+**What is saved is the model's markup, not what the frame runs.**
+`wrapForPreview` prepends our CSP, our stylesheet and a `postMessage` fault
+reporter; every one of those is scaffolding for showing the page *here*, and a
+saved file carrying them would have a policy meta tag the user did not write and
+a call to a parent that no longer exists. Named from the page's own `<title>`
+where it has one, falling back to `page.html` / `image.svg` rather than to a
+timestamp. Blob and synthesised anchor, the same machinery as
+`downloadArtifact` and for a related reason — there it was a credential a link
+cannot carry, here there is no URL at all, because the file exists only as a
+string in the tab. `previewableCode.test.ts`, 22 cases.
+
+#### The voice is `am_onyx`, and the language follows the voice
+
+Three defaults in one day. `bm_fable` was asked for, tried and rejected as too
+deep; seven male voices were then synthesised from the same sentence and the
+maintainer picked `am_onyx` by ear.
+
+**The measurements are worth keeping and did not predict the choice.** Over the
+same line, `bm_fable` and `am_michael` have the *same* median F0 — 120.6 Hz
+each — and differ in spectral centroid, 949 Hz against 1585 Hz, so "too deep"
+was a report about timbre rather than pitch; the obvious remedy of a
+higher-pitched voice would have missed, since `am_puck` is lower than both at
+105 Hz and sounds lighter on a centroid of 1442 Hz. Ordered by brightness:
+`am_onyx` 608, `bm_fable` 949, `am_eric` 1183, `am_puck` 1442, `bm_george`
+1527, `am_michael` 1585, `am_fenrir` 1632.
+
+And the voice chosen is the *darkest* of the seven, one step past the one
+rejected for being too deep — which means the axis the complaint named was not
+the axis the decision turned on. The numbers narrow a shortlist; CLAUDE.md's
+fifth integration test settles it.
+
+The derivation below outlived the voice that prompted it, which is the point of
+it. The interesting half is what would have shipped silently: `lang_code` was a separately written `"a"` that agreed with
+`am_michael` by hand, and Kokoro's prefix letter selects the
+grapheme-to-phoneme front end. A British voice under an American front end is
+not a crash — it is a voice that sounds subtly wrong, which a listener blames
+on the voice. Discovery also filtered the voice list by that letter, so the new
+default would have been absent from the list it is chosen from.
+
+So `DEFAULT_LANG_CODE` is derived from `DEFAULT_VOICE`, a *request* naming a
+voice from another language rebuilds the pipeline for it, and the list covers
+American and British together. Verified against real Kokoro: misaki loaded
+`gb_gold.json`, so the British front end actually ran. The tests assert the
+derivation rather than the name, because a default that has changed three times
+is not a contract.
+
+#### Zaram no longer reads code or punctuation aloud
+
+`frontend/src/lib/speakable.ts`. Code blocks are omitted rather than summarised;
+inline code keeps what it names and loses its backticks; headings, bullets,
+emphasis, tables and URLs lose their marks. One function, and `pushSpeech` is
+the only caller it needs — the speak-aloud button begins by pushing the whole
+reply through the same path.
+
+**The property that mattered is prefix stability**, and the test found two real
+breaks: `INLINE_CODE` paired the first two backticks of a fence, and a
+half-arrived `[the terms]` spoke a bracket that later moved. Speech cleans the
+*accumulated* reply on every token and keeps a character cursor into it, so
+anything that changes behind the cursor is spoken twice or never. Only a
+character-by-character streaming test could see either.
+
+#### Project imports documents, and they are the project's
+
+Rule 7i's scope has been on the store since M8 and
+`IngestService._store_fact` has read `metadata.get("scope")` since then —
+**and nothing ever put one there**, so every ingested fact was global. The
+field, the reader and the migration all existed; the caller did not. Fifteen
+unreachable subsystems, at the size of one dictionary key.
+
+`/ingest/upload`, `/ingest/text` and `/ingest` now take a `project_id`, an
+unknown one is a **404 rather than a silent global ingest** (nothing records
+which run wrote a fact, so that is the outcome nothing can undo), and Project
+grows an **Import documents** control beside "Add files" — which is a different
+thing and says so: one moves an artifact Zaram made, the other reads documents
+the user has.
+
+> Verified in the running app: one file imported, and the project row's fact
+> count went from 0 to 1. That count is `count_by_scope("project:<id>")`, so
+> the scope is what it is counting.
+
+#### Zaram stops announcing the model unprompted
+
+The preamble hands it the model and the locality and told it to report them,
+and nothing said *when*. It is not hiding the model — `AnsweredBy` states it
+under every reply already, from the `answering` event, which is exactly why
+saying it in prose is a third copy.
+
+#### Image generation: nothing was missing except a way to see it
+
+`can_draw: true` on this machine — `sd_xl_base_1.0` is installed and the
+refusal path, the progress events and the artifact card all work. Image models
+are **not** in the model dropdown by design: that dropdown chooses the model
+that *answers*, and drawing is a separate runtime reached by asking for a
+picture in the conversation. Settings now has an **Images** row saying whether
+this machine can draw, what would fix it if not, and that the way to ask is to
+ask. There is still no cloud image provider; `ModelInfo` still cannot express
+"emits an image" as distinct from "reads one".
+
+#### Two found on the way, both fixed rather than left
+
+**Settings said the speech extra was not installed on a machine that speaks.**
+The Voice row inferred that from an empty voice list, and the list is empty on
+every working install: naming the pack means asking huggingface.co, which rule
+7g forbids without consent. Two questions, one signal, again. `/character` now
+reports `default_voice`, which needs no network because it is the constant the
+synthesiser resolves to.
+
+**`test_installer_payload.py` was red**, and its own advice would have made it
+worse: a 6.9 GB SDXL checkpoint sits in `backend/models/image/` because
+`data_dir()` is `backend/` in a checkout, and the test suggested adding the
+extension to the installer allow-list. `!backend/models` is excluded instead,
+and weights join databases in the "user data, excluded on purpose" category.
+
+#### The one that is a question, not a bug
+
+**Web search reads from named providers — DuckDuckGo, Wikipedia, GitHub, RSS —
+with a hardcoded authority table in `knowledge/ranking.py`.** The maintainer
+asked whether MCP would scale better. It would, and `CLAUDE.md` already says
+so: *"attaching somebody else's MCP server covers more applications in a week
+than a year of first-party integrations"*. The shape, when it is built: keep
+DuckDuckGo as the zero-configuration default so search works with nothing
+attached, and let a search server be attached for anyone who wants a better
+one. Two things it must not do — a tool description is third-party text and
+never widens permission, and every byte a tool sends is logged like any other
+egress. Not built this session.
+
+---
+
+## Previous state — 31 August 2026
 
 **Everything below from 31 August is uncommitted** — 33 changed or new files on
 `Zaram-V0.1`, none pushed. Read the entries before committing; several touch the
@@ -4804,6 +5207,206 @@ markup and on `Artifact.claims`; the preview renders provenance as chrome around
 the document, the same relationship `CitationPanel` has to a reply.
 `include_provenance=True` turns it back on for a research brief or a proposal,
 where citation is part of the genre.
+
+### A template teaches Zaram the letterhead — 4 September 2026
+
+**Seventeen, and this one could not have been called.** `template_profile.py` is
+400 tested lines that read a company's identity out of a document they already
+send. It had no importer — and the reason is not the usual carelessness:
+`extract_template_profile(text, images=...)` takes the two things a document
+yields, and **nothing in this backend produced them**. The ingest parsers return
+`ParseResult(text=...)` with nowhere to put images. The function was unreachable
+because its arguments were unbuildable.
+
+The missing piece was specified in the module's own docstring — *".docx and PDF
+supply those differently and both plug into one interface"* — and never written.
+`artifacts/template_reader.py` is it.
+
+*Text comes from the ingest parsers, not from a second extractor.* They already
+read `.docx` paragraphs **and tables**, which matters exactly here: an invoice
+keeps its terms in a table, and a reader that skipped them would propose a
+letterhead with no payment terms and nothing would say why. Asserted.
+
+*Images are this module's own work*, because widening the parser protocol would
+touch every parser for one caller's benefit. Opening the file a second time
+costs milliseconds on a path a person runs once.
+
+*Format is decided by the bytes.* `PK` and `%PDF`, never the filename — which
+comes from whatever uploaded it and can say anything.
+
+**Two routes, and the gap between them is the product rule.**
+`POST /letterhead/from-document` proposes; `PUT /letterhead/adopt` saves. The
+adoption route takes **values rather than a proposal id**, deliberately: a
+server-side "adopt what you extracted" would discard the corrections made in the
+review, and the user would find out when a client did. That is rule 4's
+correction loop at the cheapest moment to be corrected.
+
+The Settings review shows each field with the line it was read from, because
+confirming *"yes, that is my address"* is a far easier question than *"what is
+your address"* — but only with the evidence in view. Terms, currency and
+numbering are shown as read-and-not-saved rather than hidden, since the store
+holds an identity and those belong to the invoice layer.
+
+14 tests, including the end-to-end one: upload a `.docx` built by python-docx,
+adopt the proposal, and the name and logo appear in a generated document.
+
+### The deck stops being 4:3 — 4 September 2026
+
+`pptx.py` said *"nothing here is a theme… a deck someone presents is one they
+will restyle, and a hardcoded palette is one more thing to undo."* The maintainer
+looked at the output and disagreed, and the measurement settles it rather than
+the argument: **10 × 7.5 inches, and not one run carrying a font, a size or a
+colour.** That is not restraint leaving room for someone's template; it is
+python-pptx's stock template, which is a design — just nobody's.
+
+The error has a name, and `theme.py` was written after making it once already
+with Word: *two renderers had two designs, and only one of them was designed.*
+Not styling is not the neutral choice.
+
+Now 16:9, with `theme.py`'s faces and colours — accent on section titles and
+nowhere else, exactly as on the page. Measured after: `13.333 × 7.5`, Georgia at
+40/32/18pt, `#0f766e` on section titles. **The table slide was missed on the
+first pass** and came out stock while four others were themed, which is worse
+than uniformly stock because it reads as a fault rather than a plain template —
+found by measuring rather than by reading the diff.
+
+Layouts, masters and placeholder geometry stay the template's, so applying a
+theme in PowerPoint still works. Type and colour carry the identity; moving the
+boxes is the thing the old note was right about.
+
+### Right-click had no menu at all — 4 September 2026
+
+Reported as *"I would like to be able to right click on the generated image and
+copy it"*, and the cause is an absence rather than a broken feature: **Electron
+ships no default context menu.** A web page in a browser gets the browser's;
+an Electron window gets nothing unless the app builds one. So right-clicking a
+picture Zaram had just drawn did nothing, which reads as the image being inert.
+
+`electron/contextMenu.js` uses `webContents.copyImageAt`, which is Chromium's
+own copy of the decoded bitmap the page is already showing. The alternative —
+fetch in the renderer, build a `Blob`, write through the async clipboard API —
+re-encodes the picture and needs a permission that behaves differently per
+platform.
+
+Kept small on purpose: copy an image, copy its address, show it in its folder
+when it is a real file, and the editing commands a text field is expected to
+have. It is not a place for application commands — `CLAUDE.md` puts capability
+in the conversation rather than in chrome, and a menu that grows into a second
+command surface is one more thing to keep in step.
+
+### FLUX.1 [schnell] replaces SDXL, and it draws — 4 September 2026
+
+`imaging/local_sdxl.py` and `tests/test_local_image_generation.py` are deleted;
+`imaging/local_flux.py` and `tests/test_flux_draws_locally.py` replace them.
+`DEFAULT_STEPS` is **4**, not 30 — schnell is distilled to finish in four, and
+thirty is seven times the wait for a slightly worse picture.
+
+**Proven before it was wired.** A blue dog at 512x512, four steps, seed 7:
+photoreal fur, correct anatomy, amber eyes, natural bokeh. Base SDXL would not
+have come close. The test writes `_flux_sample.png` so the claim can be checked
+by opening it rather than by trusting four assertions that would all pass for a
+blue rectangle.
+
+**NF4, and not by preference.** Schnell is 23.8 GB in bf16 against a 12 GB card.
+Black Forest Labs' own repository is `gated: auto` — Apache 2.0 licence, but it
+wants an account and a token, which is the opposite of what a local feature is
+for. `magespace/FLUX.1-schnell-bnb-nf4` is ungated, already quantised, 13.4 GB
+instead of the 57.9 GB the bf16 originals would cost to quantise on load.
+
+Four bugs found, three of them in the new code and each by the real artifact
+rather than by a fixture:
+
+* The env-only `HF_HUB_OFFLINE` switch, which `test_egress_chokepoint.py`
+  already documents as ineffective — the library reads it into a constant at
+  import and `import diffusers` has already done so.
+* A half-downloaded model reported itself installed: `model_index.json` lands in
+  the first seconds. `find_model` now checks the weights the index names.
+* That check then rejected the **complete** model, because three of FLUX's seven
+  components — scheduler and both tokenisers — ship configuration and no
+  weights. Class-name based now.
+* An `.incomplete`-file check that was redundant *and* wrong: hub only moves a
+  file into place on success, so a partial weight is already an absent weight —
+  and an orphan from a killed attempt blocked a model that was entirely present.
+
+### The app serves from a CPU-only interpreter — 4 September 2026
+
+**Found while verifying FLUX, and it is the more serious finding.** Electron
+launches `backend/venv/Scripts/python.exe main.py` — correct, and logged. That
+process then spawns **a second `main.py` on the base interpreter**,
+`Python311\python.exe`, and the child is what holds port 8420. Reproducible: kill
+the child and a new one takes the port within seconds.
+
+The child's environment has fastapi, uvicorn and kokoro — enough to serve and to
+speak, which is why nothing looked wrong — but **`torch 2.12.1+cpu`, with
+`cuda: False`**, and no diffusers. The venv it was launched from has
+`2.13.0+cu126`. So image generation cannot work in the running app whatever the
+provider does, and any future local GPU work is silently on the CPU.
+
+Not the spawn's cause yet. `main.py`'s entry is a plain `uvicorn.run` under
+`__main__`; importing `main` in the venv spawns nothing, so it happens during
+startup rather than import; the venv is a real copy with a correct
+`pyvenv.cfg`; and the only `.pth` in it is setuptools' shim. **Installing
+diffusers into the base interpreter is not the fix** — CPU-only torch makes that
+tens of minutes per image, and it would entrench the split `docs/RUNNING.md`
+already records as having cost this repository a 376 MB installer exclusion that
+never matched.
+
+This is the third variant of the two-virtualenv trap, and the first where the
+product picks the wrong one *itself* rather than through a launcher's fallback
+order.
+
+### The letterhead is reachable — 4 September 2026
+
+**Sixteen.** `artifacts/letterhead.py` has validated logo uploads, bounded them,
+refused SVG with a written reason and returned an embeddable `data:` URI since
+it was written. `_masthead` renders that URI. `word_theme.py` carries it into
+Word. `Letterhead` was constructed in exactly **two** places in `main.py`, both
+from per-request fields, both without a logo — and every document Zaram has ever
+generated went out unbranded, under a comment saying where branding is captured
+was still an open decision. It had been decided, in the section below, and never
+built.
+
+`artifacts/template_profile.py` is the same story one level worse: 400 lines
+that read a company's identity out of an invoice they already send, with tests,
+and **no importer anywhere**. It stays unreachable for now; the store below is
+what it would write to when it lands, and that is its named re-entry point.
+
+What shipped: `artifacts/letterhead_store.py` (global scope, rule 7i — a
+letterhead is about the user, not the work), four routes, and a Settings
+section. `_letterhead_for` is the one line the old comment was waiting for —
+**the request wins, the store is the default**, so someone trading under two
+names can still say which one a document is from.
+
+Three decisions worth keeping:
+
+*A file of its own, not a key in `settings.json`.* The logo is base64 and may be
+most of a megabyte; `settings.json` answers "which model, which voice, is search
+on" constantly and on paths that must stay cheap.
+
+*The logo is read strictly on load.* The value is interpolated into an
+`<img src>` in a document that gets sent to a client, and
+`check-no-remote-assets.mjs` scans **source** — it cannot see a JSON file. A
+`https://` or `javascript:` written into that file by hand is refused where it
+is read or not at all. Asserted against all three.
+
+*`describe()` withholds the pixels.* Settings asks whether a logo exists far
+more often than it needs one, and an endpoint that returns a megabyte per call
+is one nobody can poll.
+
+**Verified as far as this session could.** 13 tests, including the routes
+through `TestClient` and the end-to-end assertion the other fifteen unreachable
+subsystems would each have failed: a stored logo appears in the HTML of a
+generated document. The Settings section mounts and renders, and it was seen
+rendering its *unavailable* branch rather than its populated one, because the
+browser pane cannot authenticate against a running backend — `electron/main.js`
+mints the credential per launch and hands it to the renderer over IPC alone.
+That is the guard working correctly, and it is also the reason the populated
+state has to be looked at in the real app.
+
+**Still to build, in order:** capture in chat (drop a logo in the composer,
+"use this as my letterhead"), and the offer at the moment of doubt — the first
+time a document is generated without one. Rule 7e: no form before the first
+document, and Settings must never be the only way in.
 
 ### Where branding is captured — decided, not yet built
 

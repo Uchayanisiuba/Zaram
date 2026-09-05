@@ -177,10 +177,9 @@ NETWORK_LIBRARY_GATED = {
 #: Like the gated list, the reason is asserted rather than believed: see
 #: ``test_disarmed_exemptions_actually_disarm_the_library``.
 NETWORK_LIBRARY_DISARMED = {
-    "imaging/local_sdxl.py": (
-        "imports huggingface_hub only to force it offline; the pipeline "
-        "configuration is resolved from a local directory so there is nothing "
-        "to fetch"
+    "imaging/local_flux.py": (
+        "imports huggingface_hub only to force it offline; the pipeline is "
+        "resolved from a local directory so there is nothing to fetch"
     ),
 }
 

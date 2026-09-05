@@ -294,6 +294,43 @@ class TestWhatItSaysItCanDo:
         assert "say what is missing" in preamble
 
 
+class TestTheModelIsNamedWhenAsked:
+    """Supplied so it can answer, not so it announces.
+
+    Reported by the maintainer, 3 September 2026: *"Zaram doesn't have to
+    announce model information every single time."* It was, because the
+    preamble hands it the model, the locality and an instruction to report
+    them, and nothing said *when*.
+
+    Two things it is not. It is not hiding the model — `CLAUDE.md` forbids
+    that in as many words, and the preamble still names it, still names where
+    it runs, and still answers truthfully when asked. And it costs no routing
+    legibility, because the interface states it under **every** reply already:
+    `AnsweredBy` renders the model and the locality in words, from the
+    `answering` event, and exists precisely so the answer does not have to.
+    Saying it in prose as well is a third copy of a fact the screen is already
+    showing.
+    """
+
+    def test_the_facts_are_still_supplied(self):
+        preamble = identity_preamble(model="qwen3:14b", locality="local")
+
+        assert "qwen3:14b" in preamble
+        assert "running on this machine" in preamble
+
+    def test_but_it_is_told_to_wait_to_be_asked(self):
+        preamble = identity_preamble(model="qwen3:14b", locality="local")
+
+        assert "unless you were asked" in preamble
+
+    def test_and_it_still_answers_when_it_is(self):
+        """The rule narrows when, never whether."""
+        preamble = identity_preamble(model="qwen3:14b", locality="local")
+
+        assert "Asked which model is answering" in preamble
+        assert "Never say you are the model, and never say there is no model." in preamble
+
+
 class TestSearchStateIsSupplied:
     """A model cannot see its own tooling, so it is told."""
 
