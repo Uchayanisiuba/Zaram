@@ -47,12 +47,14 @@ from __future__ import annotations
 import asyncio
 import io
 import logging
+import os
 import time
 from dataclasses import dataclass, field
 from typing import Any, AsyncIterator, Callable, Dict, List, Optional, Protocol
 
 import numpy as np
 
+from core.egress import EgressDenied, get_gate
 from voice.config import KokoroConfig
 from voice.exceptions import ProviderUnavailableError
 from voice.health import AudioCache
@@ -161,9 +163,32 @@ _LANG_NAMES = {
 
 
 def _default_pipeline_factory(
-    *, repo_id: str, lang_code: str, device: Optional[str]
+    *,
+    repo_id: str,
+    lang_code: str,
+    device: Optional[str],
+    backend: str = "torch",
+    onnx_variant: str = "model_fp16",
 ) -> Any:
-    """Build a real Kokoro ``KPipeline`` (lazy import keeps kokoro optional)."""
+    """Build the pipeline for the configured backend.
+
+    Both return the same shape — called as ``pipeline(text, voice=...)``, yielding
+    results with ``.audio`` and ``.tokens`` — so :meth:`KokoroProvider._run_synthesis`
+    never learns which one it got. That is the seam ``VoiceProvider`` was written
+    for, and it is why swapping the tensor library underneath Kokoro is an
+    implementation rather than a rewrite.
+
+    Imports stay lazy on both branches. ``kokoro`` drags in torch and
+    ``kokoro_onnx`` drags in onnxruntime; a top-level import of either would make
+    this module unimportable on a base install, which is the exact failure that
+    once stopped the provider being constructed even to report itself
+    unavailable.
+    """
+    if backend == "onnx":
+        from voice.providers.kokoro_onnx import OnnxKokoroPipeline
+
+        return OnnxKokoroPipeline(lang_code=lang_code, variant=onnx_variant, device=device)
+
     from kokoro import KPipeline
 
     return KPipeline(lang_code=lang_code, repo_id=repo_id, model=True, device=device)
@@ -189,6 +214,9 @@ class KokoroProvider(VoiceProvider):
         self._discoverer = voice_discoverer or HuggingFaceVoiceDiscoverer()
         self._cache = cache or AudioCache(self.config.cache_directory)
         self._pipeline: Any = None
+        #: Which language front end `_pipeline` was built with, so a voice from
+        #: another language rebuilds it instead of borrowing this one.
+        self._pipeline_lang: str = ""
         self._kokoro: Any = None
         self._voices: Dict[str, Dict[str, Any]] = {}
         self._initialized = False
@@ -220,17 +248,121 @@ class KokoroProvider(VoiceProvider):
             "provider": self.name,
         }
 
-    def _ensure_pipeline(self) -> Any:
-        if self._pipeline is not None:
+    #: Languages that are one choice rather than two, so a voice list built for
+    #: one of them must offer both. American and British English differ only in
+    #: the front end, both ship in the same pack, and `_lang_for_voice` builds
+    #: whichever the chosen voice needs — so listing only the configured half
+    #: would hide voices that work perfectly.
+    #:
+    #: This is not a general "list everything": the other languages need extra
+    #: `misaki` dependencies that are not installed, so offering their voices
+    #: would be offering choices that fail.
+    _INTERCHANGEABLE = (frozenset({"a", "b"}),)
+
+    def _discoverable_langs(self) -> List[str]:
+        """Which language codes the voice list should cover."""
+        configured = self.config.lang_code
+        for group in self._INTERCHANGEABLE:
+            if configured in group:
+                return sorted(group)
+        return [configured]
+
+    def _lang_for_voice(self, voice: str) -> str:
+        """The front end a voice needs, read off the voice's own name.
+
+        Kokoro's prefix is `<language><gender>_`: `af_heart` is American
+        female, `bm_fable` British male. The pipeline's `lang_code` selects the
+        grapheme-to-phoneme front end, and a mismatch is not a failure — it is
+        an American front end pronouncing a British voice, which a listener
+        hears as something wrong with the voice.
+
+        Taking it from the voice rather than from the config means a user who
+        picks a voice in Settings gets the front end that voice was trained
+        with, without a second setting they would have to know to change. A
+        name whose first letter is not a language Kokoro knows falls back to
+        the configured default rather than guessing.
+        """
+        first = (voice or "")[:1].lower()
+        return first if first in _LANG_NAMES else self.config.lang_code
+
+    def _build_pipeline(self, lang_code: str) -> Any:
+        factory = self._pipeline_factory or _default_pipeline_factory
+        return factory(
+            repo_id=self.config.repo_id,
+            lang_code=lang_code,
+            device=self.config.device,
+            backend=self.config.backend,
+            onnx_variant=self.config.onnx_variant,
+        )
+
+    def _ensure_pipeline(self, lang_code: Optional[str] = None) -> Any:
+        """Load the model, asking the gate first if the weights are not here.
+
+        **This used to just construct KPipeline**, which resolves through
+        ``huggingface_hub`` and downloads ~315 MB from huggingface.co without
+        asking anyone. Worse, ``health_check`` called it as a side effect of
+        reporting health and ``initialize`` called ``health_check``, so the
+        backend fetched the model on every boot, unlogged, while
+        ``load_model_eagerly`` sat at ``False``. A flag deliberately turned off
+        and a different path doing the thing anyway is a pattern this codebase
+        has now hit five times.
+
+        The remedy is the one ``voice/stt/whisper.py`` uses, and the ordering is
+        the point: cached weights are the ordinary case and must touch nothing,
+        so the gate is asked only when there is genuinely something to fetch.
+        Asking unconditionally would fill the egress log with decisions about
+        requests that were never going to happen.
+
+        `lang_code` is the front end the *requested voice* needs. A cached
+        pipeline built for a different language is rebuilt rather than reused,
+        because reuse is what makes a British voice come out American. Two
+        pipelines are not held at once: switching language is rare — it happens
+        when the user changes voice in Settings — and a second resident copy of
+        the model would cost memory permanently to save a load that happens
+        almost never.
+        """
+        wanted = lang_code or self.config.lang_code
+        if self._pipeline is not None and self._pipeline_lang == wanted:
             return self._pipeline
+        self._pipeline = None
+        self._pipeline_lang = wanted
         if self._kokoro is None:
             raise ProviderUnavailableError("Kokoro package is not available")
-        factory = self._pipeline_factory or _default_pipeline_factory
-        self._pipeline = factory(
-            repo_id=self.config.repo_id,
-            lang_code=self.config.lang_code,
-            device=self.config.device,
-        )
+
+        # `KPipeline` has no `local_files_only`, but everything underneath it
+        # honours HF_HUB_OFFLINE, so that is the lever. Restored afterwards
+        # rather than left set: this process may legitimately fetch other things.
+        previous = os.environ.get("HF_HUB_OFFLINE")
+        os.environ["HF_HUB_OFFLINE"] = "1"
+        try:
+            self._pipeline = self._build_pipeline(wanted)
+            return self._pipeline
+        except Exception as offline_failure:
+            self._log.info(
+                "Kokoro weights are not cached (%s); asking the gate before fetching",
+                type(offline_failure).__name__,
+                extra={"provider": self.name},
+            )
+        finally:
+            if previous is None:
+                os.environ.pop("HF_HUB_OFFLINE", None)
+            else:
+                os.environ["HF_HUB_OFFLINE"] = previous
+
+        url = f"https://huggingface.co/{self.config.repo_id}"
+        try:
+            get_gate().check(url, source="text-to-speech")
+        except EgressDenied as denied:
+            # Default deny is the ordinary answer, not an error. Raised as
+            # unavailable so the caller reports it the way it reports any other
+            # missing engine — with a reason a user can act on.
+            raise ProviderUnavailableError(
+                f"Speech needs the Kokoro voice model, which is not on this machine "
+                f"yet. Downloading it from huggingface.co (about 315 MB, one time) "
+                f"was blocked: {denied}"
+            ) from denied
+
+        self._pipeline = self._build_pipeline(wanted)
         return self._pipeline
 
     def _to_wav_bytes(self, audio: Any, sample_rate: int) -> bytes:
@@ -333,7 +465,9 @@ class KokoroProvider(VoiceProvider):
             # 2. Voice discovery (no hard-coded names)
             if self._kokoro is not None and self.config.voice_discovery_enabled:
                 try:
-                    names = self._discoverer.discover(self.config.repo_id, self.config.lang_code)
+                    names: List[str] = []
+                    for code in self._discoverable_langs():
+                        names.extend(self._discoverer.discover(self.config.repo_id, code))
                     self._voices = {n: self._voice_metadata(n) for n in names}
                 except Exception as exc:
                     self._voices = {}
@@ -382,7 +516,10 @@ class KokoroProvider(VoiceProvider):
             selected = self.config.default_voice
 
         try:
-            pipeline = self._ensure_pipeline()
+            # The front end the *selected* voice needs, not the configured
+            # one. They agree for the default and differ the moment a user
+            # picks a voice from another language in Settings.
+            pipeline = self._ensure_pipeline(self._lang_for_voice(selected))
         except Exception as exc:
             self._log.error(
                 "Kokoro unavailable: %s", exc, extra={**extra, "failure": type(exc).__name__}
@@ -505,17 +642,30 @@ class KokoroProvider(VoiceProvider):
     async def available_voices(self) -> Dict[str, Any]:
         return dict(self._voices)
 
-    async def health_check(self) -> Dict[str, Any]:
+    async def health_check(self, *, probe_model: bool = False) -> Dict[str, Any]:
+        """Report health. **Does not load the model unless asked.**
+
+        ``probe_model`` defaults to False, and that default is the whole fix.
+        This method used to call ``_ensure_pipeline()`` unconditionally, and
+        ``initialize()`` calls this method — so reporting health was how the
+        model got loaded, and the boot sequence fetched ~315 MB from
+        huggingface.co on every launch while the eager-load flag said no.
+
+        A health check that changes what it is measuring is not a health check.
+        The model loads on the first synthesis, which is where it belongs.
+        """
         checks: Dict[str, Any] = {}
         checks["kokoro_import"] = self._kokoro is not None
 
-        model_ok = False
-        try:
-            self._ensure_pipeline()
-            model_ok = True
-        except Exception as exc:
-            checks["model_error"] = f"{type(exc).__name__}: {exc}"
+        model_ok = self._pipeline is not None
+        if probe_model and not model_ok:
+            try:
+                self._ensure_pipeline()
+                model_ok = True
+            except Exception as exc:
+                checks["model_error"] = f"{type(exc).__name__}: {exc}"
         checks["model_available"] = model_ok
+        checks["model_loaded"] = self._pipeline is not None
 
         checks["voices_detected"] = len(self._voices)
         checks["cache_writable"] = self._cache.is_writable()
@@ -533,11 +683,17 @@ class KokoroProvider(VoiceProvider):
                 synthesis_test = {"success": False, "error": str(exc)}
         checks["synthesis_test"] = synthesis_test
 
-        available = bool(
-            checks["kokoro_import"]
-            and checks["cache_writable"]
-            and (model_ok or checks["voices_detected"] > 0)
-        )
+        # "The engine is installed and can write its output." Deliberately *not*
+        # "the weights are here": establishing that would mean loading them, and
+        # loading them at health-check time is the defect this method just had.
+        #
+        # Different from `WhisperRecogniser.is_available()`, which does require a
+        # loaded model — and the asymmetry is the honest one. Listening decides
+        # whether to *offer a button*, so it must know before the user presses.
+        # Speaking follows a reply that has already arrived, so resolving the
+        # weights on first use costs a delay rather than a dead control, and the
+        # refusal carries its own reason when it comes.
+        available = bool(checks["kokoro_import"] and checks["cache_writable"])
 
         report = {
             "provider": self.name,

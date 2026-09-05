@@ -6,10 +6,13 @@
  *
  * Architecture: Reads orbStore for state, renders globe image with dynamic effects.
  */
+import { STATE_PULSE } from '@/lib/embodimentPulse';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useOrbStore } from '@/stores';
+import { useIsReducedMotion } from '@/hooks/useReducedMotion';
 import type { OrbState } from '@/stores/orbStore';
 import globeImage from '@/assets/living-orb-globe.png';
+import { frames, loop } from './stillness';
 
 // Deterministic particle positions
 const PARTICLES = [
@@ -25,9 +28,10 @@ const PARTICLES = [
   { top: 64, left: 88, delay: 1.3, size: 4,   color: '#818cf8' },
 ];
 
-// Waveform bars for speaking state
-const WAVE_BARS = [0, 1, 2, 3, 4, 5, 6];
-const WAVE_HEIGHTS = [28, 44, 60, 72, 60, 44, 28];
+// The waveform bar constants are gone with the bars they drove. Their being a
+// hardcoded array is the clearest statement of why: a level meter whose levels
+// are `[28, 44, 60, 72, 60, 44, 28]` is a decoration wearing a measurement's
+// clothes. See the note where the bars were rendered.
 
 // Re-exported, not redeclared. This file used to define its own four-member
 // copy of the union, so adding `swapping` to the store left the orb's own
@@ -80,10 +84,18 @@ interface StateConfig {
   glowColor2: string;
   ring1Color: string;
   ring2Color: string;
-  ring1Duration: number;
-  ring2Duration: number;
-  scale: number[];
-  scaleDuration: number;
+  // `ring1Duration` / `ring2Duration` were here, set in all five states, and
+  // read by nothing: both rings render `animate={{ rotate: 0 }}` with a fixed
+  // 0.3s transition and are labelled STATIC where they are drawn. Ten numbers
+  // maintained across five states for no effect — the same shape as this
+  // repository's unreachable modules, in config rather than in code. Removed
+  // from the type first, so the compiler named every state that had to change.
+  // `scale` and `scaleDuration` were here and are now read from `STATE_PULSE`,
+  // which `RobotAvatar` reads too. Left in place they would be five more sets of
+  // numbers maintained for no effect — the same defect this type already had
+  // once, with `ring1Duration` and `ring2Duration`, and removed for the same
+  // reason: take it out of the type first, so the compiler names every state
+  // that has to change.
   filter: string;
 }
 
@@ -94,49 +106,50 @@ interface StateConfig {
 // orb at runtime, with nothing failing at build time. This is the same remedy
 // M6 applied to the surface list — let the compiler name every file that needs
 // an entry.
+// `glowColor` and `scale`/`scaleDuration` are **derived from `STATE_PULSE`**
+// rather than written here, because `RobotAvatar` renders the same five states
+// and `CLAUDE.md` is explicit that two renderers reporting one state in
+// different colours is a defect. They did disagree — the avatar had one cyan
+// where this file has violet, emerald and cyan — and nothing would ever have
+// caught it, because the two components shared no code. The remaining entries
+// are orb-only chrome: a second glow stop, two rings and a drop shadow that the
+// avatar has no equivalent for.
+const glowOf = (state: OrbState, alpha: number) => {
+  const c = STATE_PULSE[state].colour
+  return `rgba(${(c >> 16) & 255},${(c >> 8) & 255},${c & 255},${alpha})`
+}
+
 const STATE_CONFIG: Record<OrbState, StateConfig> = {
   idle: {
-    glowColor: 'rgba(99,102,241,0.30)',
+    glowColor: glowOf('idle', 0.30),
     glowColor2: 'rgba(168,85,247,0.18)',
     ring1Color: 'rgba(34,211,238,0.18)',
     ring2Color: 'rgba(168,85,247,0.28)',
-    ring1Duration: 22,
-    ring2Duration: 14,
-    scale: [1, 1.06, 1],
-    scaleDuration: 5,
+    // 8s, up from 5s. Idle has no ripples — the pulse the eye reads as one is
+    // this breath — and on the landing state it runs continuously, forever,
+    // behind whatever the user is actually doing. `UI-SPEC`: calm over
+    // delight, and motion has a budget.
     filter: 'drop-shadow(0 0 28px rgba(99,102,241,0.45))',
   },
   listening: {
-    glowColor: 'rgba(34,211,238,0.45)',
+    glowColor: glowOf('listening', 0.45),
     glowColor2: 'rgba(6,182,212,0.28)',
     ring1Color: 'rgba(34,211,238,0.40)',
     ring2Color: 'rgba(99,102,241,0.35)',
-    ring1Duration: 14,
-    ring2Duration: 8,
-    scale: [1.08, 1.14, 1.08],
-    scaleDuration: 2,
     filter: 'drop-shadow(0 0 36px rgba(34,211,238,0.65))',
   },
   thinking: {
-    glowColor: 'rgba(168,85,247,0.45)',
+    glowColor: glowOf('thinking', 0.45),
     glowColor2: 'rgba(99,102,241,0.32)',
     ring1Color: 'rgba(168,85,247,0.40)',
     ring2Color: 'rgba(34,211,238,0.35)',
-    ring1Duration: 8,
-    ring2Duration: 5,
-    scale: [1, 1.05, 1.02, 1.07, 1],
-    scaleDuration: 1.6,
     filter: 'drop-shadow(0 0 40px rgba(168,85,247,0.65))',
   },
   speaking: {
-    glowColor: 'rgba(16,185,129,0.35)',
+    glowColor: glowOf('speaking', 0.35),
     glowColor2: 'rgba(34,211,238,0.28)',
     ring1Color: 'rgba(16,185,129,0.35)',
     ring2Color: 'rgba(34,211,238,0.30)',
-    ring1Duration: 16,
-    ring2Duration: 10,
-    scale: [1, 1.04, 1.08, 1.04, 1],
-    scaleDuration: 0.9,
     filter: 'drop-shadow(0 0 32px rgba(16,185,129,0.55))',
   },
   // Dimmer and slower than every other state, deliberately.
@@ -152,14 +165,10 @@ const STATE_CONFIG: Record<OrbState, StateConfig> = {
   // a swap is neither. Spending one of them here would break a meaning that is
   // reused precisely so it needs no legend.
   swapping: {
-    glowColor: 'rgba(100,116,139,0.30)',
+    glowColor: glowOf('swapping', 0.30),
     glowColor2: 'rgba(71,85,105,0.20)',
     ring1Color: 'rgba(148,163,184,0.22)',
     ring2Color: 'rgba(100,116,139,0.28)',
-    ring1Duration: 30,
-    ring2Duration: 24,
-    scale: [1, 1.03, 1],
-    scaleDuration: 3.4,
     filter: 'drop-shadow(0 0 20px rgba(100,116,139,0.35))',
   },
 };
@@ -175,6 +184,13 @@ const LivingOrb = ({
   const { orbState } = useOrbStore();
   const state = orbState as OrbState;
   const cfg = STATE_CONFIG[state];
+
+  // `docs/UI-SPEC.md`: "Respect `prefers-reduced-motion` — it disables the orb
+  // pulse too." This component is the orb, and it had no gate across seven
+  // infinite animations. `loop` and `frames` hold each one at its resting
+  // value; colour still transitions, because reduced motion means less
+  // movement rather than less information. See `stillness.ts`.
+  const reduced = useIsReducedMotion();
 
   /** Amplify existing glow via brightness � no new colors */
   const orbBrightness = emphasis ? ' brightness(1.4)' : '';
@@ -197,7 +213,7 @@ const LivingOrb = ({
 
   // Deepen or soften the breath without altering its timing. The per-state
   // values are deviations from 1, so only the distance from 1 is scaled.
-  const scaleKeyframes = (cfg.scale as number[]).map(
+  const scaleKeyframes = ([...STATE_PULSE[state].pulse] as number[]).map(
     (v) => 1 + (v - 1) * pulseAmplitude,
   );
 
@@ -221,8 +237,11 @@ const LivingOrb = ({
           background: `radial-gradient(circle, ${cfg.glowColor} 0%, ${cfg.glowColor2} 45%, transparent 70%)`,
           filter: `blur(24px)${emphasis ? ' brightness(1.8)' : ''}`,
         }}
-        animate={{ scale: scaleKeyframes, opacity: state === 'idle' ? [0.7, 1, 0.7] : [0.8, 1, 0.8] }}
-        transition={{ duration: cfg.scaleDuration, repeat: Infinity, ease: 'easeInOut' }}
+        animate={{
+          scale: frames(scaleKeyframes, reduced),
+          opacity: frames(state === 'idle' ? [0.7, 1, 0.7] : [0.8, 1, 0.8], reduced),
+        }}
+        transition={loop(STATE_PULSE[state].pulseSeconds, reduced)}
       />
 
       {/* Thinking multi-color pulse overlay */}
@@ -242,7 +261,7 @@ const LivingOrb = ({
               ],
             }}
             exit={{ opacity: 0 }}
-            transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
+            transition={loop(4, reduced)}
           />
         )}
       </AnimatePresence>
@@ -275,18 +294,40 @@ const LivingOrb = ({
         />
       )}
 
-      {/* Speaking waveform rings emanating outward */}
+      {/* Speaking ripples, emanating outward.
+       *
+       * Calmed on the maintainer's report that they read as blinding and too
+       * busy while Zaram speaks. Three changes, and they are separable so the
+       * next person can tune one without the others:
+       *
+       *   rate    — one ripple every 1.2s rather than every 0.6s. With three
+       *             rings, spacing is `duration / 3`, so the duration and the
+       *             stagger move together or the ring spacing goes uneven.
+       *   reach   — 2.2x rather than 2.8x. At 2.8 the outermost ring was the
+       *             brightest thing on screen and further out than any other
+       *             layer, which is what made it read as a flash rather than
+       *             as a ripple.
+       *   opacity — starts at 0.3 against a 0.28 border, down from 0.7 against
+       *             0.5. `UI-SPEC` puts motion on a budget and this is a
+       *             continuous animation on a surface used all day.
+       *
+       * Not removed. It is the only thing distinguishing speaking from idle on
+       * the orb once the bars are gone, and a state indicator that does not
+       * indicate is worse than a busy one.
+       */}
       <AnimatePresence>
         {state === 'speaking' &&
           [0, 1, 2].map(i => (
             <motion.div
               key={i}
               className="absolute rounded-full pointer-events-none"
-              style={{ width: corePx, height: corePx, border: '1px solid rgba(16,185,129,0.5)' }}
-              initial={{ scale: 1, opacity: 0.7 }}
-              animate={{ scale: 2.8, opacity: 0 }}
+              style={{ width: corePx, height: corePx, border: '1px solid rgba(16,185,129,0.28)' }}
+              initial={{ scale: 1, opacity: 0.3 }}
+              animate={reduced ? { scale: 1, opacity: 0.3 } : { scale: 2.2, opacity: 0 }}
               exit={{ opacity: 0 }}
-              transition={{ duration: 1.8, repeat: Infinity, delay: i * 0.6, ease: 'easeOut' }}
+              // 4s, was 3.6, and the stagger goes to 4/3 so the three ripples
+              // stay evenly spaced within one period.
+              transition={{ ...loop(4, reduced, 'easeOut'), delay: reduced ? 0 : i * (4 / 3) }}
             />
           ))}
       </AnimatePresence>
@@ -298,9 +339,14 @@ const LivingOrb = ({
             className="absolute rounded-full pointer-events-none"
             style={{ width: corePx + 32, height: corePx + 32, border: '2px solid rgba(34,211,238,0.55)' }}
             initial={{ scale: 1, opacity: 0 }}
-            animate={{ scale: [1, 1.25, 1.5], opacity: [0.7, 0.4, 0] }}
+            animate={{
+              scale: frames([1, 1.25, 1.5], reduced),
+              // Held at 0.7 rather than the array's 0, or a still ring would be
+              // an invisible one and listening would lose its only marker.
+              opacity: reduced ? 0.7 : [0.7, 0.4, 0],
+            }}
             exit={{ opacity: 0 }}
-            transition={{ duration: 1.4, repeat: Infinity, ease: 'easeOut' }}
+            transition={loop(2, reduced, 'easeOut')}
           />
         )}
       </AnimatePresence>
@@ -320,12 +366,14 @@ const LivingOrb = ({
           filter: `${cfg.filter}${state === 'swapping' ? '' : orbBrightness}`,
         }}
         animate={{
-          scale: scaleKeyframes,
+          scale: frames(scaleKeyframes, reduced),
           // The globe fades toward half-present rather than holding steady:
           // the model backing it is, at this moment, genuinely not there.
-          opacity: state === 'swapping' ? [0.85, 0.5, 0.85] : 1,
+          // Still, it holds at 0.85 — dimmer than resident, which is the part
+          // that carries meaning without moving.
+          opacity: state === 'swapping' ? frames([0.85, 0.5, 0.85], reduced) : 1,
         }}
-        transition={{ duration: cfg.scaleDuration, repeat: Infinity, ease: 'easeInOut' }}
+        transition={loop(STATE_PULSE[state].pulseSeconds, reduced)}
       />
 
       {/* Inner pulse dot. Shown by rendered diameter rather than preset name:
@@ -340,8 +388,13 @@ const LivingOrb = ({
             // hard edge.
             boxShadow: `0 0 ${Math.max(4, Math.round(coreDotPx * 1.2))}px rgba(255,255,255,0.9)`,
           }}
-          animate={{ opacity: [0.35, 0.9, 0.35], scale: [0.8, 1.2, 0.8] }}
-          transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
+          animate={{
+            // Rests bright rather than at the array's 0.35: the dot is the
+            // orb's centre, and a still one at a third opacity looks broken.
+            opacity: reduced ? 0.9 : [0.35, 0.9, 0.35],
+            scale: reduced ? 1 : [0.8, 1.2, 0.8],
+          }}
+          transition={loop(4, reduced)}
         />
       )}
 
@@ -359,37 +412,37 @@ const LivingOrb = ({
               background: p.color,
               boxShadow: `0 0 4px ${p.color}`,
             }}
-            animate={{ y: [0, -24, 0], x: [0, 12, 0], opacity: [0.2, 0.9, 0.2] }}
-            transition={{ duration: 3.5 + p.delay, repeat: Infinity, delay: p.delay, ease: 'easeInOut' }}
+            animate={{
+              y: frames([0, -24, 0], reduced),
+              x: frames([0, 12, 0], reduced),
+              opacity: reduced ? 0.55 : [0.2, 0.9, 0.2],
+            }}
+            // **One period, offset by delay — not ten periods.**
+            // This was `3.5 + p.delay`, which gave the ten particles ten
+            // different durations (3.5s to 5.5s). Ten cycles sharing no common
+            // factor is the largest single source of the orb's restlessness:
+            // they drift through every possible phase relationship and the
+            // field never repeats. A shared 8s with staggered starts looks the
+            // same at a glance and settles into one rhythm.
+            transition={{ ...loop(8, reduced), delay: reduced ? 0 : p.delay }}
           />
         ))}
 
-      {/* Speaking waveform bars below orb (xl only) */}
-      <AnimatePresence>
-        {state === 'speaking' && size === 'xl' && (
-          <motion.div
-            className="absolute flex items-end gap-1 pointer-events-none z-20"
-            style={{ bottom: -88, left: '50%', transform: 'translateX(-50%)' }}
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.3 }}
-          >
-            {WAVE_BARS.map((_, i) => (
-              <motion.div
-                key={i}
-                className="rounded-full"
-                style={{
-                  width: 6,
-                  background: 'linear-gradient(to top, rgba(34,211,238,0.8), rgba(168,85,247,0.8))',
-                }}
-                animate={{ height: [4, WAVE_HEIGHTS[i], 4] }}
-                transition={{ duration: 0.5 + i * 0.05, repeat: Infinity, delay: i * 0.07, ease: 'easeInOut' }}
-              />
-            ))}
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {/* The speaking waveform bars are gone, deliberately.
+       *
+       * Removed on the maintainer's call, and the reasoning is worth keeping
+       * because it is not only taste. **The bars were not driven by the
+       * audio.** Their heights are a fixed array and their timings are
+       * `0.5 + i * 0.05` — a loop that looks like a level meter and measures
+       * nothing. `UI-SPEC` says never render invented values, and an
+       * always-identical waveform beside real speech is exactly that: it
+       * claims to show what Zaram is saying and shows a constant.
+       *
+       * If a level meter returns it has to read `useSpeechStore`'s audio
+       * element, the way the avatar's visemes already do — the seam is there,
+       * and lip sync is scrubbed against `audio.currentTime` for precisely
+       * this reason. Twelve looping divs are not that.
+       */}
     </div>
   );
 };

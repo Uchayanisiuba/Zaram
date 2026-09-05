@@ -33,8 +33,9 @@ from __future__ import annotations
 import io
 from typing import Dict
 
+from .. import theme
 from ..html import claim_entry_id
-from . import _reader
+from . import _reader, word_theme
 from .base import Availability, module_available
 
 #: Word's limit. Longer names are dropped without an error.
@@ -65,6 +66,10 @@ class DocxExporter:
 
         doc = _reader.read(document_html)
         word = WordDocument()
+        # Before anything is added, so every heading, paragraph and table
+        # inherits the design rather than `python-docx`'s 2007 template. See
+        # `word_theme` for what that template actually looked like.
+        word_theme.apply(word)
 
         word.add_heading(doc.title or "Untitled", level=1)
 
@@ -78,14 +83,30 @@ class DocxExporter:
             if block.anchor and block.anchor.startswith("claim-")
         }
 
-        for block in doc.body_blocks():
+        # Tables, keyed by where they opened. `blocks` and `tables` are two
+        # flat lists, so a table's position has to be carried explicitly or a
+        # fee table can only be written before or after the whole body — never
+        # where its author put it.
+        tables_after: Dict[int, list] = {}
+        for table in doc.tables:
+            tables_after.setdefault(table.after_block, []).append(table)
+
+        for index, block in enumerate(doc.blocks):
+            for table in tables_after.pop(index, ()):
+                _add_table(word, table)
+
+            if block.in_sources:
+                continue
             if block.tag == "h1" and block.text.strip() == doc.title.strip():
                 continue  # already the document heading
             if not block.text.strip():
                 continue
 
             if block.tag in ("h1", "h2", "h3"):
-                word.add_heading(block.text.strip(), level=2)
+                # h3 is a real sub-level. Collapsing it into Heading 2 flattens
+                # the outline, and Word's navigation pane and the PDF bookmark
+                # tree are both built from exactly this.
+                word.add_heading(block.text.strip(), level=2 if block.tag != "h3" else 3)
                 continue
 
             paragraph = word.add_paragraph(
@@ -98,6 +119,11 @@ class DocxExporter:
                     )
                 else:
                     _add_styled_run(paragraph, run)
+
+        # A table that opened after the last block still belongs in the file.
+        for index in sorted(tables_after):
+            for table in tables_after[index]:
+                _add_table(word, table)
 
         source_blocks = doc.source_blocks()
         if source_blocks:
@@ -128,6 +154,58 @@ class DocxExporter:
         buffer = io.BytesIO()
         word.save(buffer)
         return buffer.getvalue()
+
+
+
+def _add_table(word, table) -> None:
+    """One table, header emboldened, written where the author put it.
+
+    **The Word exporter had no table handling at all.** `_reader` parsed them
+    and `csv`, `pptx`, `text` and `xlsx` all consumed them; this module did
+    not, so every table in every prose document was dropped on export with
+    nothing reporting it.
+
+    That was not a latent gap waiting for structured documents to arrive. It
+    was live: `render_invoice` emits the line items as a table, so an invoice
+    exported to .docx arrived at the client carrying its title, "Billed to" and
+    the client's name — and **no line items, no amounts and no total.** Measured
+    that way before this existed.
+
+    **It used to be drawn with "Table Grid"**, the one table style
+    `python-docx`'s template ships — a visible box around every single cell,
+    and the most dated thing in the output. `word_theme.style_table` replaces
+    it with what the stylesheet already does on the HTML side: a rule under the
+    header, hairlines between rows, nothing around the outside.
+    """
+    from docx.shared import Pt, RGBColor
+
+    width = max([len(table.header)] + [len(row) for row in table.rows] or [0])
+    if not width:
+        return
+
+    word_table = word.add_table(rows=0, cols=width)
+
+    if table.header:
+        cells = word_table.add_row().cells
+        for column, text in enumerate(table.header[:width]):
+            cells[column].text = text
+
+    for row in table.rows:
+        cells = word_table.add_row().cells
+        for column, text in enumerate(row[:width]):
+            cells[column].text = text
+
+    # After the content, because the run-level formatting it applies needs runs
+    # to exist — a cell written by `.text` has exactly one.
+    word_theme.style_table(word_table, numeric_columns=table.numeric_columns)
+
+    if table.caption:
+        caption = word.add_paragraph(table.caption)
+        for run in caption.runs:
+            run.font.name = theme.WORD_SANS
+            run.font.size = Pt(theme.SMALL_PT)
+            run.font.color.rgb = RGBColor.from_string(theme.MUTED)
+            run.italic = True
 
 
 def _bookmark_name(anchor: str) -> str:

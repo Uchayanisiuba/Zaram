@@ -29,9 +29,27 @@ Build this as one pass before any screen.
 --accent       #5EE7DC    active, local, primary state
 --accent-2     #8B7FD4    cloud, secondary emphasis
 --warn         #E5A44C
+
+--face-led     #818cf8    the avatar's LED face. Constant; carries no state.
 ```
 
 One accent per screen region. Never both competing in the same area.
+
+**`--face-led` is deliberately neither accent — 15 August 2026.** The shipped
+avatar's face is a dot-matrix panel that is lit whenever the avatar is
+rendered, so whatever colour it takes, it wears permanently. Both accents above
+already mean something, and `--accent-2` means *cloud* — a permanently violet
+face would state, on the one indicator whose whole job is to be trusted, that
+data had left the device. Indigo is close to the character reference, is
+distinct from both accents at a glance, and asserts nothing.
+
+**This palette has drifted and the drift is recorded rather than fixed.**
+`VrmAvatar.tsx` uses `#78DCF0` where this file says `#5EE7DC`, and
+`index.css` carries an indigo ramp (`#6366f1` / `#818cf8`) that appears
+nowhere above while being used throughout the frontend. `--face-led` pins to
+that ramp because it is what the product actually looks like. Reconciling the
+other two is a separate job; doing it here, as a side effect of an avatar
+change, would be a palette rewrite nobody asked for and nobody could review.
 
 Radii: 12px cards and panels, 8px controls, pill only for chips.
 
@@ -60,14 +78,29 @@ activity table, cards, metric tiles.
 
 ### Navigation
 
-**The orbit** — five nodes revolving around the Living Orb on the landing state:
-**Work · Memory · Knowledge · Activity · Settings**.
+**The orbit** — six nodes revolving around the Living Orb on the landing state:
+**Work · Project · Memory · Knowledge · Activity · Settings**.
 
 **Work** holds what the user made — documents, spreadsheets, charts — each with the
 conversation that produced it and its sources. Same layout across project types;
 only the content differs. It exists because a navigation made only of Memory,
 Knowledge and Activity is entirely about the system and holds nothing the user
 made.
+
+**Project** holds the projects themselves: create, name, choose the type that
+activates a pack, assign and move artifacts and facts, rename, delete. **Work is the
+output; Project is the organisation of it** — Work browses and previews what was
+made, Project decides what belongs where.
+
+It is a node rather than a filter inside Work because `project:<id>` scopes *facts*,
+not only files: it reaches the Spine and, once the plan object lands, the plan. A
+filter living inside Work cannot own something that scopes Memory. The reasoning, and
+the argument it replaced, are recorded in `CLAUDE.md`.
+
+**No folder tree.** One level of grouping, the project. Nesting would be a second
+organising system competing with scope, provenance and recall — and Project assigns
+files to a project, it does not browse a filesystem. Deleting a project is never one
+button: it holds facts and files, so it asks what happens to them.
 Sources live inside Knowledge. Active item takes a cyan left indicator bar and
 raised background, not a filled pill.
 
@@ -90,7 +123,10 @@ in the output directory — there is no Files surface.
 sidebar. Memory carries its view toggle plus a Constellation link; Settings
 uses a segmented control.
 
-**Command palette** — ⌘K. Glass overlay, centred, 640px. Searches facts,
+**Command palette** — Ctrl K, and Cmd K on a Mac. Every chord is written once
+in `runtime/shortcuts/registry.ts`, where `meta` means *the platform's primary
+modifier* — never spelled out anywhere else, in the interface or in this
+document. Glass overlay, centred, 640px. Searches facts,
 sources and commands, results grouped under mono section labels, keyboard
 hints in the footer.
 
@@ -102,6 +138,23 @@ Conversation it carries the privacy timer.
 Transitions ≤200ms. No spring physics on list rows. No continuous animation
 anywhere except the orb while actively processing. Respect
 `prefers-reduced-motion` — it disables the orb pulse too.
+
+**Motion must not depend on frame rate.** Every eased value in the embodiment
+renderer used `lerp(a, b, dt * k)`, which covers a different fraction of the
+distance per *second* at each refresh rate — so the avatar moved at visibly
+different speeds depending on the display, and the tuning was only correct on
+the machine it was tuned on. Use the exponential form, `1 - e^(-dt/τ)`
+(`approachRate` in `VrmAvatar.tsx`), where τ is a time constant in seconds and
+the same wall-clock time produces the same progress everywhere. It also cannot
+overshoot, which the linear form does on a long frame — a backgrounded tab
+returning, or a model finishing a load.
+
+**A state change is a transition, not a cut.** The avatar's rim light is its
+state channel and it was assigned absolutely each frame, so idle→thinking swapped
+slate for cyan between two frames. On a surface briefed as calm, an instant
+colour flip is the one motion that reads as a glitch rather than as a state.
+0.22s, which is long enough to read as a transition and short enough that the
+indicator is not still catching up when the thing it indicates has moved on.
 
 ### Component inventory
 
@@ -129,18 +182,34 @@ Persistent bar, always at the bottom:
 
 ### The orb
 
-A 20px circle at the left of the persistent bar. Four states, no others:
+A 20px circle at the left of the persistent bar. It reports **what the system
+is doing**, and nothing else:
 
 | State | Appearance |
 |---|---|
 | idle | dim, still |
 | thinking | slow pulse, accent |
-| local | steady accent ring |
-| cloud active | steady accent-2 ring + provider name in mono |
+| speaking | pulse in time with speech |
+| listening | steady, while the microphone is open |
+| swapping | dimmed, slow breathe — a model is being evicted for another |
 
 It never grows, never centres, never reacts to cursor position, never speaks.
 It is an instrument light, not a character. This is deliberate — do not
 reintroduce expressive behaviour.
+
+**The orb does not report locality, and this table used to say it did.**
+It listed `local` as a *steady accent ring* and `cloud active` as an
+*accent-2 ring*, which contradicts both `CLAUDE.md` and the code. The narrowing
+of 13 August 2026 is explicit: locality is stated **in words** by
+`OrbStatusLabel` — "Local only", "Local · can send", "Cloud enabled" — because
+*"a rim colour cannot make that distinction on the one indicator whose whole
+job is to be trusted."* A ring cannot say *can send but has not*, and that is
+the distinction that matters.
+
+`OrbState` in `frontend/src/stores/orbStore.ts` is `idle | thinking | speaking |
+listening | swapping`. It has never carried locality. Corrected here on
+27 August 2026 — the codebase wins, and a spec that disagrees with it is worse
+than no spec, because it is reviewed against.
 
 ---
 
@@ -211,6 +280,18 @@ indexed sources with dot, name, fact count, scope.
 
 Message thread. Assistant replies carry inline `CitationChip`s. Above the input,
 a strip showing 2–3 facts recalled into this reply, each dismissible.
+
+**The user's messages sit right, Zaram's left.** Both used to stack down the
+left edge, which made a long exchange read as one continuous document rather
+than as a conversation — the turn boundaries were there, but you had to read the
+labels to find them. The user's are capped at 85% width and given a quiet
+surface, because right-aligned text with no drawn edge to align *to* reads as a
+layout accident, and a bubble spanning the panel has no visible right edge at
+all — so the cue disappears on exactly the long messages where it helps most.
+
+**The speaker label stays.** Side is a third cue and, like colour, it is one a
+screen reader cannot use. Zaram's replies keep their left rule for the same
+reason.
 
 Header carries a **privacy timer**: cloud off for 15 / 30 / 60 min. One tap,
 with remaining time visible in mono while active.
@@ -422,7 +503,7 @@ may leave, egress retention, and a prominent local kill switch.
 
 ### 8. Command palette
 
-⌘K overlay. Three states: empty, typing, results. Results grouped by kind with
+Ctrl K overlay (Cmd K on a Mac). Three states: empty, typing, results. Results grouped by kind with
 mono section labels.
 
 ### 8b. Fact history

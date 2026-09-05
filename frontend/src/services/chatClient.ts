@@ -75,22 +75,124 @@ export function sourceLeftDevice(source: ChatSource): boolean {
   return source.kind === 'web';
 }
 
+/** The site a cited page came from, or `null` when it is not a web page.
+ *
+ *  **The signal a row of citations was missing.** A web chip rendered as a
+ *  globe and a number, so four sources were four identical globes — and the
+ *  domain, which is the thing that actually distinguishes them, was only
+ *  visible after opening the panel one at a time.
+ *
+ *  `www.` is dropped because it is noise on every domain that has it and
+ *  absent on every domain that does not, so it carries no information and
+ *  costs the width that a longer name needs. Nothing else is trimmed: a
+ *  subdomain is part of who published the page, and `docs.example.com` and
+ *  `blog.example.com` are not interchangeable.
+ *
+ *  One implementation, here, because `SourcePanel` already computed this
+ *  inline and a second copy is how the panel and the chip come to disagree
+ *  about what they are pointing at. */
+export function sourceHost(source: ChatSource): string | null {
+  return hostOf(source.url ?? '');
+}
+
+/** The same question asked of a bare URL, for callers holding one.
+ *
+ *  `SourcePanel` receives a `url` rather than a `ChatSource` and had its own
+ *  inline copy of this. Two implementations of "which site is this" is how the
+ *  panel and the chip come to name different things while pointing at the same
+ *  page. */
+export function hostOf(url: string): string | null {
+  if (!/^https?:\/\//i.test(url)) return null;
+  try {
+    const host = new URL(url).host.toLowerCase();
+    return host.startsWith('www.') ? host.slice(4) : host;
+  } catch {
+    // A malformed URL is not a domain, and inventing one from a substring
+    // would put a name on a chip that links somewhere else.
+    return null;
+  }
+}
+
+/** How far through drawing a picture the machine is.
+ *
+ *  Mirrors `ImageProgress` in `imaging/contracts.py`, field for field, and
+ *  carries **no time remaining** — there is no field here that could hold one,
+ *  which is the point. A diffusion pipeline emits a callback per denoising
+ *  step, so `step` and `percent` are counted; seconds-left would be an
+ *  extrapolation from nothing at the moment it would first be shown.
+ *
+ *  Defined here rather than in the component that draws it: this is what the
+ *  backend sends, and a transport type living inside a component is one the
+ *  next surface has to import a component to read. */
+export interface ImageProgress {
+  step: number;
+  total_steps: number;
+  index: number;
+  count: number;
+  percent: number;
+}
+
 export type ChatEvent =
   | { type: 'token'; content: string }
+  /** The model's working, from a `<think>` block, with the tags removed.
+   *
+   *  Its own event rather than a flag on `token` because the destinations
+   *  differ: `token` accumulates into `streamingText`, which is committed to
+   *  the transcript and read by `pushSpeech`. Before the backend split these,
+   *  a reasoning model's working *was* the answer as far as this client knew —
+   *  rendered as the reply, and spoken aloud by Kokoro in avatar mode. */
+  | { type: 'reasoning'; content: string }
   | { type: 'source'; source: ChatSource }
   /** A file Zaram made. The same record Work draws a row from, so the card in
    *  the conversation and the row in Work cannot disagree about what exists. */
   | { type: 'artifact'; artifact: Artifact & { download_url: string } }
+  /** How far through drawing a picture the machine is.
+   *
+   *  Its own event rather than a `status`, because this carries a *measured
+   *  fraction* — a diffusion pipeline emits a callback per denoising step, so
+   *  "step 7 of 30" is counted rather than estimated. There is deliberately no
+   *  time remaining in it: seconds-left is a guess until several steps have
+   *  run, and a confident wrong number is worse than none. */
+  | { type: 'image_progress'; progress: ImageProgress }
   /** Something the user needs to know that is not part of the answer — the
    *  first case is a file ingest could not read. Kept separate from `token` so
    *  it is never rendered as the model speaking, and from `error` because
    *  nothing failed in this exchange. `action` names where to go about it. */
   | { type: 'notice'; content: string; kind: string; action: string }
-  /** A model has to be loaded before the reply can start. Sent *before*
-   *  generation, so the orb can say why the wait is about to happen rather
-   *  than after the machine has already gone quiet. `kind` is `load` (cold
-   *  start, room to spare) or `swap` (something resident gets evicted). */
-  | { type: 'model_load'; kind: 'load' | 'swap'; model: string; evicts: string[] }
+  /** What the reply is waiting for, sent *before* generation so the orb can
+   *  say why rather than going quiet and letting the user guess.
+   *
+   *  Four kinds, matching `SwapPlan`: `resident` (already loaded, nothing to
+   *  wait for), `load` (cold start with room to spare), `swap` (something
+   *  resident gets evicted) and `oversized` (larger than the whole budget). */
+  | {
+      type: 'model_load';
+      kind: 'resident' | 'load' | 'swap' | 'oversized';
+      model: string;
+      evicts: string[];
+    }
+  /** The transcript this reply is being written into.
+   *
+   *  Sent only when the backend *started* one — the client already knows the
+   *  id it sent, and needs to be told the id it did not. Arrives before the
+   *  first token, so an interrupted stream still leaves a conversation that
+   *  can be reopened rather than a thread with no name. */
+  | { type: 'conversation'; conversationId: string; title: string }
+  /** Which model is about to answer, and where it runs. Arrives *before* the
+   *  first token, so the attribution is present while the reply is read rather
+   *  than added underneath it afterwards.
+   *
+   *  `locality` is null when the backend could not resolve the model — a real
+   *  answer, and the reason the field is not a boolean. Rendering "on this
+   *  machine" for an unresolved model would be a confident false claim on the
+   *  one thing the user is most likely to check. */
+  | {
+      type: 'answering';
+      model: string;
+      locality: 'local' | 'cloud' | null;
+      provider: string | null;
+      chosenBy: string | null;
+    }
   | { type: 'status'; state: string }
   | { type: 'error'; message: string }
   | { type: 'done' };
@@ -104,6 +206,35 @@ export interface ChatRequest {
    *  means none is active, which scopes recall to everything and captures
    *  facts as `global` — a question asked outside a project is not about one. */
   projectId?: string | null;
+  /** The knowledge domains this question is asked inside. Empty or undefined
+   *  means all of them, which is the ordinary case.
+   *
+   *  A separate axis from `projectId`: scope is about whose work a fact
+   *  belongs to, a domain is about which library the user chose to read from,
+   *  and a question can sit inside both at once. Sent as a list because the
+   *  backend unions them — asking across *Clients* and *Legal* means either —
+   *  even though the control currently offers one at a time. */
+  domainIds?: string[];
+  /** Files attached to this message, by id from `POST /chat/attachments`.
+   *
+   *  A third axis, and the narrowest. A project says whose work this is, a
+   *  domain says which library to read from, and this says "the document in
+   *  front of us right now" - working state that never enters the Spine
+   *  unless the user separately decides it should (rule 7d).
+   *
+   *  Ids rather than text, deliberately. How much of a document fits is a
+   *  question about the answering model's context budget, which is known in
+   *  the backend and not here; inlining the text would mean choosing on
+   *  behalf of a limit this side cannot see.
+   */
+  attachmentIds?: string[];
+  /** Which stored conversation this message continues, or omitted to begin one.
+   *
+   *  **Not `sessionId`, and the two must not be merged.** A session is a page
+   *  load — the frontend mints one per mount. A conversation is a thing a
+   *  person comes back to next week. Keying transcripts on the session would
+   *  file every reload as a new conversation and every restart as amnesia. */
+  conversationId?: string | null;
 }
 
 /** A failure that should be shown to the user, with the cause preserved. */
@@ -142,10 +273,23 @@ export async function* streamChat(
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         text: req.text,
-        model: req.model ?? 'gemma3:latest',
+        // Empty means "this request expresses no preference", and the backend
+        // then uses the model chosen in Settings, or its own vetted selection.
+        //
+        // **This was `'gemma3:latest'`** — a model name hardcoded in the
+        // transport, on every message, that no control in the interface ever
+        // changed. So the provider layer's selection ran, applied its residency
+        // and data-policy gates, and was then overridden by a string literal
+        // here. No routing decision the backend made was observable, and
+        // choosing a cloud model was impossible from the interface however the
+        // backend was configured.
+        model: req.model ?? '',
         persona: req.persona ?? 'zaram_prime',
         session_id: req.sessionId ?? 'default',
         project_id: req.projectId ?? '',
+        domain_ids: req.domainIds ?? [],
+        attachment_ids: req.attachmentIds ?? [],
+        conversation_id: req.conversationId ?? '',
       }),
       signal,
     });
@@ -275,6 +419,9 @@ function parseLine(line: string): ChatEvent | null {
     case 'token':
       return { type: 'token', content: String(data.content ?? '') };
 
+    case 'reasoning':
+      return { type: 'reasoning', content: String(data.content ?? '') };
+
     case 'source': {
       // An unrecognised kind is dropped rather than coerced. The kind decides
       // whether the UI tells the user their data left the machine, so a
@@ -306,9 +453,43 @@ function parseLine(line: string): ChatEvent | null {
       };
     }
 
+    case 'conversation': {
+      const conversationId = String(data.conversation_id ?? '').trim();
+      if (!conversationId) return null;
+      return {
+        type: 'conversation',
+        conversationId,
+        title: String(data.title ?? ''),
+      };
+    }
+
     case 'model_load': {
       const kind = String(data.kind ?? '');
-      if (kind !== 'load' && kind !== 'swap') return null;
+      // **`SwapPlan` has four kinds and this parser has now dropped two of
+      // them, one at a time, for the same reason.** `oversized` went first.
+      // The comment that replaced it asserted `resident` "is deliberately
+      // never sent" — it was not deliberate and it was not true: the backend
+      // sends it on every reply whose model is already loaded, and discarding
+      // it here is what produced **Warming up** under a model that had not
+      // moved. `chatStore` has a `resident` branch whose whole job is to
+      // cancel that guess, and it was unreachable.
+      //
+      // Measured in the running app, 31 August 2026: the backend emitted
+      // `{"kind": "resident"}` for `Qwen3.8-27B-exl3-2.20bpw` on the third
+      // consecutive message and the orb still read "Warming up · Starting the
+      // local model."
+      //
+      // So the list is kept in step with `SwapPlan` rather than with whichever
+      // kinds someone happened to need, and a kind Zaram does not recognise
+      // is still dropped rather than coerced.
+      if (
+        kind !== 'resident' &&
+        kind !== 'load' &&
+        kind !== 'swap' &&
+        kind !== 'oversized'
+      ) {
+        return null;
+      }
       const model = String(data.model ?? '').trim();
       if (!model) return null;
       return {
@@ -316,6 +497,26 @@ function parseLine(line: string): ChatEvent | null {
         kind,
         model,
         evicts: Array.isArray(data.evicts) ? data.evicts.map(String) : [],
+      };
+    }
+
+    case 'answering': {
+      const model = String(data.model ?? '').trim();
+      // Nothing to attribute is not an attribution. The backend sends the
+      // event whether or not it could resolve a name, because the absence is
+      // itself worth knowing there; the interface has nothing to draw.
+      if (!model) return null;
+      const locality = String(data.locality ?? '');
+      return {
+        type: 'answering',
+        model,
+        // Only the two values the backend defines. Anything else — including
+        // the `null` it sends for a model it could not place — becomes null
+        // and renders as no claim about where the reply came from, which is
+        // the whole reason locality is three-valued on that side.
+        locality: locality === 'local' || locality === 'cloud' ? locality : null,
+        provider: data.provider == null ? null : String(data.provider),
+        chosenBy: data.chosen_by == null ? null : String(data.chosen_by),
       };
     }
 
@@ -330,6 +531,28 @@ function parseLine(line: string): ChatEvent | null {
         artifact: {
           ...artifact,
           download_url: artifact.download_url ?? `/artifacts/${artifact.id}/download`,
+        },
+      };
+    }
+
+    case 'image_progress': {
+      // Every field is read as a number and none is defaulted to something
+      // plausible: a bar drawn from an invented denominator is a rendered
+      // value nobody measured, which is the thing the UI principles forbid.
+      // A payload that cannot supply them is dropped instead.
+      const step = Number(data.step);
+      const total = Number(data.total_steps);
+      const percent = Number(data.percent);
+      if (!Number.isFinite(step) || !Number.isFinite(total) || total < 1) return null;
+      if (!Number.isFinite(percent)) return null;
+      return {
+        type: 'image_progress',
+        progress: {
+          step,
+          total_steps: total,
+          index: Number(data.index) || 1,
+          count: Number(data.count) || 1,
+          percent: Math.max(0, Math.min(100, Math.round(percent))),
         },
       };
     }

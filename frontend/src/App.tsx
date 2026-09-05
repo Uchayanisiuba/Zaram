@@ -12,11 +12,14 @@ import { useRuntimeLoop } from '@/hooks/useRuntimeLoop';
 import TopNav from './components/TopNav';
 import LeftRail from './components/LeftRail';
 import ChatSurface from './components/chat/ChatSurface';
+import HistoryPanel from './components/chat/HistoryPanel';
 import SourcePanelLayer from './components/chat/SourcePanelLayer';
 import CommandPalette from './components/CommandPalette';
 import LandingHint from './components/shell/LandingHint';
+import ConfirmSendDialog from './components/egress/ConfirmSendDialog';
 import Landing from './workspaces/Landing';
 import WorkWorkspace from './workspaces/WorkWorkspace';
+import ProjectWorkspace from './workspaces/ProjectWorkspace';
 import MemoryWorkspace from './workspaces/MemoryWorkspace';
 import KnowledgeWorkspace from './workspaces/KnowledgeWorkspace';
 import ActivityWorkspace from './workspaces/ActivityWorkspace';
@@ -94,6 +97,11 @@ export default function App() {
           workspace={workspace}
           onSearchOpen={() => setCommandOpen(true)}
           onOpenConversation={openConversation}
+          // Home is the landing at rest. `navigate` already closes the chat and
+          // resets the conversation's context, which is exactly what returning
+          // to the start should do — and is deliberately not `openConversation`,
+          // so the orb keeps its single meaning.
+          onHome={() => navigate('landing')}
         />
       )}
 
@@ -129,6 +137,11 @@ export default function App() {
           {workspace === 'work' && (
             <div key="work" style={{ flex: 1, display: 'flex', animation: 'fade-in 0.25s ease' }}>
               <WorkWorkspace onOpenConversation={openConversation} />
+            </div>
+          )}
+          {workspace === 'project' && (
+            <div key="project" style={{ flex: 1, display: 'flex', animation: 'fade-in 0.25s ease' }}>
+              <ProjectWorkspace />
             </div>
           )}
           {workspace === 'memory' && (
@@ -168,14 +181,30 @@ export default function App() {
 
       {/* Chat surface — slides in from the right over the landing */}
       <AnimatePresence>
-        {chatView === 'chat' && <ChatSurface />}
+        {chatView === 'chat' && <ChatSurface navigate={navigate} />}
       </AnimatePresence>
+
+      {/* Past conversations, on a lip at the left edge.
+          Mounted only with the conversation, because history of the shell has
+          no meaning while a workspace is open -- and because `SourcePanelLayer`
+          below also comes from the left, so the two must not be on screen
+          competing for the same edge. Sources are transient and belong to the
+          reply being read; this is ambient and belongs to the shell, which is
+          why it sits under them in the stack. */}
+      {chatView === 'chat' && <HistoryPanel />}
 
       {/* Source panels — over the orb region, beside the conversation. */}
       <SourcePanelLayer />
 
       {/* Shortcuts help overlay */}
       <HelpOverlay open={helpOpen} platform={platform} onClose={() => setHelpOpen(false)} />
+
+      {/* Confirm before send. Mounted on every surface rather than beside the
+          conversation: a tool can reach the network from anywhere, and a
+          question the user cannot see is one that times out and denies while
+          they wonder why nothing is happening. Renders nothing until something
+          is actually waiting. */}
+      <ConfirmSendDialog />
     </div>
   );
 }

@@ -1,0 +1,71 @@
+# Zaram backend - voice extra, ONNX runtime. Install with:
+#
+#     pip install -r backend/requirements-voice-onnx.txt
+#     python -m spacy download en_core_web_sm
+#
+# This is `requirements-voice.txt` with the tensor library swapped, not a
+# different engine. Same Kokoro-82M weights, same 54 voices, same Apache-2.0,
+# same output - see `voice/providers/kokoro_onnx.py` for what the swap costs
+# (one graph patch, to recover the per-phoneme durations lip sync reads).
+#
+# What comes out, measured on disk in backend/venv on 19 August 2026:
+#
+#     torch          494 MB      - the whole reason this file exists
+#     transformers    96 MB      - reached only through kokoro's KModel
+#     tokenizers, safetensors, sympy, networkx, mpmath - torch's own tail
+#
+# What goes in: onnxruntime, which the *mic* extra already installs because
+# faster-whisper depends on it, so on a machine that can listen the marginal
+# cost is zero. Plus `onnx` itself, which is needed once, to add an output to
+# the exported graph, and never again.
+#
+# What deliberately stays: spaCy and misaki. They are 125 MB and they are what
+# knows that "read" is not "read" and "lead" is not "lead". Dropping them for
+# the espeak fallback pinned below saves 97 MB and makes heteronyms wrong out
+# loud, which is a bad trade on the half of the stack the user hears.
+#
+# `spacy-curated-transformers` must NOT be added here, and is worth naming
+# because it is not obvious. spaCy loads plugin entry points from whatever is
+# installed, that plugin imports torch at module scope, and one contaminated
+# virtualenv therefore drags 494 MB back in through a package nobody asked for.
+# Found by running the ONNX path in a process where torch was unimportable -
+# see `voice/tests/test_kokoro_onnx_backend.py`.
+addict==2.4.0
+blis==1.3.3
+catalogue==2.0.10
+cloudpathlib==0.24.0
+confection==1.3.3
+cymem==2.0.13
+espeakng-loader==0.2.4
+fsspec==2026.6.0
+hf-xet==1.5.1
+huggingface_hub==1.23.0
+Jinja2==3.1.6
+loguru==0.7.3
+markdown-it-py==4.2.0
+MarkupSafe==3.0.3
+mdurl==0.1.2
+misaki==0.9.4
+murmurhash==1.0.15
+num2words==0.5.14
+onnx==1.22.0
+onnxruntime==1.29.0
+phonemizer-fork==3.3.2
+preshed==3.0.13
+PyYAML==6.0.3
+rich==15.0.0
+shellingham==1.5.4
+smart_open==8.0.0
+sounddevice==0.5.5
+soundfile==0.14.0
+spacy==3.8.14
+spacy-legacy==3.0.12
+spacy-loggers==1.0.5
+srsly==2.5.3
+thinc==8.3.13
+tqdm==4.68.3
+typer==0.26.8
+wasabi==1.1.3
+weasel==1.0.0
+win32_setctime==1.2.0
+wrapt==2.2.2

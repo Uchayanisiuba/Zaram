@@ -292,6 +292,36 @@ class TestKeywordFallbackStillWorks:
         assert router.classify("read that out loud") is not None
 
 
+def _fake_extractor(reply: str):
+    """An `ask` that returns fixed JSON, so structured kinds can be tested.
+
+    `DocumentsRuntime` reads an invoice, a spreadsheet or a deck into fields by
+    asking a model, and refuses outright when it has no way to ask. That
+    refusal is correct and must stay — a `.docx` of prose with `invoice` in the
+    filename is worse than no file, because the user believes they have one.
+
+    It also means a runtime built without an extractor cannot make any of the
+    three, which is what these tests were silently asserting when they were
+    written against the prose fallback. The model is stubbed rather than
+    removed: what is under test here is the runtime's routing, not a model's
+    reading comprehension, and `tests/test_extraction_across_models.py` is
+    where the reading itself is measured.
+    """
+    return lambda prompt, system: reply
+
+
+#: Enough of an invoice to build one — two line items and who they are for.
+#: Totals are deliberately absent: `total_of` computes them, because a language
+#: model producing a subtotal is a language model guessing at multiplication.
+INVOICE_JSON = (
+    '{"bill_to": ["Northwind Studios"], "currency": "NGN", "terms_days": 30, '
+    '"items": [{"description": "Design work", "quantity": 3, '
+    '"unit_price": 85000, "unit": "day"}]}'
+)
+
+TABLE_JSON = '{"header": ["Item", "Amount"], "rows": [["Design work", "255000"]]}'
+
+
 class TestTheDocumentsRuntime:
     @pytest.fixture
     def runtime(self, tmp_path):
@@ -305,6 +335,17 @@ class TestTheDocumentsRuntime:
         )
         runtime = DocumentsRuntime(service)
         asyncio.run(runtime.initialize())
+        return runtime
+
+    @pytest.fixture
+    def invoicing(self, runtime):
+        """The same runtime, able to read an answer into invoice fields."""
+        runtime.set_extractor(_fake_extractor(INVOICE_JSON))
+        return runtime
+
+    @pytest.fixture
+    def tabulating(self, runtime):
+        runtime.set_extractor(_fake_extractor(TABLE_JSON))
         return runtime
 
     @staticmethod
@@ -388,11 +429,11 @@ class TestTheDocumentsRuntime:
 
         assert result["success"]
 
-    def test_a_self_describing_request_needs_no_context(self, runtime):
+    def test_a_self_describing_request_needs_no_context(self, invoicing):
         """"Draft an invoice for the Northwind job at 85,000 a day" contains its
         own subject. Refusing it would be the rule misfiring."""
         result = self._run(
-            runtime,
+            invoicing,
             {
                 "prompt": "draft an invoice for the Northwind job at 85,000 a day",
                 "answer": "Invoice for Northwind Studios. Day rate 85,000 naira, "
@@ -417,12 +458,29 @@ class TestTheDocumentsRuntime:
         assert not result["success"]
         assert "needs the figures as data" in result["error"]
 
-    def test_the_requested_kind_picks_the_format(self, runtime):
+    def test_the_requested_kind_picks_the_format(self, tabulating):
         result = self._run(
-            runtime, {"prompt": "make me a spreadsheet", "answer": "Some rows."}
+            tabulating, {"prompt": "make me a spreadsheet", "answer": "Some rows."}
         )
 
         assert result["artifact"]["filename"].endswith(".xlsx")
+
+    def test_a_structured_kind_refuses_rather_than_writing_prose(self, runtime):
+        """No extractor, so no invoice — and no `.docx` pretending to be one.
+
+        This is the defect the structured path was built to end: "make me an
+        invoice" produced a document of the model's paragraphs with `invoice`
+        in the filename and no table anywhere in it. A prose fallback would
+        restore it, so the refusal is asserted rather than merely intended.
+        """
+        result = self._run(
+            runtime,
+            {"prompt": "draft an invoice for the Northwind job", "answer": "Some prose."},
+        )
+
+        assert not result["success"]
+        assert "artifact" not in result
+        assert "an invoice" in result["error"]
 
     def test_markdown_does_not_reach_the_document(self, runtime):
         """The model reaches for `**bold**` by habit. Left alone those are

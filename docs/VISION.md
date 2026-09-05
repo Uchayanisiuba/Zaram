@@ -2,7 +2,40 @@
 
 ---
 
-## The work that pays you is not the work that gets you paid
+## The assistant you open every day, that keeps what it learns
+
+**Corrected 29 August 2026, and the correction is narrow.** This document opened
+on the freelancer's unpaid admin hours for months. That story is true, sharp,
+and it is a *pack* — `CLAUDE.md` settled that on 16 August with "a universal
+base, with verticals as packs", and this file never caught up. Read the section
+below as the first pack's argument, not as the product's boundary.
+
+The product is what earns a **daily open**, and that is universal: an assistant
+one keystroke away that is fast, remembers you, reads your documents, and sends
+nothing you did not send. No profession appears in that sentence and no gate in
+the product adds one.
+
+The order matters and it is easy to get backwards: **usable daily → useful
+because it remembers → indispensable because it acts.** Obligations give someone
+a reason to open Zaram in week one. They give nobody a reason to open it on a
+Tuesday in month three, and without that Tuesday nothing went into the memory
+worth having.
+
+**Your models, your keys, and Zaram routes between them per question.** Bring a
+local model, bring a cloud key, or bring both. Five of the eight jobs people
+actually use AI for — writing, editing, summarising, rewriting, translating — a
+local 8–14B already does well, and it does them with no network round trip at
+all. The rest routes somewhere without the user thinking about it: consent and
+capability filter which models may answer, residency and preference order the
+ones that survive, and every reply names the model that answered and why.
+
+Zaram never buys inference. That is why the single-user tier is uncapped
+permanently rather than promotionally, and it is a structural fact about the
+architecture rather than a pricing decision anyone can reverse.
+
+---
+
+## The first pack: the work that pays you is not the work that gets you paid
 
 You are good at the thing you do. You are not paid for the hours around it — writing
 the quote, chasing the invoice, digging through a brief to remember what the client
@@ -67,7 +100,18 @@ The shape is identical across every business type; only the nouns change.
 | Researcher | grant deadlines, submission dates, ethics renewals |
 | Production | delivery dates, review rounds, render windows |
 
-One mechanism, every vertical. **The product is horizontal; the wedge is not.** We
+One mechanism, every vertical.
+
+> **Revised 16 August 2026 — read `CLAUDE.md` first.** The paragraph below argues
+> for a freelance wedge, and that is now only half right. Obligation extraction
+> genuinely is freelance-shaped, and it is now **the first pack** rather than the
+> entry point. What earns the daily open is universal — an assistant one keystroke
+> away that is fast, remembers you, reads your documents and sends nothing
+> anywhere — and that serves students, researchers, writers, developers,
+> consultants, and anyone whose documents are not allowed to leave. The section
+> below is kept because everything it says about the *mechanism* still holds.
+
+**The product is horizontal; the wedge is not.** We
 start with freelancers and one-person businesses because that is the sharpest version
 of the pain, reachable without a sales team, decided by one person, and felt
 personally. See `docs/PITCH.md`.

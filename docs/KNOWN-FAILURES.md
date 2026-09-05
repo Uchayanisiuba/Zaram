@@ -1,9 +1,21 @@
 # Known failures — classified by contract
 
-**Current: 0 failing, 0 skipped-by-accident. 1293 tests, ~2 minutes, from the
-repo root.**
+**Current: 0 failing. See `docs/MILESTONES.md` for the count — it is measured
+every session and was 1293 when this line was first written.**
 
 Run from the repo root. Not from `backend/`.
+
+**A test count without its condition is not a measurement — 19 August 2026.**
+The suite runs in roughly 4 minutes with Ollama up and roughly 20 with it down,
+because every provider probe waits for a timeout. More importantly it executes
+*different code*: a crash that stopped the backend booting hid for two weeks
+behind a green suite, because its branch only runs when models are discovered
+and every one is unselectable — which never happens with Ollama running and
+always happens on a machine that has never had it. The passing number was
+honest and answered a question nobody had asked.
+
+So this file no longer restates a total that drifts. When you record a count,
+record whether Ollama was running.
 
 ---
 

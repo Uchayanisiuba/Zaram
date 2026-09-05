@@ -59,34 +59,137 @@ async function walk(dir) {
   return out;
 }
 
-const findings = [];
+/** Lines that open a block comment, conservatively.
+ *
+ *  A block comment is only recognised when its opener starts the line. That is
+ *  narrower than JavaScript's real grammar and deliberately so: an opener
+ *  inside a string literal mid-line would otherwise begin a comment region that
+ *  never ends, and every line after it would go unscanned. The whole value of
+ *  this script is that it cannot be talked out of looking, so where the two
+ *  available errors are "flag a comment" and "miss a use", it takes the first.
+ *
+ *  Anchored at the line start covers what actually occurs: JSDoc headers and
+ *  the banners this codebase writes above every module. */
+const BLOCK_OPEN = /^\s*\/\*/;
 
-for (const file of await walk(SRC)) {
-  const rel = path.relative(SRC, file).split(path.sep).join('/');
-  const inQuarantine = rel.startsWith(`${QUARANTINE}/`);
-  const text = await readFile(file, 'utf8');
+/** Scan one file's text. Exported shape so the self-test below can drive it
+ *  with fixtures — a guard whose logic changed and was believed on inspection
+ *  is a guard nobody has checked. `check-visemes.mjs` was mutation-tested
+ *  before being trusted; this is the same debt, paid in the same currency. */
+export function scanText(text, { rel = 'fixture.ts', inQuarantine = false } = {}) {
+  const out = [];
+  let inBlockComment = false;
 
   text.split('\n').forEach((line, i) => {
     // Comments discuss this API by name — including this script's own
     // documentation elsewhere — and banning the word in prose would make the
     // rule unexplainable in the codebase that enforces it.
-    const code = line.replace(/\/\/.*$/, '').replace(/\/\*.*?\*\//g, '');
+    //
+    // Stripping only single-line comments was not enough: a module explaining
+    // *why* it does thirty lines of MediaRecorder plumbing rather than three
+    // lines of the banned API was itself reported, on a line that is prose.
+    // That is the check disagreeing with its own docstring, and the fix is to
+    // track the block rather than to stop explaining.
+    let scannable = line;
+    if (inBlockComment) {
+      const close = line.indexOf('*/');
+      if (close === -1) return;
+      inBlockComment = false;
+      scannable = line.slice(close + 2);
+    }
+    // Same-line pairs first, so an opener is only left over when it genuinely
+    // runs on to the next line.
+    scannable = scannable.replace(/\/\*.*?\*\//g, '');
+    if (BLOCK_OPEN.test(scannable) && !scannable.includes('*/')) {
+      inBlockComment = true;
+      scannable = scannable.replace(/\/\*.*$/, '');
+    }
+
+    const code = scannable.replace(/\/\/.*$/, '');
 
     if (!inQuarantine && CLOUD_SPEECH.test(code)) {
-      findings.push(
+      out.push(
         `${rel}:${i + 1} uses the Web Speech API, which streams microphone ` +
           `audio to Google.\n      ${line.trim()}`,
       );
     }
     const legacy = code.match(LEGACY_IMPORT);
     if (!inQuarantine && legacy) {
-      findings.push(
+      out.push(
         `${rel}:${i + 1} imports from the quarantine: ${legacy[1]}\n` +
           `      legacy/ holds cloud speech recognition. Reaching into it ` +
           `makes that reachable.`,
       );
     }
   });
+
+  return out;
+}
+
+/** Does the scanner still catch the thing it exists to catch?
+ *
+ *  Every case here is a real way the check could have been broken by the
+ *  block-comment tracking, and each one was run and observed to fail before the
+ *  tracking existed or after it was deliberately broken. A guard that has only
+ *  ever been seen to pass has not been tested — it has been *watched*.
+ */
+function selfTest() {
+  const cases = [
+    ['a bare construction', 'const r = new webkitSpeechRecognition();', 1],
+    ['the unprefixed spelling', 'const R = window.SpeechRecognition;', 1],
+    ['a grammar list', 'const g = new SpeechGrammarList();', 1],
+    ['an import from the quarantine', "import X from '@/legacy/panels/ChatInterface';", 1],
+    ['prose in a line comment', '// webkitSpeechRecognition is banned here', 0],
+    [
+      'prose in a block comment',
+      '/**\n * We do not use webkitSpeechRecognition.\n */\nexport const ok = 1;',
+      0,
+    ],
+    [
+      'code after a block comment closes — the regression this tracking could cause',
+      '/**\n * Prose.\n */\nconst r = new webkitSpeechRecognition();',
+      1,
+    ],
+    [
+      'code on the same line a block comment closes',
+      '/* prose */ const r = new webkitSpeechRecognition();',
+      1,
+    ],
+    [
+      'an unterminated block comment must not swallow the rest of the file',
+      'const s = "/*";\nconst r = new webkitSpeechRecognition();',
+      1,
+    ],
+  ];
+
+  const failures = [];
+  for (const [name, source, expected] of cases) {
+    const found = scanText(source).length;
+    if (found !== expected) {
+      failures.push(`  - ${name}: expected ${expected} finding(s), got ${found}`);
+    }
+  }
+  if (failures.length) {
+    console.error('\ncheck-no-cloud-speech self-test FAILED:\n');
+    console.error(failures.join('\n'));
+    console.error('\nThe scanner no longer detects what it exists to detect.\n');
+    process.exit(1);
+  }
+  console.log(`check-no-cloud-speech: self-test clean — ${cases.length} cases.`);
+}
+
+selfTest();
+
+const findings = [];
+
+for (const file of await walk(SRC)) {
+  const rel = path.relative(SRC, file).split(path.sep).join('/');
+  findings.push(
+    ...scanText(await readFile(file, 'utf8'), {
+      rel,
+      inQuarantine: rel.startsWith(`${QUARANTINE}/`),
+    }),
+  );
 }
 
 if (findings.length) {

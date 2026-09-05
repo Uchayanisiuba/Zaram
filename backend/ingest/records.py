@@ -133,39 +133,68 @@ class IngestRecords:
             )
             return source_id
 
+    _INSERT_OUTCOME = (
+        "INSERT INTO outcomes (id, source_id, path, name, status, parser, chars,"
+        " pages, fact_ids, reason, remedy, seconds, recorded_at)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    )
+
+    @staticmethod
+    def _row(source_id: str, outcome: IngestOutcome, now: float) -> tuple[Any, ...]:
+        return (
+            f"out-{uuid.uuid4().hex[:12]}",
+            source_id,
+            outcome.path,
+            outcome.name,
+            outcome.status.value,
+            outcome.parser,
+            outcome.chars,
+            outcome.pages,
+            json.dumps(list(outcome.fact_ids)),
+            outcome.reason,
+            outcome.remedy,
+            outcome.seconds,
+            now,
+        )
+
     def record_outcomes(self, source_id: str, outcomes: list[IngestOutcome]) -> None:
         """Replace this source's outcomes with the ones from the latest run.
 
         Replace rather than append: a list showing yesterday's failure beside
         today's success for the same file cannot be read, and the user's
         question is always "what is wrong *now*".
+
+        **Only correct when the run saw the whole source.** A folder scan does;
+        a drop of two files into the shared uploads directory does not, and
+        calling this for one would delete the other forty files' rows — losing
+        their `fact_ids` and with them the only route rule 4 has to take those
+        facts back out of the Spine. `merge_outcomes` is that case.
         """
         now = time.time()
         with self._lock, self._connect() as connection:
             connection.execute("DELETE FROM outcomes WHERE source_id = ?", (source_id,))
             connection.executemany(
-                "INSERT INTO outcomes (id, source_id, path, name, status, parser, chars,"
-                " pages, fact_ids, reason, remedy, seconds, recorded_at)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                [
-                    (
-                        f"out-{uuid.uuid4().hex[:12]}",
-                        source_id,
-                        outcome.path,
-                        outcome.name,
-                        outcome.status.value,
-                        outcome.parser,
-                        outcome.chars,
-                        outcome.pages,
-                        json.dumps(list(outcome.fact_ids)),
-                        outcome.reason,
-                        outcome.remedy,
-                        outcome.seconds,
-                        now,
-                    )
-                    for outcome in outcomes
-                ],
+                self._INSERT_OUTCOME,
+                [self._row(source_id, outcome, now) for outcome in outcomes],
             )
+
+    def merge_outcomes(self, source_id: str, outcomes: list[IngestOutcome]) -> None:
+        """Record these files' outcomes, leaving the source's others alone.
+
+        For a run that saw only part of a source — a drop, a paste, an upload.
+        Per *path* rather than wholesale, so re-reading one file still replaces
+        its own row and the "what is wrong now" property holds per file; every
+        other row survives, along with the fact ids that make its facts
+        removable.
+        """
+        now = time.time()
+        with self._lock, self._connect() as connection:
+            for outcome in outcomes:
+                connection.execute(
+                    "DELETE FROM outcomes WHERE source_id = ? AND path = ?",
+                    (source_id, outcome.path),
+                )
+                connection.execute(self._INSERT_OUTCOME, self._row(source_id, outcome, now))
 
     def sources(self) -> list[dict[str, Any]]:
         """Every folder, with its counts. What Knowledge lists."""
@@ -332,6 +361,50 @@ class IngestRecords:
                 "UPDATE sources SET policy = ? WHERE id = ?", (policy, source_id)
             )
             return cursor.rowcount > 0
+
+    def source_root(self, source_id: str) -> str | None:
+        """The absolute path this source stands for, or None if unknown.
+
+        Needed because *where* a source is decides what withdrawing it may
+        delete: files under the uploads directory are copies Zaram made, and a
+        scanned folder holds the user's own originals. The caller makes that
+        judgement — this only reports the place.
+        """
+        with self._lock, self._connect() as connection:
+            row = connection.execute(
+                "SELECT root FROM sources WHERE id = ?", (source_id,)
+            ).fetchone()
+        return str(row["root"]) if row else None
+
+    def remove_outcome(self, outcome_id: str) -> list[str] | None:
+        """Forget one file. Returns the fact ids it produced, or None if absent.
+
+        The per-file counterpart to :meth:`remove_source`, and it exists
+        because the source is the wrong unit for this. A dropped image lands in
+        the uploads directory alongside every other dropped document, so the
+        only removal available was withdrawing that entire source -- throwing
+        away every file the user had ever pasted in order to be rid of one PNG.
+        Rule 4 says the user can delete any stored thing; "all of them or none"
+        is not that.
+
+        The source row is deliberately left in place, even when this was its
+        last file. An uploads directory with nothing in it is still where the
+        next dropped file goes, and deleting the row would make the next drop
+        silently re-create it under a new id -- detaching it from any domain
+        that pointed at the old one.
+
+        Like `remove_source`, this does not touch the Spine. Rule 4 belongs to
+        whoever owns the facts.
+        """
+        with self._lock, self._connect() as connection:
+            row = connection.execute(
+                "SELECT fact_ids FROM outcomes WHERE id = ?", (outcome_id,)
+            ).fetchone()
+            if row is None:
+                return None
+            fact_ids = list(json.loads(row["fact_ids"]))
+            connection.execute("DELETE FROM outcomes WHERE id = ?", (outcome_id,))
+        return fact_ids
 
     def remove_source(self, source_id: str) -> list[str]:
         """Forget a folder. Returns the fact ids its files produced.

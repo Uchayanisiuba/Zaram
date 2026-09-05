@@ -32,7 +32,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 
 
 class ArtifactKind(str, Enum):
@@ -46,6 +46,33 @@ class ArtifactKind(str, Enum):
     DOCUMENT = "document"
     SPREADSHEET = "spreadsheet"
     CHART = "chart"
+    #: A CV, which is a kind rather than a longer document.
+    #:
+    #: **It used to fall through to `DOCUMENT`**, which meant "write my CV"
+    #: produced a proposal's layout — a ruled masthead, a metadata grid,
+    #: justified prose — with somebody's career inside it. A CV is read by
+    #: scanning down a column of dates, so its layout is not a variation on a
+    #: report's; it is a different one, and `render_cv` is where that lives.
+    CV = "cv"
+    #: Slides. A *kind*, not a format — the .pptx exporter reads headings, so
+    #: any document can be exported as slides. This exists for the case where
+    #: the user asked for a deck, so the outline is what gets previewed and
+    #: `.pptx` is what gets written by default.
+    DECK = "deck"
+    #: A picture Zaram drew, from a prompt rather than from data.
+    #:
+    #: Distinct from `CHART`, which is also a PNG and is not the same thing: a
+    #: chart is *derived from numbers the user has* and always carries the data
+    #: table that makes it checkable, while an image is drawn from a
+    #: description and has no numbers behind it to check. Folding the two
+    #: together would either put an empty data table under every picture or
+    #: quietly drop the one under every chart, and the second is the relief
+    #: `export/chart.py` says is mandatory rather than decorative.
+    #:
+    #: Both export as `.png` through the same exporter, because both embed the
+    #: image in their HTML as a data URI and getting it back out is a base64
+    #: decode either way.
+    IMAGE = "image"
 
 
 class Origin(str, Enum):
@@ -130,6 +157,129 @@ class Claim:
             "source_revision": self.source_revision,
             "verified_at": self.verified_at,
         }
+
+
+# --------------------------------------------------------------------------- #
+# The document's content model.
+#
+# `render_document` used to take `Sequence[str | Claim]` and wrap **every**
+# member in `<p>`, escaping it on the way. There was no way to express a
+# heading, a list or a table, so a model asked for a proposal produced markdown
+# that came out as literal text: a paragraph reading `## Scope of Work`, another
+# reading `- Discovery`, and a table rendered as one mangled block of pipes.
+#
+# That was the whole reason generated documents read as basic. The page design
+# was never the problem — the A4 page box, the serif measure, the masthead and
+# the table rules were all already here. **The vocabulary to reach them was
+# missing at the one end that writes.**
+#
+# It was missing only at that end. `export/_reader.py` already parses
+# `h1, h2, h3, p, li` plus `table/caption/tr/td/th`, and `export/docx.py`
+# already maps headings to Word heading styles and `li` to "List Bullet". The
+# readers were built for a document that the writer could not produce, which is
+# this repository's signature shape arriving from the far side.
+#
+# So these types are deliberately **not a new format**. Each one names markup
+# the exporters already understand, and nothing here invents a tag they would
+# have to learn.
+# --------------------------------------------------------------------------- #
+
+
+@dataclass(frozen=True)
+class RichText:
+    """Inline HTML that has already been made safe, and is not escaped again.
+
+    Every other piece of text in a document goes through `_esc`. This one does
+    not, so the *only* thing permitted to construct it is a converter that
+    guarantees two properties, and `markdown_blocks.py` is currently the only
+    one:
+
+    * text content is escaped;
+    * the tag set is exactly `strong`, `em`, `code` and `br` — the inline
+      vocabulary `export/_reader.py` parses, and nothing else.
+
+    That second bound is the load-bearing one and it is narrower than "safe
+    HTML". A tag the readers do not know is not a security problem, it is a
+    *silent* problem: it survives into the HTML, looks correct in the preview,
+    and vanishes on export to .docx with nothing reporting it. Restricting the
+    set to what the readers already handle is what makes the preview and the
+    exported file agree.
+
+    `img` is dropped rather than passed through, and its alt text kept. A
+    markdown image points at a URL, and a document that fetches one is a remote
+    asset — the class `check-no-remote-assets.mjs` exists to keep out, arriving
+    inside a data file where that check cannot see it.
+    """
+
+    html: str
+
+
+@dataclass(frozen=True)
+class Heading:
+    """A section heading.
+
+    ``level`` is 2 or 3. There is no level 1: `<h1>` is the document title, set
+    once by the masthead, and a second one would give the .docx two competing
+    Title styles and the PDF outline two roots.
+    """
+
+    text: str
+    level: int = 2
+
+    def __post_init__(self) -> None:
+        if self.level not in (2, 3):
+            raise ValueError("heading level must be 2 or 3; h1 is the title")
+
+
+@dataclass(frozen=True)
+class BulletList:
+    """A list. ``ordered`` picks `<ol>` over `<ul>`.
+
+    Items may be Claims, so a cited fact can sit in a list rather than being
+    forced into prose to keep its anchor — which is what the old model made a
+    caller do.
+    """
+
+    items: Sequence[Any] = ()
+    ordered: bool = False
+
+
+@dataclass(frozen=True)
+class TableBlock:
+    """A table inside a prose document.
+
+    Distinct from an `ArtifactKind.SPREADSHEET`, which *is* a table. This is a
+    table **in** a document — a fee schedule inside a proposal, a milestone list
+    inside a statement of work.
+
+    ``numeric_columns`` carries the `.num` class the stylesheet already defines
+    for right-aligned tabular figures. It is passed by the caller rather than
+    guessed from cell contents, for the reason `_TABLE_STYLE` records: a
+    heuristic reading digits would right-align a reference number.
+    """
+
+    header: Sequence[str] = ()
+    rows: Sequence[Sequence[str]] = ()
+    caption: str = ""
+    numeric_columns: Sequence[int] = ()
+
+
+@dataclass(frozen=True)
+class PageBreak:
+    """Start the next block on a new page.
+
+    Carries no content. Present because a covering letter and the document it
+    covers are one file, and the break between them is a decision the author
+    makes rather than a consequence of how the text happened to flow.
+    """
+
+
+#: Everything `render_document` accepts as a member of ``blocks``.
+#:
+#: `str` and `Claim` stay first and stay supported unchanged: every existing
+#: caller keeps working, which is what let this land without touching the
+#: invoice, deck or spreadsheet paths.
+DocumentBlock = Any
 
 
 @dataclass

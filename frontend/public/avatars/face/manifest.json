@@ -1,0 +1,148 @@
+{
+  "alpha": 255,
+  "atlases": {
+    "eyes": {
+      "expressions": {
+        "blink": {
+          "index": 1,
+          "offset": [
+            0.25,
+            0.75
+          ]
+        },
+        "happy": {
+          "index": 6,
+          "offset": [
+            0.5,
+            0.5
+          ]
+        },
+        "happy_blink": {
+          "index": 7,
+          "offset": [
+            0.75,
+            0.5
+          ]
+        },
+        "listening": {
+          "index": 3,
+          "offset": [
+            0.75,
+            0.75
+          ]
+        },
+        "open": {
+          "index": 0,
+          "offset": [
+            0.0,
+            0.75
+          ]
+        },
+        "swapping": {
+          "index": 4,
+          "offset": [
+            0.0,
+            0.5
+          ]
+        },
+        "thinking": {
+          "index": 2,
+          "offset": [
+            0.5,
+            0.75
+          ]
+        },
+        "warming": {
+          "index": 5,
+          "offset": [
+            0.25,
+            0.5
+          ]
+        }
+      },
+      "filename": "eyes_atlas_4x4.png",
+      "size": [
+        768,
+        768
+      ]
+    },
+    "mouth": {
+      "expressions": {
+        "aa": {
+          "index": 1,
+          "offset": [
+            0.25,
+            0.75
+          ]
+        },
+        "ee": {
+          "index": 4,
+          "offset": [
+            0.0,
+            0.5
+          ]
+        },
+        "ih": {
+          "index": 2,
+          "offset": [
+            0.5,
+            0.75
+          ]
+        },
+        "oh": {
+          "index": 5,
+          "offset": [
+            0.25,
+            0.5
+          ]
+        },
+        "ou": {
+          "index": 3,
+          "offset": [
+            0.75,
+            0.75
+          ]
+        },
+        "sil": {
+          "index": 0,
+          "offset": [
+            0.0,
+            0.75
+          ]
+        },
+        "smile": {
+          "index": 6,
+          "offset": [
+            0.5,
+            0.5
+          ]
+        }
+      },
+      "filename": "mouth_atlas_4x4.png",
+      "size": [
+        768,
+        768
+      ]
+    }
+  },
+  "background": "#000000",
+  "dim_colour": "#2D3157",
+  "dot_radius": 3,
+  "filtering": "linear + mipmaps",
+  "frame": {
+    "height": 256,
+    "width": 256
+  },
+  "grid": {
+    "cols": 32,
+    "rows": 32
+  },
+  "lit_colour": "#818cf8",
+  "pitch": 8,
+  "repeat": [
+    0.25,
+    0.25
+  ],
+  "supersample": 4,
+  "version": "zaram-led-face-v4"
+}

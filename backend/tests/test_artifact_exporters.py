@@ -64,11 +64,24 @@ SOURCES = [
 
 @pytest.fixture
 def document_html() -> str:
+    """A proposal that argues from evidence, so it prints its sources.
+
+    `include_provenance=True` is explicit here and is no longer the default.
+    A document is written for its recipient: an invoice goes to a client who has
+    no use for `memory:55b6` at the foot of it. A proposal is the other case —
+    citation is part of the genre — which is why these exporter tests use one.
+
+    What they assert is unchanged and still matters: **when** a document carries
+    provenance, the exporters must preserve it, as .docx bookmarks and Markdown
+    footnotes. Turning it off by default would be worthless if the machinery
+    behind it rotted.
+    """
     return render_document(
         title="Proposal — Northwind",
         blocks=["Here is the scope.", CLAIMS[0], CLAIMS[1], "Work begins on signature."],
         sources=SOURCES,
         claims=CLAIMS,
+        include_provenance=True,
     )
 
 
@@ -227,7 +240,12 @@ class TestDocxClaimsLinkToTheirSource:
     def test_the_document_says_when_nothing_was_recalled(self):
         """A real state, stated. Not an empty Sources heading, which reads as a
         rendering failure."""
-        html = render_document(title="T", blocks=["Plain prose."], sources=[], claims=[])
+        # Provenance requested and none found. The "nothing was recalled" line
+        # only makes sense in a document that was going to print its sources —
+        # a document that never asked for them says nothing, correctly.
+        html = render_document(
+            title="T", blocks=["Plain prose."], sources=[], claims=[], include_provenance=True
+        )
 
         xml = self._document_xml(export.render(html, "docx"))
 
@@ -371,7 +389,13 @@ class TestCharts:
         assert "<table>" in html
 
     def test_exporting_a_document_as_png_says_what_is_wrong(self, document_html):
-        with pytest.raises(ValueError, match="does not contain one"):
+        # "contains neither" rather than "does not contain one": the exporter
+        # now serves both PNG-carrying kinds — a chart drawn from the user's
+        # numbers and a picture drawn from a prompt — because both embed the
+        # image in their HTML the same way and getting it back out is the same
+        # base64 decode. The old wording said png was "only meaningful for a
+        # chart", which stopped being true when the image kind landed.
+        with pytest.raises(ValueError, match="contains neither"):
             export.render(document_html, "png")
 
 

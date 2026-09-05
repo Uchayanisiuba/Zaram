@@ -66,6 +66,12 @@ export interface IngestSource {
   counts: Partial<Record<IngestStatus, number>>;
   total: number;
   problems: number;
+  /** True when this source is Zaram's own uploads directory — the files in it
+   *  are copies Zaram wrote when documents were dropped or pasted, so
+   *  withdrawing it deletes them. A scanned folder holds the user's originals
+   *  and withdrawing it never touches the disk. The backend answers this; it is
+   *  deliberately not inferred from the folder's name. */
+  staged: boolean;
 }
 
 /** One event from the ingest stream. Progress is per file, never a percentage:
@@ -116,18 +122,43 @@ export async function setSourcePolicy(
   });
 }
 
-export async function removeSource(sourceId: string): Promise<{ facts_removed: number }> {
+/**
+ * Remove one file from Knowledge, leaving the rest of its source alone.
+ *
+ * `removeSource` is the wrong unit for a single document: every dropped or
+ * pasted file shares one uploads source, so withdrawing it to be rid of one
+ * image discards everything ever pasted. Rule 4 says the user can delete any
+ * stored thing, and "all of them or none" is not that.
+ *
+ * `files_deleted` counts only copies Zaram made -- a scanned folder holds the
+ * user's originals and they are never unlinked.
+ */
+export async function removeFile(
+  outcomeId: string,
+): Promise<{
+  id: string;
+  name: string;
+  source_id: string;
+  facts_removed: number;
+  facts_recorded: number;
+  files_deleted: number;
+}> {
+  return json(`/ingest/outcomes/${outcomeId}`, { method: 'DELETE' });
+}
+
+export async function removeSource(
+  sourceId: string,
+): Promise<{ facts_removed: number; facts_recorded: number; files_deleted: number }> {
   return json(`/ingest/sources/${sourceId}`, { method: 'DELETE' });
 }
 
 /**
- * Start an ingest and call `onEvent` as each file finishes.
+ * Index a folder, calling `onEvent` as each file finishes.
  *
- * NDJSON, decoded the same way `chatClient` decodes it — including the two
- * cases that only appear under load and are easy to get wrong: a JSON object
- * split across chunk boundaries, and a multi-byte character split mid-sequence.
- * `TextDecoder` with `stream: true` handles the second; the line buffer handles
- * the first.
+ * The three ways in — a folder, dropped files, pasted text — emit one NDJSON
+ * vocabulary and share `consume` below. That is the backend's decision as much
+ * as this file's: a second event shape would be a second set of split-chunk
+ * bugs, and this one has already been through them.
  */
 export async function ingestFolder(
   path: string,
@@ -140,9 +171,80 @@ export async function ingestFolder(
     body: JSON.stringify({ path }),
     signal,
   });
+  await consume(response, onEvent);
+}
 
+/**
+ * Dropped, chosen or pasted files.
+ *
+ * No `Content-Type` header: the browser has to set it, because a multipart
+ * body is worthless without the boundary it generates, and naming the type by
+ * hand omits it.
+ */
+export async function uploadFiles(
+  files: File[],
+  onEvent: (event: IngestEvent) => void,
+  signal?: AbortSignal,
+  projectId?: string,
+): Promise<void> {
+  const form = new FormData();
+  for (const file of files) form.append('files', file, file.name);
+  // Present only when a project asked for the import. Rule 7i's scope reaches
+  // the Spine from here: the same bytes, the same parsers and the same uploads
+  // directory as a drop into Knowledge, with every fact scoped to the project
+  // instead of global. An id the backend does not know is refused rather than
+  // indexed globally, because that is the one outcome nothing can undo.
+  if (projectId) form.append('project_id', projectId);
+
+  const response = await fetch(`${API_BASE}/ingest/upload`, {
+    method: 'POST',
+    body: form,
+    signal,
+  });
+  await consume(response, onEvent);
+}
+
+/** Pasted text. Written as a file and read by the same parser as any other —
+ *  see the route, which explains why it does not go straight into the Spine. */
+export async function ingestText(
+  text: string,
+  name: string,
+  onEvent: (event: IngestEvent) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  const response = await fetch(`${API_BASE}/ingest/text`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text, name }),
+    signal,
+  });
+  await consume(response, onEvent);
+}
+
+/**
+ * Read one NDJSON ingest stream, whatever produced it.
+ *
+ * Shared rather than repeated per route, because the two cases that are easy
+ * to get wrong only appear under load: a JSON object split across chunk
+ * boundaries, and a multi-byte character split mid-sequence. Three copies of
+ * this would be three chances to fix only one of them.
+ *
+ * A refusal carries the backend's own sentence — "that file is larger than
+ * 100 MB", "there was nothing in that" — rather than a status code, because
+ * the status code is not something the user can act on.
+ */
+async function consume(
+  response: Response,
+  onEvent: (event: IngestEvent) => void,
+): Promise<void> {
   if (!response.ok || !response.body) {
-    throw new Error(`Ingest failed: ${response.status} ${response.statusText}`);
+    let detail = '';
+    try {
+      detail = ((await response.json()) as { detail?: string }).detail ?? '';
+    } catch {
+      /* not every failure has a body */
+    }
+    throw new Error(detail || `Ingest failed: ${response.status} ${response.statusText}`);
   }
 
   const reader = response.body.getReader();

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Home, Brain, BookOpen, FileText, ShieldCheck, Settings, Search, FolderOpen, Database, Clock } from 'lucide-react'
+import { Home, Brain, BookOpen, FileText, Layers, ShieldCheck, Settings, Search, FolderOpen, Database, Clock } from 'lucide-react'
 import ResizeHandle from '@/components/common/ResizeHandle'
 import {
   useLayoutStore,
@@ -29,6 +29,9 @@ const NAV_ICONS: Record<WorkspaceId, React.ReactNode> = {
   // entry, navigating into a workspace was a one-way trip.
   landing: <Home size={32} />,
   work: <FileText size={32} />,
+  // Layers, not a folder. Project groups work; it does not browse a filesystem,
+  // and a folder icon would promise the tree CLAUDE.md rules out.
+  project: <Layers size={32} />,
   memory: <Brain size={32} />,
   knowledge: <BookOpen size={32} />,
   // Activity is evidence rather than content, which is why its icon is the odd
@@ -39,11 +42,23 @@ const NAV_ICONS: Record<WorkspaceId, React.ReactNode> = {
 
 const NAV_LABELS: Partial<Record<WorkspaceId, string>> = { landing: 'Home' }
 
-const NAV_ITEMS: NavItem[] = surfaceOrder.map((id) => ({
-  id,
-  icon: NAV_ICONS[id],
-  label: NAV_LABELS[id] ?? surfaceLabels[id],
-}))
+// Settings is pinned below the divider at the foot of the rail, so it is left
+// out here. It was in both places and drew **two Settings buttons** — the same
+// node twice, three rows apart, which reads as two different destinations.
+//
+// The list is still derived rather than written out: the exclusion is one named
+// id, so a seventh node still arrives automatically. That distinction is the
+// whole lesson of `orbitOrder` — a restatement drifts, a derivation minus one
+// deliberate omission does not.
+const PINNED_TO_FOOT: WorkspaceId = 'settings'
+
+const NAV_ITEMS: NavItem[] = surfaceOrder
+  .filter((id) => id !== PINNED_TO_FOOT)
+  .map((id) => ({
+    id,
+    icon: NAV_ICONS[id],
+    label: NAV_LABELS[id] ?? surfaceLabels[id],
+  }))
 
 const RECENT_CONTEXTS = [
   { icon: <FolderOpen size={24} />, label: 'zaram-core v0.4.2', sub: '2 min ago' },
@@ -172,12 +187,18 @@ export default function LeftRail({ workspace, onNavigate }: LeftRailProps) {
 
       <div style={{ height: 1, background: 'var(--color-border-subtle)', margin: '8px 0' }} />
 
-      {/* Settings */}
+      {/* Settings, pinned to the foot — the only copy. Its icon and label come
+          from the same registry as every other node rather than being written
+          out here, so a rename cannot leave this one saying the old name. */}
       <RailItem
-        item={{ id: 'settings', icon: <Settings size={32} />, label: 'Settings' }}
-        active={workspace === 'settings'}
+        item={{
+          id: PINNED_TO_FOOT,
+          icon: NAV_ICONS[PINNED_TO_FOOT],
+          label: surfaceLabels[PINNED_TO_FOOT],
+        }}
+        active={workspace === PINNED_TO_FOOT}
         expanded={expanded}
-        onClick={() => onNavigate('settings')}
+        onClick={() => onNavigate(PINNED_TO_FOOT)}
       />
     </aside>
 

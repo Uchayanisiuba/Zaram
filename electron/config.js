@@ -42,7 +42,14 @@ function createConfig(options) {
       baseUrl: `http://127.0.0.1:${backendPort}`,
       port: backendPort,
       healthPath: '/health',
-      startupTimeoutMs: 30000,
+      // Measured, not chosen: a cold boot on a developer machine with a
+      // populated Spine took 148 s on 26 August 2026 — 13 s to reindex, then
+      // 131 s in semantic intent routing, which logs nothing while it runs.
+      // At 30,000 ms the window showed `error.html` every time and read as a
+      // black screen. This is deliberately well clear of the measurement
+      // rather than just above it, because the slow step scales with the
+      // number of routing exemplars and nothing caps it.
+      startupTimeoutMs: 240000,
       pollIntervalMs: 2000,
       restartDelayMs: 3000,
     },
@@ -52,17 +59,52 @@ function createConfig(options) {
       url: isDev ? `http://localhost:${rendererDevPort}` : `http://127.0.0.1:${staticPort}`,
       staticDir: frontendDist,
       staticPort,
+      // Every backend prefix the packaged origin must forward to 8420.
+      //
+      // **This list is not a convenience, it is the packaged product's routing
+      // table**, and it was missing eleven prefixes. `createStaticServer`
+      // serves anything it does not recognise from `frontend/dist`, so a
+      // forgotten prefix does not 404 — it answers **200 with index.html**, and
+      // the client hands HTML to `response.json()`. Measured against the built
+      // app: `/health` and `/chat` returned 502 with no backend running, which
+      // is a proxy working; `/egress`, `/artifacts`, `/providers`, `/export`,
+      // `/character`, `/routing/preference` and `/projects` all returned 200
+      // and a document. The egress log and the exporter — rules 3 and 7 — were
+      // unreachable in every packaged build, and only in packaged builds.
+      //
+      // The dev proxy in `frontend/vite.config.js` had all of them, which is
+      // why nobody saw it: development is the environment that does not use
+      // this list. `check-proxy-covers-backend.mjs` now checks both, and its
+      // own header used to reason that "the packaged build does not use the
+      // proxy at all" — the premise, not the code, is what was wrong.
+      //
+      // Add a prefix here whenever one is added to the backend. The guard
+      // fails the build if this drifts, so the list stays explicit rather than
+      // derived: an allow-list nobody can quietly widen is the same reason
+      // `electron-builder.yml` names what it ships.
       apiProxyPrefixes: [
         '/api',
-        '/chat',
-        '/personalities',
+        '/artifacts',
         '/audio',
-        '/models',
+        '/character',
+        '/chat',
+        '/conversations',
+        '/egress',
+        '/export',
         '/garage',
-        '/knowledge',
-        '/voice',
         '/health',
+        '/ingest',
+        '/knowledge',
         '/memory',
+        '/models',
+        '/obligations',
+        '/personalities',
+        '/projects',
+        '/providers',
+        '/readiness',
+        '/routing',
+        '/search',
+        '/voice',
       ],
     },
     window: {

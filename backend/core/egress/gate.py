@@ -50,11 +50,12 @@ import json
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any, Callable
 
 from .log import EgressLog
-from .policy import EgressPolicy, Mode
+from .policy import DataClass, EgressPolicy, Mode
 
 #: Hostnames that never leave the machine. ``localhost`` and the reserved
 #: ``.localhost`` TLD are loopback by RFC 6761.
@@ -111,6 +112,24 @@ class EgressRequest:
     url: str
     body: str | None
     source: str
+    #: What kind of thing is leaving — rule 7j's second dimension.
+    #:
+    #: **Not a `source` label, and the difference is the one `SearchReadGrant`
+    #: already had to learn.** `source` is what a call site says about itself
+    #: and is enforced nowhere; this is what the *body* is, and it decides
+    #: which permission applies. The distinction survives only as long as
+    #: nobody widens a grant by renaming their caller, so the classes are a
+    #: closed enum and the sensitive ones can never be reached by default.
+    data_class: DataClass = DataClass.PROMPT
+    #: Why the confirm hook said no, when it did not say no on the user's behalf.
+    #:
+    #: The log's default wording for a refusal is "you chose not to send this",
+    #: which is true when a person clicked the button and false in every other
+    #: way a confirmation can fail. A hook that could not reach anyone sets this
+    #: instead, so the record says what actually happened. An append-only,
+    #: tamper-evident log that confidently attributes a decision to a user who
+    #: never saw the question is worse than one that admits it does not know.
+    refusal_reason: str | None = None
 
     @property
     def literal_text(self) -> str:
@@ -132,6 +151,58 @@ ConfirmFn = Callable[[EgressRequest], bool]
 
 def _refuse_by_default(_: EgressRequest) -> bool:
     return False
+
+
+@dataclass(frozen=True)
+class SearchReadGrant:
+    """Permission to read a named set of pages a search has just returned.
+
+    **Why a capability and not a rule.** Reading a search result means fetching
+    a host the *search engine* chose. The user cannot predict it and so cannot
+    pre-allow it, and under default-deny every page is therefore refused —
+    which is how "who won the Osun state election" came to be answered from a
+    headline embedded in a URL while the article sat unread. Asking per host
+    would ask the same question forty times to answer one question, which is
+    the failure rule 7j was written about: consent once per destination *and
+    data class*, then remember.
+
+    **Why not a `source` label.** The first attempt at this keyed the exemption
+    off ``source="internet.deep_read"`` — a string the caller supplies about
+    itself. That is `X-Zaram-Client` again: a label enforced as a credential,
+    and it would have let any present or future call site skip default-deny by
+    naming itself correctly. This module's own docstring already forbids the
+    shape: a caller that can declare its own request exempt has put rule 3 back
+    into the realm of convention.
+
+    So the grant carries **the exact URLs**, normalised, and permits nothing
+    else. A caller cannot widen it by describing itself differently; it can
+    only widen it by already holding the URL, which is not an escalation
+    because it had to come from somewhere.
+
+    What this deliberately does not claim
+    -------------------------------------
+    It does not prove the URLs came from a search — the gate cannot know that,
+    and pretending otherwise would be a second label. What it buys is that the
+    exemption is **explicit at the call site and narrow in scope**: constructing
+    one is a deliberate act that reads as one in review, rather than something a
+    new call site inherits by accident.
+
+    Only `GET`, and only with no body — asserted in `permits`, not promised.
+    Nothing derived from the Spine can travel on one of these, because there is
+    no field for it to travel in. Rule 8 stays structural.
+    """
+
+    #: Exact URLs, as they will be requested.
+    urls: frozenset[str]
+
+    @staticmethod
+    def of(urls: Any) -> "SearchReadGrant":
+        return SearchReadGrant(frozenset(str(u) for u in urls if u))
+
+    def permits(self, request: EgressRequest) -> bool:
+        if request.method.upper() != "GET" or request.body:
+            return False
+        return request.url in self.urls
 
 
 class EgressGate:
@@ -165,7 +236,9 @@ class EgressGate:
     # ----------------------------------------------------------------- check
 
     def check(self, url: str, *, method: str = "GET", body: str | None = None,
-              source: str = "unknown") -> EgressRequest | None:
+              source: str = "unknown",
+              data_class: DataClass = DataClass.PROMPT,
+              grant: "SearchReadGrant | None" = None) -> EgressRequest | None:
         """Decide and log, without performing the request.
 
         Returns the approved :class:`EgressRequest`, or ``None`` when the
@@ -176,13 +249,56 @@ class EgressGate:
         here and then use their own client to send. The verdict is still made
         and logged in one place, which is the property that matters.
         """
+        # Loopback returns before the policy is consulted, and that is
+        # deliberate even with the kill switch on. A request to 127.0.0.1
+        # cannot leave the machine, so it is not egress and there is nothing to
+        # cut; sealing it would stop Ollama answering and turn "cut all
+        # outbound traffic" into "stop the product working", which is not what
+        # anyone reaching for that switch means. The switch is about bytes
+        # leaving, and these do not.
         if is_local(url):
             return None
 
         host = (urllib.parse.urlparse(url).hostname or "").lower()
         req = EgressRequest(host=host, method=method.upper(), url=url,
-                            body=body, source=source)
-        decision = self._policy.decide(host)
+                            body=body, source=source, data_class=data_class)
+        decision = self._policy.decide(host, data_class)
+
+        # A page a search has already returned, permitted by the grant the
+        # caller is holding rather than by anything it says about itself.
+        #
+        # Placed after the policy is consulted so an *explicit* rule still
+        # wins: a host the user has deliberately denied stays denied even if it
+        # turns up in a search result, because that decision was made by a
+        # person about a destination and this was not. Only the default-deny
+        # case — a host nobody has an opinion about — is covered. See
+        # `SearchReadGrant`.
+        #
+        # The kill switch is checked explicitly, and **called**. `decide`
+        # collapses it into the same `DENY` as an unknown host, so without this
+        # a grant would sail straight through "cut all outbound traffic" — the
+        # one control that must have no exceptions at all. `kill_switch` is a
+        # method rather than a property, and `not self._policy.kill_switch` is
+        # therefore always False: written that way this clause disabled the
+        # grant entirely, and written the other way round it would have
+        # disabled the kill switch. A test caught it; the parentheses are the
+        # whole difference.
+        # `data_class` is checked here as well as inside `permits`, and the
+        # redundancy is deliberate: a grant exists to cover *reading a page a
+        # search returned*, which is a `GET` with no body and therefore always
+        # `PROMPT`. Should a future call site ever construct one around
+        # something richer, this refuses rather than inheriting an exemption
+        # written for a different kind of cargo.
+        if (
+            grant is not None
+            and decision.mode is Mode.DENY
+            and req.data_class is DataClass.PROMPT
+            and not self._policy.kill_switch()
+            and not self._policy.has_rule(host)
+            and grant.permits(req)
+        ):
+            self._record(req, "allowed", "reading a page from a search you enabled")
+            return req
 
         if decision.mode is Mode.DENY:
             entry = self._record(req, "denied", decision.reason)
@@ -194,7 +310,11 @@ class EgressGate:
 
         if decision.mode is Mode.ASK:
             if not self._confirm(req):
-                entry = self._record(req, "cancelled", "you chose not to send this")
+                entry = self._record(
+                    req,
+                    "cancelled",
+                    req.refusal_reason or "you chose not to send this",
+                )
                 raise EgressDenied(
                     f"The request to {host} was cancelled.",
                     host=host,
@@ -215,6 +335,7 @@ class EgressGate:
         method: str = "GET",
         body: str | None = None,
         source: str = "unknown",
+        grant: "SearchReadGrant | None" = None,
     ) -> str:
         """Fold ``params`` into the URL, check it, and return the final URL.
 
@@ -233,7 +354,7 @@ class EgressGate:
                 {k: v for k, v in params.items() if v is not None}
             )
             final = f"{url}{'&' if urllib.parse.urlparse(url).query else '?'}{encoded}"
-        self.check(final, method=method, body=body, source=source)
+        self.check(final, method=method, body=body, source=source, grant=grant)
         return final
 
     def _record(self, req: EgressRequest, decision: str, reason: str):
@@ -258,6 +379,7 @@ class EgressGate:
         headers: dict[str, str] | None = None,
         timeout: float = 10.0,
         source: str = "unknown",
+        data_class: DataClass = DataClass.PROMPT,
     ) -> bytes:
         """Check, log, and send. Returns the response body.
 
@@ -267,11 +389,23 @@ class EgressGate:
         if body is not None:
             body_text = body.decode("utf-8", "replace") if isinstance(body, bytes) else body
 
-        self.check(url, method=method, body=body_text, source=source)
-
-        payload = body if isinstance(body, bytes) else (
-            body.encode("utf-8") if body else None
+        # Same reasoning as `stream_lines`: the confirmation may have rewritten
+        # the body, and what is sent has to be what was logged and agreed to.
+        approved = self.check(
+            url, method=method, body=body_text, source=source, data_class=data_class
         )
+        edited = approved is not None and approved.body != body_text
+
+        if edited:
+            payload = approved.body.encode("utf-8") if approved.body else None
+        else:
+            # Unedited bodies keep their original bytes. Re-encoding from the
+            # logged text would round-trip a binary payload through a lossy
+            # `decode(..., "replace")` and corrupt it — the log is allowed to
+            # hold a best-effort rendering of bytes; the wire is not.
+            payload = body if isinstance(body, bytes) else (
+                body.encode("utf-8") if body else None
+            )
         req = urllib.request.Request(
             url,
             data=payload,
@@ -286,3 +420,65 @@ class EgressGate:
         """The shape almost every existing call site actually wanted."""
         return json.loads(self.request(url, timeout=timeout, source=source,
                                        headers=headers))
+
+    def stream_lines(
+        self,
+        url: str,
+        *,
+        method: str = "POST",
+        body: str | None = None,
+        headers: dict[str, str] | None = None,
+        timeout: float = 120.0,
+        source: str = "unknown",
+        data_class: DataClass = DataClass.PROMPT,
+    ) -> Iterator[bytes]:
+        """Check, log, and stream the response one line at a time.
+
+        Added for cloud generation, which is the first outbound call whose
+        response must be consumed *as it arrives* — a chat reply that only
+        appears once the model has finished is a worse product than a local one,
+        and buffering it here would undo the reason for going to the cloud.
+
+        It exists on the gate rather than in the engine because of what
+        `test_egress_chokepoint.py` enforces: no shipped module opens its own
+        outbound connection. The engine could have called `check` and then used
+        its own client — `check` is deliberately separable and async call sites
+        do exactly that — but doing so in a *synchronous* path that had no such
+        constraint would have traded the invariant for convenience, and the
+        chokepoint scan is right to refuse it. The gate is the transport; this
+        is the transport growing the one shape it was missing.
+
+        **Headers are sent and not logged.** That asymmetry is deliberate and
+        is what makes this usable for an authenticated API: the log is
+        append-only and tamper-evident, so writing a bearer token into it would
+        create a credential the user cannot delete and therefore cannot rotate
+        away from. What the log records is the destination and the body — what
+        left and where it went, which is the question it exists to answer.
+
+        Raises :class:`EgressDenied` before opening a socket if policy or the
+        user says no, and lets `urllib.error.HTTPError` through so the caller
+        can read the status and explain it. An `HTTPError` is itself a readable
+        response, which is what makes a provider's "no credit left" reachable
+        rather than becoming a bare 402.
+        """
+        # Checked first, and the body read back *afterwards*. A confirmation
+        # may rewrite it — M10's dialog lets the user remove a recalled fact
+        # before sending — and the gate logs the edited text, so encoding
+        # before the check would send bytes that differ from the ones logged
+        # and approved. That gap is worse than not asking, because it looks
+        # like consent.
+        approved = self.check(
+            url, method=method, body=body, source=source, data_class=data_class
+        )
+        final_body = approved.body if approved is not None else body
+        body_bytes = final_body.encode("utf-8") if final_body is not None else None
+
+        req = urllib.request.Request(
+            url,
+            data=body_bytes,
+            method=method.upper(),
+            headers={"User-Agent": self._user_agent, **(headers or {})},
+        )
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            for line in resp:
+                yield line

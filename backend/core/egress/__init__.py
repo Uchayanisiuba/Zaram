@@ -10,25 +10,37 @@ why the gate is the transport rather than a helper the call sites are asked to
 remember.
 """
 
+from .confirm import PendingConfirmations
 from .gate import EgressDenied, EgressGate, EgressRequest, is_local
 from .log import EgressEntry, EgressLog, TamperDetected
-from .policy import DEFAULT_DECISION, Decision, EgressPolicy, Mode
-from .runtime import default_log_path, default_policy_path, get_gate, set_gate
+from .policy import DEFAULT_DECISION, DataClass, Decision, EgressPolicy, Mode
+from .runtime import (
+    default_log_path,
+    default_policy_path,
+    get_gate,
+    get_pending,
+    set_gate,
+    set_pending,
+)
 
 __all__ = [
     "EgressGate",
     "EgressDenied",
     "EgressRequest",
+    "PendingConfirmations",
     "is_local",
     "EgressLog",
     "EgressEntry",
     "TamperDetected",
     "EgressPolicy",
     "Mode",
+    "DataClass",
     "Decision",
     "DEFAULT_DECISION",
     "get_gate",
     "set_gate",
+    "get_pending",
+    "set_pending",
     "default_log_path",
     "default_policy_path",
 ]

@@ -7,8 +7,50 @@ spike would actually cost. Investigated 8 August 2026.
 
 ## The constraint, first
 
-**The avatar embodies which model is answering and what it is doing.** Local
-versus cloud, thinking versus idle, speaking. The orb's job with more bandwidth.
+**The avatar embodies what the system is doing.** Thinking versus idle,
+listening, speaking, swapping. The orb's job with more bandwidth.
+
+**Narrowed 13 August 2026: it does not embody which model answered.** The
+original line here read "which model is answering and what it is doing", and
+`local` / `cloud` were two of the seven states. Both are gone, for two reasons.
+
+*The two renderers disagreed about what they report, and that was found by
+checking rather than by reasoning.* `LivingOrb` reads `orbStore.orbState`
+directly and has **never rendered locality at all**. So the claim in the seam
+section below — that both renderers read one derived state — was half true: the
+derivation existed and only one consumer ever saw it. The avatar was the sole
+renderer reporting where an answer came from, which means the same status told
+the user different things depending on a toggle.
+
+Where locality *is* reported is `OrbStatusLabel`, in words: "Local only",
+"Local · can send", "Cloud enabled". Its own comment records why three labels
+rather than two — permitting a single search host once flipped the indicator to
+"Cloud enabled" while every answer was still generated on the machine, and *"on
+the one indicator whose entire job is to be trusted, that is the worst thing to
+be wrong about."* A rim colour cannot draw that line, so the colour and the
+label could only ever have agreed by luck.
+
+**The gap this leaves, stated rather than papered over.** That label is behind
+`{chat && …}` in `Landing.tsx` — deliberately, because *"at rest the landing is
+meant to be quiet"* — so at rest nothing reports locality. The avatar surfaced
+`local` / `cloud` **only** at rest, which is precisely when the label is
+absent, so the two were complementary rather than redundant and this removal
+does lose that. It was already the situation on the orb path, and the fix, if
+it is wanted, is one condition in `Landing.tsx` rather than a colour on a face.
+CLAUDE.md's line that *"the Orb shows system state (idle / thinking / local /
+cloud)"* does not match `OrbState`, which has never held the last two.
+
+*A face that reports where an answer came from is read as a someone.* The
+constraint below is that this is a status indicator rather than a personality.
+Rendering a routing decision as an expression is the first step to "she used the
+cloud", which is precisely the projection this document was written to prevent.
+The pressure to cross that line arrives from anything that sells or personalises
+characters, which is why the narrowing is recorded rather than merely done.
+
+Attaching an avatar to an **agent** is the direction that replaces it — an agent
+is a thing with a job, and a face standing for one is not a claim about
+infrastructure. Not designed, not scheduled; agents are out of scope until v1
+ships, and they get no menu item when they arrive.
 
 Not a personality. Not a name. Not a relationship. This is the line that decides
 every later argument, so it goes in the spec before any code: the moment the
@@ -22,6 +64,58 @@ around, fidgeting, reacting to being watched), any name or pronoun in the UI,
 emotional expressions not derived from system state, and voice lines. It rules
 *in*: the same four-to-six states the orb has, rendered with a face instead of a
 glow.
+
+### The shipped avatar is also the mascot — 15 August 2026
+
+A helmeted robot with a dot-matrix LED face. It is the default avatar and the
+product's mascot, and the second of those is a collision with the line above
+worth stating rather than glossing: the reference art smiles, and a smile is not
+a system state.
+
+**It resolves because mascot and renderer are two jobs, and only one of them is
+governed here.** The rule says the *status indicator* may not be a someone. It
+does not say the product may not have key art. So the character smiles on the
+site, the installer, the README and the icon; inside the product its rest face
+is `sil`, a flat line. Same asset, two contexts, and the split costs nothing —
+a smiling render sells just as well when the running app is honest.
+
+The pressure this document predicted — *"from anything that sells or
+personalises characters"* — is now arriving from the product's own marketing
+rather than from an avatar store, which is the harder direction to refuse.
+Hence writing it down.
+
+### A screen face is not a blendshape face
+
+The LED panel is driven by VRM 1.0 `textureTransformBinds`, which slide a UV
+window across a sprite atlas, rather than by morph targets. `@pixiv/three-vrm`
+implements them (`VRMExpressionTextureTransformBind`), so the driver's shape is
+unchanged — `setValue('aa', 1)` still selects a mouth. What changes is how the
+value behaves, and both differences were read off `applyWeight` rather than
+assumed:
+
+- **Weights are binary.** `applyWeight` scales the UV delta linearly, so a
+  fractional weight lands *between* two atlas cells and renders a sliced
+  composite of both. The eased mouth lerp in `VrmAvatar.tsx` is correct for
+  morph rigs and wrong for this one.
+- **One expression per material.** Binds are additive (`offset.add`), so two
+  simultaneous non-zero mouth expressions sum into a cell that does not exist.
+
+The two paths are told apart by **bind type**, never by which avatar is loaded.
+Special-casing the bundled character would break bring-your-own on the first
+sprite-faced VRM a user supplies, which is the whole reason `vrmSafety.ts`
+exists.
+
+Eyes and mouth are **separate materials** so blinking stays independent of
+speech; a single combined atlas would need a cell per combination. The face
+panel is the only thing the sprite touches — black base colour, atlas on
+`emissiveMap`, two quads on the visor, full 0–1 UVs with cell selection done
+entirely by `repeat` and `offset`.
+
+State stays on the **rim light**, not on the face. Moving it to the character's
+ear rings was considered and not built: the rim already works, needs no
+geometry, and reads on any VRM. The face's colour is therefore a constant
+(`--face-led`, `#818cf8`) and asserts nothing — see `docs/UI-SPEC.md` for why it
+is neither accent, and specifically why it is not violet.
 
 ---
 
@@ -137,24 +231,31 @@ already has one home.
 
 ### What needs changing
 
-**1. `orbState` has no `local`/`cloud`, and the spike wants four expressions
-including those.**
+**1. ~~`orbState` has no `local`/`cloud`, and the spike wants four expressions
+including those.~~ Withdrawn 13 August 2026 — the avatar does not report
+locality, so there is nothing to derive.**
 
-Locality lives in `sessionStatusStore.locality`, activity lives in
-`orbStore.orbState`. They are correctly separate — they change at different
-rates for different reasons, and that separation was a deliberate fix. So an
-adapter should *derive* an embodiment state from both rather than either store
-growing a field that duplicates the other:
+The original plan derived an embodiment state from `orbStore.orbState`
+(activity) and `sessionStatusStore.locality` (where the answer came from),
+because those two are correctly separate stores and neither should grow a field
+duplicating the other. That derivation was built and has now been removed with
+the states it existed to produce.
+
+What is left is the orb's activity vocabulary, and it is the **same type** rather
+than a copy of it:
 
 ```ts
-type EmbodimentState =
-  | 'idle' | 'thinking' | 'speaking' | 'listening'
-  | 'local' | 'cloud' | 'swapping'
+export type EmbodimentState = OrbState
+// 'idle' | 'thinking' | 'speaking' | 'listening' | 'swapping'
 ```
 
-Derived in one hook — `useEmbodimentState()` — that both adapters consume. That
-hook is the seam, and it is what stops the VRM adapter reaching into three
-stores and slowly acquiring opinions about routing.
+`useEmbodimentState()` stays even though it now returns one store's field
+unchanged. It is the seam: it is what stops the VRM adapter reaching into three
+stores and slowly acquiring opinions about routing, which is exactly what it
+would have to do to get locality back. And the alias is deliberate — `LivingOrb`
+once declared its own four-member copy of `OrbState` instead of importing the
+store's, and a renderer written against a private copy of a vocabulary is how
+two renderers silently diverge.
 
 **2. ~~`swapping` does not exist anywhere.~~ ✅ Done, 8 August 2026.** It is now
 in `orbStore` (visual), `systemStore` (`OrbActivity` plus the model name and the

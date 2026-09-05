@@ -14,33 +14,49 @@
  * convincing populated lie.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { AnimatePresence } from 'framer-motion';
 import {
   AlertCircle,
   BarChart3,
   Download,
+  Eye,
   FileSpreadsheet,
   FileText,
+  ImageIcon,
   MessageSquare,
+  Presentation,
   Quote,
   Receipt,
   RefreshCw,
+  UserRound,
   X,
 } from 'lucide-react';
 
+import ArtifactPreview from '@/components/ArtifactPreview';
+import SurfaceHeader from '@/components/common/SurfaceHeader';
+import { useArtifactImage } from '@/hooks/useArtifactImage';
 import {
   KIND_LABELS,
-  downloadUrl,
+  PICTORIAL_KINDS,
+  downloadArtifact,
   getArtifact,
   listArtifacts,
   type Artifact,
   type ArtifactKind,
 } from '@/services/artifactsClient';
 
+// The second copy of this map, and the reason `ArtifactKind` is a union rather
+// than a string: adding `deck` and `cv` to it broke both copies at compile
+// time, which is how a kind that had shipped on the backend for weeks with no
+// icon here was found at all.
 const KIND_ICON: Record<ArtifactKind, React.ReactNode> = {
   invoice: <Receipt size={16} />,
   document: <FileText size={16} />,
   spreadsheet: <FileSpreadsheet size={16} />,
   chart: <BarChart3 size={16} />,
+  deck: <Presentation size={16} />,
+  cv: <UserRound size={16} />,
+  image: <ImageIcon size={16} />,
 };
 
 // One accent per kind, drawn from the existing token set. No new hues.
@@ -49,6 +65,9 @@ const KIND_COLOUR: Record<ArtifactKind, string> = {
   document: 'var(--color-cyan-light)',
   spreadsheet: 'var(--color-amber)',
   chart: 'var(--color-violet)',
+  deck: 'var(--color-indigo-light)',
+  cv: 'var(--color-cyan-light)',
+  image: 'var(--color-indigo-light)',
 };
 
 const relative = (seconds: number) => {
@@ -154,35 +173,45 @@ export default function WorkWorkspace({ onOpenConversation }: WorkWorkspaceProps
     [byProject, kind],
   );
 
+  // Whether this listing is entirely pictures, which is what earns the grid.
+  // Computed from what is actually showing rather than from the filter, so
+  // "all kinds" on a machine that has only ever generated images gets the grid
+  // too — the density should follow the contents, not the control.
+  const allPictures = useMemo(
+    () => visible.length > 0 && visible.every((a) => PICTORIAL_KINDS.has(a.kind)),
+    [visible],
+  );
+
   const kinds = Object.keys(KIND_LABELS) as ArtifactKind[];
 
   return (
     <div className="flex-1 flex overflow-hidden">
       <div className="flex-1 flex flex-col overflow-hidden">
-        <div className="px-8 pt-6 pb-3">
-          <div className="flex items-baseline gap-3">
-            <h1
-              className="text-lg font-semibold"
-              style={{ fontFamily: 'var(--font-display)', color: 'var(--color-text)' }}
-            >
-              Work
-            </h1>
+        <SurfaceHeader
+          icon={FileText}
+          title="Work"
+          meta={
             <span
               className="text-xs"
               style={{ fontFamily: 'var(--font-mono)', color: 'var(--color-text-muted)' }}
             >
               {loading ? 'loading…' : `${visible.length} of ${artifacts.length}`}
             </span>
-            <button
-              onClick={() => void load()}
-              disabled={loading}
-              aria-label="Refresh"
-              className="ml-auto p-1 rounded-md text-slate-500 hover:text-slate-200 hover:bg-white/5 transition-colors disabled:opacity-40"
-            >
-              <RefreshCw size={13} className={loading ? 'animate-spin' : undefined} />
-            </button>
-          </div>
+          }
+        >
+          <button
+            onClick={() => void load()}
+            disabled={loading}
+            aria-label="Refresh"
+            className="p-1 rounded-md text-slate-500 hover:text-slate-200 hover:bg-white/5 transition-colors disabled:opacity-40"
+          >
+            <RefreshCw size={13} className={loading ? 'animate-spin' : undefined} />
+          </button>
+        </SurfaceHeader>
 
+        {/* The filter block keeps the header's horizontal rhythm; the vertical
+            padding above it now belongs to SurfaceHeader. */}
+        <div className="px-8 pb-3">
           {error && (
             <div
               className="mt-3 flex items-start gap-2 rounded-lg px-3 py-2 text-[11px] leading-relaxed"
@@ -258,6 +287,31 @@ export default function WorkWorkspace({ onOpenConversation }: WorkWorkspaceProps
                 setKind('all');
               }}
             />
+          ) : allPictures ? (
+            /* A page of thumbnails rather than a page of filenames.
+             *
+             * Same store, same artifacts, different density — Work's job is to
+             * let someone find what they made, and for a picture the filename
+             * is close to useless for that. `image-3.png` and `image-4.png`
+             * are indistinguishable as rows and obvious as pictures.
+             *
+             * Only when *everything* showing is pictorial, which is the state
+             * the kind filter produces. A mixed listing keeps the rows: a grid
+             * with document tiles in it would be a grid of icons, which is
+             * worse than a list at the one thing a list is good at. */
+            <div
+              className="grid gap-3"
+              style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))' }}
+            >
+              {visible.map((a) => (
+                <Thumbnail
+                  key={a.id}
+                  artifact={a}
+                  selected={selected?.id === a.id}
+                  onSelect={() => setSelected(a)}
+                />
+              ))}
+            </div>
           ) : (
             <div
               className="rounded-xl overflow-hidden"
@@ -324,6 +378,72 @@ export default function WorkWorkspace({ onOpenConversation }: WorkWorkspaceProps
         />
       )}
     </div>
+  );
+}
+
+/** One picture in Work's grid.
+ *
+ *  Its own component because the image fetch is a hook, and a hook cannot be
+ *  called inside the `visible.map` that draws the tiles.
+ */
+function Thumbnail({
+  artifact,
+  selected,
+  onSelect,
+}: {
+  artifact: Artifact;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  const image = useArtifactImage(artifact.id, artifact.exists);
+
+  return (
+    <button
+      onClick={onSelect}
+      className="overflow-hidden rounded-xl text-left transition-colors"
+      style={{
+        border: selected
+          ? '1px solid var(--color-indigo-light)'
+          : '1px solid var(--color-border-subtle)',
+        background: 'var(--color-glass)',
+      }}
+    >
+      <span
+        className="block w-full"
+        style={{
+          aspectRatio: '1 / 1',
+          background: 'var(--color-surface-sunken, #0b1120)',
+        }}
+      >
+        {image.url ? (
+          <img
+            src={image.url}
+            alt={artifact.filename}
+            className="h-full w-full"
+            style={{ objectFit: 'cover' }}
+          />
+        ) : (
+          <span
+            className="flex h-full w-full items-center justify-center"
+            style={{ color: 'var(--color-text-faint)' }}
+            title={image.error ?? undefined}
+          >
+            {KIND_ICON[artifact.kind]}
+          </span>
+        )}
+      </span>
+      <span className="block px-2.5 py-2">
+        <span className="block truncate text-[11px]" style={{ color: 'var(--color-text)' }}>
+          {artifact.filename}
+        </span>
+        <span
+          className="block truncate text-[10px]"
+          style={{ fontFamily: 'var(--font-mono)', color: 'var(--color-text-secondary)' }}
+        >
+          {relative(artifact.created_at)}
+        </span>
+      </span>
+    </button>
   );
 }
 
@@ -415,6 +535,10 @@ function DetailPanel({
 }) {
   const [full, setFull] = useState<Artifact | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
+  const [previewing, setPreviewing] = useState(false);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
+  const pictorial = PICTORIAL_KINDS.has(artifact.kind);
+  const picture = useArtifactImage(artifact.id, pictorial && artifact.exists);
 
   useEffect(() => {
     let cancelled = false;
@@ -485,7 +609,37 @@ function DetailPanel({
               shown here is what downloads. Sandboxed with no permissions: the
               markup is ours, but the prose inside it was written by a model,
               and defence in depth costs nothing here. */}
-          {previewError ? (
+          {pictorial ? (
+            // The picture itself, matching the overlay. For every other kind
+            // the HTML *is* the faithful preview, because it is what the
+            // exporters render from; for an image the file that downloads is
+            // the PNG and the HTML is the envelope it travelled in. Showing
+            // the envelope here and the picture in the overlay would be the
+            // drift the comment above this section warns about.
+            <div
+              className="flex items-center justify-center rounded-lg"
+              style={{
+                height: 320,
+                border: '1px solid var(--color-border-subtle)',
+                background: 'var(--color-surface-sunken, #0b1120)',
+              }}
+            >
+              {picture.url ? (
+                <img
+                  src={picture.url}
+                  alt={artifact.filename}
+                  style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
+                />
+              ) : (
+                <span
+                  className="text-[11px]"
+                  style={{ fontFamily: 'var(--font-mono)', color: 'var(--color-text-faint)' }}
+                >
+                  {picture.error ?? 'Loading preview…'}
+                </span>
+              )}
+            </div>
+          ) : previewError ? (
             <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
               {previewError}
             </p>
@@ -628,15 +782,47 @@ function DetailPanel({
             file — the user moved it — the button says so rather than offering a
             download that fails. */}
         {artifact.exists ? (
-          <a
-            href={downloadUrl(artifact.id)}
-            download={artifact.filename}
-            className="w-full flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-xs transition-colors hover:bg-white/5"
-            style={{ border: '1px solid var(--color-border)', color: 'var(--color-text)' }}
-          >
-            <Download size={13} />
-            Download {artifact.filename.split('.').pop()?.toUpperCase()}
-          </a>
+          <>
+            {/* Preview belongs on both surfaces or neither. Work is where a
+                file is *browsed* — the conversation card is where it was made —
+                and a control that exists in one place and not the other is the
+                kind of inconsistency users read as a bug in the surface that
+                lacks it. Same component, so the two cannot drift. */}
+            <button
+              type="button"
+              onClick={() => setPreviewing(true)}
+              className="w-full flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-xs transition-colors hover:bg-white/5"
+              style={{ border: '1px solid var(--color-border)', color: 'var(--color-text)' }}
+            >
+              <Eye size={13} />
+              Preview
+            </button>
+            {/* A button, not a link. Every request to the backend is
+                authenticated against this launch's credential, and that
+                credential rides on a wrapper around `fetch` — an anchor
+                navigates without it and gets 401. See `downloadUrl`. */}
+            <button
+              type="button"
+              onClick={() => {
+                setDownloadError(null);
+                downloadArtifact(artifact.id, artifact.filename).catch((err: unknown) =>
+                  setDownloadError(
+                    err instanceof Error ? err.message : 'Could not download that file.',
+                  ),
+                );
+              }}
+              className="w-full flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-xs transition-colors hover:bg-white/5"
+              style={{ border: '1px solid var(--color-border)', color: 'var(--color-text)' }}
+            >
+              <Download size={13} />
+              Download {artifact.filename.split('.').pop()?.toUpperCase()}
+            </button>
+            {downloadError && (
+              <p className="text-[11px]" style={{ color: '#fca5a5' }} role="alert">
+                {downloadError}
+              </p>
+            )}
+          </>
         ) : (
           <button
             disabled
@@ -652,6 +838,12 @@ function DetailPanel({
           </button>
         )}
       </div>
+
+      <AnimatePresence>
+        {previewing && (
+          <ArtifactPreview artifact={artifact} onClose={() => setPreviewing(false)} />
+        )}
+      </AnimatePresence>
     </aside>
   );
 }

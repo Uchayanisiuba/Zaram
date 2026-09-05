@@ -10,26 +10,88 @@ from __future__ import annotations
 import logging
 import os
 import time
+import uuid
 from pathlib import Path
 from typing import Any, Callable, Iterator
 
 from .contracts import IngestOutcome, IngestReport, IngestStatus
 from .records import IngestRecords
-from .service import discover, ingest_folder, iter_ingest_folder
+from .service import _ingest_one, discover, ingest_folder, iter_ingest_folder
 
 logger = logging.getLogger(__name__)
+
+#: Where dropped, uploaded and pasted content is kept.
+#:
+#: **One directory, so it is one source with one policy.** A source row is a
+#: *place*, and the per-source privacy rule attaches to it — that is the whole
+#: reason `upsert_source` keys on an absolute path and preserves the policy
+#: across re-scans. Recording each dropped file under its own parent folder
+#: would scatter a user's decisions across a source row per download folder,
+#: and rule 5 asks them once per place, not once per file.
+#:
+#: The bytes genuinely live here, so the row points at something real and
+#: "delete this source" means something. Already excluded from the installer
+#: payload and from git.
+UPLOADS_DIRNAME = "uploads"
 
 
 class IngestService:
     """Point at a folder, put its text in the Spine, remember what happened."""
 
-    def __init__(self, records: IngestRecords, memory_runtime: Any | None = None) -> None:
+    def __init__(
+        self,
+        records: IngestRecords,
+        memory_runtime: Any | None = None,
+        obligations: Any | None = None,
+    ) -> None:
         self._records = records
         self._memory = memory_runtime
+        self._obligations = obligations
 
     @property
     def records(self) -> IngestRecords:
         return self._records
+
+    @property
+    def obligations(self) -> Any | None:
+        return self._obligations
+
+    def attach_obligations(self, obligations: Any | None) -> None:
+        """Point this at the obligations store.
+
+        Separate from `attach_memory` on purpose. Indexing a document and
+        reading its commitments are two different capabilities, and a build
+        that has one and not the other should do the half it can rather than
+        neither.
+        """
+        self._obligations = obligations
+
+    def _read_obligations(self, text: str, path: Any) -> None:
+        """Every dated commitment in one document, into the store.
+
+        **No anchor date is supplied, and that is the honest default.** A
+        relative term like "30 days from the invoice date" needs the issue date
+        to become a deadline, and this layer does not know it — the parsers
+        return text, not fields. So such a clause is stored unresolved, with
+        the question that would settle it, and the user is asked. Passing
+        today's date as an anchor would turn "I don't know when this was
+        issued" into a confident wrong deadline, which is the failure rule 9
+        exists to prevent, applied to something the user will plan around.
+
+        `direction` is likewise left UNKNOWN. The sentence cannot say whether
+        the user owes the money or is owed it — "payment is due within 30 days"
+        reads identically on an invoice sent and one received — and guessing
+        would tell a freelancer they owe money they are in fact owed.
+        """
+        if self._obligations is None:
+            return
+        from obligations.extract import extract_obligations
+
+        result = extract_obligations(text, document_id=str(path))
+        self._obligations.record(
+            obligations=list(result.obligations),
+            unresolved=list(result.unresolved),
+        )
 
     def attach_memory(self, memory_runtime: Any | None) -> None:
         """Point this at the Spine.
@@ -67,22 +129,58 @@ class IngestService:
             )
         )
 
+    def _fact_writer(self, scope: str | None) -> Callable[[str, dict[str, Any]], str] | None:
+        """The store-fact callable for one run, carrying that run's scope.
+
+        Rule 7i: every fact carries `global` or `project:<id>`. `_store_fact`
+        has read a `scope` key out of the metadata since M8 and **nothing ever
+        put one there** — the comment beside it said "a folder is indexed into
+        a project when one is active" and no caller had a project to give it.
+        So every ingested fact landed global, and a project's own documents
+        were no more its own than anything else on the machine.
+
+        A closure per run rather than a field on the service, because two
+        ingests can be in flight — a drop into a project while a folder scan
+        finishes — and a field would give the second one's facts to the first
+        one's project. There is no undoing that from the outside: the scope is
+        on the fact, and nothing records which run wrote it.
+
+        None when nothing is scoped, so `_store_fact` sees exactly the metadata
+        it saw before and a global ingest is byte-for-byte unchanged.
+        """
+        if self._memory is None:
+            return None
+        if not scope:
+            return self._store_fact
+
+        def write(text: str, metadata: dict[str, Any]) -> str:
+            return self._store_fact(text, {**metadata, "scope": scope})
+
+        return write
+
     # -- running ------------------------------------------------------------ #
 
     def scan(
-        self, root: str, on_outcome: Callable[[IngestOutcome], None] | None = None
+        self,
+        root: str,
+        on_outcome: Callable[[IngestOutcome], None] | None = None,
+        *,
+        scope: str | None = None,
     ) -> tuple[str, IngestReport]:
         """Ingest a folder and record the result. Returns (source_id, report)."""
         report = ingest_folder(
             root,
-            store_fact=self._store_fact if self._memory is not None else None,
+            store_fact=self._fact_writer(scope),
+                read_obligations=(
+                    self._read_obligations if self._obligations is not None else None
+                ),
             on_outcome=on_outcome,
         )
         source_id = self._records.upsert_source(report.root, seconds=report.seconds)
         self._records.record_outcomes(source_id, list(report.outcomes))
         return source_id, report
 
-    def stream_scan(self, root: str) -> Iterator[dict[str, Any]]:
+    def stream_scan(self, root: str, *, scope: str | None = None) -> Iterator[dict[str, Any]]:
         """Ingest, yielding an event per file as it finishes.
 
         Progress is per file rather than a percentage because that is what the
@@ -110,7 +208,10 @@ class IngestService:
         for index, outcome in enumerate(
             iter_ingest_folder(
                 root_path,
-                store_fact=self._store_fact if self._memory is not None else None,
+                store_fact=self._fact_writer(scope),
+                read_obligations=(
+                    self._read_obligations if self._obligations is not None else None
+                ),
                 paths=files,
             ),
             start=1,
@@ -131,6 +232,245 @@ class IngestService:
         self._records.record_outcomes(source_id, list(report.outcomes))
 
         yield {"type": "done", "source_id": source_id, **report.to_dict()}
+
+    # -- drop, paste and upload --------------------------------------------- #
+
+    def uploads_path(self) -> Path:
+        """Where staged files belong, without creating anything.
+
+        Separate from `uploads_dir` because listing sources has to ask *"is this
+        the staging directory?"*, and a read should not leave an empty folder
+        behind as a side effect.
+        """
+        from core.paths import data_dir
+
+        return Path(data_dir()) / UPLOADS_DIRNAME
+
+    def uploads_dir(self) -> Path:
+        """The staging directory, created on demand."""
+        directory = self.uploads_path()
+        directory.mkdir(parents=True, exist_ok=True)
+        return directory
+
+    def is_staged_source(self, root: str) -> bool:
+        """True when this source is Zaram's staging directory rather than a
+        folder of the user's own files.
+
+        The interface needs this to know whether withdrawing will delete
+        documents, and it must not be guessed from the folder's name.
+        """
+        try:
+            return Path(root).resolve() == self.uploads_path().resolve()
+        except OSError:
+            return False
+
+    @staticmethod
+    def safe_name(name: str) -> str:
+        """A filename that cannot escape the directory it is written into.
+
+        **A filename is third-party text**, exactly as a tool description is.
+        It arrives over HTTP from whatever produced it, and `../../` in it
+        would write outside the uploads directory — over a database, a policy
+        file, or the backend's own source. `Path(name).name` discards every
+        directory component, and the separator and null checks catch the forms
+        that survive it on one platform but not the other.
+
+        Empty or wholly unusable input becomes a generated name rather than an
+        error: the file's bytes are the thing the user asked to keep, and
+        refusing the whole upload because its name was strange would lose them.
+        """
+        cleaned = Path(str(name or "").replace("\\", "/")).name
+        cleaned = cleaned.replace("\x00", "").strip().strip(".")
+        # Reserved device names on Windows resolve to a device, not a file.
+        stem = cleaned.split(".")[0].upper()
+        reserved = {"CON", "PRN", "AUX", "NUL"} | {f"COM{i}" for i in range(1, 10)} | {f"LPT{i}" for i in range(1, 10)}
+        if not cleaned or stem in reserved:
+            return f"dropped-{uuid.uuid4().hex[:8]}.txt"
+        return cleaned[:200]
+
+    def _unused_path(self, name: str) -> Path:
+        """A path in the uploads directory that is not already taken.
+
+        **Never overwrite.** The generative-safety rule says a filename
+        collision increments or asks, and it applies with more force here:
+        these are the user's own documents, and two people's `invoice.pdf` are
+        not the same invoice. Incrementing is the right half of that rule for
+        an ingest path, where asking would interrupt a drop of forty files.
+        """
+        directory = self.uploads_dir()
+        candidate = directory / name
+        if not candidate.exists():
+            return candidate
+
+        stem, suffix = candidate.stem, candidate.suffix
+        for index in range(2, 1000):
+            attempt = directory / f"{stem} ({index}){suffix}"
+            if not attempt.exists():
+                return attempt
+        return directory / f"{stem}-{uuid.uuid4().hex[:8]}{suffix}"
+
+    def save_upload(self, name: str, data: bytes) -> Path:
+        """Write dropped or uploaded bytes into the staging directory."""
+        path = self._unused_path(self.safe_name(name))
+        path.write_bytes(data)
+        return path
+
+    def save_text(self, text: str, name: str = "") -> Path:
+        """Write pasted text as a file, so one ingest path serves everything.
+
+        Pasted text could be stored straight into the Spine without ever
+        touching the disk, and that would be a second ingest path with its own
+        chunking, its own grading and its own way of going wrong. It goes
+        through the same parser, grader and chunker as every other document
+        instead — the plaintext parser exists and this is what it is for.
+        """
+        chosen = self.safe_name(name) if name else ""
+        if not chosen.lower().endswith(".txt"):
+            chosen = f"{chosen or 'pasted-' + time.strftime('%Y-%m-%d-%H%M%S')}.txt"
+        path = self._unused_path(chosen)
+        path.write_text(text, encoding="utf-8")
+        return path
+
+    def stream_ingest_paths(
+        self, paths: list[Path], *, scope: str | None = None
+    ) -> Iterator[dict[str, Any]]:
+        """Ingest specific files, streaming an event each, as `stream_scan` does.
+
+        The same NDJSON shape as the folder scan on purpose: the interface
+        already parses it, the progress is already per-file, and a drop of
+        thirty documents wants exactly the report a folder of thirty does.
+
+        `scope` is `project:<id>` when the files were imported from a project,
+        and every fact they produce carries it. Rule 7i: the scope is a field
+        on the one store, not a second store, so these facts are recalled
+        alongside global ones inside that project and left out of every other.
+        """
+        yield {"type": "start", "root": str(self.uploads_dir()), "total": len(paths)}
+
+        started = time.perf_counter()
+        outcomes: list[IngestOutcome] = []
+        store = self._fact_writer(scope)
+        read = self._read_obligations if self._obligations is not None else None
+
+        for index, path in enumerate(paths, start=1):
+            outcome = _ingest_one(Path(path), store, read)
+            outcomes.append(outcome)
+            yield {"type": "file", "index": index, "total": len(paths), **outcome.to_dict()}
+
+        report = IngestReport(
+            root=str(self.uploads_dir()),
+            outcomes=tuple(outcomes),
+            seconds=time.perf_counter() - started,
+        )
+        # One source for the staging directory, as with a scanned folder, and
+        # recorded only once the run finished — a row written up front would
+        # claim files were indexed if the stream were abandoned halfway.
+        #
+        # **Merged, not replaced.** A folder scan sees every file in its source
+        # and is entitled to overwrite the lot; a drop sees the files that were
+        # dropped, and the uploads directory is one shared source. Replacing
+        # here deleted every earlier drop's row on the second drop — and with
+        # it the `fact_ids` that are the only route rule 4 has to take those
+        # facts back out of the Spine.
+        source_id = self._records.upsert_source(report.root, seconds=report.seconds)
+        self._records.merge_outcomes(source_id, list(report.outcomes))
+
+        yield {"type": "done", "source_id": source_id, **report.to_dict()}
+
+    # -- withdrawing a source ------------------------------------------------ #
+
+    def withdraw(self, source_id: str) -> dict[str, Any] | None:
+        """Take a source out, and take Zaram's own copies of its files with it.
+
+        **Which files are Zaram's is the whole question, and the answer is not
+        "the ones in this source".** A scanned folder's files are the user's
+        originals, sitting in their Documents folder; deleting those because
+        they withdrew a *source* would be unrecoverable and is exactly the
+        surprise rule 4 exists to prevent. A file under the uploads directory is
+        a copy Zaram wrote when they dropped or pasted something — their
+        original is still wherever they dragged it from.
+
+        So the rows and the facts go in both cases, and only the copies are
+        deleted. Before this existed, pressing *"Forget this folder and
+        everything Zaram learned from it"* left every dropped document on disk:
+        the promise on the button was not kept, and the bytes were unreachable
+        by any other route because the row naming them had just been deleted.
+
+        Three conditions, all required, and the third is not a formality — an
+        outcome's `path` is stored data, and following it to a delete without
+        checking where it lands is how "Zaram deleted my file" happens.
+        """
+        root = self._records.source_root(source_id)
+        if root is None:
+            return None
+
+        paths = [str(outcome["path"]) for outcome in self._records.outcomes(source_id=source_id)]
+        fact_ids = self._records.remove_source(source_id)
+        deleted = self._delete_own_copies(root, paths)
+        return {"fact_ids": fact_ids, "files_deleted": deleted}
+
+    def withdraw_file(self, outcome_id: str) -> dict[str, Any] | None:
+        """Take one file out, with the same guarantees `withdraw` gives a source.
+
+        Same three conditions, for the same reason: the facts go, only *Zaram's*
+        copy is deleted, and the path is checked for containment after resolving
+        before anything is unlinked. A scanned folder's file is the user's
+        original and is never touched -- only its row and its facts go, which
+        is what "remove this from Knowledge" honestly means for a document
+        Zaram never owned a copy of.
+
+        Returns None when the outcome does not exist, which the route turns
+        into a 404 rather than a cheerful no-op.
+        """
+        outcome = self._records.get_outcome(outcome_id)
+        if outcome is None:
+            return None
+
+        source_id = str(outcome.get("source_id") or "")
+        path = str(outcome.get("path") or "")
+        root = self._records.source_root(source_id) if source_id else None
+
+        fact_ids = self._records.remove_outcome(outcome_id)
+        if fact_ids is None:
+            return None
+
+        deleted = self._delete_own_copies(root, [path]) if root else 0
+        return {
+            "fact_ids": fact_ids,
+            "files_deleted": deleted,
+            "name": str(outcome.get("name") or ""),
+            "source_id": source_id,
+        }
+
+    def _delete_own_copies(self, root: str, paths: list[str]) -> int:
+        """Delete the staged copies belonging to a withdrawn uploads source."""
+        if not self.is_staged_source(root):
+            # A scanned folder. Its files are the user's; nothing is deleted.
+            return 0
+        uploads = self.uploads_path().resolve()
+
+        deleted = 0
+        for raw in paths:
+            try:
+                candidate = Path(raw).resolve()
+            except OSError:
+                continue
+            # Containment, checked after resolving. A symlink inside the uploads
+            # directory pointing at a real document resolves *outside* it and is
+            # refused here — which leaves a dangling link and keeps the
+            # document, the right way round for an irreversible operation.
+            if not candidate.is_relative_to(uploads) or candidate == uploads:
+                logger.warning("refusing to delete %s: outside the uploads directory", raw)
+                continue
+            try:
+                candidate.unlink()
+                deleted += 1
+            except FileNotFoundError:
+                # Already gone. Withdrawing still succeeded.
+                pass
+            except OSError as exc:
+                logger.warning("could not delete %s: %s", candidate, exc)
+        return deleted
 
     def retry(self, outcome_id: str) -> dict[str, Any] | None:
         """Re-read one file. What the retry button on a failure does.
@@ -155,6 +495,9 @@ class IngestService:
         report = ingest_folder(
             path.parent,
             store_fact=self._store_fact if self._memory is not None else None,
+                read_obligations=(
+                    self._read_obligations if self._obligations is not None else None
+                ),
             paths=[path],
         )
         if report.outcomes:
@@ -199,7 +542,6 @@ class IngestService:
 
 
 def default_db_path() -> str:
-    return os.getenv(
-        "ZARAM_INGEST_DB",
-        os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "ingest.db"),
-    )
+    from core.paths import in_data_dir
+
+    return in_data_dir("ingest.db", "ZARAM_INGEST_DB")

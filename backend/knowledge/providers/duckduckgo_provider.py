@@ -10,10 +10,9 @@ from core.egress import EgressDenied, get_gate
 from ..protocol import KnowledgeResult, ResultType
 from .base import BaseKnowledgeProvider, SearchMixin
 
-try:
-    from duckduckgo_search import DDGS  # type: ignore
-except Exception:  # pragma: no cover
-    DDGS = None  # type: ignore
+# Prefers `ddgs`; the superseded `duckduckgo_search` returns zero results
+# without raising. See `core/ddgs_import.py`.
+from core.ddgs_import import DDGS  # noqa: F401
 
 
 class DuckDuckGoProvider(BaseKnowledgeProvider):

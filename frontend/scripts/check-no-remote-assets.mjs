@@ -46,11 +46,144 @@ const PATTERNS = [
 ];
 
 /**
- * Allowed: links a human clicks, which open in their browser and are their
- * decision — not something the page fetches on its own. Anything matching a
- * pattern above is still reported even if it appears here.
+ * Which lines are comment, so a URL written in prose is not reported as a
+ * request. Documentation has to be able to name the thing it forbids — this
+ * file's own header quotes the `fonts.googleapis.com` import that motivated it.
+ *
+ * **This replaced a one-line heuristic that had a real hole.** The old test was
+ * `/^\s*(?:\/\/|\*|\/\*|#|<!--)/` — any line *starting with* `*` counted as a
+ * comment continuation and was skipped. But `*` is also the CSS universal
+ * selector, so
+ *
+ *     * { background: url('https://cdn.example/x.png') }
+ *
+ * was silently ignored in every stylesheet and every CSS-in-JS template
+ * literal. That is the dangerous direction for a guard to be wrong in: it
+ * misses a real request rather than flagging a comment. A `*` line is now
+ * treated as comment only when a block comment is actually open.
+ *
+ * Block detection is deliberately conservative — the opener must start the line.
+ * A `/*` inside a string mid-line would otherwise open a region that never
+ * closes, and every line after it would go unscanned.
+ *
+ * Trailing comments are not stripped, on purpose: `https://` contains `//`, so
+ * anything that strips from the first `//` mangles the very URLs being looked
+ * for. A line that *starts* with a comment marker is a comment; a URL sitting
+ * after code on the same line is reported, which is the safe way to be wrong.
  */
-const COMMENT_OR_DOC = /^\s*(?:\/\/|\*|\/\*|#|<!--)/;
+const LINE_COMMENT = /^\s*(?:\/\/|#|<!--)/;
+const BLOCK_OPEN = /^\s*\/\*/;
+
+function commentLines(text) {
+  const inComment = new Set();
+  let open = false;
+  text.split('\n').forEach((line, i) => {
+    const lineNo = i + 1;
+    if (open) {
+      inComment.add(lineNo);
+      if (line.includes('*/')) open = false;
+      return;
+    }
+    if (LINE_COMMENT.test(line)) {
+      inComment.add(lineNo);
+      return;
+    }
+    if (BLOCK_OPEN.test(line)) {
+      inComment.add(lineNo);
+      if (!line.includes('*/')) open = true;
+    }
+  });
+  return inComment;
+}
+
+/** Scan one file's text. Exported shape so the self-test can drive it. */
+export function scanText(text, rel = 'fixture.css') {
+  const out = [];
+  const lines = text.split('\n');
+  const comments = commentLines(text);
+
+  // One remote URL is one finding, however many patterns match it. The patterns
+  // deliberately overlap — `@import url('https://…')` matches both the @import
+  // rule and the generic `url()`, and an `<img src="https://…">` matches both
+  // the markup and JSX rules — so without this, every finding was reported
+  // twice and the "N remote asset reference(s)" headline was double the truth.
+  // Found by the self-test below on its first run.
+  //
+  // Keyed on where the *scheme* sits in the file, not on the line: two
+  // different remote URLs on one line are still two findings.
+  const seen = new Set();
+
+  for (const { re, what } of PATTERNS) {
+    re.lastIndex = 0;
+    let m;
+    while ((m = re.exec(text)) !== null) {
+      const line = text.slice(0, m.index).split('\n').length;
+      if (comments.has(line)) continue;
+      const schemeAt = m.index + m[0].search(/https?:\/\//);
+      if (seen.has(schemeAt)) continue;
+      seen.add(schemeAt);
+      out.push({
+        file: rel,
+        line,
+        what,
+        text: (lines[line - 1] ?? '').trim().slice(0, 110),
+      });
+    }
+  }
+  return out;
+}
+
+/**
+ * Does the scanner still catch what it exists to catch?
+ *
+ * Checked in rather than run once by hand, because a guard whose logic changed
+ * and was believed on inspection is a guard nobody has verified. Each case was
+ * observed failing against a deliberately broken scanner.
+ */
+function selfTest() {
+  const cases = [
+    ['a remote font import', "@import url('https://fonts.googleapis.com/css2?family=Inter');", 1],
+    [
+      'the universal selector — the hole the old heuristic had',
+      "* { background: url('https://cdn.example/x.png'); }",
+      1,
+    ],
+    ['a remote image in markup', '<img src="https://evil.example/x.png">', 1],
+    ['a remote src in JSX', 'const a = <img src="https://evil.example/x.png" />;', 1],
+    ['a URL in a line comment', "// see https://fonts.googleapis.com for why not", 0],
+    [
+      'a URL in a block comment',
+      "/**\n * We banned @import url('https://fonts.googleapis.com/x').\n */\nexport const ok = 1;",
+      0,
+    ],
+    [
+      'code after a block comment closes — the regression this tracking could cause',
+      "/**\n * Prose.\n */\n@import url('https://fonts.googleapis.com/x');",
+      1,
+    ],
+    [
+      'an unterminated block opener in a string must not swallow the file',
+      'const s = "/*";\n@import url(\'https://fonts.googleapis.com/x\');',
+      1,
+    ],
+    ['a local asset', "@import url('./fonts/inter.css');", 0],
+  ];
+
+  const failures = [];
+  for (const [name, source, expected] of cases) {
+    const found = scanText(source).length;
+    if (found !== expected) {
+      failures.push(`  - ${name}: expected ${expected} finding(s), got ${found}`);
+    }
+  }
+  if (failures.length) {
+    console.error('\ncheck-no-remote-assets self-test FAILED:\n');
+    console.error(failures.join('\n'));
+    console.error('\nThe scanner no longer detects what it exists to detect.\n');
+    process.exit(1);
+  }
+  console.log(`check-no-remote-assets: self-test clean — ${cases.length} cases.`);
+}
 
 async function* walk(dir) {
   let entries;
@@ -67,6 +200,8 @@ async function* walk(dir) {
   }
 }
 
+selfTest();
+
 const findings = [];
 
 for (const target of SCAN_DIRS) {
@@ -82,22 +217,8 @@ for (const target of SCAN_DIRS) {
     } catch {
       continue;
     }
-    const lines = text.split('\n');
-    for (const { re, what } of PATTERNS) {
-      re.lastIndex = 0;
-      let m;
-      while ((m = re.exec(text)) !== null) {
-        const line = text.slice(0, m.index).split('\n').length;
-        // A URL inside a comment is documentation, not a request.
-        if (COMMENT_OR_DOC.test(lines[line - 1] ?? '')) continue;
-        findings.push({
-          file: path.relative(path.resolve(ROOT, '..'), file).replace(/\\/g, '/'),
-          line,
-          what,
-          text: (lines[line - 1] ?? '').trim().slice(0, 110),
-        });
-      }
-    }
+    const rel = path.relative(path.resolve(ROOT, '..'), file).replace(/\\/g, '/');
+    findings.push(...scanText(text, rel));
   }
 }
 

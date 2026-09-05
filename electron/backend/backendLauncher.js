@@ -4,24 +4,59 @@ const path = require('path');
 const { checkHealth } = require('./health');
 
 /**
+ * Where the interpreter lives inside a packaged install.
+ *
+ * Unpacked beside the app rather than inside `app.asar`, because an archived
+ * file cannot be executed and a bundled CPython has to be. `extraResources` in
+ * `electron-builder.yml` is what puts it here.
+ */
+const BUNDLED_RUNTIME_DIR = 'runtime';
+
+function bundledPython(root, plat) {
+  return plat === 'win32'
+    ? path.join(root, BUNDLED_RUNTIME_DIR, 'python.exe')
+    : path.join(root, BUNDLED_RUNTIME_DIR, 'bin', 'python3');
+}
+
+/**
  * Resolves the Python interpreter to launch the backend.
  *
- * Order: ZARAM_PYTHON env -> project venv -> python3 -> python.
+ * Order: ZARAM_PYTHON -> bundled runtime -> development venv.
  * Kept pure (no child_process import at top level) so it can be unit tested.
  *
+ * **A stranger has no Python, and that was the blocker.** This used to look for
+ * `ZARAM_PYTHON`, then a `.venv`, then `python` on PATH — three things that
+ * exist only on a developer's machine. The packaged app would install
+ * correctly and then never start.
+ *
+ * **PATH is deliberately not a fallback.** Finding *some* Python on a stranger's
+ * machine is worse than finding none: it will be the wrong version, without the
+ * backend's dependencies, and the failure arrives later and reads as a broken
+ * product rather than a missing runtime. Not finding an interpreter is a clear
+ * error; finding the wrong one is a confusing one.
+ *
  * @param {object} opts
- * @param {string} opts.cwd
+ * @param {string} opts.cwd            backend directory (where main.py lives)
+ * @param {string} [opts.resourcesPath] packaged resources dir, if packaged
  * @param {Record<string,string>} [opts.env]
  * @param {string} [opts.platform]
  * @returns {string}
  */
-function resolvePythonCommand({ cwd, env, platform }) {
+function resolvePythonCommand({ cwd, resourcesPath, env, platform }) {
   const e = env || process.env;
   if (e.ZARAM_PYTHON) return e.ZARAM_PYTHON;
 
-  // `cwd` here is the backend directory (where main.py lives). The venv may
-  // live alongside it (dev) or at the repo root (packaged layouts).
   const plat = platform || process.platform;
+
+  // The bundled runtime wins over any venv. In a packaged install it is the
+  // only interpreter present; on a developer machine that has both, shipping
+  // behaviour is what should be exercised by default.
+  const roots = [resourcesPath, path.join(cwd, '..'), cwd].filter(Boolean);
+  for (const root of roots) {
+    const candidate = bundledPython(root, plat);
+    if (fsExistsSync(candidate)) return candidate;
+  }
+
   const venvLocal = plat === 'win32'
     ? path.join(cwd, '.venv', 'Scripts', 'python.exe')
     : path.join(cwd, '.venv', 'bin', 'python');
@@ -39,7 +74,42 @@ function resolvePythonCommand({ cwd, env, platform }) {
 }
 
 function fsExistsSync(p) {
-  try { return require('fs').existsSync(p); } catch (_) { return false; }
+  try { return realFs().existsSync(p); } catch (_) { return false; }
+}
+
+/**
+ * A filesystem that cannot see inside `app.asar`.
+ *
+ * Electron patches `fs` in the main process so archive contents look like
+ * ordinary files. That is convenient for `require` and a trap for anything
+ * that hands a path to another process: `existsSync` says yes, `spawn` says
+ * ENOENT, and the two disagree because only one of them is running inside
+ * Electron. `original-fs` is Electron's unpatched copy and is what every check
+ * on this path must use — the whole defect lives in the gap between the two.
+ *
+ * Outside Electron the module is absent and plain `fs` is already unpatched,
+ * so the fallback is the same filesystem by a different name.
+ */
+function realFs() {
+  try { return require('original-fs'); } catch (_) { return require('fs'); }
+}
+
+/** True for a path that lies inside the archive itself, unpacked tree aside. */
+function insideArchive(p) {
+  if (typeof p !== 'string') return false;
+  return /app\.asar(?!\.unpacked)($|[\\/])/.test(p);
+}
+
+/**
+ * The same location in the unpacked tree beside the archive.
+ *
+ * `asarUnpack` in `electron-builder.yml` writes `backend/**` to
+ * `resources/app.asar.unpacked/backend`, but `app.getAppPath()` keeps naming
+ * the archive. Translating is what connects the two.
+ */
+function unpackedTwin(p) {
+  if (!insideArchive(p)) return p;
+  return p.replace(/app\.asar($|[\\/])/, 'app.asar.unpacked$1');
 }
 
 function buildArgs() {
@@ -53,13 +123,24 @@ function buildArgs() {
  * health endpoint and reconnecting on failure. Event-driven: status changes
  * are pushed to subscribers.
  */
+/** Consecutive unanswered probes tolerated from a *running* backend.
+ *
+ *  At the 2 s poll interval this is roughly two minutes, chosen to clear the
+ *  95 s cold load of a model larger than VRAM. See `_shouldGiveUp`.
+ */
+const UNANSWERED_LIMIT = 60;
+
 class BackendLauncher {
-  constructor({ config, logger, spawnImpl, checkHealthImpl, fsImpl, platform }) {
+  constructor({ config, logger, spawnImpl, checkHealthImpl, fsImpl, realFsImpl, platform }) {
     this.config = config;
     this.logger = logger || console;
     this._spawn = spawnImpl || require('child_process').spawn;
     this._check = checkHealthImpl || checkHealth;
     this._fs = fsImpl || require('fs');
+    // Separate from `_fs` on purpose — see `realFs`. A test injecting one
+    // filesystem means it, so an injected `fsImpl` stands in for both unless
+    // the test distinguishes them.
+    this._realFs = realFsImpl || fsImpl || realFs();
     this._platform = platform || process.platform;
     this.child = null;
     this.status = { state: 'starting', url: config.backend.baseUrl, lastCheckedAt: 0 };
@@ -67,6 +148,26 @@ class BackendLauncher {
     this._timer = null;
     this._stopping = false;
     this._restartTimer = null;
+    // Consecutive failed health probes. Reset by any success.
+    //
+    // A single failure is not evidence the backend has gone. `checkHealth`
+    // aborts after 3 s, and the backend does not answer promptly while a cold
+    // model load is in flight — measured at 95 s for a 17 GB model. Tearing
+    // the app down on one abort meant that loading a large model destroyed
+    // the window it was being loaded from.
+    this._failures = 0;
+  }
+
+  /** Whether the backend process is still there.
+   *
+   *  Liveness, as distinct from readiness. The probe says whether the backend
+   *  can answer *right now*; this says whether it exists. Only the second is
+   *  grounds for telling the user it has gone — and an exit is already
+   *  reported separately by the `close` handler, so this is the belt to that
+   *  set of braces rather than the only check.
+   */
+  _childAlive() {
+    return Boolean(this.child && this.child.exitCode === null && !this.child.killed);
   }
 
   onStatus(cb) {
@@ -78,6 +179,12 @@ class BackendLauncher {
     return Object.assign({}, this.status);
   }
 
+  /** Announce a state change and tell the log.
+   *
+   *  Logged here rather than at each call site so no transition can be added
+   *  without one. A launcher that does not say when it changed state leaves
+   *  "the window never appeared" to be diagnosed by counting HTTP requests.
+   */
   _emit(state, error) {
     this.status = {
       state,
@@ -85,8 +192,21 @@ class BackendLauncher {
       lastCheckedAt: Date.now(),
       error: error || undefined,
     };
+    if (this.logger && this.logger.info) {
+      this.logger.info('Backend state', { state, subscribers: this._subscribers.size, error: error || undefined });
+    }
     for (const cb of this._subscribers) {
-      try { cb(this.getStatus()); } catch (_) { /* ignore subscriber errors */ }
+      // **A subscriber that throws is reported, not swallowed.** This was a
+      // bare `catch (_) {}`, and the one subscriber that matters is the
+      // handler in `main.js` that loads the renderer — so any error on that
+      // path produced a window that never loaded and a log that said nothing.
+      try {
+        cb(this.getStatus());
+      } catch (err) {
+        if (this.logger && this.logger.error) {
+          this.logger.error('Backend status subscriber failed', { state, error: err && err.message });
+        }
+      }
     }
   }
 
@@ -104,26 +224,56 @@ class BackendLauncher {
     return true;
   }
 
+  /**
+   * Where `main.py` lives, as a path another process can actually enter.
+   *
+   * Two rules, and the first one is the fix for a packaged app that could
+   * never start:
+   *
+   * 1. **A path inside `app.asar` is never returned**, however convincingly it
+   *    exists. It exists to Electron and to nothing else, and handing it to
+   *    `spawn` as a working directory fails on the cwd rather than on the
+   *    command — an ENOENT that names the interpreter and blames the wrong
+   *    thing. Each candidate is translated to its unpacked twin first, and the
+   *    archive form is then discarded rather than kept as a fallback.
+   * 2. **Existence is checked against `original-fs`.** Checking with the
+   *    patched `fs` is what made rule 1 necessary and invisible at the same
+   *    time.
+   */
   _resolveBackendDir() {
-    const candidates = [
-      path.join(this.config.appPath, 'backend'),
+    const roots = [
       this.config.appPath,
-      path.join(process.cwd(), 'backend'),
-      path.join(this.config.resourcesPath || process.cwd(), 'backend'),
-    ];
+      process.cwd(),
+      this.config.resourcesPath || process.cwd(),
+    ].filter(Boolean);
+
+    const candidates = [];
+    for (const root of roots) {
+      for (const c of [path.join(root, 'backend'), root]) {
+        const real = unpackedTwin(c);
+        if (insideArchive(real)) continue;
+        if (!candidates.includes(real)) candidates.push(real);
+      }
+    }
+
     for (const c of candidates) {
       try {
-        if (this._fs.existsSync(path.join(c, 'main.py'))) return c;
+        if (this._realFs.existsSync(path.join(c, 'main.py'))) return c;
       } catch (_) { /* ignore */ }
     }
-    // Fall back to appPath/backend even if not found; the spawn error will surface.
-    return path.join(this.config.appPath, 'backend');
+
+    // Nothing was found. Return the unpacked location rather than the archive:
+    // the spawn will still fail, but it fails naming a path a person can go
+    // and look at, which the archive path never was.
+    this.logger.error('No backend directory found', { candidates });
+    return unpackedTwin(path.join(this.config.appPath, 'backend'));
   }
 
   _spawnBackend() {
     const backendDir = this._resolveBackendDir();
     const command = resolvePythonCommand({
       cwd: backendDir,
+      resourcesPath: this.config.resourcesPath,
       env: process.env,
       platform: this._platform,
     });
@@ -177,30 +327,82 @@ class BackendLauncher {
     }, this.config.backend.restartDelayMs);
   }
 
+  /**
+   * The credential this launch's backend was started with.
+   *
+   * Read from `process.env` rather than held as a field: the desktop host sets
+   * it before spawning anything, the backend inherits it through the spawn
+   * environment, and this reads the same one value. Three copies of a secret
+   * are three chances for two of them to differ.
+   *
+   * Empty when there is none — a developer running the backend by hand, which
+   * uses the file fallback instead. Sending no header is then correct, and the
+   * request fails with 401 rather than being silently let through.
+   */
+  _authHeaders() {
+    const secret = process.env.ZARAM_API_SECRET || '';
+    return secret ? { 'X-Zaram-Auth': secret } : {};
+  }
+
   _startPolling() {
     if (this._timer) return;
     this._timer = setInterval(async () => {
       try {
-        const res = await this._check(this.config.backend.baseUrl, this.config.backend.healthPath);
+        // The credential goes on the probe. `/health` is not exempt from
+        // authentication, so a probe without it is a 401, which reads here as
+        // "the backend never started" — a splash screen for ever, in front of
+        // a backend that is running.
+        const res = await this._check(
+          this.config.backend.baseUrl,
+          this.config.backend.healthPath,
+          undefined,
+          this._authHeaders(),
+        );
         console.log('[BackendLauncher] Health check result:', res.ok ? 'OK' : `FAIL(${res.status})`, 'current state:', this.status.state)
         if (res.ok) {
+          this._failures = 0;
           if (this.status.state !== 'available') {
-            console.log('[BackendLauncher] Emitting available')
             this._emit('available')
           }
         } else if (this.status.state === 'available') {
-          console.log('[BackendLauncher] Emitting unavailable - status:', res.status)
+          // A status code is an answer, so the backend is up and saying no.
+          // That is a real fault and is reported at once.
+          this.logger.warn('Backend health check returned', { status: res.status });
           this._emit('unavailable', `Health check returned status ${res.status}`);
         }
       } catch (err) {
-        console.log('[BackendLauncher] Health check error:', err.message, 'current state:', this.status.state)
-        if (this.status.state === 'available') {
-          console.log('[BackendLauncher] Emitting unavailable - error')
+        // No answer at all — a refused connection, or the 3 s probe aborting.
+        // Only meaningful if it keeps happening *and* the process has gone.
+        this._failures += 1;
+        if (this.status.state === 'available' && this._shouldGiveUp()) {
+          this.logger.warn('Backend stopped answering', {
+            failures: this._failures,
+            childAlive: this._childAlive(),
+            error: err.message,
+          });
           this._emit('unavailable', err.message);
         }
       }
     }, this.config.backend.pollIntervalMs);
     if (this._timer.unref) this._timer.unref();
+  }
+
+  /** Whether silence has gone on long enough to tell the user.
+   *
+   *  A dead process is reported immediately: there is nothing to wait for, and
+   *  `close` will usually have said so already. A *live* process that is not
+   *  answering is busy, and the app stays up — the orb already reports that
+   *  Zaram is working, which is the honest thing to show while it is.
+   *
+   *  The grace period is generous on purpose. `UNANSWERED_LIMIT` probes at
+   *  `pollIntervalMs` is about two minutes, which clears the 95 s cold model
+   *  load measured on this machine. Being slow to report a hang costs a
+   *  spinner; being quick to report one costs the user their window and
+   *  whatever was on screen.
+   */
+  _shouldGiveUp() {
+    if (!this._childAlive()) return true;
+    return this._failures >= UNANSWERED_LIMIT;
   }
 
   _stopPolling() {
@@ -240,4 +442,12 @@ class BackendLauncher {
   }
 }
 
-module.exports = { BackendLauncher, resolvePythonCommand, buildArgs };
+module.exports = {
+  BackendLauncher,
+  resolvePythonCommand,
+  buildArgs,
+  bundledPython,
+  BUNDLED_RUNTIME_DIR,
+  insideArchive,
+  unpackedTwin,
+};

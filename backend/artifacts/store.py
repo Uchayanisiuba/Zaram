@@ -205,4 +205,10 @@ def default_output_root() -> Path:
     override = os.getenv("ZARAM_OUTPUT_DIR")
     if override:
         return Path(override).expanduser()
-    return Path(__file__).resolve().parents[1] / DEFAULT_OUTPUT_DIRNAME
+    # Inside the data directory, which is what `build/installer.nsh` already
+    # promises to hand back on uninstall — "the invoices and documents it
+    # generated". Under a source checkout that is still `backend/generated`, so
+    # nothing moves for a developer.
+    from core.paths import data_dir
+
+    return data_dir() / DEFAULT_OUTPUT_DIRNAME

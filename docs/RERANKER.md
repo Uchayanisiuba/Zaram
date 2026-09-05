@@ -57,6 +57,39 @@ treat every earlier margin in this file as measured through a broken selector.
 one the single most relevant document of a thousand, zero false citations at
 the floor, 673 ms mean latency.
 
+### Confirmed as a curve, 11 August 2026
+
++0.106 was one point. Re-run at three sizes it becomes a shape, and the shape
+is the part that settles the question:
+
+| docs | `related_min` | `unrelated_max` | margin | recalled | false citations | latency |
+|---|---|---|---|---|---|---|
+| 10 | 0.517 | 0.386 | +0.131 | 5/5 | 0/18 | 41 ms |
+| 100 | 0.517 | 0.409 | +0.108 | 5/5 | 0/18 | 65 ms |
+| 1,000 | 0.517 | 0.410 | **+0.106** | 5/5 | 0/18 | 285 ms |
+
+`related_min` is flat across two orders of magnitude, which is what it should
+be — a cosine between two fixed vectors, untouched by how much else is stored.
+The whole narrowing is `unrelated_max`, and **it saturates**: 10→100 costs
++0.023, 100→1,000 costs +0.001. Extrapolating the first two points linearly
+predicts a crossed floor at a thousand. It did not happen.
+
+So the reranker stays unbought on stronger evidence than before: not "the
+margin held once" but "the margin stops narrowing". Better similarities would
+buy headroom that is not being consumed.
+
+**The caveat that keeps this honest.** `_filler` has four templates and ten
+client names, so a thousand synthetic documents are a few hundred distinct
+texts with no new vocabulary — very likely *why* the maximum saturates. Real
+material keeps adding kinds of document, not just instances. This is evidence
+about a corpus, and the first bullet below is still the measurement that
+matters.
+
+Latency at 1,000 documents is 285 ms against the 673 ms recorded above, on the
+same machine and the same code path. Both were mean recall latency; the earlier
+figure was taken while a backend and an indexing pass were competing for the
+same GPU. Treat 285 ms as the quieter number and neither as a promise.
+
 ### What would reopen the question
 
 Measured evidence about *scoring*, and nothing else:

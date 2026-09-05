@@ -55,10 +55,30 @@ export interface EgressIntegrity {
 
 export type PolicyMode = 'allow' | 'ask' | 'deny';
 
+/**
+ * *What* is leaving, as distinct from where it is going — rule 7j's second
+ * dimension.
+ *
+ * `prompt` is what a plain host rule has always meant and is the default
+ * everywhere. The others must be granted for a destination in their own right:
+ * a chat message is a couple of kilobytes and a photograph is a few megabytes
+ * of something far more personal, so connecting a provider for text is not
+ * consent to send it a picture.
+ */
+export type EgressDataClass = 'prompt' | 'image' | 'spine';
+
 export interface EgressPolicySnapshot {
   /** Always "deny" — stated by the backend rather than assumed here. */
   default: string;
   rules: Record<string, PolicyMode>;
+  /**
+   * host → class → mode, for the classes a host rule does not speak for.
+   *
+   * Its own field rather than a nesting of `rules`, matching the backend: that
+   * shape is already rendered and parsed, and changing it quietly is how a
+   * privacy pane comes to show nothing at all.
+   */
+  classRules: Record<string, Partial<Record<EgressDataClass, PolicyMode>>>;
   hostsSeen: string[];
   /** Contacted at least once but never ruled on. What the pane should offer. */
   hostsWithoutARule: string[];
@@ -128,20 +148,111 @@ export async function fetchEgressPolicy(): Promise<EgressPolicySnapshot> {
   return {
     default: String(raw.default ?? 'deny'),
     rules: (raw.rules as Record<string, PolicyMode>) ?? {},
+    classRules:
+      (raw.class_rules as Record<string, Partial<Record<EgressDataClass, PolicyMode>>>) ?? {},
     hostsSeen: (raw.hosts_seen as string[]) ?? [],
     hostsWithoutARule: (raw.hosts_without_a_rule as string[]) ?? [],
   };
 }
 
-export async function setEgressPolicy(host: string, mode: PolicyMode): Promise<void> {
+/**
+ * Set one destination's rule, for one class of thing.
+ *
+ * `dataClass` defaults to `prompt`, so every existing call site keeps its
+ * exact behaviour — and the default is the least sensitive class rather than
+ * the most, because a caller that does not say what it is sending must not be
+ * able to grant permission for a photograph by omission.
+ */
+export async function setEgressPolicy(
+  host: string,
+  mode: PolicyMode,
+  dataClass: EgressDataClass = 'prompt',
+): Promise<void> {
   await json('/egress/policy', {
     method: 'PUT',
-    body: JSON.stringify({ host, mode }),
+    body: JSON.stringify({ host, mode, data_class: dataClass }),
   });
 }
 
-export async function forgetEgressPolicy(host: string): Promise<void> {
-  await json(`/egress/policy/${encodeURIComponent(host)}`, { method: 'DELETE' });
+/**
+ * Remove a rule.
+ *
+ * Omitting `dataClass` forgets the destination entirely, every class with it.
+ * Leaving an image grant behind after the host rule was removed would be a
+ * permission outliving the decision that created it — and an invisible one,
+ * since the list shows host rules.
+ */
+export async function forgetEgressPolicy(
+  host: string,
+  dataClass?: EgressDataClass,
+): Promise<void> {
+  const query = dataClass ? `?data_class=${encodeURIComponent(dataClass)}` : '';
+  await json(`/egress/policy/${encodeURIComponent(host)}${query}`, { method: 'DELETE' });
+}
+
+/**
+ * A request parked inside the gate, waiting for the user to answer.
+ *
+ * The thread that produced this is blocked on it: the model is not thinking,
+ * the reply is not streaming, and nothing has been logged or sent. That is the
+ * whole design — the decision happens before the bytes move, not after.
+ */
+export interface PendingEgress {
+  id: string;
+  host: string;
+  method: string;
+  url: string;
+  body: string | null;
+  /** Exactly what would go on the wire. The dialog shows this, not a summary. */
+  literalText: string;
+  byteCount: number;
+  /** Which part of Zaram is asking — "chat", a tool name. */
+  source: string;
+  /** Unix seconds, for ordering when more than one is waiting. */
+  createdAt: number;
+}
+
+export async function fetchPendingEgress(): Promise<PendingEgress[]> {
+  const raw = await json<{ pending: Array<Record<string, unknown>> }>('/egress/pending');
+  return (raw.pending ?? []).map((p) => ({
+    id: String(p.id),
+    host: String(p.host),
+    method: String(p.method),
+    url: String(p.url),
+    body: p.body == null ? null : String(p.body),
+    literalText: String(p.literal_text ?? p.url),
+    byteCount: Number(p.byte_count ?? 0),
+    source: String(p.source ?? 'unknown'),
+    createdAt: Number(p.created_at ?? 0),
+  }));
+}
+
+/**
+ * Answer a waiting request.
+ *
+ * `body` is what the user approved after editing — omit it to send the request
+ * unchanged. Omitting is meaningfully different from passing the same string
+ * back: an unedited body keeps its original bytes, while an edit is
+ * re-serialised, and the two are only guaranteed identical for text that
+ * survives a round trip.
+ *
+ * Resolves `false` when there was nothing left to answer, which is the normal
+ * outcome of a double-click or of a dialog that sat open past the timeout. It
+ * is not an error worth showing — the request was already refused.
+ */
+export async function decidePendingEgress(
+  id: string,
+  approved: boolean,
+  body?: string,
+): Promise<boolean> {
+  const res = await fetch(`${API_BASE}/egress/pending/${encodeURIComponent(id)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ approved, body: body ?? null }),
+  });
+  if (res.status === 404) return false;
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  return true;
 }
 
 export interface RetentionResult {

@@ -1,81 +1,178 @@
 /**
- * Settings — reports the running system, and says what cannot be configured yet.
+ * Settings — the controls, and an honest statement where a control does not exist.
  *
- * Everything shown here is read from `GET /health`. Where a control does not
- * exist, the screen says so rather than presenting a switch that does nothing.
- * A settings screen full of inert toggles is the same failure as a status panel
- * full of invented numbers: it tells the user they have control they do not
- * have, and on a privacy product that is the worst thing to be wrong about.
+ * The rule this screen was written around still holds: **where a capability is
+ * missing, say so rather than presenting a switch that does nothing.** A
+ * settings screen full of inert toggles tells the user they have control they
+ * do not have, and on a privacy product that is the worst thing to be wrong
+ * about.
  *
- * `docs/UI-SPEC.md` calls for Models · Privacy · Appearance · Storage as a
- * segmented control, with the Privacy pane carrying default source scope,
- * egress retention and a local kill switch. That is the shape to build here as
- * each capability lands.
+ * What changed is which side of that line things fall on. The previous version
+ * reported "Egress log: not built" and "Kill switch: not built" — and the
+ * egress log had been served at `/egress` for weeks, with its policy at
+ * `/egress/policy`. **A screen can lie in both directions**, and "not built"
+ * about something that exists is the more damaging one here: it tells a user
+ * worried about their data that Zaram is not recording what leaves, when it is.
+ * The kill switch genuinely did not exist, so it was built rather than
+ * re-labelled.
+ *
+ * Where each control's authority lives
+ * ------------------------------------
+ * Backend, because more than one client has to agree about it: the chosen
+ * model, the routing preference, the cloud connections, the per-host egress
+ * policy, the kill switch. A phone or a second window must not hold a different
+ * opinion about which provider may receive the user's documents.
+ *
+ * Browser, because it is a rendering choice this window owns: the renderer
+ * (orb or avatar) and reduced motion. These are already `zustand` stores with
+ * their own persistence and are surfaced here rather than duplicated.
+ *
+ * Discovery is on a button, not on mount
+ * --------------------------------------
+ * Listing models asks every connected cloud provider what it offers, which is
+ * egress — logged, and refusable by policy. Rule 7g means that cannot happen
+ * because a screen was opened. So the model list has a *Look for models*
+ * action, and it says that it is a network call before it makes one.
  */
-import { useEffect } from 'react';
-import { Volume2, Shield, Cpu, RefreshCw, Check, Minus } from 'lucide-react';
+import { useCallback, useEffect, useState } from 'react';
+import LetterheadSection from '../components/settings/LetterheadSection';
+import {
+  Volume2,
+  Shield,
+  Cpu,
+  RefreshCw,
+  Check,
+  Minus,
+  Cloud,
+  Eye,
+  Plus,
+  Trash2,
+  Loader2,
+  ExternalLink,
+  AlertTriangle,
+  Download,
+  ImageIcon,
+  FileText,
+  Settings as SettingsIcon,
+  UserRound,
+} from 'lucide-react';
+import SurfaceHeader from '../components/common/SurfaceHeader';
+import AdvancedModelField from '../components/settings/AdvancedModelField';
 import { useSystemStore } from '@/stores/systemStore';
+import { useEmbodimentStore } from '@/stores/embodimentStore';
+import {
+  fetchCharacter,
+  saveCharacter,
+  fetchVoices,
+  type Character,
+} from '@/services/characterClient';
+import {
+  SettingsError,
+  connectCloudProvider,
+  disconnectCloudProvider,
+  downloadExport,
+  fetchCloudStatus,
+  fetchEgressPolicy,
+  fetchExportManifest,
+  fetchKillSwitch,
+  fetchModels,
+  fetchProviderCatalogue,
+  fetchRoutingSettings,
+  fetchWebSearch,
+  forgetEgressPolicyForHost,
+  setEgressPolicyForHost,
+  setKillSwitch,
+  setSearchScope,
+  setWebSearch,
+  updateRoutingSettings,
+  type CatalogueProvider,
+  type CloudStatus,
+  type DiscoveredModel,
+  type EgressMode,
+  type EgressPolicy,
+  type ExportManifest,
+  type RoutingPreference,
+  type RoutingSettings,
+  type WebSearchStatus,
+} from '@/services/settingsClient';
+
+// --------------------------------------------------------------- primitives
 
 function Row({
   label,
   value,
   detail,
   state = 'neutral',
+  children,
 }: {
   label: string;
-  value: string;
-  detail?: string;
-  state?: 'good' | 'neutral' | 'absent';
+  value?: string;
+  detail?: React.ReactNode;
+  state?: 'good' | 'neutral' | 'absent' | 'warn';
+  children?: React.ReactNode;
 }) {
   const colour =
     state === 'good'
       ? 'var(--color-emerald)'
-      : state === 'absent'
-        ? 'var(--color-text-faint)'
-        : 'var(--color-text-muted)';
+      : state === 'warn'
+        ? 'var(--color-amber, #fbbf24)'
+        : state === 'absent'
+          ? 'var(--color-text-faint)'
+          : 'var(--color-text-muted)';
   return (
     <div
       className="flex items-start gap-3 px-5 py-3.5"
       style={{ borderBottom: '1px solid var(--color-border-subtle)' }}
     >
       <span className="mt-0.5 shrink-0" style={{ color: colour }}>
-        {state === 'good' ? <Check size={14} /> : <Minus size={14} />}
+        {state === 'good' ? <Check size={14} /> : state === 'warn' ? <AlertTriangle size={14} /> : <Minus size={14} />}
       </span>
       <div className="flex-1 min-w-0">
         <div className="flex items-baseline gap-2 flex-wrap">
           <span className="text-sm" style={{ color: 'var(--color-text)' }}>
             {label}
           </span>
-          <span
-            className="text-xs"
-            style={{ fontFamily: 'var(--font-mono)', color: colour }}
-          >
-            {value}
-          </span>
+          {value && (
+            <span className="text-xs" style={{ fontFamily: 'var(--font-mono)', color: colour }}>
+              {value}
+            </span>
+          )}
         </div>
         {detail && (
           // pre-wrap so a detail can carry an indented command block. Without
-          // it the install instructions collapse onto one line and stop being
+          // it install instructions collapse onto one line and stop being
           // copyable as a command.
-          <p
+          <div
             className="mt-1 text-[11px] text-slate-500 leading-relaxed"
             style={{ whiteSpace: 'pre-wrap' }}
           >
             {detail}
-          </p>
+          </div>
         )}
+        {children && <div className="mt-2.5">{children}</div>}
       </div>
     </div>
   );
 }
 
-function Section({ title, icon, children }: { title: string; icon: React.ReactNode; children: React.ReactNode }) {
+function Section({
+  title,
+  icon,
+  children,
+}: {
+  title: string;
+  icon: React.ReactNode;
+  children: React.ReactNode;
+}) {
   return (
     <div
       className="rounded-xl overflow-hidden mb-4"
       style={{ border: '1px solid var(--color-border-subtle)', background: 'var(--color-glass)' }}
     >
-      <div className="flex items-center gap-2 px-5 py-3" style={{ borderBottom: '1px solid var(--color-border-subtle)' }}>
+      <div
+        className="flex items-center gap-2 px-5 py-3"
+        style={{ borderBottom: '1px solid var(--color-border-subtle)' }}
+      >
         {icon}
         <span
           className="text-xs uppercase tracking-wider"
@@ -89,98 +186,681 @@ function Section({ title, icon, children }: { title: string; icon: React.ReactNo
   );
 }
 
+/**
+ * One destination and what happens to requests addressed to it.
+ *
+ * Shared by the hosts that have a rule and the hosts that have only been
+ * contacted, because they are the same decision at two stages and drawing them
+ * differently made the controls sit at three different x positions down one
+ * list. The host gets a fixed width and truncates rather than pushing the
+ * control, so the segmented buttons form a column the eye can run down — which
+ * is what makes "what can leave this machine" answerable at a glance rather
+ * than by reading every row.
+ */
+function PolicyRow({
+  host,
+  mode,
+  ruled,
+  busy,
+  onChange,
+  onForget,
+}: {
+  host: string;
+  mode: EgressMode;
+  ruled: boolean;
+  busy: boolean;
+  onChange: (mode: EgressMode) => void;
+  onForget?: () => void;
+}) {
+  return (
+    <div className="flex items-center gap-3">
+      <span
+        className="text-[11px] w-44 shrink-0 truncate"
+        title={host}
+        style={{
+          fontFamily: 'var(--font-mono)',
+          color: ruled ? 'var(--color-text)' : 'var(--color-text-faint)',
+        }}
+      >
+        {host}
+      </span>
+      <Segmented<EgressMode>
+        options={[
+          { value: 'deny', label: 'Never' },
+          { value: 'ask', label: 'Ask' },
+          { value: 'allow', label: 'Always' },
+        ]}
+        value={mode}
+        disabled={busy}
+        onChange={onChange}
+      />
+      {ruled ? (
+        <button
+          aria-label={`Forget the rule for ${host}`}
+          className="p-1 rounded text-slate-500 hover:text-slate-300"
+          onClick={onForget}
+        >
+          <Trash2 size={12} />
+        </button>
+      ) : (
+        <span className="text-[10px] text-slate-500">contacted, no rule</span>
+      )}
+    </div>
+  );
+}
+
+/** A segmented control. Used wherever the choice is a small closed set, which
+ *  `CLAUDE.md` prefers to a slider for anyone non-technical: nobody holds an
+ *  opinion about 0.3 versus 0.4 on a bias slider. */
+function Segmented<T extends string>({
+  options,
+  value,
+  onChange,
+  disabled,
+}: {
+  options: Array<{ value: T; label: string }>;
+  value: T;
+  onChange: (value: T) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <div className="inline-flex rounded-lg overflow-hidden" style={{ border: '1px solid var(--color-border-subtle)' }}>
+      {options.map((option) => {
+        const active = option.value === value;
+        return (
+          <button
+            key={option.value}
+            type="button"
+            disabled={disabled}
+            aria-pressed={active}
+            onClick={() => onChange(option.value)}
+            className="px-3 py-1.5 text-xs transition-colors disabled:opacity-40"
+            style={{
+              background: active ? 'var(--color-indigo-light, #6366f1)' : 'transparent',
+              color: active ? '#fff' : 'var(--color-text-muted)',
+            }}
+          >
+            {option.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function Button({
+  children,
+  onClick,
+  busy,
+  disabled,
+  tone = 'normal',
+  type = 'button',
+}: {
+  children: React.ReactNode;
+  onClick?: () => void;
+  busy?: boolean;
+  disabled?: boolean;
+  tone?: 'normal' | 'danger';
+  type?: 'button' | 'submit';
+}) {
+  return (
+    <button
+      type={type}
+      onClick={onClick}
+      disabled={disabled || busy}
+      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs transition-colors disabled:opacity-40"
+      style={{
+        border: '1px solid var(--color-border-subtle)',
+        color: tone === 'danger' ? '#fca5a5' : 'var(--color-text)',
+      }}
+    >
+      {busy && <Loader2 size={12} className="animate-spin" />}
+      {children}
+    </button>
+  );
+}
+
+/**
+ * "3 facts", "1 fact", or "an unknown number of facts".
+ *
+ * The last case is why this exists. The backend answers `-1` for a store it
+ * could not count, and rendering that as `0` would tell somebody deciding
+ * whether they can leave that Zaram holds nothing of theirs — a confident
+ * claim built on a failed read. Same rule as `vram_bytes` returning `None`
+ * rather than `0`, applied to a sentence instead of a number.
+ */
+function countLabel(count: number, singular: string, plural = ''): string {
+  const many = plural || `${singular}s`;
+  if (count < 0) return `an unknown number of ${many}`;
+  return `${count} ${count === 1 ? singular : many}`;
+}
+
+/** A failure shown in the user's terms, using the backend's own sentence. */
+function Problem({ message }: { message: string | null }) {
+  if (!message) return null;
+  return (
+    <p className="mt-2 text-[11px] leading-relaxed" style={{ color: '#fca5a5' }}>
+      {message}
+    </p>
+  );
+}
+
+const messageOf = (error: unknown): string =>
+  error instanceof SettingsError || error instanceof Error
+    ? error.message
+    : 'Something went wrong.';
+
+// ------------------------------------------------------------------- screen
+
+/**
+ * The model picker, grouped by where the model runs.
+ *
+ * A flat list made the single most important fact about a model -- whether
+ * choosing it sends your documents off the machine -- a suffix on a line of
+ * text, read only by someone already looking for it. `CLAUDE.md` puts locality
+ * on the one indicator whose whole job is to be trusted; the picker is where
+ * that choice is actually made, so it belongs here too.
+ *
+ * **Four localities, not two.** `CapabilityLocality` is `local | cloud |
+ * hybrid | remote_device`, and a split written as "local, else cloud" would
+ * quietly file a hybrid model under a guarantee nobody checked. Anything that
+ * is not one of the two known groups gets its own heading and says so, which
+ * is the same posture as `data_policy` returning `None` rather than guessing:
+ * an unanswered question is shown as unanswered.
+ *
+ * Order is deliberate and is not a ranking: local first because it is the
+ * default posture of the product, not because it is better.
+ */
+export type ModelGroup = { key: string; label: string; models: DiscoveredModel[] };
+
+/** Gigabytes, one decimal, for a number a person is about to compare. */
+function gb(bytes: number): string {
+  return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
+}
+
+/**
+ * Why a model will be slow on this machine, or `null` when it will not be.
+ *
+ * **The product already knew this and only told a log file.** A model larger
+ * than the whole resident budget loads with layers spilled into system RAM,
+ * which `swap_preflight` grades as `oversized` and its own docstring calls
+ * "a hardware fact no setting will change". `select_default_model` refuses to
+ * auto-pick one; a user choosing by hand skipped that gate entirely — which is
+ * right, a deliberate choice is theirs to make, and silent, which is not.
+ *
+ * Measured, 27 August 2026: choosing an 18.2 GB model on a 12 GB card gave no
+ * warning at any point, then a read timeout naming a URL.
+ *
+ * `null` covers two different situations that must both stay quiet: the model
+ * fits, and the question could not be answered. A Mac reports no VRAM at all,
+ * and greying out every model there would be worse than saying nothing.
+ */
+export function describeFit(model: DiscoveredModel): string | null {
+  if (model.fitsResident !== false) return null;
+  // `residentCostBytes` is weights *plus the model's own KV cache*, and it is
+  // the quantity the verdict was decided on. Quoting `sizeBytes` here was
+  // right only while the cache allowance was held back from the budget; since
+  // it moved onto the model, weights can sit under the budget on a model
+  // correctly graded too large, and the row would argue with itself.
+  const claimed = model.residentCostBytes ?? model.sizeBytes;
+  if (claimed === null || model.residentBudgetBytes === null) {
+    // Graded as not fitting, but without both numbers there is no sentence
+    // worth writing. Say the short true thing rather than an empty comparison.
+    return 'larger than this machine can hold';
+  }
+  return `${gb(claimed)}, and this machine has about ${gb(
+    model.residentBudgetBytes,
+  )} for a chat model`;
+}
+
+export function groupModelsByLocality(models: DiscoveredModel[]): ModelGroup[] {
+  const local: DiscoveredModel[] = [];
+  const cloud: DiscoveredModel[] = [];
+  const other: DiscoveredModel[] = [];
+
+  for (const model of models) {
+    if (model.locality === 'local') local.push(model);
+    else if (model.locality === 'cloud') cloud.push(model);
+    else other.push(model);
+  }
+
+  const groups: ModelGroup[] = [];
+  if (local.length) {
+    groups.push({ key: 'local', label: 'On this machine — nothing is sent', models: local });
+  }
+  if (cloud.length) {
+    groups.push({ key: 'cloud', label: 'Cloud — your prompt leaves this device', models: cloud });
+  }
+  if (other.length) {
+    // Named rather than hidden. If a locality Zaram does not recognise ever
+    // appears, the user should see the model and see that we cannot vouch for
+    // where it runs.
+    groups.push({ key: 'other', label: 'Where this runs is not established', models: other });
+  }
+  return groups;
+}
+
 export default function SettingsWorkspace() {
   const backendOnline = useSystemStore((s) => s.backendOnline);
   const routing = useSystemStore((s) => s.routing);
   const speech = useSystemStore((s) => s.speech);
+  const images = useSystemStore((s) => s.images);
   const refresh = useSystemStore((s) => s.refresh);
   const startPolling = useSystemStore((s) => s.startPolling);
 
+  const renderer = useEmbodimentStore((s) => s.renderer);
+  const setRenderer = useEmbodimentStore((s) => s.setRenderer);
+
+  const [catalogue, setCatalogue] = useState<CatalogueProvider[]>([]);
+  const [catalogueDate, setCatalogueDate] = useState<string>('');
+  const [cloud, setCloud] = useState<CloudStatus | null>(null);
+  const [routingSettings, setRoutingSettings] = useState<RoutingSettings | null>(null);
+  const [killSwitch, setKillSwitchState] = useState<boolean | null>(null);
+  const [policy, setPolicy] = useState<EgressPolicy | null>(null);
+  const [models, setModels] = useState<DiscoveredModel[] | null>(null);
+  const [search, setSearch] = useState<WebSearchStatus | null>(null);
+  const [exportManifest, setExportManifest] = useState<ExportManifest | null>(null);
+  const [exported, setExported] = useState<string | null>(null);
+
+  const [character, setCharacter] = useState<Character | null>(null);
+  const [voices, setVoices] = useState<string[]>([]);
+  // Drafts, so a half-typed name is not saved on every keystroke.
+  // Null means "not being edited" and falls back to the stored value —
+  // distinct from an empty string, which is a deliberate clear.
+  const [nameDraft, setNameDraft] = useState<string | null>(null);
+  const [mannerDraft, setMannerDraft] = useState<string | null>(null);
+
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  // The provider being connected, and the key being typed for it. Held here
+  // rather than in a child so that switching provider clears the field — a key
+  // left over from a different provider is the kind of thing that gets pasted
+  // into the wrong service.
+  const [chosenProvider, setChosenProvider] = useState<string>('');
+  const [apiKey, setApiKey] = useState('');
+  const [customUrl, setCustomUrl] = useState('');
+
   useEffect(() => startPolling(), [startPolling]);
 
-  const providers = routing?.providers ?? [];
+  /**
+   * Everything that costs nothing to read. Deliberately excludes the model
+   * list, which is egress — see the header.
+   *
+   * **Settled, not all.** With `Promise.all`, one endpoint failing threw before
+   * a single `setState` ran, so the entire screen stayed empty — every provider
+   * gone, every rule gone, every toggle inert — and the only clue was one error
+   * banner. That happened here for real the first time `/search/web` was added
+   * without its proxy entry: a route nobody could reach blanked the provider
+   * picker, the egress rules and the kill switch along with it.
+   *
+   * A settings screen is six independent readings of the system. One of them
+   * being unavailable is a reason to say so about *that* one, never a reason to
+   * stop reporting the other five — the same principle as the rest of this
+   * screen, applied to its own loading.
+   */
+  const loadLocalState = useCallback(async () => {
+    setError(null);
+
+    const [cat, cloudStatus, routingState, kill, egressPolicy, webSearch, manifest] =
+      await Promise.allSettled([
+        fetchProviderCatalogue(),
+        fetchCloudStatus(),
+        fetchRoutingSettings(),
+        fetchKillSwitch(),
+        fetchEgressPolicy(),
+        fetchWebSearch(),
+        // Counting what an export would hold is a local read, not a network
+        // call, so rule 7g does not apply and it can run on mount.
+        fetchExportManifest(),
+      ]);
+
+    if (cat.status === 'fulfilled') {
+      setCatalogue(cat.value.providers);
+      setCatalogueDate(cat.value.generated);
+    }
+    if (cloudStatus.status === 'fulfilled') setCloud(cloudStatus.value);
+    if (routingState.status === 'fulfilled') setRoutingSettings(routingState.value);
+    if (kill.status === 'fulfilled') setKillSwitchState(kill.value);
+    if (egressPolicy.status === 'fulfilled') setPolicy(egressPolicy.value);
+    if (webSearch.status === 'fulfilled') setSearch(webSearch.value);
+    if (manifest.status === 'fulfilled') setExportManifest(manifest.value);
+
+    // Named, and only the ones that actually failed. "Something went wrong"
+    // over a screen that is now half-populated is worse than either a working
+    // screen or an empty one, because the user cannot tell which half to trust.
+    const failures = [
+      ['providers', cat],
+      ['cloud', cloudStatus],
+      ['routing', routingState],
+      ['kill switch', kill],
+      ['per-source rules', egressPolicy],
+      ['web search', webSearch],
+    ] as const;
+    const broken = failures.filter(([, r]) => r.status === 'rejected');
+    if (broken.length > 0) {
+      setError(
+        `Could not read ${broken.map(([name]) => name).join(', ')} — ` +
+          messageOf((broken[0][1] as PromiseRejectedResult).reason) +
+          ' Everything else on this screen is current.',
+      );
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadLocalState();
+  }, [loadLocalState]);
+
+  /**
+   * The character, read on its own rather than folded into `loadLocalState`.
+   *
+   * Same reasoning as the `allSettled` above, applied one level out: this is a
+   * seventh independent reading of the system, and a backend without the voice
+   * extra installed must not be able to blank the provider list. `fetchVoices`
+   * never throws for that reason — an absent voice list is the ordinary state
+   * of a base install and is not a failure worth reporting anywhere.
+   */
+  useEffect(() => {
+    const stop = new AbortController();
+    void (async () => {
+      try {
+        const [loaded, available] = await Promise.all([
+          fetchCharacter(stop.signal),
+          fetchVoices(stop.signal),
+        ]);
+        setCharacter(loaded);
+        setVoices(available);
+      } catch {
+        // Leaves `character` null, which the section renders as "unavailable"
+        // rather than as an empty form that would silently save nothing.
+      }
+    })();
+    return () => stop.abort();
+  }, []);
+
+  const run = async (name: string, work: () => Promise<void>) => {
+    setBusy(name);
+    setError(null);
+    try {
+      await work();
+    } catch (err) {
+      setError(messageOf(err));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const selected = catalogue.find((p) => p.id === chosenProvider) ?? null;
+  const needsKey = selected ? selected.auth !== 'none' : true;
+  const needsUrl = selected ? !selected.available : Boolean(chosenProvider === '');
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
-      <div className="px-8 pt-6 pb-4 flex items-center gap-3">
-        <h1
-          className="text-lg font-semibold"
-          style={{ fontFamily: 'var(--font-display)', color: 'var(--color-text)' }}
-        >
-          Settings
-        </h1>
-        <div className="flex-1" />
+      <SurfaceHeader icon={SettingsIcon} title="Settings">
         <button
-          onClick={() => void refresh()}
+          onClick={() => {
+            void refresh();
+            void loadLocalState();
+          }}
           aria-label="Refresh"
           className="p-2 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-white/5 transition-colors"
         >
           <RefreshCw size={15} />
         </button>
-      </div>
+      </SurfaceHeader>
 
       <div className="flex-1 overflow-y-auto px-8 pb-8 max-w-3xl">
+        {error && (
+          <div
+            className="mb-4 px-4 py-3 rounded-lg text-xs"
+            style={{ border: '1px solid rgba(248,113,113,0.4)', color: '#fca5a5' }}
+            role="alert"
+          >
+            {error}
+          </div>
+        )}
+
+        {/* ------------------------------------------------------- Privacy */}
         <Section title="Privacy" icon={<Shield size={14} style={{ color: 'var(--color-emerald)' }} />}>
+          <Row
+            label="Kill switch"
+            value={killSwitch === null ? 'unknown' : killSwitch ? 'ON — nothing may leave' : 'off'}
+            state={killSwitch ? 'warn' : 'neutral'}
+            detail={
+              'Refuses every outbound request in one action, whatever the per-source rules say. ' +
+              'Turning it off restores those rules exactly as they were — nothing is forgotten.\n' +
+              'The local model is unaffected: it runs on this machine, so there is nothing to cut.'
+            }
+          >
+            <Segmented<'on' | 'off'>
+              options={[
+                { value: 'off', label: 'Allow, per the rules below' },
+                { value: 'on', label: 'Cut everything' },
+              ]}
+              value={killSwitch ? 'on' : 'off'}
+              disabled={busy === 'kill' || killSwitch === null}
+              onChange={(next) =>
+                void run('kill', async () => {
+                  setKillSwitchState(await setKillSwitch(next === 'on'));
+                  // The web search row reports the kill switch as one of the
+                  // things standing in its way, so leaving it unrefreshed would
+                  // show a warning that had stopped being true — or hide one
+                  // that had just started being true.
+                  setSearch(await fetchWebSearch());
+                })
+              }
+            />
+          </Row>
+
           <Row
             label="Requests that can leave this device"
             value={routing?.canLeaveDevice ? 'some' : 'none'}
             state={routing?.canLeaveDevice ? 'neutral' : 'good'}
             detail={
               routing?.canLeaveDevice
-                ? 'A route off this machine exists. Check what has left in Activity.'
+                ? 'A route off this machine exists. Everything that took it is listed in Activity.'
                 : 'Inference runs locally and the Spine is a file on this disk. Nothing is sent out.'
             }
           />
+
+          <Row
+            label="Per-source rules"
+            value={policy ? `${Object.keys(policy.rules).length} set · default deny` : 'unknown'}
+            state="good"
+            detail="Each destination is allowed, asked about, or refused. Anything with no rule is refused."
+          >
+            <div className="flex flex-col gap-1.5">
+              {policy &&
+                Object.entries(policy.rules).map(([host, mode]) => (
+                  <PolicyRow
+                    key={host}
+                    host={host}
+                    mode={mode}
+                    ruled
+                    busy={busy === `policy:${host}`}
+                    onChange={(next) =>
+                      void run(`policy:${host}`, async () => {
+                        await setEgressPolicyForHost(host, next);
+                        setPolicy(await fetchEgressPolicy());
+                        setSearch(await fetchWebSearch());
+                      })
+                    }
+                    onForget={() =>
+                      void run(`policy:${host}`, async () => {
+                        await forgetEgressPolicyForHost(host);
+                        setPolicy(await fetchEgressPolicy());
+                        setSearch(await fetchWebSearch());
+                      })
+                    }
+                  />
+                ))}
+
+              {policy?.hostsWithoutARule.map((host) => (
+                <PolicyRow
+                  key={host}
+                  host={host}
+                  // Shown as "Never" because that is what happens to it — the
+                  // default is deny. Showing it as unset would be accurate
+                  // about the rule and wrong about the behaviour, and the
+                  // behaviour is the thing the user is checking.
+                  mode="deny"
+                  ruled={false}
+                  busy={busy === `policy:${host}`}
+                  onChange={(next) =>
+                    void run(`policy:${host}`, async () => {
+                      await setEgressPolicyForHost(host, next);
+                      setPolicy(await fetchEgressPolicy());
+                        setSearch(await fetchWebSearch());
+                    })
+                  }
+                />
+              ))}
+
+              {policy && Object.keys(policy.rules).length === 0 && policy.hostsWithoutARule.length === 0 && (
+                <span className="text-[11px] text-slate-500">
+                  Nothing has been contacted yet, so there is nothing to decide about.
+                </span>
+              )}
+            </div>
+          </Row>
+
           <Row
             label="Web search"
-            value={routing?.webSearch ?? 'unknown'}
-            state={routing?.webSearch === 'disabled' ? 'good' : 'neutral'}
-            detail="Off until the egress log and per-source policy exist, so a question cannot reach a search provider unlogged."
-          />
-          <Row
-            label="Egress log"
-            value="not built"
-            state="absent"
-            detail="Nothing can leave yet, so there is nothing to record. It ships before the first cloud provider, together with its retention control."
-          />
-          <Row
-            label="Kill switch"
-            value="not built"
-            state="absent"
-            detail="Will cut all outbound traffic in one action. Nothing to cut today."
-          />
-        </Section>
-
-        <Section title="Speech" icon={<Volume2 size={14} style={{ color: 'var(--color-indigo-light)' }} />}>
-          {/* Not installed is the ordinary state of a base install, not a
-              fault — so it says which, and says how to change it. A greyed
-              control with no explanation leaves the user unable to tell
-              "broken" from "unfinished" from "not installed", and the usual
-              conclusion is that the product is broken. */}
-          <Row
-            label="Speech synthesis"
-            value={
-              speech === null
-                ? 'unknown'
-                : speech === 'available'
-                  ? 'available'
-                  : 'not installed'
-            }
-            state={speech === 'available' ? 'good' : speech === null ? 'neutral' : 'absent'}
+            value={search === null ? 'unknown' : search.on ? 'on' : 'off'}
+            state={search?.on ? 'neutral' : 'good'}
             detail={
-              speech === null
-                ? 'Waiting for the backend to report.'
-                : speech === 'available'
-                  ? 'Kokoro is installed and runs on the CPU, so it does not compete with the local model for VRAM.'
-                  : 'Voice ships as an optional extra because it pulls roughly 830 MB — torch, ' +
-                    'transformers and the spaCy stack — for a feature that is out of scope for v1. ' +
-                    'Chat is unaffected. To enable it, install the extra and restart Zaram:\n\n' +
-                    '    pip install -r backend/requirements-voice.txt\n' +
-                    '    python -m spacy download en_core_web_sm'
+              'Zaram’s first source that leaves this machine, and it is governed like any other: ' +
+              'the question itself is what gets sent, never anything recalled from your Spine.'
             }
-          />
+          >
+            {/* A testid because "On" and "Off" are the two most reusable button
+                labels there are, and a driver script matching them by name
+                would silently start operating a different control the day one
+                is added above. */}
+            <div className="flex flex-col gap-2" data-testid="web-search-toggle">
+              <Segmented<'on' | 'off'>
+                options={[
+                  { value: 'off', label: 'Off' },
+                  { value: 'on', label: 'On' },
+                ]}
+                value={search?.on ? 'on' : 'off'}
+                disabled={busy === 'search' || search === null || search.forcedByEnvironment}
+                onChange={(next) =>
+                  void run('search', async () => setSearch(await setWebSearch(next === 'on')))
+                }
+              />
+
+              {/* The two things that still stand between "on" and a working
+                  search, each stated only when it actually applies. Turning the
+                  switch on and getting a refusal, with nothing explaining why,
+                  is the failure this section exists to prevent. */}
+              {search?.forcedByEnvironment && (
+                <p className="text-[11px] leading-relaxed" style={{ color: 'var(--color-amber, #fbbf24)' }}>
+                  ZARAM_WEB_SEARCH is set in the environment, so it decides and this control does
+                  not. Unset it to hand the choice back to this screen.
+                </p>
+              )}
+
+              {search?.on && search.killSwitch && (
+                <p className="text-[11px] leading-relaxed" style={{ color: 'var(--color-amber, #fbbf24)' }}>
+                  The kill switch is on, so no search will be sent regardless.
+                </p>
+              )}
+
+              {/* When searching is worth it, which is a different question from
+                  whether it is allowed. Search compensates for what the
+                  answering model does not know, and a local model knows least —
+                  so the default only searches for local models. Shown only when
+                  search is on, because it is meaningless otherwise. */}
+              {search?.on && (
+                <div className="flex flex-col gap-1">
+                  <Segmented<'local_only' | 'always'>
+                    options={[
+                      { value: 'local_only', label: 'Only for local models' },
+                      { value: 'always', label: 'For every model' },
+                    ]}
+                    value={search.scope}
+                    disabled={busy === 'search-scope'}
+                    onChange={(next) =>
+                      void run('search-scope', async () => setSearch(await setSearchScope(next)))
+                    }
+                  />
+                  <span className="text-[10px] text-slate-500 leading-relaxed">
+                    A local model has an older, smaller store of facts, so a live result changes
+                    its answer far more often. Cloud models mostly do not come with web search
+                    either — they just have a later cutoff — so this trades freshness for speed
+                    rather than avoiding something the provider would have done anyway.
+                  </span>
+                </div>
+              )}
+
+              {search?.on && search.hostPolicy === 'deny' && !search.killSwitch && (
+                <p className="text-[11px] leading-relaxed" style={{ color: 'var(--color-amber, #fbbf24)' }}>
+                  Searches go to {search.host}, which has no rule yet — so they are refused, and the
+                  refusal is recorded in Activity. Set that host to Ask or Always in Per-source
+                  rules above to let them through. Turning search on does not grant a destination
+                  anything; that stays a separate decision.
+                </p>
+              )}
+            </div>
+          </Row>
+
+          {/*
+            Rule 7, made reachable. The exporter and its tests had existed for
+            weeks behind no route and no control, so "the Spine is exportable,
+            no lock-in" was a true statement about a module and a false one
+            about the product.
+
+            It sits inside Privacy rather than in a section of its own because
+            it answers the same question as everything above it: what happens
+            to my data. The counts come first — a download button with no idea
+            what is behind it asks the user to take the claim on faith, which
+            is the posture this whole screen exists to avoid.
+          */}
+          <Row
+            label="Take everything with you"
+            value={exportManifest ? 'ready' : undefined}
+            state="good"
+            detail={
+              exportManifest
+                ? `${countLabel(exportManifest.facts, 'fact')}, ` +
+                  `${countLabel(exportManifest.egressEntries, 'egress entry', 'egress entries')} and ` +
+                  `${countLabel(exportManifest.generatedDocuments, 'generated document')}, ` +
+                  `as ${exportManifest.formats.join(', ')} inside one .zip. ` +
+                  exportManifest.note
+                : 'Everything Zaram holds, in formats that open without Zaram installed.'
+            }
+          >
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
+                <Button
+                  busy={busy === 'export'}
+                  onClick={() =>
+                    run('export', async () => {
+                      setExported(null);
+                      const filename = await downloadExport();
+                      setExported(filename);
+                    })
+                  }
+                >
+                  <Download size={12} />
+                  Export everything
+                </Button>
+                {exported && (
+                  <span className="text-[11px]" style={{ color: 'var(--color-emerald)' }}>
+                    Saved as {exported}
+                  </span>
+                )}
+              </div>
+              <p className="text-[11px] leading-relaxed" style={{ color: 'var(--color-text-faint)' }}>
+                Nothing is deleted and nothing changes — this is a copy. Checking that you could
+                leave should not cost you anything.
+              </p>
+            </div>
+          </Row>
         </Section>
 
+        {/* -------------------------------------------------------- Models */}
         <Section title="Models" icon={<Cpu size={14} style={{ color: 'var(--color-indigo-light)' }} />}>
           <Row
             label="Engine"
@@ -188,36 +868,639 @@ export default function SettingsWorkspace() {
             state={backendOnline ? 'good' : 'absent'}
             detail={backendOnline ? undefined : 'Zaram’s backend is not reachable on port 8420.'}
           />
-          {providers.length > 0 ? (
-            providers.map((p) => (
-              <Row
-                key={p.id}
-                label={p.id === 'ollama' ? 'On this computer' : p.id}
-                value={p.locality}
-                state="good"
-                detail={
-                  p.locality === 'local'
-                    ? 'Answers are generated here. Nothing about your question is sent anywhere.'
-                    : undefined
+
+          <Row
+            label="How Zaram chooses"
+            value={routingSettings?.routingPreference ?? 'unknown'}
+            state="good"
+            detail={
+              'A bias, not a permission. Preferring cloud cannot promote a model whose terms are ' +
+              'unknown — that gate is separate and a dropdown does not turn it off.'
+            }
+          >
+            <Segmented<RoutingPreference>
+              options={[
+                { value: 'prefer_local', label: 'Prefer local' },
+                { value: 'auto', label: 'Auto' },
+                { value: 'prefer_cloud', label: 'Prefer cloud' },
+              ]}
+              value={routingSettings?.routingPreference ?? 'auto'}
+              disabled={busy === 'routing' || !routingSettings}
+              onChange={(next) =>
+                void run('routing', async () =>
+                  setRoutingSettings(await updateRoutingSettings({ routingPreference: next })),
+                )
+              }
+            />
+          </Row>
+
+          <Row
+            label="Which model answers"
+            value={routingSettings?.defaultModel ?? 'Zaram decides'}
+            state={routingSettings?.defaultModel ? 'good' : 'neutral'}
+            detail={
+              models === null
+                ? 'Looking for models asks every connected provider what it offers. For a cloud provider that is a request that leaves this device, so it happens when you ask for it and is recorded in Activity.'
+                : 'Leaving this on “Zaram decides” uses the model the provider layer vetted — it checks that the model fits alongside the embedding model and that its terms are known.'
+            }
+          >
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
+                <Button
+                  busy={busy === 'models'}
+                  onClick={() => void run('models', async () => setModels(await fetchModels()))}
+                >
+                  <RefreshCw size={12} />
+                  {models === null ? 'Look for models' : 'Look again'}
+                </Button>
+                {models !== null && (
+                  <span className="text-[11px] text-slate-500">
+                    {models.filter((m) => m.category !== 'embedding').length} found
+                  </span>
+                )}
+              </div>
+
+              {models !== null && (
+                <select
+                  aria-label="Which model answers"
+                  className="px-2 py-1.5 rounded-lg text-xs max-w-full"
+                  style={{
+                    background: 'transparent',
+                    border: '1px solid var(--color-border-subtle)',
+                    color: 'var(--color-text)',
+                  }}
+                  value={routingSettings?.defaultModel ?? ''}
+                  onChange={(event) =>
+                    void run('routing', async () =>
+                      setRoutingSettings(
+                        await updateRoutingSettings({ defaultModel: event.target.value }),
+                      ),
+                    )
+                  }
+                >
+                  <option value="">Zaram decides</option>
+                  {/* Embedders are not offered. `bge-m3` is a model, is
+                      discovered like one, and answers `/api/generate` with a
+                      400 — so listing it here is offering a choice whose only
+                      outcome is a failed reply. `/readiness` already excludes
+                      them from its chat-model count; this was the surface that
+                      did not. */}
+                  {groupModelsByLocality(
+                    models.filter((model) => model.category !== 'embedding'),
+                  ).map((group) => (
+                    <optgroup key={group.key} label={group.label}>
+                      {group.models.map((model) => (
+                        <option key={model.id} value={model.id}>
+                          {model.displayName}
+                          {model.dataPolicy ? '' : ' · terms unknown'}
+                          {/* On the label, because a native `option` cannot be
+                              styled portably and the text is the one carrier
+                              that always survives. Same shape as the terms
+                              note beside it. */}
+                          {model.fitsResident === false ? ' · too large for this machine' : ''}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ))}
+                </select>
+              )}
+
+              {/* **The case that actually bit.** Marking the option is enough
+                  while someone is choosing; it is no use at all to the person
+                  who chose an hour ago and is now watching a reply that will
+                  not arrive. So the chosen model is checked on its own, and
+                  the consequence is stated rather than the verdict — "will be
+                  slow" is what they will experience, "does not fit alongside
+                  the embedding model" is how the system phrases it to itself. */}
+              {(() => {
+                if (models === null) return null;
+                const chosen = models.find((m) => m.id === routingSettings?.defaultModel);
+                const reason = chosen ? describeFit(chosen) : null;
+                if (!chosen || !reason) return null;
+                return (
+                  <p
+                    className="text-[11px] leading-snug mt-0.5"
+                    style={{ color: 'var(--color-amber)', maxWidth: '46ch' }}
+                  >
+                    {chosen.displayName} is {reason}. Part of it will run on the processor,
+                    so every reply will be slow — not just the first. A smaller model is the
+                    remedy.
+                  </p>
+                );
+              })()}
+
+              {/* A dropdown cannot hold OpenRouter's catalogue, so a name can
+                  be typed. Behind Advanced, per the three tiers of control.
+                  The refusal that makes it safe is already in `main.py`: a
+                  name the catalogue cannot place is refused before dispatch
+                  rather than falling through to Ollama. */}
+              <AdvancedModelField
+                models={models}
+                chosen={routingSettings?.defaultModel ?? null}
+                busy={busy === 'routing'}
+                onChoose={(model) =>
+                  void run('routing', async () =>
+                    setRoutingSettings(await updateRoutingSettings({ defaultModel: model })),
+                  )
                 }
               />
-            ))
-          ) : (
-            <Row label="Providers" value="none detected" state="absent" />
-          )}
+            </div>
+          </Row>
+        </Section>
+
+        {/* --------------------------------------------------------- Cloud */}
+        <Section title="Cloud providers" icon={<Cloud size={14} style={{ color: 'var(--color-indigo-light)' }} />}>
           <Row
-            label="Cloud model"
-            value="not connected"
-            state="absent"
-            detail="Connecting one is not built yet. When it is, you will be able to use free models through OpenRouter alongside the local one, and choose which handles what."
+            label="Connected"
+            value={cloud ? `${cloud.connections.length}` : 'unknown'}
+            state={cloud?.configured ? 'good' : 'neutral'}
+            detail={
+              'Zaram never buys inference — bring your own key. Connecting stores it and makes no ' +
+              'network call: a key is checked by being used, and that first use is logged and confirmed.'
+            }
+          >
+            <div className="flex flex-col gap-1.5">
+              {cloud?.connections.map((connection) => (
+                <div key={connection.providerId} className="flex items-center gap-2 flex-wrap">
+                  <span className="text-[11px]" style={{ color: 'var(--color-text)' }}>
+                    {connection.displayName}
+                  </span>
+                  <span
+                    className="text-[10px]"
+                    style={{ fontFamily: 'var(--font-mono)', color: 'var(--color-text-faint)' }}
+                  >
+                    {connection.baseUrl}
+                  </span>
+                  {connection.keyTail && (
+                    <span className="text-[10px] text-slate-500">key ····{connection.keyTail}</span>
+                  )}
+                  <Button
+                    tone="danger"
+                    busy={busy === `disconnect:${connection.providerId}`}
+                    onClick={() =>
+                      void run(`disconnect:${connection.providerId}`, async () =>
+                        setCloud(await disconnectCloudProvider(connection.providerId)),
+                      )
+                    }
+                  >
+                    Disconnect
+                  </Button>
+                </div>
+              ))}
+              {cloud && cloud.connections.length === 0 && (
+                <span className="text-[11px] text-slate-500">
+                  None. Everything is answered on this machine.
+                </span>
+              )}
+
+              {/* The step that is missing after a successful connect, named.
+                  Connecting stores a key; it does not permit the destination.
+                  So "Look for models" is refused by default deny, the list
+                  comes back empty, and there is no way to select a cloud model
+                  — with nothing on screen explaining why. That happened to the
+                  maintainer, and this is the fix: say which host needs a rule
+                  and offer it here rather than sending them to another
+                  section to guess. */}
+              {cloud?.connections
+                .filter((c) => c.locality === 'cloud')
+                .map((c) => {
+                  const host = (() => {
+                    try {
+                      return new URL(c.baseUrl).hostname;
+                    } catch {
+                      return '';
+                    }
+                  })();
+                  const rule = host ? policy?.rules[host] : undefined;
+                  if (!host || (rule && rule !== 'deny')) return null;
+                  return (
+                    <p
+                      key={`needs-rule-${c.providerId}`}
+                      className="text-[11px] leading-relaxed"
+                      style={{ color: 'var(--color-amber, #fbbf24)' }}
+                    >
+                      {c.displayName} is connected, but {host} has no rule yet — so looking for
+                      its models, and any answer from it, will be refused and recorded in
+                      Activity. Allow it below to use it.
+                      <button
+                        type="button"
+                        className="ml-2 underline"
+                        onClick={() =>
+                          void run(`policy:${host}`, async () => {
+                            await setEgressPolicyForHost(host, 'allow');
+                            setPolicy(await fetchEgressPolicy());
+                            setSearch(await fetchWebSearch());
+                          })
+                        }
+                      >
+                        Allow {host}
+                      </button>
+                    </p>
+                  );
+                })}
+            </div>
+          </Row>
+
+          <Row
+            label="Connect a provider"
+            detail={
+              catalogueDate
+                ? `Addresses were read from each provider's documentation on ${catalogueDate}. Nothing here was confirmed by a live request.`
+                : undefined
+            }
+          >
+            <form
+              className="flex flex-col gap-2"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void run('connect', async () => {
+                  setCloud(
+                    await connectCloudProvider({
+                      providerId: chosenProvider || undefined,
+                      baseUrl: customUrl.trim() || undefined,
+                      apiKey: apiKey.trim() || undefined,
+                    }),
+                  );
+                  setApiKey('');
+                  setCustomUrl('');
+                });
+              }}
+            >
+              <select
+                aria-label="Provider"
+                className="px-2 py-1.5 rounded-lg text-xs"
+                style={{
+                  background: 'transparent',
+                  border: '1px solid var(--color-border-subtle)',
+                  color: 'var(--color-text)',
+                }}
+                value={chosenProvider}
+                onChange={(event) => {
+                  setChosenProvider(event.target.value);
+                  // A key typed for one provider must not survive into
+                  // another. Pasting a key into the wrong service is a real
+                  // way to leak a credential to a third party.
+                  setApiKey('');
+                  setCustomUrl('');
+                }}
+              >
+                <option value="">Something else — I'll paste the address</option>
+                {catalogue.map((provider) => (
+                  <option key={provider.id} value={provider.id}>
+                    {provider.displayName}
+                    {provider.available ? '' : ' — not reachable yet'}
+                  </option>
+                ))}
+              </select>
+
+              {/* The grading, in the user's words, at the moment they picked
+                  it. `CLAUDE.md`: unavailable entries are shown greyed out and
+                  honestly graded — "greyed out" without "and here is why" is
+                  the same as missing. */}
+              {selected && !selected.available && (
+                <p className="text-[11px] leading-relaxed" style={{ color: 'var(--color-amber, #fbbf24)' }}>
+                  {selected.note}
+                </p>
+              )}
+
+              {(needsUrl || (selected && !selected.available)) && (
+                <input
+                  aria-label="API address"
+                  placeholder="https://… the API address from your provider's console"
+                  className="px-2 py-1.5 rounded-lg text-xs"
+                  style={{
+                    background: 'transparent',
+                    border: '1px solid var(--color-border-subtle)',
+                    color: 'var(--color-text)',
+                  }}
+                  value={customUrl}
+                  onChange={(event) => setCustomUrl(event.target.value)}
+                />
+              )}
+
+              {needsKey && (
+                <input
+                  aria-label="API key"
+                  type="password"
+                  autoComplete="off"
+                  placeholder="Your API key"
+                  className="px-2 py-1.5 rounded-lg text-xs"
+                  style={{
+                    background: 'transparent',
+                    border: '1px solid var(--color-border-subtle)',
+                    color: 'var(--color-text)',
+                  }}
+                  value={apiKey}
+                  onChange={(event) => setApiKey(event.target.value)}
+                />
+              )}
+
+              <div className="flex items-center gap-2 flex-wrap">
+                <Button type="submit" busy={busy === 'connect'}>
+                  <Plus size={12} />
+                  Connect
+                </Button>
+                {selected?.keyUrl && (
+                  <a
+                    href={selected.keyUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1 text-[11px] text-slate-400 hover:text-slate-200"
+                  >
+                    <ExternalLink size={11} />
+                    Where to get a key
+                  </a>
+                )}
+              </div>
+            </form>
+          </Row>
+        </Section>
+
+        {/* -------------------------------------------------------- Speech */}
+        <Section title="Speech" icon={<Volume2 size={14} style={{ color: 'var(--color-indigo-light)' }} />}>
+          <Row
+            label="Speech synthesis"
+            value={speech === null ? 'unknown' : speech === 'available' ? 'available' : 'not installed'}
+            state={speech === 'available' ? 'good' : speech === null ? 'neutral' : 'absent'}
+            detail={
+              speech === null
+                ? 'Waiting for the backend to report.'
+                : speech === 'available'
+                  ? 'Kokoro is installed and runs on the CPU, so it does not compete with the local model for VRAM. Replies are spoken when the avatar is showing — one decision, made by choosing a face.'
+                  : 'Voice ships as an optional extra because it pulls roughly 830 MB — torch, ' +
+                    'transformers and the spaCy stack. Chat is unaffected. To enable it:\n\n' +
+                    '    pip install -r backend/requirements-voice.txt\n' +
+                    '    python -m spacy download en_core_web_sm'
+            }
           />
         </Section>
 
+        {/* -------------------------------------------------------- Images */}
+        {/* The only place image generation is visible at all.
+
+            `CLAUDE.md` keeps tools out of the navigation — "tools never get
+            menu items, they are actions inside the conversation" — which is
+            right, and has a consequence: there is no button to press and
+            therefore no way to find out whether Zaram can draw. A capability
+            that is off silently reads as a broken product; one that is *on*
+            silently is one nobody discovers. This row is the answer to both.
+
+            It reports readiness and deliberately not residency. The model
+            loads on the first request rather than at launch, because SDXL is
+            ~7 GB and a 27B chat model with its cache is ~10.7 GB — on a 12 GB
+            card, holding both is not slow, it is impossible. */}
+        <Section
+          title="Images"
+          icon={<ImageIcon size={14} style={{ color: 'var(--color-indigo-light)' }} />}
+        >
+          <Row
+            label="Image generation"
+            value={
+              images === null ? 'unknown' : images.canDraw ? 'ready' : 'not installed'
+            }
+            state={images === null ? 'neutral' : images.canDraw ? 'good' : 'absent'}
+            detail={
+              images === null
+                ? 'Waiting for the backend to report.'
+                : images.canDraw
+                  ? `${images.provider} is on this machine and nothing is sent anywhere to use it. ` +
+                    'Ask for a picture in the conversation — there is no button, because ' +
+                    'tools are actions inside the conversation rather than menu items. ' +
+                    'The model loads on the first request, which takes a little under a ' +
+                    'minute; after that it stays resident until something else needs the room.'
+                  : // The backend's own words. It is the thing that knows which
+                    // of three absences it is looking at — no torch, no
+                    // diffusers, or no checkpoint — and each has a different
+                    // fix and a different download size. Composing a sentence
+                    // here would be guessing at which one.
+                    [images.reason, images.remedy].filter(Boolean).join('\n\n')
+            }
+          />
+        </Section>
+
+        {/* ---------------------------------------------------- Letterhead */}
+        {/* The way in that was missing. `artifacts/letterhead.py` has been able
+            to put a name, an address and a logo on every generated document
+            since it was written, and `Letterhead` was constructed in two places
+            in `main.py`, both without a logo — so every document Zaram has ever
+            produced went out unbranded. Its own first line is the cost: "an
+            invoice with no letterhead is a draft."
+
+            Settings is where this is visible and editable, never the only way
+            in. MILESTONES settles the capture as happening in chat — drop a
+            logo in the composer — and offered the first time a document is
+            generated without one. Rule 7e: no form before the first document. */}
+        <Section
+          title="Letterhead"
+          icon={<FileText size={14} style={{ color: 'var(--color-indigo-light)' }} />}
+        >
+          <LetterheadSection Row={Row} />
+        </Section>
+
+        {/* ----------------------------------------------------- Character */}
+        {/* Free, forever, on one machine: CLAUDE.md makes personalisation the
+            retention engine rather than the revenue one.
+
+            The reversal underneath it is worth remembering, because it was
+            narrow. This used to be forbidden — "not a personality: no name, no
+            pronoun" — and that ban fixed two failures with one rule. It fixed
+            the first: a model asked what it is answers from training data, and
+            eight named personas made that worse by supplying a third answer.
+            It never fixed the second, parasocial attachment, because
+            attachment comes from being *remembered*, not from being named. So
+            the ban paid a large product cost for a protection it did not
+            deliver, and what replaced it is one sentence enforced by test: a
+            user may name it, and it may never deny what it is when asked. */}
+        <Section
+          title="Character"
+          icon={<UserRound size={14} style={{ color: 'var(--color-indigo-light)' }} />}
+        >
+          {character === null ? (
+            <Row
+              label="Character"
+              value="unavailable"
+              state="absent"
+              detail="Zaram could not read these settings from the backend. Nothing is shown rather than an empty form, which would look editable and save nothing."
+            />
+          ) : (
+            <>
+              <Row
+                label="Name"
+                value={character.assistantName || character.defaultName}
+                state={character.assistantName ? 'good' : 'neutral'}
+                detail={
+                  'What you call it. Additive, never substitutive — it is still Zaram underneath ' +
+                  'and will say so if you ask what it is. Clear the field to use the default.'
+                }
+              >
+                <div className="flex items-center gap-2">
+                  <input
+                    value={nameDraft ?? character.assistantName}
+                    onChange={(e) => setNameDraft(e.target.value)}
+                    placeholder={character.defaultName}
+                    aria-label="What to call your assistant"
+                    maxLength={48}
+                    className="w-36 px-2 py-1 text-xs rounded-lg bg-transparent outline-none"
+                    style={{
+                      border: '1px solid var(--color-border-subtle)',
+                      color: 'var(--color-text)',
+                    }}
+                  />
+                  <button
+                    disabled={busy === 'name' || nameDraft === null}
+                    onClick={() =>
+                      void run('name', async () => {
+                        // The stored value comes back, not the submitted one.
+                        // The backend collapses whitespace and bounds length,
+                        // so echoing what was typed could show a name Zaram
+                        // will not actually use.
+                        setCharacter(await saveCharacter({ assistantName: nameDraft ?? '' }));
+                        setNameDraft(null);
+                      })
+                    }
+                    className="text-[11px] px-2 py-1 rounded-lg disabled:opacity-40"
+                    style={{ color: 'var(--color-cyan-light)' }}
+                  >
+                    {busy === 'name' ? <Loader2 size={12} className="animate-spin" /> : 'Save'}
+                  </button>
+                </div>
+              </Row>
+
+              <Row
+                label="Manner"
+                value={character.manner ? 'set' : 'default'}
+                state={character.manner ? 'good' : 'neutral'}
+                detail={
+                  'How it should write — tone, length, formality. Style only: it cannot change ' +
+                  'what Zaram says it is, which model answered, where that model runs, or the ' +
+                  'date. Your words are placed before those rules deliberately, so the last ' +
+                  'instruction the model reads is the true one.'
+                }
+              >
+                <div className="flex flex-col items-end gap-2">
+                  <textarea
+                    value={mannerDraft ?? character.manner}
+                    onChange={(e) => setMannerDraft(e.target.value)}
+                    placeholder="Brief and plain. No preamble."
+                    aria-label="How your assistant should write"
+                    maxLength={600}
+                    rows={3}
+                    className="w-56 px-2 py-1 text-xs rounded-lg bg-transparent outline-none resize-none"
+                    style={{
+                      border: '1px solid var(--color-border-subtle)',
+                      color: 'var(--color-text)',
+                    }}
+                  />
+                  <button
+                    disabled={busy === 'manner' || mannerDraft === null}
+                    onClick={() =>
+                      void run('manner', async () => {
+                        setCharacter(await saveCharacter({ manner: mannerDraft ?? '' }));
+                        setMannerDraft(null);
+                      })
+                    }
+                    className="text-[11px] px-2 py-1 rounded-lg disabled:opacity-40"
+                    style={{ color: 'var(--color-cyan-light)' }}
+                  >
+                    {busy === 'manner' ? <Loader2 size={12} className="animate-spin" /> : 'Save'}
+                  </button>
+                </div>
+              </Row>
+
+              {/* **This row said "not installed" on a machine that speaks.**
+                  It read an empty voice list as an absent speech extra, and
+                  the list is empty on every working install: naming the pack's
+                  voices means asking huggingface.co, and rule 7g forbids a
+                  network call nobody consented to, so discovery is off by
+                  default. One signal standing for two answers, which is this
+                  codebase's recurring defect — and here it told the user that
+                  a feature they have does not exist.
+
+                  The two questions are now asked separately. *Is there speech*
+                  is `speech`, already read from `/health` for the row above.
+                  *Which voice speaks* is `defaultVoice`, which the backend can
+                  answer without a network call because it is the constant its
+                  own synthesiser resolves to. The picker still only appears
+                  when there is a list to pick from. */}
+              <Row
+                label="Voice"
+                value={
+                  speech !== 'available'
+                    ? 'not installed'
+                    : character.voice || character.defaultVoice || 'default'
+                }
+                state={speech !== 'available' ? 'absent' : 'neutral'}
+                detail={
+                  speech !== 'available'
+                    ? 'Voices come with the speech extra, which is not installed — see Speech ' +
+                      'above. A picker over an empty list would be a control that does nothing.'
+                    : voices.length === 0
+                      ? 'This is the voice that speaks replies. The rest of the pack is not ' +
+                        'listed here because listing it means asking huggingface.co, and ' +
+                        'nothing reaches the network without you asking for it. Replies are ' +
+                        'spoken when the avatar is showing, which is a decision you already ' +
+                        'made by choosing a face.'
+                      : 'Which voice speaks replies. Replies are spoken when the avatar is showing, ' +
+                        'which is a decision you already made by choosing a face.'
+                }
+              >
+                {voices.length > 0 && (
+                  <select
+                    value={character.voice}
+                    aria-label="Which voice speaks replies"
+                    onChange={(e) =>
+                      void run('voice', async () => {
+                        setCharacter(await saveCharacter({ voice: e.target.value }));
+                      })
+                    }
+                    className="px-2 py-1 text-xs rounded-lg bg-transparent outline-none cursor-pointer"
+                    style={{
+                      border: '1px solid var(--color-border-subtle)',
+                      color: 'var(--color-text)',
+                    }}
+                  >
+                    <option value="">Default</option>
+                    {voices.map((v) => (
+                      <option key={v} value={v}>
+                        {v}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </Row>
+            </>
+          )}
+        </Section>
+
+        {/* ---------------------------------------------------- Appearance */}
+        <Section title="Appearance" icon={<Eye size={14} style={{ color: 'var(--color-indigo-light)' }} />}>
+          <Row
+            label="Indicator"
+            value={renderer}
+            state="good"
+            detail={
+              'The orb and the avatar are two renderings of one state — neither knows the other ' +
+              'exists. The avatar embodies what the system is doing, not who it is. ' +
+              'Choosing it also turns on spoken replies.'
+            }
+          >
+            <Segmented<'orb' | 'avatar'>
+              options={[
+                { value: 'orb', label: 'Orb' },
+                { value: 'avatar', label: 'Avatar' },
+              ]}
+              value={renderer}
+              onChange={setRenderer}
+            />
+          </Row>
+        </Section>
+
         <p className="text-[11px] text-slate-500 leading-relaxed px-1">
-          Every value on this screen is read from the running backend. Where a
-          control is missing it is marked not built rather than shown as a
-          switch that does nothing.
+          Every value on this screen is read from the running backend or from this window's own
+          state. Where a control is missing it says so rather than showing a switch that does
+          nothing.
         </p>
+        <Problem message={null} />
       </div>
     </div>
   );

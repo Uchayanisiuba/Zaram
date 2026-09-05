@@ -25,15 +25,38 @@ import pytest
 from implementations.ollama_llm import OllamaLLM
 from runtimes.models.engines.base_engine import ERROR_PREFIX, LLMEngine
 from runtimes.models.engines.ollama_engine import OllamaEngine
+from runtimes.models.engines.openai_compatible_engine import OpenAICompatibleEngine
+from runtimes.models.engines.routed_engine import RoutedEngine
 from tests.llm_doubles import FakeLLM
 
 #: Real engines and the doubles that stand in for them. The doubles are in this
 #: list deliberately — a fake exempt from the contract is the original bug.
-ENGINES = [OllamaEngine, OllamaLLM, FakeLLM]
+#:
+#: `OpenAICompatibleEngine` joined on 11 August 2026, which is what the note at
+#: the top of this file was reserving a place for. It matters more here than the
+#: others do: it is the only engine whose `system_prompt` leaves the machine, so
+#: a signature drift that dropped or reordered it would change *what is sent to
+#: a third party* rather than only what the model reads.
+#: `RoutedEngine` joined on 26 August 2026. It is what `ModelsRuntime`
+#: returns whenever a cloud key is configured, so it is the engine every
+#: real request goes through — and it was the one member of the chain
+#: this list did not cover.
+ENGINES = [OllamaEngine, OllamaLLM, OpenAICompatibleEngine, RoutedEngine, FakeLLM]
 
-#: The one call shape. Every caller uses it: `ModelsService.generate_response`,
+#: The one call shape, **read from the protocol rather than retyped**.
+#:
+#: This was a literal `["prompt", "system_prompt", "model"]` sitting beside an
+#: assertion message that said "does not match the contract in
+#: `base_engine.LLMEngine`" — two sources of truth for one fact, in the file
+#: whose entire purpose is that there be one. It bit the day `images` was added
+#: to `LLMEngine` and to every implementation: all four engines failed against
+#: a contract they in fact satisfied, and the list was what was wrong.
+#:
+#: Every caller uses this shape: `ModelsService.generate_response`,
 #: `ConversationManager.run_conversation`, `Dispatcher.dispatch_stream`.
-CANONICAL_PARAMETERS = ["prompt", "system_prompt", "model"]
+CANONICAL_PARAMETERS = [
+    p for p in inspect.signature(LLMEngine.stream_response).parameters if p != "self"
+]
 
 
 @pytest.mark.parametrize("engine_cls", ENGINES, ids=lambda c: c.__name__)
@@ -58,6 +81,11 @@ def test_accepts_the_call_every_caller_makes(engine_cls):
 
     bindable.bind("a prompt", "a system prompt", "some-model:latest")
     bindable.bind("a prompt")  # system_prompt and model are both optional
+    # The image call, positionally, exactly as the dispatcher makes it when a
+    # picture is attached. An engine that took `images` keyword-only would
+    # satisfy the name check above and fail here, which is the whole reason
+    # this second test binds rather than reading names.
+    bindable.bind("a prompt", "a system prompt", "some-model:latest", ["aGk="])
 
 
 @pytest.mark.parametrize("engine_cls", ENGINES, ids=lambda c: c.__name__)

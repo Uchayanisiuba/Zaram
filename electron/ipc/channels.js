@@ -14,6 +14,13 @@ const Channels = {
     getInfo: 'app:get-info',
     getVersion: 'app:get-version',
     getPlatform: 'app:get-platform',
+    // This launch's API credential, handed to the renderer over IPC.
+    //
+    // Over IPC specifically, and never through `additionalArguments`: a
+    // renderer's command line is readable by other processes on Windows, and
+    // other processes on this machine are the entire audience this credential
+    // exists to refuse.
+    getApiSecret: 'app:get-api-secret',
   },
   os: {
     getInfo: 'os:get-info',
@@ -68,6 +75,16 @@ backend: {
   presence: {
     getStatus: 'presence:get-status',
     getDiagnostics: 'presence:get-diagnostics',
+  },
+  // The ambient overlay. Both are things the *user* did — dismissing the panel
+  // and moving a pointer onto the edge handle — travelling from the renderer
+  // that observed them to the main process that owns the windows. There is
+  // deliberately no channel here for reading a selection or watching input:
+  // the surface is invoked, never passive.
+  ambient: {
+    dismiss: 'ambient:dismiss',
+    hover: 'ambient:hover',
+    summon: 'ambient:summon',
   },
   runtime: {
     getPresenceHealth: 'runtime:get-presence-health',
@@ -128,6 +145,7 @@ const RENDERER_INVOKABLE = [
   Channels.app.getInfo,
   Channels.app.getVersion,
   Channels.app.getPlatform,
+  Channels.app.getApiSecret,
   Channels.os.getInfo,
   Channels.window.minimize,
   Channels.window.maximize,
@@ -160,6 +178,9 @@ const RENDERER_INVOKABLE = [
   Channels.download.cancel,
   Channels.presence.getStatus,
   Channels.presence.getDiagnostics,
+  Channels.ambient.dismiss,
+  Channels.ambient.hover,
+  Channels.ambient.summon,
   Channels.runtime.getPresenceHealth,
   Channels.runtime.getPresenceStatus,
   Channels.runtime.getExecutiveSnapshot,

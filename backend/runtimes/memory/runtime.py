@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from typing import Any
+from typing import Any, Dict
 
 from core.async_bridge import run_sync
 from core.event_bus import ZaramEvent
@@ -19,6 +19,7 @@ from .contracts import (
     RuntimeMetadata,
     Capability,
     CapabilityLocality,
+    scope_project_id,
 )
 from .store import InMemoryMemoryStore, create_memory_store, MemoryStore
 from .index import HybridMemoryIndex, create_memory_index, MemoryIndex
@@ -291,7 +292,12 @@ class MemoryRuntimeImpl(MemoryRuntime):
             ))
         return True
 
-    async def correct(self, record_id: str, corrected_content: str) -> dict[str, Any]:
+    async def correct(
+        self,
+        record_id: str,
+        corrected_content: str,
+        valid_from: float | None = None,
+    ) -> dict[str, Any]:
         """Replace a fact with a corrected one, keeping the original visible.
 
         Rule 4 in full. Deletion was only ever half of it: removing a wrong fact
@@ -303,6 +309,17 @@ class MemoryRuntimeImpl(MemoryRuntime):
         So this writes a *new* record and marks the old one superseded. The old
         fact stays on disk, is dropped from the vector index so it can never be
         recalled again, and remains visible in the Memory surface struck through.
+
+        `valid_from` is *when the new fact became true*, which is usually not
+        now. A client raised the rate in June and the user is saying so in
+        August; passing June keeps "what was my rate in July" answerable, and
+        passing nothing means "as far as I know, since now".
+
+        The two timestamps are not interchangeable and both are written:
+        `superseded_at` is when Zaram was told, `valid_until` is when the old
+        fact stopped being true. Collapsing them would answer questions about
+        the past with what is true in the present, which for anything financial
+        is the difference between a correct invoice and a wrong one.
 
         Returns both ids, so the caller can show what replaced what.
         """
@@ -328,6 +345,10 @@ class MemoryRuntimeImpl(MemoryRuntime):
             importance=original.importance,
             source=original.source,
             pinned=original.pinned,
+            # When the world changed, not when we were told. Defaulting to now
+            # is the honest fallback: the user did not state a date, so the
+            # earliest moment Zaram can vouch for is this one.
+            valid_from=valid_from if valid_from is not None else time.time(),
         )
         new_id = await self._store.put(replacement)
         await self._index.add(replacement)
@@ -336,7 +357,12 @@ class MemoryRuntimeImpl(MemoryRuntime):
             **{
                 **original.__dict__,
                 "superseded_by": new_id,
+                # Recorded time: when the user said so.
                 "superseded_at": time.time(),
+                # Valid time: the instant the replacement took over. The two
+                # windows meet exactly, so an as-of query at any point lands on
+                # one fact rather than none or two.
+                "valid_until": replacement.valid_from,
                 "updated_at": time.time(),
             }
         )
@@ -379,6 +405,7 @@ class MemoryRuntimeImpl(MemoryRuntime):
         user_id: str | None = None,
         filters: dict[str, Any] | None = None,
         scope: str | None = None,
+        only_ids: frozenset[str] | None = None,
     ) -> list[MemoryResult]:
         """Recall, optionally narrowed to one project plus global (rule 7i).
 
@@ -386,6 +413,12 @@ class MemoryRuntimeImpl(MemoryRuntime):
         — it shows the user everything they have. The engine passes the current
         project, so a question asked inside one draws on that project and on
         what is true about the user generally, and on nothing else.
+
+        `only_ids` narrows to a knowledge domain and is a separate axis: scope
+        is about *whose work* a fact belongs to, a domain is about *which
+        library* the user chose to read from, and a question can be inside both
+        at once. `None` is unrestricted; an empty set means a domain with
+        nothing in it and is honoured as such.
         """
         start = time.time()
         try:
@@ -401,6 +434,7 @@ class MemoryRuntimeImpl(MemoryRuntime):
                 strategy=strategy,
                 filters=filters or {},
                 scope=scope,
+                only_ids=only_ids,
                 session_id=session_id,
                 user_id=user_id,
                 metadata=query_metadata,
@@ -483,6 +517,85 @@ class MemoryRuntimeImpl(MemoryRuntime):
     async def forget(self, record_id: str) -> bool:
         await self._index.remove(record_id)
         return await self._store.delete(record_id)
+
+    # ------------------------------------------------------------------
+    # Scope-wide operations
+    #
+    # These exist for deleting a project. A project holds facts, and rule 4
+    # gives the *user* power over their facts — so a container must be able to
+    # say exactly what it is about to do to them, and then do only that.
+    # ------------------------------------------------------------------
+
+    async def count_by_scope(self, scope: str) -> int:
+        """How many facts carry this scope.
+
+        Read before a destructive confirmation, so the user is told "11 facts"
+        rather than asked to trust that a number exists somewhere.
+        """
+        records = await self._store.all_records()
+        return sum(1 for record in records if record.scope == scope)
+
+    async def project_fact_counts(self) -> Dict[str, int]:
+        """Facts per project id, for every project scope the Spine actually holds.
+
+        The question this answers is *which* projects the Spine believes in, not
+        how many facts a named one has — and it is asked because the Spine can
+        end up believing in a project no project record exists for. A scope is
+        written from whatever `project_id` came in on the request, so a stale
+        selection or a typo puts facts under a group that Project cannot show,
+        rename or delete: rule 4 defeated by a spelling mistake.
+
+        Global is excluded. It is not a project, and offering to adopt it would
+        propose turning every fact about the user into a project's contents.
+        """
+        records = await self._store.all_records()
+        counts: Dict[str, int] = {}
+        for record in records:
+            project_id = scope_project_id(record.scope)
+            if project_id:
+                counts[project_id] = counts.get(project_id, 0) + 1
+        return counts
+
+    async def rescope_to_global(self, scope: str) -> int:
+        """Move every fact in this scope to global. Returns how many moved.
+
+        The recoverable half of deleting a project: the grouping goes, the
+        knowledge stays. Rule 7i is what makes this cheap — scope is one field
+        on one store, and facts are *meant* to move between scopes, so this is
+        the ordinary operation rather than a migration.
+        """
+        records = await self._store.all_records()
+        moved = 0
+        for record in records:
+            if record.scope != scope:
+                continue
+            await self._store.put(
+                MemoryRecord(**{**record.__dict__, "scope": GLOBAL_SCOPE, "updated_at": time.time()})
+            )
+            moved += 1
+        if moved and self._event_bus:
+            self._event_bus.publish(ZaramEvent(
+                source_runtime="memory",
+                event_type="memory.scope_changed",
+                priority="normal",
+                data={"scope": GLOBAL_SCOPE, "was": scope, "count": moved},
+            ))
+        return moved
+
+    async def forget_scope(self, scope: str) -> int:
+        """Delete every fact in this scope. Returns how many went.
+
+        Never the default anywhere, and never implicit. This is rule 4 being
+        exercised deliberately by the user, which is the only way it may be
+        exercised — a sidebar tidy-up must not be able to reach it by accident.
+        """
+        records = await self._store.all_records()
+        gone = 0
+        for record in records:
+            if record.scope == scope:
+                if await self.forget(record.id):
+                    gone += 1
+        return gone
 
     async def consolidate(self) -> dict[str, Any]:
         """Consolidate memories by grouping similar episodic memories into semantic memories.

@@ -5,14 +5,37 @@ import { VRMLoaderPlugin, VRMUtils, type VRM } from '@pixiv/three-vrm'
 import { useEmbodimentState, type EmbodimentState } from '@/hooks/useEmbodimentState'
 import { useSpeechStore } from '@/stores/speechStore'
 import { VISEMES, visemeAt, type Viseme } from '@/lib/visemes'
+import { inspectAvatar } from '@/lib/vrmSafety'
+
+// Keep the fetched VRM in memory across mounts.
+//
+// This component unmounts when a surface opens and remounts on the way back to
+// the landing, and three.js ships its file cache *disabled*, so every return
+// re-fetched the whole model before it could draw anything. That is the empty
+// avatar panel for several seconds after coming back from a menu — the
+// conspicuous cost of a round trip nobody needed to pay twice.
+//
+// `THREE.Cache` is keyed by URL and read by the `FileLoader` underneath
+// `GLTFLoader`, so enabling it is the entire change; a remount now goes
+// straight to parsing. It holds one avatar's bytes, which is the right trade
+// against re-reading tens of megabytes on every navigation.
+//
+// Parsing still happens per mount. Removing that too means keeping the
+// renderer mounted and pausing its loop instead of tearing it down, which is a
+// larger change to the component's lifecycle and is worth doing separately.
+THREE.Cache.enabled = true
 
 /**
  * The VRM renderer — the orb's job with more bandwidth.
  *
  * `docs/EMBODIMENT-SPIKE.md` fixes the constraint before any code: **the avatar
- * embodies which model is answering and what it is doing.** Local versus cloud,
- * thinking versus idle, speaking. Not a personality, not a name, not a
- * relationship.
+ * embodies what the system is doing.** Thinking versus idle, listening,
+ * speaking, swapping. Not a personality, not a name, not a relationship.
+ *
+ * **It no longer embodies which model answered** — narrowed 13 August 2026.
+ * Locality is stated in words by `OrbStatusLabel`, which renders beside this
+ * component under either renderer and can express a distinction a rim colour
+ * cannot. Reasoning in `useEmbodimentState`.
  *
  * That line decides every argument below. The moment the avatar has a name,
  * users form a relationship with a status indicator, and every routing decision
@@ -31,13 +54,20 @@ import { VISEMES, visemeAt, type Viseme } from '@/lib/visemes'
  * crash rather than as calm. They carry no information and never vary by state.
  */
 
-/** Colour is the same vocabulary the orb and the citation chips already use:
- *  cyan for what stayed on the device, violet for what left, slate for a swap.
- *  One meaning reused, so the avatar needs no legend of its own. */
+/** The rim light says whether the system is working, and nothing else.
+ *
+ *  It used to carry locality as well — cyan for what stayed on the device,
+ *  violet for what left. Removed 13 August 2026: `LivingOrb` never rendered
+ *  locality, so this was the only renderer that did and the two disagreed about
+ *  what they report. `OrbStatusLabel` states it in words, with a distinction a
+ *  colour cannot make ("Local · can send" is not "Cloud enabled"), and a face
+ *  that reports routing is a face read as a someone. Reasoning in
+ *  `useEmbodimentState`.
+ *
+ *  So: slate at rest, cyan while working, dim slate while nothing is resident.
+ *  Three values, no legend to learn. */
 const RIM_COLOUR: Record<EmbodimentState, number> = {
   idle: 0x93a3b8,
-  local: 0x78dcf0,
-  cloud: 0xc084fc,
   thinking: 0x78dcf0,
   listening: 0x78dcf0,
   speaking: 0x78dcf0,
@@ -50,13 +80,21 @@ const RIM_COLOUR: Record<EmbodimentState, number> = {
 /** How lively the resting motion is. Swapping is deliberately the slowest. */
 const MOTION_RATE: Record<EmbodimentState, number> = {
   idle: 1,
-  local: 1,
-  cloud: 1,
   thinking: 1.6,
   listening: 1.2,
   speaking: 1.4,
   swapping: 0.45,
 }
+
+/**
+ * Render tuning now lives in `@/lib/renderTuning` — a second renderer needed
+ * the same three functions and neither of them is VRM-specific. Re-exported
+ * here because they are part of this module's tested surface and moving the
+ * import site is a change to the tests, not to the behaviour.
+ */
+export { renderScaleFor, approachRate, applyTextureFiltering, RIM_EASE_SECONDS } from '@/lib/renderTuning'
+import { renderScaleFor, approachRate, applyTextureFiltering, RIM_EASE_SECONDS } from '@/lib/renderTuning'
+
 
 interface VrmAvatarProps {
   /** Rendered box, in px. Matches the orb's `px` so the two are swappable. */
@@ -97,9 +135,7 @@ export default function VrmAvatar({ px = 320, src = '/avatars/AvatarSample_Z.vrm
     // painting a second ground over it.
     const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true })
     renderer.setSize(px, px)
-    // Capped at 2: a 3x device pixel ratio triples fragment cost for a face
-    // 320px wide, and the GPU budget is shared with a resident local model.
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
+    renderer.setPixelRatio(renderScaleFor(window.devicePixelRatio))
     renderer.outputColorSpace = THREE.SRGBColorSpace
     mount.appendChild(renderer.domElement)
 
@@ -113,15 +149,82 @@ export default function VrmAvatar({ px = 320, src = '/avatars/AvatarSample_Z.vrm
     rim.position.set(-1.4, 0.6, -1)
     scene.add(rim)
 
-    const loader = new GLTFLoader()
+    // Nothing this loader resolves may leave the machine.
+    //
+    // A `.vrm` is a file somebody else wrote, and glTF `buffers` and `images`
+    // carry an optional `uri` that the loader fetches. An absolute `https://`
+    // one is a request no gate in this product can see: `EgressGate` intercepts
+    // what the *backend* sends, and `check-no-remote-assets.mjs` scans *source*.
+    // A URL inside a binary asset is invisible to both, so rule 3 — every byte
+    // that leaves is logged — would be broken by a data file with nothing
+    // anywhere reporting it. It is also a working beacon: whoever authored the
+    // avatar learns the user's IP and when they opened Zaram.
+    //
+    // Two layers, deliberately. `inspectAvatar` refuses the file before a
+    // single request is made and can say why; the modifier below is the
+    // structural backstop for anything the scan did not recognise as a URI, and
+    // it fails to a broken model rather than to a silent request. Belt and
+    // braces on the one path where the failure is invisible.
+    //
+    // **The two loaders get different managers, and the first version of this
+    // did not.** A `LoadingManager`'s URL modifier applies to *every* URL that
+    // manager resolves — including the avatar's own, which is not a data URI
+    // and was therefore replaced with an empty one. The bundled avatar then
+    // arrived as zero bytes and the gate refused it as unreadable: the guard
+    // blocked the very file it was written to protect. Shipped without looking
+    // at it, which is exactly what the handoff had just finished warning about.
+    //
+    // So the restrictive manager governs *sub-resource resolution during parse*
+    // and nothing else. The top-level fetch is an ordinary load of a path this
+    // component chose, not a URI a stranger's file asked for, and the two must
+    // not be governed by the same rule.
+    const parseManager = new THREE.LoadingManager()
+    parseManager.setURLModifier((url) => {
+      if (url.startsWith('data:') || url.startsWith('blob:')) return url
+      console.warn(`[embodiment] refused an external avatar resource: ${url}`)
+      return 'data:application/octet-stream;base64,'
+    })
+
+    const loader = new GLTFLoader(parseManager)
     loader.register((parser) => new VRMLoaderPlugin(parser))
 
     const clock = new THREE.Clock()
     let blinkAt = 2 + Math.random() * 3
+    // Allocated once. A `new THREE.Color()` per frame is 60 allocations a
+    // second on a surface that renders permanently beside a resident model.
+    const rimTarget = new THREE.Color()
 
-    loader.load(
+    // Fetched as bytes and inspected before parsing, rather than handed
+    // straight to `loader.load`. Reading the glTF JSON first is the only point
+    // at which an external URI can be refused *before* the loader resolves it.
+    // `FileLoader` rather than `fetch` so `THREE.Cache` still serves a remount.
+    // The default manager, deliberately — see the note above `parseManager`.
+    const bytes = new THREE.FileLoader()
+    bytes.setResponseType('arraybuffer')
+    bytes.load(
       src,
-      (gltf) => {
+      (data) => {
+        if (disposed) return
+        const buffer = data as ArrayBuffer
+        const verdict = inspectAvatar(buffer)
+        if (!verdict.ok) {
+          setStatus('failed')
+          setReason(verdict.reason)
+          console.warn(`[embodiment] refused ${src}: ${verdict.reason}`, verdict.external)
+          return
+        }
+        loader.parse(buffer, '', onLoaded, onLoadError)
+      },
+      undefined,
+      (err) => {
+        if (disposed) return
+        setStatus('failed')
+        setReason(err instanceof Error ? err.message : 'The avatar file could not be read.')
+      },
+    )
+
+    function onLoaded(gltf: { scene: THREE.Group; userData: { vrm?: VRM } }) {
+      {
         if (disposed) return
         const loaded = gltf.userData.vrm as VRM | undefined
         if (!loaded) {
@@ -144,6 +247,9 @@ export default function VrmAvatar({ px = 320, src = '/avatars/AvatarSample_Z.vrm
           // skinned mesh that is always on screen only costs a test.
           o.frustumCulled = false
         })
+        // After VRMUtils and before the first frame: the loader leaves every
+        // texture at three.js's default anisotropy of 1.
+        const filtered = applyTextureFiltering(vrm.scene, renderer.capabilities.getMaxAnisotropy())
         scene.add(vrm.scene)
 
         // The named requirement from the spike: log every expression the model
@@ -151,12 +257,16 @@ export default function VrmAvatar({ px = 320, src = '/avatars/AvatarSample_Z.vrm
         // indistinguishable from a bug in this file.
         const expressions = vrm.expressionManager?.expressions ?? []
         const names = expressions.map((e) => e.expressionName)
-        // eslint-disable-next-line no-console
         console.info(
           `[embodiment] ${src}\n` +
             `  expressions (${names.length}): ${names.join(', ') || 'none'}\n` +
             `  visemes present: ${['aa', 'ih', 'ou', 'ee', 'oh'].filter((v) => names.includes(v)).join(', ') || 'none'}\n` +
-            `  humanoid: ${vrm.humanoid ? 'yes' : 'no'}`,
+            `  humanoid: ${vrm.humanoid ? 'yes' : 'no'}\n` +
+            // Printed because both were silently wrong and looked right: the
+            // buffer was 320x320 on a DPR-1 display, and every texture sat at
+            // anisotropy 1. Neither is visible in the code that sets them.
+            `  render buffer: ${px * renderer.getPixelRatio()}px for a ${px}px box\n` +
+            `  textures filtered: ${filtered} at anisotropy ${renderer.capabilities.getMaxAnisotropy()}`,
         )
         if (names.length === 0) {
           setReason('This avatar has no expressions, so only head motion will respond to state.')
@@ -187,6 +297,7 @@ export default function VrmAvatar({ px = 320, src = '/avatars/AvatarSample_Z.vrm
         const head = vrm.humanoid?.getNormalizedBoneNode('head')
         const target = new THREE.Vector3(0, 1.35, 0)
         if (head) head.getWorldPosition(target)
+
         // Head and shoulders. The orb occupies a 320px circle and the avatar
         // replaces it in the same space, so a full body would render the face —
         // the only part carrying state — a few dozen pixels tall.
@@ -194,17 +305,17 @@ export default function VrmAvatar({ px = 320, src = '/avatars/AvatarSample_Z.vrm
         camera.lookAt(0, target.y - 0.07, 0)
 
         setStatus('ready')
-      },
-      undefined,
-      (err) => {
-        if (disposed) return
-        setStatus('failed')
-        // Named, never silent. A blank square where a face should be is
-        // indistinguishable from a code bug, which is the same reason the
-        // ingest path reports why a file could not be read.
-        setReason(err instanceof Error ? err.message : 'The avatar file could not be read.')
-      },
-    )
+      }
+    }
+
+    function onLoadError(err: unknown) {
+      if (disposed) return
+      setStatus('failed')
+      // Named, never silent. A blank square where a face should be is
+      // indistinguishable from a code bug, which is the same reason the
+      // ingest path reports why a file could not be read.
+      setReason(err instanceof Error ? err.message : 'The avatar file could not be read.')
+    }
 
     const tick = () => {
       raf = requestAnimationFrame(tick)
@@ -213,8 +324,14 @@ export default function VrmAvatar({ px = 320, src = '/avatars/AvatarSample_Z.vrm
       const s = stateRef.current
       const rate = MOTION_RATE[s]
 
-      rim.color.setHex(RIM_COLOUR[s])
-      rim.intensity = s === 'swapping' ? 1.1 : 2.2
+      // Eased, not assigned. Both are pushed toward the state's value rather
+      // than set to it, so a state change is a short crossfade in the one
+      // channel that carries state. `Color.lerp` interpolates in linear RGB,
+      // which is what keeps slate-to-cyan from passing through a muddy middle.
+      const k = approachRate(dt, RIM_EASE_SECONDS)
+      rimTarget.setHex(RIM_COLOUR[s])
+      rim.color.lerp(rimTarget, k)
+      rim.intensity = THREE.MathUtils.lerp(rim.intensity, s === 'swapping' ? 1.1 : 2.2, k)
 
       if (vrm) {
         const em = vrm.expressionManager
@@ -230,11 +347,14 @@ export default function VrmAvatar({ px = 320, src = '/avatars/AvatarSample_Z.vrm
           // a status indicator, and a head that swings reads as a character.
           const tilt = s === 'thinking' ? 0.09 : 0
           const lean = s === 'listening' ? 0.06 : 0
-          head.rotation.z = THREE.MathUtils.lerp(head.rotation.z, tilt, dt * 3)
+          // Same time constant the old `dt * 3` produced at 60Hz, now the same
+          // at any refresh rate — see `approachRate`.
+          const kHead = approachRate(dt, 1 / 3)
+          head.rotation.z = THREE.MathUtils.lerp(head.rotation.z, tilt, kHead)
           head.rotation.x = THREE.MathUtils.lerp(
             head.rotation.x,
             lean + Math.sin(now * 0.7 * rate) * 0.008,
-            dt * 3,
+            kHead,
           )
         }
 
@@ -269,9 +389,10 @@ export default function VrmAvatar({ px = 320, src = '/avatars/AvatarSample_Z.vrm
           // Ease rather than snap. Blend shapes switched instantly read as a
           // puppet; a short lerp at ~15 Hz still resolves every cue at speech
           // rate while looking like a jaw with mass.
+          const kMouth = approachRate(dt, 1 / 15)
           for (const v of VISEMES) {
             const target = shape === v ? (v === 'aa' ? 0.85 : 0.6) : 0
-            em.setValue(v, THREE.MathUtils.lerp(em.getValue(v) ?? 0, target, dt * 15))
+            em.setValue(v, THREE.MathUtils.lerp(em.getValue(v) ?? 0, target, kMouth))
           }
 
           // A swap is the one state where nothing is resident and no work is

@@ -22,29 +22,27 @@ from __future__ import annotations
 import os
 import threading
 
+from .confirm import PendingConfirmations
 from .gate import EgressGate
 from .log import EgressLog
 from .policy import EgressPolicy
 
 _lock = threading.Lock()
 _gate: EgressGate | None = None
+_pending: PendingConfirmations | None = None
 
 
 def default_log_path() -> str:
     """Beside the Spine, but a separate file. See ``log.py`` for why."""
-    return os.environ.get(
-        "ZARAM_EGRESS_LOG",
-        os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
-            os.path.abspath(__file__)))), "egress.db"),
-    )
+    from core.paths import in_data_dir
+
+    return in_data_dir("egress.db", "ZARAM_EGRESS_LOG")
 
 
 def default_policy_path() -> str:
-    return os.environ.get(
-        "ZARAM_EGRESS_POLICY",
-        os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
-            os.path.abspath(__file__)))), "egress-policy.json"),
-    )
+    from core.paths import in_data_dir
+
+    return in_data_dir("egress-policy.json", "ZARAM_EGRESS_POLICY")
 
 
 def get_gate() -> EgressGate:
@@ -64,3 +62,35 @@ def set_gate(gate: EgressGate | None) -> None:
     global _gate
     with _lock:
         _gate = gate
+
+
+def get_pending() -> PendingConfirmations:
+    """The questions this process is waiting on an answer for.
+
+    One store, for the same reason there is one gate: the thread that blocks
+    inside :meth:`EgressGate.check` and the HTTP handler that releases it are in
+    different call stacks and must be looking at the same dictionary. A second
+    instance anywhere means a dialog that answers a question nobody asked, while
+    the real one times out and denies.
+
+    Building it on first use rather than at import keeps it out of processes
+    that never send anything — a test suite, a one-shot script — where a
+    120-second timeout on a thread nothing will answer is a hang with no cause
+    the reader can see.
+    """
+    global _pending
+    with _lock:
+        if _pending is None:
+            _pending = PendingConfirmations()
+        return _pending
+
+
+def set_pending(pending: PendingConfirmations | None) -> None:
+    """Install the process confirmation store. ``None`` resets it.
+
+    Tests install one with a short timeout; without this they would inherit the
+    two-minute default and a single unanswered question would stall the suite.
+    """
+    global _pending
+    with _lock:
+        _pending = pending
