@@ -29,8 +29,21 @@ requires-python = ">=3.11"
 # The gap is never silent: a scan lands in Knowledge with its reason and this
 # command, with the size stated. See backend/ingest/quality.py for the
 # measurement and CLAUDE.md's dependency table for the decision.
+#
+# Listening is a *third* extra, not part of voice, decided by measurement the
+# same way. faster-whisper plus every dependency is 81 MB against Kokoro's
+# 905 MB — an order of magnitude apart, so somebody who wants Zaram to talk
+# should not have to buy a microphone stack. Pins in
+# backend/requirements-mic.txt.
+#
+#     pip install -r backend/requirements-mic.txt
+#
+# Whisper's model weights are not installed with it. They are fetched on first
+# use through the egress gate, which under default deny means not at all until
+# the user permits it — see backend/voice/stt/whisper.py.
 [project.optional-dependencies]
 voice = []
+mic = []
 ingest = ["docling>=2.118.1"]
 
 [tool.ruff]
@@ -53,6 +66,14 @@ ignore_missing_imports = true
 exclude = ["venv", "node_modules", "frontend"]
 
 [tool.pytest.ini_options]
+markers = [
+    # Tests that measure something against a live local model rather than
+    # asserting a recorded number. They skip themselves when Ollama or the model
+    # is absent, so the suite stays offline — but they are the reason the
+    # recorded numbers elsewhere can be trusted, and `pytest -m measure` re-runs
+    # every one of them when an embedding model changes.
+    "measure: measures against a live local model; skips when unavailable",
+]
 # Collect the whole backend, not a hand-listed set of directories. An allow-list
 # silently hides any test dir nobody remembered to add: `backend/tests` alone left
 # garage, media, voice and presence uncollected, so every suite count quoted before

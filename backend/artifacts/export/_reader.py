@@ -73,6 +73,28 @@ class Table:
     caption: str = ""
     header: List[str] = field(default_factory=list)
     rows: List[List[str]] = field(default_factory=list)
+    #: Column indices the composer marked as figures, read back off the
+    #: `class="num"` the stylesheet already puts on them.
+    #:
+    #: Carried rather than re-derived, for the reason `TableBlock` states about
+    #: the same field: a heuristic that reads digits right-aligns a reference
+    #: number. The caller knew; this recovers what they knew instead of
+    #: guessing it a second time.
+    numeric_columns: List[int] = field(default_factory=list)
+    #: How many blocks had been read when this table opened.
+    #:
+    #: `blocks` and `tables` are two flat lists, so on their own they say what
+    #: a document contains and not what order it is in. The spreadsheet
+    #: exporters do not care — a .xlsx *is* the table. A prose exporter does:
+    #: without this, a fee table can only be written before or after the whole
+    #: body, never where the author put it.
+    #:
+    #: Recorded as a position rather than by interleaving a placeholder into
+    #: `blocks`, because every existing consumer iterates `body_blocks()` and
+    #: expects only `h1, h2, h3, p, li`. A new tag in that stream would have
+    #: each of them render something unintended, which is a wide change to make
+    #: for a narrow need.
+    after_block: int = 0
 
 
 @dataclass
@@ -110,6 +132,7 @@ class _Reader(HTMLParser):
         self._row: Optional[List[str]] = None
         self._cell: Optional[List[str]] = None
         self._cell_is_header = False
+        self._cell_span = 1
 
     # -- structure ---------------------------------------------------------
 
@@ -133,7 +156,7 @@ class _Reader(HTMLParser):
             return
 
         if tag == "table":
-            self._table = Table()
+            self._table = Table(after_block=len(self.doc.blocks))
             return
         if tag == "caption" and self._table is not None:
             self._cell = []
@@ -145,6 +168,24 @@ class _Reader(HTMLParser):
         if tag in ("td", "th") and self._table is not None:
             self._cell = []
             self._cell_is_header = tag == "th"
+            # `colspan` decides which *column* the cells after this one land
+            # in, so ignoring it does not lose a cell — it moves every later
+            # cell in the row leftwards. On an invoice that put the total under
+            # "Qty": the markup is `<td colspan="3">Total due</td><td>NGN
+            # 340,000.00</td>`, which without this reads as a two-column row.
+            try:
+                self._cell_span = max(1, int(attr.get("colspan", 1)))
+                if "num" in (attr.get("class") or "").split():
+                    # The column, not the cell: alignment is a property of the
+                    # column in every consumer of this, and the header cell is
+                    # the one the composer marks first.
+                    column = len(self._row) if self._row is not None else 0
+                    if column not in self._table.numeric_columns:
+                        self._table.numeric_columns.append(column)
+            except (TypeError, ValueError):
+                # A malformed span is not worth failing an export over. One
+                # column is the value that changes nothing.
+                self._cell_span = 1
             return
 
         if tag in _BLOCK_TAGS:
@@ -178,7 +219,13 @@ class _Reader(HTMLParser):
             return
         if tag in ("td", "th") and self._cell is not None and self._row is not None:
             self._row.append("".join(self._cell).strip())
+            # Padding rather than a span on the cell itself: a spanned cell is
+            # a *layout* fact, and the two consumers of this — Word and a
+            # spreadsheet — both want a grid. Empty columns put the following
+            # cell under the right heading in both, which is the whole point.
+            self._row.extend([""] * (self._cell_span - 1))
             self._cell = None
+            self._cell_span = 1
             return
         if tag == "tr" and self._row is not None and self._table is not None:
             # The header is the first row that was made of <th>. A table whose

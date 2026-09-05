@@ -344,7 +344,13 @@ def _apply_chrome(axes, spec: ChartSpec) -> None:
 
 
 class ChartExporter:
-    """The image, taken back out of the HTML that holds it."""
+    """The image, taken back out of the HTML that holds it.
+
+    Serves both PNG-carrying kinds — a chart drawn from the user's numbers and
+    a picture drawn from a prompt. Neither needs an exporter of its own,
+    because both embed the image in their HTML as a data URI and getting it
+    back out is the same base64 decode.
+    """
 
     extension = "png"
     media_type = "image/png"
@@ -360,7 +366,8 @@ class ChartExporter:
         if not match:
             raise ValueError(
                 "no embedded PNG in this artifact's HTML — export as png is only "
-                "meaningful for a chart, and this artifact does not contain one"
+                "meaningful for a chart or a generated image, and this artifact "
+                "contains neither"
             )
 
         return base64.b64decode(re.sub(r"\s+", "", match.group(1)))

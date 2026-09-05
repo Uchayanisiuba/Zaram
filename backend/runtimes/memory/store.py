@@ -274,6 +274,14 @@ class SQLiteMemoryStore(MemoryStore):
                 ("scope", f"ALTER TABLE memories ADD COLUMN scope TEXT NOT NULL DEFAULT '{GLOBAL_SCOPE}'"),
                 ("origin", f"ALTER TABLE memories ADD COLUMN origin TEXT NOT NULL DEFAULT '{Origin.CONVERSATION.value}'"),
                 ("recalled_in", "ALTER TABLE memories ADD COLUMN recalled_in TEXT NOT NULL DEFAULT '[]'"),
+                # Valid time, alongside the recorded time already stored in
+                # `superseded_at`. Nullable with no default on purpose: a fact
+                # written before this migration has no known validity window,
+                # and back-filling `valid_from` from `created_at` would turn a
+                # capture timestamp into a claim about when something became
+                # true. NULL says "not known", which is the truth.
+                ("valid_from", "ALTER TABLE memories ADD COLUMN valid_from REAL"),
+                ("valid_until", "ALTER TABLE memories ADD COLUMN valid_until REAL"),
             ):
                 if column not in existing:
                     conn.execute(ddl)
@@ -291,8 +299,9 @@ class SQLiteMemoryStore(MemoryStore):
                 INSERT OR REPLACE INTO memories
                 (id, content, memory_type, metadata, embedding, created_at, updated_at,
                  access_count, last_accessed, tags, session_id, user_id, importance, source,
-                 superseded_by, superseded_at, pinned, scope, origin, recalled_in)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 superseded_by, superseded_at, pinned, scope, origin, recalled_in,
+                 valid_from, valid_until)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
                 (
                     record.id,
@@ -315,6 +324,8 @@ class SQLiteMemoryStore(MemoryStore):
                     record.scope,
                     record.origin.value if hasattr(record.origin, "value") else str(record.origin),
                     json.dumps(list(record.recalled_in or [])),
+                    record.valid_from,
+                    record.valid_until,
                 ),
             )
         return record.id
@@ -525,6 +536,8 @@ class SQLiteMemoryStore(MemoryStore):
             recalled_in=json.loads(
                 row["recalled_in"] if "recalled_in" in row.keys() and row["recalled_in"] else "[]"
             ),
+            valid_from=row["valid_from"] if "valid_from" in row.keys() else None,
+            valid_until=row["valid_until"] if "valid_until" in row.keys() else None,
         )
 
 

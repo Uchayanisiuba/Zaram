@@ -60,7 +60,39 @@ _KIND_WORDS = {
     ArtifactKind.SPREADSHEET: ("spreadsheet", "xlsx", "excel", "csv", "table of"),
     ArtifactKind.INVOICE: ("invoice", "bill", "quote", "estimate"),
     ArtifactKind.CHART: ("chart", "graph", "plot"),
+    # "write my CV" used to fall through to DOCUMENT, which gave somebody's
+    # career a proposal's layout. "resume" carries the accented spelling too,
+    # because a person writing "résumé" is asking for exactly this.
+    ArtifactKind.CV: ("cv", "curriculum vitae", "résumé", "resume"),
+    # DECK was absent, so "make me a PowerPoint" fell through to DOCUMENT and
+    # produced a .docx. The .pptx exporter existed and was tested throughout.
+    ArtifactKind.DECK: ("powerpoint", "pptx", "deck", "slides", "slide", "presentation"),
 }
+
+#: Kinds that are made of fields rather than of paragraphs.
+#:
+#: An invoice is a table of line items with totals computed from them; a
+#: spreadsheet is rows; a deck is headings. Writing prose into any of the three
+#: produces a file that carries the *label* of the thing and none of its shape —
+#: which is what "make me an invoice" was doing: a .docx of the model's prose
+#: with `invoice` in the filename and no table in it anywhere.
+#: A CV is here for the same reason: it is a set of dated entries, and prose in
+#: a file called `cv.docx` is the same defect wearing a different label.
+_STRUCTURED = {
+    ArtifactKind.INVOICE,
+    ArtifactKind.SPREADSHEET,
+    ArtifactKind.DECK,
+    ArtifactKind.CV,
+}
+
+#: Prefixes an engine or the dispatcher puts in front of a failure.
+#:
+#: These reach this runtime as "the answer" because in-band errors are text and
+#: this runtime writes text to disk. The output directory therefore contains
+#: `error-400-client-error-bad-request-for-url-http-127-0-0-1-11.docx` and
+#: `error-the-request-to-192-168-1-170-was-cancelled.docx` — real files, on a
+#: real machine, each one a failure message with a `.docx` extension.
+_FAILURE_PREFIXES = ("[ERROR]", "[FALLBACK]", "[WARN]")
 
 
 class DocumentsRuntime(Runtime):
@@ -72,6 +104,21 @@ class DocumentsRuntime(Runtime):
         self._state = RuntimeState.UNINITIALIZED
         self._start_time = time.time()
         self._generated = 0
+        #: Reads an already-written answer into fields. See `set_extractor`.
+        self._ask: Optional[Any] = None
+
+    def set_extractor(self, ask: Any) -> None:
+        """Give this runtime a way to read an answer into structured fields.
+
+        Injected rather than imported, like every other cross-layer callable
+        here: the artifacts layer must not depend on the models runtime.
+
+        **Absent is a supported state, and it degrades honestly.** Without an
+        extractor the structured kinds refuse and say so, rather than falling
+        back to prose in a file named `invoice.docx` — which is the behaviour
+        being fixed, and it must not survive as a fallback.
+        """
+        self._ask = ask
 
     # ------------------------------------------------------------- lifecycle
 
@@ -154,6 +201,27 @@ class DocumentsRuntime(Runtime):
                 ),
             }
 
+        # A failure is not a document.
+        #
+        # In-band errors are text, and this runtime writes text to disk, so a
+        # step that failed upstream became a file: the output directory holds
+        # `error-400-client-error-bad-request-for-url-http-127-0-0-1-11.docx`
+        # among others. Refusing here rather than in the exporter because this
+        # is where the reason still exists — by the time it reaches the writer
+        # it is indistinguishable from prose that happens to start with a
+        # bracket.
+        failure = next(
+            (p for p in _FAILURE_PREFIXES if body.strip().startswith(p)), ""
+        )
+        if failure:
+            return {
+                "success": False,
+                "error": (
+                    "That didn't work, so there was nothing to write up — the "
+                    "answer came back as an error. Fix that first and ask again."
+                ),
+            }
+
         # Rule 9: generation must fail rather than invent.
         unresolved = _unresolved_reference(prompt, body, input_data)
         if unresolved:
@@ -185,6 +253,20 @@ class DocumentsRuntime(Runtime):
         claims = _claims_from(input_data.get("claims") or [])
         sources = _sources_from(input_data.get("sources") or [])
 
+        # An invoice, a spreadsheet and a deck are made of fields. Prose in the
+        # shape of a document is not one of them, and producing it anyway is
+        # what made "make me an invoice" return a .docx of paragraphs.
+        if kind in _STRUCTURED:
+            return self._structured(
+                kind=kind,
+                title=title,
+                body=body,
+                prompt=prompt,
+                claims=claims,
+                sources=sources,
+                input_data=input_data,
+            )
+
         try:
             artifact = self._service.create_document(
                 title=title,
@@ -206,6 +288,122 @@ class DocumentsRuntime(Runtime):
         self._generated += 1
         logger.info("Generated %s (%d bytes)", artifact.filename, artifact.size_bytes)
 
+        return {"success": True, "artifact": _card(artifact)}
+
+    # ------------------------------------------------------------ structured
+
+    #: What each structured kind is called when Zaram has to refuse one.
+    _WHAT = {
+        ArtifactKind.INVOICE: "an invoice",
+        ArtifactKind.SPREADSHEET: "a spreadsheet",
+        ArtifactKind.DECK: "a slide deck",
+        ArtifactKind.CV: "a CV",
+    }
+
+    def _structured(
+        self,
+        *,
+        kind: ArtifactKind,
+        title: str,
+        body: str,
+        prompt: str,
+        claims: List[Claim],
+        sources: List[ArtifactSource],
+        input_data: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Read the answer into fields, then build the real thing — or refuse.
+
+        There is no prose fallback anywhere in here, deliberately. A fallback
+        would restore the exact defect: a file carrying the *label* of an
+        invoice with none of its shape, which is worse than no file because the
+        user believes they have one.
+        """
+        from artifacts import extract, invoice as invoice_module
+
+        what = self._WHAT[kind]
+        if self._ask is None:
+            return {
+                "success": False,
+                "error": (
+                    f"I can't make {what} right now — reading the details out of "
+                    f"an answer needs a model and none is available. Ask me to "
+                    f"write it up as a document and I can do that."
+                ),
+            }
+
+        common = dict(
+            title=title,
+            fmt=input_data.get("format"),
+            project_id=input_data.get("project_id", ""),
+            conversation_id=input_data.get("session_id", ""),
+            conversation_title=input_data.get("conversation_title", "") or title,
+            sources=sources,
+            claims=claims,
+        )
+
+        try:
+            if kind is ArtifactKind.INVOICE:
+                draft = extract.invoice_from(body, prompt, self._ask)
+                if isinstance(draft, extract.Missing):
+                    return {"success": False, "error": draft.sentence(what)}
+                artifact = self._service.create_invoice(
+                    items=[
+                        invoice_module.line_item(
+                            description=item["description"],
+                            quantity=item["quantity"],
+                            unit_price=item["unit_price"],
+                            unit=item["unit"],
+                        )
+                        for item in draft.items
+                    ],
+                    bill_to=draft.bill_to,
+                    currency=draft.currency,
+                    terms_days=draft.terms_days,
+                    notes=draft.notes,
+                    **common,
+                )
+            elif kind is ArtifactKind.SPREADSHEET:
+                draft = extract.table_from(body, prompt, self._ask)
+                if isinstance(draft, extract.Missing):
+                    return {"success": False, "error": draft.sentence(what)}
+                artifact = self._service.create_spreadsheet(
+                    header=draft.header, rows=draft.rows, **common
+                )
+            elif kind is ArtifactKind.CV:
+                draft = extract.cv_from(body, prompt, self._ask)
+                if isinstance(draft, extract.Missing):
+                    return {"success": False, "error": draft.sentence(what)}
+                # The person's name titles the file, not the request. `common`
+                # carries the request's title, so it is replaced rather than
+                # passed alongside — two titles would be a filename argument
+                # nobody could predict.
+                cv_common = dict(common, title=f"{draft.name} — CV")
+                artifact = self._service.create_cv(
+                    name=draft.name,
+                    headline=draft.headline,
+                    contact=draft.contact,
+                    summary=draft.summary,
+                    experience=draft.experience,
+                    education=draft.education,
+                    skills=draft.skills,
+                    **cv_common,
+                )
+            else:
+                draft = extract.deck_from(body, prompt, self._ask)
+                if isinstance(draft, extract.Missing):
+                    return {"success": False, "error": draft.sentence(what)}
+                artifact = self._service.create_deck(slides=draft.slides, **common)
+        except invoice_module.InvoiceIncomplete as exc:
+            # The same refusal `POST /artifacts/generate` returns as a 400. It
+            # is not a crash: it is the document layer declining to produce a
+            # bill with a hole in it, and the sentence is already actionable.
+            return {"success": False, "error": f"I can't make {what}: {exc}"}
+        except Exception as error:
+            logger.exception("Structured generation failed")
+            return {"success": False, "error": f"could not write {what}: {error}"}
+
+        self._generated += 1
+        logger.info("Generated %s (%d bytes)", artifact.filename, artifact.size_bytes)
         return {"success": True, "artifact": _card(artifact)}
 
 
@@ -232,9 +430,22 @@ def _card(artifact: Artifact) -> Dict[str, Any]:
 
 
 def _kind_from(prompt: str) -> ArtifactKind:
+    """Which kind the request names, matched on words rather than substrings.
+
+    **`in` was enough until "cv" joined the list.** Two letters match inside
+    ordinary words, and a request that happened to contain one would have been
+    answered with somebody's CV layout. That is the failure
+    `test_intent_word_boundaries.py` already records one floor down — "invoice"
+    contains "voice", so every invoice request routed to text-to-speech — and
+    it costs nothing to not have it twice.
+
+    The boundary is applied to every entry, not only the short ones: "bill"
+    inside "billing" and "slide" inside "slides" were both matching by
+    accident, and an accident that happens to be right is not a rule.
+    """
     lowered = prompt.lower()
     for kind, words in _KIND_WORDS.items():
-        if any(word in lowered for word in words):
+        if any(re.search(rf"\b{re.escape(word)}\b", lowered) for word in words):
             return kind
     return ArtifactKind.DOCUMENT
 

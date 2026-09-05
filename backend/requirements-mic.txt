@@ -1,0 +1,26 @@
+# Zaram backend - mic extra (speech to text). Install with:
+#
+#     pip install -r backend/requirements-mic.txt
+#
+# Separate from the voice extra, and the split is decided by measurement rather
+# than by taste. Listening is **81 MB** of wheels - faster-whisper plus av,
+# ctranslate2, onnxruntime, tokenizers, numpy and huggingface_hub. Speaking is
+# 905 MB, because Kokoro pulls torch, transformers and the spaCy stack.
+#
+# An order of magnitude apart, so somebody who wants Zaram to talk should not
+# have to buy a microphone stack and somebody who wants to dictate a note should
+# not have to buy torch. The estimate carried into the packaging discussion was
+# ~250 MB and was wrong by three times, in the useful direction.
+#
+# **Model weights are not here and are not fetched at install time.** They come
+# down on first use, through the egress gate, which under default deny means
+# they do not come down at all until the user permits it - see
+# backend/voice/stt/whisper.py. tiny is 75 MB, base (the default) is 141 MB measured.
+#
+# Nothing in the chat path imports any of this. WhisperRecogniser catches the
+# missing import and reports itself unavailable with the install command and its
+# size, while chat continues untouched.
+#
+# Licences checked: faster-whisper MIT, ctranslate2 MIT, av BSD-3, onnxruntime
+# MIT, tokenizers Apache-2.0, huggingface_hub Apache-2.0. No AGPL.
+faster-whisper==1.2.1

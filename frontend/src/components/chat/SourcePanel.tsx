@@ -16,9 +16,10 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { motion, type Variants } from 'framer-motion';
-import { X, Trash2, Loader2 } from 'lucide-react';
+import { X, Trash2, Loader2, ExternalLink } from 'lucide-react';
 import { useIsReducedMotion } from '@/hooks/useReducedMotion';
 import { fetchMemory, deleteMemory, type MemoryRecord } from '@/services/memoryClient';
+import { hostOf } from '@/services/chatClient';
 
 export interface SourcePanelProps {
   /** Provenance URL, e.g. "memory:1a2b-...". */
@@ -77,7 +78,49 @@ export default function SourcePanel({
 
   const memoryId = url.startsWith('memory:') ? url.slice('memory:'.length) : null;
 
+  /** A cited page, as opposed to a remembered fact.
+   *
+   *  **Clicking one used to do nothing useful.** This panel only ever handled
+   *  `memory:` URLs, so every web citation — the whole output of a search —
+   *  fell into "This source is not a stored memory." and offered no way to
+   *  reach the page. A citation you cannot open is not a citation, which is
+   *  half of rule 2 missing precisely where the user is most likely to check:
+   *  a claim Zaram made about the world. */
+  const webUrl = /^https?:\/\//i.test(url) ? url : null;
+  // `hostOf` rather than a second parse here. The chip beside this panel names
+  // the same site, and two implementations of "which site is this" is how the
+  // two come to disagree about one page.
+  const host = hostOf(url);
+
+  /** Hand the page to the user's real browser.
+   *
+   *  Never in-app. A page opened inside Zaram would be a browser nobody
+   *  audited, running third-party script beside the Spine, and the egress from
+   *  it would be invisible to `EgressGate` — which intercepts what the
+   *  *backend* sends. The system browser is the honest place for somebody
+   *  else's page, and it is where the user's own blockers and sessions live.
+   *
+   *  `window.open` is the fallback for a plain browser tab during development,
+   *  with `noopener` so the opened page cannot reach back through
+   *  `window.opener`. */
+  const openInBrowser = useCallback(() => {
+    if (!webUrl) return;
+    const shell = window.zaram?.shell?.openExternal;
+    if (typeof shell === 'function') {
+      void shell(webUrl);
+      return;
+    }
+    window.open(webUrl, '_blank', 'noopener,noreferrer');
+  }, [webUrl]);
+
   useEffect(() => {
+    if (webUrl) {
+      // Nothing to fetch: the panel shows where the claim came from and opens
+      // it. The page itself is deliberately not retrieved here — see above.
+      setLoading(false);
+      setError(null);
+      return;
+    }
     if (!memoryId) {
       setError('This source is not a stored memory.');
       setLoading(false);
@@ -103,7 +146,7 @@ export default function SourcePanel({
       cancelled = true;
       controller.abort();
     };
-  }, [memoryId]);
+  }, [memoryId, webUrl]);
 
   // Return focus where it came from. Without this, closing drops the caret at
   // the top of the document and the keyboard user loses their place.
@@ -193,7 +236,7 @@ export default function SourcePanel({
             className="text-[10px] uppercase text-slate-500"
             style={{ letterSpacing: '0.08em', fontFamily: 'var(--font-display)' }}
           >
-            Remembered
+            {webUrl ? 'From the web' : 'Remembered'}
           </span>
           <div className="flex-1" />
           <button
@@ -221,6 +264,25 @@ export default function SourcePanel({
             </p>
           )}
 
+          {/* A cited page. The full URL is shown rather than only the host,
+              because the whole reason to open a citation is to check it, and
+              the path is the half that says which article. */}
+          {webUrl && !loading && (
+            <>
+              {host && (
+                <p className="text-sm text-slate-200" style={{ fontFamily: 'var(--font-display)' }}>
+                  {host}
+                </p>
+              )}
+              <p className="mt-2 text-[11px] leading-relaxed text-slate-500 break-all">{webUrl}</p>
+              <p className="mt-4 pt-3 border-t border-white/5 text-[11px] leading-relaxed text-slate-500">
+                Zaram fetched this page to answer, so it is in your Activity log.
+                Opening it now is a fresh visit, made by your browser rather than
+                by Zaram.
+              </p>
+            </>
+          )}
+
           {record && !loading && (
             <>
               <p className="text-sm leading-relaxed text-slate-200 whitespace-pre-wrap">
@@ -243,6 +305,19 @@ export default function SourcePanel({
         </div>
 
         {/* Actions */}
+        {webUrl && !loading && (
+          <div className="px-5 py-3 border-t border-white/5 flex items-center gap-2">
+            <button
+              onClick={openInBrowser}
+              className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs transition-colors hover:bg-white/5"
+              style={{ color: 'var(--color-text)' }}
+            >
+              <ExternalLink size={14} />
+              Open in your browser
+            </button>
+          </div>
+        )}
+
         {record && !loading && (
           <div className="px-5 py-3 border-t border-white/5 flex items-center gap-2">
             <button

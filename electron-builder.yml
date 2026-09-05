@@ -2,30 +2,186 @@ appId: ai.zaram.desktop
 productName: Zaram
 copyright: Copyright © 2026 Zaram
 artifactName: Zaram
+# `app:` is deliberately absent.
+#
+# It was `app: .`, which electron-builder itself warns about on every run —
+# "Specified application directory equals to project dir — superfluous or wrong
+# configuration". It is worse than superfluous. With the app directory set to
+# the project directory, the transformed metadata that `extraMetadata` produces
+# is written over the **repository's own `package.json`**: the file came back
+# from a build holding only `dependencies` and `"main": "electron/main.js"`,
+# with all twenty-five scripts gone. Every `npm run` in the project then failed
+# with "Missing script", including the ones that would have rebuilt it.
+#
+# Recovered from git, which is the only reason it was a nuisance rather than a
+# loss. Omitted here so the default applies and nothing rewrites a tracked file.
 directories:
-  app: .
   output: dist-electron
   buildResources: build
+# What goes in the installer.
+#
+# **The backend is included by allow-list, and that polarity is the point.**
+# It used to be `- backend` plus a handful of exclusions, and the exclusions
+# were wrong in a way that only ever fails in one direction: `!backend/.venv`
+# does not match `backend/venv`, which is what the directory is actually
+# called on a working machine. That alone was 376 MB.
+#
+# Far worse, and the reason this is now an allow-list: `backend/spine.db`,
+# `backend/egress.db`, `backend/artifacts.db`, `backend/projects.db` and
+# `backend/egress-policy.json` all sat inside that glob. Those are the
+# maintainer's own Spine, their append-only record of every request that ever
+# left their machine, their generated documents and their per-host privacy
+# rules. Shipping them to every user is the precise failure this product
+# exists to prevent, and it would have shipped silently.
+#
+# A denylist fails open: the next database somebody adds is included by
+# default and nobody finds out. An allow-list fails closed — a file nobody
+# listed is missing, which breaks loudly in testing rather than quietly in
+# public. `backend/tests/test_installer_payload.py` asserts this holds.
 files:
   - electron
   - desktop/dist
   - frontend/dist
-  - backend
   - package.json
+
+  # Backend: source and the data files it genuinely reads at runtime.
+  - backend/**/*.py
+  - backend/**/*.json
+  - backend/**/*.txt
+  - backend/**/*.yaml
+  - backend/**/*.yml
+
+  # Never, whatever matched above. Ordered after the includes deliberately.
+  - "!backend/venv"        # the developer's virtualenv, 376 MB
+  - "!backend/.venv"
+  # Databases, at the top level and at any depth. Both forms are spelled out
+  # rather than relying on `**` matching zero path segments — that is correct
+  # minimatch behaviour, and it is too subtle a thing for the rule that keeps
+  # the user's Spine out of a public installer to depend on.
+  - "!backend/*.db"        # spine, egress, artifacts, projects — user data
+  - "!backend/**/*.db"
+  - "!backend/*.db-wal"    # SQLite's sidecars hold the most recent writes, so
+  - "!backend/**/*.db-wal" # a rule matching only *.db leaks exactly the rows
+  - "!backend/*.db-shm"    # written last. Both exist on disk today.
+  - "!backend/**/*.db-shm"
+  - "!backend/*.sqlite"
+  - "!backend/**/*.sqlite"
+  - "!backend/*.sqlite3"
+  - "!backend/**/*.sqlite3"
+  - "!backend/egress-policy.json"
+  - "!backend/generated"   # the output directory — the user's own documents
+  - "!backend/tests"
+  - "!backend/**/tests"
+  # Runtime scratch. The same set pyproject.toml calls "data, never tests".
+  - "!backend/audio"
+  - "!backend/audio_cache"
+  - "!backend/audio_clips"
+  - "!backend/audio_output"
+  - "!backend/image_output"
+  - "!backend/temp"
+  - "!backend/uploads"
+  # Model weights the user brought. `default_model_dir()` is
+  # `data_dir()/models/image`, and in a checkout `data_dir()` is `backend/` —
+  # so a developer with an SDXL checkpoint has 6.9 GB sitting here. Nothing
+  # under the allow-list's extensions matches `.safetensors`, so it could not
+  # ship today; this says so on purpose rather than by omission, and covers
+  # `.gguf`, `.bin`, `.pt` and `.onnx` beside it, because "the weights are not
+  # in the installer" must not depend on which format somebody drops in next.
+  - "!backend/models"
+
   - "!**/__pycache__"
   - "!**/*.pyc"
-  - "!backend/.venv"
-  - "!backend/__pycache__"
   - "!**/node_modules"
+# The backend, unpacked beside the archive rather than sealed inside it.
+#
+# **A native process cannot read an asar.** The archive is an Electron format;
+# the main process gets a patched `fs` that reads it transparently and nothing
+# else on the machine does. So `backend/` went into `app.asar`, the launcher's
+# `existsSync` check passed — because that check runs in Electron — and the
+# spawned `python.exe` was then given a working directory that does not exist
+# on the real filesystem. It failed with ENOENT on the cwd, not on the
+# interpreter, which is why the error named neither.
+#
+# Every machine with a checkout fell through to `process.cwd()/backend` and
+# worked. A machine that had never seen the repo had nothing to fall through
+# to, and that is the single acceptance criterion M11 could never test here.
+#
+# `asarUnpack` rather than `extraResources` deliberately: the allow-list above
+# is the thing that keeps the maintainer's Spine out of the installer, and it
+# has already been wrong once. Unpacking reuses it. `extraResources` would mean
+# writing those exclusions a second time in a different syntax, where a missing
+# one publishes private data again.
+asarUnpack:
+  - "backend/**"
+# The Python runtime, unpacked beside the app rather than inside app.asar.
+#
+# An archived file cannot be executed, and a bundled CPython has to be — so it
+# cannot travel in `files`. It lands in `resources/runtime/`, which is what
+# `resolvePythonCommand` looks for via `resourcesPath`.
+#
+# Absent during development, and that is deliberate: `extraResources` skips a
+# missing directory, so a developer build works from the repo venv exactly as
+# before. `scripts/check-runtime.mjs` is what refuses to *ship* without it.
+extraResources:
+  - from: runtime
+    to: runtime
+    filter:
+      - "**/*"
+      - "!**/__pycache__"
+      - "!**/*.pyc"
+      # Never ship a key, a database or a log that landed in the runtime tree.
+      - "!**/*.db"
+      - "!**/*.pfx"
+      - "!**/*.p12"
+
 extraMetadata:
   main: electron/main.js
 asar: true
+# Code signing.
+#
+# **Nothing secret is in this file, and nothing secret may be.** The identity
+# is named by environment variable, and the private key is never named at all
+# — since June 2023 a publicly-trusted signing key must live on a hardware
+# token or an HSM, so there is no key file for this config to point at even in
+# principle. `scripts/check-signing.mjs` refuses a release build that is not
+# configured, and refuses one that tries to sign from a file.
+#
+# `certificateSubjectName` selects a certificate from the **Windows certificate
+# store** by its subject. That is how a hardware token presents itself once its
+# driver is installed: the certificate is visible, the private key is not, and
+# signing happens on the token. It is also what makes the OV → EV move a
+# one-variable change — set ZARAM_SIGN_SUBJECT to the new identity and nothing
+# else in the build moves.
+#
+# **Timestamping is not optional.** Without it, every binary ever signed stops
+# validating the day the certificate expires — including copies already
+# installed. With an RFC 3161 timestamp, the signature stays valid because it
+# proves the signing happened while the certificate was live. A one-year
+# certificate and no timestamp means the alpha's installers break in a year.
 win:
   target:
     - nsis
     - portable
   artifactName: Zaram-${version}-${arch}.${ext}
+  # certificateSubjectName is deliberately absent. It used to be written as
+  # "${env.ZARAM_SIGN_SUBJECT}" with a comment saying an unset variable resolves
+  # to empty and signing is skipped. It does not: the literal reaches the signer,
+  # which fails with `Cannot find certificate ${env.ZARAM_SIGN_SUBJECT}` while
+  # signing the uninstaller — the last minute of a ten-minute build, and the
+  # reason an installer had never been produced here.
+  #
+  # scripts/build-installer.mjs injects it when the environment has one, so the
+  # field is present exactly when it can be honoured.
+  rfc3161TimeStampServer: http://timestamp.digicert.com
+  timeStampServer: http://timestamp.digicert.com
+  signingHashAlgorithms:
+    - sha256
 nsis:
+  # Uninstall asks what to do with the user's data: keep, export then delete,
+  # or delete. Named explicitly rather than relying on electron-builder finding
+  # build/installer.nsh by convention — the same convention that produced an
+  # installer wearing the default Electron icon when build/icon.ico was absent.
+  include: build/installer.nsh
   oneClick: false
   perMachine: false
   allowToChangeInstallationDirectory: true

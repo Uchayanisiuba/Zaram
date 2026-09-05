@@ -7,6 +7,7 @@ export type Platform = 'mac' | 'win';
 export type WorkspaceId =
   | 'landing'
   | 'work'
+  | 'project'
   | 'memory'
   | 'knowledge'
   | 'activity'
@@ -32,6 +33,7 @@ export interface Shortcut {
 export const surfaceOrder: WorkspaceId[] = [
   'landing',
   'work',
+  'project',
   'memory',
   'knowledge',
   'activity',
@@ -41,23 +43,31 @@ export const surfaceOrder: WorkspaceId[] = [
 export const surfaceLabels: Record<WorkspaceId, string> = {
   landing: 'Landing',
   work: 'Work',
+  project: 'Project',
   memory: 'Memory',
   knowledge: 'Knowledge',
   activity: 'Activity',
   settings: 'Settings',
 };
 
-/** The five nodes of the orbit, in order. Landing is the shell, not a node.
+/** The six nodes of the orbit, in order. Landing is the shell, not a node.
+ *
+ *  Project sits next to Work because they are adjacent and distinct: Work is
+ *  the output, Project is the organisation of it. It earned a node rather than
+ *  being a filter inside Work because `project:<id>` scopes *facts* — it
+ *  reaches the Spine and the plan, and a filter living inside Work cannot own
+ *  something that scopes Memory. See CLAUDE.md, 10 August 2026.
  *
  *  Consumers that render navigation derive their list from this, and key their
  *  icons off `Record<WorkspaceId, …>` so the compiler names every file that
  *  needs updating when a node is added. The comment above about Activity
  *  breaking four places was written and then not acted on: TopNav, LeftRail and
  *  CommandPalette each restated the list anyway, and CommandPalette silently
- *  lost Activity as a result — it was unreachable from ⌘K until Work was added
+ *  lost Activity as a result — it was unreachable from Ctrl K until Work was added
  *  and the restatements were removed. */
 export const orbitOrder: Exclude<WorkspaceId, 'landing'>[] = [
   'work',
+  'project',
   'memory',
   'knowledge',
   'activity',
@@ -74,39 +84,66 @@ export const NAV_SHORTCUTS: Shortcut[] = surfaceOrder.map((id, i) => ({
 
 export const REGISTRY: Shortcut[] = [
   ...NAV_SHORTCUTS,
+  // **These four were on Ctrl+O, Ctrl+L, Ctrl+S and Ctrl+T**, and this is the
+  // Ctrl+C defect again rather than a near miss of it: `useShortcuts` calls
+  // `preventDefault()` on every match outside a text field, so they did not
+  // shadow Open, Save and the rest — they deleted them. Two of the four are
+  // among the most reflexive keystrokes a person has, and the registry's own
+  // guard test was named for Save while testing only `c/v/x/a/z`, so the
+  // assertion that should have caught this reported a coverage it did not
+  // have. The test now checks what its name claims.
+  //
+  // Alt for the reason Toggle Chat took Alt: the window sets `autoHideMenuBar`
+  // so no menu claims Alt+letter, and the browser does not use it. Matched on
+  // **physical position**, because macOS Option is a compose key — ⌥S emits
+  // "ß" and ⌥L emits "¬", so a chord compared on `event.key` would be printed
+  // on the keycap and never fire.
   {
     id: 'orb.idle',
     label: 'Orb · Idle',
     group: 'orb',
-    keys: { meta: true, key: 'o' },
+    keys: { alt: true, key: 'o' },
     action: { type: 'orb', target: 'idle' },
   },
   {
     id: 'orb.listening',
     label: 'Orb · Listening',
     group: 'orb',
-    keys: { meta: true, key: 'l' },
+    keys: { alt: true, key: 'l' },
     action: { type: 'orb', target: 'listening' },
   },
   {
     id: 'orb.speaking',
     label: 'Orb · Speaking',
     group: 'orb',
-    keys: { meta: true, key: 's' },
+    keys: { alt: true, key: 's' },
     action: { type: 'orb', target: 'speaking' },
   },
   {
     id: 'orb.thinking',
     label: 'Orb · Thinking',
     group: 'orb',
-    keys: { meta: true, key: 't' },
+    keys: { alt: true, key: 't' },
     action: { type: 'orb', target: 'thinking' },
   },
   {
     id: 'chat',
     label: 'Toggle Chat',
     group: 'window',
-    keys: { meta: true, key: 'c' },
+    // **Not Ctrl+C.** `useShortcuts` calls `preventDefault()` on every match
+    // outside a text field, so this chord was eating Copy on all six surfaces
+    // — measured with a live selection. Memory, Knowledge and Activity exist
+    // to show facts, citations and egress rows, and copying one of them is an
+    // ordinary thing to want; a product whose pitch is that the interface
+    // tells you the truth should not silently swallow the most universal
+    // keystroke there is.
+    //
+    // Alt keeps the C mnemonic and collides with nothing: the window sets
+    // `autoHideMenuBar`, so no menu claims Alt+letter, and the browser does
+    // not use it either. Bare Shift+C was considered and refused — that is a
+    // capital letter, not a chord, and it is one un-exempted focusable element
+    // away from firing at somebody typing.
+    keys: { alt: true, key: 'c' },
     action: { type: 'chat' },
   },
   {
@@ -132,6 +169,11 @@ export const REGISTRY: Shortcut[] = [
   },
 ];
 
+/** `meta` means *the platform's primary chord key* — Command on a Mac, Control
+ *  on Windows. It does not mean the physical Windows key, which the OS takes
+ *  before the page sees it and which no shortcut may claim. `ctrl` is the
+ *  literal Control key, distinct from `meta` only on a Mac; on Windows the two
+ *  collapse onto Ctrl, which is why `chordTokens` renders both as "Ctrl". */
 export function chordTokens(shortcut: Shortcut, platform: Platform): string {
   const parts: string[] = [];
   if (shortcut.keys.meta) parts.push(platform === 'mac' ? '\u2318' : 'Ctrl');
@@ -142,11 +184,37 @@ export function chordTokens(shortcut: Shortcut, platform: Platform): string {
   return parts.join(' ');
 }
 
-const SHIFTED_KEYS = new Set(['?', '!', '@', '#', '$', '%', '^', '&', '*', '(', ')', '+', '{', '}', '|', '<', '>', '~', ':', '"']);
+/** Characters a standard layout cannot produce without Shift held. Exported so
+ *  a test can synthesise the same event the keyboard would, rather than
+ *  restating the set and drifting from it. */
+export const SHIFTED_KEYS = new Set(['?', '!', '@', '#', '$', '%', '^', '&', '*', '(', ')', '+', '{', '}', '|', '<', '>', '~', ':', '"']);
+
+/** True when `event` is the physical key this shortcut names.
+ *
+ * **`event.key` is the character produced, not the key pressed, and Option
+ * changes it.** On macOS ⌥C emits `key: "ç"` — so an Alt chord compared on
+ * `event.key` is printed on the keycap, shown in the help overlay, and never
+ * fires. That is the same shape as the Ctrl+K/Win+K defect recorded below:
+ * the interface advertising a chord the matcher does not answer to.
+ *
+ * So an Alt chord on a letter is matched by physical position instead, which
+ * is what the user actually pressed and is stable across layouts. Everything
+ * else keeps `event.key`, because `code` would break `?` — a shifted Slash on
+ * a US layout and a different key entirely elsewhere.
+ */
+function hitsTheKey(event: KeyboardEvent, shortcut: Shortcut): boolean {
+  const { alt, key } = shortcut.keys;
+  if (alt && /^[a-z]$/i.test(key)) {
+    // `code` is absent on a synthetic event that did not set it; falling back
+    // keeps such an event matchable rather than silently unmatchable.
+    return event.code ? event.code === `Key${key.toUpperCase()}` : event.key === key;
+  }
+  return event.key === key;
+}
 
 export function matches(event: KeyboardEvent, shortcut: Shortcut, platform: Platform): boolean {
   const { meta, ctrl, alt, shift, key } = shortcut.keys;
-  if (event.key !== key) return false;
+  if (!hitsTheKey(event, shortcut)) return false;
 
   const needsShift = !!shift || SHIFTED_KEYS.has(key);
   if (event.shiftKey !== needsShift) return false;
@@ -156,8 +224,15 @@ export function matches(event: KeyboardEvent, shortcut: Shortcut, platform: Plat
     if (!!meta !== event.metaKey) return false;
     if (!!ctrl !== event.ctrlKey) return false;
   } else {
-    if (!!ctrl !== event.ctrlKey) return false;
-    if (!!meta !== event.metaKey) return false;
+    // Windows: `meta` and `ctrl` both resolve to Ctrl, exactly as chordTokens
+    // renders them. This branch used to require `event.metaKey` for a `meta`
+    // shortcut, so the help overlay advertised "Ctrl K" while the matcher
+    // waited for Win+K — a chord the OS intercepts. Every registry shortcut
+    // was unreachable on Windows and the interface said otherwise.
+    if ((!!meta || !!ctrl) !== event.ctrlKey) return false;
+    // The Windows key is never part of a chord here, so holding it is not a
+    // near-miss to be forgiven: Win+K must not open the palette.
+    if (event.metaKey) return false;
   }
   return true;
 }

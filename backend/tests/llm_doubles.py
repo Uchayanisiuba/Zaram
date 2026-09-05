@@ -39,9 +39,22 @@ class FakeLLM:
         self.tokens = list(tokens) if tokens is not None else list(DEFAULT_TOKENS)
         #: (prompt, system_prompt, model) per call, in order.
         self.calls: list[tuple[str, str, str | None]] = []
+        #: Images seen per call. Kept beside `calls` rather than inside it so
+        #: that every existing assertion about `calls` keeps its shape.
+        self.images: list[list[str] | None] = []
 
     def stream_response(
-        self, prompt: str, system_prompt: str = "", model: str | None = None
+        self,
+        prompt: str,
+        system_prompt: str = "",
+        model: str | None = None,
+        images: list[str] | None = None,
     ) -> Iterator[str]:
+        # `images` is on the double for the reason the contract test exists at
+        # all: a fake exempt from the interface is the original bug. It kept a
+        # two-argument `stream_response` for four milestones while the real
+        # client grew a third, and thirteen tests failed identically without
+        # anyone reading the message.
         self.calls.append((prompt, system_prompt, model))
+        self.images.append(images)
         yield from self.tokens

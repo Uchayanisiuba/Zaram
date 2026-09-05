@@ -1,16 +1,17 @@
 import { useState, useEffect, useRef } from 'react'
-import { Search, Home, Brain, BookOpen, FileText, ShieldCheck, Settings, ArrowRight, Command } from 'lucide-react'
+import { Search, Home, Brain, BookOpen, FileText, Layers, ShieldCheck, Settings, ArrowRight, Command } from 'lucide-react'
 
 import { surfaceOrder, surfaceLabels } from '@/runtime/shortcuts/registry'
 import type { WorkspaceId } from '@/runtime/shortcuts/registry'
 
 // Keyed by WorkspaceId so a new node cannot be added without giving it an entry
 // here. This list used to be written out by hand and had silently lost
-// Activity — it was in the rail and the orbit but not reachable from ⌘K, which
+// Activity — it was in the rail and the orbit but not reachable from the command palette, which
 // is the one route a keyboard user has.
 const COMMAND_ICONS: Record<WorkspaceId, React.ReactNode> = {
   landing: <Home size={28} />,
   work: <FileText size={28} />,
+  project: <Layers size={28} />,
   memory: <Brain size={28} />,
   knowledge: <BookOpen size={28} />,
   activity: <ShieldCheck size={28} />,

@@ -1,0 +1,568 @@
+/* Zaram — site styles.
+   Palette follows docs/UI-SPEC.md so the site and the product agree.
+   No external fonts, no CDN: the page makes zero third-party requests on load. */
+
+:root {
+  --bg-base:    #0A0B0E;
+  --bg-raised:  #121419;
+  --bg-overlay: #1A1D24;
+  --line:       #232733;
+  --text:       #F2F4F8;
+  --text-2:     #9BA1AC;
+  --text-3:     #6B7280;
+  --accent:     #5EE7DC;  /* local, primary state */
+  --accent-2:   #8B7FD4;  /* cloud, secondary emphasis */
+  --warn:       #E5A44C;
+
+  --w-page: 1120px;
+  --w-text: 62ch;
+  --r: 12px;
+
+  --ui: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+}
+
+* { box-sizing: border-box; }
+
+html { scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+}
+
+body {
+  margin: 0;
+  background: var(--bg-base);
+  color: var(--text);
+  font-family: var(--ui);
+  font-size: 17px;
+  line-height: 1.65;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* A single quiet wash behind the fold, echoing the orb. Static: motion has a budget. */
+body::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 900px;
+  background:
+    radial-gradient(60% 55% at 50% 12%, rgba(139,127,212,.16), transparent 70%),
+    radial-gradient(40% 40% at 72% 4%, rgba(94,231,220,.07), transparent 70%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+main, .nav, footer { position: relative; z-index: 1; }
+
+h1, h2, h3 { line-height: 1.18; letter-spacing: -.02em; margin: 0 0 .5em; font-weight: 600; }
+h1 { font-size: clamp(2rem, 5.2vw, 3.4rem); letter-spacing: -.03em; }
+h2 { font-size: clamp(1.5rem, 3.2vw, 2.1rem); }
+h3 { font-size: 1.05rem; }
+p  { margin: 0 0 1em; }
+
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+em { font-style: normal; color: var(--text); }
+strong { font-weight: 600; }
+
+.muted { color: var(--text-3); }
+.aside { color: var(--text-3); font-size: .92rem; }
+.kicker {
+  font-size: .78rem; text-transform: uppercase; letter-spacing: .1em;
+  color: var(--accent-2); margin-bottom: .7em; font-weight: 600;
+}
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+
+/* ---------- nav ---------- */
+
+.nav {
+  max-width: var(--w-page); margin: 0 auto;
+  padding: 26px 24px; display: flex; align-items: center; justify-content: space-between; gap: 24px;
+}
+.wordmark {
+  font-size: 1.22rem; font-weight: 600; letter-spacing: -.01em;
+  color: var(--text); text-decoration: none;
+}
+.wordmark.small { font-size: 1rem; margin: 0 0 .3em; }
+.nav nav { display: flex; gap: 26px; flex-wrap: wrap; }
+.nav nav a { color: var(--text-2); font-size: .93rem; }
+.nav nav a:hover { color: var(--text); text-decoration: none; }
+
+/* ---------- hero ---------- */
+
+.hero { max-width: var(--w-page); margin: 0 auto; padding: 64px 24px 0; text-align: center; }
+
+.eyebrow {
+  display: inline-flex; align-items: center; gap: 9px;
+  font-size: .8rem; letter-spacing: .06em; text-transform: uppercase;
+  color: var(--text-2); border: 1px solid var(--line); background: var(--bg-raised);
+  padding: 6px 14px; border-radius: 999px; margin-bottom: 28px;
+}
+.dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 10px var(--accent); }
+
+.lede {
+  max-width: var(--w-text); margin: 0 auto 36px;
+  font-size: 1.12rem; color: var(--text-2);
+}
+
+/* ---------- calls to action ---------- */
+
+.cta { margin-bottom: 56px; }
+
+.signup {
+  display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;
+  max-width: 500px; margin: 0 auto 14px;
+}
+.signup input {
+  flex: 1 1 260px; min-width: 0;
+  padding: 14px 16px; font: inherit; font-size: 1rem;
+  color: var(--text); background: var(--bg-raised);
+  border: 1px solid var(--line); border-radius: var(--r);
+}
+.signup input::placeholder { color: var(--text-3); }
+.signup input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-color: transparent; }
+
+.signup button, .btn-primary {
+  display: inline-block; padding: 14px 24px; font: inherit; font-size: 1rem; font-weight: 600;
+  color: #06251f; background: var(--accent); border: 0; border-radius: var(--r);
+  cursor: pointer; text-decoration: none; transition: filter .15s ease;
+}
+.signup button:hover, .btn-primary:hover { filter: brightness(1.08); text-decoration: none; }
+.signup button:disabled { opacity: .55; cursor: default; filter: none; }
+.signup button:focus-visible, .btn-primary:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+
+.btn-primary { padding: 16px 32px; text-align: center; }
+.btn-sub { display: block; font-size: .82rem; font-weight: 400; opacity: .75; margin-top: 3px; }
+
+/* ---------- alpha signup card ---------- */
+
+.alpha-card {
+  max-width: 520px; margin: 0 auto; text-align: left;
+  background: var(--bg-raised); border: 1px solid var(--line);
+  border-radius: 16px; padding: 32px;
+}
+.alpha-title { font-size: 1.4rem; margin-bottom: .35em; }
+.alpha-sub { color: var(--text-2); font-size: .95rem; margin-bottom: 26px; }
+
+.alpha-form { display: flex; flex-direction: column; gap: 20px; }
+.field { display: flex; flex-direction: column; gap: 7px; }
+.field label { font-size: .88rem; font-weight: 600; color: var(--text); }
+.field .opt { font-weight: 400; color: var(--text-3); }
+
+.field input, .field select, .field textarea {
+  width: 100%; padding: 12px 14px; font: inherit; font-size: .96rem;
+  color: var(--text); background: var(--bg-base);
+  border: 1px solid var(--line); border-radius: 10px;
+}
+.field textarea { resize: vertical; min-height: 60px; }
+.field input::placeholder, .field textarea::placeholder { color: var(--text-3); }
+.field input:focus-visible, .field select:focus-visible, .field textarea:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 1px; border-color: transparent;
+}
+/* The native arrow is invisible on a dark control in several browsers. */
+.field select {
+  appearance: none;
+  background-image: linear-gradient(45deg, transparent 50%, var(--text-2) 50%),
+                    linear-gradient(135deg, var(--text-2) 50%, transparent 50%);
+  background-position: calc(100% - 19px) 50%, calc(100% - 13px) 50%;
+  background-size: 6px 6px, 6px 6px;
+  background-repeat: no-repeat;
+  padding-right: 38px;
+}
+.field select:invalid { color: var(--text-3); }
+.field .hint { font-size: .82rem; color: var(--text-3); margin: 1px 0 0; line-height: 1.5; }
+
+.alpha-form button {
+  padding: 14px 24px; font: inherit; font-size: 1rem; font-weight: 600;
+  color: #06251f; background: var(--accent); border: 0; border-radius: 10px;
+  cursor: pointer; transition: filter .15s ease;
+}
+.alpha-form button:hover { filter: brightness(1.08); }
+.alpha-form button:disabled { opacity: .55; cursor: default; filter: none; }
+.alpha-form button:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+
+.alpha-terms { margin-top: 26px; padding-top: 22px; border-top: 1px solid var(--line); }
+.alpha-terms ul { margin: 0 0 14px; padding-left: 1.1em; }
+.alpha-terms li { font-size: .88rem; color: var(--text-2); margin-bottom: .55em; }
+.alpha-terms .muted { font-size: .82rem; line-height: 1.6; margin: 0; }
+
+.cta-note { font-size: .9rem; color: var(--text-2); max-width: 46ch; margin: 0 auto; }
+.cta-note .muted { display: block; font-size: .85rem; margin-top: 5px; }
+.cta-status { font-size: .92rem; min-height: 1.5em; margin: 12px 0 0; }
+.cta-status.ok { color: var(--accent); }
+.cta-status.err { color: var(--warn); }
+
+/* ---------- screenshots ---------- */
+
+.shot { margin: 0; }
+.shot img {
+  display: block; width: 100%; height: auto;
+  border: 1px solid var(--line); border-radius: var(--r);
+  background: var(--bg-raised);
+}
+.shot figcaption {
+  margin-top: 14px; font-size: .88rem; color: var(--text-3);
+  max-width: 56ch; margin-left: auto; margin-right: auto;
+}
+.hero-shot img { box-shadow: 0 40px 90px -30px rgba(0,0,0,.9); }
+.hero-caption {
+  margin: 18px auto 0; max-width: 1000px; text-align: right;
+  font-size: .84rem; color: var(--text-3);
+}
+@media (max-width: 860px) { .hero-caption { text-align: center; } }
+
+/* ---------- claim strip ---------- */
+
+.claims {
+  max-width: var(--w-page); margin: 96px auto 0; padding: 0 24px;
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 32px;
+}
+.claims h3 { color: var(--text); }
+.claims p { color: var(--text-2); font-size: .96rem; margin: 0; }
+
+/* ---------- alternating features ---------- */
+
+.feature {
+  max-width: var(--w-page); margin: 112px auto 0; padding: 0 24px;
+  display: grid; grid-template-columns: 1fr 1.25fr; gap: 56px; align-items: center;
+}
+.feature.reverse .feature-text { order: 2; }
+.feature p { color: var(--text-2); }
+
+/* A feature with no screenshot: one measure, centred, so a missing image reads as
+   a deliberate change of rhythm rather than as a hole where a picture failed. */
+.feature-plain { display: block; text-align: center; }
+.feature-text.wide { max-width: 60ch; margin: 0 auto; }
+.feature-plain .kicker { color: var(--accent); }
+/* Heading centred, prose left. Centred body copy stops being readable at about
+   two paragraphs, and one of these runs to four. */
+.feature-plain p { text-align: left; }
+
+kbd {
+  font-family: var(--mono); font-size: .82em;
+  padding: 2px 7px; border-radius: 5px;
+  background: var(--bg-overlay); border: 1px solid var(--line);
+  color: var(--text); white-space: nowrap;
+}
+
+/* ---------- instrument panels ----------
+   Showing a trace beats describing one, and it needs no screenshot — which
+   matters for the surfaces that have none. System mono only: the page still
+   makes zero third-party requests, and a site claiming that must earn it. */
+
+.panel {
+  background: var(--bg-base);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  overflow: hidden;
+  margin: 28px 0 0;
+  text-align: left;
+}
+.panel-bar {
+  display: flex; align-items: center; gap: 9px;
+  padding: 10px 15px;
+  background: var(--bg-overlay);
+  border-bottom: 1px solid var(--line);
+  font-size: .72rem; letter-spacing: .06em; text-transform: uppercase;
+  color: var(--text-3);
+}
+.panel-bar .spacer { margin-left: auto; text-transform: none; letter-spacing: 0; }
+.panel-bar .orb {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--accent); box-shadow: 0 0 0 3px rgba(94,231,220,.13);
+}
+
+.panel-body {
+  padding: 16px 17px 18px;
+  font-family: var(--mono);
+  font-size: .78rem; line-height: 1.75;
+  color: var(--text);
+  overflow-x: auto;
+}
+.panel-body .line { display: block; white-space: pre; }
+.panel-body .dim { color: var(--text-3); }
+.panel-body .cy  { color: var(--accent); }
+.panel-body .vi  { color: var(--accent-2); }
+.panel-body .ok  { color: #5FCF9E; }
+
+.panel-note {
+  border-top: 1px solid var(--line);
+  padding: 11px 17px 13px;
+  font-size: .82rem; color: var(--text-3);
+}
+
+/* Prose inside a panel: an answer as the product would render it, rather than a
+   screenshot of one. Legible at any width, and no dev machine has to be running. */
+.panel-prose {
+  padding: 17px 18px 18px;
+  font-size: .95rem; line-height: 1.62; color: var(--text);
+}
+.panel-prose p { margin: 0 0 .8em; }
+.panel-prose p:last-child { margin-bottom: 0; }
+.panel-prose .struck { color: var(--text-3); text-decoration: line-through; }
+
+.cite {
+  font-family: var(--mono); font-size: .7rem;
+  color: var(--accent); border: 1px solid rgba(94,231,220,.32);
+  border-radius: 3px; padding: 1px 4px; white-space: nowrap;
+}
+
+.panel-foot {
+  border-top: 1px solid var(--line);
+  padding: 11px 18px 13px;
+  display: flex; flex-wrap: wrap; gap: 7px 18px;
+  font-family: var(--mono); font-size: .7rem; color: var(--text-3);
+}
+.panel-foot b { color: var(--text-2); font-weight: 500; }
+
+/* Orb beside the answer it produced — the composition the original screenshot
+   had, rebuilt from the half of it that carries no stale example data. */
+.hero-showcase {
+  display: grid;
+  grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr);
+  gap: 36px;
+  align-items: center;
+  max-width: 1000px;
+  margin: 0 auto;
+}
+/* ---------- the orb, alive ---------- */
+
+.orb-stage { position: relative; display: flex; flex-direction: column; align-items: center; }
+
+.orb-img {
+  display: block; width: 100%; height: auto; border-radius: 50%;
+  filter: drop-shadow(0 26px 64px rgba(139,127,212,.26));
+  animation: breathe 7s ease-in-out infinite;
+  transition: filter .8s ease;
+}
+/* Working is the one state the orb reports here. It never reports routing. */
+.orb-stage.is-working .orb-img { filter: drop-shadow(0 26px 64px rgba(94,231,220,.38)); }
+
+@keyframes breathe {
+  0%, 100% { transform: scale(1); }
+  50%      { transform: scale(1.018); }
+}
+
+/* One thin ring with a travelling dot, drawn rather than baked in, so it can
+   turn independently of the sphere. */
+.orb-track {
+  position: absolute; inset: 6%;
+  border: 1px solid rgba(139,127,212,.20); border-radius: 50%;
+  animation: orbit 26s linear infinite;
+  pointer-events: none;
+}
+.orb-track i {
+  position: absolute; top: -3px; left: 50%; width: 5px; height: 5px;
+  margin-left: -2.5px; border-radius: 50%;
+  background: var(--accent); box-shadow: 0 0 8px var(--accent);
+}
+.orb-stage.is-working .orb-track { animation-duration: 6s; border-color: rgba(94,231,220,.30); }
+
+@keyframes orbit { to { transform: rotate(360deg); } }
+
+.orb-state {
+  display: flex; align-items: center; gap: 8px;
+  margin: 14px 0 0; font-size: .84rem; color: var(--accent); text-align: center;
+}
+.orb-state .dot { flex: 0 0 auto; transition: background .5s ease, box-shadow .5s ease; }
+
+/* ---------- the conversation replay ---------- */
+
+.demo .panel-bar .orb { transition: background .4s ease, box-shadow .4s ease; }
+.demo.is-working .panel-bar .orb { background: var(--accent); box-shadow: 0 0 0 3px rgba(94,231,220,.18); }
+.demo:not(.is-working) .panel-bar .orb { background: var(--text-3); box-shadow: none; }
+
+/* Laid out to match the product's own conversation surface: a small speaker
+   label, the user's line plain, Zaram's in cyan behind a rule, and the source
+   underneath it. NB the label class is `.speaker`, not `.who` — `.who` is the
+   audience section, and reusing it put a 120px margin on every line. */
+.thread { padding: 18px; min-height: 210px; display: flex; flex-direction: column; gap: 18px; }
+.turn { display: block; }
+.turn .speaker {
+  display: block; margin: 0 0 5px;
+  font-size: .66rem; letter-spacing: .14em; text-transform: uppercase; color: var(--text-3);
+}
+.turn p { margin: 0; font-size: .93rem; line-height: 1.55; color: var(--text); }
+.turn.is-zaram .speaker { color: var(--accent); }
+.turn.is-zaram > p:first-of-type {
+  border-left: 2px solid var(--accent); padding-left: 12px; color: var(--accent);
+}
+.turn .src {
+  display: inline-block; margin-top: 8px; margin-left: 14px; padding: 4px 9px;
+  background: var(--bg-overlay); border-radius: 5px;
+  font-family: var(--mono); font-size: .68rem; color: var(--text-3);
+}
+.turn .src b { color: var(--text-2); font-weight: 500; }
+
+/* The caret only exists while something is being written. */
+.caret {
+  display: inline-block; width: 7px; height: 1em; margin-left: 1px;
+  background: var(--accent); vertical-align: text-bottom;
+  animation: blink 1s step-end infinite;
+}
+@keyframes blink { 50% { opacity: 0; } }
+
+.demo-foot { justify-content: flex-end; min-height: 20px; }
+.replay {
+  font: inherit; font-family: var(--mono); font-size: .7rem;
+  color: var(--text-3); background: none; border: 1px solid var(--line);
+  border-radius: 6px; padding: 4px 10px; cursor: pointer;
+  transition: color .15s ease, border-color .15s ease;
+}
+.replay:hover { color: var(--accent); border-color: rgba(94,231,220,.4); }
+.replay:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* Motion is opt-out, and opting out must leave the page complete, not empty. */
+@media (prefers-reduced-motion: reduce) {
+  .orb-img, .orb-track { animation: none; }
+}
+.hero .panel { margin: 0; max-width: none; }
+
+@media (max-width: 860px) {
+  .hero-showcase { grid-template-columns: 1fr; gap: 24px; }
+  .orb-shot { max-width: 320px; margin: 0 auto; }
+}
+.panel.gate { max-width: 640px; margin: 34px auto 0; }
+
+/* ---------- who it's for ---------- */
+
+.who { max-width: var(--w-page); margin: 120px auto 0; padding: 0 24px; }
+.who > h2 { text-align: center; margin-bottom: 8px; }
+.who-lede { text-align: center; color: var(--text-2); max-width: 56ch; margin: 0 auto 36px; }
+.who-rows { border-top: 1px solid var(--line); }
+.who-row {
+  display: grid; grid-template-columns: 230px minmax(0, 1fr); gap: 30px;
+  padding: 22px 0; border-bottom: 1px solid var(--line); align-items: baseline;
+}
+.who-row h3 { color: var(--text); margin: 0; }
+.who-row p { color: var(--text-2); font-size: .95rem; margin: 0; }
+
+/* ---------- data-policy section ---------- */
+
+.policy { max-width: 760px; margin: 112px auto 0; padding: 0 24px; }
+.policy > .kicker, .policy > h2 { text-align: center; }
+.policy > h2 { margin-bottom: .6em; }
+.policy-lede { color: var(--text-2); text-align: center; max-width: 58ch; margin: 0 auto 36px; }
+
+.policy-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 14px; }
+.policy-list li {
+  display: grid; grid-template-columns: 210px 1fr; gap: 20px; align-items: start;
+  padding: 20px 22px; background: var(--bg-raised);
+  border: 1px solid var(--line); border-radius: var(--r);
+}
+.policy-list p { margin: 0; color: var(--text-2); font-size: .94rem; }
+
+.tag {
+  display: inline-block; padding: 5px 12px; border-radius: 999px;
+  font-size: .78rem; font-weight: 600; letter-spacing: .02em; white-space: nowrap;
+  /* A grid item stretches by default, which would blow each pill out to the
+     full column and make three different labels read as one fixed-width chip. */
+  justify-self: start;
+}
+/* Cyan for what stayed, violet for what left — the same two colours the orb uses,
+   so the site never teaches a reading the product will contradict. */
+.tag-local { color: var(--accent);   background: rgba(94,231,220,.10);  border: 1px solid rgba(94,231,220,.30); }
+.tag-key   { color: var(--accent-2); background: rgba(139,127,212,.12); border: 1px solid rgba(139,127,212,.32); }
+.tag-warn  { color: var(--warn);     background: rgba(229,164,76,.10);  border: 1px solid rgba(229,164,76,.30); }
+
+.policy-note { text-align: center; max-width: 58ch; margin: 28px auto 0; }
+
+/* ---------- capability grid ---------- */
+
+.caps { max-width: var(--w-page); margin: 120px auto 0; padding: 0 24px; }
+.caps > h2 { text-align: center; margin-bottom: 44px; }
+.caps-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 28px; }
+.caps-grid > div {
+  padding: 24px; background: var(--bg-raised);
+  border: 1px solid var(--line); border-radius: var(--r);
+}
+.caps-grid h3 { color: var(--text); margin-bottom: .45em; }
+.caps-grid p { color: var(--text-2); font-size: .93rem; margin: 0; }
+
+/* ---------- honest section ---------- */
+
+.honest {
+  max-width: var(--w-page); margin: 128px auto 0; padding: 48px 24px;
+  border-top: 1px solid var(--line); border-bottom: 1px solid var(--line);
+}
+.honest > h2 { text-align: center; margin-bottom: 40px; }
+.honest-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 48px; }
+.honest h3 {
+  color: var(--accent-2); font-size: .82rem; text-transform: uppercase; letter-spacing: .1em;
+}
+.honest ul { margin: 0; padding-left: 1.15em; }
+.honest li { color: var(--text-2); margin-bottom: .8em; }
+.honest-note {
+  max-width: 62ch; margin: 40px auto 0; text-align: center;
+  color: var(--text-3); font-size: .92rem;
+}
+
+/* ---------- install / checksum ---------- */
+
+.install { max-width: 640px; margin: 96px auto 0; padding: 0 24px; }
+.install p { color: var(--text-2); }
+.checksum {
+  margin-top: 28px; padding: 22px; background: var(--bg-raised);
+  border: 1px solid var(--line); border-radius: var(--r);
+}
+.checksum code {
+  display: block; font-family: var(--mono); font-size: .82rem;
+  color: var(--accent); word-break: break-all; margin-bottom: 16px;
+}
+.install pre {
+  margin: 8px 0 0; padding: 14px; overflow-x: auto;
+  background: var(--bg-base); border: 1px solid var(--line); border-radius: 8px;
+}
+.install pre code { color: var(--text-2); font-family: var(--mono); font-size: .85rem; }
+
+/* ---------- closing ---------- */
+
+.closing {
+  max-width: 600px; margin: 112px auto 0; padding: 0 24px; text-align: center;
+}
+.closing p { color: var(--text-2); margin-bottom: 28px; }
+
+/* ---------- footer ---------- */
+
+footer {
+  max-width: var(--w-page); margin: 120px auto 0; padding: 40px 24px 64px;
+  border-top: 1px solid var(--line);
+  display: grid; grid-template-columns: 1fr auto; gap: 32px; align-items: start;
+}
+footer p { margin: 0; font-size: .9rem; }
+footer nav { display: flex; flex-direction: column; gap: 10px; text-align: right; }
+footer nav a { color: var(--text-2); font-size: .9rem; }
+footer nav a:hover { color: var(--text); }
+.colophon { grid-column: 1 / -1; max-width: 62ch; font-size: .84rem; line-height: 1.6; }
+
+/* ---------- responsive ---------- */
+
+@media (max-width: 860px) {
+  body { font-size: 16px; }
+  .claims { grid-template-columns: 1fr; gap: 28px; margin-top: 72px; }
+  .caps-grid { grid-template-columns: 1fr; gap: 20px; }
+  .caps { margin-top: 80px; }
+  .policy { margin-top: 80px; }
+  .policy-list li { grid-template-columns: 1fr; gap: 12px; }
+  .who { margin-top: 80px; }
+  .who-row { grid-template-columns: 1fr; gap: 6px; }
+  .panel-body { font-size: .72rem; }
+  .feature { grid-template-columns: 1fr; gap: 28px; margin-top: 80px; }
+  .feature.reverse .feature-text { order: 0; }
+  .honest-grid { grid-template-columns: 1fr; gap: 32px; }
+  footer { grid-template-columns: 1fr; }
+  footer nav { flex-direction: row; flex-wrap: wrap; gap: 20px; text-align: left; }
+}
+
+@media (max-width: 560px) {
+  .hero { padding-top: 40px; }
+  .nav { padding: 20px 16px; }
+  .hero, .claims, .feature, .honest, .install, .closing, footer { padding-left: 16px; padding-right: 16px; }
+  .signup { flex-direction: column; }
+  .signup button { width: 100%; }
+  .alpha-card { padding: 24px 20px; border-radius: 14px; }
+}

@@ -660,6 +660,34 @@ def test_openai_compatible_cloud_locality():
     assert models[0].locality is CapabilityLocality.CLOUD
 
 
+def test_openai_compatible_adapter_asks_for_models_once():
+    """`ZARAM_OPENAI_ENDPOINT` written any of the three documented ways.
+
+    Found against a running backend, not by reading. The engine normalises a
+    trailing `/v1` — its docstring says so, because that is what providers print
+    in their own dashboards — and this adapter did not, so an endpoint ending in
+    `/v1` produced a request for `/v1/v1/models`. Against a real provider that
+    is a 404: discovery returns nothing, no cloud model is known, and routing
+    quietly sends every message to the local model instead. Chat still works,
+    which is what makes it hard to notice.
+    """
+    for given in (
+        "http://provider.test",
+        "http://provider.test/",
+        "http://provider.test/v1",
+    ):
+        gate = _FakeGate({"data": [{"id": "gpt-x"}]})
+        with patch("core.egress.get_gate", return_value=gate):
+            adapter = OpenAICompatibleAdapter(
+                provider_id="openai_cloud", base_url=given, kind=ProviderKind.CLOUD_API
+            )
+            asyncio.run(adapter.discover_models(timeout=1.0))
+
+        assert gate.calls == ["http://provider.test/v1/models"], (
+            f"{given} asked for {gate.calls}"
+        )
+
+
 def test_lm_studio_adapter_defaults():
     assert LMStudioAdapter().provider_id == "lm_studio"
     assert LMStudioAdapter().base_url == "http://127.0.0.1:1234"
@@ -714,6 +742,18 @@ def test_providers_runtime_initialize_registers_providers(monkeypatch):
     monkeypatch.setattr("providers.runtime.OllamaAdapter", lambda *a, **k: fake_ollama)
     monkeypatch.setattr("providers.runtime.LMStudioAdapter", lambda *a, **k: fake_lm)
 
+    # `_register_default_providers` adds OpenRouter and a custom OpenAI endpoint
+    # *conditionally on the environment*, and this test patched neither. So it
+    # counted two providers on a bare machine and three on a configured one —
+    # it went red the moment the maintainer put a real key in their shell, which
+    # is to say it broke on success.
+    #
+    # An environment-conditional branch has to be pinned in both directions.
+    # Absent is the case under test here; `test_a_key_in_the_environment_adds_a
+    # _provider` below is the other half.
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.delenv("ZARAM_OPENAI_ENDPOINT", raising=False)
+
     runtime = ProvidersRuntime()
     assert runtime.get_runtime_id() == RUNTIME_ID
     assert runtime.get_version() == RUNTIME_VERSION
@@ -727,6 +767,32 @@ def test_providers_runtime_initialize_registers_providers(monkeypatch):
     assert runtime.manager.catalog.count() == 1
     hc = runtime.health_check()
     assert hc["registered_services"] == 2
+    asyncio.run(runtime.shutdown())
+
+
+def test_a_key_in_the_environment_adds_a_provider(monkeypatch):
+    """The other half of the branch above, asserted rather than encountered.
+
+    OpenRouter registers only when a key exists — keyless it would discover a
+    catalogue of models that cannot be called, which is a list of things Zaram
+    appears to offer and does not. That conditional was previously covered by
+    accident, in the sense that it silently changed another test's answer.
+    """
+    fake_ollama = FakeModelProvider("ollama", models=[make_sample_model()])
+    fake_lm = FakeModelProvider("lm_studio")
+    monkeypatch.setattr("providers.runtime.OllamaAdapter", lambda *a, **k: fake_ollama)
+    monkeypatch.setattr("providers.runtime.LMStudioAdapter", lambda *a, **k: fake_lm)
+    monkeypatch.setattr(
+        "providers.runtime.OpenRouterAdapter",
+        lambda *a, **k: FakeModelProvider("openrouter"),
+    )
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-test-not-a-real-key")
+    monkeypatch.delenv("ZARAM_OPENAI_ENDPOINT", raising=False)
+
+    runtime = ProvidersRuntime()
+    asyncio.run(runtime.initialize())
+
+    assert runtime.registry.count_model_providers() == 3
     asyncio.run(runtime.shutdown())
 
 

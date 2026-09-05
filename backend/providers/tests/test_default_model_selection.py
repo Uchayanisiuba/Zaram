@@ -138,19 +138,28 @@ class TestRefusals:
 class TestResidency:
     """Fitting alongside the embedder beats being large.
 
-    The regression these exist for: on a 12 GB card with bge-m3 resident, a 9 GB
-    model was selected because it was the biggest thing installed. It cannot be
-    co-resident with the embedder, so every exchange pays a swap — a cost on the
-    hot path that users read as the product being slow.
+    The regression these exist for: on a 12 GB card with bge-m3 resident, the
+    biggest thing installed was selected because it was the biggest thing
+    installed. A model that cannot be co-resident with the embedder makes every
+    exchange pay a swap — a cost on the hot path that users read as the product
+    being slow.
+
+    **The oversized model is 11 GB rather than the original 9 GB, since 31
+    August 2026.** The KV allowance moved off the card and onto the model, and
+    under that arithmetic 9 GB plus its cache and a 1 GB embedder genuinely
+    fits on a 12 GB card — measured on the real machine, where a 9.28 GB model
+    goes resident at 10.32 GB beside a 0.66 GB embedder and runs fine. The old
+    number stopped describing a model that does not fit, which is the thing
+    these tests are about.
     """
 
-    def test_a_9gb_model_loses_to_a_5gb_one_on_a_12gb_card(self, manager):
+    def test_the_oversized_model_loses_to_one_that_fits(self, manager):
         """The exact case that was wrong."""
         _with_vram(manager, 12 * GB)
         _load(
             manager,
             _local("ollama:bge-m3", size=1 * GB, category=ModelCategory.EMBEDDING),
-            _local("ollama:big-general", size=9 * GB),
+            _local("ollama:big-general", size=11 * GB),
             _local("ollama:mid-general", size=5 * GB),
         )
 
@@ -161,7 +170,7 @@ class TestResidency:
         _load(
             manager,
             _local("ollama:bge-m3", size=1 * GB, category=ModelCategory.EMBEDDING),
-            _local("ollama:big-general", size=9 * GB),
+            _local("ollama:big-general", size=11 * GB),
             _local("ollama:mid-general", size=5 * GB),
         )
 
@@ -177,26 +186,65 @@ class TestResidency:
         Same card, same chat model — the only difference is whether an embedding
         model is also resident. It has to change the answer, or the budget is
         not doing anything.
+
+        Asserted on `model_fits_resident` rather than on `select_default_model`
+        returning ``None``, and that is the contract moving rather than the
+        test being weakened. Residency stopped being able to refuse: a machine
+        where nothing fits gets its best slow option instead of "No model was
+        selected for this request". The budget still has to answer differently
+        with the embedder present, which is what this measures.
         """
         chat = _local("ollama:general", size=8 * GB)
 
         alone = _with_vram(ProviderManager(), 12 * GB)
         _load(alone, chat)
-        assert alone.select_default_model() is not None
+        assert alone.model_fits_resident(alone.get_model("ollama:general")) is True
 
         shared = _with_vram(ProviderManager(), 12 * GB)
         _load(shared, chat, _local("ollama:embed", size=3 * GB, category=ModelCategory.EMBEDDING))
-        assert shared.select_default_model() is None
+        assert shared.model_fits_resident(shared.get_model("ollama:general")) is False
 
-    def test_headroom_is_reserved_beyond_the_raw_weights(self, manager):
-        """Weights are not the whole cost; the KV cache grows with context."""
+    def test_the_cache_is_charged_beyond_the_raw_weights(self, manager):
+        """Weights are not the whole cost; the KV cache grows with context.
+
+        A model sized to exactly the card does not fit, because loading it
+        leaves nothing for its own cache. That is the whole reason an allowance
+        exists — and charging it to the model rather than to the card is what
+        stopped it excluding models that run.
+        """
         _with_vram(manager, 10 * GB)
         _load(manager, _local("ollama:exactly-vram", size=10 * GB))
 
-        assert manager.model_fits_resident(
-            manager.get_model("ollama:exactly-vram")
-        ) is False
-        assert manager.select_default_model() is None
+        model = manager.get_model("ollama:exactly-vram")
+        assert manager.model_fits_resident(model) is False
+        assert manager.resident_cost_bytes(model) > manager.resident_budget_bytes()
+
+    def test_the_only_model_is_offered_even_when_it_does_not_fit(self, manager):
+        """Warn, never block — and it is the defect that produced this rule.
+
+        Measured 31 August 2026: every chat model on the 12 GB card reported
+        ``fits_resident: false``, auto-routing had an empty field, and the user
+        was told "No model was selected for this request" on a machine running
+        one of them fine. A slow answer beats a refusal; refusing is what a
+        *consent* filter is for.
+        """
+        _with_vram(manager, 10 * GB)
+        _load(manager, _local("ollama:too-big", size=10 * GB))
+
+        assert manager.select_default_model().id == "ollama:too-big"
+
+    def test_a_model_that_was_selected_is_not_also_reported_as_rejected(self, manager):
+        """The interface must not name the answering model as passed over.
+
+        Once residency stopped refusing, "rejected for VRAM" and "chosen"
+        became reachable at the same time for the same model, and a picker
+        showing both says two contradictory things about one row.
+        """
+        _with_vram(manager, 10 * GB)
+        _load(manager, _local("ollama:too-big", size=10 * GB))
+
+        chosen = manager.select_default_model()
+        assert chosen.id not in {m.id for m, _ in manager.rejected_default_candidates()}
 
     def test_unknown_vram_skips_the_fit_test_rather_than_failing_it(self, manager):
         """Metal and DirectML report no capacity. That is not a budget of zero.

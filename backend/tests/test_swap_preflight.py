@@ -85,14 +85,24 @@ def _catalogued(
 def manager():
     """A 12 GB card with bge-m3 resident — the dev machine, in miniature.
 
-    Budget: 12 GB, less the 1.16 GB embedder, less a 20% KV reserve = ~8.4 GB.
+    Budget: 12 GB less the 1.16 GB embedder = ~10.84 GB, and each model is
+    charged its own weights plus a 20% KV allowance.
+
+    **The sizes were re-pinned on 31 August 2026 and the reason matters.** The
+    KV reserve used to be a flat 20% of the *card*, taken out of the budget
+    while models were compared as bare weights — one charge in two places,
+    which excluded every chat model on the real machine. Now the allowance
+    travels with the model. Under the corrected arithmetic the old 9 GB coder
+    and 6 GB chat model both fit comfortably, so they stopped exercising the
+    relationships these tests are named for. The relationships are what is
+    fixed here; the numbers serve them.
     """
     mgr = ProviderManager()
     mgr.catalog.upsert_all([
         _model("bge-m3:latest", 1.16, category=ModelCategory.EMBEDDING),
         _model("gemma3:latest", 3.3),
-        _model("qwen2.5-coder:14b", 9.0),   # larger than the whole budget
-        _model("qwen3:latest", 6.0),        # fits alone, not beside gemma3
+        _model("qwen2.5-coder:14b", 11.0),  # 13.2 GB with its cache: over budget
+        _model("qwen3:latest", 8.0),        # 9.6 GB: fits alone, not beside gemma3
         _model("llama3.2:latest", 2.0),
     ])
     mgr._hardware = HardwareProfile(vram_bytes=12 * GB, gpu_available=True)
@@ -137,10 +147,10 @@ class TestTheThreeOutcomes:
     def test_a_model_that_does_not_fit_alongside_the_resident_one_is_a_swap(self, manager):
         """The case the rule exists for.
 
-        gemma3 (3.3 GB) is loaded and the request routes to a 6 GB model. The
-        budget is ~8.4 GB: 6 fits on its own, 3.3 + 6 does not, so gemma3 has
-        to go. That is a genuine eviction, unlike a model too big for the card
-        at all.
+        gemma3 (3.3 GB) is loaded and the request routes to an 8 GB model. The
+        budget is ~10.84 GB and the incoming model costs 9.6 with its cache: it
+        fits on its own, and 3.3 + 9.6 does not, so gemma3 has to go. That is a
+        genuine eviction, unlike a model too big for the card at all.
         """
         manager.registry.register_model_provider(_FakeAdapter({"gemma3:latest": int(3.3 * GB)}))
         plan = manager.swap_preflight("qwen3:latest")
@@ -192,8 +202,8 @@ class TestTheRealCatalogShape:
             _catalogued("ollama:bge-m3:latest", "bge-m3:latest", 1.16,
                         ModelCategory.EMBEDDING),
             _catalogued("ollama:gemma3:latest", "gemma3:latest", 3.3),
-            _catalogued("ollama:qwen2.5-coder:14b", "qwen2.5-coder:14b", 9.0),
-            _catalogued("ollama:qwen3:latest", "qwen3:latest", 6.0),
+            _catalogued("ollama:qwen2.5-coder:14b", "qwen2.5-coder:14b", 11.0),
+            _catalogued("ollama:qwen3:latest", "qwen3:latest", 8.0),
         ])
         mgr._hardware = HardwareProfile(vram_bytes=12 * GB, gpu_available=True)
         return mgr
@@ -230,8 +240,9 @@ class TestTheRealCatalogShape:
     def test_a_model_larger_than_the_whole_budget_is_not_called_a_swap(self, real_shaped):
         """Nothing to evict that would make room, so it is not a swap.
 
-        The 9 GB coder against an ~8.4 GB budget does not fit even on an empty
-        card. Ollama loads it with layers spilled to system RAM — slow for a
+        The 11 GB coder costs 13.2 GB with its cache, against an ~10.84 GB
+        budget: it does not fit even on an empty card. Ollama loads it with
+        layers spilled to system RAM — slow for a
         different reason, with a different remedy, and no model displaced.
         Calling that a swap produces an indicator that names nothing evicted,
         which cannot explain itself.

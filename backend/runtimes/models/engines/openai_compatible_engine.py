@@ -1,0 +1,839 @@
+# backend/runtimes/models/engines/openai_compatible_engine.py
+"""Generation against any OpenAI-compatible endpoint — the cloud half of v1.
+
+Zaram stays local-first. This exists because local-first is not local-only, and
+the constraint is not capability but **who can run it**: a freelancer on a
+laptop with no discrete GPU cannot serve a chat model at all, and `CLAUDE.md`
+says plainly that the target user is not technical. An alpha recruited only
+from people who can install Ollama and spare 8 GB of VRAM measures a different
+market than the one the product is aimed at.
+
+Rule 1 is not bent to do it. **Zaram never buys inference**: the user brings a
+key, the key is theirs, and no key means no engine rather than a quiet fallback
+to something we pay for.
+
+Why one HTTP shape instead of a routing library
+-----------------------------------------------
+`CLAUDE.md`'s dependency table names LiteLLM for provider routing. This does
+not use it, and the reason is the same one that makes packaging the stated
+blocker: `/v1/chat/completions` is *already* the lingua franca. OpenAI,
+OpenRouter, Groq, Together, DeepSeek, Mistral, Fireworks, vLLM, llama.cpp and
+LM Studio all speak it, and OpenRouter fronts Anthropic and Gemini for the two
+that do not. So the whole cloud surface is one POST and an SSE parser — no new
+dependency at all — against a library that would add a substantial tree to the
+installer that packaging worked to cut by 81%.
+
+There is a second reason, and it turned out to be the stronger one. A routing
+library brings its own HTTP client, and `test_egress_chokepoint.py` forbids any
+shipped module from opening its own outbound connection. LiteLLM would have to
+be exempted from the one scan that makes rule 3 enforceable rather than
+aspirational — which is a high price for code that assembles a JSON body.
+
+This is a deviation from a recorded decision, so it is recorded here rather
+than made quietly, and it is **cheap to reverse**: this class satisfies
+`LLMEngine` and nothing above it knows what is inside. Swapping in LiteLLM
+later is the same move the TTS interface exists to allow. If a provider appears
+that is worth supporting and does not speak this dialect, that is the evidence
+to revisit it — not tidiness.
+
+The part that actually matters: this is egress
+-----------------------------------------------
+`OllamaEngine` talks to loopback, so `system_prompt` has never left the
+machine. **This engine changes that, and `system_prompt` is where recalled
+facts live.** Every cloud generation therefore carries Spine content off-device
+by design — `CLAUDE.md` intends exactly that, "carries project context into the
+cloud request", and immediately follows it with "showing the user exactly what
+leaves before it does".
+
+So nothing here opens a socket at all. **This module has no HTTP client**: the
+body is built, handed to :class:`EgressGate` in full, and the gate carries the
+bytes. The gate consults per-host policy (rule 5, default deny), asks the user
+when the policy says ask (M10), and writes the literal outbound text to the
+append-only log *before* the request (rule 3).
+
+The first draft did own a client — `check` the verdict, then `requests.post` —
+which is a sanctioned pattern for async call sites and was still wrong here.
+`test_egress_chokepoint.py` caught it on the first run, correctly: it scans
+source rather than behaviour, so it fails on the commit that introduces a
+bypass instead of in production when the path is first taken. The remedy it
+insists on is the right one — `EgressGate.stream_lines` exists because this was
+the first outbound call that had to be consumed as it arrived, and the gate was
+missing that shape rather than the engine needing an exemption.
+
+**With no confirmation handler installed, the gate refuses.** That is the
+designed resting state, not an oversight: until M10's dialog exists, cloud
+generation is reachable, tested, and declines to send. Rule 5 with the safety
+removed would be the alternative.
+
+The API key is deliberately not in the logged body
+--------------------------------------------------
+It travels in the `Authorization` header, which the gate does not record. The
+egress log is append-only and tamper-evident by design, which makes it the
+worst possible place to write a user's secret — a credential you cannot delete
+is a credential you cannot rotate away from. What is logged is the destination
+and the text, which is what the log exists to answer for.
+"""
+
+from __future__ import annotations
+
+import base64
+import json
+import logging
+import os
+import re
+import urllib.error
+from urllib.parse import urlparse
+from collections.abc import Iterator
+from typing import Any, Dict, Optional
+
+from core.egress import DataClass, EgressDenied, get_gate
+from core.reasoning import CLOSE_TAG, OPEN_TAG
+
+from .base_engine import ERROR_PREFIX, LLMEngine
+
+logger = logging.getLogger(__name__)
+
+#: How long to wait for the first byte, and then between chunks. Generous
+#: because a cold cloud model behind a queue can take a while to start, and a
+#: timeout mid-answer is worse than a slow one.
+DEFAULT_TIMEOUT = 120.0
+
+#: A quoted string in a Jinja chat template — `'...'` or `"..."`.
+#:
+#: Used to read what a template *emits* without evaluating it, which is the
+#: only safe way to ask a question of a template: rendering one means running
+#: somebody else's code to decide how to parse their output. See
+#: `OpenAICompatibleEngine._template_opens_thinking`.
+_QUOTED_LITERAL_RE = re.compile(r"'((?:[^'\\]|\\.)*)'|\"((?:[^\"\\]|\\.)*)\"")
+
+
+#: OpenRouter's endpoint, used when `OPENROUTER_API_KEY` is set. Hardcoded
+#: because it is the address of a specific service rather than a preference,
+#: and the provider layer already registers OpenRouter from the same variable —
+#: two places reading one key is fine; two places inventing two URLs is not.
+OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+
+
+#: Generation settings for a **local** OpenAI-compatible server.
+#:
+#: **Sending nothing is not neutral, and that is the whole point.** This body
+#: carried `model`, `messages` and `stream` and no sampling at all, so the
+#: server's own factory default applied — and TabbyAPI's is temperature 1.0
+#: with top-p 1.0, which is unconstrained sampling from the raw distribution.
+#: The Ollama path does not have this problem because a Modelfile ships
+#: per-model settings and Ollama applies them. So the two local engines
+#: generated differently, nobody chose that, and nothing anywhere said so.
+#:
+#: Reported as *"talking weird"*, 28 August 2026, against Qwen3.8-27B at
+#: **2.20bpw** — a quantisation aggressive enough that loose sampling shows up
+#: as wandering answers and headings nobody asked for. The quantisation is the
+#: user's choice and not this module's business; the missing dial was ours.
+#:
+#: The values are Qwen3's own published recommendation for thinking mode and
+#: are conservative enough to suit a general assistant on any model. They are a
+#: **default, not a setting** — `CLAUDE.md` forbids sampling controls in the
+#: primary path, and this never appears in the interface.
+#:
+#: **`temperature` and `top_p` only.** Both are standard OpenAI fields that
+#: every compatible server accepts. `top_k` is a local extension: TabbyAPI and
+#: vLLM take it, OpenAI itself rejects unknown fields, and one dialect-specific
+#: key would make this constant unsafe to reuse. The gain from the two standard
+#: ones is most of the benefit at none of the risk.
+LOCAL_SAMPLING: Dict[str, Any] = {"temperature": 0.6, "top_p": 0.95}
+
+
+def from_environment(**kwargs: Any) -> "OpenAICompatibleEngine | None":
+    """Build a cloud engine from configuration, or return ``None``.
+
+    ``None`` is the ordinary answer, not a failure: a user who has not brought
+    a key has no cloud engine, and rule 1 says Zaram never supplies one.
+
+    Reads the variables the provider layer already uses, so a key configured
+    once is discovered *and* callable rather than producing a catalogue of
+    models that cannot be reached:
+
+    * ``ZARAM_OPENAI_ENDPOINT`` + ``ZARAM_OPENAI_KEY`` — any compatible service
+    * ``OPENROUTER_API_KEY`` — OpenRouter, whose endpoint is not a preference
+
+    An explicit endpoint wins, because someone who set one meant it.
+
+    **Nothing here touches the network.** Rule 7g: no network call occurs before
+    the user has consented to one, and that includes checking whether a key
+    works. A key is validated by being used, at which point the gate has already
+    logged the attempt and asked.
+    """
+    endpoint = (os.getenv("ZARAM_OPENAI_ENDPOINT") or "").strip()
+    key = (os.getenv("ZARAM_OPENAI_KEY") or "").strip()
+
+    if not endpoint and (os.getenv("OPENROUTER_API_KEY") or "").strip():
+        endpoint = OPENROUTER_BASE_URL
+        key = os.getenv("OPENROUTER_API_KEY", "").strip()
+
+    if not endpoint or not key:
+        return None
+
+    # The model is supplied per request by the router, so the default here is
+    # only a fallback for a caller that names none. It is deliberately not
+    # guessed from a hardcoded list of provider model names: those change
+    # weekly and a stale guess is a confusing 404 rather than a helpful default.
+    default_model = (os.getenv("ZARAM_CLOUD_MODEL") or "").strip()
+
+    try:
+        return OpenAICompatibleEngine(
+            base_url=endpoint, api_key=key, default_model=default_model, **kwargs
+        )
+    except (MissingApiKey, ValueError) as exc:
+        logger.warning("cloud engine not configured: %s", exc)
+        return None
+
+
+class MissingApiKey(ValueError):
+    """No key, so no engine.
+
+    Raised at construction rather than at the first request. Rule 1 says Zaram
+    never buys inference, which means a keyless cloud engine has nothing it
+    could legitimately fall back to — and an engine that constructs fine and
+    fails on first use puts that discovery inside the user's first message.
+    """
+
+
+#: Hosts whose traffic cannot leave the machine. Duplicated from the discovery
+#: adapter rather than imported: this module must not depend on `providers`,
+#: which is the same layering constraint `ModelsRuntime` keeps by typing its
+#: provider manager loosely.
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1", "[::1]", "0.0.0.0"})
+
+
+def _is_loopback(base_url: str) -> bool:
+    """True when the endpoint is on this machine, by address not by name."""
+    try:
+        host = urlparse((base_url or "").strip()).hostname
+    except ValueError:
+        return False
+    return bool(host) and host.lower() in _LOOPBACK_HOSTS
+
+
+#: The first bytes of each image format, and what to call it on the wire.
+#:
+#: Read from the picture rather than taken from the filename, because by the
+#: time an image reaches an engine the filename is gone: `main.py` passes
+#: ``[a.data for a in attached ...]``, which is base64 and nothing else, and
+#: `Attachment.suffix` never travels with it. Widening `stream_response` to
+#: carry a MIME type would touch every engine and every caller to move a fact
+#: that is already inside the bytes.
+#:
+#: A signature is a measurement. Defaulting to `image/png` because most
+#: screenshots are PNGs would be a guess, and a mislabelled data URI is the
+#: kind of wrong that produces a provider error nobody can read.
+_IMAGE_SIGNATURES: tuple[tuple[bytes, str], ...] = (
+    (b"\x89PNG\r\n\x1a\n", "image/png"),
+    (b"\xff\xd8\xff", "image/jpeg"),
+    (b"GIF87a", "image/gif"),
+    (b"GIF89a", "image/gif"),
+    (b"BM", "image/bmp"),
+)
+
+#: Enough base64 to decode the longest signature above plus the RIFF/WEBP pair,
+#: which needs twelve bytes. Base64 decodes in four-character groups, so this is
+#: rounded to one.
+_SIGNATURE_CHARS = 24
+
+
+def _data_uri(image: str) -> str:
+    """One image as the `image_url` content part wants it, or raise.
+
+    Already-formed data URIs pass through untouched: a caller that knows the
+    type has better information than a signature does, and re-encoding it would
+    be this function overruling a fact with an inference.
+
+    Raises `ValueError` when the format cannot be established. **Refusing is
+    the point.** The alternative is to label it `image/png` and send it anyway,
+    which is rule 9 in miniature — the request goes, the provider rejects or
+    misreads it, and the failure surfaces as something unrelated. An image
+    Zaram cannot name is an image it does not send.
+    """
+    if image.startswith("data:"):
+        return image
+
+    try:
+        head = base64.b64decode(image[:_SIGNATURE_CHARS], validate=False)
+    except Exception as exc:  # noqa: BLE001 — reported, not swallowed
+        raise ValueError(
+            "That image could not be read as base64, so Zaram will not send it."
+        ) from exc
+
+    for signature, media_type in _IMAGE_SIGNATURES:
+        if head.startswith(signature):
+            return f"data:{media_type};base64,{image}"
+    # RIFF....WEBP — the only one whose marker is not at the start.
+    if head[:4] == b"RIFF" and head[8:12] == b"WEBP":
+        return f"data:image/webp;base64,{image}"
+
+    raise ValueError(
+        "Zaram could not tell what kind of image that is, so it did not send "
+        "it. PNG, JPEG, GIF, WebP and BMP are the formats it can label."
+    )
+
+
+def _thinking_from(delta: dict) -> str:
+    """The reasoning in one streaming delta, under whichever name it arrives.
+
+    **This is the third name one defect has arrived under, which is why it is
+    a function rather than another line in the parser.** `reasoning_content`
+    is the OpenAI extension TabbyAPI and DeepSeek follow. Ollama put the same
+    thing in a `thinking` field, and `ollama_engine` records in as many words
+    what that cost — *"the maintainer saw thinking on TabbyAPI and lost it on
+    switching to Ollama, and read that as Zaram breaking."* OpenRouter is the
+    third, with `reasoning` and the documented streaming field
+    `reasoning_details`.
+
+    Each time the failure was silent: the panel built to show the working
+    simply stayed empty, which is indistinguishable from a model that does not
+    reason. So every known name is read here, in one place, and a provider
+    that invents a fourth costs one line rather than an investigation.
+
+    **A structure is never stringified.** `reasoning_details` is a list of
+    objects; `str(dict)` in the working panel is worse than an empty one,
+    because it is indistinguishable from something the model wrote. Only the
+    documented human-readable keys are taken, and `reasoning.encrypted` — a
+    base64 `data` blob that streams as ``"[REDACTED]"`` — is deliberately
+    skipped, since there is nothing in it to show.
+    """
+    for name in ("reasoning_content", "reasoning"):
+        value = delta.get(name)
+        if isinstance(value, str) and value:
+            return value
+
+    details = delta.get("reasoning_details")
+    if not isinstance(details, list):
+        return ""
+
+    parts: list[str] = []
+    for entry in details:
+        if not isinstance(entry, dict):
+            continue
+        # `text` before `summary`: an entry carrying both is the raw working
+        # plus a precis of it, and the working is what the panel is for.
+        for key in ("text", "summary"):
+            piece = entry.get(key)
+            if isinstance(piece, str) and piece:
+                parts.append(piece)
+                break
+    return "".join(parts)
+
+
+#: Statuses that settle the question of whether a server has `/v1/model` at
+#: all. Anything else — 503 while a model loads, a timeout, a refused socket —
+#: means the question could not be *asked*, which is a different answer and
+#: must not be cached. See `_template_opens_thinking`.
+_NO_SUCH_ROUTE = frozenset({404, 405, 501})
+
+
+class OpenAICompatibleEngine(LLMEngine):
+    """Streams from an OpenAI-compatible `/v1/chat/completions`.
+
+    ``base_url`` is the API root, with or without a trailing ``/v1`` — both are
+    accepted because both are what providers print in their own documentation,
+    and a user pasting the URL from a dashboard should not have to know which
+    convention we chose.
+    """
+
+    def __init__(
+        self,
+        *,
+        base_url: str,
+        api_key: str,
+        default_model: str,
+        gate: Any = None,
+        source: str = "chat",
+        timeout: float = DEFAULT_TIMEOUT,
+        sampling: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        # A keyless endpoint is allowed **only on loopback**, and the test is
+        # the address rather than the absence of a key.
+        #
+        # This class was written on the assumption that OpenAI-compatible means
+        # cloud, which its own error message still says. It is not true here:
+        # LM Studio ships auth-free on 127.0.0.1:1234 and TabbyAPI does the
+        # same, and the `lm_studio` catalogue entry has declared
+        # `AuthStyle.NONE` all along -- so that entry could be discovered,
+        # listed in the picker, and never executed. Relaxing on emptiness
+        # instead would let a *cloud* provider through with no key, turning a
+        # clear "bring your own key" refusal into an opaque 401 from a
+        # stranger's server. Loopback is structural: a request to 127.0.0.1
+        # cannot leave, which is the same reasoning `_policy_for` uses in the
+        # discovery adapter.
+        if not (api_key or "").strip() and not _is_loopback(base_url):
+            raise MissingApiKey(
+                "A cloud model needs your own API key. Zaram does not provide one."
+            )
+        self.base_url = self._normalise(base_url)
+        self.default_model = default_model
+        self._api_key = api_key.strip()
+        # Injectable so tests can supply a gate with a known policy and log.
+        # Resolved lazily rather than captured at import, because the process
+        # gate can be replaced during startup.
+        self._gate = gate
+        self._source = source
+        self._timeout = timeout
+        #: Extra generation parameters merged into every request body, or
+        #: ``None`` for "send none and let the server decide". See
+        #: `LOCAL_SAMPLING` for why the local path supplies these and the
+        #: cloud path deliberately does not.
+        self._sampling = dict(sampling) if sampling else None
+        #: Whether this server's prompt template opens a `<think>` block the
+        #: model is expected to close. `None` until asked once — see
+        #: `_template_opens_thinking`.
+        self._opens_thinking: bool | None = None
+
+    @staticmethod
+    def _normalise(base_url: str) -> str:
+        """Accept `https://host`, `https://host/`, and `https://host/v1`."""
+        trimmed = (base_url or "").strip().rstrip("/")
+        if not trimmed:
+            raise ValueError("A cloud model needs a base URL.")
+        return trimmed if trimmed.endswith("/v1") else f"{trimmed}/v1"
+
+    @property
+    def endpoint(self) -> str:
+        return f"{self.base_url}/chat/completions"
+
+    def _template_opens_thinking(self) -> bool:
+        """Does this server's prompt template leave a `<think>` block open?
+
+        **A third shape of reasoning output, and the one that leaks.** The two
+        already handled put the thinking somewhere of its own: Ollama in a
+        `thinking` field, an OpenAI-compatible server with a reasoning parser
+        in `reasoning_content`. This is the case where it arrives in `content`
+        with **only a closing tag** — because the chat template emitted the
+        opening one into the *prompt*, so the model begins its output already
+        inside the block and never writes `<think>` itself.
+
+        `ReasoningSplitter` switches on an opening tag. There isn't one, so the
+        entire monologue is filed as the answer: rendered on screen, committed
+        to the transcript, and read aloud by Kokoro. Measured 3 September 2026
+        against TabbyAPI serving `Qwen3.8-27B-exl3-2.20bpw` — `reasoning_content`
+        was `null` and the content began *"The user is asking for 17 times 23.
+        Let me calculate…"*, closing with `</think>` before the real answer.
+
+        **Asked of the server, not guessed from the model name.** The same
+        discipline `OllamaEngine` uses when it asks `/api/show` for the
+        `thinking` capability: `/v1/model` reports the template, and the
+        template says what it does. That server's ends with
+
+            {%- if add_generation_prompt %}
+                {{- '<|im_start|>assistant\\n' }}
+                {%- if enable_thinking is defined and enable_thinking is false %}
+                    {{- '<think>\\n\\n</think>\\n\\n' }}
+                {%- else %}
+                    {{- '<think>\\n' }}
+                {%- endif %}
+            {%- endif %}
+
+        so the test is whether any literal in it opens a think block **without
+        closing it in the same literal** — which distinguishes the branch above
+        from its disabled twin, and needs no Jinja evaluation.
+
+        Any doubt resolves to **False**, and the asymmetry is deliberate. A
+        wrong yes prepends a tag to a model that was not thinking and files its
+        whole reply into the panel, showing the user an empty answer. A wrong
+        no is today's behaviour, which is visible and reported rather than
+        silent. Cached per engine because it is a property of the loaded model,
+        and this runs before every reply.
+        """
+        if self._opens_thinking is not None:
+            return self._opens_thinking
+
+        try:
+            gate = self._gate if self._gate is not None else get_gate()
+            raw = gate.request(
+                f"{self.base_url}/model",
+                method="GET",
+                timeout=min(self._timeout, 5.0),
+                headers={"Authorization": f"Bearer {self._api_key}"},
+                source=self._source,
+            )
+            payload = json.loads(raw.decode("utf-8", "replace") if isinstance(raw, bytes) else raw)
+            template = (payload.get("parameters") or {}).get("prompt_template_content") or ""
+        except urllib.error.HTTPError as exc:
+            if exc.code in _NO_SUCH_ROUTE:
+                # A server that does not have the route will not grow one. This
+                # is the ordinary case — only TabbyAPI serves `/v1/model` — and
+                # settling it here is what keeps this from asking a *cloud*
+                # provider before every single reply, which is an egress per
+                # reply for an answer that cannot change.
+                self._opens_thinking = False
+            logger.debug("no readable prompt template at %s: %s", self.base_url, exc)
+            return False
+        except Exception as exc:
+            # **Could not ask is not "the answer is no", and conflating them is
+            # what put the leak back.** TabbyAPI answers `/v1/model` with 503
+            # until its model has finished loading, and an exl3 takes minutes —
+            # `scripts/dev-app.ps1` says so in as many words and deliberately
+            # does not wait for it. So Zaram's first reply of a session asks too
+            # early, and the old code had already written `False` into the cache
+            # *before* the request, latching it for the life of the engine. Every
+            # later reply then filed the whole monologue as the answer: rendered,
+            # transcribed, and read aloud, with the fix for that shape present
+            # and correct and never consulted again.
+            #
+            # Left unlatched, so the next reply asks again. The cost of being
+            # wrong the other way is one loopback GET per reply against a server
+            # that is genuinely never ready; the cost of latching is a session
+            # that shows thinking as the answer and cannot recover without a
+            # restart. Same asymmetry `vram_bytes` keeps by returning `None`
+            # rather than `0`.
+            logger.debug("could not ask %s for its prompt template yet: %s", self.base_url, exc)
+            return False
+
+        self._opens_thinking = False
+        for single, double in _QUOTED_LITERAL_RE.findall(template):
+            literal = single or double
+            if OPEN_TAG in literal and CLOSE_TAG not in literal:
+                logger.info(
+                    "%s opens a think block in its prompt; tagging the stream so "
+                    "the thinking reaches the panel rather than the answer",
+                    self.base_url,
+                )
+                self._opens_thinking = True
+                break
+
+        return self._opens_thinking
+
+    def _body(
+        self,
+        prompt: str,
+        system_prompt: str,
+        model: str | None,
+        images: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """The exact object that will be sent, built before anything is checked.
+
+        Built once and used for both the gate and the request. Building it
+        twice would let the text the user was shown drift from the text that
+        left, which is the one thing the confirmation dialog cannot survive.
+
+        **Images were accepted by `stream_response` and dropped here.** The
+        signature took an ``images`` argument, this method did not, and nothing
+        joined them — so an image attached while an OpenAI-compatible model was
+        selected was discarded and the model answered about a picture it had
+        never seen. Rule 9 in a new medium, and silent, which is the worst
+        version: the reply is fluent and there is nothing on screen to suggest
+        the picture went nowhere.
+
+        The content-parts form is used only when there are images. A plain
+        string is what every server has always accepted and several older ones
+        accept *only*, so sending a one-element array for an ordinary message
+        would trade a fixed bug for a new one on endpoints nobody here can
+        test.
+        """
+        messages: list[dict[str, Any]] = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+
+        attached = [image for image in (images or []) if image and image.strip()]
+        if attached:
+            content: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
+            for image in attached:
+                content.append({"type": "image_url", "image_url": {"url": _data_uri(image)}})
+            messages.append({"role": "user", "content": content})
+        else:
+            messages.append({"role": "user", "content": prompt})
+
+        body: Dict[str, Any] = {
+            "model": model or self.default_model,
+            "messages": messages,
+            "stream": True,
+        }
+        if self._sampling:
+            body.update(self._sampling)
+        return body
+
+    @staticmethod
+    def _body_carries_images(body: Dict[str, Any]) -> bool:
+        """Whether the payload actually contains a picture.
+
+        **Read off the body, never off the caller's argument.** `stream_response`
+        takes an ``images`` list that may be empty, may be entirely whitespace,
+        and — for two milestones — was accepted and then silently dropped by
+        `_body`. Deciding the consent class from that argument would mean
+        asking the user's permission for an image that is not there, or worse,
+        the reverse if the shapes ever drift again. This inspects what is about
+        to go on the wire, so the permission and the payload cannot disagree.
+
+        Matches the content-parts form `_body` produces above. A server dialect
+        that carried images some other way would read as `PROMPT` here, which
+        is why `_body` is the only place allowed to build one.
+        """
+        for message in body.get("messages") or []:
+            content = message.get("content")
+            if not isinstance(content, list):
+                continue
+            for part in content:
+                if isinstance(part, dict) and part.get("type") == "image_url":
+                    return True
+        return False
+
+    def stream_response(
+        self,
+        prompt: str,
+        system_prompt: str = "",
+        model: str | None = None,
+        images: list[str] | None = None,
+    ) -> Iterator[str]:
+        """Stream plain text tokens, per `LLMEngine`.
+
+        The order is the whole design: **build, then hand the whole thing to
+        the gate.** The body — including the system prompt, and therefore every
+        recalled fact in it — is what the gate logs and what the confirmation
+        shows.
+
+        **The gate is asked exactly once.** An earlier draft called `check`
+        here *and* let `stream_lines` check again, which on an approved host
+        merely double-logged, and on an `ask` host would have put two
+        confirmation dialogs in front of one message. A user shown the same
+        request twice does not conclude the software is careful; they conclude
+        it is broken, and they stop reading the dialog — which is the one
+        outcome M10 cannot afford.
+        """
+        try:
+            body = self._body(prompt, system_prompt, model, images)
+        except ValueError as unreadable:
+            # Said here rather than swallowed by the general handler below,
+            # which would report it as "could not reach" — a network problem,
+            # which this is not, and which sends the user looking in the wrong
+            # place entirely.
+            logger.info("refusing to send an unidentifiable image: %s", unreadable)
+            yield ERROR_PREFIX + str(unreadable)
+            return
+        payload = json.dumps(body)
+
+        gate = self._gate if self._gate is not None else get_gate()
+        try:
+            lines = gate.stream_lines(
+                self.endpoint,
+                method="POST",
+                body=payload,
+                # Sent, not logged. See `EgressGate.stream_lines` — the log is
+                # append-only, and a token written into it is one the user can
+                # never delete and therefore never rotate away from.
+                headers={
+                    "Authorization": f"Bearer {self._api_key}",
+                    "Content-Type": "application/json",
+                },
+                timeout=self._timeout,
+                source=self._source,
+                # **Rule 7j's second dimension, at the one place that knows.**
+                # `RoutedEngine` used to refuse every image bound for the cloud
+                # outright, because the policy could only speak about hosts and
+                # so had no way to hold the answer. It can now, so the question
+                # is asked here — where the host is known, where the gate
+                # already runs, and where the decision is logged with the rest.
+                #
+                # Read off the body rather than off an argument, deliberately.
+                # A caller that says what it is sending is a label; the body is
+                # the fact, and `_body` is the only thing that knows whether an
+                # image actually survived into the payload.
+                data_class=(
+                    DataClass.IMAGE if self._body_carries_images(body)
+                    else DataClass.PROMPT
+                ),
+            )
+            # Asked before the stream is read, and cached, so it costs one
+            # request per engine rather than one per reply.
+            yield from self._tokens(lines, self._template_opens_thinking())
+        except EgressDenied as denied:
+            # `stream_lines` checks inside the generator, so a denial can also
+            # surface here rather than above — a generator body does not run
+            # until it is iterated.
+            logger.info("cloud generation refused: %s", denied)
+            yield ERROR_PREFIX + str(denied)
+        except urllib.error.HTTPError as http_error:
+            yield ERROR_PREFIX + self._explain(http_error)
+        except Exception as exc:
+            logger.warning("cloud request failed: %s: %s", type(exc).__name__, exc)
+            yield ERROR_PREFIX + f"Could not reach {self.base_url}: {exc}"
+
+    @staticmethod
+    def _explain(error: Any) -> str:
+        """Turn an HTTP failure into something the user can act on.
+
+        401 and 402 are the two a real person actually hits, and a bare "401"
+        tells them nothing about which of their several keys is wrong or which
+        account ran out of credit.
+        """
+        status = getattr(error, "code", 0)
+        detail = ""
+        try:
+            body = error.read().decode("utf-8", "replace")
+            parsed = json.loads(body)
+            detail = (parsed.get("error") or {}).get("message") or body[:200]
+        except Exception:
+            detail = ""
+
+        if status == 401:
+            return f"That API key was rejected. {detail}".strip()
+        if status == 402:
+            return f"That account has no credit left. {detail}".strip()
+        if status == 429:
+            return f"Rate limited by the provider. {detail}".strip()
+        return f"The provider returned {status}. {detail}".strip()
+
+    @staticmethod
+    def _tokens(lines: Any, starts_in_reasoning: bool = False) -> Iterator[str]:
+        """Parse SSE into plain text, per the engine contract.
+
+        Frames are unwrapped here rather than passed upward. `OllamaEngine`
+        used to yield SSE that `ModelsService` parsed straight back off, and
+        the contract docstring is explicit that transport framing belongs to
+        the transport.
+
+        **`reasoning_content` and `reasoning` are read as well as `content`,
+        and re-tagged.** Providers that split a reasoning model's stream --
+        TabbyAPI with its parser on, DeepSeek, and others following the same
+        OpenAI extension -- put the thinking in a second delta field, and
+        OpenRouter calls it `reasoning`, or streams `reasoning_details`. See
+        `_thinking_from`, which is where every name is read. This engine read only
+        `content`, so on those providers the thinking was **dropped in
+        silence**: not leaked into the answer, simply gone, with the panel that
+        exists to show it left permanently empty.
+
+        The tokens are wrapped back into `<think>` ... `</think>` rather than
+        given a new channel, because `core.reasoning.ReasoningSplitter` already
+        understands exactly that shape and everything downstream is built on
+        it -- the reasoning event, the transcript, and the rule that thinking
+        never reaches `pushSpeech`. A parallel path would have to re-earn all
+        three.
+
+        **`starts_in_reasoning` covers the third shape**, where the thinking
+        arrives in `content` with only a closing tag because the prompt
+        template opened the block. See `_template_opens_thinking` for how that
+        is established — from the server's own template, never from the model's
+        name. The opening tag is supplied here so the rest of the stream needs
+        no special handling at all.
+        """
+        in_reasoning = False
+        #: Set once the model closes the block the prompt opened, so the
+        #: end-of-stream tidy-up can tell "it finished thinking" from "it never
+        #: did".
+        model_closed_its_block = False
+        #: The last few characters of content, so a closing tag arriving split
+        #: across deltas is still recognised. See the comment where it is used.
+        watch = ""
+
+        if starts_in_reasoning:
+            # Before any frame, because the first content delta is already the
+            # middle of a thought.
+            in_reasoning = True
+            yield OPEN_TAG
+        #: Whether any answer text has been emitted yet. Gates the one-off
+        #: leading-whitespace trim below; see the comment there.
+        answer_started = False
+        for raw in lines:
+            if not raw:
+                continue
+            line = raw.decode("utf-8", "replace") if isinstance(raw, bytes) else raw
+            line = line.strip()
+            if not line.startswith("data:"):
+                continue
+            data = line[len("data:"):].strip()
+            if data == "[DONE]":
+                # Close an open block before leaving. `[DONE]` returns early,
+                # so the tidy-up after the loop never runs on the normal path --
+                # and an unclosed `<think>` makes the splitter hold the entire
+                # reply, showing the user nothing at all.
+                if in_reasoning and not model_closed_its_block:
+                    yield CLOSE_TAG
+                return
+            try:
+                frame = json.loads(data)
+            except json.JSONDecodeError:
+                # A keep-alive or a comment. Skipping is right; failing here
+                # would end a working stream over a blank frame.
+                continue
+
+            if "error" in frame:
+                message = frame["error"]
+                if isinstance(message, dict):
+                    message = message.get("message") or str(message)
+                yield ERROR_PREFIX + str(message)
+                return
+
+            for choice in frame.get("choices") or ():
+                delta = choice.get("delta") or {}
+
+                thinking = _thinking_from(delta)
+                if thinking:
+                    if not in_reasoning:
+                        in_reasoning = True
+                        yield OPEN_TAG
+                    yield thinking
+
+                text = delta.get("content")
+                if text:
+                    if starts_in_reasoning:
+                        # The model writes its own closing tag here, in the
+                        # content stream, because the opening one was in the
+                        # prompt. So the content is passed through untouched
+                        # and `ReasoningSplitter` does the splitting — the same
+                        # component, on the same shape, as every other path.
+                        #
+                        # The auto-close below must not run: it fires when
+                        # content arrives, and here the first content *is* the
+                        # thinking.
+                        #
+                        # **Watched across deltas, not within one.** `</think>`
+                        # arrives split — `"</"`, `"think"`, `">"` — exactly as
+                        # `[M1]` does, and this repository has now paid for that
+                        # lesson three times. Checking a single delta missed
+                        # it, so the tidy-up at the end added a *second*
+                        # closing tag and it landed in the answer. A rolling
+                        # tail one character shorter than the tag is enough to
+                        # span any split, and costs nothing to keep.
+                        watch += text
+                        if CLOSE_TAG in watch:
+                            model_closed_its_block = True
+                            in_reasoning = False
+                        watch = watch[-(len(CLOSE_TAG) - 1):]
+                        yield text
+                        continue
+
+                    # The answer starting is what closes the block. A provider
+                    # is not obliged to send a final empty reasoning delta, so
+                    # waiting for one would leave the tag unclosed and the
+                    # whole reply filed as thinking.
+                    if in_reasoning:
+                        in_reasoning = False
+                        yield CLOSE_TAG
+
+                    # **The answer never begins with blank lines.** A reasoning
+                    # model's chat template puts a newline or two after the
+                    # closing think tag, so the first content delta arrives as
+                    # ``"\n\nI’m"`` — measured against TabbyAPI serving
+                    # Qwen3.8-27B, 28 August 2026, on every reply. That gap is
+                    # invisible in a raw stream and reads on screen as the
+                    # answer starting late or the model having stalled.
+                    #
+                    # Only the leading edge, and only once: a blank line
+                    # *inside* an answer is the author's paragraph break and
+                    # stripping those would run the prose together. Nothing is
+                    # yielded until there is something to yield, so a chunk
+                    # that was entirely whitespace does not emit an empty one.
+                    if not answer_started:
+                        text = text.lstrip()
+                        if not text:
+                            continue
+                        answer_started = True
+
+                    yield text
+
+        # A stream that ends mid-thought still has to close its tag, or the
+        # splitter holds everything and the user sees nothing at all.
+        #
+        # That applies to the prompt-opened case too, and there it is the
+        # honest failure rather than the safe one: if the model never wrote
+        # `</think>`, the whole reply ends up in the working panel with an
+        # empty answer beside it. Visible, and the alternative is worse — the
+        # tag left open means the splitter releases nothing at all.
+        if in_reasoning and not model_closed_its_block:
+            yield CLOSE_TAG

@@ -21,6 +21,15 @@ from core.contracts import ExecutionToken
 class EventType(str, Enum):
     START = "start"
     TOKEN = "token"
+    #: The model's working, not its answer.
+    #:
+    #: A separate event rather than a flag on TOKEN because the two have
+    #: different destinations: TOKEN accumulates into `streamingText`, which is
+    #: what gets committed to the transcript and what `pushSpeech` reads. Before
+    #: this existed, a reasoning model's `<think>` block *was* the answer as far
+    #: as this backend was concerned — rendered as the reply and read aloud by
+    #: Kokoro. Keeping it off that channel is the fix; showing it is the feature.
+    REASONING = "reasoning"
     STATUS = "status"
     SOURCE = "source"
     ERROR = "error"
@@ -34,6 +43,20 @@ class EventType(str, Enum):
     #: A file Zaram made. Rendered as a card in the conversation and, from the
     #: same record, as a row in Work.
     ARTIFACT = "artifact"
+    #: How far through drawing a picture the machine is.
+    #:
+    #: Distinct from STATUS, which says *what* is happening; this says how much
+    #: of it is done, and it is the only event in this file carrying a
+    #: measured fraction. With code you watch it being written, so the wait
+    #: explains itself. An image is silent for its whole duration unless
+    #: something reports it — and a diffusion pipeline emits a callback per
+    #: denoising step, so the number here is measured rather than guessed.
+    #:
+    #: There is deliberately no time remaining, here or in the payload.
+    #: Seconds-left is a guess until several steps have run, and a confident
+    #: wrong number is worse than no number — the same discipline `vram_bytes`
+    #: keeps by returning `None` rather than `0`.
+    IMAGE_PROGRESS = "image_progress"
     #: A model has to be loaded before this reply can start.
     #:
     #: Emitted *before* generation, not while it stalls. CLAUDE.md requires a
@@ -52,6 +75,38 @@ class EventType(str, Enum):
     #: be *mentioned in the conversation the first time it matters*, since
     #: Knowledge showing it only helps someone who opens Knowledge.
     NOTICE = "notice"
+    #: Which model is about to answer, and where it runs.
+    #:
+    #: `CLAUDE.md`: "Every reply names the model that answered and why", and
+    #: "Never hide the model" — the memory holding while the model changes
+    #: underneath it is the product's best demonstration, and a reply that
+    #: names nothing forfeits it. It is also the only way a user can tell a
+    #: cloud answer from a local one: the maintainer connected OpenRouter and
+    #: had no way to know whether anything ever reached it.
+    #:
+    #: Emitted *before* the first token, for the reason MODEL_LOAD is: an
+    #: attribution that arrives after the answer is a footnote, and the
+    #: question "where did this come from" is asked while reading, not after.
+    ANSWERING = "answering"
+    #: A tool the model asked to run, and what Zaram decided about it.
+    #:
+    #: Distinct from NOTICE because it carries the *decision* in a shape a
+    #: surface can act on — `verdict` is one of allow / confirm / refuse, and
+    #: the confirm case is a question the user has to answer before anything
+    #: runs. `McpRuntime.execute` returns that question rather than asking it,
+    #: because a runtime has no user; this is the channel it comes back on.
+    #:
+    #: It is also the record of an ordinary successful call, so a reply that
+    #: used somebody's Blender session says so in the conversation rather than
+    #: only in the egress log. Rule 3 logs the bytes; this is the half a person
+    #: reads.
+    TOOL_CALL = "tool_call"
+    #: Which stored conversation this reply is being written into.
+    #:
+    #: Sent when the backend *started* one, which is the only case a client
+    #: cannot work out for itself -- it knows the id it sent, and needs to be
+    #: told the id it did not.
+    CONVERSATION = "conversation"
 
 
 @dataclass
@@ -82,6 +137,16 @@ class StreamEvent:
     def token(content: str, seq: int = 0, correlation_id: str = "") -> StreamEvent:
         return StreamEvent(
             type=EventType.TOKEN,
+            data={"content": content},
+            seq=seq,
+            correlation_id=correlation_id,
+        )
+
+    @staticmethod
+    def reasoning(content: str, seq: int = 0, correlation_id: str = "") -> StreamEvent:
+        """One piece of the model's working, tags already removed."""
+        return StreamEvent(
+            type=EventType.REASONING,
             data={"content": content},
             seq=seq,
             correlation_id=correlation_id,
@@ -176,6 +241,14 @@ class StreamEvent:
         user can act on. Collapsing them would make `swapping` a synonym for
         "slow" and cost the distinction its meaning.
 
+        **`resident` is the fourth kind, and it carries no wait at all.** It
+        exists because the receiver has a timer that guesses "cold model" from
+        silence, and without a positive "already loaded" it cannot tell that
+        apart from "the pre-flight could not answer". It could, so a model in
+        VRAM was labelled *Warming up* on every reply. An event that says
+        nothing is happening is worth sending when the alternative is the
+        interface inventing something that is.
+
         Never emitted speculatively. The pre-flight returns `None` whenever it
         cannot tell, and no event is sent for that — announcing a swap that
         does not happen trains the user to ignore the indicator.
@@ -183,6 +256,51 @@ class StreamEvent:
         return StreamEvent(
             type=EventType.MODEL_LOAD,
             data={"kind": kind, "model": model, "evicts": list(evicts or [])},
+            correlation_id=correlation_id,
+        )
+
+    @staticmethod
+    def answering(
+        model: str | None,
+        locality: str | None,
+        *,
+        chosen_by: str | None = None,
+        provider: str | None = None,
+        correlation_id: str = "",
+    ) -> StreamEvent:
+        """Which model is answering, where it runs, and who picked it.
+
+        **Three fields that must not be collapsed into one sentence here.** The
+        backend reports; the interface phrases. A pre-composed string would put
+        wording in the layer that cannot be styled, cannot be translated, and
+        cannot show locality as anything but words — and locality is the field
+        a user checks before trusting the rest.
+
+        `locality` is three-valued and ``None`` is a real answer, carried from
+        `ModelsRuntime.locality_of` rather than defaulted. Saying "on this
+        machine" about a model whose record could not be resolved would be a
+        confident false claim on the one thing the product asks to be trusted
+        for; the interface renders nothing for a ``None`` instead.
+
+        `chosen_by` is `request`, `settings`, `task` or `zaram` — the honest
+        version of `CLAUDE.md`'s "routed to qwen2.5-coder — coding task".
+
+        `task` is the one that was promised here and is now real: the message
+        was classified against the intent exemplars, the intent named a model
+        specialisation, and the provider layer had one installed. It is
+        deliberately the narrowest of the four. Nobody having chosen is still
+        `zaram`, because "Zaram picked its usual model" and "Zaram picked this
+        model *for this question*" are different claims and only the second is
+        a routing decision.
+        """
+        return StreamEvent(
+            type=EventType.ANSWERING,
+            data={
+                "model": model,
+                "locality": locality,
+                "chosen_by": chosen_by,
+                "provider": provider,
+            },
             correlation_id=correlation_id,
         )
 
@@ -198,6 +316,48 @@ class StreamEvent:
         return StreamEvent(
             type=EventType.ARTIFACT,
             data=record,
+            correlation_id=correlation_id,
+        )
+
+    @staticmethod
+    def tool_call(
+        server: str,
+        tool: str,
+        verdict: str,
+        reason: str = "",
+        correlation_id: str = "",
+    ) -> StreamEvent:
+        """One tool call, and what the gate said about it.
+
+        `verdict` is the gate's word, not the model's: "allow" means it ran,
+        "confirm" means it is waiting on the user, "refuse" means it will not
+        run and `reason` says what would change that. A refusal that does not
+        say how to permit the thing reads as a broken product — the note
+        `CLAUDE.md` makes about disabled capabilities being visible rather
+        than silent.
+        """
+        return StreamEvent(
+            type=EventType.TOOL_CALL,
+            data={
+                "server": server,
+                "tool": tool,
+                "verdict": verdict,
+                "reason": reason,
+            },
+            correlation_id=correlation_id,
+        )
+
+    @staticmethod
+    def image_progress(update: dict, correlation_id: str = "") -> StreamEvent:
+        """One denoising step's worth of progress.
+
+        The payload is passed through rather than rebuilt, so the fields the
+        provider measured are the fields the card draws — a translation layer
+        here would be a second place for "step" and "percent" to disagree.
+        """
+        return StreamEvent(
+            type=EventType.IMAGE_PROGRESS,
+            data=update,
             correlation_id=correlation_id,
         )
 
@@ -221,6 +381,21 @@ class StreamEvent:
         return StreamEvent(
             type=EventType.ERROR,
             data={"content": content},
+            correlation_id=correlation_id,
+        )
+
+    @staticmethod
+    def conversation(conversation_id: str, title: str = "", correlation_id: str = "") -> StreamEvent:
+        """The transcript this reply is being written into.
+
+        Ahead of the first token, for the same reason `answering` is: a client
+        that learns the id after the reply has nowhere to put the reply. It
+        also means an interrupted stream still leaves the client holding a
+        conversation it can reopen, rather than a thread with no name.
+        """
+        return StreamEvent(
+            type=EventType.CONVERSATION,
+            data={"conversation_id": conversation_id, "title": title},
             correlation_id=correlation_id,
         )
 

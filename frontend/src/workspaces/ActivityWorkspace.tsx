@@ -24,6 +24,7 @@
  * displays is transparency theatre.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import SurfaceHeader from '../components/common/SurfaceHeader';
 import {
   ShieldCheck,
   ShieldAlert,
@@ -40,6 +41,7 @@ import {
   fetchEgressPolicy,
   forgetEgressPolicy,
   setEgressPolicy,
+  type EgressDataClass,
   verifyEgressLog,
   type EgressEntry,
   type EgressIntegrity,
@@ -141,11 +143,15 @@ export default function ActivityWorkspace() {
 
   const blockedCount = requests.filter((e) => e.decision !== 'allowed').length;
 
-  const changePolicy = async (host: string, mode: PolicyMode | null) => {
+  const changePolicy = async (
+    host: string,
+    mode: PolicyMode | null,
+    dataClass: EgressDataClass = 'prompt',
+  ) => {
     setBusy(true);
     try {
-      if (mode === null) await forgetEgressPolicy(host);
-      else await setEgressPolicy(host, mode);
+      if (mode === null) await forgetEgressPolicy(host, dataClass);
+      else await setEgressPolicy(host, mode, dataClass);
       await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not change the policy.');
@@ -259,6 +265,58 @@ export default function ActivityWorkspace() {
                   </button>
                 ))}
               </div>
+              {/* Images are their own decision, and this is where it is made.
+                  Rule 7j grants consent per destination *and data class*, so
+                  the row above speaks for messages and says nothing about
+                  pictures — a photograph is megabytes of something far more
+                  personal than a chat message.
+
+                  Shown only once the destination has a rule at all, because
+                  before that the question does not arise: an unruled host
+                  refuses everything, and offering to permit pictures to
+                  somewhere nothing may be sent is a control that governs
+                  nothing.
+
+                  `spine` deliberately has no row. It exists in the policy and
+                  nothing sends it yet, so a switch for it would be an
+                  invented value on the one surface whose job is to be
+                  trusted. It gets a control when something can trip it. */}
+              {policy?.rules[h] && (
+                <div className="flex items-center gap-1 mt-1">
+                  <span
+                    className="text-[9px] shrink-0 w-10"
+                    style={{ color: 'var(--color-text-faint)', fontFamily: 'var(--font-mono)' }}
+                  >
+                    images
+                  </span>
+                  {(['deny', 'ask', 'allow'] as PolicyMode[]).map((m) => {
+                    const imageMode = policy?.classRules[h]?.image ?? 'deny';
+                    return (
+                      <button
+                        key={m}
+                        disabled={busy}
+                        onClick={() => void changePolicy(h, m, 'image')}
+                        title={
+                          m === 'deny'
+                            ? 'Never send a picture here'
+                            : m === 'ask'
+                              ? 'Show me the picture and let me decide each time'
+                              : 'Send pictures without asking. Still logged.'
+                        }
+                        className="flex-1 rounded text-[9px] py-0.5 transition-colors disabled:opacity-40"
+                        style={{
+                          background: imageMode === m ? 'rgba(255,255,255,0.10)' : 'transparent',
+                          border: `1px solid ${imageMode === m ? 'var(--color-border)' : 'var(--color-border-subtle)'}`,
+                          color: imageMode === m ? 'var(--color-text)' : 'var(--color-text-faint)',
+                          fontFamily: 'var(--font-mono)',
+                        }}
+                      >
+                        {m}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           );
         })}
@@ -274,14 +332,7 @@ export default function ActivityWorkspace() {
       {/* The log.                                                          */}
       {/* ---------------------------------------------------------------- */}
       <div className="flex-1 flex flex-col overflow-hidden">
-        <div className="px-8 pt-6 pb-3 flex items-center gap-3">
-          <h1
-            className="text-lg font-semibold"
-            style={{ fontFamily: 'var(--font-display)', color: 'var(--color-text)' }}
-          >
-            Activity
-          </h1>
-          <div className="flex-1" />
+        <SurfaceHeader icon={ShieldCheck} title="Activity">
           <button
             onClick={() => void killSwitch()}
             disabled={busy || hosts.length === 0}
@@ -302,7 +353,7 @@ export default function ActivityWorkspace() {
           >
             <RefreshCw size={15} className={busy ? 'animate-spin' : undefined} />
           </button>
-        </div>
+        </SurfaceHeader>
 
         {/* The summary line. */}
         <div className="px-8 pb-4 flex items-baseline gap-6 flex-wrap">

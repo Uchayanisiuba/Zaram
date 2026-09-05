@@ -16,23 +16,32 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   AlertTriangle,
+  BookOpen,
   Check,
+  ClipboardPaste,
   FileWarning,
   FolderOpen,
   Loader2,
   RefreshCw,
   ShieldCheck,
   Trash2,
+  Upload,
   X,
 } from 'lucide-react';
+import SurfaceHeader from '../components/common/SurfaceHeader';
+import DomainList from '../components/knowledge/DomainList';
+import { fetchDomains, type KnowledgeDomain } from '../services/domainsClient';
 import {
   fetchOutcomes,
   fetchSources,
   ingestFolder,
+  ingestText,
   isProblem,
   removeSource,
   retryOutcome,
+  removeFile,
   setSourcePolicy,
+  uploadFiles,
   STATUS_LABELS,
   type IngestEvent,
   type IngestOutcome,
@@ -46,6 +55,31 @@ interface Progress {
   current: string;
 }
 
+/** Below this, a paste is far more likely to be a path or a filename the user
+ *  meant for the field below than a document. Offering to index every short
+ *  paste would tax every interaction to serve a minority of them — rule 7h —
+ *  and the offer above it costs nothing when it is not wanted. */
+const MIN_PASTE_CHARS = 40;
+
+/**
+ * The real filesystem path of a dropped file, when the desktop host offers one.
+ *
+ * **The one place that knows how to ask.** Electron adds a non-standard `path`
+ * to `File`, which is how a dropped *folder* becomes something the existing
+ * folder route can index — the browser hands a directory over as a zero-byte
+ * file that is useless on its own. Electron 32 removed it in favour of
+ * `webUtils.getPathForFile` behind the preload bridge, so that upgrade changes
+ * this function and nothing else.
+ *
+ * `null` in a browser tab, which is the honest answer there: a web page is not
+ * allowed to know where a file came from, and the interface says so rather
+ * than failing at the parser.
+ */
+function desktopPathOf(file: File): string | null {
+  const path = (file as File & { path?: unknown }).path;
+  return typeof path === 'string' && path ? path : null;
+}
+
 const STATUS_COLOR: Record<string, string> = {
   indexed: 'var(--color-emerald)',
   sparse: 'var(--color-amber, #d97706)',
@@ -56,6 +90,7 @@ const STATUS_COLOR: Record<string, string> = {
 
 export default function KnowledgeWorkspace() {
   const [sources, setSources] = useState<IngestSource[]>([]);
+  const [domains, setDomains] = useState<KnowledgeDomain[]>([]);
   const [outcomes, setOutcomes] = useState<IngestOutcome[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -63,19 +98,41 @@ export default function KnowledgeWorkspace() {
   const [progress, setProgress] = useState<Progress | null>(null);
   const [pathInput, setPathInput] = useState('');
   const [retrying, setRetrying] = useState<string | null>(null);
+  const [dragging, setDragging] = useState(false);
+  /** A gap, not a failure — a dropped folder. Separate from `error` because
+   *  starting an ingest clears the error, and a drop of a folder *and* some
+   *  files would otherwise lose the one thing the user needs to be told. */
+  const [notice, setNotice] = useState<string | null>(null);
+  /** The staged source awaiting a yes before its documents are deleted. */
+  const [confirming, setConfirming] = useState<string | null>(null);
+  const [pasted, setPasted] = useState<string | null>(null);
+  const [pasteName, setPasteName] = useState('');
   const abortRef = useRef<AbortController | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const load = useCallback(async () => {
     try {
       setError(null);
-      const [nextSources, nextOutcomes] = await Promise.all([
+      // `allSettled`, so a domains store that is unavailable does not blank the
+      // sources list beside it. Same principle as Settings: one thing being
+      // unavailable is a reason to say so about *that* one.
+      const [nextSources, nextOutcomes, nextDomains] = await Promise.allSettled([
         fetchSources(),
         fetchOutcomes(),
+        fetchDomains(),
       ]);
-      setSources(nextSources);
-      setOutcomes(nextOutcomes);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not reach Zaram.');
+      if (nextSources.status === 'fulfilled') setSources(nextSources.value);
+      if (nextOutcomes.status === 'fulfilled') setOutcomes(nextOutcomes.value);
+      if (nextDomains.status === 'fulfilled') setDomains(nextDomains.value);
+
+      const failed = [nextSources, nextOutcomes, nextDomains].find(
+        (r) => r.status === 'rejected',
+      );
+      if (failed && failed.status === 'rejected') {
+        setError(
+          failed.reason instanceof Error ? failed.reason.message : 'Could not reach Zaram.',
+        );
+      }
     } finally {
       setLoading(false);
     }
@@ -86,18 +143,30 @@ export default function KnowledgeWorkspace() {
     return () => abortRef.current?.abort();
   }, [load]);
 
-  const startIngest = useCallback(async () => {
-    const path = pathInput.trim();
-    if (!path || progress) return;
+  /**
+   * One ingest, whichever way it started.
+   *
+   * Folder, drop and paste differ only in the call they make: the stream is
+   * one shape, so the progress, the error handling and the reload are written
+   * once. Returns whether it finished, which is the only thing the callers
+   * differ on afterwards.
+   */
+  const run = useCallback(
+    async (
+      label: string,
+      operation: (
+        onEvent: (event: IngestEvent) => void,
+        signal: AbortSignal,
+      ) => Promise<void>,
+    ): Promise<boolean> => {
+      if (progress) return false;
 
-    abortRef.current = new AbortController();
-    setError(null);
-    setProgress({ root: path, index: 0, total: 0, current: 'Looking…' });
+      abortRef.current = new AbortController();
+      setError(null);
+      setProgress({ root: label, index: 0, total: 0, current: 'Looking…' });
 
-    try {
-      await ingestFolder(
-        path,
-        (event: IngestEvent) => {
+      try {
+        await operation((event: IngestEvent) => {
           if (event.type === 'start') {
             setProgress({ root: event.root, index: 0, total: event.total, current: '' });
           } else if (event.type === 'file') {
@@ -107,19 +176,192 @@ export default function KnowledgeWorkspace() {
           } else if (event.type === 'error') {
             setError(event.message);
           }
-        },
-        abortRef.current.signal,
-      );
-      setPathInput('');
-      await load();
-    } catch (err) {
-      if ((err as Error).name !== 'AbortError') {
-        setError(err instanceof Error ? err.message : 'Indexing failed.');
+        }, abortRef.current.signal);
+        await load();
+        return true;
+      } catch (err) {
+        if ((err as Error).name !== 'AbortError') {
+          // The backend's own sentence when it sent one — "that file is larger
+          // than 100 MB" is actionable and "413" is not.
+          setError(err instanceof Error ? err.message : 'Indexing failed.');
+        }
+        return false;
+      } finally {
+        setProgress(null);
       }
-    } finally {
-      setProgress(null);
+    },
+    [progress, load],
+  );
+
+  // The notice is cleared by whatever the user did *next*, not by `run` — a
+  // drop of a folder and some files would otherwise clear its own message on
+  // the way to uploading the files. `onDrop` sets it for the same reason.
+  const startIngest = useCallback(async () => {
+    const path = pathInput.trim();
+    if (!path) return;
+    setNotice(null);
+    if (await run(path, (onEvent, signal) => ingestFolder(path, onEvent, signal))) {
+      setPathInput('');
     }
-  }, [pathInput, progress, load]);
+  }, [pathInput, run]);
+
+  const addFiles = useCallback(
+    async (files: File[]) => {
+      if (!files.length) return;
+      const label = files.length === 1 ? files[0].name : `${files.length} files`;
+      await run(label, (onEvent, signal) => uploadFiles(files, onEvent, signal));
+    },
+    [run],
+  );
+
+  /** Dropped folders, indexed through the route a typed path already uses. */
+  const addFolders = useCallback(
+    async (paths: string[]) => {
+      if (!paths.length) return;
+      const label = paths.length === 1 ? paths[0] : `${paths.length} folders`;
+      await run(label, async (onEvent, signal) => {
+        // Sequential, not parallel: two scans writing source rows at once is a
+        // race for no gain, and the progress line can only describe one file.
+        for (const path of paths) await ingestFolder(path, onEvent, signal);
+      });
+    },
+    [run],
+  );
+
+  const addPastedText = useCallback(async () => {
+    const text = pasted;
+    if (!text) return;
+    setNotice(null);
+    const name = pasteName.trim();
+    if (await run(name || 'Pasted text', (onEvent, signal) => ingestText(text, name, onEvent, signal))) {
+      setPasted(null);
+      setPasteName('');
+    }
+  }, [pasted, pasteName, run]);
+
+  /**
+   * A drop. Files are uploaded; folders are scanned where that is possible.
+   *
+   * The `DataTransfer` is read entirely before the first `await` — it is
+   * emptied once the handler yields, so a file list gathered afterwards is
+   * silently empty.
+   *
+   * Directories are separated out because the browser hands one over as a
+   * zero-byte file: uploaded, it would be indexed as an empty document, which
+   * is a wrong answer. In the desktop app it resolves to a real path and goes
+   * to the folder route instead — the same route the field below uses. In a
+   * browser tab it cannot, and the interface says which and why rather than
+   * quietly doing nothing.
+   */
+  const onDrop = useCallback(
+    async (event: React.DragEvent) => {
+      event.preventDefault();
+      setDragging(false);
+
+      const items = Array.from(event.dataTransfer.items ?? []).filter((i) => i.kind === 'file');
+      const entries = items.map((item) => item.webkitGetAsEntry?.() ?? null);
+      const all = Array.from(event.dataTransfer.files ?? []);
+
+      const files: File[] = [];
+      const folderPaths: string[] = [];
+      let unresolvedFolders = 0;
+
+      all.forEach((file, index) => {
+        if (entries[index]?.isDirectory !== true) {
+          files.push(file);
+          return;
+        }
+        const path = desktopPathOf(file);
+        if (path) folderPaths.push(path);
+        else unresolvedFolders += 1;
+      });
+
+      setNotice(
+        unresolvedFolders === 0
+          ? null
+          : unresolvedFolders === 1
+            ? "A folder can't be read from a browser tab — put its path in the field below, or drop it into the Zaram app."
+            : "Folders can't be read from a browser tab — put a path in the field below, or drop them into the Zaram app.",
+      );
+
+      // Folders first: a drop of a folder and some loose files is one intent,
+      // and the folder is the larger half of it.
+      await addFolders(folderPaths);
+      await addFiles(files);
+    },
+    [addFiles, addFolders],
+  );
+
+  /**
+   * A paste, anywhere on this screen that is not a field.
+   *
+   * The guard matters: without it, pasting a folder path into the input below
+   * would also offer to index the path as a document. Files on the clipboard
+   * go straight in — the user copied a file, and there is nothing to decide —
+   * while text is *offered*, because a paste is far more often a path, and an
+   * offer at the moment of doubt costs nothing when it is not wanted.
+   */
+  useEffect(() => {
+    const onPaste = (event: ClipboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)
+      ) {
+        return;
+      }
+
+      const data = event.clipboardData;
+      if (!data) return;
+
+      const files = Array.from(data.files ?? []);
+      if (files.length) {
+        event.preventDefault();
+        void addFiles(files);
+        return;
+      }
+
+      const text = data.getData('text/plain');
+      if (text.trim().length >= MIN_PASTE_CHARS) {
+        event.preventDefault();
+        setPasted(text);
+      }
+    };
+
+    window.addEventListener('paste', onPaste);
+    return () => window.removeEventListener('paste', onPaste);
+  }, [addFiles]);
+
+  const [removingFile, setRemovingFile] = useState<string | null>(null);
+
+  /**
+   * Remove one file from Knowledge.
+   *
+   * Not routed through the source-withdrawal confirmation: that dialog exists
+   * because withdrawing a source can delete many files at once, and this is
+   * one, named, that the user pointed at. The note afterwards still says what
+   * happened to the copy on disk -- `files_deleted` counts only copies Zaram
+   * made, so a scanned folder's original is reported as untouched because it
+   * is.
+   */
+  const onRemoveFile = useCallback(async (outcome: IngestOutcome) => {
+    setRemovingFile(outcome.id);
+    try {
+      const result = await removeFile(outcome.id);
+      setOutcomes((current) => current.filter((o) => o.id !== outcome.id));
+      setNotice(
+        result.files_deleted > 0
+          ? `Removed ${result.name}, and the copy Zaram kept was deleted. Your original is untouched.`
+          : result.facts_removed > 0
+            ? `Removed ${result.name} and the ${result.facts_removed} fact(s) it produced.`
+            : `Removed ${result.name}. It had produced nothing to forget.`,
+      );
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'Could not remove that file.');
+    } finally {
+      setRemovingFile(null);
+    }
+  }, []);
 
   const onRetry = useCallback(async (outcome: IngestOutcome) => {
     setRetrying(outcome.id);
@@ -144,9 +386,32 @@ export default function KnowledgeWorkspace() {
     );
   }, []);
 
+  /**
+   * Withdraw a source.
+   *
+   * **A staged source is asked about first, because withdrawing it deletes
+   * documents.** The files under Zaram's uploads directory are copies it wrote
+   * when things were dropped or pasted, and taking the source out now takes
+   * them with it — otherwise the button's own promise, "everything Zaram
+   * learned from it", is not kept and the bytes become unreachable. That makes
+   * it irreversible, and CLAUDE.md is explicit that deleting something holding
+   * facts and files is never one button.
+   *
+   * A scanned folder is not asked about: nothing on disk is touched, its facts
+   * are removable by design under rule 4, and a confirmation on every removal
+   * would be the tax rule 7h warns against.
+   */
   const onRemove = useCallback(async (source: IngestSource) => {
-    await removeSource(source.id);
+    const result = await removeSource(source.id);
     if (selected === source.id) setSelected(null);
+    setConfirming(null);
+    if (result.files_deleted > 0) {
+      setNotice(
+        result.files_deleted === 1
+          ? 'Forgotten, and the copy Zaram kept was deleted. Your original is untouched.'
+          : `Forgotten, and the ${result.files_deleted} copies Zaram kept were deleted. Your originals are untouched.`,
+      );
+    }
     await load();
   }, [selected, load]);
 
@@ -158,28 +423,73 @@ export default function KnowledgeWorkspace() {
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden" data-testid="knowledge-workspace">
-      <div className="px-8 pt-6 pb-4 flex items-center gap-3">
-        <FolderOpen size={20} style={{ color: 'var(--color-cyan-light)' }} />
-        <h1
-          className="text-lg font-semibold"
-          style={{ fontFamily: 'var(--font-display)', color: 'var(--color-text)' }}
-        >
-          Sources
-        </h1>
-      </div>
+      {/* BookOpen, not FolderOpen: the left rail draws this node as BookOpen,
+          and the icon you clicked should be the icon you arrive at. */}
+      <SurfaceHeader icon={BookOpen} title="Sources" />
 
       <div className="flex-1 overflow-y-auto px-8 pb-8">
-        {/* --- add a folder ------------------------------------------------ */}
+        {/* --- add documents ------------------------------------------------ */}
         <div
+          onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+          onDragLeave={(e) => {
+            // Moving over a child fires dragleave on the parent, which would
+            // flicker the highlight off under the cursor.
+            if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragging(false);
+          }}
+          onDrop={onDrop}
+          data-testid="drop-zone"
           className="rounded-xl px-5 py-4"
-          style={{ border: '1px solid var(--color-border-subtle)', background: 'var(--color-glass)' }}
+          style={{
+            border: `1px solid ${dragging ? 'var(--color-cyan-light)' : 'var(--color-border-subtle)'}`,
+            background: 'var(--color-glass)',
+          }}
         >
           <div className="flex items-center gap-3">
+            <Upload size={16} style={{ color: 'var(--color-cyan-light)' }} />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm" style={{ color: 'var(--color-text)' }} data-testid="drop-invitation">
+                {dragging ? 'Drop them here' : 'Drop documents here'}
+              </p>
+              <p className="text-[11px] text-slate-500">
+                Or paste — text or files — anywhere on this screen.
+              </p>
+            </div>
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={!!progress}
+              data-testid="choose-files"
+              className="text-xs px-3 py-1.5 rounded-lg disabled:opacity-40"
+              style={{ border: '1px solid var(--color-border-subtle)', color: 'var(--color-text)' }}
+            >
+              Choose files
+            </button>
+          </div>
+
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            hidden
+            data-testid="file-input"
+            onChange={(e) => {
+              const chosen = Array.from(e.target.files ?? []);
+              // Cleared so choosing the same file twice still fires a change.
+              e.target.value = '';
+              setNotice(null);
+              void addFiles(chosen);
+            }}
+          />
+
+          <div
+            className="mt-3 pt-3 flex items-center gap-3"
+            style={{ borderTop: '1px solid var(--color-border-subtle)' }}
+          >
+            <FolderOpen size={15} style={{ color: 'var(--color-text-dim, #64748b)' }} />
             <input
               value={pathInput}
               onChange={(e) => setPathInput(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && startIngest()}
-              placeholder="Path to a folder…"
+              placeholder="…or the path to a whole folder"
               disabled={!!progress}
               data-testid="ingest-path"
               className="flex-1 bg-transparent text-sm outline-none"
@@ -209,12 +519,75 @@ export default function KnowledgeWorkspace() {
             </div>
           )}
 
+          {/* A capability gap, stated rather than left silent. */}
+          {notice && (
+            <p className="mt-3 text-xs" style={{ color: 'var(--color-amber, #d97706)' }} data-testid="ingest-notice">
+              {notice}
+            </p>
+          )}
+
           {error && (
             <p className="mt-3 text-xs" style={{ color: 'var(--color-rose, #e11d48)' }} data-testid="ingest-error">
               {error}
             </p>
           )}
         </div>
+
+        {/* --- pasted text, offered rather than assumed ---------------------- */}
+        {pasted && (
+          <div
+            className="mt-3 rounded-xl px-5 py-4"
+            style={{ border: '1px solid var(--color-cyan-light)', background: 'var(--color-glass)' }}
+            data-testid="paste-offer"
+          >
+            <div className="flex items-center gap-3">
+              <ClipboardPaste size={15} style={{ color: 'var(--color-cyan-light)' }} />
+              <p className="text-sm flex-1" style={{ color: 'var(--color-text)' }}>
+                Keep {pasted.length.toLocaleString()} characters of pasted text?
+              </p>
+            </div>
+
+            {/* What will actually be kept. The user pasted it, so showing it
+                back is the only honest confirmation — and it is the real text,
+                never a summary of it. */}
+            <p
+              className="mt-2 text-xs leading-relaxed text-slate-400 line-clamp-3"
+              data-testid="paste-preview"
+            >
+              {pasted.slice(0, 240)}
+              {pasted.length > 240 ? '…' : ''}
+            </p>
+
+            <div className="mt-3 flex items-center gap-2">
+              <input
+                value={pasteName}
+                onChange={(e) => setPasteName(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && addPastedText()}
+                placeholder="Name it (optional)"
+                data-testid="paste-name"
+                className="flex-1 bg-transparent text-xs outline-none px-2 py-1.5 rounded-lg"
+                style={{ border: '1px solid var(--color-border-subtle)', color: 'var(--color-text)' }}
+              />
+              <button
+                onClick={addPastedText}
+                disabled={!!progress}
+                data-testid="paste-add"
+                className="text-xs px-3 py-1.5 rounded-lg disabled:opacity-40"
+                style={{ border: '1px solid var(--color-cyan-light)', color: 'var(--color-text)' }}
+              >
+                Add
+              </button>
+              <button
+                onClick={() => { setPasted(null); setPasteName(''); }}
+                data-testid="paste-dismiss"
+                className="text-xs px-3 py-1.5 rounded-lg"
+                style={{ color: 'var(--color-text-dim, #64748b)' }}
+              >
+                Not now
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* --- the folders -------------------------------------------------- */}
         {loading ? (
@@ -227,9 +600,10 @@ export default function KnowledgeWorkspace() {
           >
             <p className="text-sm" style={{ color: 'var(--color-text)' }}>No sources yet.</p>
             <p className="mt-2 text-xs text-slate-500 max-w-md mx-auto leading-relaxed">
-              Point Zaram at a folder above. Every answer drawn from it will cite
-              the document and passage it came from, and anything Zaram could not
-              read will be listed here with the reason.
+              Drop a few documents above, or point Zaram at a whole folder. Every
+              answer drawn from them will cite the document and passage it came
+              from, and anything Zaram could not read will be listed here with
+              the reason.
             </p>
           </div>
         ) : (
@@ -289,18 +663,68 @@ export default function KnowledgeWorkspace() {
                   {source.policy === 'local_only' ? 'Local only' : 'Cloud allowed'}
                 </button>
 
-                <button
-                  onClick={(e) => { e.stopPropagation(); void onRemove(source); }}
-                  title="Forget this folder and everything Zaram learned from it"
-                  className="shrink-0 opacity-60 hover:opacity-100"
-                  data-testid={`remove-${source.id}`}
-                >
-                  <Trash2 size={13} style={{ color: 'var(--color-text-dim, #64748b)' }} />
-                </button>
+                {confirming === source.id ? (
+                  // Named consequences, not "are you sure?". The count is the
+                  // part that decides, and so is the sentence saying the
+                  // originals survive — that is the thing a person is actually
+                  // afraid of here.
+                  <div
+                    className="shrink-0 flex items-center gap-2"
+                    onClick={(e) => e.stopPropagation()}
+                    data-testid={`confirm-${source.id}`}
+                  >
+                    <span className="text-[11px]" style={{ color: 'var(--color-amber, #d97706)' }}>
+                      Delete {source.total} {source.total === 1 ? 'document' : 'documents'} Zaram
+                      copied here? Your originals stay.
+                    </span>
+                    <button
+                      onClick={() => void onRemove(source)}
+                      className="text-[11px] px-2 py-1 rounded-md"
+                      style={{ border: '1px solid var(--color-rose, #e11d48)', color: 'var(--color-rose, #e11d48)' }}
+                      data-testid={`confirm-yes-${source.id}`}
+                    >
+                      Delete
+                    </button>
+                    <button
+                      onClick={() => setConfirming(null)}
+                      className="text-[11px] px-2 py-1 rounded-md"
+                      style={{ color: 'var(--color-text-dim, #64748b)' }}
+                      data-testid={`confirm-no-${source.id}`}
+                    >
+                      Keep
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      // Staged sources hold Zaram's own copies, so withdrawing
+                      // deletes files and has to be asked. A scanned folder
+                      // touches no disk and is not worth a dialog.
+                      if (source.staged) setConfirming(source.id);
+                      else void onRemove(source);
+                    }}
+                    title={
+                      source.staged
+                        ? 'Forget these documents and delete the copies Zaram kept'
+                        : 'Forget this folder and everything Zaram learned from it'
+                    }
+                    className="shrink-0 opacity-60 hover:opacity-100"
+                    data-testid={`remove-${source.id}`}
+                  >
+                    <Trash2 size={13} style={{ color: 'var(--color-text-dim, #64748b)' }} />
+                  </button>
+                )}
               </div>
             ))}
           </div>
         )}
+
+        {/* --- domains ------------------------------------------------------ */}
+        {/* Below the sources, because a domain groups sources that already
+            exist — offering to make one before there is anything to put in it
+            asks the user to decide in advance, which rule 7h is against. */}
+        {!loading && <DomainList domains={domains} sources={sources} onChanged={load} />}
 
         {/* --- what needs attention ----------------------------------------- */}
         {problems.length > 0 && (
@@ -375,6 +799,22 @@ export default function KnowledgeWorkspace() {
                       )}
                       Retry
                     </button>
+
+                    <button
+                      onClick={() => void onRemoveFile(outcome)}
+                      disabled={removingFile === outcome.id}
+                      className="text-[11px] px-2 py-1 rounded-md shrink-0 flex items-center gap-1 disabled:opacity-40"
+                      style={{ border: '1px solid var(--color-border-subtle)', color: 'var(--color-text-muted)' }}
+                      data-testid={`remove-${outcome.id}`}
+                      aria-label={`Remove ${outcome.name} from Knowledge`}
+                    >
+                      {removingFile === outcome.id ? (
+                        <Loader2 size={11} className="animate-spin" />
+                      ) : (
+                        <Trash2 size={11} />
+                      )}
+                      Remove
+                    </button>
                   </div>
                 </div>
               ))}
@@ -408,6 +848,21 @@ export default function KnowledgeWorkspace() {
                       ? `${outcome.chars.toLocaleString()} characters`
                       : STATUS_LABELS[outcome.status]}
                   </span>
+                  <button
+                    onClick={() => void onRemoveFile(outcome)}
+                    disabled={removingFile === outcome.id}
+                    className="shrink-0 rounded-md p-1 disabled:opacity-40 hover:bg-white/5"
+                    style={{ color: 'var(--color-text-muted)' }}
+                    data-testid={`remove-${outcome.id}`}
+                    aria-label={`Remove ${outcome.name} from Knowledge`}
+                    title="Remove from Knowledge"
+                  >
+                    {removingFile === outcome.id ? (
+                      <Loader2 size={11} className="animate-spin" />
+                    ) : (
+                      <Trash2 size={11} />
+                    )}
+                  </button>
                 </div>
               ))}
             </div>

@@ -24,6 +24,10 @@ class DecayResult:
     decayed: int = 0
     forgotten: int = 0
     boosted: int = 0
+    #: Records the pass did not touch because the user pinned them. Counted
+    #: rather than merely skipped, so "nothing decayed" can be told apart from
+    #: "everything was exempt" when reading a pass in `/memory/maintenance`.
+    pinned: int = 0
     total_records: int = 0
     config: DecayConfig = field(default_factory=DecayConfig)
     timestamp: float = field(default_factory=time.time)
@@ -33,6 +37,7 @@ class DecayResult:
             "decayed": self.decayed,
             "forgotten": self.forgotten,
             "boosted": self.boosted,
+            "pinned": self.pinned,
             "total_records": self.total_records,
             "config": {
                 "forget_threshold": self.config.forget_threshold,
@@ -172,6 +177,27 @@ class MemoryDecayEngine:
         for record in records:
             rid = record.id
             age_days = (now - record.created_at) / 86400
+
+            # **A pinned fact is exempt, and it was not.**
+            #
+            # Measured 3 September 2026: a pinned record, 200 days old, never
+            # recalled, importance 0.2 — deleted by this pass. Pinning is the
+            # user saying *keep this*, the Memory surface tells them in as many
+            # words that it changes how recall treats the fact, and the curator
+            # was quietly undoing it a month later.
+            #
+            # It is rule 4 read from the other end. That rule gives the user
+            # power over their own facts; a maintenance pass that overrules an
+            # explicit instruction has taken it back, and silently — the fact
+            # is simply gone, with nothing saying why.
+            #
+            # Skipped entirely rather than merely spared deletion. Decaying a
+            # pinned record's importance would demote it in ranking, one pass
+            # at a time, while the interface still claimed recall prefers it —
+            # the same promise broken slowly instead of all at once.
+            if getattr(record, "pinned", False):
+                result.pinned += 1
+                continue
 
             if self.should_forget(record.importance, age_days, record.access_count):
                 await store.delete(rid)

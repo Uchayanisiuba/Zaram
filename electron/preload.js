@@ -31,9 +31,18 @@ const api = {
     getInfo: () => invoke(Channels.app.getInfo),
     getVersion: () => invoke(Channels.app.getVersion),
     getPlatform: () => invoke(Channels.app.getPlatform),
+    getApiSecret: () => invoke(Channels.app.getApiSecret),
   },
   os: {
     getInfo: () => invoke(Channels.os.getInfo),
+  },
+  // The ambient overlay tells the main process what the person did to it:
+  // dismissed it, or moved a pointer onto the edge handle. Nothing flows the
+  // other way and nothing is reported unasked.
+  ambient: {
+    dismiss: () => invoke(Channels.ambient.dismiss),
+    hover: (hovered) => invoke(Channels.ambient.hover, Boolean(hovered)),
+    summon: () => invoke(Channels.ambient.summon),
   },
   window: {
     minimize: () => invoke(Channels.window.minimize),

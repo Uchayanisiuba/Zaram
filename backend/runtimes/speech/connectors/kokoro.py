@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import time
 import uuid
 from typing import Any, AsyncIterator, Dict, List, Optional
@@ -101,6 +102,9 @@ class KokoroConnector(SpeechConnector):
             duration_ms=duration_ms,
             success=True,
             audio_id=result.audio_id,
+            # The name the cache actually wrote, not the request id. Building a
+            # URL from the request id is what made every utterance 404.
+            audio_filename=os.path.basename(result.path) if result.path else "",
             format="wav",
             channels=1,
             # Flattened to dicts at the boundary, so nothing downstream imports

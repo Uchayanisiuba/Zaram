@@ -16,6 +16,9 @@ Public API
 - :class:`ProviderRegistry` — discovery source configuration.
 - :class:`ProviderScanner` — executes discovery against each source.
 - :class:`ModelCatalog` — generic model store.
+- :mod:`providers.catalogue` — the dated manifest of pickable providers, with
+  the ones Zaram cannot call today graded down rather than hidden. Data only:
+  it describes providers, reads no keys, and reaches no network.
 - :class:`ProviderHealth` / :class:`ProviderHealthAggregator` — health reports.
 - :mod:`providers.contracts` — generic, modality-agnostic data shapes.
 - :mod:`providers.discoverers` — Ollama / LM Studio / OpenAI / voice /
@@ -26,6 +29,8 @@ Public API
 from __future__ import annotations
 
 from .api import router as api_router
+from .catalogue import PROVIDERS as PROVIDER_CATALOGUE
+from .catalogue import ProviderEntry
 from .contracts import (
     HardwareProfile,
     HealthStatus,
@@ -51,6 +56,8 @@ __all__ = [
     "ProviderRegistry",
     "ProviderScanner",
     "ModelCatalog",
+    "PROVIDER_CATALOGUE",
+    "ProviderEntry",
     "ProviderHealth",
     "ProviderHealthAggregator",
     "api_router",

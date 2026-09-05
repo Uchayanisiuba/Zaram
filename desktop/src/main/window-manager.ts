@@ -48,7 +48,17 @@ export class WindowManager {
         contextIsolation: true,
         sandbox: false,
         nodeIntegration: false,
-        webSecurity: true
+        webSecurity: true,
+        // Chromium throttles timers and rendering in windows it considers
+        // backgrounded, and it counts a partially occluded one as backgrounded.
+        // The orb and the orbit nodes animate continuously, so the throttle
+        // reads as the app stuttering whenever another window overlaps it —
+        // including for a moment after it regains focus, before the throttle
+        // lifts again.
+        //
+        // Safe to disable here because Zaram's motion has a budget by design.
+        // This is not a page of adverts animating out of view.
+        backgroundThrottling: false
       }
     })
 

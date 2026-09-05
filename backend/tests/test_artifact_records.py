@@ -212,20 +212,45 @@ class TestTheRecordStoreHasNoGeneralMutation:
             "the one field the user controls."
         )
 
+    #: The columns a user may change after an artifact is written. Everything
+    #: else — filename, path, size, origin, sources, claims — is provenance,
+    #: and a provenance record that can be edited is not one.
+    #:
+    #: Adding to this list is the deliberate act the class docstring asks for.
+    #: It is a list rather than a count because a count says *how many* named
+    #: mutations exist and not *which*, so swapping a safe one for a dangerous
+    #: one leaves it green — the number was never the property worth guarding.
+    MUTABLE_COLUMNS = {"REMEMBER_OVERRIDE", "PROJECT_ID"}
+
     def test_no_sql_deletes_or_blanket_updates(self):
-        """`set_remember_override` is the only UPDATE, and it names its column.
+        """Every UPDATE names one allowed column, and nothing else mutates.
 
         Scans the SQL the module actually executes, not its text. A raw-text
         scan matches the docstrings explaining *why* these statements are
         absent, so it fails on a module that is correct and documented — which
         would train someone to delete the explanation to get a green build.
         """
-        sql = " ".join(_executed_sql(RECORDS_SOURCE)).upper()
+        statements = [s.upper() for s in _executed_sql(RECORDS_SOURCE)]
+        sql = " ".join(statements)
 
         assert "DELETE FROM" not in sql
         assert "DROP TABLE" not in sql
         assert "INSERT OR REPLACE" not in sql
-        assert sql.count("UPDATE ARTIFACTS") == 1
+
+        updates = [s for s in statements if "UPDATE ARTIFACTS" in s]
+        assert updates, "records.py updates nothing — has the mutation path moved?"
+
+        for statement in updates:
+            column = statement.split("SET", 1)[1].split("=", 1)[0].strip()
+            assert column in self.MUTABLE_COLUMNS, (
+                f"records.py updates {column!r}, which is not one of "
+                f"{sorted(self.MUTABLE_COLUMNS)}. Mutation is one named method "
+                "per field the user controls; add the column here deliberately."
+            )
+            # One column per statement. A comma would mean a statement that
+            # moves several fields at once, which is the blanket update this
+            # store exists without.
+            assert "," not in statement.split("SET", 1)[1].split("WHERE")[0]
 
 
 class TestTheServiceWritesTheFileThenRecordsIt:
@@ -338,6 +363,7 @@ class TestTheHttpSurface:
     @pytest.fixture
     def client(self, tmp_path, monkeypatch):
         from fastapi.testclient import TestClient
+        from projects import ProjectRecords
 
         monkeypatch.setenv("ZARAM_ARTIFACTS_DB", str(tmp_path / "a.db"))
         monkeypatch.setenv("ZARAM_OUTPUT_DIR", str(tmp_path / "out"))
@@ -350,6 +376,16 @@ class TestTheHttpSurface:
             ArtifactRecords(str(tmp_path / "a.db")),
             ArtifactStore(tmp_path / "out"),
         )
+
+        # Projects too, and for two reasons. Generation now validates its
+        # `project_id` — it used to write whatever it was given, which is how
+        # groups arrived that Project could not show — so `north` has to be a
+        # real project for these tests to describe a real request. Without the
+        # rebind they would also validate against the *developer's* projects.db
+        # and pass or fail depending on whose machine they ran on.
+        main.project_records = ProjectRecords(str(tmp_path / "p.db"))
+        main.project_records.create("North", project_id="north")
+
         return TestClient(main.app)
 
     @staticmethod

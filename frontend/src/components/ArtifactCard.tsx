@@ -13,22 +13,41 @@
  * the transcript at the point it was made and does not animate, expand or
  * demand acknowledgement. Motion has a budget and this is not worth any of it.
  */
+import { useEffect, useState } from 'react';
+import { AnimatePresence } from 'framer-motion';
 import {
   BarChart3,
   Download,
+  Eye,
   FileSpreadsheet,
   FileText,
+  ImageIcon,
+  Presentation,
   Quote,
   Receipt,
+  Save,
+  UserRound,
 } from 'lucide-react';
 
-import { downloadUrl, type Artifact, type ArtifactKind } from '@/services/artifactsClient';
+import ArtifactPreview from '@/components/ArtifactPreview';
+import { useArtifactImage } from '@/hooks/useArtifactImage';
+import {
+  downloadArtifact,
+  keepArtifact,
+  PICTORIAL_KINDS,
+  type Artifact,
+  type ArtifactKind,
+} from '@/services/artifactsClient';
+import { clearsLabel } from '@/lib/staging';
 
 const KIND_ICON: Record<ArtifactKind, React.ReactNode> = {
   invoice: <Receipt size={15} />,
   document: <FileText size={15} />,
   spreadsheet: <FileSpreadsheet size={15} />,
   chart: <BarChart3 size={15} />,
+  deck: <Presentation size={15} />,
+  cv: <UserRound size={15} />,
+  image: <ImageIcon size={15} />,
 };
 
 const KIND_COLOUR: Record<ArtifactKind, string> = {
@@ -36,6 +55,9 @@ const KIND_COLOUR: Record<ArtifactKind, string> = {
   document: 'var(--color-cyan-light)',
   spreadsheet: 'var(--color-amber)',
   chart: 'var(--color-violet)',
+  deck: 'var(--color-indigo-light)',
+  cv: 'var(--color-cyan-light)',
+  image: 'var(--color-indigo-light)',
 };
 
 const bytes = (n: number) => {
@@ -53,6 +75,37 @@ export default function ArtifactCard({
 }) {
   const extension = artifact.filename.split('.').pop()?.toUpperCase() ?? 'FILE';
   const citedCount = artifact.claims?.length ?? 0;
+  const [previewing, setPreviewing] = useState(false);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
+  // The artifact after Save, which is not the same record the parent holds:
+  // the output folder increments on collision, so the filename can change on
+  // the way there. Rendering the prop afterwards would name a file nobody
+  // has.
+  const [kept, setKept] = useState<Artifact | null>(null);
+  const [saving, setSaving] = useState(false);
+  const shown = kept ?? artifact;
+  const staged = shown.staged;
+  const pictorial = PICTORIAL_KINDS.has(artifact.kind);
+  const thumbnail = useArtifactImage(artifact.id, pictorial && artifact.exists);
+
+  // **Opens itself only when the artifact was the point of the request.**
+  //
+  // Ask for an image and the panel comes forward the moment it is ready; an
+  // artifact that turned up alongside a reply does not seize the screen, and
+  // that is the whole distinction `deliberate` carries. An overlay arriving
+  // unbidden mid-conversation is an interruption, not a convenience.
+  //
+  // Once, and only for a file that is actually there. Keyed on the id so a
+  // second image in the same conversation opens on its own account rather
+  // than being suppressed by the first, and guarded on `exists` so the panel
+  // never comes forward over a file the write did not produce.
+  const [autoOpened, setAutoOpened] = useState('');
+  useEffect(() => {
+    if (!artifact.deliberate || !artifact.exists) return;
+    if (autoOpened === artifact.id) return;
+    setAutoOpened(artifact.id);
+    setPreviewing(true);
+  }, [artifact.deliberate, artifact.exists, artifact.id, autoOpened]);
 
   return (
     <div
@@ -63,6 +116,28 @@ export default function ArtifactCard({
         maxWidth: 520,
       }}
     >
+      {/* The picture, on the card, for a kind whose file *is* one.
+          A filename is a poor description of an image — you cannot tell
+          whether it is the one you wanted without opening it — and Work's job
+          and this card's job are both to save that opening. Above the row
+          rather than beside it, so the image gets the card's full width. */}
+      {pictorial && thumbnail.url && (
+        <button
+          type="button"
+          onClick={() => setPreviewing(true)}
+          className="block w-full"
+          style={{ lineHeight: 0, background: 'var(--color-surface-sunken, #0b1120)' }}
+          aria-label={`Preview ${artifact.filename}`}
+        >
+          <img
+            src={thumbnail.url}
+            alt={artifact.filename}
+            className="w-full"
+            style={{ maxHeight: 320, objectFit: 'contain' }}
+          />
+        </button>
+      )}
+
       <div className="flex items-start gap-3 px-4 py-3">
         <span className="mt-0.5 shrink-0" style={{ color: KIND_COLOUR[artifact.kind] }}>
           {KIND_ICON[artifact.kind]}
@@ -76,14 +151,23 @@ export default function ArtifactCard({
             className="mt-0.5 text-[11px]"
             style={{ fontFamily: 'var(--font-mono)', color: 'var(--color-text-muted)' }}
           >
-            {extension} · {bytes(artifact.size_bytes)}
-            {/* Where it went. A file the user cannot find is a file they did
-                not receive, and "check your output folder" is not an answer if
-                nobody said which folder. */}
-            {artifact.path && (
+            {extension} · {bytes(shown.size_bytes)}
+            {/* Where it went, or whether it has gone anywhere yet.
+
+                A file the user cannot find is a file they did not receive,
+                and "check your output folder" is not an answer if nobody
+                said which folder. The staged case is the newer half: an
+                image has *not* been saved, and saying it was — which this
+                line did for every kind — is the claim that prompted the
+                whole staging change. See `artifacts/staging.py`. */}
+            {shown.path && (
               <>
                 {' · '}
-                <span title={artifact.path}>saved to your output folder</span>
+                <span title={shown.path}>
+                  {staged && shown.expires_at
+                    ? clearsLabel(shown.expires_at)
+                    : 'saved to your output folder'}
+                </span>
               </>
             )}
           </div>
@@ -144,16 +228,72 @@ export default function ArtifactCard({
         {/* Never a download button over a file that is not there. `exists` is
             the backend having stat'd the path, not an assumption that writing
             succeeded. */}
-        {artifact.exists ? (
-          <a
-            href={downloadUrl(artifact.id)}
-            download={artifact.filename}
-            className="flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[11px] transition-colors hover:bg-white/5"
-            style={{ border: '1px solid var(--color-border)', color: 'var(--color-text)' }}
-          >
-            <Download size={12} />
-            Download
-          </a>
+        {shown.exists ? (
+          <>
+            {/* First in the row, because for a staged file it is the only
+                action that changes anything: Preview and Download both
+                leave it expiring. */}
+            {staged && (
+              <button
+                type="button"
+                disabled={saving}
+                onClick={() => {
+                  setDownloadError(null);
+                  setSaving(true);
+                  keepArtifact(shown.id)
+                    .then(setKept)
+                    .catch((err: unknown) =>
+                      setDownloadError(
+                        err instanceof Error ? err.message : 'Could not save that file.',
+                      ),
+                    )
+                    .finally(() => setSaving(false));
+                }}
+                className="flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[11px] transition-colors hover:bg-white/5"
+                style={{
+                  border: '1px solid var(--color-border)',
+                  color: 'var(--color-text)',
+                }}
+                title="Keep this in your output folder"
+              >
+                <Save size={12} />
+                {saving ? 'Saving…' : 'Save'}
+              </button>
+            )}
+            {/* Preview sits beside Download, not instead of it. The preview is
+                the HTML the file was built from — `CLAUDE.md` makes HTML the
+                source of truth for every generated document precisely so this
+                cannot drift from what downloads. */}
+            <button
+              type="button"
+              onClick={() => setPreviewing(true)}
+              className="flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[11px] transition-colors hover:bg-white/5"
+              style={{ border: '1px solid var(--color-border)', color: 'var(--color-text)' }}
+            >
+              <Eye size={12} />
+              Preview
+            </button>
+            {/* A button, not a link, and that is not a style choice.
+                `RequireApiSecret` authenticates every request and the
+                credential is attached by a wrapper around `fetch` — an anchor
+                navigates without it and gets 401. See `downloadUrl`. */}
+            <button
+              type="button"
+              onClick={() => {
+                setDownloadError(null);
+                downloadArtifact(artifact.id, artifact.filename).catch((err: unknown) =>
+                  setDownloadError(
+                    err instanceof Error ? err.message : 'Could not download that file.',
+                  ),
+                );
+              }}
+              className="flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[11px] transition-colors hover:bg-white/5"
+              style={{ border: '1px solid var(--color-border)', color: 'var(--color-text)' }}
+            >
+              <Download size={12} />
+              Download
+            </button>
+          </>
         ) : (
           <span
             className="text-[11px]"
@@ -174,6 +314,25 @@ export default function ArtifactCard({
           </button>
         )}
       </div>
+
+      {/* A download that failed has to say so. Silently doing nothing is what
+          the anchor did for a week, and it is indistinguishable from a click
+          that missed. */}
+      {downloadError && (
+        <div
+          className="px-4 pb-2.5 text-[11px]"
+          style={{ color: '#fca5a5' }}
+          role="alert"
+        >
+          {downloadError}
+        </div>
+      )}
+
+      <AnimatePresence>
+        {previewing && (
+          <ArtifactPreview artifact={artifact} onClose={() => setPreviewing(false)} />
+        )}
+      </AnimatePresence>
     </div>
   );
 }

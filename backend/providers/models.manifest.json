@@ -1,0 +1,56 @@
+{
+  "generated": "2026-08-30",
+  "note": "Sizes are the download as Ollama reports it, rounded. Approximate and dated on purpose: the true total is reported by the pull itself and is what the progress bar counts against.",
+  "tiers": [
+    {
+      "max_budget_gb": 3,
+      "models": [
+        {
+          "name": "qwen2.5:0.5b",
+          "size_bytes": 397000000,
+          "why": "The smallest model that can hold a conversation. Fast anywhere, and thin on anything hard."
+        }
+      ]
+    },
+    {
+      "max_budget_gb": 5,
+      "models": [
+        {
+          "name": "llama3.2:3b",
+          "size_bytes": 2000000000,
+          "why": "Writes, edits and summarises well for its size, and answers in about a second on a modest card."
+        }
+      ]
+    },
+    {
+      "max_budget_gb": 9,
+      "models": [
+        {
+          "name": "qwen2.5:7b",
+          "size_bytes": 4700000000,
+          "why": "The usual choice. Good at the five jobs a local model does well, and quick enough to feel instant."
+        }
+      ]
+    },
+    {
+      "max_budget_gb": 18,
+      "models": [
+        {
+          "name": "qwen2.5:14b",
+          "size_bytes": 9000000000,
+          "why": "Noticeably better at reasoning and code, and still resident on a 12 GB card beside the embedder."
+        }
+      ]
+    },
+    {
+      "max_budget_gb": null,
+      "models": [
+        {
+          "name": "qwen2.5:32b",
+          "size_bytes": 20000000000,
+          "why": "For a card with room to spare. Slower per token than the 14b, and better at long reasoning."
+        }
+      ]
+    }
+  ]
+}

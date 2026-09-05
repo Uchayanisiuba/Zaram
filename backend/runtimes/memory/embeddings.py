@@ -5,6 +5,10 @@ import hashlib
 import math
 from typing import Any
 
+#: How long Ollama holds the embedding model after a call. Matches
+#: `OllamaEngine.KEEP_ALIVE`; see `_embed_ollama` for why it is not imported.
+_KEEP_ALIVE = "30m"
+
 
 class EmbeddingService:
     """Generates embeddings for text content.
@@ -83,9 +87,19 @@ class EmbeddingService:
         import json
         import urllib.request
 
+        # The embedder is a *permanent* tenant, not an occasional one — recall
+        # runs on every exchange — so it gets the same treatment the chat model
+        # already gets in `OllamaEngine`. Without this it inherited Ollama's
+        # five-minute default and was unloaded between questions, which is the
+        # same defect `warm_local_model` was written to fix, on the other model.
+        #
+        # Not imported from `runtimes.models`: this module is the memory
+        # runtime and must not depend on the model runtime. Two constants, one
+        # value, and a mismatch costs nothing worse than an idle model.
         payload = json.dumps({
             "model": self._ollama_model,
             "prompt": text,
+            "keep_alive": _KEEP_ALIVE,
         }).encode()
 
         req = urllib.request.Request(

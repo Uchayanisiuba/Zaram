@@ -93,6 +93,44 @@ class TestSources:
         assert records.outcomes(source_id) == []
 
 
+class TestPartialRuns:
+    """A drop sees the files that were dropped, not the whole source.
+
+    The uploads directory is one shared source — one place, one privacy policy,
+    per rule 5 — so every drop lands in it. `record_outcomes` replaces a
+    source's rows wholesale, which is right for a folder scan that saw every
+    file and wrong here: found by the second drop of a route test, which
+    reported one file where two had been kept.
+    """
+
+    def test_a_second_drop_does_not_erase_the_first(self, records: IngestRecords):
+        source_id = records.upsert_source("/uploads")
+        records.merge_outcomes(source_id, [_outcome("first.txt", IngestStatus.INDEXED, chars=200)])
+        records.merge_outcomes(source_id, [_outcome("second.txt", IngestStatus.INDEXED, chars=200)])
+
+        assert {o["name"] for o in records.outcomes(source_id)} == {"first.txt", "second.txt"}
+
+    def test_the_earlier_facts_stay_removable(self, records: IngestRecords):
+        """The half that matters. `fact_ids` live on the outcome row and are
+        the only route rule 4 has back to the Spine — deleting the row leaves
+        those facts recallable with nothing able to reach them."""
+        source_id = records.upsert_source("/uploads")
+        records.merge_outcomes(source_id, [_outcome("first.txt", IngestStatus.INDEXED, fact_ids=("f1",))])
+        records.merge_outcomes(source_id, [_outcome("second.txt", IngestStatus.INDEXED, fact_ids=("f2",))])
+
+        assert sorted(records.remove_source(source_id)) == ["f1", "f2"]
+
+    def test_the_same_file_again_replaces_its_own_row(self, records: IngestRecords):
+        """Per file, the "what is wrong now" property still holds."""
+        source_id = records.upsert_source("/uploads")
+        records.merge_outcomes(source_id, [_outcome("a.pdf", IngestStatus.EMPTY)])
+        records.merge_outcomes(source_id, [_outcome("a.pdf", IngestStatus.INDEXED, chars=900)])
+
+        outcomes = records.outcomes(source_id)
+        assert len(outcomes) == 1
+        assert outcomes[0]["status"] == "indexed"
+
+
 class TestOutcomes:
     def test_problems_can_be_asked_for_on_their_own(self, records: IngestRecords):
         source_id = records.upsert_source("/docs")

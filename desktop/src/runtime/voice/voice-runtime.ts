@@ -117,7 +117,22 @@ export class VoiceRuntime {
       sequence: this.currentSequence,
     })
 
-    // Execute speech.tts capability
+    // **`speech.tts` has had no handler since 28 August 2026, and this call
+    // is the last thing still reaching for it.** The handler posted to
+    // `/voice/stream` on 8420 with no `X-Zaram-Auth`, so it had returned 401
+    // since the per-launch secret shipped; it was removed with the Knowledge
+    // and Vision packs for the same reason.
+    //
+    // This is not the path that speaks. `docs/SPEECH.md` is the authority and
+    // it puts synthesis in the renderer: `chatStore.sendMessage` reads the
+    // embodiment renderer at send, and `speechStore` calls
+    // `POST /voice/synthesize`. Nothing in that chain passes through here.
+    //
+    // Left in place rather than deleted because removing it takes
+    // `VoiceRuntime` (full) with it, and that is a wider question than the
+    // audit that found this: whether the desktop execution pipeline keeps a
+    // backend-facing half at all, given `executeCapability` has no caller in
+    // the live frontend. Decide that, then delete this.
     this.executionRuntime.execute({
       capabilityId: 'speech.tts',
       input: { text, persona, voice: resolvedVoice },

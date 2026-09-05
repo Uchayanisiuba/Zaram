@@ -24,8 +24,15 @@ export const CHAT_DEFAULT_WORKSPACE = 0.28;
 export const CHAT_MIN = 0.22;
 export const CHAT_MAX = 0.7;
 
-/** Left rail when expanded, in pixels — it holds text, so it does not scale. */
-export const RAIL_DEFAULT = 440;
+/** Left rail when expanded, in pixels — it holds text, so it does not scale.
+ *
+ *  Sized to its widest label rather than to a round number. At `--text-h1`
+ *  (24px) "Knowledge" and a 32px icon come to roughly 210px including padding;
+ *  the default was 440, which left a band of empty rail about as wide as the
+ *  content beside it. Density beats decoration on a surface used daily, and an
+ *  expanded rail that takes a third of a laptop screen to show seven words is
+ *  the opposite of that. Still draggable — this is where it starts, not a cap. */
+export const RAIL_DEFAULT = 260;
 export const RAIL_MIN = 220;
 export const RAIL_MAX = 640;
 
@@ -34,6 +41,32 @@ export const RAIL_COLLAPSED = 112;
 
 export const clamp = (v: number, min: number, max: number) =>
   Math.min(max, Math.max(min, v));
+
+/**
+ * Drop a stored rail width so the new default reaches someone who has already
+ * opened the app. Without this, a persisted 440 beats `RAIL_DEFAULT` and the
+ * change ships looking like it never landed.
+ *
+ * Only the rail is dropped. The conversation widths are deliberately kept — a
+ * panel someone dragged to where they wanted it is not the thing being fixed.
+ *
+ * **A version-less entry cannot be migrated at all**, and it is not a case
+ * worth designing for: zustand gates migration on
+ * `typeof stored.version === 'number'`, so an entry with no version key is
+ * loaded as-is and this function is never called with `undefined`. Every entry
+ * zustand itself has written carries `version: 0`, because that is the default
+ * when the option is absent — which is exactly what real users have. The
+ * `typeof` check below is for a hand-edited entry, and it is honest about
+ * being unreachable through the normal path rather than implying otherwise.
+ */
+export function migrateLayout(persisted: unknown, from: unknown): unknown {
+  const isOld = typeof from !== 'number' || from < 1;
+  if (isOld && persisted && typeof persisted === 'object') {
+    const { railWidth: _dropped, ...rest } = persisted as Record<string, unknown>;
+    return rest;
+  }
+  return persisted;
+}
 
 interface LayoutState {
   /** Conversation panel width as a fraction of the viewport (0–1). */
@@ -80,6 +113,13 @@ export const useLayoutStore = create<LayoutState>()(
     }),
     {
       name: 'zaram.layout',
+      // Bumped when RAIL_DEFAULT dropped from 440 to 260. Without it the new
+      // default reaches nobody who has ever opened the app: a persisted 440
+      // wins over the constant, so the change would ship looking like it had
+      // not landed. Only the rail is dropped — the conversation widths are
+      // untouched and a deliberately dragged panel keeps its size.
+      version: 1,
+      migrate: migrateLayout,
       // isResizing is transient; persisting it would restore a stuck drag state.
       partialize: (s) => ({
         chatFraction: s.chatFraction,

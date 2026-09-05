@@ -29,12 +29,24 @@ quietly work around that — see the note on the field itself.
 from __future__ import annotations
 
 import logging
-from typing import Optional, Sequence
+from datetime import date
+from typing import Any, Optional, Sequence
 
 from . import export
 from .contracts import Artifact, ArtifactKind, ArtifactSource, Claim
-from .html import render_chart, render_document, render_spreadsheet
+from .html import (
+    render_chart,
+    render_cv,
+    render_deck,
+    render_document,
+    render_image,
+    render_invoice,
+    render_spreadsheet,
+)
+from .invoice import Adjustment, LineItem, due_date, total_of
+from .letterhead import Letterhead
 from .records import ArtifactRecords
+from .staging import StagingStore
 from .store import ArtifactStore
 
 logger = logging.getLogger(__name__)
@@ -48,15 +60,35 @@ DEFAULT_FORMAT = {
     ArtifactKind.INVOICE: "docx",
     ArtifactKind.SPREADSHEET: "xlsx",
     ArtifactKind.CHART: "png",
+    ArtifactKind.DECK: "pptx",
+    # .docx rather than .pdf for the same reason as the rest, and one more that
+    # is specific to this document: a CV is edited more than any other file a
+    # person owns, and an application portal that asks for one usually parses
+    # it. Handing back a format nobody can open in Word would be a worse
+    # document however well it printed.
+    ArtifactKind.CV: "docx",
+    # A picture is a picture. `ChartExporter` handles the extension for both
+    # image kinds, because both embed the PNG in their HTML the same way.
+    ArtifactKind.IMAGE: "png",
 }
 
 
 class ArtifactService:
     """Turns a request for a document into a file and a record of it."""
 
-    def __init__(self, records: ArtifactRecords, store: ArtifactStore) -> None:
+    def __init__(
+        self,
+        records: ArtifactRecords,
+        store: ArtifactStore,
+        staging: Optional[StagingStore] = None,
+    ) -> None:
         self._records = records
         self._store = store
+        #: Where images wait to be kept. Optional so every existing caller and
+        #: every test that builds a service with two arguments goes on working
+        #: and goes on writing straight to the output folder — which is the
+        #: right behaviour for documents and stays the default.
+        self._staging = staging
 
     @property
     def records(self) -> ArtifactRecords:
@@ -65,6 +97,10 @@ class ArtifactService:
     @property
     def store(self) -> ArtifactStore:
         return self._store
+
+    @property
+    def staging(self) -> Optional[StagingStore]:
+        return self._staging
 
     def create_document(
         self,
@@ -79,16 +115,211 @@ class ArtifactService:
         conversation_title: str = "",
         sources: Sequence[ArtifactSource] = (),
         claims: Sequence[Claim] = (),
+        #: The user's branding, and the two blocks that sit under it.
+        #:
+        #: `render_document` has accepted all three since the letterhead work
+        #: landed, and this — the only caller that makes a prose document —
+        #: passed none of them. So every proposal, report and letter Zaram
+        #: generated rendered `<header class="masthead"><div></div></header>`:
+        #: the masthead was there, correctly styled, and empty, while the
+        #: invoice path three methods down passed a letterhead and looked like
+        #: a real document. The capability was reachable from one caller out of
+        #: two, which is why it read as a design gap rather than as a bug.
+        letterhead: Optional[Letterhead] = None,
+        meta: Sequence[tuple[str, str]] = (),
+        kind_label: str = "",
+        #: Print the Sources section into the file. Off by default, and the
+        #: default is deliberate — see `render_document`. On for the genres
+        #: where citation is part of the form: a report, a research brief, a
+        #: proposal that argues from evidence.
+        include_provenance: bool = False,
     ) -> Artifact:
         """Prose with claims in it. The common case."""
         html = render_document(
-            title=title, blocks=list(blocks), sources=sources, claims=claims
+            title=title,
+            blocks=list(blocks),
+            sources=sources,
+            claims=claims,
+            letterhead=letterhead,
+            meta=meta,
+            kind_label=kind_label,
+            include_provenance=include_provenance,
         )
         return self._persist(
             html=html,
             title=title,
             filename=filename,
             kind=kind,
+            fmt=fmt,
+            project_id=project_id,
+            conversation_id=conversation_id,
+            conversation_title=conversation_title,
+            sources=sources,
+            claims=claims,
+        )
+
+    def create_deck(
+        self,
+        *,
+        title: str,
+        slides: Sequence[tuple[str, Sequence[object]]],
+        subtitle: str = "",
+        filename: str = "",
+        fmt: Optional[str] = None,
+        project_id: str = "",
+        conversation_id: str = "",
+        conversation_title: str = "",
+        sources: Sequence[ArtifactSource] = (),
+        claims: Sequence[Claim] = (),
+    ) -> Artifact:
+        """Slides, authored as an outline.
+
+        Not a second pipeline: the HTML this produces is an ordinary document
+        with one `<h2>` per slide, which is what the .pptx exporter splits on
+        anyway. The kind exists so the default format is `.pptx` and the
+        preview is the outline — not because slides need their own machinery.
+        """
+        html = render_deck(
+            title=title,
+            slides=[(heading, list(bullets)) for heading, bullets in slides],
+            subtitle=subtitle,
+            sources=sources,
+            claims=claims,
+        )
+        return self._persist(
+            html=html,
+            title=title,
+            filename=filename,
+            kind=ArtifactKind.DECK,
+            fmt=fmt,
+            project_id=project_id,
+            conversation_id=conversation_id,
+            conversation_title=conversation_title,
+            sources=sources,
+            claims=claims,
+        )
+
+    def create_cv(
+        self,
+        *,
+        name: str,
+        headline: str = "",
+        contact: Sequence[str] = (),
+        summary: str = "",
+        experience: Sequence[object] = (),
+        education: Sequence[object] = (),
+        skills: Sequence[str] = (),
+        title: str = "",
+        filename: str = "",
+        fmt: Optional[str] = None,
+        project_id: str = "",
+        conversation_id: str = "",
+        conversation_title: str = "",
+        sources: Sequence[ArtifactSource] = (),
+        claims: Sequence[Claim] = (),
+    ) -> Artifact:
+        """A CV, in the layout a CV is read in — see `render_cv`.
+
+        ``title`` defaults to the person's name rather than to the request,
+        because the title becomes the filename and "cv.docx" in a folder of
+        applications is the file nobody can find again.
+        """
+        html = render_cv(
+            name=name,
+            headline=headline,
+            contact=list(contact),
+            summary=summary,
+            experience=list(experience),
+            education=list(education),
+            skills=list(skills),
+            sources=sources,
+            claims=claims,
+        )
+        return self._persist(
+            html=html,
+            title=title or f"{name} — CV",
+            filename=filename,
+            kind=ArtifactKind.CV,
+            fmt=fmt,
+            project_id=project_id,
+            conversation_id=conversation_id,
+            conversation_title=conversation_title,
+            sources=sources,
+            claims=claims,
+        )
+
+    def create_invoice(
+        self,
+        *,
+        title: str,
+        items: Sequence[LineItem],
+        number: str = "",
+        issued: Optional[date] = None,
+        terms_days: Optional[int] = None,
+        currency: str = "",
+        bill_to: Sequence[str] = (),
+        adjustments: Sequence[Adjustment] = (),
+        notes: str = "",
+        payment: Sequence[str] = (),
+        letterhead: Optional[Letterhead] = None,
+        filename: str = "",
+        fmt: Optional[str] = None,
+        project_id: str = "",
+        conversation_id: str = "",
+        conversation_title: str = "",
+        sources: Sequence[ArtifactSource] = (),
+        claims: Sequence[Claim] = (),
+    ) -> Artifact:
+        """An invoice, with its due date derived rather than typed.
+
+        `terms_days` produces both the printed terms sentence and the Due date
+        in the metadata, from one number. They cannot disagree, which matters
+        because the reminder M9a will raise is the due date and the thing a
+        client disputes is the sentence — if those two were entered separately,
+        the reminder could cite a clause that does not support it.
+
+        `issued` defaults to today. That is the one default here, and it is safe
+        in a way the money is not: an invoice issued today is what "make me an
+        invoice" means, and the date is visible on the document for correction.
+        Nothing about the amounts is defaulted — see `invoice.py`.
+        """
+        issued = issued or date.today()
+        totals = total_of(items, adjustments)
+
+        meta: list[tuple[str, str]] = []
+        if number:
+            meta.append(("Invoice", number))
+        meta.append(("Issued", issued.isoformat()))
+
+        terms = ""
+        if terms_days is not None:
+            due = due_date(issued, terms_days)
+            meta.append(("Due", due.isoformat()))
+            terms = (
+                "Payment due on receipt."
+                if terms_days == 0
+                else f"Payment due within {terms_days} days of the issue date."
+            )
+
+        html = render_invoice(
+            title=title,
+            items=items,
+            totals=totals,
+            currency=currency,
+            bill_to=bill_to,
+            meta=meta,
+            terms=terms,
+            notes=notes,
+            payment=payment,
+            letterhead=letterhead,
+            sources=sources,
+            claims=claims,
+        )
+        return self._persist(
+            html=html,
+            title=title,
+            filename=filename,
+            kind=ArtifactKind.INVOICE,
             fmt=fmt,
             project_id=project_id,
             conversation_id=conversation_id,
@@ -168,6 +399,59 @@ class ArtifactService:
             claims=claims,
         )
 
+    def create_image(
+        self,
+        *,
+        title: str,
+        png: bytes,
+        prompt: str = "",
+        model: str = "",
+        locality: str = "",
+        seed: Optional[int] = None,
+        filename: str = "",
+        project_id: str = "",
+        conversation_id: str = "",
+        conversation_title: str = "",
+        sources: Sequence[ArtifactSource] = (),
+        claims: Sequence[Claim] = (),
+    ) -> Artifact:
+        """A generated picture, recorded like every other thing Zaram makes.
+
+        Down the same path a document goes down, which is the point: one output
+        directory that cannot be overwritten, one record, one download route,
+        one preview. An image that arrived through a second mechanism would be
+        a file the user could not find in Work and could not trace, and the
+        write-path guarantees would have to be re-proved for it.
+        """
+        html = render_image(
+            title=title,
+            png=png,
+            prompt=prompt,
+            model=model,
+            locality=locality,
+            seed=seed,
+            sources=sources,
+            claims=claims,
+        )
+        return self._persist(
+            html=html,
+            title=title,
+            filename=filename,
+            kind=ArtifactKind.IMAGE,
+            fmt="png",
+            # **The one kind that waits.** A request for a picture produces
+            # several and the user keeps one, so writing all of them into the
+            # output folder fills it with rejects the write path cannot remove.
+            # See `artifacts/staging.py` for why that is not a hole in the
+            # no-delete rule.
+            store=self._staging,
+            project_id=project_id,
+            conversation_id=conversation_id,
+            conversation_title=conversation_title,
+            sources=sources,
+            claims=claims,
+        )
+
     # ------------------------------------------------------------------ shared
 
     def _persist(
@@ -183,8 +467,14 @@ class ArtifactService:
         conversation_title: str,
         sources: Sequence[ArtifactSource],
         claims: Sequence[Claim],
+        store: Optional[Any] = None,
     ) -> Artifact:
         extension = fmt or DEFAULT_FORMAT[kind]
+        # Documents go to the output folder, which is what the user asked for
+        # when they asked for a document. Images go to staging and are kept on
+        # purpose. Same record, same download route, same preview — the only
+        # difference is which directory the bytes land in.
+        destination = store if store is not None else self._store
 
         artifact = Artifact(
             filename=filename or _slug(title),
@@ -200,7 +490,7 @@ class ArtifactService:
         # File first. `export.write` goes through ArtifactStore, which creates
         # and never replaces, so the name it returns may not be the one asked
         # for — the record follows the file, never the other way round.
-        export.write(artifact, extension, self._store, filename=artifact.filename)
+        export.write(artifact, extension, destination, filename=artifact.filename)
 
         try:
             self._records.put(artifact)
@@ -216,6 +506,37 @@ class ArtifactService:
             )
             raise
 
+        return artifact
+
+    def keep(self, artifact_id: str) -> Artifact:
+        """Move a staged image into the output folder, for good.
+
+        The record is updated rather than replaced, so the user keeps *this*
+        picture — same id, same sources, same claims, same conversation — and
+        not a copy of it that has lost where it came from.
+
+        **Idempotent, because the button is on a card that can be clicked
+        twice.** An artifact already in the output folder is returned as it is
+        rather than raising: the user asked for it to be saved and it is saved,
+        and an error on the second click would say otherwise.
+        """
+        artifact = self._records.get(artifact_id)
+        if artifact is None:
+            raise KeyError(f"no artifact {artifact_id!r}")
+        if self._staging is None or not artifact.path:
+            return artifact
+        if not self._staging.is_staged(artifact.path):
+            # Already kept, or never staged. Either way there is nothing to do
+            # and nothing to report — and this is also the guard that stops a
+            # request naming a path in the output folder from having that file
+            # promoted and its original unlinked, which would be a delete
+            # through the one door that must not have one.
+            return artifact
+
+        kept = self._staging.promote(artifact.path, self._store)
+        self._records.set_location(artifact.id, str(kept), kept.name)
+        artifact.path = str(kept)
+        artifact.filename = kept.name
         return artifact
 
     def re_export(self, artifact_id: str, fmt: str) -> Artifact:

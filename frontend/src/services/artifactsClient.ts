@@ -14,14 +14,48 @@
 
 const API_BASE = import.meta.env.VITE_ZARAM_API ?? '';
 
-export type ArtifactKind = 'invoice' | 'document' | 'spreadsheet' | 'chart';
+/** The kinds the backend can produce.
+ *
+ *  `artifacts/contracts.py` says outright that divergence between the two is a
+ *  bug rather than a variation, and it had diverged: `deck` shipped on the
+ *  backend and never arrived here, so a slide deck's card had no icon and no
+ *  colour — `Record<ArtifactKind, …>` cannot catch a member it does not know
+ *  exists. `cv` is added with it.
+ */
+export type ArtifactKind =
+  | 'invoice'
+  | 'document'
+  | 'spreadsheet'
+  | 'chart'
+  | 'deck'
+  | 'cv'
+  | 'image';
 
 export const KIND_LABELS: Record<ArtifactKind, string> = {
   invoice: 'Invoices',
   document: 'Documents',
   spreadsheet: 'Spreadsheets',
   chart: 'Charts',
+  deck: 'Decks',
+  cv: 'CVs',
+  image: 'Images',
 };
+
+/** Kinds whose file *is* a picture, so a thumbnail says more than a filename.
+ *
+ *  Both of these embed their PNG in their HTML as a data URI and export
+ *  through the same exporter — see `artifacts/export/chart.py`. They are still
+ *  two kinds, because a chart is derived from numbers the user has and always
+ *  carries the data table that makes it checkable, while an image is drawn
+ *  from a description and has nothing behind it to check.
+ *
+ *  Used for density rather than for behaviour: Work draws these as a grid of
+ *  thumbnails and everything else as rows, because a page of pictures is
+ *  browsable in a way a page of filenames is not. */
+export const PICTORIAL_KINDS: ReadonlySet<ArtifactKind> = new Set<ArtifactKind>([
+  'image',
+  'chart',
+]);
 
 /** Where an artifact drew on. Mirrors `ChatSource` in chatClient — provenance
  *  is one idea, not two. */
@@ -69,9 +103,38 @@ export interface Artifact {
    *  file — the user may have moved it — and the download button has to know
    *  the difference between "no such document" and "not where we left it". */
   exists: boolean;
+  /** Waiting to be kept, rather than saved.
+   *
+   *  Images are generated several at a time and most of them are discards,
+   *  so they land in a staging area and reach the output folder only when
+   *  the user presses Save. Documents are never staged — an invoice is asked
+   *  for once, on purpose, and confirming it is the dialog rule 7h refuses.
+   *
+   *  Derived on the server from the directory the file is in rather than
+   *  stored beside it, so it cannot disagree with where the file actually
+   *  is. */
+  staged: boolean;
+  /** When a staged file clears itself, as epoch seconds, or `null`.
+   *
+   *  Rendered on the card, because a retention window the user cannot see is
+   *  indistinguishable from a product that loses things. `null` for anything
+   *  kept, and for a staged file whose bytes have already gone. */
+  expires_at: number | null;
   /** Only present when fetched with `includeHtml`. The source of truth for
    *  every export, and what the preview renders. */
   html?: string;
+  /** Whether this artifact was **the point of the request**.
+   *
+   *  Transport-only, like `exists` and `download_url` — a property of the
+   *  exchange rather than of the file, so it is never stored and never
+   *  returned by `/artifacts`.
+   *
+   *  It exists so the preview can open itself for "draw me a logo" and stay
+   *  shut for an artifact that appeared alongside a reply. An overlay arriving
+   *  unbidden mid-conversation is an interruption rather than a convenience,
+   *  and the difference between the two is exactly this: did the user ask for
+   *  the thing that just appeared. */
+  deliberate?: boolean;
 }
 
 export interface ArtifactListing {
@@ -151,11 +214,109 @@ export async function listFormats(): Promise<ExportFormat[]> {
   return (await res.json()).formats;
 }
 
-/** The URL the browser downloads from. A plain link rather than a fetch-and-
- *  blob, so the browser's own download UI handles it and a large file does not
- *  sit in memory first. */
+/** The backend path a file is served from.
+ *
+ *  **Not something to put in an `href` or an `img src` any more**, and that is
+ *  a change rather than a preference. This used to be handed straight to an
+ *  `<a download>`, with the reasoning that the browser's own download UI
+ *  should handle it and a large file should not sit in memory first. Both
+ *  halves of that were right and both stopped being available on 28 August
+ *  2026, when `RequireApiSecret` began authenticating every request against a
+ *  per-launch credential.
+ *
+ *  That credential is attached by a wrapper around `fetch`, and **a link is
+ *  not a fetch**. Neither is an `<img>`. So a plain anchor navigates without
+ *  the header and the backend answers 401 — measured against the running
+ *  backend, 3 September 2026: `/health` with no credential returns 401, and
+ *  the download route is behind the same middleware with nothing exempt.
+ *
+ *  Kept exported because it is still the right *path*, and it is what the
+ *  functions below fetch. Nothing should render it. */
 export function downloadUrl(id: string): string {
   return `${API_BASE}/artifacts/${encodeURIComponent(id)}/download`;
+}
+
+async function fetchArtifactFile(id: string): Promise<Blob> {
+  // Goes through `fetch`, so the credential wrapper attaches the header. This
+  // is the whole reason the plain link had to go.
+  const res = await fetch(downloadUrl(id));
+  if (!res.ok) throw await failure(res, 'Could not download that file');
+  return res.blob();
+}
+
+/** Save an artifact to disk, credential and all.
+ *
+ *  Fetch, object URL, synthesised click, revoke. More machinery than an
+ *  anchor, and the anchor is not an option: see `downloadUrl`. The blob is
+ *  released on the next tick rather than immediately, because Chrome cancels a
+ *  download whose URL is revoked before it has started reading it. */
+export async function downloadArtifact(id: string, filename: string): Promise<void> {
+  const blob = await fetchArtifactFile(id);
+  const url = URL.createObjectURL(blob);
+  try {
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = filename;
+    anchor.style.display = 'none';
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+  } finally {
+    setTimeout(() => URL.revokeObjectURL(url), 10_000);
+  }
+}
+
+/** An object URL for an artifact that *is* a picture, for a thumbnail.
+ *
+ *  Same reason as above — an `<img src="/artifacts/…">` never carries the
+ *  credential — and the caller is responsible for revoking what it gets back
+ *  when the element goes away.
+ *
+ *  Deliberately not cached here. A cache would have to decide when to release
+ *  its URLs, and an object URL that is never revoked is a copy of the file
+ *  held in memory for the life of the tab. The component that renders the
+ *  thumbnail knows when it unmounts; this module does not. */
+export async function artifactImageUrl(id: string): Promise<string> {
+  return URL.createObjectURL(await fetchArtifactFile(id));
+}
+
+/** Move a file into a project, out of one, or between two.
+ *
+ *  `''` is the destination for "no project" — the same value a file is born
+ *  with, so leaving a project restores its original state rather than inventing
+ *  a third one. The backend refuses a project it has never heard of, which is
+ *  what stops a typo creating a group that cannot be renamed or deleted.
+ *
+ *  Nothing moves on disk. A project is a label, not a folder, and the output
+ *  directory is deliberately flat. */
+export async function assignToProject(id: string, projectId: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/artifacts/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ project_id: projectId }),
+  });
+  if (!res.ok) throw await failure(res, 'Could not move that file');
+}
+
+/** Save a staged image to the output folder, for good.
+ *
+ *  Returns the updated artifact rather than nothing, because the filename can
+ *  change on the way there: the output folder increments on collision, so a
+ *  staged `blue.png` becomes `blue-2.png` if one is already sitting there. A
+ *  card that went on showing the old name would be naming a file nobody has.
+ *
+ *  Safe to press twice. The server treats a second press as the first, because
+ *  that is what the user means by it.
+ *
+ *  The same shape as `POST /chat/attachments/{id}/keep`, which exists for the
+ *  same reason one surface along: looking at something is not deciding to keep
+ *  it forever. */
+export async function keepArtifact(id: string): Promise<Artifact> {
+  const res = await fetch(`${API_BASE}/artifacts/${encodeURIComponent(id)}/keep`, {
+    method: 'POST',
+  });
+  if (!res.ok) throw await failure(res, 'Could not save that file');
+  return (await res.json()).artifact as Artifact;
 }
 
 export async function setRemember(id: string, remember: boolean | null): Promise<void> {

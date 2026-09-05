@@ -29,6 +29,32 @@ export interface MemoryRecord {
   pinned?: boolean;
   /** Set when this record replaced another. The inverse of superseded_by. */
   corrects?: string | null;
+  /** Rule 7i: `global`, or `project:<id>`. One field, because facts move
+   *  between the two and recall needs both at once — two stores would make a
+   *  move a copy, and the correction loop would have to exist twice.
+   *
+   *  It is also the multiplayer boundary: project memory is shareable and
+   *  global memory never is. That is why this is shown rather than kept
+   *  internal — where a fact sits decides who could eventually see it. */
+  scope?: string;
+  /**
+   * Where the curator stands on this fact — rule 7e's own vocabulary.
+   *
+   * `provisional` in and not yet used · `durable` recalled at least once ·
+   * `fading` the next pass would forget it · `pinned` the user said keep it.
+   *
+   * Sent by the backend rather than derived here, because the thresholds
+   * belong to the decay engine and a second copy of them in this file would
+   * disagree with it the first time anyone tuned one.
+   */
+  standing?: 'provisional' | 'durable' | 'fading' | 'pinned';
+}
+
+/** The project a scope belongs to, or `null` for global. One place that knows
+ *  the `project:` prefix, so a hand-built string cannot drift from it. */
+export function scopeProjectId(scope: string | undefined): string | null {
+  if (!scope || !scope.startsWith('project:')) return null;
+  return scope.slice('project:'.length) || null;
 }
 
 /** Shared failure handling. The dev proxy answers 500 with an empty body when
@@ -146,6 +172,45 @@ export async function correctMemory(
   return (await res.json()) as CorrectionResult;
 }
 
+/**
+ * Keep something the user picked out of a conversation.
+ *
+ * **An override on the automatic capture, never a replacement for it.** The
+ * engine still decides what enters on its own and `SpineMaintenance` still
+ * decays what is never used — rule 7e is that the system answers from
+ * behaviour rather than asking. This is the other half of the pair rule 7b
+ * already describes ("Don't remember this" on a file card, *"an override,
+ * never a gate"*), pointing the other way, for the cases where a heuristic is
+ * not good enough: a rate, a term, a decision already taken.
+ *
+ * `origin` must say whose words these are. Saved off a Zaram reply it is
+ * `generated`, and recall ranks it below a user document saying the same thing
+ * — rule 7b, and the reason Zaram does not end up citing itself.
+ */
+export async function rememberText(
+  text: string,
+  options: { projectId?: string | null; origin?: 'conversation' | 'generated' } = {},
+  signal?: AbortSignal,
+): Promise<{ id: string; note: string }> {
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}/memory`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        text,
+        project_id: options.projectId ?? null,
+        origin: options.origin ?? 'conversation',
+      }),
+      signal,
+    });
+  } catch {
+    throw new Error('Could not reach the Zaram backend.');
+  }
+  if (!res.ok) throw await failure(res, 'Could not keep that');
+  return (await res.json()) as { id: string; note: string };
+}
+
 /** Pin a fact so recall prefers it over merely-recent ones. */
 export async function pinMemory(
   id: string,
@@ -164,6 +229,35 @@ export async function pinMemory(
     throw new Error('Could not reach the Zaram backend.');
   }
   if (!res.ok) throw await failure(res, 'Could not pin this fact');
+}
+
+/** Move a fact between global and a project, or between two projects.
+ *
+ *  `''` is global — about the user rather than about the work. Rule 7e keeps
+ *  promotion evidence-driven, so Zaram asks when a fact has been recalled
+ *  across several projects; this is where that answer goes, and the manual
+ *  override for when it never asks.
+ *
+ *  The backend refuses an unknown project. A fact under a scope no project
+ *  points at could not be found to be corrected or deleted, which is rule 4
+ *  broken by a spelling mistake. */
+export async function setMemoryScope(
+  id: string,
+  projectId: string,
+  signal?: AbortSignal,
+): Promise<void> {
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}/memory/${encodeURIComponent(id)}/scope`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ project_id: projectId }),
+      signal,
+    });
+  } catch {
+    throw new Error('Could not reach the Zaram backend.');
+  }
+  if (!res.ok) throw await failure(res, 'Could not move this fact');
 }
 
 export async function deleteMemory(id: string, signal?: AbortSignal): Promise<void> {

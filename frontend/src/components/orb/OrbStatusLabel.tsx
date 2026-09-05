@@ -34,9 +34,10 @@ export default function OrbStatusLabel({
   const routing = useSystemStore((s) => s.routing);
   const activity = useSystemStore((s) => s.activity);
   const swappingTo = useSystemStore((s) => s.swappingTo);
+  const cloudAnsweredAt = useSystemStore((s) => s.cloudAnsweredAt);
 
   const { label, detail, tone } = describeSystem({
-    backendOnline, routing, activity, swappingTo,
+    backendOnline, routing, activity, swappingTo, cloudAnsweredAt,
   });
   const accent = TONE_COLOR[tone] ?? 'var(--color-indigo)';
 

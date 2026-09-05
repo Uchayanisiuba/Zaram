@@ -13,7 +13,17 @@ ENV/
 # Anchored to the repo root on purpose. Unanchored `lib/`, `build/` and `dist/`
 # are Python packaging patterns that also swallow real frontend source —
 # `frontend/src/lib/utils.ts` was ignored-but-tracked because of exactly that.
-/build/
+/build/*
+# ...except the installer icon. electron-builder finds it by convention rather
+# than by a path in electron-builder.yml, so a clone without it produces an
+# installer wearing the default Electron icon — silently, with nothing failing.
+# It is generated output like the brand PNGs under frontend/public/, and it is
+# tracked for the same reason: the build must not depend on someone having run
+# the generator first. Regenerate with scripts/build-brand-assets.py.
+!/build/icon.ico
+# The uninstaller's data questions. Source, not build output — without it the
+# uninstaller silently keeps everything and "remove completely" is unavailable.
+!/build/installer.nsh
 /dist/
 /develop-eggs/
 /downloads/
@@ -66,6 +76,15 @@ spine.db-wal
 spine.db-shm
 backend/spine.db*
 
+# The transcripts. Rule 7d's session store -- everything the user and Zaram
+# actually said to each other, which is the most personal thing in the product
+# after the egress log. Never committed.
+conversations.db
+conversations.db-journal
+conversations.db-wal
+conversations.db-shm
+backend/conversations.db*
+
 # The egress log and its policy. A record of every question that left the
 # machine is the most private file Zaram holds — more so than the Spine, which
 # at least only contains what the user chose to store. Never committed.
@@ -77,6 +96,23 @@ backend/egress.db*
 egress-policy.json
 backend/egress-policy.json
 
+# Backend-side user settings — the chosen model and the routing preference.
+# Written beside the egress policy and ignored for the same reason: it is the
+# user's configuration of their own machine, and committing one developer's
+# choice of model would silently become everybody's default.
+settings.json
+backend/settings.json
+
+# The API credential's development fallback.
+#
+# A packaged build never writes this — the desktop host mints one per launch
+# and passes it in the environment. In a checkout the backend and the Vite dev
+# server are separate programs that have to agree on a value, so they meet at
+# this file. Committing it would publish a credential and, worse, give every
+# clone the *same* one.
+api-secret
+backend/api-secret
+
 # Artifact records, and the files they describe. Both are the user's own work —
 # their invoices, proposals and client spreadsheets. The database holds the
 # provenance and the full HTML of every document generated, which makes it as
@@ -87,6 +123,13 @@ artifacts.db-wal
 artifacts.db-shm
 backend/artifacts.db*
 backend/generated/
+
+# Image models and the pipeline configuration beside them. A Stable Diffusion
+# checkpoint is 6.9 GB and the config is somebody else's 3 MB of tokenizer
+# vocabularies — neither is ours to redistribute, and the first would not fit
+# in a repository anyway. `imaging/local_sdxl.py` names both and says what to
+# do when they are absent, which is refuse rather than fetch.
+backend/models/
 
 # Ingest records: which folders the user pointed at, every file in them, and
 # what was extracted. The paths alone describe someone's whole working life —
@@ -107,6 +150,11 @@ frontend/scripts/drive-shots/
 backend/audio/
 backend/audio_clips/
 backend/audio_output/
+# The Kokoro provider's own cache. Missed by the list above because nothing had
+# actually synthesised speech on a working tree until 10 August 2026 — the
+# directory only appears once the model runs. `pyproject.toml` already excludes
+# it from test collection, which is where the omission hid.
+backend/audio_cache/
 
 # Uploads — whatever the user dropped in. Never ours to commit.
 uploads/
@@ -134,3 +182,64 @@ zaram-ai-operating-system-ui/
 # Test VRM avatars. Large binaries, and the sample is a licensed VRoid
 # export rather than ours to redistribute.
 *.vrm
+
+# Projects — the user's own project records, like the Spine and artifacts.
+backend/projects.db
+backend/projects.db-wal
+backend/projects.db-shm
+
+# Commitments read out of the user's own documents. Their contracts and
+# deadlines — never in the repository.
+backend/obligations.db
+backend/obligations.db-wal
+backend/obligations.db-shm
+
+# Knowledge domains. **This was tracked**, committed empty by accident in
+# c07177b, which meant the first domain the user created would have shown up as
+# a modified file ready to be committed with it. Untracked on 26 August; the
+# history is clean because the file never held a row.
+backend/domains.db
+backend/domains.db-wal
+backend/domains.db-shm
+
+# Code signing material. A committed certificate is a revoked certificate:
+# once the private key is in git history it is compromised, and the only
+# remedy is reissuing — paid for again, and re-validated from scratch.
+#
+# Since 2023 a publicly-trusted signing key must live on a hardware token or
+# an HSM, so a .pfx in the repo should not exist at all. These patterns are
+# here for the ones that do anyway: test certificates, exported backups, and
+# whatever a future self downloads "just to try it".
+*.pfx
+*.p12
+*.pem
+*.key
+*.crt
+*.cer
+*.spc
+*.pvk
+.signing/
+signing-*.json
+
+# Brand preview sheets. `scripts/build-brand-assets.py` writes them beside the
+# source image so a preview can never land in `frontend/public/`, which ships.
+# They are regenerated from the same definition as the real assets, so tracking
+# them would put a rebuildable PNG in every diff that touches the mark.
+Logo_Image/_preview.png
+
+# The bundled Python runtime. ~300 MB of third-party CPython plus the backend's
+# dependencies, assembled by scripts/build-python-runtime.mjs and rebuilt from
+# a pinned release rather than tracked. Committing it would put a vendored
+# interpreter in every clone and in every diff.
+/runtime/
+/.runtime-download/
+
+# The cloud key store. Plaintext on disk until the OS keychain lands —
+# committing it would publish the user's provider keys.
+backend/cloud-connections.json
+cloud-connections.json
+
+# Isolated venv for third-party MCP servers. Deliberately not the backend
+# venv: these pull the official MCP SDK, and the installer must not.
+.mcp-venv/
+backend/tests/_flux_sample.png

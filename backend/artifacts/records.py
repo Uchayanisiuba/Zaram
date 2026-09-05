@@ -170,6 +170,66 @@ class ArtifactRecords:
             )
             return cursor.rowcount > 0
 
+    def set_location(self, artifact_id: str, path: str, filename: str) -> bool:
+        """Where the file is now, after it moved out of staging.
+
+        The one thing that legitimately changes a record's path. `put` refuses
+        to replace a row for good reasons — a silent replace turns a bug
+        upstream into lost provenance — so keeping an image is a narrow update
+        here rather than a re-insert, and the id, the sources and the claims
+        survive it. The user kept *this* picture, not a copy of it.
+
+        Filename travels with the path because `write_new` increments on
+        collision: the kept file may be `blue-2.png` where the staged one was
+        `blue.png`, and a record naming a file that is not there is what makes
+        Work show a card that opens onto nothing.
+        """
+        with self._lock, self._connect() as conn:
+            cursor = conn.execute(
+                "UPDATE artifacts SET path = ?, filename = ? WHERE id = ?",
+                (path, filename, artifact_id),
+            )
+            return cursor.rowcount > 0
+
+    def set_project(self, artifact_id: str, project_id: str) -> bool:
+        """Move an artifact into a project, out of one, or between two.
+
+        The empty string means *no project*, which is the same value a file
+        gets when it is generated outside one — so unassigning restores the
+        original state rather than inventing a third one. There is no "None"
+        here for the same reason `project_id` is `NOT NULL DEFAULT ''`: two
+        spellings of "nowhere" is one more than the filter can ask about.
+
+        Whether the destination project exists is not this layer's question.
+        Records store what they are told; the route validates, because that is
+        where the caller can be answered with a 400 that says why.
+        """
+        with self._lock, self._connect() as conn:
+            cursor = conn.execute(
+                "UPDATE artifacts SET project_id = ? WHERE id = ?",
+                (project_id, artifact_id),
+            )
+            return cursor.rowcount > 0
+
+    def forget_at_path(self, path: str) -> int:
+        """Drop the record for a file that has been cleared from staging.
+
+        **The only removal in this class, and it is narrow on purpose.** It
+        deletes by *path* rather than by id so it cannot be aimed: the sweeper
+        has just unlinked a file and is naming the thing it removed, and there
+        is no call shape here that lets anything delete an arbitrary record.
+
+        This is not a hole in the no-delete rule. That rule is about the write
+        path in `store.py`, which still cannot remove a file from the output
+        folder. What is being forgotten here is the record of something that
+        was never saved — an image the user was shown a countdown for and did
+        not keep. A record outliving its file is what makes Work show a card
+        that opens onto nothing.
+        """
+        with self._lock, self._connect() as conn:
+            cursor = conn.execute("DELETE FROM artifacts WHERE path = ?", (path,))
+            return cursor.rowcount
+
     # ---------------------------------------------------------------- reading
 
     def get(self, artifact_id: str) -> Optional[Artifact]:
@@ -249,6 +309,20 @@ class ArtifactRecords:
 
         return [{"id": row["project_id"], "count": row["n"]} for row in rows]
 
+    def count_for_project(self, project_id: str) -> int:
+        """How many artifacts are assigned to a project.
+
+        Read before deleting one, so the confirmation can say what is in it.
+        Counted here rather than cached on the project record, because a count
+        stored in two places is a count that disagrees with itself.
+        """
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) AS n FROM artifacts WHERE project_id = ?",
+                (project_id,),
+            ).fetchone()
+        return int(row["n"])
+
 
 class DuplicateArtifact(ValueError):
     """That id is already stored. Records are written once."""
@@ -293,7 +367,6 @@ def _kind(value: str) -> ArtifactKind:
 
 def default_db_path() -> str:
     """Beside the other stores, overridable for tests and packaging."""
-    override = os.getenv("ZARAM_ARTIFACTS_DB")
-    if override:
-        return override
-    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", DEFAULT_DB_NAME)
+    from core.paths import in_data_dir
+
+    return in_data_dir(DEFAULT_DB_NAME, "ZARAM_ARTIFACTS_DB")
