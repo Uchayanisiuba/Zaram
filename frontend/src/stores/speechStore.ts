@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { useOrbStore } from './orbStore';
 import { toVisemeTrack, type VisemeCue, type WordTiming } from '@/lib/visemes';
 import { takeCompleteUtterances } from '@/lib/utterances';
-import { stripCitationMarkers } from '@/lib/markers';
+import { speakableText } from '@/lib/speakable';
 
 /**
  * Zaram speaking, and the mouth shapes that go with it.
@@ -341,11 +341,18 @@ export const useSpeechStore = create<SpeechStore>((set, get) => ({
 
   pushSpeech: (replySoFar) => {
     if (!queue) return;
-    // Citation markers are display chrome and were being read aloud: nothing
+    // What the reply *says*, which is not the text the screen shows.
+    //
+    // Citation markers are display chrome and were being read aloud — nothing
     // stripped them on this path, so Kokoro pronounced "[M1]" mid-sentence.
-    // `ChatSurface` and `SpeakButton` both strip for their own reasons; this is
-    // the third caller and the only one that had been missed.
-    const spoken = stripCitationMarkers(replySoFar);
+    // Code and markdown were the same failure one size larger, reported 3
+    // September 2026: a fenced block was read out identifier by identifier and
+    // `**bold**` arrived as its asterisks. `speakableText` is that one
+    // function now, markers included, and this is the only place it is needed
+    // — `speak` (the button) begins by pushing the whole reply through here,
+    // so both the streaming and the on-demand paths clean identically rather
+    // than by two rules that would drift.
+    const spoken = speakableText(replySoFar);
     if (spoken.length <= consumed) return;
 
     spokenSoFar = spoken;
