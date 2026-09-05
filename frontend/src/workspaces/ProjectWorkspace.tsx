@@ -19,7 +19,7 @@
  * The screen someone lands on when they have no projects is the important one,
  * so it says what a project is *for* rather than showing an empty table.
  */
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import SurfaceHeader from '../components/common/SurfaceHeader';
 import {
   Layers,
@@ -31,7 +31,9 @@ import {
   ChevronRight,
   ChevronDown,
   CornerUpLeft,
+  Upload,
 } from 'lucide-react';
+import { uploadFiles } from '@/services/ingestClient';
 import {
   assignToProject,
   listArtifacts,
@@ -604,6 +606,8 @@ function ProjectContents({ project }: { project: Project }) {
         </ul>
       )}
 
+      <ImportDocuments project={project} />
+
       {files !== null && !picking && (
         <button
           type="button"
@@ -672,6 +676,145 @@ function ProjectContents({ project }: { project: Project }) {
             </ul>
           )}
         </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Bringing the project's own documents in.
+ *
+ * **Not the same thing as the button above it, and the difference is the whole
+ * reason it is a second control.** "Add files" moves an artifact *Zaram made*
+ * into this project — a label on an existing row. This reads documents the
+ * *user* has: a brief, a contract, a spreadsheet of rates. They go through the
+ * ordinary ingest path, land in Knowledge as sources, and every fact they
+ * produce carries `project:<id>` rather than being global.
+ *
+ * That scope is the point of importing here rather than in Knowledge. Rule 7i:
+ * facts about *the work* belong to the project and are recalled inside it;
+ * facts about *the person* are global. A contract indexed in Knowledge answers
+ * questions in every other project too, which is how one client's rate ends up
+ * in another client's proposal.
+ *
+ * The upload path is Knowledge's, unchanged — same route, same parsers, same
+ * uploads directory, same per-file progress — with one field added. A second
+ * import implementation would be a second set of the split-chunk and
+ * partial-write bugs that one has already been through.
+ *
+ * Folders are not offered. A browser cannot read one, and Knowledge's field
+ * for typing a path is where that belongs; duplicating it here would be a
+ * second way to do the same thing with a different failure.
+ */
+function ImportDocuments({ project }: { project: Project }) {
+  const load = useProjectStore((s) => s.load);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+  const [progress, setProgress] = useState<{ index: number; total: number; name: string } | null>(
+    null,
+  );
+  const [done, setDone] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => () => abortRef.current?.abort(), []);
+
+  const importFiles = useCallback(
+    async (chosen: File[]) => {
+      if (!chosen.length || progress) return;
+      abortRef.current = new AbortController();
+      setError(null);
+      setDone(null);
+      setProgress({ index: 0, total: chosen.length, name: 'Reading…' });
+
+      let indexed = 0;
+      try {
+        await uploadFiles(
+          chosen,
+          (event) => {
+            if (event.type === 'file') {
+              if (event.status === 'indexed' || event.status === 'sparse') indexed += 1;
+              setProgress({ index: event.index, total: event.total, name: event.name });
+            } else if (event.type === 'error') {
+              setError(event.message);
+            }
+          },
+          abortRef.current.signal,
+          project.id,
+        );
+        // The fact count on the row above is derived server-side, so it is
+        // re-read rather than adjusted here — a number kept in two places is
+        // the number that ends up wrong on a delete confirmation.
+        await load();
+        setDone(
+          indexed === chosen.length
+            ? `Read ${indexed} file${indexed === 1 ? '' : 's'} into this project.`
+            : `Read ${indexed} of ${chosen.length}. The rest are listed under Knowledge with what happened.`,
+        );
+      } catch (e) {
+        if ((e as Error).name !== 'AbortError') {
+          // The backend's own sentence where it sent one: "that file is larger
+          // than 100 MB" is actionable and "413" is not.
+          setError(e instanceof Error ? e.message : 'Those files could not be read.');
+        }
+      } finally {
+        setProgress(null);
+      }
+    },
+    [load, progress, project.id],
+  );
+
+  return (
+    <div className="mt-2">
+      <input
+        ref={inputRef}
+        type="file"
+        multiple
+        hidden
+        onChange={(e) => {
+          const chosen = Array.from(e.target.files ?? []);
+          // Cleared so choosing the same file twice fires a change event the
+          // second time.
+          e.target.value = '';
+          void importFiles(chosen);
+        }}
+      />
+
+      <button
+        type="button"
+        onClick={() => inputRef.current?.click()}
+        disabled={progress !== null}
+        className="inline-flex items-center gap-1 rounded px-2 py-1 text-[10px] transition-colors disabled:opacity-40"
+        style={{ background: 'var(--color-glass)', border: '1px solid rgba(255,255,255,.08)' }}
+      >
+        <Upload size={11} aria-hidden />
+        Import documents
+      </button>
+
+      {progress === null && done === null && error === null && (
+        <p className="mt-1 text-[10px] leading-relaxed" style={{ color: 'var(--color-text-muted)' }}>
+          Your own files — a brief, a contract, a rate card. Zaram reads them on this
+          machine and keeps what it learns for this project.
+        </p>
+      )}
+
+      {progress !== null && (
+        <p className="mt-1 truncate text-[10px]" style={{ color: 'var(--color-text-muted)' }}>
+          {progress.total > 0
+            ? `Reading ${progress.index} of ${progress.total} — ${progress.name}`
+            : progress.name}
+        </p>
+      )}
+
+      {done !== null && (
+        <p className="mt-1 text-[10px]" style={{ color: 'var(--color-text-muted)' }}>
+          {done}
+        </p>
+      )}
+
+      {error !== null && (
+        <p className="mt-1 text-[10px]" style={{ color: '#fca5a5' }}>
+          {error}
+        </p>
       )}
     </div>
   );

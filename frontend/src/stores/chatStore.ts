@@ -467,6 +467,22 @@ export const useChatStore = create<ChatState>((set, get) => ({
             // as cloud would claim an egress that may not have happened.
             if (event.locality === 'cloud') {
               useSystemStore.getState().noteCloudAnswer();
+              // **And there is no local model to warm, so stop guessing that
+              // there is.** The timer below fires on silence and says
+              // "Warming up · Starting the local model", which for a cloud
+              // reply is false in both halves: nothing is loading, and the
+              // wait is a provider's round trip. Measured 3 September 2026
+              // with a model reached through OpenRouter — the label appeared
+              // under a reply that had left the machine.
+              //
+              // This event arrives ahead of the first token precisely so it
+              // can be acted on, and cloud is the one locality where the
+              // answer is knowable in advance. `local` and `null` still fall
+              // through to the timer: a cold local model is a real wait worth
+              // naming, and `null` means the backend could not place the
+              // model, where a guess either way is a claim about the user's
+              // data.
+              clearTimeout(warmingTimer);
             }
             break;
           }

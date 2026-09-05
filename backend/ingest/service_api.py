@@ -129,15 +129,48 @@ class IngestService:
             )
         )
 
+    def _fact_writer(self, scope: str | None) -> Callable[[str, dict[str, Any]], str] | None:
+        """The store-fact callable for one run, carrying that run's scope.
+
+        Rule 7i: every fact carries `global` or `project:<id>`. `_store_fact`
+        has read a `scope` key out of the metadata since M8 and **nothing ever
+        put one there** — the comment beside it said "a folder is indexed into
+        a project when one is active" and no caller had a project to give it.
+        So every ingested fact landed global, and a project's own documents
+        were no more its own than anything else on the machine.
+
+        A closure per run rather than a field on the service, because two
+        ingests can be in flight — a drop into a project while a folder scan
+        finishes — and a field would give the second one's facts to the first
+        one's project. There is no undoing that from the outside: the scope is
+        on the fact, and nothing records which run wrote it.
+
+        None when nothing is scoped, so `_store_fact` sees exactly the metadata
+        it saw before and a global ingest is byte-for-byte unchanged.
+        """
+        if self._memory is None:
+            return None
+        if not scope:
+            return self._store_fact
+
+        def write(text: str, metadata: dict[str, Any]) -> str:
+            return self._store_fact(text, {**metadata, "scope": scope})
+
+        return write
+
     # -- running ------------------------------------------------------------ #
 
     def scan(
-        self, root: str, on_outcome: Callable[[IngestOutcome], None] | None = None
+        self,
+        root: str,
+        on_outcome: Callable[[IngestOutcome], None] | None = None,
+        *,
+        scope: str | None = None,
     ) -> tuple[str, IngestReport]:
         """Ingest a folder and record the result. Returns (source_id, report)."""
         report = ingest_folder(
             root,
-            store_fact=self._store_fact if self._memory is not None else None,
+            store_fact=self._fact_writer(scope),
                 read_obligations=(
                     self._read_obligations if self._obligations is not None else None
                 ),
@@ -147,7 +180,7 @@ class IngestService:
         self._records.record_outcomes(source_id, list(report.outcomes))
         return source_id, report
 
-    def stream_scan(self, root: str) -> Iterator[dict[str, Any]]:
+    def stream_scan(self, root: str, *, scope: str | None = None) -> Iterator[dict[str, Any]]:
         """Ingest, yielding an event per file as it finishes.
 
         Progress is per file rather than a percentage because that is what the
@@ -175,7 +208,7 @@ class IngestService:
         for index, outcome in enumerate(
             iter_ingest_folder(
                 root_path,
-                store_fact=self._store_fact if self._memory is not None else None,
+                store_fact=self._fact_writer(scope),
                 read_obligations=(
                     self._read_obligations if self._obligations is not None else None
                 ),
@@ -298,18 +331,25 @@ class IngestService:
         path.write_text(text, encoding="utf-8")
         return path
 
-    def stream_ingest_paths(self, paths: list[Path]) -> Iterator[dict[str, Any]]:
+    def stream_ingest_paths(
+        self, paths: list[Path], *, scope: str | None = None
+    ) -> Iterator[dict[str, Any]]:
         """Ingest specific files, streaming an event each, as `stream_scan` does.
 
         The same NDJSON shape as the folder scan on purpose: the interface
         already parses it, the progress is already per-file, and a drop of
         thirty documents wants exactly the report a folder of thirty does.
+
+        `scope` is `project:<id>` when the files were imported from a project,
+        and every fact they produce carries it. Rule 7i: the scope is a field
+        on the one store, not a second store, so these facts are recalled
+        alongside global ones inside that project and left out of every other.
         """
         yield {"type": "start", "root": str(self.uploads_dir()), "total": len(paths)}
 
         started = time.perf_counter()
         outcomes: list[IngestOutcome] = []
-        store = self._store_fact if self._memory is not None else None
+        store = self._fact_writer(scope)
         read = self._read_obligations if self._obligations is not None else None
 
         for index, path in enumerate(paths, start=1):

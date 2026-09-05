@@ -75,6 +75,26 @@ const shortDate = (seconds: number) =>
     month: 'short',
   });
 
+/**
+ * What the curator is doing to each fact, in rule 7e's own words.
+ *
+ * The state is the backend's — it asks the decay engine's own predicate, so
+ * the thresholds are not spelled a second time here. This file only decides
+ * how to say it.
+ */
+const STANDING_NOTE: Record<string, string> = {
+  provisional:
+    'It is here provisionally: nothing has needed it yet, and it will fade if nothing does.',
+  durable: 'Using it is what keeps it — it has earned its place.',
+  fading: 'Nothing has used it, so it is on its way out. Pin it if it should stay.',
+  pinned: 'Pinned, so it is exempt from fading.',
+};
+
+/** Amber for the one that is going, so it can be found by scanning. The other
+ *  two are ordinary states and are not worth a colour each. */
+const standingColour = (standing: string) =>
+  standing === 'fading' ? 'var(--color-amber, #fbbf24)' : undefined;
+
 const bytes = (n: number) => {
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} kB`;
@@ -477,6 +497,14 @@ export default function MemoryWorkspace() {
                         ) : (
                           <>
                             {r.source} · {relative(r.created_at)} · recalled {r.access_count}×
+                            {r.standing && (
+                              <>
+                                {' · '}
+                                <span style={{ color: standingColour(r.standing) }}>
+                                  {r.standing}
+                                </span>
+                              </>
+                            )}
                           </>
                         )}
                       </p>
@@ -508,6 +536,12 @@ export default function MemoryWorkspace() {
                               Learned {relative(r.created_at)} from {r.source}, and used in{' '}
                               {r.access_count} {r.access_count === 1 ? 'answer' : 'answers'} since.
                               {r.pinned && ' Pinned, so recall prefers it over more recent facts.'}
+                              {/* Rule 7e has been running daily since it
+                                  landed and nothing on this screen said so. A
+                                  Spine you cannot watch curating itself is one
+                                  you assume is hoarding — which is most of why
+                                  saving everything by hand feels necessary. */}
+                              {!r.pinned && r.standing && ` ${STANDING_NOTE[r.standing]}`}
                             </>
                           )}
                         </p>

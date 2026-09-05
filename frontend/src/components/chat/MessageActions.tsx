@@ -33,6 +33,7 @@
 import { useState } from 'react';
 import { Copy, Check, RotateCcw, Pencil } from 'lucide-react';
 import { stripCitationMarkers } from '@/lib/markers';
+import RememberAction from './RememberAction';
 
 /** How long the copied confirmation stays up. Long enough to be seen at a
  *  glance, short enough that it is gone before the next message arrives. */
@@ -67,6 +68,7 @@ export default function MessageActions({
   text,
   onRetry,
   onEdit,
+  remember,
   retryLabel = 'Ask again',
   align = 'left',
 }: {
@@ -89,6 +91,17 @@ export default function MessageActions({
    * The transcript remains a record of what was actually asked.
    */
   onEdit?: () => void;
+  /**
+   * Let this message be kept in the Spine on purpose.
+   *
+   * Omitted while a reply is still streaming — half a sentence is not a fact —
+   * and it is an *override* rather than the way facts get in: capture and
+   * decay both keep working underneath it. See `RememberAction`.
+   */
+  remember?: {
+    origin: 'conversation' | 'generated';
+    projectId: string | null;
+  };
   retryLabel?: string;
   align?: 'left' | 'right';
 }) {
@@ -111,7 +124,10 @@ export default function MessageActions({
 
   return (
     <div
-      className="flex items-center gap-0.5 mt-1"
+      // `flex-wrap`, because the remember panel is a full-width sibling of the
+      // buttons rather than a popover. Wrapping puts it on its own line under
+      // them and leaves the row itself unchanged when it is closed.
+      className="flex flex-wrap items-center gap-0.5 mt-1"
       style={{ justifyContent: align === 'right' ? 'flex-end' : 'flex-start' }}
     >
       <ActionButton label={copied ? 'Copied' : 'Copy this message'} onClick={() => void copy()}>
@@ -140,6 +156,17 @@ export default function MessageActions({
           <RotateCcw size={11} />
           <span>{retryLabel}</span>
         </ActionButton>
+      )}
+
+      {/* Last in the row, and the only one that writes anything. Copy, edit
+          and re-ask all leave the Spine exactly as it was; this one puts
+          something in it, so it sits apart from the three that don't. */}
+      {remember && (
+        <RememberAction
+          text={text}
+          origin={remember.origin}
+          projectId={remember.projectId}
+        />
       )}
     </div>
   );
