@@ -58,6 +58,12 @@ EXPECTED_GET_ROUTES = [
     # The character: name, manner, voice. Served together because they are one
     # thing to the user.
     "/character",
+    # The MCP client was live from 1 September with no way in: attaching a
+    # server meant hand-editing `mcp-servers.json`. Same class of gap as
+    # `/export` above -- the capability existed and the product could not
+    # reach it.
+    "/tools/servers",
+    "/tools/health",
 ]
 
 
@@ -84,6 +90,12 @@ def test_route_is_reachable(client: TestClient, path: str) -> None:
         ("DELETE", "/providers/cloud"),
         ("POST", "/egress/killswitch"),
         ("POST", "/routing/preference"),
+        ("POST", "/tools/servers"),
+        # DELETE /tools/servers/{id} is deliberately absent. Its correct answer
+        # for an unknown id *is* 404, so this check -- whose entire premise is
+        # that 404 means unmounted -- cannot tell the two apart. It is covered
+        # in `test_a_pasted_server_cannot_grant_itself_writes.py`, where the
+        # server exists first and the assertion can mean something.
     ],
 )
 def test_write_route_is_reachable(client: TestClient, method: str, path: str) -> None:

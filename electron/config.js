@@ -104,6 +104,7 @@ function createConfig(options) {
         '/providers',
         '/readiness',
         '/routing',
+        '/tools',
         '/search',
         '/voice',
       ],

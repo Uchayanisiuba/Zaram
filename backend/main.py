@@ -202,6 +202,15 @@ from conversations.api import router as conversations_router, set_records  # noq
 set_records(ConversationRecords(conversations_db_path()))
 app.include_router(conversations_router)
 
+# The MCP client has been live since 1 September and had no way in: attaching a
+# server meant hand-editing `mcp-servers.json`. Mounted here and asserted in
+# `tests/test_routes_are_mounted.py` for the reason the provider router records
+# above -- a complete, tested router that nobody included answers 404 on the
+# running product while its own tests pass.
+from runtimes.mcp.api import router as tools_router  # noqa: E402
+
+app.include_router(tools_router)
+
 # --- KERNEL LIFECYCLE ---
 kernel = KernelBootstrapper()
 chat_router = None
@@ -223,6 +232,16 @@ async def startup_event():
     providers_runtime = getattr(kernel, "providers_runtime", None)
     if providers_runtime is not None:
         set_providers_runtime(providers_runtime)
+
+    # Only `/tools/health` needs this. The rest of the tool routes read the
+    # store on disk, so Settings can list what is configured before the kernel
+    # has finished starting -- and, more importantly, without connecting to
+    # anything. Opening a settings page must not launch a stranger's process.
+    from runtimes.mcp.api import set_mcp_runtime
+
+    mcp_runtime = getattr(kernel, "mcp_runtime", None)
+    if mcp_runtime is not None:
+        set_mcp_runtime(mcp_runtime)
 
     # Speech Runtime is now initialized via KernelBootstrapper
     speech_runtime = kernel.speech_runtime
