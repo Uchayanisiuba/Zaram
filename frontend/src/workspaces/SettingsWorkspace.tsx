@@ -36,6 +36,7 @@
  */
 import { useCallback, useEffect, useState } from 'react';
 import LetterheadSection from '../components/settings/LetterheadSection';
+import ToolsSection from '../components/settings/ToolsSection';
 import {
   Volume2,
   Shield,
@@ -55,6 +56,7 @@ import {
   FileText,
   Settings as SettingsIcon,
   UserRound,
+  Wrench,
 } from 'lucide-react';
 import SurfaceHeader from '../components/common/SurfaceHeader';
 import AdvancedModelField from '../components/settings/AdvancedModelField';
@@ -1295,6 +1297,18 @@ export default function SettingsWorkspace() {
           icon={<FileText size={14} style={{ color: 'var(--color-indigo-light)' }} />}
         >
           <LetterheadSection Row={Row} />
+        </Section>
+
+        {/* ---------------------------------------------------------- Tools */}
+        {/* Servers are configured here and nowhere else. CLAUDE.md: *tools
+            never get menu items; they are actions inside the conversation.*
+            That is what lets capability grow without the navigation growing,
+            so this is a section rather than a seventh node. */}
+        <Section
+          title="Tools"
+          icon={<Wrench size={14} style={{ color: 'var(--color-indigo-light)' }} />}
+        >
+          <ToolsSection Row={Row} />
         </Section>
 
         {/* ----------------------------------------------------- Character */}
