@@ -1,4 +1,29 @@
 /** @type {import('tailwindcss').Config} */
+
+/* The colours below map to CSS variables that `src/index.css` defines in
+ * `oklch()`. They used to be wrapped as `hsl(var(--x))`, which is what shadcn
+ * emits when its variables hold bare HSL channels — and this theme was moved to
+ * oklch without unwrapping them.
+ *
+ * `hsl(oklch(...))` is not valid CSS. The custom property still accepted the
+ * token stream, so nothing errored and the build stayed green; the declarations
+ * that consumed it were dropped at substitution time instead. Two consequences
+ * were live in the shipped stylesheet:
+ *
+ *   *{border-color:hsl(var(--border))}   — a global rule, so every element with
+ *     a border width and no explicit colour fell back to `currentColor` and drew
+ *     its border in the text colour rather than the intended grey.
+ *
+ *   .focus\:ring-accent:focus            — the composer's focus ring, the only
+ *     one in the app, painted nothing at all.
+ *
+ * Unwrapped, the variables pass through as the colours they already are. Note
+ * that a bare `var()` gives up Tailwind's `<alpha-value>` support, so opacity
+ * modifiers (`border-border/50`) will not work on these; nothing uses one.
+ *
+ * There was also a `tailwind.config.ts` beside this file. Tailwind resolves
+ * `.js` first, so it never loaded — deleted rather than left to look load-bearing.
+ */
 export default {
   darkMode: ["class"],
   content: [
@@ -19,38 +44,38 @@ export default {
     },
     extend: {
       colors: {
-        border: "hsl(var(--border))",
-        input: "hsl(var(--input))",
-        ring: "hsl(var(--ring))",
-        background: "hsl(var(--background))",
-        foreground: "hsl(var(--foreground))",
+        border: "var(--border)",
+        input: "var(--input)",
+        ring: "var(--ring)",
+        background: "var(--background)",
+        foreground: "var(--foreground)",
         primary: {
-          DEFAULT: "hsl(var(--primary))",
-          foreground: "hsl(var(--primary-foreground))",
+          DEFAULT: "var(--primary)",
+          foreground: "var(--primary-foreground)",
         },
         secondary: {
-          DEFAULT: "hsl(var(--secondary))",
-          foreground: "hsl(var(--secondary-foreground))",
+          DEFAULT: "var(--secondary)",
+          foreground: "var(--secondary-foreground)",
         },
         destructive: {
-          DEFAULT: "hsl(var(--destructive))",
-          foreground: "hsl(var(--destructive-foreground))",
+          DEFAULT: "var(--destructive)",
+          foreground: "var(--destructive-foreground)",
         },
         muted: {
-          DEFAULT: "hsl(var(--muted))",
-          foreground: "hsl(var(--muted-foreground))",
+          DEFAULT: "var(--muted)",
+          foreground: "var(--muted-foreground)",
         },
         accent: {
-          DEFAULT: "hsl(var(--accent))",
-          foreground: "hsl(var(--accent-foreground))",
+          DEFAULT: "var(--accent)",
+          foreground: "var(--accent-foreground)",
         },
         popover: {
-          DEFAULT: "hsl(var(--popover))",
-          foreground: "hsl(var(--popover-foreground))",
+          DEFAULT: "var(--popover)",
+          foreground: "var(--popover-foreground)",
         },
         card: {
-          DEFAULT: "hsl(var(--card))",
-          foreground: "hsl(var(--card-foreground))",
+          DEFAULT: "var(--card)",
+          foreground: "var(--card-foreground)",
         },
       },
       borderRadius: {

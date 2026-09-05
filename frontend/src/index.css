@@ -115,6 +115,11 @@
   --color-indigo-a-45: rgba(99,102,241,0.45);
   --color-indigo-a-70: rgba(99,102,241,0.70);
   --color-text-muted-light: #b0b4cc;
+
+  /* Focus. Indigo-light rather than the shadcn `--ring` (a near-black grey at
+     oklch(0.439 0 0)) because a focus ring that cannot be seen is not one.
+     Measured 6.42:1 against --color-surface. */
+  --focus-ring: #818cf8;
   --text-micro: 0.5625rem; /* 9px */
 }
 
@@ -425,3 +430,34 @@ body {
 }
 .scroll-area::-webkit-scrollbar { width: 4px; }
 .scroll-area::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }
+
+/* ─── Focus ──────────────────────────────────────────────────────────
+ *
+ * 31 call sites reach for `outline-none`, and 11 put anything back. The
+ * result was 210 focusable controls — 163 buttons, 31 inputs, the rest
+ * selects, textareas and tabIndex containers — that a keyboard could reach
+ * and not show.
+ *
+ * `:focus-visible`, never `:focus`. The browser only matches it when focus
+ * arrived by keyboard (and always, for text fields), so a mouse click leaves
+ * no ring behind — which is the thing `outline-none` was reached for in the
+ * first place. Restoring the outline on `:focus` would re-create the problem
+ * and the utilities would come back.
+ *
+ * Unlayered and last in the file on purpose. `.outline-none` and
+ * `:focus-visible` are both one class of specificity, so this wins on source
+ * order alone — `@tailwind utilities` sits at the top of this file. No
+ * `!important`, and nothing to keep in sync at the call sites.
+ */
+:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+/* Inputs already carry their own border; the offset would sit the ring on top
+   of an adjacent control in the composer's button cluster. */
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline-offset: 0;
+}

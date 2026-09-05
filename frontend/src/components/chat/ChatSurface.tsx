@@ -1144,7 +1144,7 @@ export default function ChatSurface({ navigate }: Props) {
             // The original note is worth keeping — the two controls plus their
             // gap occupied 68px, and 64px of padding put the caret under the
             // mic. One more button is 26px more.
-            className="w-full pl-4 pr-28 py-3 text-sm bg-[var(--color-glass)] border border-white/5 rounded-xl text-slate-200 placeholder-slate-500 outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-colors"
+            className="w-full pl-4 pr-28 py-3 text-sm bg-[var(--color-glass)] border border-white/5 rounded-xl text-slate-200 placeholder-slate-500 transition-colors"
           />
           {/* One positioned container, three ordinary buttons inside it.
               Each control used to place itself with its own `right-*` offset,
