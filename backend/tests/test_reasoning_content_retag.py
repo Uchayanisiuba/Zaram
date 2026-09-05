@@ -39,6 +39,149 @@ def run(*deltas: dict) -> str:
     return "".join(OpenAICompatibleEngine._tokens(sse(*deltas)))
 
 
+class TestOpenRouterCallsTheFieldSomethingElse:
+    """The third name one defect has arrived under, and the third provider.
+
+    `reasoning_content` was read for TabbyAPI. Then `ollama_engine` had to
+    learn `thinking`, and its own comment records what that cost — *"the
+    maintainer saw thinking on TabbyAPI and lost it on switching to Ollama,
+    and read that as Zaram breaking."* OpenRouter is the third: it normalises
+    a reasoning model's monologue into `delta.reasoning`, nothing here looked
+    for that name, and every cloud reasoning model therefore lost its working
+    in silence.
+
+    Reported by the maintainer on 4 September 2026, on a machine whose recent
+    traffic is entirely OpenRouter — `openai/gpt-5.6-sol-pro`,
+    `qwen/qwen3.8-27b`, `google/gemini-3.7-flash`.
+    """
+
+    def test_openrouters_field_is_not_dropped(self):
+        out = run({"reasoning": "weighing it up"}, {"content": "the answer"})
+
+        assert "weighing it up" in out, (
+            "OpenRouter puts the thinking in `reasoning`; unread, it vanishes "
+            "and the panel stays empty for every cloud reasoning model"
+        )
+        assert out == "<think>weighing it up</think>the answer"
+
+    def test_it_opens_once_across_several_deltas(self):
+        out = run(
+            {"reasoning": "one "},
+            {"reasoning": "two"},
+            {"content": "answer"},
+        )
+
+        assert out == "<think>one two</think>answer"
+
+    def test_a_provider_sending_both_names_is_not_doubled(self):
+        """Some gateways echo the OpenAI field alongside their own. Taking one
+        keeps the monologue from arriving twice in the panel."""
+        out = run({"reasoning_content": "hmm", "reasoning": "hmm"}, {"content": "a"})
+
+        assert out == "<think>hmm</think>a"
+
+    def test_a_structure_rather_than_text_is_ignored_not_stringified(self):
+        """OpenRouter also sends `reasoning_details` as objects, and some
+        gateways put a dict in `reasoning` itself. `str(dict)` in the working
+        panel is worse than an empty one — it is indistinguishable from
+        something the model wrote."""
+        out = run({"reasoning": {"summary": "hmm"}}, {"content": "the answer"})
+
+        assert "summary" not in out
+        assert "{" not in out
+        assert out == "the answer"
+
+    def test_a_plain_reply_is_untouched(self):
+        """The regression guard: no tag appears where no thinking was sent."""
+        assert run({"content": "391"}) == "391"
+
+
+class TestOpenRouterStreamsAListOfObjects:
+    """`reasoning_details` is the field OpenRouter's own docs name for
+    streaming — *"in streaming responses, `reasoning_details` appears in
+    `choices[].delta.reasoning_details` for each chunk"* — and it is a list of
+    objects rather than a string.
+
+    Read on 4 September 2026 from openrouter.ai/docs/use-cases/reasoning-tokens
+    rather than from memory, because the shape decides the parser: a list
+    handled as a string yields `str(list)` in the working panel.
+
+    Reasoning is returned **by default** when a model produces it, which is
+    why nothing is added to the request. Sending an unknown `reasoning`
+    parameter to the other servers this engine talks to — TabbyAPI, LM Studio,
+    llama.cpp — would risk breaking them to ask for something already on.
+    """
+
+    def test_the_documented_streaming_shape_is_read(self):
+        out = run(
+            {"reasoning_details": [
+                {"type": "reasoning.text", "text": "step by step", "index": 0}
+            ]},
+            {"content": "the answer"},
+        )
+
+        assert out == "<think>step by step</think>the answer"
+
+    def test_a_summary_entry_is_read_too(self):
+        out = run(
+            {"reasoning_details": [
+                {"type": "reasoning.summary", "summary": "weighed it up", "index": 0}
+            ]},
+            {"content": "a"},
+        )
+
+        assert out == "<think>weighed it up</think>a"
+
+    def test_raw_working_is_preferred_over_a_precis_of_it(self):
+        """An entry carrying both is the working plus a summary of the
+        working, and the panel exists for the working."""
+        out = run(
+            {"reasoning_details": [
+                {"type": "reasoning.text", "text": "the working", "summary": "a precis"}
+            ]},
+            {"content": "a"},
+        )
+
+        assert "the working" in out
+        assert "a precis" not in out
+
+    def test_encrypted_reasoning_is_skipped_rather_than_shown(self):
+        """`reasoning.encrypted` is a base64 blob that streams as
+        "[REDACTED]". There is nothing in it to read, and putting it in the
+        panel is noise the model did not write."""
+        out = run(
+            {"reasoning_details": [
+                {"type": "reasoning.encrypted", "data": "S2V5Ym9hcmQ=", "index": 0}
+            ]},
+            {"content": "the answer"},
+        )
+
+        assert out == "the answer"
+        assert "S2V5" not in out
+
+    def test_a_list_is_never_stringified(self):
+        """The failure this shape invites: `str(list)` in the working panel,
+        indistinguishable from something the model wrote."""
+        out = run(
+            {"reasoning_details": [{"type": "reasoning.text", "text": "hmm"}]},
+            {"content": "a"},
+        )
+
+        assert "[{" not in out
+        assert "'type'" not in out
+
+    def test_several_entries_join_in_order(self):
+        out = run(
+            {"reasoning_details": [
+                {"type": "reasoning.text", "text": "one ", "index": 0},
+                {"type": "reasoning.text", "text": "two", "index": 1},
+            ]},
+            {"content": "a"},
+        )
+
+        assert out == "<think>one two</think>a"
+
+
 class TestReasoningContentIsReadAndRetagged:
     def test_thinking_in_its_own_field_is_not_dropped(self):
         out = run({"reasoning_content": "weighing it up"}, {"content": "the answer"})

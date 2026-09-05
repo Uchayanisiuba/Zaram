@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import urllib.error
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
@@ -64,6 +65,33 @@ def _strip_version(base_url: str) -> str:
     """The API root without a trailing `/v1`, however the user wrote it."""
     trimmed = (base_url or "").strip().rstrip("/")
     return trimmed[: -len("/v1")] if trimmed.endswith("/v1") else trimmed
+
+
+#: A server saying, with a status code, that it is holding nothing.
+#:
+#: TabbyAPI's answer to `/v1/model` when no model is loaded is 503 with
+#: ``{"detail": "No models are currently loaded."}``. Matched on the sentence
+#: as well as the status, because 503 on its own also means "busy, try later" —
+#: and a busy server is exactly the one most likely to be holding the card.
+#: Reading that as an empty card is the error that runs in the dangerous
+#: direction. See `OpenAICompatibleAdapter.resident_models`.
+_NOTHING_LOADED = re.compile(r"no models? (?:are |is )?(?:currently )?loaded", re.I)
+
+
+def _says_nothing_is_loaded(exc: "urllib.error.HTTPError") -> bool:
+    """Whether an error response is the server reporting an empty card.
+
+    Reads the body at most once — an `HTTPError` is a one-shot stream, so a
+    second reader would get nothing — and answers False on anything it cannot
+    read, which leaves residency unknown rather than guessing empty.
+    """
+    if exc.code != 503:
+        return False
+    try:
+        body = exc.read().decode("utf-8", "replace")
+    except Exception:
+        return False
+    return bool(_NOTHING_LOADED.search(body))
 
 
 class OpenAICompatibleAdapter:
@@ -162,9 +190,31 @@ class OpenAICompatibleAdapter:
         try:
             payload = self._get("/v1/model", timeout=timeout)
         except urllib.error.HTTPError as exc:
-            # The server answered and declined. TabbyAPI serves this route; a
-            # server that does not is one whose residency we cannot read, and
-            # saying so is better than reporting an empty card.
+            # **An error status is two different answers, and reading it as one
+            # is what put "Warming up" under every reply.**
+            #
+            # TabbyAPI, up with nothing loaded, answers `/v1/model` with
+            # **503 and `{"detail": "No models are currently loaded."}`** —
+            # measured against the running server on 127.0.0.1:1234, 3
+            # September 2026. That is a well-formed statement that the card is
+            # empty: the same fact the `not model_id` branch below already
+            # handles, arriving with a status code instead of a null field.
+            #
+            # Treated as "cannot read", it made residency unknown for the whole
+            # machine — `ProviderManager._resident_models` merges every local
+            # provider and one unknown makes the merge unknown — so
+            # `swap_preflight` returned None, no `model_load` event was sent,
+            # and the interface's 2.5-second timer guessed a cold model on
+            # every single message. The `resident` event that exists to cancel
+            # that guess was never emitted at all. The LM Studio adapter is
+            # registered at that address on every machine, so an idle
+            # OpenAI-compatible server anywhere on the box was enough.
+            #
+            # Anything else stays unknown, and that asymmetry is deliberate:
+            # the error of reporting an empty card is the dangerous one — an
+            # unseen tenant makes a cold start look like it fits.
+            if _says_nothing_is_loaded(exc):
+                return {}
             logger.debug("%s residency probe rejected: %s", self.provider_id, exc)
             return None
         except urllib.error.URLError as exc:

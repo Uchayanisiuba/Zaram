@@ -112,7 +112,20 @@ class TestNothingIsLost:
         # nowhere — and specifically not in the answer, where it would be spoken.
         chunks = ["<think>I was cut off"]
         assert _joined(chunks, REASONING) == "I was cut off"
-        assert _joined(chunks, ANSWER) == ""
+        assert "I was cut off" not in _joined(chunks, ANSWER)
+
+    def test_a_reply_that_is_all_working_says_so_rather_than_nothing(self):
+        """This asserted ``== ""`` until 3 September 2026, and the empty string
+        was the bug rather than the contract.
+
+        It is the same stream as the test above, read from the user's side: a
+        blank bubble with a collapsed *Thought process* beside it and nothing
+        anywhere saying the model ran out. Reported from the running app twice
+        in one sitting. The half worth keeping — the monologue never reaches
+        the answer, where speech would read it aloud — is asserted above and is
+        unchanged. See ``test_a_reply_that_is_all_thinking_says_so.py``.
+        """
+        assert _joined(["<think>I was cut off"], ANSWER) == ReasoningSplitter.NO_ANSWER
 
     def test_every_character_survives_except_the_tags(self):
         text = "before <think>middle</think> after"

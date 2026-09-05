@@ -80,6 +80,7 @@ import base64
 import json
 import logging
 import os
+import re
 import urllib.error
 from urllib.parse import urlparse
 from collections.abc import Iterator
@@ -96,6 +97,14 @@ logger = logging.getLogger(__name__)
 #: because a cold cloud model behind a queue can take a while to start, and a
 #: timeout mid-answer is worse than a slow one.
 DEFAULT_TIMEOUT = 120.0
+
+#: A quoted string in a Jinja chat template — `'...'` or `"..."`.
+#:
+#: Used to read what a template *emits* without evaluating it, which is the
+#: only safe way to ask a question of a template: rendering one means running
+#: somebody else's code to decide how to parse their output. See
+#: `OpenAICompatibleEngine._template_opens_thinking`.
+_QUOTED_LITERAL_RE = re.compile(r"'((?:[^'\\]|\\.)*)'|\"((?:[^\"\\]|\\.)*)\"")
 
 
 #: OpenRouter's endpoint, used when `OPENROUTER_API_KEY` is set. Hardcoded
@@ -266,6 +275,60 @@ def _data_uri(image: str) -> str:
     )
 
 
+def _thinking_from(delta: dict) -> str:
+    """The reasoning in one streaming delta, under whichever name it arrives.
+
+    **This is the third name one defect has arrived under, which is why it is
+    a function rather than another line in the parser.** `reasoning_content`
+    is the OpenAI extension TabbyAPI and DeepSeek follow. Ollama put the same
+    thing in a `thinking` field, and `ollama_engine` records in as many words
+    what that cost — *"the maintainer saw thinking on TabbyAPI and lost it on
+    switching to Ollama, and read that as Zaram breaking."* OpenRouter is the
+    third, with `reasoning` and the documented streaming field
+    `reasoning_details`.
+
+    Each time the failure was silent: the panel built to show the working
+    simply stayed empty, which is indistinguishable from a model that does not
+    reason. So every known name is read here, in one place, and a provider
+    that invents a fourth costs one line rather than an investigation.
+
+    **A structure is never stringified.** `reasoning_details` is a list of
+    objects; `str(dict)` in the working panel is worse than an empty one,
+    because it is indistinguishable from something the model wrote. Only the
+    documented human-readable keys are taken, and `reasoning.encrypted` — a
+    base64 `data` blob that streams as ``"[REDACTED]"`` — is deliberately
+    skipped, since there is nothing in it to show.
+    """
+    for name in ("reasoning_content", "reasoning"):
+        value = delta.get(name)
+        if isinstance(value, str) and value:
+            return value
+
+    details = delta.get("reasoning_details")
+    if not isinstance(details, list):
+        return ""
+
+    parts: list[str] = []
+    for entry in details:
+        if not isinstance(entry, dict):
+            continue
+        # `text` before `summary`: an entry carrying both is the raw working
+        # plus a precis of it, and the working is what the panel is for.
+        for key in ("text", "summary"):
+            piece = entry.get(key)
+            if isinstance(piece, str) and piece:
+                parts.append(piece)
+                break
+    return "".join(parts)
+
+
+#: Statuses that settle the question of whether a server has `/v1/model` at
+#: all. Anything else — 503 while a model loads, a timeout, a refused socket —
+#: means the question could not be *asked*, which is a different answer and
+#: must not be cached. See `_template_opens_thinking`.
+_NO_SUCH_ROUTE = frozenset({404, 405, 501})
+
+
 class OpenAICompatibleEngine(LLMEngine):
     """Streams from an OpenAI-compatible `/v1/chat/completions`.
 
@@ -318,6 +381,10 @@ class OpenAICompatibleEngine(LLMEngine):
         #: `LOCAL_SAMPLING` for why the local path supplies these and the
         #: cloud path deliberately does not.
         self._sampling = dict(sampling) if sampling else None
+        #: Whether this server's prompt template opens a `<think>` block the
+        #: model is expected to close. `None` until asked once — see
+        #: `_template_opens_thinking`.
+        self._opens_thinking: bool | None = None
 
     @staticmethod
     def _normalise(base_url: str) -> str:
@@ -330,6 +397,108 @@ class OpenAICompatibleEngine(LLMEngine):
     @property
     def endpoint(self) -> str:
         return f"{self.base_url}/chat/completions"
+
+    def _template_opens_thinking(self) -> bool:
+        """Does this server's prompt template leave a `<think>` block open?
+
+        **A third shape of reasoning output, and the one that leaks.** The two
+        already handled put the thinking somewhere of its own: Ollama in a
+        `thinking` field, an OpenAI-compatible server with a reasoning parser
+        in `reasoning_content`. This is the case where it arrives in `content`
+        with **only a closing tag** — because the chat template emitted the
+        opening one into the *prompt*, so the model begins its output already
+        inside the block and never writes `<think>` itself.
+
+        `ReasoningSplitter` switches on an opening tag. There isn't one, so the
+        entire monologue is filed as the answer: rendered on screen, committed
+        to the transcript, and read aloud by Kokoro. Measured 3 September 2026
+        against TabbyAPI serving `Qwen3.8-27B-exl3-2.20bpw` — `reasoning_content`
+        was `null` and the content began *"The user is asking for 17 times 23.
+        Let me calculate…"*, closing with `</think>` before the real answer.
+
+        **Asked of the server, not guessed from the model name.** The same
+        discipline `OllamaEngine` uses when it asks `/api/show` for the
+        `thinking` capability: `/v1/model` reports the template, and the
+        template says what it does. That server's ends with
+
+            {%- if add_generation_prompt %}
+                {{- '<|im_start|>assistant\\n' }}
+                {%- if enable_thinking is defined and enable_thinking is false %}
+                    {{- '<think>\\n\\n</think>\\n\\n' }}
+                {%- else %}
+                    {{- '<think>\\n' }}
+                {%- endif %}
+            {%- endif %}
+
+        so the test is whether any literal in it opens a think block **without
+        closing it in the same literal** — which distinguishes the branch above
+        from its disabled twin, and needs no Jinja evaluation.
+
+        Any doubt resolves to **False**, and the asymmetry is deliberate. A
+        wrong yes prepends a tag to a model that was not thinking and files its
+        whole reply into the panel, showing the user an empty answer. A wrong
+        no is today's behaviour, which is visible and reported rather than
+        silent. Cached per engine because it is a property of the loaded model,
+        and this runs before every reply.
+        """
+        if self._opens_thinking is not None:
+            return self._opens_thinking
+
+        try:
+            gate = self._gate if self._gate is not None else get_gate()
+            raw = gate.request(
+                f"{self.base_url}/model",
+                method="GET",
+                timeout=min(self._timeout, 5.0),
+                headers={"Authorization": f"Bearer {self._api_key}"},
+                source=self._source,
+            )
+            payload = json.loads(raw.decode("utf-8", "replace") if isinstance(raw, bytes) else raw)
+            template = (payload.get("parameters") or {}).get("prompt_template_content") or ""
+        except urllib.error.HTTPError as exc:
+            if exc.code in _NO_SUCH_ROUTE:
+                # A server that does not have the route will not grow one. This
+                # is the ordinary case — only TabbyAPI serves `/v1/model` — and
+                # settling it here is what keeps this from asking a *cloud*
+                # provider before every single reply, which is an egress per
+                # reply for an answer that cannot change.
+                self._opens_thinking = False
+            logger.debug("no readable prompt template at %s: %s", self.base_url, exc)
+            return False
+        except Exception as exc:
+            # **Could not ask is not "the answer is no", and conflating them is
+            # what put the leak back.** TabbyAPI answers `/v1/model` with 503
+            # until its model has finished loading, and an exl3 takes minutes —
+            # `scripts/dev-app.ps1` says so in as many words and deliberately
+            # does not wait for it. So Zaram's first reply of a session asks too
+            # early, and the old code had already written `False` into the cache
+            # *before* the request, latching it for the life of the engine. Every
+            # later reply then filed the whole monologue as the answer: rendered,
+            # transcribed, and read aloud, with the fix for that shape present
+            # and correct and never consulted again.
+            #
+            # Left unlatched, so the next reply asks again. The cost of being
+            # wrong the other way is one loopback GET per reply against a server
+            # that is genuinely never ready; the cost of latching is a session
+            # that shows thinking as the answer and cannot recover without a
+            # restart. Same asymmetry `vram_bytes` keeps by returning `None`
+            # rather than `0`.
+            logger.debug("could not ask %s for its prompt template yet: %s", self.base_url, exc)
+            return False
+
+        self._opens_thinking = False
+        for single, double in _QUOTED_LITERAL_RE.findall(template):
+            literal = single or double
+            if OPEN_TAG in literal and CLOSE_TAG not in literal:
+                logger.info(
+                    "%s opens a think block in its prompt; tagging the stream so "
+                    "the thinking reaches the panel rather than the answer",
+                    self.base_url,
+                )
+                self._opens_thinking = True
+                break
+
+        return self._opens_thinking
 
     def _body(
         self,
@@ -470,7 +639,9 @@ class OpenAICompatibleEngine(LLMEngine):
                     else DataClass.PROMPT
                 ),
             )
-            yield from self._tokens(lines)
+            # Asked before the stream is read, and cached, so it costs one
+            # request per engine rather than one per reply.
+            yield from self._tokens(lines, self._template_opens_thinking())
         except EgressDenied as denied:
             # `stream_lines` checks inside the generator, so a denial can also
             # surface here rather than above — a generator body does not run
@@ -509,7 +680,7 @@ class OpenAICompatibleEngine(LLMEngine):
         return f"The provider returned {status}. {detail}".strip()
 
     @staticmethod
-    def _tokens(lines: Any) -> Iterator[str]:
+    def _tokens(lines: Any, starts_in_reasoning: bool = False) -> Iterator[str]:
         """Parse SSE into plain text, per the engine contract.
 
         Frames are unwrapped here rather than passed upward. `OllamaEngine`
@@ -517,10 +688,12 @@ class OpenAICompatibleEngine(LLMEngine):
         the contract docstring is explicit that transport framing belongs to
         the transport.
 
-        **`reasoning_content` is read as well as `content`, and re-tagged.**
-        Providers that split a reasoning model's stream -- TabbyAPI with its
-        parser on, DeepSeek, and others following the same OpenAI extension --
-        put the thinking in a second delta field. This engine read only
+        **`reasoning_content` and `reasoning` are read as well as `content`,
+        and re-tagged.** Providers that split a reasoning model's stream --
+        TabbyAPI with its parser on, DeepSeek, and others following the same
+        OpenAI extension -- put the thinking in a second delta field, and
+        OpenRouter calls it `reasoning`, or streams `reasoning_details`. See
+        `_thinking_from`, which is where every name is read. This engine read only
         `content`, so on those providers the thinking was **dropped in
         silence**: not leaked into the answer, simply gone, with the panel that
         exists to show it left permanently empty.
@@ -531,8 +704,28 @@ class OpenAICompatibleEngine(LLMEngine):
         it -- the reasoning event, the transcript, and the rule that thinking
         never reaches `pushSpeech`. A parallel path would have to re-earn all
         three.
+
+        **`starts_in_reasoning` covers the third shape**, where the thinking
+        arrives in `content` with only a closing tag because the prompt
+        template opened the block. See `_template_opens_thinking` for how that
+        is established — from the server's own template, never from the model's
+        name. The opening tag is supplied here so the rest of the stream needs
+        no special handling at all.
         """
         in_reasoning = False
+        #: Set once the model closes the block the prompt opened, so the
+        #: end-of-stream tidy-up can tell "it finished thinking" from "it never
+        #: did".
+        model_closed_its_block = False
+        #: The last few characters of content, so a closing tag arriving split
+        #: across deltas is still recognised. See the comment where it is used.
+        watch = ""
+
+        if starts_in_reasoning:
+            # Before any frame, because the first content delta is already the
+            # middle of a thought.
+            in_reasoning = True
+            yield OPEN_TAG
         #: Whether any answer text has been emitted yet. Gates the one-off
         #: leading-whitespace trim below; see the comment there.
         answer_started = False
@@ -549,7 +742,7 @@ class OpenAICompatibleEngine(LLMEngine):
                 # so the tidy-up after the loop never runs on the normal path --
                 # and an unclosed `<think>` makes the splitter hold the entire
                 # reply, showing the user nothing at all.
-                if in_reasoning:
+                if in_reasoning and not model_closed_its_block:
                     yield CLOSE_TAG
                 return
             try:
@@ -569,7 +762,7 @@ class OpenAICompatibleEngine(LLMEngine):
             for choice in frame.get("choices") or ():
                 delta = choice.get("delta") or {}
 
-                thinking = delta.get("reasoning_content")
+                thinking = _thinking_from(delta)
                 if thinking:
                     if not in_reasoning:
                         in_reasoning = True
@@ -578,6 +771,33 @@ class OpenAICompatibleEngine(LLMEngine):
 
                 text = delta.get("content")
                 if text:
+                    if starts_in_reasoning:
+                        # The model writes its own closing tag here, in the
+                        # content stream, because the opening one was in the
+                        # prompt. So the content is passed through untouched
+                        # and `ReasoningSplitter` does the splitting — the same
+                        # component, on the same shape, as every other path.
+                        #
+                        # The auto-close below must not run: it fires when
+                        # content arrives, and here the first content *is* the
+                        # thinking.
+                        #
+                        # **Watched across deltas, not within one.** `</think>`
+                        # arrives split — `"</"`, `"think"`, `">"` — exactly as
+                        # `[M1]` does, and this repository has now paid for that
+                        # lesson three times. Checking a single delta missed
+                        # it, so the tidy-up at the end added a *second*
+                        # closing tag and it landed in the answer. A rolling
+                        # tail one character shorter than the tag is enough to
+                        # span any split, and costs nothing to keep.
+                        watch += text
+                        if CLOSE_TAG in watch:
+                            model_closed_its_block = True
+                            in_reasoning = False
+                        watch = watch[-(len(CLOSE_TAG) - 1):]
+                        yield text
+                        continue
+
                     # The answer starting is what closes the block. A provider
                     # is not obliged to send a final empty reasoning delta, so
                     # waiting for one would leave the tag unclosed and the
@@ -609,5 +829,11 @@ class OpenAICompatibleEngine(LLMEngine):
 
         # A stream that ends mid-thought still has to close its tag, or the
         # splitter holds everything and the user sees nothing at all.
-        if in_reasoning:
+        #
+        # That applies to the prompt-opened case too, and there it is the
+        # honest failure rather than the safe one: if the model never wrote
+        # `</think>`, the whole reply ends up in the working panel with an
+        # empty answer beside it. Visible, and the alternative is worse — the
+        # tag left open means the splitter releases nothing at all.
+        if in_reasoning and not model_closed_its_block:
             yield CLOSE_TAG
