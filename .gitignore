@@ -242,3 +242,4 @@ cloud-connections.json
 # Isolated venv for third-party MCP servers. Deliberately not the backend
 # venv: these pull the official MCP SDK, and the installer must not.
 .mcp-venv/
+backend/tests/_flux_sample.png
