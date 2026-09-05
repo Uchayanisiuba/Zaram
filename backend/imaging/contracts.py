@@ -51,9 +51,15 @@ from typing import Callable, List, Optional, Protocol, runtime_checkable
 #: to discover after saying yes.
 MAX_IMAGES = 4
 
-#: Denoising steps when the caller does not say. SDXL base is trained for ~30;
-#: below about 20 the image is visibly unresolved and above ~50 nothing changes.
-DEFAULT_STEPS = 30
+#: Denoising steps when the caller does not say.
+#:
+#: **Four, because FLUX.1 [schnell] is distilled to finish in four.** The name
+#: is German for "fast" and the distillation is the whole point of the variant:
+#: it is trained to land its result in a handful of steps with no guidance. The
+#: SDXL number here was 30, and running 30 on schnell is seven times the wait
+#: for a picture that is no better and often slightly worse, because the extra
+#: steps push past what the distillation was trained to produce.
+DEFAULT_STEPS = 4
 
 
 @dataclass(frozen=True)

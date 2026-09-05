@@ -406,6 +406,184 @@ class IntentRouter:
         "make me an image", "make me a picture",
         "illustration of", "logo for", "paint me", "photorealistic",
     }
+
+    #: Verbs that make a thing, for `_asks_for_a_drawing`.
+    #:
+    #: Every one of them makes documents and spreadsheets too, which is exactly
+    #: why a verb alone decides nothing here — it is the noun beside it that
+    #: says what is being made.
+    _MAKING_VERBS = frozenset({
+        "generate", "create", "make", "draw", "paint", "illustrate",
+        "design", "render", "sketch", "produce",
+    })
+
+    #: Nouns that name a picture.
+    #:
+    #: `chart` and `diagram` are deliberately absent: both are made from the
+    #: user's own numbers by the charting exporter, which is a different
+    #: capability with a data table under it, and routing "make a chart of my
+    #: expenses" to a diffusion model would produce a plausible picture of
+    #: numbers nobody has.
+    _PICTURE_NOUNS = frozenset({
+        "image", "images", "picture", "pictures", "photo", "photos",
+        "photograph", "photographs", "illustration", "illustrations",
+        "drawing", "drawings", "painting", "paintings", "artwork",
+        "logo", "logos", "icon", "icons", "poster", "posters",
+        "wallpaper", "avatar", "portrait", "sketch", "render", "rendering",
+    })
+
+    #: Words that turn a picture noun into a reference to one that exists.
+    #:
+    #: The distinction the whole rule turns on: *"generate an image of a blue
+    #: dog"* asks for a picture, *"generate a summary of the image"* asks about
+    #: one. `of`, `in` and `from` are the three that carry most of the weight,
+    #: and they are why a preposition immediately before the noun disqualifies
+    #: it however good the verb was.
+    _REFERS_TO_AN_EXISTING_PICTURE = frozenset({
+        "this", "that", "these", "those", "my", "our", "your", "their", "its",
+        "attached", "uploaded", "supplied", "above", "below", "sent",
+        "in", "of", "from", "on", "about", "inside", "within",
+    })
+
+    #: How far back from the noun a making verb still counts.
+    #:
+    #: Five words covers *"generate for me, please, an image"* and stops short
+    #: of *"generate a document that explains the process and includes a
+    #: picture"*, where the verb governs the document and the picture is a
+    #: detail inside it.
+    _VERB_REACH = 5
+
+    #: How far back the reference check looks. Three, so *"of the image"* and
+    #: *"in this picture"* are both caught with the article in between.
+    _REFERENCE_REACH = 3
+
+    #: The shortest word that may be matched with a letter missing or wrong.
+    #:
+    #: Six, and the number is doing real work. At five, `paint` and `point`
+    #: are one edit apart and so are `photo` and `proto`, so *"point to the
+    #: image"* would ask a diffusion model for a drawing. Transpositions are
+    #: allowed below this length because they cannot collide the same way: no
+    #: rearrangement of `paint` spells another English word.
+    _SHORTEST_FUZZY = 6
+
+    @staticmethod
+    def _within_one_edit(word: str, target: str) -> bool:
+        """Whether one insertion, deletion or substitution turns one into the other.
+
+        Written out rather than imported: it is twenty lines, it runs on every
+        message, and the alternative is a dependency for a distance nobody
+        needs to be general about.
+        """
+        if abs(len(word) - len(target)) > 1:
+            return False
+        if len(word) == len(target):
+            differences = sum(1 for a, b in zip(word, target) if a != b)
+            return differences <= 1
+        shorter, longer = (word, target) if len(word) < len(target) else (target, word)
+        i = j = 0
+        skipped = False
+        while i < len(shorter) and j < len(longer):
+            if shorter[i] == longer[j]:
+                i += 1
+                j += 1
+                continue
+            if skipped:
+                return False
+            skipped = True
+            j += 1
+        return True
+
+    @classmethod
+    def _looks_like(cls, word: str, target: str) -> bool:
+        """Whether ``word`` is ``target``, or a plausible typo of it.
+
+        **Asked for on 4 September 2026**, after *"Generate and image of a
+        blue"* — which the shape rule already handled, since `and` is just a
+        word in between. What it did not handle is a misspelling of the words
+        the rule turns on: `imgae`, `pictrue`, `genrate`. A typo in the noun
+        is the same request and should reach the same runtime.
+
+        Two forms are accepted and everything else is refused, which is what
+        keeps this from becoming the fuzzy matcher the previous comment here
+        declined to build:
+
+        **A transposition** — same first letter, same letters, same length.
+        This is the overwhelmingly common typing error, it is exactly what
+        `imgae` and `pictrue` are, and it is safe at any length because
+        rearranging a short word does not spell a different one.
+
+        **One edit, in a word of at least six letters.** Below that the
+        neighbours are real words with different meanings — `paint`/`point`,
+        `photo`/`proto` — and matching them would send *"point to the image"*
+        to a diffusion model. That is the mirror of the bug this all started
+        with, and no more acceptable for being in the other direction.
+
+        The first letter must match in both forms. People fumble the middle of
+        a word far more often than its start, and anchoring there is most of
+        what stops `image` from reaching `usage`.
+        """
+        if word == target:
+            return True
+        if not word or word[0] != target[0]:
+            return False
+        if len(word) == len(target) and sorted(word) == sorted(target):
+            return True
+        if len(target) >= cls._SHORTEST_FUZZY and cls._within_one_edit(word, target):
+            return True
+        return False
+
+    @classmethod
+    def _is_one_of(cls, word: str, vocabulary: frozenset) -> bool:
+        """Membership, allowing for a typo. Exact first, so the common case is
+        a set lookup and the fuzzy scan runs only on words that missed."""
+        if word in vocabulary:
+            return True
+        return any(cls._looks_like(word, entry) for entry in vocabulary)
+
+    @classmethod
+    def _asks_for_a_drawing(cls, prompt: str) -> bool:
+        """Whether ``prompt`` asks for a picture to be *made*.
+
+        **A phrase list was the whole rule until 4 September 2026, and one
+        typo defeated it.** The maintainer wrote *"Generate and image of a
+        blue"* — `and` for `an` — and got a paragraph from the chat model
+        explaining that it could not draw. `"generate an image"` was in the
+        list and `"generate and image"` was not, and no list ever will be:
+        people typo, abbreviate, and put words in between.
+
+        So the shape is matched instead of the string: a **making verb**
+        within `_VERB_REACH` words before a **picture noun**, unless the noun
+        is a reference to a picture that already exists. That reads the
+        sentence the way its author meant it — one asks for a thing to be
+        made, the other asks about a thing already made — and the typo falls
+        out for free, because `and` is simply a word in between.
+
+        Typos in the words the rule turns on are handled too — see
+        `_looks_like`, which accepts a transposition or a single edit and
+        refuses everything else. That was declined here at first, on the
+        grounds that edit distance would reach *"generate an email"* as
+        readily as *"generate an imagine"*. It is right that unbounded edit
+        distance does exactly that; the bounds are what make it safe, and they
+        are asserted rather than described.
+
+        The phrase list stays and is checked beside this, because it holds
+        cases with no verb at all — *"a logo for Northwind"*,
+        *"photorealistic"* — which are requests to draw with nothing here to
+        match.
+        """
+        words = re.findall(r"[a-z]+", (prompt or "").lower())
+        for index, word in enumerate(words):
+            if not cls._is_one_of(word, cls._PICTURE_NOUNS):
+                continue
+            before = words[max(0, index - cls._REFERENCE_REACH):index]
+            # Exactly, never fuzzily. These are short function words — `in`,
+            # `of`, `my` — and one edit from any of them is half the language.
+            if any(w in cls._REFERS_TO_AN_EXISTING_PICTURE for w in before):
+                continue
+            reach = words[max(0, index - cls._VERB_REACH):index]
+            if any(cls._is_one_of(w, cls._MAKING_VERBS) for w in reach):
+                return True
+        return False
     _SPEECH_KEYWORDS = {"speak", "say", "voice", "audio", "talk", "pronounce", "read aloud",
                         "out loud", "aloud"}
     _FILESYSTEM_KEYWORDS = {"file", "open", "read", "search", "find", "directory", "folder"}
@@ -561,7 +739,12 @@ class IntentRouter:
         # Check for image-generation phrases. Before vision, because every one
         # of them contains a vision keyword.
         image_hits = self._matches(prompt_lower, self._IMAGE_KEYWORDS)
-        image_matched = bool(image_hits)
+        # Either signal is enough, and they cover different things: the phrase
+        # list holds requests with no verb in them, `_asks_for_a_drawing` holds
+        # every phrasing nobody thought to list. Both paths in this class use
+        # the same pair, so the keyword classifier and the semantic override
+        # cannot disagree about what counts as asking for a picture.
+        image_matched = bool(image_hits) or self._asks_for_a_drawing(prompt)
         signals.append(IntentSignal(
             name="image_phrases",
             weight=0.7,
@@ -736,6 +919,47 @@ class IntentRouter:
             decision.intent, ["reasoning.generate"]
         )
 
+        # **Asking for a picture to be made is a precondition, not a
+        # similarity judgement**, and this is the same defect the search block
+        # below records, one intent over: `classify` returns the moment this
+        # method returns non-None, so on any machine whose embedder works the
+        # keyword classifier is never consulted at all. The phrases exist, they
+        # are correct, and nothing was reaching them.
+        #
+        # Measured on the maintainer's machine, 3 September 2026, against
+        # bge-m3 through the real router: **"Generate an Image of a blue dog"
+        # routes to `vision.analyze`** — reading a picture, not drawing one —
+        # and "draw a blue dog" routes to `conversation`. `vision.analyze` has
+        # no registered runtime, so it was dropped as a misroute and the
+        # request fell through to `reasoning.generate`: a fluent paragraph
+        # explaining that no image could be made, from a machine with SDXL
+        # installed and `can_draw: true`. Rule 9 in its silent form, which is
+        # the exact failure `_NEVER_DEGRADE` and the images runtime's refusal
+        # were both built to prevent — and neither ever ran, because the plan
+        # never contained an image step to protect.
+        #
+        # The two intents are close in embedding space for an obvious reason:
+        # *"what is in this image"* and *"generate an image of…"* share their
+        # rarest word. Similarity cannot separate reading from emitting, and
+        # `CLAUDE.md` already settles what to do about it — *modality is a
+        # capability gate, never a ranking*; *"can this model accept an image,
+        # or emit one?" is binary and is a precondition*. So an unambiguous
+        # phrase decides, and the router keeps every case where no such phrase
+        # was written.
+        #
+        # Narrow on purpose. `_IMAGE_KEYWORDS` is phrases rather than words,
+        # bare "draw" is deliberately absent so *"draw up a contract"* stays a
+        # document, and nothing here widens what may run — an image request
+        # that cannot be served still meets the runtime's refusal.
+        drawing_asked_for = bool(
+            self._matches(prompt.lower(), self._IMAGE_KEYWORDS)
+        ) or self._asks_for_a_drawing(prompt)
+        overridden_from = ""
+        if drawing_asked_for and decision.intent != "image":
+            overridden_from = decision.intent
+            intent_type = IntentType.IMAGE
+            capabilities = list(self._SEMANTIC_CAPABILITIES["image"])
+
         # **Wanting live information is a property of the question, not a rival
         # intent.** This read `decision.intent == "search"` alone, and because
         # `classify` returns the moment this method returns non-None, the
@@ -782,13 +1006,25 @@ class IntentRouter:
             confidence=decision.confidence,
             capabilities=capabilities,
             requires_search=requires_search,
-            requires_vision=decision.intent == "vision",
-            requires_image_output=decision.intent == "image",
+            # Read from the resolved intent rather than from the router's,
+            # or the override above would reach the plan and not the flags —
+            # and `requires_vision` is what `_resolve_model` uses to pick a
+            # model that can *read* a picture. Left at the router's answer,
+            # "generate an image of a blue dog" would have planned an image
+            # step and chosen a vision model to run it.
+            requires_vision=intent_type is IntentType.VISION,
+            requires_image_output=intent_type is IntentType.IMAGE,
             requires_speech=decision.intent == "speech",
             search_suppressed=wants_search and not requires_search,
             search_suppressed_reason=suppression_reason(wants_search, requires_search),
             metadata={
                 "router": "semantic",
+                #: Present only when an image phrase overrode the router, and
+                #: named so the routing stays legible: CLAUDE.md asks for the
+                #: decision *and the evidence behind it*, and "we ignored the
+                #: classifier here" is exactly the kind of thing a reader of
+                #: this metadata needs to be told rather than left to infer.
+                **({"overrode": overridden_from} if overridden_from else {}),
                 # The legible half. CLAUDE.md: show routing decisions in plain
                 # language, with the evidence behind them.
                 "reason": decision.reason,

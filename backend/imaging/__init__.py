@@ -16,7 +16,7 @@ from .contracts import (
     ImageRequest,
     ProgressCallback,
 )
-from .local_sdxl import SdxlProvider, find_checkpoint
+from .local_flux import FluxProvider, find_model
 
 __all__ = [
     "AVAILABLE",
@@ -28,6 +28,6 @@ __all__ = [
     "ImageProvider",
     "ImageRequest",
     "ProgressCallback",
-    "SdxlProvider",
-    "find_checkpoint",
+    "FluxProvider",
+    "find_model",
 ]
