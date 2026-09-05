@@ -214,6 +214,9 @@ class KokoroProvider(VoiceProvider):
         self._discoverer = voice_discoverer or HuggingFaceVoiceDiscoverer()
         self._cache = cache or AudioCache(self.config.cache_directory)
         self._pipeline: Any = None
+        #: Which language front end `_pipeline` was built with, so a voice from
+        #: another language rebuilds it instead of borrowing this one.
+        self._pipeline_lang: str = ""
         self._kokoro: Any = None
         self._voices: Dict[str, Dict[str, Any]] = {}
         self._initialized = False
@@ -245,17 +248,54 @@ class KokoroProvider(VoiceProvider):
             "provider": self.name,
         }
 
-    def _build_pipeline(self) -> Any:
+    #: Languages that are one choice rather than two, so a voice list built for
+    #: one of them must offer both. American and British English differ only in
+    #: the front end, both ship in the same pack, and `_lang_for_voice` builds
+    #: whichever the chosen voice needs — so listing only the configured half
+    #: would hide voices that work perfectly.
+    #:
+    #: This is not a general "list everything": the other languages need extra
+    #: `misaki` dependencies that are not installed, so offering their voices
+    #: would be offering choices that fail.
+    _INTERCHANGEABLE = (frozenset({"a", "b"}),)
+
+    def _discoverable_langs(self) -> List[str]:
+        """Which language codes the voice list should cover."""
+        configured = self.config.lang_code
+        for group in self._INTERCHANGEABLE:
+            if configured in group:
+                return sorted(group)
+        return [configured]
+
+    def _lang_for_voice(self, voice: str) -> str:
+        """The front end a voice needs, read off the voice's own name.
+
+        Kokoro's prefix is `<language><gender>_`: `af_heart` is American
+        female, `bm_fable` British male. The pipeline's `lang_code` selects the
+        grapheme-to-phoneme front end, and a mismatch is not a failure — it is
+        an American front end pronouncing a British voice, which a listener
+        hears as something wrong with the voice.
+
+        Taking it from the voice rather than from the config means a user who
+        picks a voice in Settings gets the front end that voice was trained
+        with, without a second setting they would have to know to change. A
+        name whose first letter is not a language Kokoro knows falls back to
+        the configured default rather than guessing.
+        """
+        first = (voice or "")[:1].lower()
+        return first if first in _LANG_NAMES else self.config.lang_code
+
+    def _build_pipeline(self, lang_code: str) -> Any:
         factory = self._pipeline_factory or _default_pipeline_factory
         return factory(
             repo_id=self.config.repo_id,
-            lang_code=self.config.lang_code,
+            lang_code=lang_code,
             device=self.config.device,
             backend=self.config.backend,
             onnx_variant=self.config.onnx_variant,
         )
 
-    def _ensure_pipeline(self) -> Any:
+    def _ensure_pipeline(self, lang_code: Optional[str] = None) -> Any:
         """Load the model, asking the gate first if the weights are not here.
 
         **This used to just construct KPipeline**, which resolves through
@@ -272,9 +312,20 @@ class KokoroProvider(VoiceProvider):
         so the gate is asked only when there is genuinely something to fetch.
         Asking unconditionally would fill the egress log with decisions about
         requests that were never going to happen.
+
+        `lang_code` is the front end the *requested voice* needs. A cached
+        pipeline built for a different language is rebuilt rather than reused,
+        because reuse is what makes a British voice come out American. Two
+        pipelines are not held at once: switching language is rare — it happens
+        when the user changes voice in Settings — and a second resident copy of
+        the model would cost memory permanently to save a load that happens
+        almost never.
         """
-        if self._pipeline is not None:
+        wanted = lang_code or self.config.lang_code
+        if self._pipeline is not None and self._pipeline_lang == wanted:
             return self._pipeline
+        self._pipeline = None
+        self._pipeline_lang = wanted
         if self._kokoro is None:
             raise ProviderUnavailableError("Kokoro package is not available")
 
@@ -284,7 +335,7 @@ class KokoroProvider(VoiceProvider):
         previous = os.environ.get("HF_HUB_OFFLINE")
         os.environ["HF_HUB_OFFLINE"] = "1"
         try:
-            self._pipeline = self._build_pipeline()
+            self._pipeline = self._build_pipeline(wanted)
             return self._pipeline
         except Exception as offline_failure:
             self._log.info(
@@ -311,7 +362,7 @@ class KokoroProvider(VoiceProvider):
                 f"was blocked: {denied}"
             ) from denied
 
-        self._pipeline = self._build_pipeline()
+        self._pipeline = self._build_pipeline(wanted)
         return self._pipeline
 
     def _to_wav_bytes(self, audio: Any, sample_rate: int) -> bytes:
@@ -414,7 +465,9 @@ class KokoroProvider(VoiceProvider):
             # 2. Voice discovery (no hard-coded names)
             if self._kokoro is not None and self.config.voice_discovery_enabled:
                 try:
-                    names = self._discoverer.discover(self.config.repo_id, self.config.lang_code)
+                    names: List[str] = []
+                    for code in self._discoverable_langs():
+                        names.extend(self._discoverer.discover(self.config.repo_id, code))
                     self._voices = {n: self._voice_metadata(n) for n in names}
                 except Exception as exc:
                     self._voices = {}
@@ -463,7 +516,10 @@ class KokoroProvider(VoiceProvider):
             selected = self.config.default_voice
 
         try:
-            pipeline = self._ensure_pipeline()
+            # The front end the *selected* voice needs, not the configured
+            # one. They agree for the default and differ the moment a user
+            # picks a voice from another language in Settings.
+            pipeline = self._ensure_pipeline(self._lang_for_voice(selected))
         except Exception as exc:
             self._log.error(
                 "Kokoro unavailable: %s", exc, extra={**extra, "failure": type(exc).__name__}

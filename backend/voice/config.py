@@ -14,7 +14,6 @@ from pathlib import Path
 from typing import Optional
 
 DEFAULT_REPO_ID = "hexgrad/Kokoro-82M"
-DEFAULT_LANG_CODE = "a"
 
 #: The voice Zaram speaks in when the user has not chosen one.
 #:
@@ -26,13 +25,55 @@ DEFAULT_LANG_CODE = "a"
 #: it is the same shape as the two TTS text cleaners and the two rankers this
 #: repository has already paid for. Every one of those now reads this name.
 #:
-#: `am_michael` because the maintainer asked for a male voice on 19 August. It
-#: was already in use here for two of the tone presets, so it is a voice this
-#: codebase is known to produce sound with rather than an id read off a list.
+#: `am_michael`, restored on 4 September 2026 after listening to it beside
+#: `am_onyx` in the running product.
+#:
+#: **Four defaults in two days, and the sequence is the useful record**:
+#: `af_heart` → `am_michael` → `bm_fable` (too deep) → `am_onyx` (chosen from
+#: seven samples) → `am_michael` again. Onyx won a comparison of clips and lost
+#: the comparison that counts, which is hearing it answer real questions for a
+#: while.
+#:
+#: **The measurements never predicted a single one of these choices, and that
+#: is the finding.** Over the same line, `bm_fable` and `am_michael` have the
+#: *same* median F0 — 120.6 Hz each — and differ only in timbre, 949 Hz against
+#: 1585 Hz of spectral centroid. Ordered by brightness: `am_onyx` 608,
+#: `bm_fable` 949, `am_eric` 1183, `am_puck` 1442, `bm_george` 1527,
+#: `am_michael` 1585, `am_fenrir` 1632. So the voice rejected as *too deep* and
+#: the voice chosen to replace it sit at opposite ends of that ordering, and
+#: the one finally kept is the second brightest of the seven. No number in this
+#: list would have got there.
+#:
+#: `CLAUDE.md`'s fifth integration test — *the maintainer can test the output
+#: and judge whether it is good* — is the whole mechanism here. The numbers are
+#: kept because they are cheap and occasionally narrow a shortlist; they are
+#: never the decision, and a session that tries to pick a voice by centroid is
+#: repeating a mistake this comment already paid for twice.
 #:
 #: A *default* is all this is. `user_settings.voice` overrides it, and
 #: `ZARAM_VOICE_DEFAULT_VOICE` overrides that.
 DEFAULT_VOICE = "am_michael"
+
+#: Which grapheme-to-phoneme front end runs, derived from the voice.
+#:
+#: **Kokoro's first letter is a language and the second is a gender**: `af_` is
+#: American female, `bm_` British male. The pipeline is built with a language
+#: code, and a mismatched one is not a crash — it is an American front end
+#: pronouncing a British voice, which sounds like a fault in the *voice*.
+#:
+#: So this is derived rather than written down. `am_michael` and `a` agreed by
+#: hand for two weeks; `bm_fable` and `a` would not have, and nothing in the
+#: code would have said so. The default has changed twice more since, and that
+#: is precisely what makes the derivation worth having: it is the reason no
+#: future change of voice can reintroduce the mismatch by hand. Discovery
+#: filtered the voice list by this letter
+#: too, so a hand-written mismatch also hid the default voice from the list it
+#: is chosen from.
+#:
+#: Per *request*, the voice still wins over this — see
+#: `KokoroProvider._lang_for_voice`. This is the fallback for a voice whose
+#: prefix says nothing.
+DEFAULT_LANG_CODE = DEFAULT_VOICE[0]
 
 #: Which runtime executes Kokoro: ``"torch"`` or ``"onnx"``.
 #:
