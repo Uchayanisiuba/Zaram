@@ -1,8 +1,8 @@
 # Next session — handoff
 
 > **Out of date at the top, current at the bottom.** The newest prompt is
-> *"Prompt for the next session — written 5 September 2026"*, at the very end
-> of this file, and the authoritative state is the **Current state — 5
+> *"Prompt for the next session — written 5 September 2026, evening"*, at the
+> very end of this file, and the authoritative state is the **Current state — 5
 > September** block in `docs/MILESTONES.md`. Everything between here and that
 > prompt is an earlier brief: still accurate about what was built and why,
 > superseded on status. Read it for reasoning, not for what is true today.
@@ -511,9 +511,12 @@ and found nothing.
 
 ---
 
-## Prompt for the next session — written 5 September 2026
+## Prompt for the 5 September session — superseded, its tasks are done
 
-**This is the current prompt.** Everything above it is an earlier brief, kept
+*A1, the 17 failures and A2 were all built on 5 September. Kept for the
+reasoning; the prompt that follows it is the current one.*
+
+**This was the current prompt.** Everything above it is an earlier brief, kept
 for its reasoning and superseded on status. The authoritative state is
 **Current state — 5 September** in `docs/MILESTONES.md`.
 
@@ -612,6 +615,135 @@ then the suite once before committing.
 
 Neither is your task unless the maintainer says so; they are here so they are
 not rediscovered.
+
+* `ServerStore.save()` freezes derived `writes` modes into `mcp-servers.json`,
+  after which the stored value wins over `KNOWN_HOSTS`. Fix belongs in
+  `config.py`.
+* **9,495 lines reached by nothing**, itemised in the Current state block.
+  `backend/runtime/` (singular) is a dead web-search subsystem whose only
+  importers are its own tests, sitting one letter from the live
+  `backend/runtimes/`.
+
+---
+
+## Prompt for the next session — written 5 September 2026, evening
+
+**This is the current prompt.** Everything above it is an earlier brief, kept
+for its reasoning and superseded on status. The authoritative state is
+**Current state — 5 September** in `docs/MILESTONES.md`.
+
+Paste from here down.
+
+---
+
+Read `docs/MILESTONES.md` — the **Current state — 5 September 2026** block —
+before anything else. Then `CLAUDE.md` for the rules.
+
+`main` is the trunk and the working tree is clean. **10 commits are unpushed.**
+Do not push without being asked.
+
+The backend suite is **green**: 3,402 passed, 24 skipped, 0 failed, 0 errors,
+13m33s with Ollama up — it executes different code with Ollama down, and takes
+longer. It was 7 failed and 10 errors this morning. If you see a
+failure, it is yours.
+
+### Your task, in order
+
+**1. Watch a model actually arrive. Start here; it is an hour and it is the
+only thing A2 is missing.**
+
+First run now names a model matched to the machine and downloads it when the
+offer is pressed. Every part of that is asserted by tests, including the route
+against the real application object — and **nobody has seen a real model
+land**, because proving it means fetching gigabytes on the maintainer's
+connection.
+
+Do it on a machine with Ollama running and **no chat model** (an Ollama with
+only `bge-m3` is exactly the state `/readiness` calls `engine_without_model`).
+Open the conversation, and you should see the first-run screen where the
+composer is. Then:
+
+* the offer names a real size, and a line under it dated `2026-08-30`;
+* pressing it opens a row and starts *nothing*;
+* pressing *Start the download* streams stages and a percentage;
+* when it ends the screen replaces itself with a composer, with nothing to
+  dismiss;
+* `GET /egress` holds **one** new entry for `registry.ollama.ai`, written
+  before the bytes moved.
+
+If any of it is wrong, the code is `backend/providers/pull.py`,
+`backend/providers/api.py`'s `/providers/pull`,
+`frontend/src/components/firstrun/ModelPull.tsx` and `services/pullClient.ts`.
+
+**2. The two questions the code is holding open**, both recorded in the source
+rather than decided:
+
+* **A 24 GB machine is offered a 20 GB first download.** The manifest matches
+  the machine; `CLAUDE.md` says a user asked to pull 7 GB before their first
+  answer closes the app. Above ~9 GB of budget those two instructions disagree.
+  `core/readiness.py`'s module docstring states the case and imposes no ceiling
+  deliberately — inventing one there would be a second recommendation policy
+  beside the manifest. **Ask the maintainer**; do not choose.
+* **The pull cannot be cancelled.** Closing the row leaves it running, there is
+  no resume, and disk-full arrives as a message with a *Try again* that starts
+  over. Whether that is enough for v1 is a product call.
+
+**3. Then packaging.** It is still the actual blocker: a stranger cannot
+install this, and first-run polish does not substitute for it.
+
+### How to verify, without launching Electron
+
+The dev credential is a file, not magic. Start both halves with the same value
+and the browser authenticates:
+
+```
+cd backend && ZARAM_API_SECRET=dev venv/Scripts/python.exe -m uvicorn main:app --host 127.0.0.1 --port 8420
+cd frontend && ZARAM_API_SECRET=dev npx vite --port 5173 --strictPort
+```
+
+A mismatch presents as every Settings row reading "unavailable", which looks
+like a backend fault and is not one. The backend takes ~40s to boot.
+
+`GET /readiness` needs `X-Zaram-Auth: dev`. On a machine that already has a
+chat model it answers `ready` with no offers, which is correct and is why task
+1 needs a machine without one.
+
+### The gate
+
+```
+backend/venv/Scripts/python.exe -m pytest backend/tests/test_readiness.py backend/tests/test_the_pull_button_fetches_the_offered_model.py -q
+npm run check:reachability && npm run check:guards
+cd frontend && npx tsc --noEmit && npx vitest run
+```
+
+The whole backend suite is ~20 minutes and is not the inner loop — run the two
+files, then the suite once before committing.
+
+### Traps this repository has already paid for
+
+* **A hook body that returns something callable is a cleanup hook.**
+  `beforeEach(() => mocked.mockReset())` had Vitest calling the mock itself,
+  with no arguments, after every test — and the failure surfaced inside the
+  stub as `onEvent is not a function`, which is the last place the cause was.
+  Braces on hook bodies.
+* **Classify a failure by the contract it asserts, never by its file.** Five
+  files, four unrelated causes — and the ten errors in the keep-button file were
+  caused by nothing in the keep path: the kernel cannot boot twice, and that
+  file is the only one that starts the real application more than once.
+* **Check the instrument before believing it.** A stack trace beat four rounds
+  of reasoning about the Vitest failure above, and the repo has three earlier
+  examples in `MILESTONES.md`.
+* **Fifteen complete, tested, unreachable subsystems** have been found here. A
+  named caller is part of done — `check:reachability` reports two of the five
+  shapes and says so.
+* **Two proxy lists** — `frontend/vite.config.js` and `electron/config.js` —
+  for any new route prefix. `check:proxy` catches a miss. `/providers/pull`
+  needed neither, because `/providers` was already there.
+* **Do not point Aider at `main.py`.** 5,143 lines, ~54,600 tokens, 6.6× the
+  local model's window. `docs/AIDER.md` has the table, and Aider is installed
+  but still **not proven to generate anything**.
+
+### Two things recorded but deliberately not done
 
 * `ServerStore.save()` freezes derived `writes` modes into `mcp-servers.json`,
   after which the stored value wins over `KNOWN_HOSTS`. Fix belongs in

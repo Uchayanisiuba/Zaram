@@ -17,17 +17,109 @@ accurate — it is the first thing anyone reads.
 
 **Everything below is committed on `main` and the working tree is clean.**
 `main` was five months stale until today; it is the trunk again. Nothing has
-been pushed — `main` is **8 commits ahead of `origin/main`**.
+been pushed — `main` is **10 commits ahead of `origin/main`**.
+
+*Two sessions on this date. The second one is the first four sections.*
 
 ### What is true now that was not this morning
 
 | | |
 |---|---|
 | `main` | was a 10 August snapshot; now the trunk. Merged, no force-push needed |
-| backend suite | **completes** — it used to abort the interpreter |
+| backend suite | **3,402 passed, 24 skipped, 0 failed, 0 errors** — it used to abort the interpreter |
+| first run | names a model **matched to the machine**, and downloads it |
 | `tsc --noEmit` | 0, from 2 errors |
 | `check:proxy` | passes, was failing |
 | MCP servers | attachable from Settings; were hand-edited JSON |
+
+### A1 landed: the recommendation is true, and the button works
+
+`core/readiness.py` quoted one hardcoded model and one hardcoded size to every
+machine. It now calls `recommend_for(budget_bytes)` — the manifest module that
+had **no importers at all** — and builds the offer from the `Recommendation`:
+name, size, the manifest's own sentence, and its date. `main.py`'s `/readiness`
+supplies the budget from `ProviderManager.resident_budget_bytes`.
+
+Three decisions inside it are worth not re-deriving:
+
+* **No `ensure_scanned()` in the readiness route.** Discovery reaches every
+  configured provider, so a status check would consent to a network call on the
+  user's behalf. An unscanned manager answers `None`, and `None` means
+  *unmeasured* — the manifest's smallest tier, never a budget of zero.
+* **The model's name is on the payload and on no screen.** `Offer.model_name`
+  exists for the executor; the primary path shows no filenames, so the panel
+  never reads it and a test asserts the rendered text has none.
+* **`recommended_on` is rendered** — *"From Zaram's model list, dated
+  2026-08-30"* — and is `null` when the fallback constant answered, because
+  nothing dates a fallback.
+
+**One thing was recorded rather than decided**, in `readiness.py`'s docstring:
+above roughly 9 GB of budget the manifest's pick and *"never block on a
+download"* pull apart, so a 24 GB machine is now offered a 20 GB first
+download. No ceiling was invented here, because a second recommendation policy
+beside the manifest is the thing the manifest exists to prevent. It wants an
+answer.
+
+### A2 landed: pressing the offer downloads the model
+
+`POST /providers/pull`, streaming NDJSON, through `OllamaAdapter.pull_model` —
+never a socket of its own. **The maintainer settled both open decisions on
+5 September: Ollama's HTTP API, and yes, the pull is logged.**
+
+* **Which model is decided server-side**, by the same manifest lookup that
+  produced the offer, so what is fetched is what was priced. A name in a
+  request body would be a second answer to the same question.
+* **The egress entry is written before the first byte**, naming
+  `registry.ollama.ai`. Ollama fetches the weights over a socket this process
+  does not own and `EgressGate` cannot see, so rule 3 is met deliberately;
+  logged on success only, it would be a record of the downloads that finished.
+  Recorded rather than gated, per rule 7j — the button states the size and
+  pressing it is the decision.
+* **Opening the row does not start the download.** The second press does. A
+  gigabyte-scale fetch beginning on a curious click is what a metered
+  connection cannot forgive.
+* **The percentage counts against the total the pull reports**, never the
+  manifest's approximation, or the bar reaches 103% and reads as a stall.
+
+`FirstRunPanel.tsx`'s `canBeCarriedOut()` now admits `pull_model`.
+**Installing the engine is the last offer with no executor**, and it is still
+greyed with its sentence.
+
+*Not observed end to end, and this is the honest gap:* proving it means
+downloading 9 GB on the maintainer's own connection. The route is asserted
+against the real application object, the stream's shapes and the log entry are
+asserted in `tests/test_the_pull_button_fetches_the_offered_model.py`, and the
+component is asserted in `ModelPull.test.tsx` — but nobody has watched a real
+model arrive. Do that once, on a machine with the engine and no chat model.
+
+### The 17 failures are gone, and they were four unrelated bugs
+
+Exactly what `CLAUDE.md` warns about grouping by file: five test files, four
+causes, and only one of them was a stale test.
+
+| what failed | why | fix |
+|---|---|---|
+| 10 errors, keep-button | `kernel.boot()` twice raises `Runtime memory already registered` — the second `TestClient` lifespan in one process | `boot()` is idempotent and says so |
+| 3 cloud-invariant + 2 image-consent | **a live consent defect**, below | the probe is loopback-only |
+| 1 artifact records | a real `DELETE` and a two-column `UPDATE` now exist deliberately | the test names them instead of banning all |
+| 1 installer payload | the walk knew nothing of the config's own exclusions | it prunes what the allow-list excludes |
+
+**The consent defect is the one worth reading.**
+`OpenAICompatibleEngine._template_opens_thinking()` asks `/v1/model` whether the
+prompt template opens a think block — through the egress gate, before every
+first reply. Against a *cloud* provider that meant **two confirmation dialogs
+for one message**: a URL with no body, shown first, then the real one carrying
+the recalled facts. Two egress entries, one message. And a user who declined
+the first was asked again on every reply forever, because `EgressDenied` lands
+in the branch that deliberately does not latch.
+
+Only TabbyAPI serves that route and TabbyAPI is local, so the probe is now
+`_is_loopback`-guarded. What that gives up is stated in the code: a TabbyAPI on
+another machine on the LAN no longer has its template read.
+
+The installer failure was the most dangerous of the four in miniature — its
+message advised adding `.metadata` to the allow-list, which would have carried
+a downloaded FLUX checkpoint's cache into the installer.
 
 ### The backend suite could not finish, and now can
 
@@ -45,11 +137,10 @@ line naming the remedy, an unguarded one costs the whole run.
 **Measured after, with Ollama up: 3,342 passed, 7 failed, 24 skipped, 10
 errors, 14m20s.** Before, it never reached a summary.
 
-### The 17 that fail have not been looked at
+### The 17, as the earlier session found them
 
-Pre-existing and unexamined — the honest remainder of this session. Classify by
-the contract each asserts, never by the file it lives in; that mistake made 27
-failures feel understood for four milestones.
+Kept for the shape of the list, because it is the evidence for the rule. Every
+one is fixed — see the table above.
 
 ```
 test_an_image_needs_its_own_consent.py             2 failed
@@ -59,9 +150,10 @@ test_installer_payload.py                          1 failed
 test_the_keep_button_reaches_the_output_folder.py  10 errors
 ```
 
-Two of those names are about **egress and consent**, the one area where a
-plausible-looking change is the most expensive thing that can happen. Read them
-before touching anything near them.
+Grouped by file this reads as five problems. Four causes, one shared by two
+files, and the ten "keep button" errors were caused by nothing in the keep
+path — the app cannot boot its kernel twice, and that file is the only one that
+starts the real application more than once.
 
 ### MCP has a surface — the client was live and unreachable
 
@@ -201,34 +293,29 @@ any agent, cheap model or otherwise.
 
 ### Start here
 
-**A1 — wire the model manifest into first run. Hours, not days.**
+**Watch a real model arrive.** The one thing A2 does not have is an observed
+download. On a machine with Ollama running and no chat model, open the
+first-run screen, press the offer, press it again, and see a model land and the
+screen replace itself with a composer. That is the acceptance criterion this
+file asks for — *"I ran it and watched X happen"* — and it is an hour.
 
-`core/readiness.py:121` hardcodes a 397 MB constant and quotes it to a 4 GB
-laptop and a 24 GB workstation alike. Meanwhile
-`backend/providers/model_manifest.py` implements hardware-tier matching —
-`recommend_for(budget_bytes)` returning a `Recommendation` with name, size,
-why, and the manifest's date — and **is imported by nothing**.
-`providers/models.manifest.json` is fully populated: 5 tiers, real Ollama
-names, dated 2026-08-30. There is no content work.
+**Then the two questions the code is holding open.**
 
-`diagnose()` at `readiness.py:156` is deliberately pure — *"takes what was
-found rather than going and looking"*. Keep that: add a `budget_bytes`
-parameter, call `recommend_for`, build the offer from the `Recommendation`.
-The caller at `main.py:1008` supplies it from
-`ProviderManager.resident_budget_bytes` (`providers/manager.py:220`).
+* **The top-tier download size.** `readiness.py` now offers a 24 GB machine a
+  20 GB first download, and `CLAUDE.md` says a user asked to pull 7 GB before
+  their first answer closes the app. A ceiling, a "start small and fetch better
+  in the background" second step, or leave it — but decide it rather than let
+  the manifest decide it by default.
+* **The pull has no cancel.** The stream ends when it ends; closing the row
+  leaves it running, and there is no resume. Disk-full arrives as a message and
+  a *Try again* that starts over.
 
-`FirstRunPanel.tsx:69` `canBeCarriedOut()` admits only `explore` and
-`use_cloud_key`. Its own comment says *"when those executors land, this
-function is where they are admitted"* — `pull_model` is already an offer kind,
-and `ReadinessOffer` already carries `downloadBytes` and `downloadLabel`
-("Show this on the button itself"). The pattern is built; the wiring and the
-executor are what is missing.
+**Then packaging, which is still the actual blocker.** A stranger cannot
+install this, and no amount of first-run polish substitutes for it.
 
-**Then A2, the pull executor** — a streaming route through `OllamaAdapter`,
-never a socket of its own (`main.py:1012` records why). The happy path is a day;
-disk-full, engine-died-mid-pull, cancel and resume are the rest. Two decisions
-belong to the maintainer before it starts: Ollama's HTTP API or the CLI, and
-whether a pull is recorded in the egress log.
+The dead weight below is unchanged and still worth an afternoon —
+`backend/runtime/` singular, 2,948 lines of web-search subsystem whose only
+importers are its own tests, one letter from the live `backend/runtimes/`.
 
 ### Traps, each already paid for
 
