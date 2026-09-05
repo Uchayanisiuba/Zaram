@@ -37,6 +37,10 @@ export interface Character {
    *  the interface never hardcodes the product's own name to draw a
    *  placeholder. */
   defaultName: string;
+  /** Which voice speaks when the user has not chosen one. Empty when speech is
+   *  not installed, and empty is a real answer: the interface says nothing
+   *  rather than naming a voice this machine cannot produce. */
+  defaultVoice: string;
 }
 
 export class CharacterError extends Error {
@@ -72,6 +76,11 @@ function toCharacter(raw: Record<string, unknown>): Character {
     // Falls back to the product name only if the backend sent nothing, which
     // it always does. A blank placeholder would be worse than a hardcoded one.
     defaultName: str(raw.default_name) || 'Zaram',
+    // Deliberately *not* defaulted. Empty means the backend has no voice to
+    // name — no speech extra — and the interface must render no claim rather
+    // than a plausible one. A hardcoded voice id here would be a status
+    // indicator over invented data.
+    defaultVoice: str(raw.default_voice),
   };
 }
 

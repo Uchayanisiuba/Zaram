@@ -134,6 +134,88 @@ class TestDecayReachesTheRecords:
         )
 
 
+class TestWhatTheUserPinnedIsExempt:
+    """The curator must not overrule an instruction the user gave it.
+
+    **Measured 3 September 2026: it did.** A pinned record, 200 days old,
+    never recalled, importance 0.2 — deleted by the pass, on both stores. The
+    Memory surface says in as many words that pinning changes how recall
+    treats a fact; a month later the fact was simply gone, with nothing saying
+    why.
+
+    Rule 4 read from the other end. It gives the user power over their own
+    facts, and a maintenance pass that silently reverses an explicit act has
+    taken it back. This is also the floor the whole "user picks what Zaram
+    remembers" idea stands on: an override that a background job undoes is not
+    an override.
+    """
+
+    def _pinned_old_record(self, record_id: str) -> MemoryRecord:
+        """Exactly the record `_old_record` builds, plus the user's pin.
+
+        Deliberately the same shape as the fact
+        `test_an_old_never_recalled_fact_is_forgotten` asserts is deleted, so
+        the only difference between surviving and not is the pin.
+        """
+        stale = _old_record(record_id)
+        return MemoryRecord(**{**stale.__dict__, "pinned": True})
+
+    def test_a_pinned_fact_is_not_forgotten(self, store):
+        async def run():
+            await store.put(self._pinned_old_record("kept-1"))
+            engine = MemoryDecayEngine(DecayConfig())
+            result = await engine.apply_decay(store)
+            return result, await store.get("kept-1")
+
+        result, survivor = asyncio.run(run())
+
+        assert survivor is not None, (
+            "a pinned fact was deleted by the decay pass — the user said keep "
+            "this and a background job disagreed"
+        )
+        assert result.forgotten == 0
+        assert result.pinned == 1, (
+            "the pass must report what it left alone, or a run where every "
+            "record was exempt is indistinguishable from a run that did nothing"
+        )
+
+    def test_a_pinned_fact_does_not_quietly_decay_either(self, store):
+        """Sparing it from deletion is not enough.
+
+        Letting importance fall pass by pass demotes a pinned fact in ranking
+        while the interface still says recall prefers it. That is the same
+        promise broken slowly rather than all at once, and it is harder to
+        notice.
+        """
+        async def run():
+            await store.put(self._pinned_old_record("kept-2"))
+            engine = MemoryDecayEngine(DecayConfig())
+            await engine.apply_decay(store)
+            return await store.get("kept-2")
+
+        kept = asyncio.run(run())
+
+        assert kept is not None
+        assert kept.importance == pytest.approx(0.2), (
+            f"a pinned fact's importance moved to {kept.importance} — it is "
+            "being demoted one pass at a time"
+        )
+
+    def test_an_unpinned_neighbour_still_goes(self, store):
+        """The exemption must be the pin and not an accidental amnesty."""
+        async def run():
+            await store.put(self._pinned_old_record("kept-3"))
+            await store.put(_old_record("stale-3"))
+            engine = MemoryDecayEngine(DecayConfig())
+            await engine.apply_decay(store)
+            return await store.get("kept-3"), await store.get("stale-3")
+
+        kept, gone = asyncio.run(run())
+
+        assert kept is not None
+        assert gone is None, "decay stopped working for everything, not just pins"
+
+
 class _FakeMemoryRuntime:
     """Records what the maintenance pass asked it to do.
 

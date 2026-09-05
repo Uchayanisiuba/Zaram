@@ -185,9 +185,16 @@ export async function uploadFiles(
   files: File[],
   onEvent: (event: IngestEvent) => void,
   signal?: AbortSignal,
+  projectId?: string,
 ): Promise<void> {
   const form = new FormData();
   for (const file of files) form.append('files', file, file.name);
+  // Present only when a project asked for the import. Rule 7i's scope reaches
+  // the Spine from here: the same bytes, the same parsers and the same uploads
+  // directory as a drop into Knowledge, with every fact scoped to the project
+  // instead of global. An id the backend does not know is refused rather than
+  // indexed globally, because that is the one outcome nothing can undo.
+  if (projectId) form.append('project_id', projectId);
 
   const response = await fetch(`${API_BASE}/ingest/upload`, {
     method: 'POST',

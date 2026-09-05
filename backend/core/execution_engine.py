@@ -1919,6 +1919,68 @@ class ExecutionEngine:
         # do; the real fix is still a session store that recall never reads.
         return bool(self._ASSERTION_RE.search(stripped))
 
+    #: Where one sentence ends and the next begins. A newline counts, because a
+    #: message typed over two lines is two statements far more often than it is
+    #: one running on.
+    _SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+|\n+")
+
+    #: An explicit opener, and the punctuation people put after it. Stripped
+    #: rather than stored: "Remember: the launch is 9 September" is a fact with
+    #: an instruction in front of it, and keeping the instruction means reciting
+    #: it back later as though the user had said it about their work.
+    _MEMORY_OPENER_RE = re.compile(
+        r"^\s*(?:remember|note that|keep in mind|don'?t forget)\b[\s,:—-]*",
+        re.IGNORECASE,
+    )
+
+    def _fact_from(self, prompt: str) -> str:
+        """The part of a message that states something, not the whole message.
+
+        **The message and the fact are not the same text, and storing the
+        first as the second is what makes Zaram quote the user to themselves.**
+        `_remember`'s own docstring already says a fact is what the user said
+        rather than a transcript of the exchange; this takes that one step
+        further in, because a single message is usually a transcript too:
+
+            "Hey, quick one — my day rate is 450 now. Can you redo the invoice?"
+
+        Storing that whole line puts a greeting and a request into the Spine,
+        where they are recalled and cited beside real facts. What belongs there
+        is `my day rate is 450 now`.
+
+        The evidence used is the same evidence the door check used to let the
+        message in — `_ASSERTION_RE`, applied per sentence rather than to the
+        whole. That matters: a second, differently-tuned matcher here would
+        eventually disagree with the one at the door, and a message could be
+        admitted on one rule and emptied by the other.
+
+        **It never returns nothing.** Where no individual sentence matches — a
+        fact whose subject and verb straddle the split, or an explicit
+        "remember this" that carries no asserting shape at all — the whole
+        message is kept. Dropping to empty would lose a fact the door check had
+        already decided to keep, which is a silent deletion; keeping too much
+        is the failure this method exists to reduce, and it is the one the user
+        can see and correct.
+
+        Still a heuristic, and still not the structural fix. It narrows what a
+        wrong guess costs; it does not stop the guessing.
+        """
+        text = (prompt or "").strip()
+        if not text:
+            return ""
+
+        opened = self._MEMORY_OPENER_RE.sub("", text, count=1).strip()
+        # An opener with nothing after it is not a fact, so the original stands
+        # rather than being reduced to an empty string.
+        candidate = opened or text
+
+        sentences = [s.strip() for s in self._SENTENCE_SPLIT_RE.split(candidate)]
+        stated = [s for s in sentences if s and self._ASSERTION_RE.search(s)]
+        if not stated:
+            return candidate
+
+        return " ".join(stated)
+
     def _already_known(self, runtime: Any, prompt: str) -> bool:
         """True when the Spine already holds this almost word for word.
 
@@ -1999,14 +2061,23 @@ class ExecutionEngine:
         # Imported lazily: core/ does not depend on a runtime at module load.
         from runtimes.memory.contracts import MemoryType
 
+        # **The fact, not the message.** See `_fact_from`: a single turn is
+        # usually a greeting, a statement and a request, and only the middle
+        # one belongs in a knowledge base. Extracted before the duplicate
+        # check, so "my rate is 450" said twice in two differently-worded
+        # messages is recognised as the same fact rather than stored twice.
+        fact = self._fact_from(prompt)
+        if not fact:
+            return
+
         # Do not store something the Spine already holds almost verbatim.
-        if self._already_known(runtime, prompt):
+        if self._already_known(runtime, fact):
             logger.debug("Engine: not storing — near-identical record exists")
             return
 
         try:
             run_sync(runtime.remember(
-                content=prompt,
+                content=fact,
                 memory_type=MemoryType.CONVERSATION,
                 session_id=session_id,
                 metadata={"prompt": prompt, "answer": answer},
