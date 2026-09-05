@@ -25,6 +25,7 @@ import {
   Presentation,
   Quote,
   Receipt,
+  Save,
   UserRound,
 } from 'lucide-react';
 
@@ -32,10 +33,12 @@ import ArtifactPreview from '@/components/ArtifactPreview';
 import { useArtifactImage } from '@/hooks/useArtifactImage';
 import {
   downloadArtifact,
+  keepArtifact,
   PICTORIAL_KINDS,
   type Artifact,
   type ArtifactKind,
 } from '@/services/artifactsClient';
+import { clearsLabel } from '@/lib/staging';
 
 const KIND_ICON: Record<ArtifactKind, React.ReactNode> = {
   invoice: <Receipt size={15} />,
@@ -74,6 +77,14 @@ export default function ArtifactCard({
   const citedCount = artifact.claims?.length ?? 0;
   const [previewing, setPreviewing] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
+  // The artifact after Save, which is not the same record the parent holds:
+  // the output folder increments on collision, so the filename can change on
+  // the way there. Rendering the prop afterwards would name a file nobody
+  // has.
+  const [kept, setKept] = useState<Artifact | null>(null);
+  const [saving, setSaving] = useState(false);
+  const shown = kept ?? artifact;
+  const staged = shown.staged;
   const pictorial = PICTORIAL_KINDS.has(artifact.kind);
   const thumbnail = useArtifactImage(artifact.id, pictorial && artifact.exists);
 
@@ -140,14 +151,23 @@ export default function ArtifactCard({
             className="mt-0.5 text-[11px]"
             style={{ fontFamily: 'var(--font-mono)', color: 'var(--color-text-muted)' }}
           >
-            {extension} · {bytes(artifact.size_bytes)}
-            {/* Where it went. A file the user cannot find is a file they did
-                not receive, and "check your output folder" is not an answer if
-                nobody said which folder. */}
-            {artifact.path && (
+            {extension} · {bytes(shown.size_bytes)}
+            {/* Where it went, or whether it has gone anywhere yet.
+
+                A file the user cannot find is a file they did not receive,
+                and "check your output folder" is not an answer if nobody
+                said which folder. The staged case is the newer half: an
+                image has *not* been saved, and saying it was — which this
+                line did for every kind — is the claim that prompted the
+                whole staging change. See `artifacts/staging.py`. */}
+            {shown.path && (
               <>
                 {' · '}
-                <span title={artifact.path}>saved to your output folder</span>
+                <span title={shown.path}>
+                  {staged && shown.expires_at
+                    ? clearsLabel(shown.expires_at)
+                    : 'saved to your output folder'}
+                </span>
               </>
             )}
           </div>
@@ -208,8 +228,38 @@ export default function ArtifactCard({
         {/* Never a download button over a file that is not there. `exists` is
             the backend having stat'd the path, not an assumption that writing
             succeeded. */}
-        {artifact.exists ? (
+        {shown.exists ? (
           <>
+            {/* First in the row, because for a staged file it is the only
+                action that changes anything: Preview and Download both
+                leave it expiring. */}
+            {staged && (
+              <button
+                type="button"
+                disabled={saving}
+                onClick={() => {
+                  setDownloadError(null);
+                  setSaving(true);
+                  keepArtifact(shown.id)
+                    .then(setKept)
+                    .catch((err: unknown) =>
+                      setDownloadError(
+                        err instanceof Error ? err.message : 'Could not save that file.',
+                      ),
+                    )
+                    .finally(() => setSaving(false));
+                }}
+                className="flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[11px] transition-colors hover:bg-white/5"
+                style={{
+                  border: '1px solid var(--color-border)',
+                  color: 'var(--color-text)',
+                }}
+                title="Keep this in your output folder"
+              >
+                <Save size={12} />
+                {saving ? 'Saving…' : 'Save'}
+              </button>
+            )}
             {/* Preview sits beside Download, not instead of it. The preview is
                 the HTML the file was built from — `CLAUDE.md` makes HTML the
                 source of truth for every generated document precisely so this

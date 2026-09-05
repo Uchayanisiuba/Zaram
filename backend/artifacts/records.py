@@ -170,6 +170,27 @@ class ArtifactRecords:
             )
             return cursor.rowcount > 0
 
+    def set_location(self, artifact_id: str, path: str, filename: str) -> bool:
+        """Where the file is now, after it moved out of staging.
+
+        The one thing that legitimately changes a record's path. `put` refuses
+        to replace a row for good reasons — a silent replace turns a bug
+        upstream into lost provenance — so keeping an image is a narrow update
+        here rather than a re-insert, and the id, the sources and the claims
+        survive it. The user kept *this* picture, not a copy of it.
+
+        Filename travels with the path because `write_new` increments on
+        collision: the kept file may be `blue-2.png` where the staged one was
+        `blue.png`, and a record naming a file that is not there is what makes
+        Work show a card that opens onto nothing.
+        """
+        with self._lock, self._connect() as conn:
+            cursor = conn.execute(
+                "UPDATE artifacts SET path = ?, filename = ? WHERE id = ?",
+                (path, filename, artifact_id),
+            )
+            return cursor.rowcount > 0
+
     def set_project(self, artifact_id: str, project_id: str) -> bool:
         """Move an artifact into a project, out of one, or between two.
 
@@ -189,6 +210,25 @@ class ArtifactRecords:
                 (project_id, artifact_id),
             )
             return cursor.rowcount > 0
+
+    def forget_at_path(self, path: str) -> int:
+        """Drop the record for a file that has been cleared from staging.
+
+        **The only removal in this class, and it is narrow on purpose.** It
+        deletes by *path* rather than by id so it cannot be aimed: the sweeper
+        has just unlinked a file and is naming the thing it removed, and there
+        is no call shape here that lets anything delete an arbitrary record.
+
+        This is not a hole in the no-delete rule. That rule is about the write
+        path in `store.py`, which still cannot remove a file from the output
+        folder. What is being forgotten here is the record of something that
+        was never saved — an image the user was shown a countdown for and did
+        not keep. A record outliving its file is what makes Work show a card
+        that opens onto nothing.
+        """
+        with self._lock, self._connect() as conn:
+            cursor = conn.execute("DELETE FROM artifacts WHERE path = ?", (path,))
+            return cursor.rowcount
 
     # ---------------------------------------------------------------- reading
 

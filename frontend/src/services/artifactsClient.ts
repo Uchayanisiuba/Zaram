@@ -103,6 +103,23 @@ export interface Artifact {
    *  file — the user may have moved it — and the download button has to know
    *  the difference between "no such document" and "not where we left it". */
   exists: boolean;
+  /** Waiting to be kept, rather than saved.
+   *
+   *  Images are generated several at a time and most of them are discards,
+   *  so they land in a staging area and reach the output folder only when
+   *  the user presses Save. Documents are never staged — an invoice is asked
+   *  for once, on purpose, and confirming it is the dialog rule 7h refuses.
+   *
+   *  Derived on the server from the directory the file is in rather than
+   *  stored beside it, so it cannot disagree with where the file actually
+   *  is. */
+  staged: boolean;
+  /** When a staged file clears itself, as epoch seconds, or `null`.
+   *
+   *  Rendered on the card, because a retention window the user cannot see is
+   *  indistinguishable from a product that loses things. `null` for anything
+   *  kept, and for a staged file whose bytes have already gone. */
+  expires_at: number | null;
   /** Only present when fetched with `includeHtml`. The source of truth for
    *  every export, and what the preview renders. */
   html?: string;
@@ -279,6 +296,27 @@ export async function assignToProject(id: string, projectId: string): Promise<vo
     body: JSON.stringify({ project_id: projectId }),
   });
   if (!res.ok) throw await failure(res, 'Could not move that file');
+}
+
+/** Save a staged image to the output folder, for good.
+ *
+ *  Returns the updated artifact rather than nothing, because the filename can
+ *  change on the way there: the output folder increments on collision, so a
+ *  staged `blue.png` becomes `blue-2.png` if one is already sitting there. A
+ *  card that went on showing the old name would be naming a file nobody has.
+ *
+ *  Safe to press twice. The server treats a second press as the first, because
+ *  that is what the user means by it.
+ *
+ *  The same shape as `POST /chat/attachments/{id}/keep`, which exists for the
+ *  same reason one surface along: looking at something is not deciding to keep
+ *  it forever. */
+export async function keepArtifact(id: string): Promise<Artifact> {
+  const res = await fetch(`${API_BASE}/artifacts/${encodeURIComponent(id)}/keep`, {
+    method: 'POST',
+  });
+  if (!res.ok) throw await failure(res, 'Could not save that file');
+  return (await res.json()).artifact as Artifact;
 }
 
 export async function setRemember(id: string, remember: boolean | null): Promise<void> {

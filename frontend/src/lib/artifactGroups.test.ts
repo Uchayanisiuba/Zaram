@@ -30,6 +30,8 @@ function artifact(id: string, kind: ArtifactKind): Artifact {
     indexed: true,
     remember_override: null,
     exists: true,
+    staged: false,
+    expires_at: null,
   };
 }
 

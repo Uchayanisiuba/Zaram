@@ -30,7 +30,7 @@ from __future__ import annotations
 
 import logging
 from datetime import date
-from typing import Optional, Sequence
+from typing import Any, Optional, Sequence
 
 from . import export
 from .contracts import Artifact, ArtifactKind, ArtifactSource, Claim
@@ -46,6 +46,7 @@ from .html import (
 from .invoice import Adjustment, LineItem, due_date, total_of
 from .letterhead import Letterhead
 from .records import ArtifactRecords
+from .staging import StagingStore
 from .store import ArtifactStore
 
 logger = logging.getLogger(__name__)
@@ -75,9 +76,19 @@ DEFAULT_FORMAT = {
 class ArtifactService:
     """Turns a request for a document into a file and a record of it."""
 
-    def __init__(self, records: ArtifactRecords, store: ArtifactStore) -> None:
+    def __init__(
+        self,
+        records: ArtifactRecords,
+        store: ArtifactStore,
+        staging: Optional[StagingStore] = None,
+    ) -> None:
         self._records = records
         self._store = store
+        #: Where images wait to be kept. Optional so every existing caller and
+        #: every test that builds a service with two arguments goes on working
+        #: and goes on writing straight to the output folder — which is the
+        #: right behaviour for documents and stays the default.
+        self._staging = staging
 
     @property
     def records(self) -> ArtifactRecords:
@@ -86,6 +97,10 @@ class ArtifactService:
     @property
     def store(self) -> ArtifactStore:
         return self._store
+
+    @property
+    def staging(self) -> Optional[StagingStore]:
+        return self._staging
 
     def create_document(
         self,
@@ -424,6 +439,12 @@ class ArtifactService:
             filename=filename,
             kind=ArtifactKind.IMAGE,
             fmt="png",
+            # **The one kind that waits.** A request for a picture produces
+            # several and the user keeps one, so writing all of them into the
+            # output folder fills it with rejects the write path cannot remove.
+            # See `artifacts/staging.py` for why that is not a hole in the
+            # no-delete rule.
+            store=self._staging,
             project_id=project_id,
             conversation_id=conversation_id,
             conversation_title=conversation_title,
@@ -446,8 +467,14 @@ class ArtifactService:
         conversation_title: str,
         sources: Sequence[ArtifactSource],
         claims: Sequence[Claim],
+        store: Optional[Any] = None,
     ) -> Artifact:
         extension = fmt or DEFAULT_FORMAT[kind]
+        # Documents go to the output folder, which is what the user asked for
+        # when they asked for a document. Images go to staging and are kept on
+        # purpose. Same record, same download route, same preview — the only
+        # difference is which directory the bytes land in.
+        destination = store if store is not None else self._store
 
         artifact = Artifact(
             filename=filename or _slug(title),
@@ -463,7 +490,7 @@ class ArtifactService:
         # File first. `export.write` goes through ArtifactStore, which creates
         # and never replaces, so the name it returns may not be the one asked
         # for — the record follows the file, never the other way round.
-        export.write(artifact, extension, self._store, filename=artifact.filename)
+        export.write(artifact, extension, destination, filename=artifact.filename)
 
         try:
             self._records.put(artifact)
@@ -479,6 +506,37 @@ class ArtifactService:
             )
             raise
 
+        return artifact
+
+    def keep(self, artifact_id: str) -> Artifact:
+        """Move a staged image into the output folder, for good.
+
+        The record is updated rather than replaced, so the user keeps *this*
+        picture — same id, same sources, same claims, same conversation — and
+        not a copy of it that has lost where it came from.
+
+        **Idempotent, because the button is on a card that can be clicked
+        twice.** An artifact already in the output folder is returned as it is
+        rather than raising: the user asked for it to be saved and it is saved,
+        and an error on the second click would say otherwise.
+        """
+        artifact = self._records.get(artifact_id)
+        if artifact is None:
+            raise KeyError(f"no artifact {artifact_id!r}")
+        if self._staging is None or not artifact.path:
+            return artifact
+        if not self._staging.is_staged(artifact.path):
+            # Already kept, or never staged. Either way there is nothing to do
+            # and nothing to report — and this is also the guard that stops a
+            # request naming a path in the output folder from having that file
+            # promoted and its original unlinked, which would be a delete
+            # through the one door that must not have one.
+            return artifact
+
+        kept = self._staging.promote(artifact.path, self._store)
+        self._records.set_location(artifact.id, str(kept), kept.name)
+        artifact.path = str(kept)
+        artifact.filename = kept.name
         return artifact
 
     def re_export(self, artifact_id: str, fmt: str) -> Artifact:
