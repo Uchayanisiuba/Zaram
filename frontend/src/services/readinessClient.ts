@@ -45,6 +45,16 @@ export interface ReadinessOffer {
   downloadBytes: number | null;
   /** The same figure, formatted, or null. Show this on the button itself. */
   downloadLabel: string | null;
+  /**
+   * The date on the list the model was recommended from, or null when it came
+   * from the fallback constant instead.
+   *
+   * Shown rather than held: a recommendation is only as current as the list
+   * behind it, and `CLAUDE.md` asks for the manifest's date to be visible.
+   * Null is a real answer here too — a fallback has no list behind it, and
+   * rendering today's date would put a figure on screen that nothing produced.
+   */
+  recommendedOn: string | null;
 }
 
 export interface ReadinessReport {
@@ -72,6 +82,7 @@ export async function fetchReadiness(): Promise<ReadinessReport> {
     offers: offers.map((o) => {
       const bytes = o.download_bytes == null ? null : Number(o.download_bytes);
       const label = String(o.download_label ?? '').trim();
+      const recommendedOn = String(o.recommended_on ?? '').trim();
       return {
         kind: String(o.kind ?? ''),
         label: String(o.label ?? ''),
@@ -80,6 +91,13 @@ export async function fetchReadiness(): Promise<ReadinessReport> {
         // No bytes means no price, whatever the label says. The two cannot
         // disagree downstream if only one of them can be present.
         downloadLabel: bytes == null || !label ? null : label,
+        // Empty and absent collapse to the same null, for the same reason the
+        // label does: one representation of "there is none".
+        recommendedOn: recommendedOn || null,
+        // `model_name` is on the payload and deliberately not carried across.
+        // No model filename belongs in the primary path, so nothing here would
+        // render it — it is there for whatever executes the pull, and mapping
+        // it before that exists would add a value no view reads.
       };
     }),
     stillWorks: Array.isArray(raw.still_works) ? raw.still_works.map(String) : [],

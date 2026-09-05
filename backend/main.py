@@ -1034,10 +1034,31 @@ async def readiness():
         # and is not actionable differently: both need the same offer.
         engine_installed = False
 
+    # What a chat model may claim on this card, so the offer names a model this
+    # machine can actually run. `None` is a real answer — an unreadable GPU, or
+    # a discovery that has not run — and `diagnose` reads it as "unmeasured"
+    # and offers the smallest tier, never as a budget of zero.
+    #
+    # **Deliberately not `ensure_scanned()` here.** Discovery reaches every
+    # registered provider, which on a machine with a key configured is a
+    # network call — and a readiness probe that consents to one on the user's
+    # behalf is rule 7g broken by a status check. The budget is read if
+    # something has already scanned and left as unmeasured if not.
+    budget_bytes = None
+    manager = getattr(getattr(kernel, "providers_runtime", None), "manager", None)
+    if manager is not None:
+        try:
+            budget_bytes = manager.resident_budget_bytes()
+        except Exception:
+            logging.getLogger(__name__).debug(
+                "readiness: could not measure the resident budget", exc_info=True
+            )
+
     result = diagnose(
         engine_installed=engine_installed,
         chat_models=chat_models,
         cloud_key_configured=bool((os.getenv("ZARAM_OPENAI_KEY") or "").strip()),
+        budget_bytes=budget_bytes,
     )
     return result.to_dict()
 

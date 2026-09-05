@@ -8,10 +8,21 @@
  * screen is seen once per user and there is no second first impression.
  */
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { render, screen, cleanup } from '@testing-library/react';
+import { render, screen, cleanup, waitFor } from '@testing-library/react';
 
 import FirstRunPanel from './FirstRunPanel';
+import { pullRecommendedModel } from '@/services/pullClient';
 import type { ReadinessReport } from '@/services/readinessClient';
+
+// The download itself, stubbed. What is asserted here is *when* it is asked
+// for — never on the click that opens the row — and that the screen re-asks
+// readiness when it ends. The stream's own shapes are `ModelPull`'s tests.
+vi.mock('@/services/pullClient', () => ({
+  pullRecommendedModel: vi.fn(async (onEvent: (e: Record<string, unknown>) => void) => {
+    onEvent({ stage: 'Downloading', completed: 1, total: 2 });
+    onEvent({ done: true });
+  }),
+}));
 
 // `CloudKeyForm` reads the shipped provider manifest on mount. Stubbed rather
 // than left to fail, because an unstubbed fetch lands the form in its
@@ -54,6 +65,7 @@ const noEngine: ReadinessReport = {
       detail: 'Installs the engine that runs models on your own machine.',
       downloadBytes: 1202590515,
       downloadLabel: '1.1 GB',
+      recommendedOn: '2026-08-30',
     },
     {
       kind: 'use_cloud_key',
@@ -61,6 +73,7 @@ const noEngine: ReadinessReport = {
       detail: 'Paste a key from a provider you already pay for.',
       downloadBytes: null,
       downloadLabel: null,
+      recommendedOn: null,
     },
     {
       kind: 'explore',
@@ -68,12 +81,32 @@ const noEngine: ReadinessReport = {
       detail: 'Add a folder and explore what Zaram found.',
       downloadBytes: null,
       downloadLabel: null,
+      recommendedOn: null,
     },
   ],
   stillWorks: [
     'Add documents to Knowledge — reading and indexing them needs no model',
     'Browse Memory, Work, Projects and the egress log',
   ],
+};
+
+/** The other unready state: Ollama is running, with nothing that can chat. */
+const engineWithoutModel: ReadinessReport = {
+  readiness: 'engine_without_model',
+  summary: 'Almost there. The local engine is running but has no model that can hold a conversation yet.',
+  canChat: false,
+  offers: [
+    {
+      kind: 'pull_model',
+      label: 'Download a model to start with',
+      detail: 'The usual choice. Good at the five jobs a local model does well.',
+      downloadBytes: 4700000000,
+      downloadLabel: '4.4 GB',
+      recommendedOn: '2026-08-30',
+    },
+    ...noEngine.offers.filter((o) => o.kind !== 'install_engine'),
+  ],
+  stillWorks: noEngine.stillWorks,
 };
 
 const offerButton = (kind: string) =>
@@ -102,6 +135,36 @@ describe('the first-run screen', () => {
     expect(offerButton('explore').textContent).not.toMatch(/\d+\s*(MB|GB)/);
   });
 
+  it('says when the model advice was written', () => {
+    render(<FirstRunPanel report={noEngine} onExplore={() => {}} onConnected={() => {}} />);
+
+    // A recommendation is only as current as the list behind it, and the list
+    // ships in the bundle — so a build a year old would otherwise name a model
+    // chosen a year ago with nothing on screen saying so.
+    expect(offerButton('install_engine')).toHaveAccessibleName(/2026-08-30/);
+  });
+
+  it('says nothing about a date when the recommendation has none behind it', () => {
+    const fallback: ReadinessReport = {
+      ...noEngine,
+      offers: noEngine.offers.map((o) => ({ ...o, recommendedOn: null })),
+    };
+    render(<FirstRunPanel report={fallback} onExplore={() => {}} onConnected={() => {}} />);
+
+    // The manifest was missing or unreadable and the constant answered. Dating
+    // that would put a figure on the screen that nothing produced.
+    expect(offerButton('install_engine').textContent).not.toMatch(/dated/i);
+  });
+
+  it('never puts a model filename on the screen', () => {
+    render(<FirstRunPanel report={noEngine} onExplore={() => {}} onConnected={() => {}} />);
+
+    // The payload carries the model's name for whatever pulls it. The target
+    // user is not technical, and this screen must not read that field — a
+    // helpful `(qwen2.5:7b)` beside the label is the whole rule undone.
+    expect(screen.getByTestId('first-run').textContent).not.toMatch(/qwen|llama|gguf|:\d+b/i);
+  });
+
   it('names what still works, so the screen reads as unconfigured not broken', () => {
     render(<FirstRunPanel report={noEngine} onExplore={() => {}} onConnected={() => {}} />);
 
@@ -128,10 +191,10 @@ describe('the first-run screen', () => {
     // the product is broken rather than unconfigured, which is the exact
     // impression this screen exists to prevent.
     //
-    // `use_cloud_key` was on this list until 29 August 2026 and has been
-    // removed because it now has an executor, not because the rule softened.
-    // Installing an engine and pulling a model still have none.
-    for (const kind of ['install_engine', 'pull_model']) {
+    // `use_cloud_key` left this list on 29 August 2026 and `pull_model` on
+    // 5 September, each because it gained an executor — not because the rule
+    // softened. Installing an engine still has none.
+    for (const kind of ['install_engine']) {
       const button = offerButton(kind);
       if (!button) continue;
       expect(button).toBeDisabled();
@@ -142,6 +205,36 @@ describe('the first-run screen', () => {
       button.click();
     }
     expect(onExplore).not.toHaveBeenCalled();
+  });
+
+  it('lets the model offer be carried out, and does not start the download on a curious click', async () => {
+    // Opening the row and starting a multi-gigabyte fetch are two different
+    // decisions. The size is on the button, and the second press is the
+    // confirmation — a download that begins on the first click is the one
+    // thing a metered connection cannot forgive.
+    render(<FirstRunPanel report={engineWithoutModel} onExplore={() => {}} onConnected={() => {}} />);
+
+    expect(offerButton('pull_model')).not.toBeDisabled();
+
+    offerButton('pull_model').click();
+
+    expect(await screen.findByTestId('model-pull')).toBeInTheDocument();
+    expect(pullRecommendedModel).not.toHaveBeenCalled();
+  });
+
+  it('asks readiness again once the model is downloaded', async () => {
+    // Otherwise the setup screen stands over a product that has just become
+    // able to answer, and there is nothing to dismiss it.
+    const onConnected = vi.fn();
+    render(
+      <FirstRunPanel report={engineWithoutModel} onExplore={() => {}} onConnected={onConnected} />,
+    );
+
+    offerButton('pull_model').click();
+    (await screen.findByText('Start the download')).click();
+
+    await waitFor(() => expect(onConnected).toHaveBeenCalledTimes(1));
+    expect(pullRecommendedModel).toHaveBeenCalledTimes(1);
   });
 
   it('lets the cloud-key offer be carried out, and opens its form in place', async () => {
@@ -190,6 +283,7 @@ describe('the first-run screen', () => {
           detail: 'Written for a person, so it reads without the enum.',
           downloadBytes: null,
           downloadLabel: null,
+          recommendedOn: null,
         },
       ],
     };

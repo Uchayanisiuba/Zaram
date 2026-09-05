@@ -11,8 +11,9 @@ blocks or crashes when Ollama is not installed.
 
 from __future__ import annotations
 
+import json
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterator, List, Optional
 
 import requests
 
@@ -186,6 +187,49 @@ class OllamaAdapter:
                 "format": details.get("format"),
             },
         )
+
+    def pull_model(
+        self, name: str, *, timeout: float = 30.0
+    ) -> Iterator[Dict[str, Any]]:
+        """Ask Ollama to fetch ``name``, yielding its progress lines as they land.
+
+        `/api/pull` answers with NDJSON: a line per state change, each one
+        carrying `status`, and the ones that matter carrying `total` and
+        `completed` in bytes. They are yielded raw — naming the stages in a
+        person's words is a decision about what to *say*, which belongs where
+        the sentence is written and not in the adapter that reads the wire.
+
+        **The transfer is Ollama's, not Zaram's.** This request goes to
+        127.0.0.1 and carries a model name; the gigabytes come from the
+        registry to Ollama, over a socket this process does not own and cannot
+        gate. That is exactly why the caller writes the egress entry *before*
+        starting: a download recorded only on success is a log that misses
+        every interrupted one.
+
+        ``timeout`` is the read timeout between lines, not for the pull. A
+        multi-gigabyte fetch takes minutes and a deadline on the whole thing
+        would cancel a download that was working perfectly.
+        """
+        with requests.post(
+            f"{self.base_url}/api/pull",
+            json={"model": name, "stream": True},
+            stream=True,
+            timeout=timeout,
+        ) as response:
+            response.raise_for_status()
+            for line in response.iter_lines(decode_unicode=True):
+                if not line:
+                    continue
+                try:
+                    event = json.loads(line)
+                except json.JSONDecodeError:
+                    # One unreadable line is not a failed download. The stream
+                    # carries its own outcome — `success`, or an `error` field
+                    # — and dropping a line loses a progress tick at worst.
+                    logger.debug("unreadable line from /api/pull: %r", line)
+                    continue
+                if isinstance(event, dict):
+                    yield event
 
     def _post(
         self, path: str, payload: Dict[str, Any], *, timeout: float

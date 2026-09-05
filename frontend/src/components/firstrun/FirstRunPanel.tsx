@@ -27,12 +27,21 @@
  * are shown, greyed, and honestly graded. A button that appears to work and
  * does nothing is the single worst thing to put on a first-run screen.
  *
- * **No model filenames.** Every string on this screen comes from the payload,
- * which is asserted clean on the backend side. Nothing is composed here.
+ * **No model filenames.** Every string describing an offer comes from the
+ * payload, which is asserted clean on the backend side. The payload also
+ * carries the model's *name*, for whatever eventually pulls it, and this screen
+ * deliberately never reads it — the target user is not technical and a filename
+ * is not a thing they chose.
+ *
+ * One sentence is composed here rather than taken: the line naming the date on
+ * the model list. Its only variable is that date, it says nothing about the
+ * model, and it exists because a recommendation is only as current as the list
+ * behind it.
  */
 import { useState } from 'react';
 
 import CloudKeyForm from './CloudKeyForm';
+import ModelPull from './ModelPull';
 import type { ReadinessOffer, ReadinessReport } from '@/services/readinessClient';
 
 interface FirstRunPanelProps {
@@ -61,13 +70,20 @@ interface FirstRunPanelProps {
  * restart, so the offer can be carried out here and now rather than promising
  * something about the next launch.
  *
- * Installing an engine and pulling a model still have no executor. Inventing an
- * instruction for them here — a command to type, a site to visit — would put a
- * value in the interface that nothing else in the product maintains. When those
- * executors land, this function is where they are admitted.
+ * **Pulling a model was admitted on 5 September 2026** — `ModelPull` is its
+ * executor, over `POST /providers/pull`, and it qualified on the same terms:
+ * the download happens here, streams its progress here, and the screen
+ * disappears by itself when the model can answer. The route decides *which*
+ * model from the same manifest lookup that produced this offer, so the thing
+ * fetched is the thing priced on the button.
+ *
+ * Installing an engine still has no executor. Inventing an instruction for it
+ * here — a command to type, a site to visit — would put a value in the
+ * interface that nothing else in the product maintains. When that executor
+ * lands, this function is where it is admitted.
  */
 function canBeCarriedOut(kind: string): boolean {
-  return kind === 'explore' || kind === 'use_cloud_key';
+  return kind === 'explore' || kind === 'use_cloud_key' || kind === 'pull_model';
 }
 
 export default function FirstRunPanel({ report, onExplore, onConnected }: FirstRunPanelProps) {
@@ -98,9 +114,9 @@ export default function FirstRunPanel({ report, onExplore, onConnected }: FirstR
                 <OfferRow
                   offer={offer}
                   onChoose={() => {
-                    if (offer.kind === 'use_cloud_key') {
-                      // Toggled rather than navigated. The form belongs under
-                      // the offer it belongs to, where the price and the
+                    if (offer.kind === 'use_cloud_key' || offer.kind === 'pull_model') {
+                      // Toggled rather than navigated. The executor belongs
+                      // under the offer it belongs to, where the price and the
                       // detail above it stay readable — a setup screen that
                       // replaces itself loses the context that made the choice
                       // make sense.
@@ -113,6 +129,16 @@ export default function FirstRunPanel({ report, onExplore, onConnected }: FirstR
                 {openOffer === offer.kind && offer.kind === 'use_cloud_key' && (
                   <div className="pl-3">
                     <CloudKeyForm onConnected={onConnected} />
+                  </div>
+                )}
+                {openOffer === offer.kind && offer.kind === 'pull_model' && (
+                  <div className="pl-3">
+                    {/* Opening the row does not start the download. The size
+                        is on the button above and the confirmation is the
+                        second press — a gigabyte-scale fetch beginning on a
+                        curious click is the one thing a metered connection
+                        cannot forgive. */}
+                    <ModelPull onFinished={onConnected} />
                   </div>
                 )}
               </li>
@@ -198,6 +224,19 @@ function OfferRow({ offer, onChoose }: { offer: ReadinessOffer; onChoose: () => 
       >
         {offer.detail}
       </span>
+      {/* The date on the list the model was chosen from. Shown because a
+          recommendation is only as current as the list behind it, and a screen
+          that names a model without saying when the advice was written claims
+          more currency than the manifest has. Absent when the recommendation
+          came from the fallback — nothing dates a fallback. */}
+      {offer.recommendedOn && (
+        <span
+          className="block mt-1 text-[11px] leading-relaxed"
+          style={{ color: 'var(--color-text-muted)', opacity: 0.75 }}
+        >
+          From Zaram’s model list, dated {offer.recommendedOn}.
+        </span>
+      )}
       {/* Under the detail, not beside the label, and as a sentence rather than
           a shouted pill. The detail describes what the option *is*; this says
           why the button will not do it. Without the second line the first reads

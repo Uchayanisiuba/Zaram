@@ -23,10 +23,12 @@ anything.
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Header, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from . import catalogue, cloud_config
@@ -141,6 +143,63 @@ async def get_model(model_id: str) -> dict:
     if model is None:
         raise HTTPException(status_code=404, detail="Model not found")
     return _payload(manager, model)
+
+
+@router.post("/pull")
+async def pull_recommended_model():
+    """Fetch the model the first-run screen offered, streaming its progress.
+
+    **Which model is decided here, not sent.** `/readiness` computed the offer
+    from the manifest and the measured budget; this recomputes it the same way,
+    so the thing downloaded is the thing the user was quoted a price for. A
+    name in a request body would be a second source of truth for the same
+    question, and the first time they disagreed the user would be charged
+    gigabytes for a model nobody offered.
+
+    NDJSON, on the same pattern as `/ingest` and `/chat`, because the frontend
+    already parses it. The egress entry is written by `stream_pull` before the
+    first byte moves — see that module for why it is recorded rather than
+    gated.
+
+    The budget is read from the manager only if discovery has already run.
+    Forcing a scan here would send a request to every connected provider as a
+    side effect of pressing *download*, which is the shape of the thing rule 7g
+    refuses.
+    """
+    from core.egress import get_gate
+
+    from .discoverers.ollama import OllamaAdapter
+    from .pull import PullUnavailable, stream_pull
+
+    budget_bytes = None
+    if _PROVIDERS_RUNTIME is not None:
+        try:
+            budget_bytes = _PROVIDERS_RUNTIME.manager.resident_budget_bytes()
+        except Exception:
+            logger.debug("pull: could not measure the resident budget", exc_info=True)
+
+    try:
+        log = get_gate().log
+    except Exception:
+        # A pull with no log is not a pull. Rule 3 is not conditional on the
+        # gate having been installed, and a download that could not be recorded
+        # must not happen quietly instead.
+        logger.warning("pull refused: the egress log is not available")
+        raise HTTPException(status_code=503, detail="the egress log is not ready")
+
+    def _stream():
+        try:
+            for event in stream_pull(
+                budget_bytes=budget_bytes, adapter=OllamaAdapter(), log=log
+            ):
+                yield json.dumps(event) + "\n"
+        except PullUnavailable as exc:
+            # The body has already started, so this cannot become a status
+            # code. It arrives as the stream's own terminal event, which is
+            # what the screen renders either way.
+            yield json.dumps({"error": str(exc)}) + "\n"
+
+    return StreamingResponse(_stream(), media_type="application/x-ndjson")
 
 
 @router.get("/sources")
