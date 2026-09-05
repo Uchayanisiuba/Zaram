@@ -444,6 +444,31 @@ class OpenAICompatibleEngine(LLMEngine):
         if self._opens_thinking is not None:
             return self._opens_thinking
 
+        # **Only a server on this machine is asked, and that is a consent rule
+        # rather than an optimisation.**
+        #
+        # Only TabbyAPI serves `/v1/model`, and TabbyAPI runs locally. Asking a
+        # *cloud* provider spent a request the user never made: it reached the
+        # gate first, so the first message of a session showed **two**
+        # confirmation dialogs — a URL with no body, then the real one carrying
+        # the recalled facts — and wrote two egress entries for one message. A
+        # consent screen nobody reads is worse than none, and the surest way to
+        # make one unread is to show a meaningless one immediately before it.
+        #
+        # Worse if declined: `EgressDenied` lands in the broad `except` below,
+        # which deliberately does not latch, so the probe returned on every
+        # reply and asked again forever.
+        #
+        # What this gives up, said plainly: a TabbyAPI on another machine on
+        # the LAN no longer has its template read, so its thinking would show
+        # in the answer. That is the failure this whole method exists to
+        # prevent — but it is one the user can see and report, where the other
+        # is a dialog they learn to click through, and nothing else in the
+        # product spends a person's consent on a capability question.
+        if not _is_loopback(self.base_url):
+            self._opens_thinking = False
+            return False
+
         try:
             gate = self._gate if self._gate is not None else get_gate()
             raw = gate.request(

@@ -220,37 +220,72 @@ class TestTheRecordStoreHasNoGeneralMutation:
     #: It is a list rather than a count because a count says *how many* named
     #: mutations exist and not *which*, so swapping a safe one for a dangerous
     #: one leaves it green — the number was never the property worth guarding.
-    MUTABLE_COLUMNS = {"REMEMBER_OVERRIDE", "PROJECT_ID"}
+    MUTABLE_COLUMNS = {
+        "REMEMBER_OVERRIDE",
+        "PROJECT_ID",
+        # Where the file is now, written when a staged image is kept.
+        # `set_location` moves both together and must: the output folder
+        # increments on collision, so a kept `blue.png` can land as
+        # `blue-2.png`, and a path updated without its filename names a file
+        # nobody has. Two columns in one statement is the exception this list
+        # exists to make deliberate rather than the blanket update it forbids.
+        "PATH",
+        "FILENAME",
+    }
+
+    #: The only removal, spelled exactly as it must appear. By path rather than
+    #: by id so it cannot be aimed at a chosen record: the staging sweeper has
+    #: just unlinked a file and is naming the thing it removed.
+    ALLOWED_DELETE = "DELETE FROM ARTIFACTS WHERE PATH = ?"
 
     def test_no_sql_deletes_or_blanket_updates(self):
-        """Every UPDATE names one allowed column, and nothing else mutates.
+        """Every UPDATE names allowed columns, and the one DELETE is the one.
 
         Scans the SQL the module actually executes, not its text. A raw-text
         scan matches the docstrings explaining *why* these statements are
         absent, so it fails on a module that is correct and documented — which
         would train someone to delete the explanation to get a green build.
+
+        **This asserted no DELETE at all and was failing.** Staging gave the
+        store a real one — a record whose file expired unkept has to go, or
+        Work shows a card that opens onto nothing — so the flat prohibition was
+        describing a store that no longer exists, and a permanent failure is a
+        permanent invitation to stop reading this file. What replaced it is
+        narrower than a keyword ban: the statement itself, exactly, so a
+        delete-by-id or an unqualified one still fails here.
         """
-        statements = [s.upper() for s in _executed_sql(RECORDS_SOURCE)]
+        statements = [" ".join(s.upper().split()) for s in _executed_sql(RECORDS_SOURCE)]
         sql = " ".join(statements)
 
-        assert "DELETE FROM" not in sql
         assert "DROP TABLE" not in sql
         assert "INSERT OR REPLACE" not in sql
+
+        deletes = [s for s in statements if s.startswith("DELETE")]
+        assert deletes, "records.py deletes nothing — has the sweeper's path moved?"
+        for statement in deletes:
+            assert statement == self.ALLOWED_DELETE, (
+                f"records.py runs {statement!r}. The only removal is "
+                f"{self.ALLOWED_DELETE!r} — a delete that can be aimed at a "
+                "chosen record is a different thing and needs its own argument."
+            )
 
         updates = [s for s in statements if "UPDATE ARTIFACTS" in s]
         assert updates, "records.py updates nothing — has the mutation path moved?"
 
         for statement in updates:
-            column = statement.split("SET", 1)[1].split("=", 1)[0].strip()
-            assert column in self.MUTABLE_COLUMNS, (
-                f"records.py updates {column!r}, which is not one of "
-                f"{sorted(self.MUTABLE_COLUMNS)}. Mutation is one named method "
-                "per field the user controls; add the column here deliberately."
-            )
-            # One column per statement. A comma would mean a statement that
-            # moves several fields at once, which is the blanket update this
-            # store exists without.
-            assert "," not in statement.split("SET", 1)[1].split("WHERE")[0]
+            assignments = statement.split("SET", 1)[1].split("WHERE")[0]
+            for assignment in assignments.split(","):
+                column = assignment.split("=", 1)[0].strip()
+                assert column in self.MUTABLE_COLUMNS, (
+                    f"records.py updates {column!r}, which is not one of "
+                    f"{sorted(self.MUTABLE_COLUMNS)}. Mutation is one named "
+                    "method per field the user controls; add the column here "
+                    "deliberately."
+                )
+            # Every mutation names its row. A SET with no WHERE is the blanket
+            # update this store exists without, and it is the one shape that
+            # would rewrite every artifact the user has.
+            assert "WHERE" in statement, f"records.py runs an unqualified {statement!r}"
 
 
 class TestTheServiceWritesTheFileThenRecordsIt:

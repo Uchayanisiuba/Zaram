@@ -18,6 +18,8 @@ class KernelBootstrapper:
         self.mcp_runtime = None
         self.semantic_router = None
         self.egress_gate = None
+        #: Whether `boot()` has completed. See the guard there.
+        self.booted = False
 
     def _init_egress_gate(self):
         """Install the process egress gate, and apply retention on the way up.
@@ -72,6 +74,23 @@ class KernelBootstrapper:
         return gate
 
     async def boot(self):
+        # Booting twice is not half a boot, it is a broken kernel.
+        #
+        # The second call re-initialised the memory runtime — reopening the
+        # Spine and reindexing every record — and then raised
+        # `ValueError: Runtime memory already registered.` from step 3, leaving
+        # a process holding a half-registered registry and a memory runtime
+        # nobody was using. Found from the other end: the one test file that
+        # starts the real application through its lifespan could run exactly
+        # one test, and the other ten errored in the fixture.
+        #
+        # Refusing quietly would be worse than either, so it says so. Nothing
+        # in the product boots twice on purpose; if something starts to, this
+        # line is how it becomes visible rather than fatal.
+        if self.booted:
+            print("[Bootstrapper] Kernel already booted — ignoring a second boot.")
+            return
+
         print("[Bootstrapper] Initializing Zaram Kernel...")
 
         # 0. The egress gate, before anything that could make a request.
@@ -110,6 +129,7 @@ class KernelBootstrapper:
         if providers is not None:
             self.execution_engine.set_provider_manager(providers.manager)
 
+        self.booted = True
         print("[Bootstrapper] Kernel Ready.")
 
     def _init_semantic_router(self):
@@ -392,4 +412,8 @@ class KernelBootstrapper:
             await self.speech_runtime.shutdown()
         if self.memory_runtime:
             await self.memory_runtime.shutdown()
+        # `booted` is deliberately not cleared. Shutting down stops the
+        # runtimes; it does not unregister them, so this object cannot be
+        # booted a second time and saying otherwise here would put the
+        # "already registered" crash back where the guard removed it.
         print("[Bootstrapper] Kernel Stopped.")

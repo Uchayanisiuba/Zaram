@@ -170,13 +170,39 @@ class TestEveryRealFileIsAccountedFor:
     this one. So the risk is worth a test of its own.
     """
 
-    def test_no_backend_file_has_an_uncarried_extension(self):
+    def test_no_backend_file_has_an_uncarried_extension(self, patterns):
+        """**A file the config excludes is not a surprise, it is a decision.**
+
+        This walked the tree against `NOT_OURS` alone and knew nothing about
+        the exclusions it is testing, so anything the installer deliberately
+        leaves behind was reported as an accident. It failed on a downloaded
+        FLUX checkpoint: `!backend/models` excludes that whole tree, but the
+        `.gitattributes` and `.metadata` files Hugging Face writes beside the
+        weights matched no carried extension and no exclusion the walk knew
+        about, and the message advised adding `.metadata` to the allow-list —
+        which would have carried somebody's model cache into the installer.
+
+        The suffix lists below stay, and are now the second line rather than
+        the first: they cover a stray checkpoint dropped somewhere the config
+        does not name.
+        """
+        _, excludes = patterns
         surprises: list[str] = []
         backend = REPO_ROOT / "backend"
 
         for root, dirs, files in os.walk(backend):
-            dirs[:] = [d for d in dirs if d not in NOT_OURS]
+            rel_root = Path(root).relative_to(REPO_ROOT)
+            dirs[:] = [
+                d
+                for d in dirs
+                if d not in NOT_OURS
+                and not is_excluded(str(rel_root / d), excludes)
+            ]
             for name in files:
+                if is_excluded(str(rel_root / name), excludes):
+                    # Named in `electron-builder.yml`. Somebody decided about
+                    # it, which is exactly what this test asks for.
+                    continue
                 suffix = Path(name).suffix.lower()
                 if suffix in CARRIED_SUFFIXES:
                     continue

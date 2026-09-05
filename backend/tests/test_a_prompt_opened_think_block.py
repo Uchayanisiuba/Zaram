@@ -187,6 +187,27 @@ class TestWhetherTheTemplateOpensOneIsReadFromTheServer:
         the panel and show an empty answer."""
         assert self._engine(None)._template_opens_thinking() is False
 
+    def test_a_remote_server_is_never_asked_at_all(self):
+        """One message must cost one dialog and one egress entry.
+
+        This probe goes through the gate, so asking a cloud provider put a
+        confirmation *before* the one carrying the recalled facts — a URL with
+        no body, shown first, on the first message of every session — and
+        logged an extra request against the host. Only TabbyAPI serves this
+        route and TabbyAPI is local, so nothing is asked that could answer.
+        """
+        engine = OpenAICompatibleEngine(
+            base_url="https://api.example-cloud.test/v1", api_key="k", default_model="m"
+        )
+
+        class _Gate:
+            def request(self, url, **_kw):
+                raise AssertionError(f"a capability probe reached {url}")
+
+        engine._gate = _Gate()
+
+        assert engine._template_opens_thinking() is False
+
     def test_it_is_asked_once_and_remembered(self):
         engine = self._engine(self.QWEN3)
         calls = {"n": 0}
