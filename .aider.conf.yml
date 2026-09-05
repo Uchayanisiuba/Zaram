@@ -1,0 +1,47 @@
+# Aider, pointed at the local engine.
+#
+# The venv lives outside the repository — %LOCALAPPDATA%\aider-venv — because
+# Aider is a tool the maintainer runs, not something Zaram ships or depends
+# on. Only its configuration belongs here, and only because it encodes facts
+# about *this* repository that anyone driving Aider needs.
+
+# Ollama, over loopback. `ollama_chat/` is the prefix LiteLLM wants; plain
+# `ollama/` uses the completion endpoint and formats prompts worse.
+model: ollama_chat/qwen3-14b-8k
+
+# Whole-file replacement rather than diffs. A 14B model produces malformed
+# search/replace blocks often enough that the retry loop costs more than
+# resending the file — but see the context note in docs/AIDER.md, because
+# `whole` is only viable on files that fit twice over in 8k tokens.
+edit-format: whole
+
+# The repo map competes with the files for a very small context window.
+# Off by default; raise it deliberately when a task needs cross-file awareness
+# and the files themselves are small.
+map-tokens: 0
+
+# One commit per change, so a bad edit costs `git revert` rather than an
+# archaeology session. This is the property that makes delegation survivable.
+auto-commits: true
+
+# Never touched without being asked. `git commit` is the agent's job; deciding
+# what reaches a remote is not.
+gitignore: false
+
+# Lint and test are per-task and passed on the command line, not baked in
+# here — the gate for a Python change is not the gate for a TSX one. See
+# docs/AIDER.md for the command each task must pass.
+auto-test: false
+auto-lint: false
+
+# Analytics off, permanently, and no update check on launch.
+#
+# Aider ships posthog and mixpanel as dependencies. Neither is exotic and
+# both are opt-out — but a tool used to write a product whose entire claim is
+# that it tells you what left the machine should not itself be reporting
+# usage in the background. `check-update` is a network call at launch and is
+# refused for the same reason rule 7g refuses one: not because the payload is
+# large, but because it happens without being asked.
+analytics-disable: true
+check-update: false
+show-release-notes: false

@@ -1,0 +1,35 @@
+# What Aider must not read or map.
+#
+# The three worktrees under `.kilo/` are full copies of this repository. A
+# repo map built over them sees every file three or four times, and a search
+# across them is what makes recursive greps time out here. They are the first
+# entry for that reason.
+.kilo/
+.trae/
+.continue/
+
+# Build output and vendored trees.
+node_modules/
+**/node_modules/
+dist/
+dist-electron/
+desktop/dist/
+frontend/dist/
+build/
+runtime/
+backend/venv/
+.mcp-venv/
+__pycache__/
+**/*.pyc
+
+# Quarantined on purpose. `check-no-cloud-speech.mjs` asserts that no live
+# module imports from here; an agent that reads it will helpfully reintroduce
+# what the guard exists to keep out.
+frontend/src/legacy/
+
+# Assets, not source.
+figma-assets/
+avatar-source/
+Logo_Image/
+uploads/
+site/

@@ -243,3 +243,9 @@ cloud-connections.json
 # venv: these pull the official MCP SDK, and the installer must not.
 .mcp-venv/
 backend/tests/_flux_sample.png
+
+# Aider's own session files. The config and the ignore list are checked in;
+# the chat and input history are per-session scratch and are not.
+.aider.chat.history.md
+.aider.input.history
+.aider.tags.cache*
