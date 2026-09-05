@@ -11,7 +11,252 @@ accurate — it is the first thing anyone reads.
 
 ---
 
-## Current state — 4 September 2026
+## Current state — 5 September 2026
+
+*The latest work is first. Earlier sessions follow below.*
+
+**Everything below is committed on `main` and the working tree is clean.**
+`main` was five months stale until today; it is the trunk again. Nothing has
+been pushed — `main` is **8 commits ahead of `origin/main`**.
+
+### What is true now that was not this morning
+
+| | |
+|---|---|
+| `main` | was a 10 August snapshot; now the trunk. Merged, no force-push needed |
+| backend suite | **completes** — it used to abort the interpreter |
+| `tsc --noEmit` | 0, from 2 errors |
+| `check:proxy` | passes, was failing |
+| MCP servers | attachable from Settings; were hand-edited JSON |
+
+### The backend suite could not finish, and now can
+
+`backend/tests/test_flux_draws_locally.py` gated its drawing class on
+`find_model() is None` — which skips when weights are *absent* and does nothing
+when they are present. On a machine with the weights the fixture loads a
+multi-gigabyte FLUX pipeline inside pytest, and the process does not fail: it
+**aborts the interpreter**, taking every other backend test with it. So no
+backend result could be established at all on the maintainer's own machine.
+
+`ZARAM_TEST_DRAWS` now gates it alongside the weights check. Opt-in, because
+the cost of forgetting is asymmetric — a skipped drawing test costs one loud
+line naming the remedy, an unguarded one costs the whole run.
+
+**Measured after, with Ollama up: 3,342 passed, 7 failed, 24 skipped, 10
+errors, 14m20s.** Before, it never reached a summary.
+
+### The 17 that fail have not been looked at
+
+Pre-existing and unexamined — the honest remainder of this session. Classify by
+the contract each asserts, never by the file it lives in; that mistake made 27
+failures feel understood for four milestones.
+
+```
+test_an_image_needs_its_own_consent.py             2 failed
+test_cloud_generation_invariant.py                 3 failed
+test_artifact_records.py                           1 failed
+test_installer_payload.py                          1 failed
+test_the_keep_button_reaches_the_output_folder.py  10 errors
+```
+
+Two of those names are about **egress and consent**, the one area where a
+plausible-looking change is the most expensive thing that can happen. Read them
+before touching anything near them.
+
+### MCP has a surface — the client was live and unreachable
+
+`core/bootstrapper.py` has built the runtime since 1 September, `planner.py`
+can name `mcp.call`, `execution_engine` runs it. **Seven servers were
+configured on the maintainer's machine and nothing in the product could list
+them**, because attaching one meant hand-editing `mcp-servers.json` in the data
+directory.
+
+`backend/runtimes/mcp/api.py` is the surface — list, attach, detach, grant, and
+a health route that answers 503 rather than an empty result while the kernel is
+starting. Everything but health reads the store rather than the live runtime,
+so Settings shows what is configured **without starting a stranger's
+subprocess** as a side effect of opening a page.
+
+**A pasted block cannot grant itself write permission**, and that is the line
+the module exists for. `ServerConfig.from_json` honours a declared `writes`
+mode — right for a file the user edited, wrong for a block arriving over HTTP,
+because config blocks are *meant* to travel and one can come from a forum or a
+stranger carrying a host-undo declaration. `writes` and `grantedTools` are
+stripped on the way in and `known_host_reason` decides, exactly as it does for
+a block that omits them.
+
+Measured against a running backend: **401 without the credential, 200 with**; a
+block declaring host-undo with a pre-granted tool attached as read-only with no
+grants; a grant persisted; detach 200 and detach-absent 404.
+
+Settings gained a **Tools** section — not a seventh node, because tools never
+get menu items. It shows what each server may change and the sentence saying
+why. **There is no control to grant write permission**, deliberately: a toggle
+there would hand the decision straight back to whoever wrote the block.
+
+### A finding that is not fixed, and should be
+
+`ServerStore.save()` serialises every server with an explicit `writes` field,
+including ones that had none. The values it writes are exactly what
+`known_host_reason` derives, so nothing changes in effect — but **once
+explicit, the stored value wins over `KNOWN_HOSTS`**. Remove Figma from that
+list later and the server keeps host-undo regardless.
+
+Found by restoring the maintainer's config after a live test rewrote it. The
+fix is for `save()` to omit `writes` when it matches what `from_json` would
+derive, leaving the curated list authoritative. `config.py`, not the API.
+
+### The manner has two templates and is still free text
+
+`Start from · Casual · Professional` above the box. Choosing one fills the
+field and does nothing else; the ordinary Save button applies it. Not a
+dropdown and not a radio group — either would turn "how should this write" into
+a choice with a fixed set of answers, and the field is free text because a
+register is personal. **The stored default stays empty.**
+
+Both presets are style-only and neither claims a feeling: a manner is a
+register, not an inner life, so Casual has no *"happy to help"* in it. 243 and
+231 characters against the 600 bound, which is enforced at the textarea, in
+`MAX_MANNER_CHARS`, and again on the way into the store.
+
+### The focus ring was painting nothing
+
+`tailwind.config.js` wrapped every colour as an `hsl()` of a variable while
+`index.css` defines those variables in `oklch()`. That construction is invalid
+CSS, so the declarations consuming it were dropped at substitution time —
+silently, with a green build. Two were live in the shipped stylesheet:
+
+* the global `*{border-color: ...}` rule, so every element with a border width
+  and no explicit colour fell back to `currentColor` and drew its border in the
+  **text** colour;
+* the composer's focus ring, the only focus treatment in the app, painted
+  nothing at all.
+
+Beside that, 31 call sites strip the outline and 11 put anything back, leaving
+~208 focusable controls a keyboard could reach and not show. One
+`:focus-visible` rule, unlayered at the end of `index.css` so it wins on source
+order rather than on `!important`.
+
+`tailwind.config.ts` is deleted: Tailwind's own resolver confirmed it never
+loaded, nothing used its exclusive classes, and its slate scale was
+byte-identical to the default.
+
+### Dead weight, measured and mostly still there
+
+An audit found **9,495 lines reached by nothing**. Only the last two rows were
+removed; the rest is recorded here so it is not re-discovered.
+
+| | lines | |
+|---|---|---|
+| `packages/zaram-engine` (72 `.ts`) | 4,501 | a GPU renderer — FrameGraph, ShaderRegistry, VisibilityRuntime |
+| `backend/runtime/` (33 `.py`) | 2,948 | a **web-search** subsystem; search is out of scope for v1 |
+| `backend/tests/discovery/` | 1,458 | its tests |
+| `frontend/src/components/design-system/` (19) | 400 | includes `EmptyState`, `ErrorState`, `LoadingState` |
+| `frontend/src/components/palette/` | 118 | a second `CommandPalette` |
+| root vestigial React app | — | **removed** |
+| `frontend/src/lib/utils.ts` | 13 | **removed** — the only `tsc` failure |
+
+**`backend/runtime/` is the one that matters.** Its `discovery/` package is 21
+modules and **every importer is a test file**. `check:reachability` misses it
+because the modules import *each other* — a self-referential island is
+invisible to a "does anything import this" check, which is one of the three
+blind spots that guard already admits to.
+
+**`backend/runtime/` and `backend/runtimes/` both exist**, one letter apart,
+both containing a `discovery` package. Plural is live — 165 imports across 69
+files including `main.py`. Singular is dead. A one-character typo reaches a
+different subsystem.
+
+`components/design-system/` has **zero importers** and contains exactly the
+empty, loading and error states the workspaces are missing. Built, never wired.
+
+### Aider is installed and not proven
+
+`%LOCALAPPDATA%\aider-venv`, aider-chat 0.86.2, outside the repository because
+it is a tool the maintainer runs rather than something Zaram ships. Only
+`.aider.conf.yml` and `.aiderignore` are checked in.
+
+**The first dry run blocked on an interactive prompt and no successful
+generation has been read.** The install and the configuration are real; the
+generation is not verified. `--yes-always` with stdin closed is what the retry
+needs.
+
+`docs/AIDER.md` records the ceiling that decides what can be delegated.
+`qwen3-14b-8k` is capped at **8192 tokens** by its Modelfile, and Aider has no
+partial-file mode, so a file it edits is sent whole:
+
+| file | ~tokens | |
+|---|---|---|
+| `core/readiness.py` | 2,100 | in reach |
+| `runtimes/mcp/config.py` | 2,100 | in reach |
+| `ChatSurface.tsx` | 15,000 | out of reach |
+| `SettingsWorkspace.tsx` | 16,700 | out of reach |
+| **`main.py`** | **54,600** | **6.6× the window** |
+
+Raising `num_ctx` does not rescue `main.py`: that much KV cache does not fit in
+12 GB beside the weights. **`main.py` is 5,143 lines**, and extracting routers
+is worth doing on its own merits — `app.include_router` is already the pattern
+at `main.py:193`, and it would make the largest file in the repo tractable for
+any agent, cheap model or otherwise.
+
+### Start here
+
+**A1 — wire the model manifest into first run. Hours, not days.**
+
+`core/readiness.py:121` hardcodes a 397 MB constant and quotes it to a 4 GB
+laptop and a 24 GB workstation alike. Meanwhile
+`backend/providers/model_manifest.py` implements hardware-tier matching —
+`recommend_for(budget_bytes)` returning a `Recommendation` with name, size,
+why, and the manifest's date — and **is imported by nothing**.
+`providers/models.manifest.json` is fully populated: 5 tiers, real Ollama
+names, dated 2026-08-30. There is no content work.
+
+`diagnose()` at `readiness.py:156` is deliberately pure — *"takes what was
+found rather than going and looking"*. Keep that: add a `budget_bytes`
+parameter, call `recommend_for`, build the offer from the `Recommendation`.
+The caller at `main.py:1008` supplies it from
+`ProviderManager.resident_budget_bytes` (`providers/manager.py:220`).
+
+`FirstRunPanel.tsx:69` `canBeCarriedOut()` admits only `explore` and
+`use_cloud_key`. Its own comment says *"when those executors land, this
+function is where they are admitted"* — `pull_model` is already an offer kind,
+and `ReadinessOffer` already carries `downloadBytes` and `downloadLabel`
+("Show this on the button itself"). The pattern is built; the wiring and the
+executor are what is missing.
+
+**Then A2, the pull executor** — a streaming route through `OllamaAdapter`,
+never a socket of its own (`main.py:1012` records why). The happy path is a day;
+disk-full, engine-died-mid-pull, cancel and resume are the rest. Two decisions
+belong to the maintainer before it starts: Ollama's HTTP API or the CLI, and
+whether a pull is recorded in the egress log.
+
+### Traps, each already paid for
+
+* **Two proxy lists.** A new prefix goes in `frontend/vite.config.js` *and*
+  `electron/config.js`. Missing either produces a 200 with `index.html` rather
+  than a 404 — an error naming neither the route nor the proxy. `check:proxy`
+  catches it.
+* **A router that is never included** answers 404 on the running product while
+  its own tests pass. `tests/test_routes_are_mounted.py` asserts against the
+  real app object; add to it.
+* **Check the instrument.** Three probes misled this session: a regex that
+  called five present keys MISSING, an `ls | head` that hid `tokens.ts`, and a
+  grep for `loadError` that missed `setLoadError` on case. Each produced a
+  wrong conclusion before the file itself was read.
+* **Vite serves stale transforms.** A runtime `ReferenceError` survived a hard
+  reload while the source on disk was correct; only restarting Vite with
+  `--force` cleared it. Compare the served module against the file before
+  believing either.
+* **The dev credential is a file, not magic.** `vite.config.js`'s
+  `devApiSecret()` reads `ZARAM_API_SECRET`, or falls back to
+  `backend/api-secret`. Start the backend and Vite with the *same* value and
+  the browser authenticates with no Electron at all. A mismatch presents as
+  every Settings row reading "unavailable", which looks like a backend fault
+  and is not one.
+
+---
+
+## Previous state — 4 September 2026
 
 *The latest work is first. Earlier sessions follow below.*
 

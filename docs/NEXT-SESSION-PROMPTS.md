@@ -1,11 +1,11 @@
 # Next session — handoff
 
 > **Out of date at the top, current at the bottom.** The newest prompt is
-> *"Prompt for the next session — written 4 September 2026"*, near the end of
-> this file, and the authoritative state is the **Current state — 4 September**
-> block in `docs/MILESTONES.md`. Everything between here and that prompt is the
-> 3 September brief: still accurate about what was built and why, superseded on
-> status. Read it for reasoning, not for what is true today.
+> *"Prompt for the next session — written 5 September 2026"*, at the very end
+> of this file, and the authoritative state is the **Current state — 5
+> September** block in `docs/MILESTONES.md`. Everything between here and that
+> prompt is an earlier brief: still accurate about what was built and why,
+> superseded on status. Read it for reasoning, not for what is true today.
 
 
 Rewritten 3 September 2026, then **updated the same day once tasks 1 and 2 were
@@ -412,7 +412,7 @@ and found nothing.
 
 ---
 
-## Prompt for the next session — written 4 September 2026
+## Prompt for the 4 September session — superseded
 
 > Continue Zaram. Read the **Current state — 4 September** block at the top of
 > `docs/MILESTONES.md` first; it is the handoff and re-deriving it is expensive.
@@ -508,3 +508,115 @@ and found nothing.
 >
 > Stage paths explicitly when committing; a previous session swept a dozen
 > unrelated files into an avatar commit with `git add -A frontend/src`.
+
+---
+
+## Prompt for the next session — written 5 September 2026
+
+**This is the current prompt.** Everything above it is an earlier brief, kept
+for its reasoning and superseded on status. The authoritative state is
+**Current state — 5 September** in `docs/MILESTONES.md`.
+
+Paste from here down.
+
+---
+
+Read `docs/MILESTONES.md` — the **Current state — 5 September 2026** block —
+before anything else. Then `CLAUDE.md` for the rules.
+
+`main` is the trunk and the working tree is clean. **8 commits are unpushed.**
+Do not push without being asked.
+
+### Your task, in order
+
+**1. A1 — make the first-run model recommendation true. Start here; it is hours.**
+
+`core/readiness.py:121` hardcodes `SMALLEST_CHAT_BYTES = 397 MB` and offers
+that same number to a 4 GB laptop and a 24 GB workstation. Meanwhile
+`backend/providers/model_manifest.py` already does hardware-tier matching and
+**nothing imports it**. `providers/models.manifest.json` is populated — 5
+tiers, real Ollama names, dated 2026-08-30. There is no content work and no new
+concept; this is wiring a finished module to a surface that is already built.
+
+* Add a `budget_bytes` parameter to `diagnose()` at `readiness.py:156`. **Keep
+  it pure** — its docstring says it *"takes what was found rather than going
+  and looking"*, and a test asserts no module opens its own connection.
+* Build the `PULL_MODEL` offer from the returned `Recommendation` — its `name`,
+  `size_bytes`, `why`, and surface `generated` so the manifest's date is
+  visible, which `CLAUDE.md` asks for.
+* The caller at `main.py:1008` supplies the budget from
+  `ProviderManager.resident_budget_bytes` (`providers/manager.py:220`).
+* Fall back to the existing constant when `recommend_for` returns nothing.
+  **Never fail closed** — the module's own docstring says so.
+
+*Done looks like:* `GET /readiness` names a real model and a real size, and
+names a **different** one when the budget is forced small. `tests/test_readiness.py`
+exists and will need updating.
+
+**2. The 17 backend failures.** They are pre-existing and nobody has read them.
+`CLAUDE.md`: a failing test is fixed or deleted, never left — and classify by
+the contract each asserts, never by the file it lives in. Two are about
+**egress and consent**; read those first and change nothing near them casually.
+
+**3. Only if 1 and 2 are done: A2, the pull executor.** A streaming route
+through `OllamaAdapter`, never a socket of its own. Then flip
+`canBeCarriedOut()` at `FirstRunPanel.tsx:69` to admit `pull_model`. **Two
+decisions are the maintainer's, not yours** — Ollama's HTTP API or the CLI, and
+whether a model pull is recorded in the egress log. Ask; do not choose.
+
+### How to verify, without launching Electron
+
+The dev credential is a file, not magic. Start both halves with the same value
+and the browser authenticates:
+
+```
+cd backend && ZARAM_API_SECRET=dev venv/Scripts/python.exe -m uvicorn main:app --host 127.0.0.1 --port 8420
+cd frontend && ZARAM_API_SECRET=dev npx vite --port 5173 --strictPort
+```
+
+A mismatch presents as every Settings row reading "unavailable", which looks
+like a backend fault and is not one. The backend takes ~40s to boot.
+
+### The gate
+
+Nothing counts as done because it runs. It is done when something **calls** it
+and these pass:
+
+```
+backend/venv/Scripts/python.exe -m pytest backend/tests/test_readiness.py -q
+npm run check:reachability
+cd frontend && npx tsc --noEmit && npx vitest run
+```
+
+The whole backend suite is 14m20s and is not the inner loop — run the one file,
+then the suite once before committing.
+
+### Traps this repository has already paid for
+
+* **Check your instrument before believing it.** Three probes gave wrong
+  answers in the last session alone — a regex that reported five present keys
+  as missing, an `ls | head` that hid a file, a grep that missed a name on
+  case. Read the file before concluding from a grep.
+* **Fifteen complete, tested, unreachable subsystems** have been found here.
+  That is the base rate, not pessimism. A named caller is part of done.
+* **Two proxy lists** — `frontend/vite.config.js` and `electron/config.js` —
+  for any new route prefix. `check:proxy` catches a miss.
+* **Vite serves stale transforms.** If a runtime error contradicts the source
+  on disk, compare the served module and restart Vite with `--force`.
+* **Do not point Aider at `main.py`.** It is 5,143 lines, ~54,600 tokens,
+  6.6× the local model's window. `docs/AIDER.md` has the full table, and Aider
+  itself is installed but **not yet proven to generate anything** — its first
+  dry run blocked on an interactive prompt.
+
+### Two things recorded but deliberately not done
+
+Neither is your task unless the maintainer says so; they are here so they are
+not rediscovered.
+
+* `ServerStore.save()` freezes derived `writes` modes into `mcp-servers.json`,
+  after which the stored value wins over `KNOWN_HOSTS`. Fix belongs in
+  `config.py`.
+* **9,495 lines reached by nothing**, itemised in the Current state block.
+  `backend/runtime/` (singular) is a dead web-search subsystem whose only
+  importers are its own tests, sitting one letter from the live
+  `backend/runtimes/`.
