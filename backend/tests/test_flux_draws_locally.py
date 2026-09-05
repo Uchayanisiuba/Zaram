@@ -16,6 +16,7 @@ the feature works is how this repository has been fooled before — so it skips
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -267,11 +268,35 @@ class TestTheParametersSchnellNeeds:
         assert any("Negative prompt ignored" in r.message for r in caplog.records)
 
 
+# Two conditions, and the second one is the lesson.
+#
+# Weights being present is not sufficient. Loading a FLUX pipeline takes
+# several gigabytes, and on a machine that has the weights but not the room
+# the process does not fail — it **aborts the interpreter**, taking the whole
+# suite with it. Measured 5 September 2026: a full `pytest -q` died inside
+# `transformers.modeling_utils.from_pretrained`, so the backend suite could
+# not be run to completion at all, and no other backend result could be
+# established while that was true.
+#
+# The original gate protected a machine with *no* weights and did nothing for
+# the maintainer's own — which is the machine the suite is actually run on.
+#
+# Opt-in rather than opt-out, because the cost of forgetting is asymmetric:
+# a skipped drawing test costs one loud line naming the remedy, and an
+# unguarded one costs every other backend test in the run.
 @pytest.mark.skipif(
     find_model() is None,
     reason=(
         f"No FLUX pipeline in {default_model_dir()} — download {SOURCE_REPO} "
         "to run the test that actually draws"
+    ),
+)
+@pytest.mark.skipif(
+    not os.environ.get("ZARAM_TEST_DRAWS"),
+    reason=(
+        "Loading FLUX needs several GB and aborts the interpreter on a machine "
+        "without the room, taking the whole suite with it. Set "
+        "ZARAM_TEST_DRAWS=1 to run the test that actually draws."
     ),
 )
 class TestAnImageIsActuallyProduced:
