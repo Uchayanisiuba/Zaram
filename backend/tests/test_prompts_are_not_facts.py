@@ -49,6 +49,17 @@ def carries():
     return _Probe()._carries_new_information
 
 
+@pytest.fixture(scope="module")
+def fact_from():
+    """The extractor, built the same way and for the same reason."""
+
+    class _Probe(ExecutionEngine):
+        def __init__(self):  # noqa: D107 - deliberately does nothing
+            pass
+
+    return _Probe()._fact_from
+
+
 #: Read out of the real Spine, plus the two question forms that started it.
 TRAFFIC = [
     "Say the single word: hello",
@@ -111,3 +122,78 @@ def test_the_asymmetry_is_deliberate(carries):
     """
     ambiguous = "the thing we discussed on Tuesday"
     assert carries(ambiguous) is False
+
+
+class TestWhatIsStoredIsTheFactAndNotTheMessage:
+    """Getting in the door is one decision; what gets written is another.
+
+    The door check above decides whether a message contains a fact. It says
+    nothing about *which part* of it is one — and until 3 September 2026
+    `_remember` stored the whole message, so a real fact arrived in the Spine
+    wrapped in a greeting and a request:
+
+        "Hey, quick one — my day rate is 450 now. Can you redo the invoice?"
+
+    All of that was recalled and cited later, which is the same visible failure
+    rule 7d names, one size smaller: Zaram quoting the user's own asides back
+    at them as though they were sources.
+
+    The extractor uses `_ASSERTION_RE` — the *same* evidence the door used,
+    applied per sentence. A second matcher tuned separately would eventually
+    disagree with the first, and a message could be admitted by one and emptied
+    by the other.
+    """
+
+    def test_the_request_after_a_fact_is_left_out(self, fact_from):
+        """The half that was doing the damage: the ask.
+
+        **A sentence is the unit, and the limit that comes with that is stated
+        rather than papered over.** "Hey, quick one" shares its sentence with
+        the fact — an em-dash is not a sentence boundary — so it rides along.
+        Splitting on dashes as well would trim it, and would also cut
+        `Ashgrove — 30th, every month` in half, which is a whole fact and is
+        asserted below. A greeting stored beside a rate is untidy; a fact
+        stored in two pieces is wrong.
+        """
+        got = fact_from(
+            "Hey, quick one — my day rate is 450 now. Can you redo the invoice?"
+        )
+        assert got == "Hey, quick one — my day rate is 450 now."
+        assert "redo the invoice" not in got
+
+    def test_an_explicit_opener_is_not_stored_as_part_of_the_fact(self, fact_from):
+        """"Remember:" is an instruction to Zaram, not something about the work."""
+        assert fact_from("Remember: the Northwind contract renews in March.") == (
+            "the Northwind contract renews in March."
+        )
+        assert fact_from("Don't forget the deadline is Friday.") == (
+            "the deadline is Friday."
+        )
+
+    def test_a_message_that_is_only_a_fact_is_unchanged(self, fact_from):
+        for prompt in FACTS:
+            if prompt.lower().startswith("remember"):
+                continue  # covered above; the opener is deliberately removed
+            assert fact_from(prompt) == prompt
+
+    def test_a_second_line_that_asks_for_something_is_dropped(self, fact_from):
+        got = fact_from("The deadline is Friday.\nCan you draft the email?")
+        assert got == "The deadline is Friday."
+
+    def test_two_facts_in_one_message_both_survive(self, fact_from):
+        got = fact_from(
+            "My day rate is 450. Harbour Lane pays late. Anyway, thanks for the help."
+        )
+        assert got == "My day rate is 450. Harbour Lane pays late."
+
+    def test_it_never_returns_nothing(self, fact_from):
+        """The failure that would be silent, so it is the one pinned hardest.
+
+        Returning empty for a message the door check already admitted is a
+        deletion nobody asked for and nobody sees. Keeping too much is the
+        failure this method reduces, and the user can see and correct that one.
+        """
+        awkward = "Ashgrove — 30th, every month, without fail"
+        assert fact_from(awkward) == awkward
+        assert fact_from("Remember") == "Remember"
+        assert fact_from("   ") == ""

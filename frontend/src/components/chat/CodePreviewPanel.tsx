@@ -25,17 +25,55 @@
  * what it produced was a calculator that could not add up — a preview that
  * makes working code look broken.
  *
+ * **Then it shipped scriptable and storage-less, which was the same mistake
+ * one layer down.** An opaque origin does not hand a frame an empty
+ * `localStorage`; it hands it one that *throws* on the first read. A generated
+ * Tetris opens by reading its high score, so it died on line one and rendered
+ * a black canvas — working code made to look broken a second time, by the seal
+ * rather than by the label. `SEALED_STORAGE` gives the frame a map of its own,
+ * which is strictly less than real storage and discarded with the panel.
+ *
  * `ArtifactPreview` is unchanged and still runs nothing. An invoice has no use
  * for a script, so granting it one would be surface bought for nothing.
  */
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { motion } from 'framer-motion';
-import { X, Info } from 'lucide-react';
+import { X, Info, Download } from 'lucide-react';
 import { useLayoutStore } from '@/stores/layoutStore';
 import { useChatModeStore } from '@/stores/chatModeStore';
 import { useViewport } from '@/hooks/useViewport';
-import { APP_SANDBOX, wrapForPreview, type PreviewableBlock } from '@/lib/previewableCode';
+import {
+  APP_SANDBOX,
+  filenameFor,
+  savePreviewable,
+  wrapForPreview,
+  type PreviewableBlock,
+} from '@/lib/previewableCode';
+
+/** The host a policy refusal names, or `null` when there is nothing to name.
+ *
+ *  `blockedURI` is a full URL for a remote sub-resource, and one of a handful
+ *  of bare words — `inline`, `eval`, `data` — for a refusal with no host in
+ *  it. Only the first kind is worth telling anyone about: a page asking
+ *  cdn.tailwindcss.com for itself is exactly why it renders unstyled, whereas
+ *  "inline" explains nothing to a person who did not write the page. */
+function hostOf(uri: string | undefined): string | null {
+  if (!uri || !/^https?:/i.test(uri)) return null;
+  try {
+    return new URL(uri).host || null;
+  } catch {
+    return null;
+  }
+}
+
+/** Three hosts read as a list; six read as noise. Named in full up to
+ *  three, because \"and 1 more\" is longer than the host it is hiding. */
+function nameThem(hosts: string[]): string {
+  if (hosts.length <= 2) return hosts.join(" and ");
+  if (hosts.length === 3) return `${hosts[0]}, ${hosts[1]} and ${hosts[2]}`;
+  return `${hosts[0]}, ${hosts[1]} and ${hosts.length - 2} more`;
+}
 
 export default function CodePreviewPanel({
   block,
@@ -63,23 +101,60 @@ export default function CodePreviewPanel({
   // instead. Filtered by `source`, because a `message` listener on the window
   // hears every frame on the page and an unfiltered one would let any of them
   // write into this panel.
+  //
+  // Two channels, because a refusal and a crash are two different facts about
+  // the page, and merging them is what made the old single line useless: a
+  // blocked webfont is the seal doing its job on a page that is otherwise
+  // fine, a thrown exception is the page not working, and whichever arrived
+  // first was the one the user read.
   const frameRef = useRef<HTMLIFrameElement | null>(null);
-  const [fault, setFault] = useState<string | null>(null);
+  const [scriptError, setScriptError] = useState<string | null>(null);
+  const [reachedFor, setReachedFor] = useState<string[]>([]);
 
   useEffect(() => {
-    setFault(null);
+    setScriptError(null);
+    setReachedFor([]);
     const onMessage = (event: MessageEvent) => {
       if (!frameRef.current || event.source !== frameRef.current.contentWindow) return;
-      const data = event.data as { __zaramPreview?: boolean; kind?: string; detail?: string };
+      const data = event.data as {
+        __zaramPreview?: boolean;
+        kind?: string;
+        detail?: string;
+        uri?: string;
+      };
       if (!data || data.__zaramPreview !== true) return;
-      // First fault only. A page that throws on every animation frame would
+      if (data.kind === 'blocked') {
+        const host = hostOf(data.uri);
+        if (!host) return;
+        // Deduplicated: a page pulling eight webfonts from one host is one
+        // fact about that page, not eight.
+        setReachedFor((current) => (current.includes(host) ? current : [...current, host]));
+        return;
+      }
+      // First error only. A page that throws on every animation frame would
       // otherwise rewrite this line hundreds of times a second, and the first
       // one is the one that explains the rest.
-      setFault((current) => current ?? `${data.kind === 'blocked' ? 'Blocked' : 'Error'}: ${data.detail ?? ''}`);
+      setScriptError((current) => current ?? (data.detail || 'the page stopped'));
     };
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
   }, [block.code]);
+
+  // Said in the user's terms rather than the browser's. "Blocked:
+  // style-src-elem blocked https://fonts.googleapis.com/css2?family=…" is a
+  // true sentence that tells a non-technical user nothing and reads as Zaram
+  // being broken — when it is Zaram working. The seal holding is the product's
+  // whole claim here, so the line leads with that and gives the consequence
+  // second.
+  const status = [
+    scriptError ? `The page's own script stopped: ${scriptError}` : null,
+    reachedFor.length
+      ? `Nothing left your device — the page asked ${nameThem(reachedFor)} for part of itself, ` +
+        'and the preview has no network, so it may look unfinished.'
+      : null,
+  ]
+    .filter(Boolean)
+    .join(' ');
 
   // Registered on the window because focus is inside a sandboxed iframe most of
   // the time, where a React key handler on the panel would never see the event.
@@ -139,6 +214,22 @@ export default function CodePreviewPanel({
             preview
           </span>
           <div className="flex-1" />
+          {/* Keeping what you are looking at, from where you are looking at
+              it. The same action is under the message, and both belong: the
+              panel is where someone decides the page is worth having, and
+              closing it to go and find a button is the moment that decision
+              gets dropped. `savePreviewable` writes the model's markup, not
+              the framed page in the iframe beside it. */}
+          <button
+            onClick={() => savePreviewable(block)}
+            aria-label={`Save as ${filenameFor(block)}`}
+            title={`Save as ${filenameFor(block)}`}
+            className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-[11px] text-slate-400 hover:bg-white/5 hover:text-slate-200"
+            style={{ border: '1px solid var(--color-border)' }}
+          >
+            <Download size={12} />
+            Save
+          </button>
           <button
             onClick={onClose}
             aria-label="Close preview"
@@ -168,15 +259,15 @@ export default function CodePreviewPanel({
             the user is watching model-written code run, and is entitled to
             know what it is sealed off from without opening a settings page. */}
         <div
-          className="flex items-center gap-2 px-4 py-2"
+          className="flex items-start gap-2 px-4 py-2"
           style={{
             borderTop: '1px solid var(--color-border-subtle)',
             color: 'var(--color-text-faint)',
           }}
         >
-          <Info size={12} />
-          <span className="text-[11px]">
-            {fault ?? "Runs here only — no network, and no access to your files or Zaram's data."}
+          <Info size={12} className="mt-[3px] shrink-0" />
+          <span className="text-[11px] leading-snug">
+            {status || "Runs here only — no network, and no access to your files or Zaram's data."}
           </span>
         </div>
       </motion.div>

@@ -1,11 +1,14 @@
 import { describe, it, expect } from 'vitest';
 import {
   extractPreviewable,
+  filenameFor,
+  savePreviewable,
   wrapForPreview,
   APP_CSP,
   APP_SANDBOX,
   DOCUMENT_CSP,
   ERROR_REPORTER,
+  SEALED_STORAGE,
 } from './previewableCode';
 
 describe('extractPreviewable', () => {
@@ -140,5 +143,129 @@ describe('the seal on an app preview', () => {
   it('reports a policy refusal, which is the failure nobody can otherwise see', () => {
     expect(ERROR_REPORTER).toContain('securitypolicyviolation');
     expect(ERROR_REPORTER).toContain('unhandledrejection');
+  });
+
+  /** The directive alone cannot produce a sentence a person can read. "the
+   *  page asked cdn.tailwindcss.com for part of itself" needs the host, and
+   *  the panel has no other way to get it — it cannot see into an opaque
+   *  origin. Reported as a field rather than parsed back out of the prose. */
+  it('carries the host a refusal named, not only the directive', () => {
+    expect(ERROR_REPORTER).toContain('e.blockedURI');
+    expect(ERROR_REPORTER).toContain('uri:');
+  });
+});
+
+describe('storage a generated page can actually use', () => {
+  /** The bug the shim exists for, and it is why a working Tetris looked
+   *  broken. In an opaque origin `localStorage` does not return an empty
+   *  store — it *throws* `SecurityError` on the first read. A generated game
+   *  opens with `parseInt(localStorage.getItem('highScore') || '0')`, that
+   *  line throws at the top level, and nothing after it runs: the canvas
+   *  stays black and no key does anything. A portfolio page hits the same
+   *  wall reading a saved theme, which is why both symptoms arrived together.
+   *
+   *  Measured in a real sandboxed frame either side of the change — before,
+   *  the reporter caught "Uncaught SecurityError: Failed to read the
+   *  'localStorage' property from 'Window'"; after, the game runs. */
+  it('hands an app frame its own storage, ahead of the page', () => {
+    const wrapped = wrapForPreview('<p id="page">x</p>', 'app');
+    expect(wrapped).toContain(SEALED_STORAGE);
+    expect(wrapped.indexOf(SEALED_STORAGE)).toBeLessThan(wrapped.indexOf('id="page"'));
+  });
+
+  it('shims every store that throws in an opaque origin', () => {
+    for (const name of ['localStorage', 'sessionStorage', 'cookie']) {
+      expect(SEALED_STORAGE).toContain(name);
+    }
+  });
+
+  /** Left alone deliberately. `indexedDB.open` throws the same
+   *  `SecurityError`, and a half-built fake database would fail later,
+   *  deeper and less legibly than the honest error the reporter already
+   *  carries. */
+  it('fakes no database, because a bad one fails less legibly than none', () => {
+    expect(SEALED_STORAGE).not.toContain('indexedDB');
+  });
+
+  /** The shim has to be strictly *less* than real storage, which is the whole
+   *  reason it does not widen the seal: real `localStorage` would be wrong
+   *  here because it would be Zaram's own origin persisting across previews,
+   *  and a map inside the frame persists across nothing. Nothing in it may
+   *  reach a disk, a parent, or a network. */
+  it('is a map inside the frame and reaches nothing outside it', () => {
+    for (const reach of ['fetch(', 'XMLHttpRequest', 'WebSocket', 'parent.', 'top.', 'http']) {
+      expect(SEALED_STORAGE).not.toContain(reach);
+    }
+  });
+
+  it('gives a document none of it, because a document runs no script at all', () => {
+    expect(wrapForPreview('<p>x</p>')).not.toContain(SEALED_STORAGE);
+  });
+});
+
+describe('saving a page written in a reply', () => {
+  const block = (code: string, language = 'html') => ({
+    language,
+    label: language.toUpperCase(),
+    code,
+  });
+
+  it("names the file from the page's own title", () => {
+    expect(filenameFor(block('<title>Budget Calculator</title><p>x</p>'))).toBe(
+      'budget-calculator.html',
+    );
+  });
+
+  it('falls back to a dull name rather than an unreadable unique one', () => {
+    expect(filenameFor(block('<p>no title here</p>'))).toBe('page.html');
+    expect(filenameFor(block('<circle r="4"/>', 'svg'))).toBe('image.svg');
+  });
+
+  it('keeps a filename to characters three operating systems agree on', () => {
+    const name = filenameFor(block('<title>Q3 / Q4: "spend" report *draft*</title>'));
+    expect(name).toBe('q3-q4-spend-report-draft.html');
+  });
+
+  /** The regression worth having a test for: the preview wraps the page in our
+   *  CSP, our stylesheet and a `postMessage` reporter, and none of that is the
+   *  user's document. Saving the framed version would hand them a file with a
+   *  policy meta tag they did not write and a call to a parent frame that does
+   *  not exist. */
+  it('writes the markup the model wrote, not what the preview frame runs', async () => {
+    const source = '<title>T</title><p>body</p>';
+    const blobs: Blob[] = [];
+    const originalCreate = URL.createObjectURL;
+    const originalRevoke = URL.revokeObjectURL;
+    URL.createObjectURL = ((given: Blob) => {
+      blobs.push(given);
+      return 'blob:stub';
+    }) as typeof URL.createObjectURL;
+    URL.revokeObjectURL = (() => {}) as typeof URL.revokeObjectURL;
+    try {
+      savePreviewable(block(source));
+      expect(blobs).toHaveLength(1);
+      const written = await blobs[0].text();
+      expect(written).toBe(source);
+      expect(written).not.toContain('Content-Security-Policy');
+      expect(written).not.toContain('__zaramPreview');
+      expect(blobs[0].type).toContain('text/html');
+    } finally {
+      URL.createObjectURL = originalCreate;
+      URL.revokeObjectURL = originalRevoke;
+    }
+  });
+
+  it('leaves no anchor behind in the document', () => {
+    const originalCreate = URL.createObjectURL;
+    const originalRevoke = URL.revokeObjectURL;
+    URL.createObjectURL = (() => 'blob:stub') as typeof URL.createObjectURL;
+    URL.revokeObjectURL = (() => {}) as typeof URL.revokeObjectURL;
+    try {
+      savePreviewable(block('<p>x</p>'));
+      expect(document.querySelectorAll('a[download]')).toHaveLength(0);
+    } finally {
+      URL.createObjectURL = originalCreate;
+      URL.revokeObjectURL = originalRevoke;
+    }
   });
 });

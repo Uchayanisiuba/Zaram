@@ -56,7 +56,9 @@ export const DOCUMENT_CSP =
  *  *consequence*, not by whether code runs. Paired with `allow-scripts` and
  *  **no** `allow-same-origin`, the frame gets an opaque origin: no reach into
  *  this app's DOM or storage, its own storage isolated and discarded, no
- *  network, no navigation, no popups, no modals. The consequence is that
+ *  network, no navigation, no popups, no modals. That last claim was
+ *  aspirational until `SEALED_STORAGE` below made it true — an opaque origin
+ *  does not give a frame isolated storage, it gives it storage that throws. The consequence is that
  *  pixels change. That is the generative tier, and the first version of this
  *  file refused it by applying the label instead of the test — which left a
  *  calculator that could not add up.
@@ -91,8 +93,8 @@ export const APP_CSP =
  *  and it is the one this file has now caused twice. */
 export const ERROR_REPORTER = `<script>
 (function () {
-  function send(kind, detail) {
-    try { parent.postMessage({ __zaramPreview: true, kind: kind, detail: String(detail) }, '*'); }
+  function send(kind, detail, uri) {
+    try { parent.postMessage({ __zaramPreview: true, kind: kind, detail: String(detail), uri: String(uri || '') }, '*'); }
     catch (e) { /* nothing to be done from in here */ }
   }
   window.addEventListener('error', function (e) {
@@ -102,8 +104,99 @@ export const ERROR_REPORTER = `<script>
     send('error', (e && e.reason && e.reason.message) || 'unhandled rejection');
   });
   document.addEventListener('securitypolicyviolation', function (e) {
-    send('blocked', (e.violatedDirective || 'policy') + ' blocked ' + (e.blockedURI || 'inline'));
+    send('blocked', (e.violatedDirective || 'policy') + ' blocked ' + (e.blockedURI || 'inline'), e.blockedURI);
   });
+})();
+<\/script>`;
+
+/** Storage the page can use, that is a map in this frame and nothing else.
+ *
+ *  **This is the bug that made a working Tetris look broken.** `allow-scripts`
+ *  without `allow-same-origin` gives the frame an opaque origin, and in an
+ *  opaque origin `window.localStorage` does not return an empty store — it
+ *  *throws* `SecurityError` on the very first read. A generated game opens
+ *  with `parseInt(localStorage.getItem('highScore') || '0')`, that line throws
+ *  at the top level, and every line after it never runs. The page renders,
+ *  the canvas stays black, nothing responds to a key. Measured: the panel's
+ *  own reporter caught it as "Uncaught SecurityError: Failed to read the
+ *  'localStorage' property from 'Window'". A portfolio page hits the same wall
+ *  reading a saved theme, which is why both symptoms arrived together.
+ *
+ *  So the frame is handed its own. An in-memory map, installed before the
+ *  page's script runs, discarded with the frame — it touches no disk, no
+ *  origin and nothing of this app's. **That is strictly less than real
+ *  storage, not more**, which is why it does not widen the seal: the reason
+ *  real `localStorage` would be wrong here is that it would be *Zaram's*
+ *  origin, persisting across previews. This persists across nothing.
+ *
+ *  Same grading as `'unsafe-eval'` above, and the same lesson twice: refusing
+ *  by the *name* of a capability rather than by its consequence here is what
+ *  produced a calculator that could not add up, and now a game that could not
+ *  start.
+ *
+ *  `document.cookie` throws identically and gets the same treatment. Cookies
+ *  are a store with names, so it keeps names rather than appending forever —
+ *  no expiry, no domains, no path, because a preview that ends when the panel
+ *  closes has no use for any of them.
+ *
+ *  **`indexedDB` is deliberately not shimmed.** `indexedDB.open` throws the
+ *  same `SecurityError`, and a half-built fake database would fail later,
+ *  deeper, and less legibly than the honest error does now. A generated page
+ *  reaching for IndexedDB is rare; one that does gets a reported fault, which
+ *  is the outcome this file exists to guarantee. */
+export const SEALED_STORAGE = `<script>
+(function () {
+  function memory() {
+    var map = Object.create(null);
+    var base = {
+      getItem: function (key) { key = String(key); return key in map ? map[key] : null; },
+      setItem: function (key, value) { map[String(key)] = String(value); },
+      removeItem: function (key) { delete map[String(key)]; },
+      clear: function () { for (var key in map) { delete map[key]; } },
+      key: function (index) { var keys = Object.keys(map); return index in keys ? keys[index] : null; }
+    };
+    // A Proxy rather than a plain object because real storage answers to
+    // localStorage.highScore as well as to getItem('highScore'), and generated
+    // pages use both spellings interchangeably.
+    return new Proxy(base, {
+      get: function (target, name) {
+        if (name === 'length') return Object.keys(map).length;
+        if (name in target) return target[name];
+        return typeof name === 'string' && name in map ? map[name] : undefined;
+      },
+      set: function (target, name, value) {
+        if (!(name in target)) map[String(name)] = String(value);
+        return true;
+      },
+      deleteProperty: function (target, name) { delete map[String(name)]; return true; },
+      has: function (target, name) { return name in target || name in map; },
+      ownKeys: function () { return Object.keys(map); },
+      getOwnPropertyDescriptor: function (target, name) {
+        if (name in map) return { value: map[name], writable: true, enumerable: true, configurable: true };
+        return undefined;
+      }
+    });
+  }
+  // An own property on the window shadows the throwing accessor it inherits.
+  var names = ['localStorage', 'sessionStorage'];
+  for (var i = 0; i < names.length; i++) {
+    try { Object.defineProperty(window, names[i], { value: memory(), configurable: true }); }
+    catch (e) { /* a frame that still loads beats one that does not */ }
+  }
+  try {
+    var jar = Object.create(null);
+    Object.defineProperty(document, 'cookie', {
+      configurable: true,
+      get: function () {
+        return Object.keys(jar).map(function (k) { return k + '=' + jar[k]; }).join('; ');
+      },
+      set: function (value) {
+        var pair = String(value).split(';')[0];
+        var eq = pair.indexOf('=');
+        if (eq > 0) { jar[pair.slice(0, eq).trim()] = pair.slice(eq + 1).trim(); }
+      }
+    });
+  } catch (e) { /* as above */ }
 })();
 <\/script>`;
 
@@ -139,10 +232,13 @@ export const FRAME_STYLE = `<style>
  *  ability to execute would be surface bought for nothing. */
 export function wrapForPreview(source: string, mode: 'document' | 'app' = 'document'): string {
   if (mode !== 'app') return DOCUMENT_CSP + FRAME_STYLE + source;
-  // The reporter goes before the page so it is listening while the page's own
-  // script runs — registered afterwards it would miss the very errors that
-  // matter, which are the ones thrown during setup.
-  return APP_CSP + FRAME_STYLE + ERROR_REPORTER + source;
+  // Three things ahead of the page, and the order of all three is load-bearing.
+  // The reporter is first so it is listening while everything after it runs —
+  // registered later it would miss the errors that matter most, which are the
+  // ones thrown during setup, and it would not be able to report a shim that
+  // failed to install. The shim is next because it has to be in place before
+  // the page's *first* line: the storage read that broke Tetris was line one.
+  return APP_CSP + FRAME_STYLE + ERROR_REPORTER + SEALED_STORAGE + source;
 }
 
 /** The languages worth offering a preview for, and the label each gets. */
@@ -190,4 +286,63 @@ export function extractPreviewable(text: string): PreviewableBlock | null {
   }
 
   return null;
+}
+
+/** What to call the file when a page written in a reply is saved.
+ *
+ *  Read from the page's own `<title>` where it has one, because a model that
+ *  wrote a budget calculator titled it "Budget calculator" and that is a
+ *  better name than anything this module could invent. Falls back to the
+ *  language — `page.html`, `image.svg` — rather than to a timestamp: a name
+ *  nobody can read is not more informative for being unique, and the operating
+ *  system already disambiguates a second `page.html` on its own.
+ *
+ *  The result is deliberately conservative — lower case, ASCII words joined by
+ *  hyphens, one extension. It reaches `<a download>`, which is a hint the
+ *  browser sanitises anyway, and beyond that it lands in a real directory on
+ *  three operating systems with different opinions about what a filename may
+ *  contain. Producing something dull that works everywhere is the whole job. */
+export function filenameFor(block: PreviewableBlock): string {
+  const extension = block.language === 'svg' ? 'svg' : 'html';
+  const titled = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(block.code);
+  const slug = (titled?.[1] ?? '')
+    .replace(/&[a-z]+;|&#\d+;/gi, ' ')
+    .replace(/[^A-Za-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .toLowerCase()
+    .slice(0, 60);
+  return `${slug || (extension === 'svg' ? 'image' : 'page')}.${extension}`;
+}
+
+/** Save a page written in a reply to disk, as the file it already is.
+ *
+ *  **What is saved is the model's markup, not what the preview frame runs.**
+ *  `wrapForPreview` prepends our CSP, our stylesheet and the fault reporter,
+ *  and every one of those is scaffolding for showing the page *here*. Writing
+ *  them into the user's file would hand them a document with a policy meta tag
+ *  they did not ask for, a `postMessage` call to a parent that no longer
+ *  exists, and body styling that overrides their own. The preview is a lens;
+ *  the file is what was written.
+ *
+ *  Blob, object URL, synthesised click, revoke — the same machinery as
+ *  `downloadArtifact` in `services/artifactsClient`, and for a related reason:
+ *  a plain `<a href>` is not the shape that works here. There it was the API
+ *  credential a link cannot carry; here there is no URL to link to at all,
+ *  because the file exists only as a string in this tab. The revoke is
+ *  deferred for the same measured reason it is there — Chrome cancels a
+ *  download whose object URL is released before it has finished reading it. */
+export function savePreviewable(block: PreviewableBlock): void {
+  const type = block.language === 'svg' ? 'image/svg+xml' : 'text/html';
+  const url = URL.createObjectURL(new Blob([block.code], { type: `${type};charset=utf-8` }));
+  try {
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = filenameFor(block);
+    anchor.style.display = 'none';
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+  } finally {
+    setTimeout(() => URL.revokeObjectURL(url), 10_000);
+  }
 }

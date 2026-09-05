@@ -31,6 +31,7 @@ false zero `vram_bytes` already cost this codebase once.
 """
 from __future__ import annotations
 
+import io
 import urllib.error
 from typing import Optional
 
@@ -366,6 +367,72 @@ class TestTheDecisionThatWasWrong:
         assert two_server_machine.swap_preflight("gemma3:latest") is None
 
 
+class TestAnIdleServerDoesNotBlindTheWholeMachine:
+    """The reported symptom: **"Warming up" on every question, still.**
+
+    Reported by the maintainer on 3 September 2026, after the 31 August session
+    fixed three other causes of the same label. The state of the machine when
+    it was measured: Ollama running and holding the chat model, TabbyAPI
+    running on 127.0.0.1:1234 with **nothing loaded**.
+
+    `_resident_models` merges every local provider and one unknown makes the
+    merge unknown — deliberately, because a partial picture reported as a
+    complete one is the 28 August defect. TabbyAPI's idle 503 was read as
+    unknown, so residency was unknowable while a model sat plainly loaded in
+    Ollama, `swap_preflight` returned None, no `model_load` event was emitted,
+    and the interface's 2.5-second timer guessed a cold model on every single
+    message. The `resident` event whose whole job is to cancel that guess was
+    never sent at all.
+
+    The LM Studio adapter is registered at that address on every machine, so
+    any idle OpenAI-compatible server anywhere on the box was enough to do it.
+    """
+
+    def _idle_openai_server(self) -> OpenAICompatibleAdapter:
+        adapter = OpenAICompatibleAdapter(
+            provider_id="lm_studio",
+            base_url="http://127.0.0.1:1234",
+            kind=ProviderKind.LOCAL_AI_SERVER,
+        )
+
+        def _idle(path, *, timeout):
+            raise urllib.error.HTTPError(
+                "http://127.0.0.1:1234/v1/model",
+                503,
+                "Service Unavailable",
+                {},
+                io.BytesIO(b'{"detail": "No models are currently loaded."}'),
+            )
+
+        adapter._get = _idle
+        return adapter
+
+    def test_a_resident_model_is_still_reported_resident(self, two_server_machine):
+        """The one that matters: the orb can say "Thinking" again."""
+        two_server_machine.registry.register_model_provider(
+            _Server("ollama", {"qwen3:latest": 9 * GB})
+        )
+        two_server_machine.registry.register_model_provider(self._idle_openai_server())
+
+        plan = two_server_machine.swap_preflight("qwen3:latest")
+
+        assert plan is not None, (
+            "an idle second server made residency unknown, which is what puts "
+            "'Warming up' under a model that has not moved"
+        )
+        assert plan.kind == "resident"
+
+    def test_the_idle_server_contributes_nothing_rather_than_hiding_everything(
+        self, two_server_machine
+    ):
+        two_server_machine.registry.register_model_provider(
+            _Server("ollama", {"qwen3:latest": 9 * GB})
+        )
+        two_server_machine.registry.register_model_provider(self._idle_openai_server())
+
+        assert two_server_machine._resident_models() == {"qwen3:latest": 9 * GB}
+
+
 class TestTheOpenAICompatibleServerCanReportAtAll:
     """Merging alone would have changed nothing: there was nothing to merge.
 
@@ -432,6 +499,55 @@ class TestTheOpenAICompatibleServerCanReportAtAll:
 
         assert adapter.resident_models() is None
 
+    def test_an_idle_server_says_so_with_a_status_code_and_is_believed(self):
+        """503 plus *"No models are currently loaded"* is an empty card.
+
+        Measured against the running TabbyAPI on 127.0.0.1:1234, 3 September
+        2026: with nothing loaded it answers `/v1/model` with **503** and
+        ``{"detail": "No models are currently loaded."}``. That is the same
+        fact the null-id branch above reports, arriving as a status rather than
+        as a field — and reading it as "cannot tell" made residency unknown for
+        the whole machine, because one unknown provider makes the merge
+        unknown. See `TestAnIdleServerDoesNotBlindTheWholeMachine`.
+        """
+        adapter = self._adapter()
+
+        def _idle(path, *, timeout):
+            raise urllib.error.HTTPError(
+                "http://127.0.0.1:1234/v1/model",
+                503,
+                "Service Unavailable",
+                {},
+                io.BytesIO(b'{"detail": "No models are currently loaded."}'),
+            )
+
+        adapter._get = _idle
+
+        assert adapter.resident_models() == {}
+
+    def test_a_503_that_does_not_say_that_is_still_unknown(self):
+        """Busy is not empty, and busy is when a model is most likely loaded.
+
+        503 alone means "not right now" — overloaded, starting up, behind a
+        proxy that is between backends. Reading any of those as an empty card
+        undercounts the card, which is the error that runs in the dangerous
+        direction: an unseen tenant makes a cold start look like it fits.
+        """
+        adapter = self._adapter()
+
+        def _busy(path, *, timeout):
+            raise urllib.error.HTTPError(
+                "http://127.0.0.1:1234/v1/model",
+                503,
+                "Service Unavailable",
+                {},
+                io.BytesIO(b'{"detail": "Server is warming up, try again."}'),
+            )
+
+        adapter._get = _busy
+
+        assert adapter.resident_models() is None
+
     def test_a_timeout_is_unknown_because_busy_is_when_it_is_most_likely_loaded(
         self,
     ):
@@ -486,15 +602,32 @@ class TestAgainstTheRealServersOnThisMachine:
             kind=ProviderKind.LOCAL_AI_SERVER,
         )
 
-    def test_the_running_server_reports_the_model_it_is_holding(self):
+    def test_the_running_server_reports_what_it_is_holding(self):
+        """A listening server answers, whether or not it holds anything.
+
+        **This asserted `assert resident` until 3 September 2026, and the
+        assumption underneath it — listening implies loaded — was the bug.**
+        TabbyAPI idle answers `/v1/model` with 503 and *"No models are
+        currently loaded"*, which was read as "cannot tell" and made residency
+        unknown for the whole machine. The test passed for as long as the
+        maintainer happened to have a model loaded, and went red the moment the
+        real state it was blind to was the state of the machine.
+
+        The contract is: a reachable server is never unknown, and any model it
+        names carries an unknown size, because no OpenAI-compatible route has a
+        field for one.
+        """
         resident = self._tabby().resident_models()
 
-        assert resident, "a server is listening and reported nothing resident"
-        name, size = next(iter(resident.items()))
-        assert size is None, (
-            "no OpenAI-compatible route carries a memory figure; a number here "
-            f"would be an invention: {name} -> {size}"
+        assert resident is not None, (
+            "a server is listening, so what it holds is knowable — including "
+            "when the answer is nothing"
         )
+        for name, size in resident.items():
+            assert size is None, (
+                "no OpenAI-compatible route carries a memory figure; a number "
+                f"here would be an invention: {name} -> {size}"
+            )
 
     def test_both_servers_appear_in_one_map(self):
         from providers.discoverers.ollama import OllamaAdapter

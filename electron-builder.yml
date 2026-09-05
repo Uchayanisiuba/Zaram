@@ -80,6 +80,14 @@ files:
   - "!backend/image_output"
   - "!backend/temp"
   - "!backend/uploads"
+  # Model weights the user brought. `default_model_dir()` is
+  # `data_dir()/models/image`, and in a checkout `data_dir()` is `backend/` —
+  # so a developer with an SDXL checkpoint has 6.9 GB sitting here. Nothing
+  # under the allow-list's extensions matches `.safetensors`, so it could not
+  # ship today; this says so on purpose rather than by omission, and covers
+  # `.gguf`, `.bin`, `.pt` and `.onnx` beside it, because "the weights are not
+  # in the installer" must not depend on which format somebody drops in next.
+  - "!backend/models"
 
   - "!**/__pycache__"
   - "!**/*.pyc"

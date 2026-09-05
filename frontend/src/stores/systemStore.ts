@@ -67,11 +67,39 @@ export function cloudModelConnected(routing: RoutingState | null): boolean {
  *  installed. Null means the backend has not reported yet. */
 export type SpeechAvailability = 'available' | 'not-installed' | null;
 
+/** Whether Zaram can draw a picture on this machine, and what to say if not.
+ *
+ *  Same argument as speech, one step further. Image generation has **no menu
+ *  item** — `CLAUDE.md` keeps tools out of the navigation, so the only way to
+ *  ask for a picture is to type one — which means a user has no way at all to
+ *  discover whether it works. A capability that is off silently reads as a
+ *  broken product; a capability that is *on* silently is one nobody finds.
+ *
+ *  `reason` and `remedy` come from the backend rather than being composed
+ *  here, because it is the thing that knows which of three separate absences
+ *  it is looking at — no torch, no diffusers, or no checkpoint — and each has
+ *  its own fix and its own download size.
+ *
+ *  This reports **readiness, never residency**. The model loads on first use,
+ *  not at boot: SDXL is ~7 GB and a 27B chat model with its cache is ~10.7 GB,
+ *  so on a 12 GB card holding both is not slow, it is impossible. */
+export interface ImageAvailability {
+  canDraw: boolean;
+  /** Why not. Empty when it can. */
+  reason: string;
+  /** What would fix it, with the size named. Empty when it can. */
+  remedy: string;
+  /** What would draw — the checkpoint's own name. Empty when nothing would. */
+  provider: string;
+}
+
 interface SystemState {
   backendOnline: boolean;
   /** Null until the first successful poll — distinct from "known offline". */
   routing: RoutingState | null;
   speech: SpeechAvailability;
+  /** Null until the first successful poll, on the same rule as `speech`. */
+  images: ImageAvailability | null;
   activity: OrbActivity;
   /** Which model is being loaded, while `activity` is `swapping`.
    *
@@ -125,6 +153,7 @@ export const useSystemStore = create<SystemState>((set, get) => ({
   backendOnline: false,
   routing: null,
   speech: null,
+  images: null,
   activity: 'idle',
   swappingTo: null,
   cloudAnsweredAt: null,
@@ -170,9 +199,22 @@ export const useSystemStore = create<SystemState>((set, get) => ({
       // the ordinary state of a base install and must be explained rather than
       // shown as a dead control.
       const connector = data?.speech?.active_connector_health;
+      // Absent means an older backend that does not report it, which is not
+      // the same as "cannot draw" — so it stays null and the surface says
+      // nothing, rather than claiming a capability is missing on the strength
+      // of a field that was never sent.
+      const img = data?.images;
       set({
         backendOnline: data?.kernel === 'online',
         speech: connector?.available ? 'available' : 'not-installed',
+        images: img
+          ? {
+              canDraw: Boolean(img.can_draw),
+              reason: String(img.reason ?? ''),
+              remedy: String(img.remedy ?? ''),
+              provider: String(img.provider ?? ''),
+            }
+          : null,
         routing: {
           mode: (r.mode as RoutingMode) ?? 'unknown',
           providers,

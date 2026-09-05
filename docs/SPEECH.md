@@ -40,10 +40,20 @@ was removed on 18 August.
 reasoning for excluding every better-sounding alternative is in `CLAUDE.md` under
 the dependency stack: licence, VRAM, platform coverage. It has not changed.
 
-The default is **`am_michael`** — American English, male. Kokoro ids read
-`<language><gender>_<name>`, so the second character is the claim, and
-`test_voice_resolution.py` asserts on that convention rather than on the literal:
-swapping in another male voice keeps it green, swapping in a female one does not.
+The default is **`am_michael`** — American English, male. Kokoro ids read `<language><gender>_<name>`, so the
+second character is the claim, and `test_voice_resolution.py` asserts on that
+convention rather than on the literal: swapping in another male voice keeps it
+green, swapping in a female one does not. That is what let the default move
+four times across 3–4 September 2026 — `am_michael` → `bm_fable` → `am_onyx` →
+`am_michael` — with one constant edited each time and no test rewritten to
+match a name.
+
+**The first character is a claim too, and it is the one that nearly shipped
+wrong.** `lang_code` was a separately written `"a"`; `DEFAULT_LANG_CODE` is now
+derived from `DEFAULT_VOICE`, so a British voice can never again be phonemised
+by the American front end. See `voice/config.py`, which also records why the
+brightness measurements taken that day are worth keeping and were not what
+decided the choice.
 
 **It is decided in exactly one place**, `backend/voice/config.py`. It used to be
 spelled in six, which is how they drifted apart. A scan test fails the suite if

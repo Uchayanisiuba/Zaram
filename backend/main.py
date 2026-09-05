@@ -264,6 +264,15 @@ async def startup_event():
         spine_maintenance = SpineMaintenance(kernel.memory_runtime, kernel.event_bus)
         spine_maintenance.start()
 
+    # Staging keeps its own promise. A retention window nothing enforces is a
+    # sentence on a card rather than a property of the product, and the card
+    # says "clears in N days" — so something has to clear it.
+    #
+    # On boot and then daily, the same shape as `SpineMaintenance` and for the
+    # same reason: a desktop app that is open for a fortnight must not need a
+    # restart to honour a window it advertised on day one.
+    asyncio.create_task(_sweep_staging_forever())
+
     # Preload the local model, in the background, so the first message does not
     # pay for it. Fire-and-forget on purpose: the backend must answer /health
     # and /readiness while several gigabytes move onto the card, or the first
@@ -1046,6 +1055,25 @@ async def health():
             speech_health = kernel.speech_runtime.health_check()
     except Exception:
         speech_health = {}
+
+    # Whether this machine can draw, and if not, what would fix it and what it
+    # costs. Reported here rather than only at the moment somebody asks for a
+    # picture, because `CLAUDE.md` requires disabled capabilities to be visible
+    # rather than silent — and the inverse matters just as much: a capability
+    # that works and says so nowhere is one nobody discovers. Image generation
+    # has no menu item by design, so this is the only place it can be seen.
+    #
+    # It reports readiness, never residency. The model loads on the first
+    # request and not at boot, which is deliberate: SDXL is ~7 GiB and a 27B
+    # chat model with its cache is ~10.7 GiB, so on a 12 GiB card holding both
+    # is not slow, it is impossible. `can_draw` means "asking would work", not
+    # "it is loaded".
+    images_health = {}
+    try:
+        if getattr(kernel, "images_runtime", None):
+            images_health = await kernel.images_runtime.health_check()
+    except Exception:
+        images_health = {}
     
     # Which build is answering, and since when. Cheap, and it exists because a
     # backend from 06:32 served this port all day while two already-fixed bugs
@@ -1159,6 +1187,7 @@ async def health():
         "capabilities": capabilities,
         "knowledge_providers": provider_health,
         "speech": speech_health,
+        "images": images_health,
         "routing": routing,
         # `curl localhost:8420/health` now answers "which build is this?" —
         # the question that would have saved two rounds of re-fixing bugs that
@@ -1184,7 +1213,13 @@ def _web_search_state() -> bool | None:
 
         return bool(web_search_enabled())
     except Exception:  # noqa: BLE001
-        logger.debug("could not read web search state for the identity block")
+        # `logging.getLogger(__name__)` rather than a bare `logger`, which is
+        # not bound anywhere in this module — every other call site spells it
+        # out. As written this raised `NameError` from inside the handler whose
+        # whole purpose is that a preamble is never worth a failed reply.
+        logging.getLogger(__name__).debug(
+            "could not read web search state for the identity block"
+        )
         return None
 
 
@@ -1487,6 +1522,47 @@ async def knowledge_search(request: KnowledgeRequest):
     return search_knowledge(request.query, request.persona)
 
 
+def _standing_reader():
+    """A function saying where each fact stands with the curator.
+
+    **Rule 7e is running and nobody can see it.** Facts *"enter provisionally,
+    become durable through use, and decay if never recalled"*, `SpineMaintenance`
+    has been doing exactly that once a day since it landed, and the Memory
+    surface showed a recall count with no way to tell what it meant. A user
+    watching a Spine they cannot see curated has no reason to believe it is —
+    which is most of why a save-everything-by-hand button feels necessary.
+
+    Four values, and they are 7e's own words:
+
+    - ``pinned`` — the user said keep it, and decay now honours that
+    - ``durable`` — recalled at least once, so use has made it worth keeping
+    - ``fading`` — the next pass would forget it
+    - ``provisional`` — in, not yet used, not yet at risk
+
+    **Asked of the decay engine rather than recomputed.** `should_forget` is
+    the predicate the pass itself runs; re-deriving "is this fading" from the
+    thresholds would put a second copy of the policy here, and the two would
+    drift the first time anyone tuned one. Returns a function so the engine is
+    resolved once per listing rather than per record.
+    """
+    from runtimes.memory.decay import MemoryDecayEngine
+
+    engine = getattr(kernel.memory_runtime, "_decay_engine", None) or MemoryDecayEngine()
+    now = time.time()
+
+    def standing(record) -> str:
+        if getattr(record, "pinned", False):
+            return "pinned"
+        age_days = (now - record.created_at) / 86400
+        if engine.should_forget(record.importance, age_days, record.access_count):
+            return "fading"
+        if record.access_count > 0:
+            return "durable"
+        return "provisional"
+
+    return standing
+
+
 @app.get("/memory")
 async def list_memory(limit: int = 200, offset: int = 0, q: str = ""):
     """Everything in the Spine, newest first.
@@ -1511,6 +1587,7 @@ async def list_memory(limit: int = 200, offset: int = 0, q: str = ""):
 
     total = len(records)
     page = records[offset : offset + limit]
+    standing_of = _standing_reader()
 
     return {
         "total": total,
@@ -1535,6 +1612,12 @@ async def list_memory(limit: int = 200, offset: int = 0, q: str = ""):
                 "superseded_by": r.superseded_by,
                 "superseded_at": r.superseded_at,
                 "pinned": r.pinned,
+                # Where this fact stands with the curator — see
+                # `_standing_reader`. Computed here rather than in the
+                # interface because the thresholds belong to the decay engine,
+                # and a second copy of them in TypeScript would be the "one
+                # number, two places" defect this repository keeps paying for.
+                "standing": standing_of(r),
                 # Set when this record replaced another, so the surface can link
                 # a correction back to what it corrected.
                 "corrects": (r.metadata or {}).get("corrects"),
@@ -1938,7 +2021,38 @@ async def get_character():
         # interface never has to hardcode the product's own name to render a
         # placeholder — the same reason `default_model` of null is meaningful.
         "default_name": "Zaram",
+        # And which voice actually speaks when they have not chosen one.
+        #
+        # Sent for the same reason as the name, and it closes a real hole:
+        # `/voice/voices` answers `{}` on a working install, because listing
+        # the pack means asking huggingface.co and rule 7g forbids a network
+        # call nobody consented to. Settings read that empty list as "the
+        # speech extra is not installed" and said so — on a machine where
+        # Kokoro was installed and speaking. One signal standing for two
+        # answers again: "no voices to list" is not "no speech".
+        #
+        # This is the answerable half, and it needs no network: what is
+        # speaking right now. `_resolve_voice` resolves the same way.
+        "default_voice": _default_voice_name(),
     }
+
+
+def _default_voice_name() -> str:
+    """The shipped default voice, or empty when speech is not installed.
+
+    Read from `voice.config` rather than written here, because that module's
+    own note records six spellings of one voice id collapsing into one
+    constant. Importing it is what keeps this the seventh reader rather than
+    the seventh spelling.
+    """
+    try:
+        from voice.config import DEFAULT_VOICE
+
+        return DEFAULT_VOICE
+    except Exception:
+        # No voice extra on this machine. Empty, not a guess: the interface
+        # renders no claim rather than naming a voice nothing can produce.
+        return ""
 
 
 class CharacterUpdate(BaseModel):
@@ -1959,6 +2073,236 @@ async def set_character(update: CharacterUpdate):
         manner=update.manner,
         voice=update.voice,
     )
+
+
+def _letterhead_for(from_name: str, from_lines: list[str]):
+    """The letterhead a generated document carries.
+
+    **The request wins, the store is the default, and neither is discarded.**
+    A caller that named a business meant that business — a user trading under
+    two names has to be able to say so per document, and rule 7i already
+    anticipates that as the per-project override. A caller that named nothing
+    gets what they configured, which is the whole point of configuring it.
+
+    This is the line the comment at the two call sites was waiting for. It read
+    *"supplied per request, not read from a store, because where branding is
+    captured is an open decision"* — true when it was written and settled since,
+    in `docs/MILESTONES.md` under *"Where branding is captured"*. Global scope,
+    Settings for editing, chat for capture.
+
+    Returns None when neither has anything, because `_masthead` renders a
+    titled document under a rule for None and an empty branding block for an
+    empty object.
+    """
+    from artifacts.letterhead import Letterhead
+    from artifacts.letterhead_store import get_letterhead_store
+
+    if from_name or from_lines:
+        return Letterhead(name=from_name, lines=from_lines)
+    return get_letterhead_store().as_letterhead()
+
+
+class LetterheadUpdate(BaseModel):
+    #: Absent leaves a field alone; empty clears it. Same contract as
+    #: `CharacterUpdate` above, for the same reason: a store where clearing is
+    #: impossible makes a typo in a business name permanent.
+    name: str | None = None
+    lines: list[str] | None = None
+
+
+class LogoUpload(BaseModel):
+    """A logo as the interface has it: base64 and the type the file claimed.
+
+    **Base64 in JSON rather than multipart**, which looks like the wrong choice
+    and is not. The value is *stored* as a base64 `data:` URI — that is what
+    `letterhead.py` requires, because WeasyPrint is called with no `base_url`
+    and a relative path cannot resolve. Accepting multipart would mean decoding
+    bytes on the way in so they could be re-encoded on the way to disk, and
+    every route on this backend already speaks JSON.
+    """
+
+    #: Raw base64, no `data:` prefix. The prefix is built here from
+    #: `content_type` so the stored URI cannot disagree with the type that was
+    #: checked.
+    data: str
+    content_type: str
+
+
+@app.get("/letterhead")
+async def get_letterhead():
+    """The user's branding, without the logo's bytes.
+
+    `describe()` rather than `to_dict()`: a control needs to know a logo exists
+    to decide between "Add" and "Replace", and it does not need a megabyte to
+    render that word. The pixels are served by `/letterhead/logo` for the one
+    surface that previews them.
+    """
+    from artifacts.letterhead_store import get_letterhead_store
+
+    return get_letterhead_store().describe()
+
+
+@app.get("/letterhead/logo")
+async def get_letterhead_logo():
+    """The stored `data:` URI itself, for a preview.
+
+    Separate from `/letterhead` so the common read stays small. Returns an
+    empty string rather than 404 when there is none: "no logo configured" is an
+    ordinary state of this product, not a missing resource, and a 404 would put
+    an error in the console of every user who has not set one.
+    """
+    from artifacts.letterhead_store import get_letterhead_store
+
+    return {"logo": get_letterhead_store().logo}
+
+
+@app.put("/letterhead")
+async def set_letterhead(update: LetterheadUpdate):
+    from artifacts.letterhead_store import get_letterhead_store
+
+    store = get_letterhead_store()
+    store.set_identity(name=update.name, lines=update.lines)
+    return store.describe()
+
+
+@app.post("/letterhead/logo")
+async def set_letterhead_logo(upload: LogoUpload):
+    """Validate and store a logo, or explain in a sentence why not.
+
+    `LogoRejected` carries text written for a person — which formats are
+    accepted, how large the limit is, and why SVG is refused even though it
+    would be smaller and sharper. It is passed through as the 400's detail
+    rather than replaced with a code, because the reason is the useful part and
+    the interface has nothing better to say than what the rule already says.
+    """
+    import base64
+
+    from artifacts.letterhead import LogoRejected, logo_data_uri
+    from artifacts.letterhead_store import get_letterhead_store
+
+    try:
+        raw = base64.b64decode(upload.data or "", validate=True)
+    except Exception:
+        raise HTTPException(status_code=400, detail="That upload was not readable.")
+
+    try:
+        uri = logo_data_uri(raw, upload.content_type)
+    except LogoRejected as rejected:
+        raise HTTPException(status_code=400, detail=str(rejected))
+
+    store = get_letterhead_store()
+    store.set_logo(uri)
+    return store.describe()
+
+
+@app.delete("/letterhead/logo")
+async def clear_letterhead_logo():
+    from artifacts.letterhead_store import get_letterhead_store
+
+    store = get_letterhead_store()
+    store.clear_logo()
+    return store.describe()
+
+
+class TemplateUpload(BaseModel):
+    """A document the user already sends, for Zaram to read their identity from.
+
+    Base64 for the same reason `LogoUpload` is: every route here speaks JSON,
+    and the one thing extracted from this file that gets *stored* — the logo —
+    is stored base64 anyway.
+    """
+
+    data: str
+    filename: str = ""
+
+
+class TemplateAdoption(BaseModel):
+    """The reviewed proposal, as the person actually approved it.
+
+    **The interface sends values back rather than an id, and that is the
+    design.** A server-side "adopt proposal #7" would apply what was
+    *extracted*; this applies what was *confirmed*, including the corrections
+    made in the review. `TemplateProposal.as_letterhead()` exists for the
+    uncorrected case and is deliberately not the route — a person who fixed
+    their own address in the form and then had the original saved would have
+    no way to tell until a client did.
+    """
+
+    name: str = ""
+    lines: list[str] = []
+    #: The `data:` URI shown in the review, returned as it was shown. Empty
+    #: means the user declined the logo that was found, which is a real answer
+    #: and not the same as not having looked.
+    logo: str = ""
+
+
+@app.post("/letterhead/from-document")
+async def read_letterhead_from_document(upload: TemplateUpload):
+    """Read a company's identity out of a document they already send.
+
+    **Nothing is applied here.** The reply is a proposal: every field carries
+    the line it was read from and how sure the reader is, and everything that
+    could not be read carries the question that would settle it.
+    `artifacts/template_profile.py` is explicit that `as_letterhead()` is the
+    only route from extracted to used and that a person triggers it — so this
+    route reads, `PUT /letterhead/adopt` writes, and the gap between them is
+    the review.
+
+    That is rule 4's correction loop moved to the cheapest moment to be
+    corrected: before the first invoice goes out, rather than after a client
+    has seen the wrong address.
+    """
+    import base64
+
+    from artifacts.template_profile import extract_template_profile
+    from artifacts.template_reader import UnreadableTemplate, read_template
+
+    try:
+        raw = base64.b64decode(upload.data or "", validate=True)
+    except Exception:
+        raise HTTPException(status_code=400, detail="That upload was not readable.")
+
+    try:
+        text, images = read_template(raw, filename=upload.filename)
+    except UnreadableTemplate as unreadable:
+        # Its sentences are written for a person and name the fix — an OCR
+        # extra, a size limit, a format. Replacing them with a code would throw
+        # away the only part that tells the user what to do next.
+        raise HTTPException(status_code=400, detail=str(unreadable))
+
+    return extract_template_profile(text, images=images).to_dict()
+
+
+@app.put("/letterhead/adopt")
+async def adopt_letterhead(adoption: TemplateAdoption):
+    """Save what the person confirmed in the review.
+
+    The logo is re-validated rather than trusted, even though it came from a
+    proposal this backend produced a moment ago. It arrives over HTTP like
+    anything else, and `letterhead_store` reads a stored logo strictly for the
+    same reason — the value ends up in an `<img src>` inside a document that
+    gets sent to a client.
+    """
+    from artifacts.letterhead_store import get_letterhead_store
+
+    store = get_letterhead_store()
+    store.set_identity(name=adoption.name, lines=adoption.lines)
+
+    logo = (adoption.logo or "").strip()
+    if logo:
+        if not logo.startswith("data:image/"):
+            raise HTTPException(
+                status_code=400,
+                detail="A logo has to be an embedded image. Zaram does not store a link.",
+            )
+        store.set_logo(logo)
+    else:
+        # Empty is a decision: the user saw a proposed logo and declined it, or
+        # there was none. Either way the stored one goes, so adopting a
+        # template never leaves a logo from a previous one behind.
+        store.clear_logo()
+
+    return store.describe()
 
 
 @app.get("/routing/preference")
@@ -2286,6 +2630,100 @@ async def correct_memory(record_id: str, body: MemoryCorrection):
     }
 
 
+class MemoryRemember(BaseModel):
+    """A fact the user picked out of a conversation and asked Zaram to keep."""
+
+    text: str
+    #: Rule 7i. Absent means no project was active, which is a real answer.
+    project_id: str | None = None
+    #: Whose words these are. `generated` when saved off a Zaram reply — rule
+    #: 7b, and it changes how recall ranks the fact against a user document
+    #: saying the same thing. Anything else is read as the user's own.
+    origin: str = "conversation"
+
+
+#: How much of a head start a fact gets for having been chosen deliberately.
+#:
+#: Not immortality — that is what pinning is for, and it already exists. This
+#: is a fact the user thought worth keeping, so it should outlast one they only
+#: happened to mention, and still fall away if it turns out never to be used.
+#:
+#: What the number buys, against `DecayConfig`'s 90-day half life: it stays
+#: above the low-importance line for about three months and is forgotten at
+#: roughly six if it is never recalled once. A single recall in that window
+#: adds to it and restarts the argument. Rule 7e in one constant — durable
+#: through use, not through a decision made in advance.
+REMEMBERED_IMPORTANCE = 0.7
+
+
+@app.post("/memory")
+async def remember_fact(body: MemoryRemember):
+    """Keep something the user chose, rather than something a heuristic caught.
+
+    **This is an override, and deliberately not a gate.** Automatic capture
+    stays exactly as it was: `ExecutionEngine._carries_new_information` decides
+    what enters, `SpineMaintenance` decays what is never used, and rule 7e's
+    *"never ask the user a question the system can answer from behaviour"*
+    still governs the ordinary path. Nothing here asks anyone to predict which
+    sentence will matter in November.
+
+    What it adds is certainty for the cases where a heuristic is not good
+    enough — a rate, a term, a decision — in the same shape rule 7b already
+    gives the opposite: *"a 'Don't remember this' override exists on file
+    cards; it is an override, never a gate."* This is that, pointing the other
+    way.
+
+    **`SEMANTIC`, not `CONVERSATION`.** The turn is traffic; what the user
+    lifted out of it is a fact. They are different kinds of thing and the
+    contract has always had words for both, even where the engine collapsed
+    them.
+    """
+    if not kernel.memory_runtime:
+        raise HTTPException(status_code=503, detail="Memory runtime not available")
+
+    text = (body.text or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="There was nothing to remember.")
+    if len(text) > 4000:
+        raise HTTPException(
+            status_code=413,
+            detail="That is too long to keep as one fact. Save the part that matters.",
+        )
+
+    from runtimes.memory.contracts import MemoryType, Origin
+
+    scope = _scope_for_project(body.project_id)
+    # Unknown values resolve to the user's own words rather than to
+    # `GENERATED`, because mislabelling a user document as Zaram's output would
+    # have recall quietly deprioritise the more trustworthy of the two.
+    origin = Origin.GENERATED if body.origin == "generated" else Origin.CONVERSATION
+
+    record_id = await kernel.memory_runtime.remember(
+        content=text,
+        memory_type=MemoryType.SEMANTIC,
+        metadata={"remembered_by": "user"},
+        tags=["remembered"],
+        importance=REMEMBERED_IMPORTANCE,
+        scope=scope,
+        origin=origin,
+    )
+
+    record = await kernel.memory_runtime._store.get(record_id)
+    return {
+        "id": record_id,
+        "content": text,
+        "scope": getattr(record, "scope", scope),
+        "origin": origin.value,
+        "created_at": getattr(record, "created_at", None),
+        # Said here so the interface does not have to know the decay policy to
+        # describe what just happened.
+        "note": (
+            "Kept in Memory, where you can correct or delete it. Pin it there "
+            "if it should never fade."
+        ),
+    }
+
+
 class MemoryPin(BaseModel):
     pinned: bool
 
@@ -2330,12 +2768,46 @@ async def delete_memory(record_id: str):
 from artifacts import export as artifact_export  # noqa: E402
 from artifacts.records import ArtifactRecords, default_db_path  # noqa: E402
 from artifacts.service import ArtifactService  # noqa: E402
+from artifacts.staging import StagingStore, default_staging_root  # noqa: E402
 from artifacts.store import ArtifactStore, default_output_root  # noqa: E402
 
 artifact_service = ArtifactService(
     ArtifactRecords(default_db_path()),
     ArtifactStore(default_output_root()),
+    StagingStore(default_staging_root()),
 )
+
+
+#: How often staging is swept. Daily, matching `SpineMaintenance`, and
+#: overridable for the same reason it is there — a test should not wait a day.
+STAGING_SWEEP_INTERVAL_SECONDS = float(
+    os.getenv("ZARAM_STAGING_SWEEP_INTERVAL", str(24 * 60 * 60))
+)
+
+
+async def _sweep_staging_forever() -> None:
+    """Clear staged images nobody kept, on boot and then daily.
+
+    Failures are logged and the loop continues. A sweep that cannot run is
+    untidy; a sweep whose exception kills the task is a retention window that
+    silently stopped being enforced, which is the worse of the two because
+    nothing on screen changes.
+    """
+    staging = artifact_service.staging
+    if staging is None:
+        return
+    while True:
+        try:
+            for gone in staging.sweep():
+                # The record goes with the file. A record pointing at a path
+                # that is not there is what makes Work show a card that opens
+                # onto nothing.
+                artifact_service.records.forget_at_path(str(gone))
+        except Exception:
+            logging.getLogger(__name__).exception(
+                "staging sweep failed; the retention window is not being enforced"
+            )
+        await asyncio.sleep(STAGING_SWEEP_INTERVAL_SECONDS)
 
 
 def _artifact_json(artifact, *, include_html: bool = False) -> Dict[str, Any]:
@@ -2347,6 +2819,26 @@ def _artifact_json(artifact, *, include_html: bool = False) -> Dict[str, Any]:
     """
     payload = artifact.to_dict()
     payload["exists"] = bool(artifact.path) and os.path.isfile(artifact.path)
+
+    # **Derived from the path, never stored beside it.** A column saying
+    # "staged" next to a file that was kept last week is a second source of
+    # truth, and the one that is wrong is always the one the card renders. The
+    # path already knows which directory it is in, and the file's own mtime
+    # already knows when it expires.
+    staging = artifact_service.staging
+    staged = bool(
+        staging is not None and artifact.path and staging.is_staged(artifact.path)
+    )
+    payload["staged"] = staged
+    payload["expires_at"] = None
+    if staged and payload["exists"]:
+        try:
+            payload["expires_at"] = staging.expires_at(artifact.path)
+        except OSError:
+            # Swept between the two checks. `exists` already says so, and a
+            # missing countdown is better than a wrong one.
+            pass
+
     if include_html:
         payload["html"] = artifact.html
     return payload
@@ -3098,7 +3590,6 @@ async def generate_artifact(body: GenerateBody):
 
     from artifacts import invoice as invoice_module
     from artifacts.contracts import ArtifactKind, ArtifactSource, Claim
-    from artifacts.letterhead import Letterhead
 
     try:
         kind = ArtifactKind(body.kind)
@@ -3186,16 +3677,10 @@ async def generate_artifact(body: GenerateBody):
                 bill_to=body.bill_to,
                 notes=body.notes,
                 payment=body.payment,
-                # Supplied per request, not read from a store, because **where
-                # branding is captured is an open decision** (see MILESTONES,
-                # "Where branding is captured — decided, not yet built"). A
-                # request field commits to nothing: when capture lands, this
-                # becomes its default rather than a second source of truth.
-                letterhead=(
-                    Letterhead(name=body.from_name, lines=body.from_lines)
-                    if (body.from_name or body.from_lines)
-                    else None
-                ),
+                # Per request if this one named a business, otherwise the
+                # stored letterhead. See `_letterhead_for`, which is the
+                # "becomes its default" this comment used to promise.
+                letterhead=_letterhead_for(body.from_name, body.from_lines),
                 fmt=body.fmt,
                 **common,
             )
@@ -3239,11 +3724,7 @@ async def generate_artifact(body: GenerateBody):
                 blocks=blocks,
                 kind=kind,
                 fmt=body.fmt,
-                letterhead=(
-                    Letterhead(name=body.from_name, lines=body.from_lines)
-                    if (body.from_name or body.from_lines)
-                    else None
-                ),
+                letterhead=_letterhead_for(body.from_name, body.from_lines),
                 meta=[(m.label, m.value) for m in body.meta if m.label and m.value],
                 kind_label=body.kind_label,
                 include_provenance=body.include_provenance,
@@ -3269,6 +3750,39 @@ async def generate_artifact(body: GenerateBody):
 
 class RememberBody(BaseModel):
     remember: bool | None = None
+
+
+@app.post("/artifacts/{artifact_id}/keep")
+async def keep_artifact(artifact_id: str):
+    """Save a staged image to the output folder, because the user said so.
+
+    The other half of the answer to *"should the user not choose what to
+    save?"* — the card shows the window, this is the button.
+
+    **The same shape as `POST /chat/attachments/{id}/keep`, deliberately.**
+    That route exists because someone asking one question about a contract has
+    not decided to add it to their knowledge base, and treating those as the
+    same act fills the Spine with things people looked at once. An image is the
+    same distinction one surface along: asking for a picture is not deciding to
+    file four of them forever, and treating those as one act fills a folder the
+    write path cannot clean.
+
+    Generative tier: it creates a file in the output directory and drops one
+    from a cache that was always going to expire, so there is nothing to undo
+    and nothing to confirm.
+
+    Idempotent, because a card can be clicked twice and the second click means
+    what the first did. See `ArtifactService.keep`, which is also where the
+    guard lives that stops a path in the *output* folder being treated as
+    staged — that would be a delete through the one door that must not have
+    one.
+    """
+    try:
+        artifact = artifact_service.keep(artifact_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="No such artifact")
+
+    return {"artifact": _artifact_json(artifact)}
 
 
 @app.post("/artifacts/{artifact_id}/remember")
@@ -3793,11 +4307,34 @@ async def answer_obligation_question(question_id: str, body: QuestionAnswer):
 
 class IngestBody(BaseModel):
     path: str
+    project_id: str | None = None
 
 
 class PasteBody(BaseModel):
     text: str
     name: str = ""
+    project_id: str | None = None
+
+
+def _scope_for_project(project_id: str | None) -> str | None:
+    """`project:<id>` for a project that exists, or None for an unscoped ingest.
+
+    **An unknown id is refused rather than quietly indexed globally.** The
+    scope is written onto every fact the run produces and there is no undoing
+    it from outside — nothing records which run wrote a fact, so a typo'd or
+    stale project id would silently put someone's contract in the general pool
+    with no way to tell afterwards which facts to move. Rule 5's posture
+    applied to scope: default deny, and say so.
+    """
+    chosen = (project_id or "").strip()
+    if not chosen:
+        return None
+    try:
+        return project_records.get(chosen).scope
+    except UnknownProject:
+        raise HTTPException(
+            status_code=404, detail=f"There is no project called {chosen}."
+        )
 
 
 class PolicyBody(BaseModel):
@@ -3825,9 +4362,10 @@ async def start_ingest(body: IngestBody):
     it is the only part the user can act on.
     """
     ingest_service.attach_memory(getattr(kernel, "memory_runtime", None))
+    scope = _scope_for_project(body.project_id)
 
     def _stream():
-        for event in ingest_service.stream_scan(body.path):
+        for event in ingest_service.stream_scan(body.path, scope=scope):
             yield json.dumps(event) + "\n"
 
     return StreamingResponse(_stream(), media_type="application/x-ndjson")
@@ -3860,24 +4398,35 @@ async def _read_capped(upload: UploadFile) -> bytes:
     return b"".join(chunks)
 
 
-def _stream_paths(paths: list[Path]):
+def _stream_paths(paths: list[Path], scope: str | None = None):
     """The NDJSON body for a drop, a paste or an upload.
 
     One shape for all three, and the same shape `/ingest` already emits, so the
     interface parses one stream format rather than three.
+
+    `scope` carries `project:<id>` when the files were imported from a project.
     """
     ingest_service.attach_memory(getattr(kernel, "memory_runtime", None))
 
     def _generate():
-        for event in ingest_service.stream_ingest_paths(paths):
+        for event in ingest_service.stream_ingest_paths(paths, scope=scope):
             yield json.dumps(event) + "\n"
 
     return StreamingResponse(_generate(), media_type="application/x-ndjson")
 
 
 @app.post("/ingest/upload")
-async def ingest_upload(files: list[UploadFile] = File(...)):
+async def ingest_upload(
+    files: list[UploadFile] = File(...),
+    project_id: str = Form(""),
+):
     """Dropped or chosen files, kept and indexed.
+
+    `project_id` is what makes Project's import different from Knowledge's
+    drop: same bytes, same parsers, same uploads directory, and every fact
+    scoped to that project rather than global. A form field rather than a query
+    parameter because this is already multipart, and a project id in a URL is a
+    project id in a log line.
 
     **The bytes are written before a single event is streamed.** A
     `StreamingResponse` body runs after the endpoint returns, by which point
@@ -3892,6 +4441,10 @@ async def ingest_upload(files: list[UploadFile] = File(...)):
     """
     if not files:
         raise HTTPException(status_code=400, detail="No files were sent.")
+
+    # Before a byte is written. An unknown project must not leave files in the
+    # uploads directory that the request then refuses.
+    scope = _scope_for_project(project_id)
 
     saved: list[Path] = []
     try:
@@ -3917,7 +4470,7 @@ async def ingest_upload(files: list[UploadFile] = File(...)):
                 logging.warning("Ingest: could not clean up %s", path)
         raise
 
-    return _stream_paths(saved)
+    return _stream_paths(saved, scope)
 
 
 @app.post("/ingest/text")
@@ -3933,6 +4486,8 @@ async def ingest_text(body: PasteBody):
     if not body.text.strip():
         raise HTTPException(status_code=400, detail="There was nothing in that.")
 
+    scope = _scope_for_project(body.project_id)
+
     try:
         path = ingest_service.save_text(body.text, body.name)
     except OSError as exc:
@@ -3940,7 +4495,7 @@ async def ingest_text(body: PasteBody):
             status_code=500, detail=f"Could not keep that text: {exc.strerror or exc}"
         ) from exc
 
-    return _stream_paths([path])
+    return _stream_paths([path], scope)
 
 
 @app.get("/ingest/sources")

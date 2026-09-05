@@ -1,4 +1,4 @@
-# Start Zaram the way it actually runs.
+﻿# Start Zaram the way it actually runs.
 #
 # Replaces `npm run dev`, which launches the wrong things: `dev:desktop` starts
 # `desktop/src/main/index.ts` — the parallel TypeScript tree `docs/RUNNING.md`
