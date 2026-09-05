@@ -157,6 +157,43 @@ function Row({
   );
 }
 
+/**
+ * Two registers to start from, because a blank box is a poor question.
+ *
+ * **These are templates, not defaults.** The stored manner ships empty and
+ * stays empty until somebody chooses or types something; picking one only
+ * fills the field, and the ordinary Save button is still what applies it.
+ * That keeps the setting the user's — `CLAUDE.md` gives personalisation away
+ * precisely because it is the retention engine, and a default nobody chose is
+ * not personalisation.
+ *
+ * **Both are written to the guardrails that bind any manner.** Style only —
+ * `identity.py` frames them as governing "tone, length, formality" and nothing
+ * about what Zaram is, and places them *before* the self-description rules so
+ * the last instruction the model reads is the true one. And neither claims a
+ * feeling: a manner is a register, not an inner life, so "warm" describes the
+ * prose and never "I'd be delighted to". Nothing here re-engages, congratulates
+ * or greets by streak, because no manner may.
+ */
+const MANNER_PRESETS: ReadonlyArray<{ label: string; text: string }> = [
+  {
+    label: 'Casual',
+    text:
+      'Warm and conversational. Use contractions and everyday words, and keep ' +
+      'sentences short. Answer the question first, then add context if it helps. ' +
+      'Say what you did rather than how you feel about it. Offer the obvious next ' +
+      'step when there is one.',
+  },
+  {
+    label: 'Professional',
+    text:
+      'Measured and precise. Prefer full words to contractions and open with the ' +
+      'answer rather than a preamble. State the conclusion, then the reasoning ' +
+      'that supports it. Name limits and assumptions explicitly. Keep to the ' +
+      'question asked.',
+  },
+];
+
 function Section({
   title,
   icon,
@@ -1392,6 +1429,36 @@ export default function SettingsWorkspace() {
                 }
               >
                 <div className="flex flex-col items-end gap-2">
+                  {/* A starting point, not a setting. Choosing one fills the box
+                      and nothing else — the text is then ordinary, editable, and
+                      saved by the same button as anything typed by hand. Rule 7h:
+                      offer at the moment of doubt, never make the choice for
+                      them. "Blank page" is that moment, and two named registers
+                      answer it more usefully than a placeholder does.
+
+                      First-party text, so it raises none of the questions a
+                      shared character file does — but it is written to the same
+                      guardrails anyway: style only, and no claimed feeling. */}
+                  <div className="flex items-center gap-1.5 self-end">
+                    <span className="text-[10px]" style={{ color: 'var(--color-text-muted)' }}>
+                      Start from
+                    </span>
+                    {MANNER_PRESETS.map((preset) => (
+                      <button
+                        key={preset.label}
+                        type="button"
+                        onClick={() => setMannerDraft(preset.text)}
+                        title={preset.text}
+                        className="text-[10px] px-1.5 py-0.5 rounded"
+                        style={{
+                          color: 'var(--color-text-muted)',
+                          border: '1px solid var(--color-border-subtle)',
+                        }}
+                      >
+                        {preset.label}
+                      </button>
+                    ))}
+                  </div>
                   <textarea
                     value={mannerDraft ?? character.manner}
                     onChange={(e) => setMannerDraft(e.target.value)}
