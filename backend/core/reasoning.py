@@ -81,13 +81,69 @@ class ReasoningSplitter:
     answer would silently vanish into the thinking panel.
     """
 
+    #: What is said when a reply is all thinking and no answer.
+    #:
+    #: Not an error, and deliberately not phrased as one — nothing failed, the
+    #: model simply stopped before it got to the point. Observed on the
+    #: maintainer's machine on 3 September 2026 with a 27B model at 2.2 bits
+    #: per weight, asked to build a portfolio site from a CV: it thought at
+    #: length, twice, and the reply came back **empty**. On screen that is a
+    #: blank bubble with a collapsed *Thought process* beside it and nothing at
+    #: all saying what happened, which reads as the product being broken rather
+    #: than as a generation that ran out.
+    #:
+    #: `CLAUDE.md`: *generation must fail rather than invent* — and a silent
+    #: failure is the half of that rule which is easy to miss, since inventing
+    #: nothing at all still leaves the user with no idea why. It names where
+    #: the working went, because that panel is genuinely worth opening here.
+    NO_ANSWER = (
+        "The model stopped before writing an answer — everything it produced is "
+        "under Thought process. Ask again, or try a shorter question."
+    )
+
     def __init__(self) -> None:
         self._buffer = ""
         self._in_reasoning = False
+        #: Whether anything has ever been emitted as answer.
+        #:
+        #: Tracked rather than derived at the end from `_in_reasoning`, because
+        #: by flush time that flag says nothing useful: `OpenAICompatibleEngine`
+        #: closes an unterminated block itself before the stream ends, so the
+        #: splitter is out of reasoning mode with an empty answer — the exact
+        #: case being caught. What matters is not who closed the tag; it is
+        #: that no answer was ever produced.
+        self._answered = False
+        #: And whether there was any thinking to attribute the silence to. An
+        #: empty reply with no reasoning is a different failure — a refused
+        #: request, a dropped connection — which the error path already reports
+        #: in its own words, and speaking over it here would replace a specific
+        #: message with a vaguer one.
+        self._reasoned = False
 
     @property
     def in_reasoning(self) -> bool:
         return self._in_reasoning
+
+    def _saw(self, kind: str, text: str) -> None:
+        """Record that real content of ``kind`` was emitted.
+
+        **Whitespace does not count, and that is not tidiness.** A reasoning
+        model's chat template puts a newline or two after the closing tag, so a
+        reply truncated immediately afterwards emits `"
+
+"` as its entire
+        answer — measured against TabbyAPI serving Qwen3.8-27B, where every
+        reply's first content delta arrives that way. Counted, that blank line
+        would mark the reply as answered and put the empty bubble back, hiding
+        the one case `NO_ANSWER` exists for behind two characters nobody can
+        see.
+        """
+        if not text.strip():
+            return
+        if kind == ANSWER:
+            self._answered = True
+        else:
+            self._reasoned = True
 
     def feed(self, chunk: str) -> List[Tuple[str, str]]:
         """Consume one token; return whatever can now be emitted safely."""
@@ -102,10 +158,12 @@ class ReasoningSplitter:
                     ready = self._buffer[: len(self._buffer) - hold]
                     if ready:
                         out.append((REASONING, ready))
+                        self._saw(REASONING, ready)
                     self._buffer = self._buffer[len(self._buffer) - hold :]
                     break
                 if index:
                     out.append((REASONING, self._buffer[:index]))
+                    self._saw(REASONING, self._buffer[:index])
                 self._buffer = self._buffer[index + len(CLOSE_TAG) :]
                 self._in_reasoning = False
                 continue
@@ -116,10 +174,12 @@ class ReasoningSplitter:
                 ready = self._buffer[: len(self._buffer) - hold]
                 if ready:
                     out.append((ANSWER, ready))
+                    self._saw(ANSWER, ready)
                 self._buffer = self._buffer[len(self._buffer) - hold :]
                 break
             if index:
                 out.append((ANSWER, self._buffer[:index]))
+                self._saw(ANSWER, self._buffer[:index])
             self._buffer = self._buffer[index + len(OPEN_TAG) :]
             self._in_reasoning = True
 
@@ -134,11 +194,18 @@ class ReasoningSplitter:
         that gets blamed on the model. Whatever is in the buffer is emitted as
         whichever side of the tag the stream was on when it ended.
         """
-        if not self._buffer:
-            return []
-        kind = REASONING if self._in_reasoning else ANSWER
-        out = [(kind, self._buffer)]
-        self._buffer = ""
+        out: List[Tuple[str, str]] = []
+        if self._buffer:
+            kind = REASONING if self._in_reasoning else ANSWER
+            out.append((kind, self._buffer))
+            self._saw(kind, self._buffer)
+            self._buffer = ""
+
+        # All working, no answer. See `NO_ANSWER` for what was measured.
+        if self._reasoned and not self._answered:
+            self._answered = True
+            out.append((ANSWER, self.NO_ANSWER))
+
         return out
 
 
