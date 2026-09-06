@@ -160,36 +160,65 @@ the binding limit on everything above.
   whole reason there is a second round.
 * **The gate runs per call**, unchanged: `McpRuntime.execute` calls
   `policy.decide` itself, so more rounds is more decisions and never one reused.
-* **A full window is not the end of the task.** It carries itself into a fresh
-  one, `MAX_AUTO_CONTINUATIONS` (3) times, keeping the turns and dropping the
-  oldest when they no longer fit — the maintainer's decision on 6 September:
-  *"have it continue till the task is done."* Bounded because "done" is the
-  model's judgement and a model that keeps finding one more file to read would
-  otherwise spend an unbounded amount of somebody's time, or their money on a
-  metered provider. It is **not** a loosening of permission: every call still
-  goes through `policy.decide`, so carrying on buys more decisions, not fewer.
-* **Every carry-on and every stop is said out loud.** A reply that quietly gave
-  up on the tools is the silent-degradation failure; a reply that quietly spent
-  four windows is the same failure pointing upward, and the user pays that one
-  in seconds.
+* **At half the window the task hands itself over, silently.** It compacts —
+  the steps travel, trimmed to `CARRY_SHARE` (0.25) so the next window has room
+  to work — and carries on, `MAX_AUTO_CONTINUATIONS` (3) times. The trigger is
+  the **measured size of the request being sent**, `HANDOFF_SHARE` (0.5) of the
+  model's loaded context, not a count of rounds or bytes read: that is the
+  number the model has to fit and a provider charges for, and everything else
+  is a proxy for it.
+* **Nothing is announced, and that is the point.** The maintainer's decision on
+  6 September: *"I don't want Zaram to keep prompting users… optimise the
+  context, do the handoff behind the scenes, so the UI stays fluid and
+  seamless."* A task that carried on and finished has not failed; four
+  bookkeeping notices in one reply is noise rather than disclosure. A task that
+  runs out of windows **does** say so, with an offer to pick it up, because that
+  one is the silent-degradation case.
+* **The handoff is the cost control.** An earlier version gave a cloud model no
+  automatic continuations at all, reasoning that rule 1 makes those tokens the
+  user's money. Rejected, and the test that asserted it is kept as the test that
+  asserts the opposite: a request that never exceeds half a window is smaller
+  than one that fills it, so compacting is cheaper *and* seamless, while asking
+  charges the user attention to save them nothing.
+* **It is not a loosening of permission**: every call still goes through
+  `policy.decide`, so carrying on buys more decisions, not fewer.
 
-**Continue is session state, and it is not the plan object.** What is kept is
-the completed turns — what the tools *returned* — never the model's prose
-between them. Rule 7d draws that line and the patterns section rejects
-persisting raw dialogue by name. Retention, because a store without an answer
-is an unshipped feature: one per session, replaced when that session stops
-again, dropped on resume, evicted past `MAX_SESSIONS`, **gone on restart**, and
-the notice says so. Continuing evicts whole turns, oldest first, when they no
-longer fit — the call `transcript.py` already makes, for the same reason:
-evicting is deterministic and summarising is a generation.
+**3c — the plan object, so a task outlives the process. Done, 6 September.**
 
-**The button is the fallback, not the route.** It appears only once the
-automatic allowance is spent, which is the honest moment to ask a person
-whether the task is worth more of their machine's time.
+`projects/plans.py`, which `projects/records.py` had already predicted:
+*"everything a project appears to contain (artifacts, facts, later a plan) lives
+in its own store and points back here by id"*. A task that runs out of windows
+is written down, and Project lists what is waiting with a Continue on each.
+This is the half of *"no handoffs"* a person can see: the button under a reply
+dies with the reply, and a row in Project does not.
 
-The durable plan object `CLAUDE.md` assigns to Project — steps, decisions taken
-and rejected, surviving a restart, readable before it runs — **is still not
-built**, and this does not pretend to be it.
+Four properties, and three of them are rules:
+
+* **It holds what the tools returned, never what was said.** Rule 7d, and the
+  patterns section rejecting L0 by name. A step is a call and its result.
+* **It holds no system prompt, deliberately — and that is rule 4.** The obvious
+  design stores the context so a resume is identical, which would freeze a copy
+  of whatever recall found at the time, and a fact the user corrected on
+  Wednesday would come back to life on Thursday inside a task they had
+  forgotten about. So a resumed task **re-recalls** from the question and
+  re-lists the tools: rebuilt, not replayed, and not byte-identical on purpose.
+* **A row exists only while a task is unfinished.** Finishing deletes it — the
+  answer is in the conversation and the steps have done their job — so the
+  store stays small by construction rather than by a sweep.
+* **Seven days, then it is gone.** Long enough for *"stop on Tuesday, carry on
+  Thursday"*; short enough that tool results, which hold file contents, are not
+  a liability sitting on disk. Pruned on open and on every write, and the user
+  can discard one from Project. *"No new store ships without an answer to how
+  long it keeps things and how the user shortens that."*
+
+Continuing still evicts whole steps, oldest first, when they no longer fit —
+the call `transcript.py` already makes, for the same reason: evicting is
+deterministic and summarising is a generation.
+
+**What is still not built** is the other half of what `CLAUDE.md` asks of the
+plan: *decisions taken and decisions rejected*, and a plan the user reads
+**before** it runs. This is the steps and the resumability. The object now
+exists to hang the rest on.
 
 **A UX cost taken deliberately, with a named way back.** Every generation in a
 tool-using reply is now buffered, so those replies arrive whole instead of

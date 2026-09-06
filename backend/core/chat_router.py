@@ -48,6 +48,7 @@ class ChatRouter:
         only_ids: frozenset[str] | None = None,
         images: list[str] | None = None,
         resume: bool = False,
+        plan_id: str = "",
     ) -> AsyncGenerator:
         """Returns the correct generator based on the feature flag.
 
@@ -72,7 +73,7 @@ class ChatRouter:
         if USE_NEW_KERNEL:
             return self._kernel_stream(
                 request_text, model, system_prompt, session_id, project_id,
-                only_ids, images, resume,
+                only_ids, images, resume, plan_id,
             )
         else:
             # The legacy path has no image plumbing and is not getting any.
@@ -90,6 +91,7 @@ class ChatRouter:
         only_ids: frozenset[str] | None = None,
         images: list[str] | None = None,
         resume: bool = False,
+        plan_id: str = "",
     ) -> AsyncGenerator:
         """Streams structured StreamEvent lines from the new Execution Engine.
 
@@ -114,7 +116,13 @@ class ChatRouter:
             # is what continuing means, and re-deriving it would quietly change
             # the task's context between one half and the other.
             source = (
-                self.execution_engine.continue_task(session_id, model)
+                self.execution_engine.continue_task(
+                    session_id,
+                    model,
+                    system_prompt=system_prompt,
+                    plan_id=plan_id,
+                    project_id=project_id,
+                )
                 if resume
                 else self.execution_engine.execute(
                     text, model, system_prompt, session_id,

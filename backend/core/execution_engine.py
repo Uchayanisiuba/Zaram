@@ -33,7 +33,6 @@ import re
 import time
 from collections import OrderedDict
 from collections.abc import Iterator
-from dataclasses import dataclass
 from typing import Any
 
 from core.async_bridge import run_sync
@@ -83,33 +82,11 @@ _NEVER_DEGRADE = frozenset({"image.generate"})
 MCP_CALL = "mcp.call"
 
 
-@dataclass
-class _Continuation:
-    """A tool loop that ran out of room, kept so the user can say *Continue*.
-
-    **What is kept is what was established, not what was said.** The turns are
-    the calls that ran and what they returned; the model's prose between them is
-    working state and is dropped. Rule 7d draws exactly that line, and the
-    patterns section rejects persisting raw dialogue by name.
-
-    The system prompt travels with it because it carries the tools and the facts
-    recall found for the original question, and continuing a task under a
-    different context is not continuing it. It is session state, in memory, and
-    the retention answer is on `_continuations`.
-
-    This is **not** the plan object `CLAUDE.md` assigns to Project. That one
-    outlives a restart, holds decisions taken and rejected, and is something the
-    user reads before it runs. This holds one question's tool results for as
-    long as the process lives, and claims nothing more.
-    """
-
-    prompt: str
-    turns: list[ToolTurn]
-    system_prompt: str
-    model: str | None
-    #: Why it stopped, in the words the user was given. Repeated on resume so a
-    #: continuation that stops again reads as the same task, not a new one.
-    reason: str
+#: Spelled here for the same reason `MCP_CALL` is, and asserted to agree with
+#: `runtimes.mcp` by `test_mcp_reaches_chat`: `core/` keeps no import-time
+#: dependency on a runtime, and a comment claiming two strings match is not the
+#: same thing as a check that they do.
+MCP_LIST_TOOLS = "mcp.list_tools"
 
 
 def _scope_for(project_id: str | None) -> str | None:
@@ -179,22 +156,24 @@ class ExecutionEngine:
         #: session_id → recent (prompt, answer) pairs, LRU-capped at
         #: MAX_SESSIONS. Ordered because eviction order is the point.
         self._session_turns: OrderedDict[str, list[tuple[str, str]]] = OrderedDict()
-        #: session_id → a tool loop that stopped with work left, for **Continue**.
+        #: Where an unfinished task is written down, injected by `main.py`.
         #:
-        #: Session state, on the same terms as `_session_turns` above and for
-        #: the same rule: this is working state, not memory. What it holds is
-        #: the completed tool turns — what was found — never the dialogue, which
-        #: would be L0 and is rejected outright by `CLAUDE.md`'s patterns
-        #: section.
+        #: `projects.plans.PlanRecords`, and `None` when nothing supplied one —
+        #: in which case a stopped task simply is not kept and the loop still
+        #: answers from what it gathered. See `set_plan_records`.
+        self._plans: Any | None = None
+        #: session_id → the id of the task that session is working on.
         #:
-        #: **Its retention answer, because a store without one is an unshipped
-        #: feature.** One per session, replaced when that session stops again,
-        #: dropped the moment it is resumed or the loop finishes on its own,
-        #: evicted with the oldest session past `MAX_SESSIONS`, and gone on
-        #: restart. Continuing is therefore something you do now, not something
-        #: Zaram keeps for you — and the notice says so rather than implying a
-        #: durability this does not have.
-        self._continuations: OrderedDict[str, "_Continuation"] = OrderedDict()
+        #: A pointer, not a copy: the task itself is in the store, and holding
+        #: a second version of it here would be two answers to *"is my work
+        #: still there"*. This exists so a task that stops twice updates one row
+        #: rather than offering the user the same job at two different stages.
+        self._plan_ids: OrderedDict[str, str] = OrderedDict()
+        #: session_id → the project that session's questions belong to (7i).
+        #:
+        #: Recorded per request so a task stopped in a project is filed under
+        #: it, which is what lets Project list the work waiting there.
+        self._project_ids: OrderedDict[str, str] = OrderedDict()
         #: Returns one sentence to say in the transcript, or None. Injected so
         #: `core/` keeps no dependency on `ingest/`; `main.py` supplies it.
         self._notice_source: Any | None = None
@@ -387,6 +366,14 @@ class ExecutionEngine:
             if event.data.get("cited"):
                 event.data["number"] = next(citation_numbers)
             return event
+
+        # Which project this session is working in, so a task that stops here
+        # is filed under it and Project can list what is waiting. Recorded per
+        # request rather than held, because the user can change it between one
+        # question and the next.
+        self._project_ids[session_id] = project_id or ""
+        while len(self._project_ids) > self.MAX_SESSIONS:
+            self._project_ids.popitem(last=False)
 
         # --- Recall: what does the Spine already know that bears on this? ---
         recalled = self._recall(prompt, session_id, project_id, only_ids)
@@ -994,7 +981,7 @@ class ExecutionEngine:
         spoken: list[str],
         session_id: str = "default",
         turns: list[ToolTurn] | None = None,
-        continuations_left: int = MAX_AUTO_CONTINUATIONS,
+        continuations_left: int | None = None,
     ):
         """Call a tool, show the model what came back, and let it call another.
 
@@ -1002,18 +989,22 @@ class ExecutionEngine:
         so the caller can store the answer rather than the marker that produced
         it.
 
-        **Bounded by the window, not by a round count.** Every result is carried
-        into the next prompt, so what has to be bounded is the accumulation —
-        `ContextBudget.tool_output_tokens`, a share of the context the answering
-        model was actually loaded with. An 8K local model and a 64K remote one
-        then degrade differently instead of behaving identically under one
-        counter, and the number is read from `/api/ps` rather than assumed.
+        **It hands over at half the window, and the handoff is silent.** Every
+        result is carried into the next prompt, so the thing to watch is the size
+        of the request being sent — measured, not counted: system prompt,
+        recalled facts, question and carried results, against
+        `ContextBudget.handoff_tokens`, which is half the window the model was
+        actually loaded with. At that point the task compacts itself and carries
+        on in a fresh context. Nothing is announced, because the task has not
+        failed and four bookkeeping notices in one reply is noise rather than
+        disclosure.
 
-        **That budget is a trade, and it is this one:** tool output competes for
-        the same window as the facts recall found. Three 400-line reads would
-        evict the memory that makes an answer Zaram's rather than any model's,
-        which is the product's whole thesis, so the share is a decision written
-        down in `TOOL_OUTPUT_SHARE` rather than a consequence nobody chose.
+        **That is also the cost control.** A request that never exceeds half a
+        window is a smaller request than one that fills it, and on a metered
+        provider smaller is cheaper. The alternative — asking the user each time
+        — is what the maintainer ruled out on 6 September: it is the thing that
+        makes a product stop feeling seamless, and it charges them attention to
+        save them nothing.
 
         **The gate runs on every call, and is not consulted here.** Each pass
         asks `McpRuntime.execute`, which calls `policy.decide` itself, so more
@@ -1021,26 +1012,25 @@ class ExecutionEngine:
         Reading the verdict here as well is how a permission check becomes
         advisory — the distinction `CLAUDE.md` records paying for three times.
 
-        **A full window is not the end of the task.** It carries itself on —
-        `MAX_AUTO_CONTINUATIONS` times — keeping what it found, dropping the
-        oldest of it when it no longer fits, and saying so each time. Only when
-        that allowance is spent does the loop close, and then it offers the
-        manual Continue rather than ending flat.
-
-        **Every stop and every carry-on is said out loud.** A reply that quietly
-        gave up on the tools is the silent-degradation failure `CLAUDE.md` names;
-        a reply that quietly spent four windows is the same failure pointing the
-        other way, and the user is the one paying for it in seconds.
+        **Bounded all the same.** `MAX_AUTO_CONTINUATIONS` handoffs, because
+        "done" is the model's judgement and could be never. When that runs out
+        the loop closes, and *that* is said out loud with an offer to pick it up
+        — a task that stopped short is the silent-degradation case, and it is
+        the only one here that needs a sentence.
         """
         turns = list(turns or [])
-        #: What *this* window has spent on reading, and what it has called.
-        #:
-        #: Both start at zero even when turns were carried in by `continue_task`,
-        #: because that is what continuing means: a second allowance, spent under
-        #: the same rules. What stops it growing without end is not this counter
-        #: but the eviction in `continue_task`, which refuses to carry more than
-        #: the model's own window can hold.
-        spent = 0
+        if continuations_left is None:
+            # **The same allowance whichever model is answering.** An earlier
+            # version of this gave a cloud model none, on the grounds that rule
+            # 1 makes those tokens the user's money — and the maintainer
+            # rejected it: a prompt at every window is the thing that stops a
+            # product feeling seamless, and the handoff itself is the cost
+            # control, because half a window re-sent is cheaper than a full one.
+            continuations_left = MAX_AUTO_CONTINUATIONS
+        #: Calls made in *this* window. Reset by a handoff, because the thing it
+        #: guards against — a model calling a cheap tool for ever — is a
+        #: per-window pathology, and a task that legitimately needs twelve reads
+        #: should get them across three windows.
         rounds = 0
         #: Every call this request has made, across every window. `rounds` is
         #: reset by a carry-on and this is not, because the user is told how
@@ -1054,7 +1044,7 @@ class ExecutionEngine:
             if call is None:
                 # Nothing more wanted: the answer, minus any half-written
                 # marker. The task finished, so nothing is left to continue.
-                self._continuations.pop(session_id, None)
+                self._finished(session_id)
                 answer = strip_calls(text)
                 spoken.append(answer)
                 yield answer
@@ -1135,7 +1125,6 @@ class ExecutionEngine:
                 payload = result.get("result")
 
             turns.append(ToolTurn(call=call, result=payload))
-            spent += estimate_tokens(render_result(payload))
             rounds += 1
             made += 1
 
@@ -1146,11 +1135,19 @@ class ExecutionEngine:
             if budget is None:
                 budget = budget_for(model)
 
-            if spent >= budget.tool_output_tokens:
+            # **The size of the request, not a count of what went into it.**
+            # This is the number the model has to fit and the number a metered
+            # provider charges for, so it is the one the handoff is measured
+            # against — system prompt, recalled facts, question and every result
+            # carried forward. Counting rounds or bytes-read instead would be a
+            # proxy for it, and proxies drift.
+            working = estimate_tokens(system_prompt) + estimate_tokens(
+                result_prompt(original_prompt, turns, may_call_again=True)
+            )
+            if working >= budget.handoff_tokens:
                 filled = (
-                    f"what it read has filled the {budget.tool_output_tokens:,} "
-                    "tokens this question can spend on reading, out of the "
-                    f"{budget.total_tokens:,} the model is loaded with"
+                    f"the working context reached {working:,} tokens, half of "
+                    f"the {budget.total_tokens:,} this model has"
                 )
             elif rounds >= MAX_TOOL_ROUNDS:
                 filled = f"it has made {rounds} tool calls in one window"
@@ -1158,42 +1155,37 @@ class ExecutionEngine:
                 filled = ""
 
             if filled:
-                # **The window fills; the task carries on.** The maintainer's
-                # call on 6 September — *"have it continue till the task is
-                # done"*. What continues is what was *found*: the turns travel
-                # into the fresh window, the oldest are dropped if they no
-                # longer fit, and the prose between them does not go, which is
-                # rule 7d and the reason this is not a transcript.
+                # **The handoff, and it is silent.** At half the window the task
+                # compacts itself and carries on: the turns travel into a fresh
+                # context, the oldest are dropped to leave room to work, and the
+                # prose between them does not go — rule 7d, and the reason this
+                # is not a transcript being replayed.
                 #
-                # Bounded, because "done" is the model's judgement and a model
-                # that keeps finding one more file to read would spend an
-                # unbounded amount of the user's time. When the allowance runs
-                # out the loop closes and offers the manual Continue, which is
-                # now the fallback rather than the only route.
+                # Silent by the maintainer's decision on 6 September: *"I don't
+                # want Zaram to keep prompting users… optimise the context, do
+                # the handoff behind the scenes, so the UI stays fluid and
+                # seamless."* Nothing is being hidden by that — the task
+                # completes, every call is in the egress log, and a *stopped*
+                # task still says so. What is removed is a status line about
+                # Zaram's own bookkeeping, four of which in one reply is noise
+                # rather than disclosure.
+                #
+                # It is also what protects a metered provider's bill: half a
+                # window re-sent is cheaper than a full one, and cheaper still
+                # than the user being asked whether to go on.
+                #
+                # Bounded all the same, because "done" is the model's judgement
+                # and could be never.
                 if continuations_left > 0:
                     carried, dropped = self._turns_that_still_fit(turns, model)
                     if carried:
                         continuations_left -= 1
                         turns = carried
-                        spent = 0
                         rounds = 0
-                        # Said out loud every time. Carrying on silently would
-                        # make a reply that took four windows indistinguishable
-                        # from one that took none, and the user is paying for
-                        # the difference in seconds — or, on a metered
-                        # provider, in money.
-                        lost = (
-                            f" The {dropped} earliest "
-                            f"{'result' if dropped == 1 else 'results'} were "
-                            "dropped to make room; Zaram can look them up again."
-                            if dropped
-                            else ""
-                        )
-                        yield StreamEvent.notice(
-                            f"Zaram is carrying on — {filled}, so it is "
-                            "continuing the task in a fresh window with what it "
-                            f"has found.{lost}",
-                            kind="tool_loop",
+                        logger.info(
+                            "Tool loop handing over: %s; carried %d step(s), "
+                            "dropped %d",
+                            filled, len(carried), dropped,
                         )
                         follow_up = ExecutionStep(
                             capability_id="reasoning.generate",
@@ -1262,15 +1254,7 @@ class ExecutionEngine:
         streams it. Obedience is not something to rely on when the check costs
         one buffer.
         """
-        self._continuations[session_id] = _Continuation(
-            prompt=original_prompt,
-            turns=list(turns),
-            system_prompt=system_prompt,
-            model=model,
-            reason=reason,
-        )
-        while len(self._continuations) > self.MAX_SESSIONS:
-            self._continuations.popitem(last=False)
+        self._park(original_prompt, turns, model, session_id, reason)
 
         final = ExecutionStep(
             capability_id="reasoning.generate",
@@ -1284,42 +1268,142 @@ class ExecutionEngine:
         )
         spoken.append(answer)
         yield answer
+        # **The one thing that is still said out loud.** A task that handed
+        # itself over four times and finished needs no announcement — it worked.
+        # A task that ran out of windows without finishing is the
+        # silent-degradation case `CLAUDE.md` names, so it says so, and the
+        # offer to pick it up is what makes the stop survivable.
         yield StreamEvent.notice(
-            f"{reason} Continue to give it another window — that offer lasts "
-            "for this session only.",
+            f"{reason} Continue to pick it up — Zaram keeps what it found for "
+            "seven days.",
             kind="tool_loop",
             action="continue",
         )
+
+    def _park(
+        self,
+        question: str,
+        turns: list[ToolTurn],
+        model: str | None,
+        session_id: str,
+        reason: str,
+    ) -> None:
+        """Write the unfinished task down, so a restart does not lose it.
+
+        **The store is `PlanRecords` and there is no in-memory copy.** A cache
+        beside a durable store is two answers to one question, and the one this
+        product cannot afford to get wrong is *"is my work still there"*. If no
+        store was injected the task simply is not kept — the loop still answers
+        from what it gathered, and the notice is the only thing that overstates
+        it, which is why the notice is written from the store's own terms.
+
+        The plan id is carried on the engine per session so a task that stops
+        twice updates one row rather than offering the user the same job at two
+        different stages.
+        """
+        if self._plans is None:
+            return
+        from projects.plans import Plan, PlanStep
+
+        try:
+            existing = self._plan_ids.get(session_id, "")
+            stored = self._plans.save(
+                Plan(
+                    id=existing,
+                    question=question,
+                    steps=[
+                        PlanStep(
+                            server=turn.call.server,
+                            tool=turn.call.tool,
+                            arguments=dict(turn.call.arguments),
+                            result=turn.result,
+                        )
+                        for turn in turns
+                    ],
+                    project_id=self._project_ids.get(session_id, ""),
+                    session_id=session_id,
+                    model=model or "",
+                    stopped_because=reason,
+                )
+            )
+            self._plan_ids[session_id] = stored.id
+            while len(self._plan_ids) > self.MAX_SESSIONS:
+                self._plan_ids.popitem(last=False)
+        except Exception:
+            # A task that cannot be written down is not a request that should
+            # fail. The user still gets the answer built from what was read.
+            logger.exception("Could not store the unfinished task")
+
+    def _finished(self, session_id: str) -> None:
+        """Forget the task for this session. It answered; nothing is left to do.
+
+        Deletion on completion is what keeps this store small by construction
+        rather than by a sweep — and tool results hold file contents, which
+        `CLAUDE.md` is explicit about being a liability to keep rather than an
+        asset.
+        """
+        plan_id = self._plan_ids.pop(session_id, "")
+        if plan_id and self._plans is not None:
+            try:
+                self._plans.delete(plan_id)
+            except Exception:
+                logger.exception("Could not clear the finished task")
+
+    def set_plan_records(self, records: Any | None) -> None:
+        """Provide the store for unfinished tasks. Injected, never imported.
+
+        The same seam `set_provider_manager` keeps: `core/` holds no import-time
+        dependency on `projects/`, and an engine without a store degrades to a
+        loop whose tasks do not outlive the process rather than failing.
+        """
+        self._plans = records
 
     def continue_task(
         self,
         session_id: str = "default",
         model: str | None = None,
+        system_prompt: str = "",
+        plan_id: str = "",
+        project_id: str | None = None,
     ) -> Iterator[Any]:
-        """Resume the tool loop this session stopped, with a fresh window.
+        """Resume a stopped task, with a fresh window and a rebuilt context.
 
-        The user's *Continue*. It re-enters the same loop with the turns already
+        The user's *Continue*. It re-enters the loop with the steps already
         completed — what was found, not what was said — so the model picks up
-        from what it established rather than from a transcript it would have to
-        re-read. Rule 7d is the reason that distinction is load-bearing rather
-        than tidy: dialogue is session state, and persisting it to survive a
-        context limit is the L0 store `CLAUDE.md` rejects by name.
+        from what it established rather than from a transcript. Rule 7d is why
+        that distinction is load-bearing rather than tidy.
 
-        A session with nothing parked says so and yields nothing else. That is
-        the ordinary case after a restart, and it must read as *the offer has
+        **The context is rebuilt, not replayed.** Recall runs again from the
+        original question, so a fact the user corrected or deleted in between
+        changes the resumed answer — which is rule 4, and is the reason the
+        stored task deliberately holds no system prompt. `system_prompt` here is
+        the fresh base the API composed for this request: identity, persona, and
+        nothing task-specific.
+
+        Nothing to continue says so and yields nothing else. After the seven-day
+        window that is the ordinary case, and it must read as *the offer has
         expired* rather than as a fault.
         """
-        pending = self._continuations.pop(session_id, None)
+        pending = self._pending_plan(plan_id, session_id, project_id or "")
         if pending is None:
             yield StreamEvent.notice(
-                "There is nothing to continue — the earlier task is no longer "
-                "in this session. Ask again and Zaram will start it fresh.",
+                "There is nothing to continue — no unfinished task is waiting. "
+                "Ask again and Zaram will start it fresh.",
                 kind="tool_loop",
             )
             return
 
-        model = model or pending.model
-        turns, dropped = self._turns_that_still_fit(pending.turns, model)
+        model = model or pending.model or None
+        turns, dropped = self._turns_that_still_fit(
+            [
+                ToolTurn(
+                    call=ToolCall(step.server, step.tool, dict(step.arguments)),
+                    result=step.result,
+                )
+                for step in pending.steps
+            ],
+            model,
+        )
         if dropped:
             # **Whole turns, oldest first, and said out loud.** The same call
             # `transcript.py` makes when a conversation outgrows a window:
@@ -1343,26 +1427,93 @@ class ExecutionEngine:
             )
             return
 
+        # The task is this session's now, whichever session left it — otherwise
+        # a task picked up on Thursday would be written back under Tuesday's
+        # session id and the next Continue would not find it.
+        self._plan_ids[session_id] = pending.id
+        scope = pending.project_id or (project_id or "")
+        if scope:
+            self._project_ids[session_id] = scope
+
+        system_prompt = self._context_for(pending, session_id, system_prompt)
+
         spoken: list[str] = []
         first = ExecutionStep(
             capability_id="reasoning.generate",
             input_data={
-                "prompt": result_prompt(pending.prompt, turns, may_call_again=True)
+                "prompt": result_prompt(pending.question, turns, may_call_again=True)
             },
             depends_on=[],
         )
-        buffered = "".join(
-            self._dispatcher.execute_step(first, model, pending.system_prompt)
-        )
+        buffered = "".join(self._dispatcher.execute_step(first, model, system_prompt))
         yield from self._run_tool_loop(
             buffered=buffered,
-            original_prompt=pending.prompt,
+            original_prompt=pending.question,
             model=model,
-            system_prompt=pending.system_prompt,
+            system_prompt=system_prompt,
             spoken=spoken,
             session_id=session_id,
             turns=turns,
         )
+
+    def _pending_plan(self, plan_id: str, session_id: str, project_id: str):
+        """The task a Continue means: a named one, else this session's, else this
+        project's most recent.
+
+        A named id is the Project surface, where the user picked a specific
+        one out of a list. The other two are the button under a reply, which
+        carries no id and means *the thing that just stopped*.
+        """
+        if self._plans is None:
+            return None
+        try:
+            if plan_id:
+                return self._plans.get(plan_id)
+            return self._plans.latest_for(
+                session_id=session_id,
+                project_id=project_id or self._project_ids.get(session_id, ""),
+            )
+        except Exception:
+            logger.exception("Could not read the unfinished task")
+            return None
+
+    def _context_for(self, pending, session_id: str, base: str) -> str:
+        """Rebuild what the resumed task should be thinking with.
+
+        **Rebuilt, never replayed**, and that is a correctness property rather
+        than an economy. A stored system prompt would carry a copy of whatever
+        recall found days ago, so a fact the user has since corrected or deleted
+        would come back to life inside a task they had forgotten about — rule 4
+        says the answers change, and a frozen copy is how they quietly would
+        not.
+
+        The tools are re-listed for the same reason: a server the user detached
+        in between must not still be on offer.
+        """
+        system_prompt = base
+        try:
+            recalled = self._recall(
+                pending.question, session_id, pending.project_id or None, None
+            )
+            if recalled:
+                system_prompt = self._augment_system_prompt(system_prompt, recalled)
+        except Exception:
+            logger.exception("Recall failed while resuming; continuing without it")
+
+        try:
+            runtime = self._router.try_resolve(MCP_LIST_TOOLS)
+            if runtime is not None:
+                listed = run_sync(
+                    runtime.execute(MCP_LIST_TOOLS, {"query": pending.question})
+                )
+                tools = self._parse_tool_list(
+                    listed if isinstance(listed, str) else json.dumps(listed, default=str)
+                )
+                if tools:
+                    system_prompt += tool_instructions(tools)
+        except Exception:
+            logger.exception("Could not re-attach tools while resuming")
+        return system_prompt
 
     def _turns_that_still_fit(
         self, turns: list[ToolTurn], model: str | None
@@ -1375,14 +1526,12 @@ class ExecutionEngine:
         still attached and it can look again, which the repeat guard permits
         because a dropped call is no longer among the turns.
         """
-        budget = budget_for(model)
-        # **What may be carried is everything except the room to read more.**
-        # Not `tool_output_tokens`: that is one window's *reading allowance*, and
-        # measuring the carry against it would refuse to continue exactly the
-        # loops that stopped — the results that filled the allowance are the
-        # results being carried. So the carry may fill the input budget up to
-        # the point where the next window's reading would not fit.
-        room = budget.input_tokens - budget.tool_output_tokens
+        # **Trimmed to `carry_tokens`, which is well under the handoff
+        # threshold.** Carrying right up to the point that triggered the handoff
+        # would trigger it again on the very next call, and the task would spend
+        # its life handing over instead of working. The gap is the room the next
+        # window has to do something in.
+        room = budget_for(model).carry_tokens
         kept: list[ToolTurn] = []
         for turn in reversed(turns):
             cost = estimate_tokens(render_result(turn.result))
@@ -1393,9 +1542,13 @@ class ExecutionEngine:
         kept.reverse()
         return kept, len(turns) - len(kept)
 
-    def has_continuation(self, session_id: str = "default") -> bool:
-        """Whether this session has a stopped tool loop waiting."""
-        return session_id in self._continuations
+    def has_continuation(
+        self, session_id: str = "default", project_id: str = ""
+    ) -> bool:
+        """Whether an unfinished task is waiting for this session or project."""
+        return (
+            self._pending_plan("", session_id, project_id) is not None
+        )
 
     def _answer_without_the_tool(
         self,

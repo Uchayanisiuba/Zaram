@@ -32,7 +32,14 @@ import {
   ChevronDown,
   CornerUpLeft,
   Upload,
+  PlayCircle,
 } from 'lucide-react';
+import {
+  discardTask,
+  listUnfinished,
+  type UnfinishedTask,
+} from '@/services/plansClient';
+import { useChatStore } from '@/stores/chatStore';
 import { uploadFiles } from '@/services/ingestClient';
 import {
   assignToProject,
@@ -68,7 +75,136 @@ function typeLabel(type: ProjectType): string {
   return TYPE_LABELS[type] ?? type[0].toUpperCase() + type.slice(1);
 }
 
-export default function ProjectWorkspace() {
+/**
+ * Work Zaram stopped partway through, and the button that picks it up.
+ *
+ * **This is the half of "no handoffs" that a person can see.** A long task now
+ * hands itself over between windows without saying anything, which is right —
+ * but a task that ran out of windows altogether used to exist only as a button
+ * under a reply, and that reply is gone the moment the app closes. Written down,
+ * it is something you come back to.
+ *
+ * Continuing sends an ordinary message naming the task, so the press lands in
+ * the conversation where the rest of the work is. What resumes is what the tools
+ * *found* — never the dialogue, which is rule 7d — and recall runs again from
+ * the original question, so a fact corrected in between changes the answer.
+ */
+function UnfinishedSection({
+  projectId,
+  onOpenConversation,
+}: {
+  projectId?: string;
+  onOpenConversation?: () => void;
+}) {
+  const [tasks, setTasks] = useState<UnfinishedTask[]>([]);
+  const [keptDays, setKeptDays] = useState(7);
+  const send = useChatStore((s) => s.send);
+  const setProject = useChatStore((s) => s.setProject);
+
+  const load = useCallback(async () => {
+    try {
+      const answer = await listUnfinished(projectId);
+      setTasks(answer.plans);
+      setKeptDays(answer.kept_for_days);
+    } catch {
+      // A list that cannot be read is not worth an error banner on a surface
+      // whose main job is something else. It renders as nothing waiting, which
+      // is what the user sees anyway when nothing is.
+      setTasks([]);
+    }
+  }, [projectId]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const resume = useCallback(
+    (task: UnfinishedTask) => {
+      // The project goes with it, because the task's tools are scoped to one —
+      // a coding task resumed outside its project would have no folder to read.
+      if (task.project_id) setProject(task.project_id);
+      onOpenConversation?.();
+      void send('Continue', { continueTask: true, planId: task.id });
+    },
+    [onOpenConversation, send, setProject],
+  );
+
+  const forget = useCallback(
+    async (task: UnfinishedTask) => {
+      await discardTask(task.id);
+      void load();
+    },
+    [load],
+  );
+
+  if (!tasks.length) return null;
+
+  return (
+    <section
+      className="mb-5 rounded-xl px-4 py-4"
+      style={{ background: 'var(--color-glass)', border: '1px solid rgba(255,255,255,.08)' }}
+    >
+      <h2 className="flex items-center gap-2 text-xs font-semibold">
+        <PlayCircle size={13} aria-hidden style={{ color: 'var(--color-cyan-light)' }} />
+        {tasks.length === 1 ? 'One task is unfinished' : `${tasks.length} tasks are unfinished`}
+      </h2>
+      <p className="mt-1.5 max-w-xl text-[11px] leading-relaxed" style={{ color: 'var(--color-text-muted)' }}>
+        Zaram ran out of room before it finished these. It kept what it found —
+        the results, not the conversation — and can carry on from there. Kept for{' '}
+        {keptDays} days.
+      </p>
+
+      <ul className="mt-3 flex flex-col gap-2">
+        {tasks.map((task) => (
+          <li
+            key={task.id}
+            className="rounded-lg px-3 py-2.5"
+            style={{ background: 'rgba(0,0,0,.16)', border: '1px solid rgba(255,255,255,.06)' }}
+          >
+            <p className="text-xs" style={{ color: 'var(--color-text)' }}>
+              {task.question}
+            </p>
+            <p className="mt-1 text-[10px] leading-snug" style={{ color: 'var(--color-text-faint)' }}>
+              {task.steps.length} {task.steps.length === 1 ? 'step' : 'steps'}
+              {task.steps.length ? ` · ${task.steps.map((s) => s.tool).join(', ')}` : ''}
+              {task.stopped_because ? ` · ${task.stopped_because}` : ''}
+            </p>
+            <div className="mt-2 flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => resume(task)}
+                className="text-[11px] flex items-center gap-1"
+                style={{ color: 'var(--color-cyan-light)' }}
+                data-testid="resume-task"
+              >
+                Continue
+                <ChevronRight size={10} aria-hidden />
+              </button>
+              <button
+                type="button"
+                onClick={() => void forget(task)}
+                className="text-[11px]"
+                style={{ color: 'var(--color-text-faint)' }}
+                data-testid="discard-task"
+              >
+                Discard
+              </button>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+interface ProjectWorkspaceProps {
+  /** Leave Project and open the conversation, the way Work does. The shell owns
+   *  that transition; a resumed task answers into the conversation, so pressing
+   *  Continue here has to go there. */
+  onOpenConversation?: () => void;
+}
+
+export default function ProjectWorkspace({ onOpenConversation }: ProjectWorkspaceProps = {}) {
   const projects = useProjectStore((s) => s.projects);
   const loading = useProjectStore((s) => s.loading);
   const error = useProjectStore((s) => s.error);
@@ -112,6 +248,10 @@ export default function ProjectWorkspace() {
         )}
 
       {creating && <CreateRow onDone={() => setCreating(false)} />}
+
+      {/* Above the project list, because it is the thing with something
+          waiting in it. A task nobody can find is a task nobody continues. */}
+      <UnfinishedSection onOpenConversation={onOpenConversation} />
 
       {unclaimed.length > 0 && <UnclaimedSection groups={unclaimed} />}
 

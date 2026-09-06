@@ -101,6 +101,7 @@ function createConfig(options) {
         '/obligations',
         '/personalities',
         '/projects',
+        '/plans',
         '/providers',
         '/readiness',
         '/routing',

@@ -185,7 +185,8 @@ class TestALocalModelDrivesTheCodeTools:
         # engine the loop only ever runs after a generation, so this is the
         # order the product has anyway.
         for _ in range(4):
-            may_call_again = budget is None or spent < budget.tool_output_tokens
+            working = estimate_tokens(system) + estimate_tokens(prompt)
+            may_call_again = budget is None or working < budget.handoff_tokens
             text = _generate(model, prompt, system)
             if budget is None:
                 budget = budget_for(model, base_url=OLLAMA)
@@ -196,17 +197,14 @@ class TestALocalModelDrivesTheCodeTools:
             result: Any = tools.call_tool(call.tool, call.arguments)
             turns.append(ToolTurn(call=call, result=result))
             spent += estimate_tokens(render_result(result))
-            prompt = result_prompt(
-                QUESTION,
-                turns,
-                may_call_again=spent < budget.tool_output_tokens,
-            )
+            prompt = result_prompt(QUESTION, turns, may_call_again=True)
 
         print(f"\nmodel: {model}")
         print(
             f"loaded context: {budget.total_tokens} "
             f"({'measured' if budget.measured else 'assumed'}), "
-            f"tool budget: {budget.tool_output_tokens} tokens, spent: {spent}"
+            f"hands over at: {budget.handoff_tokens} tokens, "
+            f"read so far: {spent}"
         )
         for index, turn in enumerate(turns, start=1):
             print(f"  {index}. {turn.call.tool} {turn.call.arguments}")

@@ -243,6 +243,14 @@ export interface ChatRequest {
    *  parked: it does not survive a restart, and the notice that offers it
    *  says so rather than implying a durability it does not have. */
   continueTask?: boolean;
+  /** Which unfinished task to pick up, or omitted for the obvious one.
+   *
+   *  Named when the user chose it from the list in Project; omitted when they
+   *  pressed Continue under a reply, where "the one that just stopped" is the
+   *  only thing it could mean. The backend resolves the empty case from this
+   *  session and then from this project, which is what makes a task left days
+   *  ago findable from a session that shares no id with it. */
+  planId?: string;
 }
 
 /** A failure that should be shown to the user, with the cause preserved. */
@@ -299,6 +307,7 @@ export async function* streamChat(
         attachment_ids: req.attachmentIds ?? [],
         conversation_id: req.conversationId ?? '',
         continue_task: req.continueTask ?? false,
+        plan_id: req.planId ?? '',
       }),
       signal,
     });

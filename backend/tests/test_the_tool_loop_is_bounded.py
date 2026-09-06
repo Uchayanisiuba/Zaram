@@ -8,11 +8,14 @@ coming from Claude Code or Aider would notice missing in the first minute.
 What replaces it is a budget rather than a counter, and these are the four
 claims that makes:
 
-**It is bounded by the window, not by rounds.** `ContextBudget.tool_output_tokens`
-is a share of the context the answering model was actually loaded with, so an
-8K local model and a 64K remote one degrade differently instead of behaving
-identically. A round counter gives them the same allowance and is wrong for
-both.
+**It hands over at half the window, and it does so silently.** The trigger is
+the measured size of the request being sent, against `ContextBudget.handoff_tokens`
+— half the context the answering model was actually loaded with — so an 8K local
+model and a 64K remote one behave the same way at different sizes. A round
+counter gives them the same allowance and is wrong for both. Nothing is
+announced, because a task that carried itself on and finished has not failed;
+half a window re-sent is also a cheaper request than a full one, which is how
+this protects a metered bill without asking anybody anything.
 
 **The gate runs on every call.** More rounds must never become one permission
 decision reused — that is "a shortlisted tool has earned nothing", the
@@ -192,13 +195,72 @@ def _call(tool: str, **arguments: Any) -> str:
     return f"Working on it.\n{TOOL_CALL_MARKER} {payload}\n"
 
 
+class _LocalModels:
+    """The models runtime, saying every model runs here.
+
+    Present because `_auto_continuations_for` asks it whether carrying a task on
+    would spend the user's money. Without it every model is unresolvable, which
+    is deliberately treated as metered — correct behaviour, and the wrong
+    fixture for a file about the loop's own limits.
+    `test_an_unfinished_task_survives_a_restart.py` is where that answer is
+    tested.
+    """
+
+    def get_runtime_id(self):
+        return "models"
+
+    def get_version(self):
+        return "0.0.1"
+
+    def get_metadata(self):
+        return RuntimeMetadata(
+            runtime_id="models", version="0.0.1", priority="normal", capabilities=[]
+        )
+
+    async def initialize(self):
+        pass
+
+    async def shutdown(self):
+        pass
+
+    def get_state(self):
+        return RuntimeState.READY
+
+    def health_check(self):
+        return {"state": "ready"}
+
+    def locality_of(self, model):
+        return "local"
+
+
+#: The plan store every engine in this file gets, replaced per test.
+#:
+#: A module global rather than a parameter because `_engine` is called from
+#: twenty places that do not care where a stopped task is written, and threading
+#: a fixture through all of them would put the least interesting fact in this
+#: file into every one of its tests.
+_STORE = None
+
+
+@pytest.fixture(autouse=True)
+def _a_store_per_test(tmp_path):
+    from projects.plans import PlanRecords
+
+    global _STORE
+    _STORE = PlanRecords(str(tmp_path / "plans.db"))
+    yield
+    _STORE = None
+
+
 def _engine(replies, mcp: _McpDouble):
     kernel = KernelBootstrapper()
     model = _ModelRuntime(replies)
     kernel.registry.register(model)
     kernel.registry.register(mcp)
+    kernel.registry.register(_LocalModels())
     engine = ExecutionEngine(kernel.registry, kernel.event_bus)
     engine.set_tool_vocabulary(mcp.server_names)
+    engine.set_plan_records(_STORE)
     return engine, model
 
 
@@ -230,18 +292,18 @@ def a_generous_window(monkeypatch):
     )
 
 
-#: A result big enough to fill a small window's reading allowance in one call,
-#: and still small enough to be carried into the next one. Both halves matter:
-#: a loop that stops must be a loop that can be continued.
-_A_BIG_RESULT = {"lines": ["x" * 380]}
+#: A result large enough that a couple of them cross the handoff line, and small
+#: enough that one of them still fits the carry. Both halves matter: a task that
+#: hands over must have something to hand over.
+_A_BIG_RESULT = {"lines": ["x" * 300]}
 
 
 @pytest.fixture
 def a_tiny_window(monkeypatch):
-    """A window with room for one `_A_BIG_RESULT` and nothing more.
+    """A window small enough that a couple of results trip the handoff.
 
-    300 input tokens: 120 of reading allowance, which one big result exhausts,
-    and 180 that a continuation may carry it into.
+    600 tokens: 300 before the task compacts itself, 150 it may carry into the
+    next window.
     """
     from core import execution_engine
     from core.context_budget import ContextBudget
@@ -250,7 +312,7 @@ def a_tiny_window(monkeypatch):
         execution_engine,
         "budget_for",
         lambda model=None, **kw: ContextBudget(
-            total_tokens=400, measured=True, reply_reserve_tokens=100
+            total_tokens=600, measured=True, reply_reserve_tokens=150
         ),
     )
 
@@ -336,71 +398,78 @@ class TestItCanSequenceTwoCalls:
         assert TOOL_CALL_MARKER not in _text(out)
 
 
-class TestAFullWindowIsNotTheEnd:
-    """The maintainer's call: *"have it continue till the task is done."*
+class TestItHandsOverToItself:
+    """A full window is a fact about the model, not about the task.
 
-    A window filling up is a fact about the model, not about the task, so the
-    loop carries what it found into a fresh one and keeps going. What it carries
-    is the tool results; the prose between them stays behind, which is rule 7d
-    and the reason this is not a transcript being replayed.
+    At half the window the task compacts itself and carries on — the maintainer's
+    call twice over: *"have it continue till the task is done"*, and then *"do
+    the handoff behind the scenes so the UI stays fluid and seamless"*.
     """
 
-    def test_the_task_carries_on_when_the_window_fills(self, a_tiny_window):
-        """One big result fills the allowance, and the task continues anyway."""
+    def test_the_task_keeps_going_past_the_handoff(self, a_tiny_window):
         mcp = _McpDouble(
             tools=[_SEARCH, _READ],
-            results=[{"success": True, "result": _A_BIG_RESULT}] * 2,
+            results=[{"success": True, "result": _A_BIG_RESULT}] * 4,
         )
         engine, _ = _engine(
-            [_call("search_code", query="x"), _call("read_lines", path="a.py"), "Done."],
+            [
+                _call("search_code", query="x"),
+                _call("read_lines", path="a.py"),
+                _call("read_lines", path="b.py"),
+                "Done.",
+            ],
             mcp,
         )
 
         list(engine.execute("use the code tools to tell me about x"))
 
-        assert [c["tool"] for c in mcp.calls] == ["search_code", "read_lines"]
+        assert [c["tool"] for c in mcp.calls] == [
+            "search_code",
+            "read_lines",
+            "read_lines",
+        ]
 
-    def test_carrying_on_is_said_out_loud(self, a_tiny_window):
-        """Four windows must not look like one. The user pays the difference."""
+    def test_the_handoff_is_silent(self, a_tiny_window):
+        """No prompt, no status line, no interruption.
+
+        The task did not fail — it compacted itself and carried on — and four
+        bookkeeping notices in one reply is noise rather than disclosure. The
+        stop at the end of the allowance still speaks; this does not.
+        """
         mcp = _McpDouble(
             tools=[_SEARCH, _READ],
-            results=[{"success": True, "result": _A_BIG_RESULT}] * 2,
+            results=[{"success": True, "result": _A_BIG_RESULT}] * 4,
         )
         engine, _ = _engine(
-            [_call("search_code", query="x"), _call("read_lines", path="a.py"), "Done."],
+            [
+                _call("search_code", query="x"),
+                _call("read_lines", path="a.py"),
+                _call("read_lines", path="b.py"),
+                "Done.",
+            ],
             mcp,
         )
 
         out = list(engine.execute("use the code tools to tell me about x"))
 
-        carried = [
+        assert not [
             n
             for n in _events(out, EventType.NOTICE)
-            if n.data.get("kind") == "tool_loop" and "carrying on" in n.data["content"]
-        ]
-        assert carried, "continuing without saying so is silent degradation upward"
+            if n.data.get("kind") == "tool_loop"
+        ], "a task that carried on and finished has nothing to announce"
 
-    def test_it_stops_when_the_continuations_run_out(self, a_tiny_window):
+    def test_it_stops_eventually_and_offers_to_pick_it_up(self, a_tiny_window):
         """Bounded, because 'done' is the model's judgement and could be never."""
         mcp = _McpDouble(
             tools=[_SEARCH],
-            results=[{"success": True, "result": _A_BIG_RESULT}] * 10,
+            results=[{"success": True, "result": _A_BIG_RESULT}] * 40,
         )
-        engine, _ = _engine([_call("search_code", query=f"q{i}") for i in range(10)], mcp)
-
-        list(engine.execute("use the code tools to tell me about x"))
-
-        assert len(mcp.calls) == 1 + MAX_AUTO_CONTINUATIONS
-
-    def test_the_last_stop_offers_the_manual_continue(self, a_tiny_window):
-        mcp = _McpDouble(
-            tools=[_SEARCH],
-            results=[{"success": True, "result": _A_BIG_RESULT}] * 10,
-        )
-        engine, _ = _engine([_call("search_code", query=f"q{i}") for i in range(10)], mcp)
+        engine, _ = _engine([_call("search_code", query=f"q{i}") for i in range(40)], mcp)
 
         out = list(engine.execute("use the code tools to tell me about x"))
 
+        assert len(mcp.calls) < 40, "a model that never answers must still be stopped"
+        assert len(mcp.calls) <= MAX_TOOL_ROUNDS * (1 + MAX_AUTO_CONTINUATIONS)
         notices = [n for n in _events(out, EventType.NOTICE) if n.data.get("kind") == "tool_loop"]
         assert notices[-1].data["action"] == "continue"
         assert "stopped" in notices[-1].data["content"]
@@ -633,7 +702,7 @@ class TestTheButtonReachesTheLoop:
                 self.continued: list[tuple[str, str]] = []
                 self.executed: list[str] = []
 
-            def continue_task(self, session_id="default", model=None):
+            def continue_task(self, session_id="default", model=None, **kwargs):
                 self.continued.append((session_id, model))
                 yield "picked it up"
 

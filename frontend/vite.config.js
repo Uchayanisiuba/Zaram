@@ -121,6 +121,7 @@ export default defineConfig(({ command }) => ({
       '/tools': { target: BACKEND, changeOrigin: true },
       '/letterhead': { target: BACKEND, changeOrigin: true },
       '/projects': { target: BACKEND, changeOrigin: true },
+      '/plans': { target: BACKEND, changeOrigin: true },
       '/ingest': { target: BACKEND, changeOrigin: true },
       // A prefix missing from this list does not 404 — Vite answers with its
       // own index.html and a 200, so the client parses HTML as JSON and

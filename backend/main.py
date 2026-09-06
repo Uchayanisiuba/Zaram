@@ -275,6 +275,11 @@ async def startup_event():
     ingest_service.attach_memory(kernel.memory_runtime)
     kernel.execution_engine.set_notice_source(ingest_service.notice_text)
 
+    # A task that stops with work left now outlives the process. Injected here
+    # for the same reason as the notice source above: the dependency points
+    # inward from `main.py`, so the engine stays testable without `projects/`.
+    kernel.execution_engine.set_plan_records(plan_records)
+
     # Rule 7e stops being a document here. The decay rules and the promotion
     # evidence were written, tested and never once invoked by anything running
     # — see `runtimes/memory/maintenance.py` for why the schedule is "shortly
@@ -925,9 +930,17 @@ class ChatRequest(BaseModel):
     #: Not a new question: `text` is whatever the button sent and is not asked.
     #: The engine picks the task up from the results it had already gathered,
     #: for this `session_id`, and answers into the same stream. Nothing is
-    #: continued if that session has nothing parked — which is the ordinary
-    #: case after a restart, and says so rather than failing.
+    #: continued if there is no unfinished task waiting — which says so rather
+    #: than failing.
     continue_task: bool = False
+    #: Which unfinished task to pick up, or "" for the obvious one.
+    #:
+    #: Named when the user chose it from a list in Project; empty when they
+    #: pressed Continue under a reply, where "the one that just stopped" is the
+    #: only thing it could mean. The engine resolves the empty case from this
+    #: session, then from this project — which is what makes a task left on
+    #: Tuesday findable on Thursday, in a session that shares no id with it.
+    plan_id: str = ""
 
 
 def _domain_scope(domain_ids: list[str]) -> tuple[frozenset[str] | None, str]:
@@ -1549,6 +1562,7 @@ async def chat(request: ChatRequest):
             only_ids=only_ids,
             images=images or None,
             resume=request.continue_task,
+            plan_id=request.plan_id,
         ):
             _collect_answer(chunk, answer)
             yield chunk
@@ -2960,6 +2974,36 @@ from projects.records import default_db_path as projects_db_path  # noqa: E402
 
 project_records = ProjectRecords(projects_db_path())
 
+from projects.plans import PlanRecords  # noqa: E402
+from projects.plans import default_db_path as plans_db_path  # noqa: E402
+
+#: Unfinished tasks, so a stopped one survives a restart. Constructed here and
+#: **injected** into the engine rather than imported by it, the same seam
+#: `set_provider_manager` keeps: `core/` holds no import-time dependency on
+#: `projects/`.
+plan_records = PlanRecords(plans_db_path())
+
+
+def _plan_json(plan) -> Dict[str, Any]:
+    """One unfinished task, as the interface needs it.
+
+    The steps are named and counted rather than sent whole. A tool result holds
+    file contents, and shipping all of it to render a list would put the
+    contents of somebody's repository into a panel nobody asked to read — and
+    into whatever the browser keeps. The user opens the task to see them, by
+    continuing it.
+    """
+    return {
+        "id": plan.id,
+        "question": plan.question,
+        "project_id": plan.project_id,
+        "model": plan.model,
+        "stopped_because": plan.stopped_because,
+        "steps": [{"server": step.server, "tool": step.tool} for step in plan.steps],
+        "created_at": plan.created_at,
+        "updated_at": plan.updated_at,
+    }
+
 
 def _project_json(project) -> Dict[str, Any]:
     return {
@@ -2982,6 +3026,43 @@ class ProjectUpdateRequest(BaseModel):
     name: str | None = None
     type: str | None = None
     note: str | None = None
+
+
+@app.get("/plans")
+async def list_plans(project_id: str = "", limit: int = 20):
+    """Unfinished tasks, most recently touched first.
+
+    This is what makes *"stop on Tuesday, carry on Thursday"* real rather than a
+    claim: a task that ran out of window is written down, and Project shows what
+    is waiting. `project_id` omitted means every project **and** the tasks that
+    belong to none; passing an explicit empty one is not expressible here on
+    purpose, because a query string cannot tell those two apart and a filter
+    that silently means something else is worse than one that is missing.
+
+    The retention window is reported so the offer is honest about how long it
+    lasts. A store that quietly forgets is the same failure as one that quietly
+    keeps.
+    """
+    from projects.plans import UNFINISHED_TTL_SECONDS
+
+    plans = plan_records.unfinished(
+        project_id=project_id or None, limit=max(1, min(limit, 100))
+    )
+    return {
+        "plans": [_plan_json(plan) for plan in plans],
+        "kept_for_days": UNFINISHED_TTL_SECONDS // 86400,
+    }
+
+
+@app.delete("/plans/{plan_id}")
+async def discard_plan(plan_id: str):
+    """Forget an unfinished task.
+
+    Rule 4's shape applied to a store that is not the Spine: the user can throw
+    away anything Zaram kept on their behalf, and the answer says whether there
+    was something there rather than pretending either way.
+    """
+    return {"discarded": plan_records.delete(plan_id)}
 
 
 @app.get("/projects")

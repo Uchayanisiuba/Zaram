@@ -67,22 +67,30 @@ REPLY_RESERVE_FRACTION = 0.25
 #: a larger loaded context now buys a larger share.
 DOCUMENT_SHARE = 0.6
 
-#: Share of the *input* budget that tool output may spend in one window.
+#: How full a working context may get before the task hands itself over.
 #:
-#: **This is the trade, stated as a number rather than left to happen.** Every
-#: round of the tool loop carries its result forward, so three 400-line reads
-#: would evict the recalled facts that make an answer Zaram's rather than a
-#: generic model's — and that memory is the product. So tool output is capped
-#: at a share of the same input budget documents draw on, below the document
-#: share deliberately: a file the user attached was chosen by a person, and a
-#: file the model asked for was chosen by a guess.
+#: **Half the window, and the handoff is silent.** A long task fills its context
+#: with what it has read; left alone it either overflows or stops and asks the
+#: user for permission to carry on. Both are worse than compacting: at half full
+#: there is still room for the model to think, the prompt being re-sent stays
+#: small — and a smaller prompt is a cheaper one on a metered provider, which is
+#: how this protects the bill without ever putting a dialog in front of anybody.
 #:
-#: A judgement, and labelled as one. It is expressed as a share rather than a
-#: round count because an 8K local model and a 64K remote one should *degrade*
-#: differently rather than behave identically: at Ollama's 4,096 fallback this
-#: is ~1,200 tokens — a search and one modest read — and at a 16,384 window it
-#: is ~4,900, which is several.
-TOOL_OUTPUT_SHARE = 0.4
+#: Measured against the **whole window**, not against the input budget, because
+#: what is being bounded here is the size of the request actually being sent:
+#: system prompt, recalled facts, question and every result carried forward.
+#:
+#: A judgement, labelled as one, and the number a session should form a view on
+#: by watching a real task rather than by reasoning about it.
+HANDOFF_SHARE = 0.5
+
+#: How much of the window a handoff may carry into the next one.
+#:
+#: Deliberately well under `HANDOFF_SHARE`, and the gap is the point: carrying
+#: right up to the handoff threshold would trip it again on the next call, and
+#: the task would spend its life handing over instead of working. A quarter
+#: leaves the same room to work that the first window had.
+CARRY_SHARE = 0.25
 
 
 #: Hosts this module may ask. Loopback only, and enforced rather than assumed.
@@ -236,23 +244,25 @@ class ContextBudget:
         return self.document_tokens * CHARS_PER_TOKEN
 
     @property
-    def tool_output_tokens(self) -> int:
-        """What one window's tool results may spend, in total.
+    def handoff_tokens(self) -> int:
+        """How large a request may get before the task compacts and carries on.
 
-        Total rather than per call, because every result is carried forward into
-        the next round's prompt — so the thing that has to be bounded is the
-        accumulation, and a per-call cap would bound nothing.
-
-        Per *window*, not per question: a task that fills this carries what it
-        found into a fresh one and gets the allowance again, which is what
-        `MAX_AUTO_CONTINUATIONS` bounds instead. The two answer different
-        questions — how much may be read before the model has to think, and how
-        many times a task may start over.
-
-        See `TOOL_OUTPUT_SHARE` for why this is a share of the input budget and
-        not a number of rounds.
+        Compared against the *whole* request — system prompt, recalled facts,
+        question and every result carried forward — because that is the thing
+        being sent, and the thing a metered provider charges for. See
+        `HANDOFF_SHARE`.
         """
-        return int(self.input_tokens * TOOL_OUTPUT_SHARE)
+        return int(self.total_tokens * HANDOFF_SHARE)
+
+    @property
+    def carry_tokens(self) -> int:
+        """How much of what was found may travel into the next window.
+
+        Under `handoff_tokens` on purpose: carrying right up to the threshold
+        would trip it again on the next call, and the task would spend its life
+        handing over instead of working.
+        """
+        return int(self.total_tokens * CARRY_SHARE)
 
     def remaining_after(self, *texts: str) -> int:
         """Tokens left once ``texts`` are spent. Never negative.

@@ -953,14 +953,26 @@ rules.
 ### What landed, so you do not rebuild it
 
 `_run_tool_loop` in `core/execution_engine.py` replaced `_run_tool_round`. The
-model can now search then read; the loop is bounded by
-`ContextBudget.tool_output_tokens` rather than a round count; a refusal stops
-it and a *failed call* does not. **A full window is not the end of the task** —
-it carries itself into a fresh one `MAX_AUTO_CONTINUATIONS` (3) times, keeping
-the tool results and announcing each carry-on. Only when that runs out does it
-stop, park the task, and offer the manual Continue button, which resumes from
-the same evidence. `backend/tests/test_the_tool_loop_is_bounded.py` is the
-contract — 21 tests, all offline.
+model can now search then read; a refusal stops the loop and a *failed call*
+does not.
+
+**At half the window the task hands itself over, silently.** The trigger is the
+measured size of the request being sent — `ContextBudget.handoff_tokens`, half
+the model's loaded context — not a round count; the steps travel into the fresh
+window trimmed to `carry_tokens`, three times, and nothing is announced.
+Announcing was built first and removed: *"I don't want Zaram to keep prompting
+users… do the handoff behind the scenes."* A task that runs out of windows does
+still say so, with an offer to pick it up.
+
+**A stopped task is written down and survives a restart.**
+`projects/plans.py`, listed in Project with Continue and Discard. It stores what
+the tools returned and **no system prompt** — a resumed task re-recalls from its
+question, which is rule 4 and is the thing to be careful of if you touch it.
+Seven-day retention, pruned on open and on write; a finished task is deleted.
+
+`backend/tests/test_the_tool_loop_is_bounded.py` (20) and
+`backend/tests/test_an_unfinished_task_survives_a_restart.py` (22) are the
+contract, all offline.
 
 **A model has now driven it**, on `qwen3-14b-16k`, and that measurement lives in
 `backend/tests/test_the_model_can_drive_the_tools.py -m measure`. It takes ~10
@@ -971,14 +983,15 @@ change the prompt text, the tool descriptions, or the loop.
 
 **1. Watch a long task run, in the real app.** Nothing in this list matters if
 it does not work on screen, and that has not been observed once. Ask something
-that needs several windows of reading, watch the carry-on notices arrive, and
-press Continue when it finally stops. The loop is asserted by test; the visual
-half is unverified — this session could not screenshot it.
+that needs several windows of reading, watch it hand over without saying
+anything, let it run out, then pick it up from Project. The loop, the store and
+the button are asserted by test; the visual half is unverified — this session
+could not screenshot it.
 
-While you are there, form a view on **whether three automatic continuations is
-the right number**, and on whether the carry-on notice reads as progress or as
-noise when four of them stack up in one reply. Both are judgements that need a
-person watching, and neither can be settled by a test.
+Two numbers need a person watching and cannot be settled by a test: **three
+handoffs**, and **half the window** as the place to compact. Both are
+judgements written down as `MAX_AUTO_CONTINUATIONS` and `HANDOFF_SHARE`, and
+both are one-line changes once somebody has seen a real task run.
 
 **2. Close the routing gap, which is slice 4 with a sharper edge.** *"Search the
 code for X"* plans `filesystem.search`, not `mcp.list_tools` — the planner
@@ -990,14 +1003,12 @@ words mean, or make `filesystem.search` route to the code tools when a coding
 project is open. The second is smaller and probably right; argue it before
 building it.
 
-**3. Then the plan object, if the maintainer wants it now.** Continue is
-session state and says so — one per session, gone on restart. The durable object
-`CLAUDE.md` assigns to Project — *"the steps, decisions taken and decisions
-rejected"*, readable before it runs — is still not built, and it is still the
-missing piece for slice 5. **The decision to put to the maintainer first:**
-should Continue survive a restart? That means persisting tool results to disk,
-which is a new store, and `CLAUDE.md` says no new store ships without an answer
-to how long it keeps things and how the user shortens that.
+**3. Then the rest of the plan object.** The store holds steps and makes a task
+resumable. What `CLAUDE.md` also asks of it — *decisions taken and decisions
+rejected*, and a plan the user reads **before** it runs — is not built, and it
+is what slice 5 (diffs as cards) needs. The object exists to hang it on now;
+the questions are what counts as a decision, and whether a rejected one is worth
+keeping after the task finishes, given a finished task is otherwise deleted.
 
 ### Recorded, deliberately not done
 
@@ -1007,8 +1018,13 @@ to how long it keeps things and how the user shortens that.
   trailing text which could be a marker prefix — worth building when tool
   replies are common enough for the lost typewriter effect to be felt, and not
   before, because it is a new convention and needs its own tests.
-* **`TOOL_OUTPUT_SHARE` is 0.4 and is a judgement**, labelled as one. Nobody has
-  measured whether it is the right share on a real repository.
+* **`HANDOFF_SHARE` (0.5) and `CARRY_SHARE` (0.25) are judgements**, labelled as
+  such. Nobody has measured whether they are right on a real repository, and the
+  gap between them is what stops a task handing over on every call.
+* **A resumed task does not restore the code project's folder by itself.** The
+  root comes from the open project through a ContextVar set by the API from the
+  *request's* project, so Project's Continue sends the project with it. A
+  resume from somewhere that does not would find the tools refusing every call.
 * Everything in the previous prompt's "Recorded, deliberately not done" still
   stands: `ServerStore.save()` freezing derived write modes, the 9,495 lines in
   `backend/runtime/` reached by nothing, and packaging as the actual blocker.

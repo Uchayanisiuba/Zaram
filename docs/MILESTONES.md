@@ -19,9 +19,11 @@ accurate — it is the first thing anyone reads.
 Nothing has been pushed since the 5 September push;
 `git rev-list --count origin/main..main` is the count.
 
-**Measured: 3,510 passed, 29 skipped, 0 failed, 29m06s, with Ollama up** —
+**Measured: 3,531 passed, 29 skipped, 0 failed, 15m13s, with Ollama up** —
 excluding `test_the_model_can_drive_the_tools.py`, which drives a real 14B and
-takes ten minutes on its own (`-m measure`, 2 passed in 10m27s).
+takes ten minutes on its own (`-m measure`, 2 passed in 10m27s). The same suite
+took 29m06s earlier the same day on the same machine, which is what a wall-clock
+number is worth: nothing was made faster, the box was busier.
 
 ### The code pack — a coding agent that is not a second product
 
@@ -74,29 +76,40 @@ what it bought.
    pending confirmation still ends the loop; a call that ran and *failed* is
    handed back so the model can fix it, which is the commonest recoverable
    error. The gate runs on every call, unchanged.
-2. **Continuation is automatic, and the button is the fallback.** The
-   maintainer asked twice on 6 September and the second answer is the one that
-   ships: first *"users can simply click continue and it continues the task
-   from where it stopped"*, then *"pls do automatic continuation… have it
-   continue till the task is done."* So a full window is not the end of the
-   task — it carries itself into a fresh one, three times, keeping the tool
-   results and dropping the oldest when they no longer fit, saying so each
-   time. Only when that allowance is spent does it stop and offer the manual
-   Continue. What travels is what was *found*, never the dialogue: session
-   state, in memory, gone on restart, and the notice says so.
+2. **A task hands itself over at half the window, silently, and survives a
+   restart.** The maintainer asked three times on 6 September and each answer
+   narrowed the last: *"users can simply click continue"*, then *"pls do
+   automatic continuation… have it continue till the task is done"*, then *"I
+   don't want Zaram to keep prompting users… optimise the context, do the
+   handoff behind the scenes, so the UI stays fluid and seamless."*
 
-   Bounded because "done" is the model's judgement and could be never. Not a
-   loosening of permission: every call still goes through `policy.decide`, so
-   carrying on buys more decisions rather than fewer.
+   So: at `HANDOFF_SHARE` (0.5) of the model's loaded context — measured on the
+   request actually being sent, not counted in rounds — the task compacts
+   itself, carries its steps into a fresh window trimmed to `CARRY_SHARE`
+   (0.25), and continues. Three times, then it stops and says so with an offer
+   to pick it up. **The handoff itself says nothing**, because a task that
+   carried on and finished has not failed.
 
-**What is still not built is the plan object**, and the distinction matters
-because it is easy to think this replaced it. `CLAUDE.md` assigns to Project
-*"the steps, decisions taken and decisions rejected"* — an object that survives
-a restart and that the user reads before it runs. What shipped holds one
-question's tool results for as long as the process lives. It is the missing
-piece for slice 5 still, and **the open decision is whether Continue should
-survive a restart**: doing so means persisting tool results to disk, which is a
-new store and needs its own retention answer.
+   **That is also the cost control**, and it replaced a worse idea: cloud
+   models briefly got no automatic continuations at all, on rule 1 grounds. A
+   request that never exceeds half a window is cheaper than one that fills it,
+   so compacting saves money *and* stays seamless, while asking charges the
+   user attention to save them nothing. The test that asserted the rejected
+   design is kept, asserting its opposite.
+
+3. **The plan object exists.** `projects/plans.py` — the store
+   `projects/records.py` predicted by name. A stopped task is written down and
+   Project lists what is waiting, with Continue and Discard on each row. It
+   holds what the tools *returned*, never the dialogue (7d), and **no system
+   prompt**: a resumed task re-recalls from its question, so a fact corrected in
+   between changes the answer, which is rule 4 and would have been quietly
+   broken by a frozen context. Retention: a row exists only while the task is
+   unfinished, finishing deletes it, and seven days untouched prunes it.
+
+**What is still not built** is the rest of what `CLAUDE.md` asks of a plan —
+*decisions taken and decisions rejected*, and a plan the user reads **before**
+it runs. This is the steps and the resumability; the object now exists to hang
+the rest on, which is what slice 5 needs.
 
 ### Measured: a model drives the code tools, for the first time
 
@@ -177,9 +190,12 @@ setting changes that.
 * **Nobody has watched a model arrive.** The other half of this line — nobody
   had watched the model drive the code tools — is answered above, on
   `qwen3-14b-16k`.
-* **Nobody has watched Continue pressed in the real app.** The loop, the
-  notice, the button and the wiring are each asserted by test, and the visual
-  half is unverified: the browser pane refuses local URLs here.
+* **Nobody has watched a long task run in the real app.** The loop, the
+  handoff, the store, the Project list and the Continue button are each
+  asserted by test, and the visual half is unverified: the browser pane refuses
+  local URLs here. Two judgements need a person watching rather than a test —
+  whether **three** handoffs is the right allowance, and whether **half the
+  window** is the right place to compact.
 
 ---
 
