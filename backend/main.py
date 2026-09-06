@@ -1528,6 +1528,12 @@ async def chat(request: ChatRequest):
         # of speech -- storing it would put a model's internal monologue in
         # the transcript as though it were the answer, and a later session
         # would read it back as what Zaram said.
+        # Which folder the code pack may read, for this request. Set here
+        # rather than at the route's entry so it lands in the task context the
+        # generator actually runs in, which is the one the tools are called
+        # from.
+        _open_code_project(request.project_id)
+
         answer: list[str] = []
         async for chunk in chat_router.route(
             final_prompt, model, system_prompt, request.session_id,
@@ -4354,6 +4360,38 @@ class PasteBody(BaseModel):
     text: str
     name: str = ""
     project_id: str | None = None
+
+
+def _open_code_project(project_id: str | None) -> None:
+    """Name the folder the code tools may read, for this request only.
+
+    Set from the *project*, never from anything the model can influence: a root
+    a tool argument could supply is not a sandbox. Three cases all mean "no
+    folder", and the tools then refuse with that reason rather than guessing —
+    no project, a project of another type, and a coding project nobody has
+    pointed at a repository yet.
+
+    Called on every chat request, including the ones that clear it. Leaving a
+    previous request's root in place would let a question asked with no project
+    open read the last repository somebody looked at.
+    """
+    from packs.code import set_active_root
+    from projects.records import ProjectType, UnknownProject
+
+    wanted = (project_id or "").strip()
+    if not wanted:
+        set_active_root(None)
+        return
+
+    try:
+        project = project_records.get(wanted)
+    except (UnknownProject, Exception):  # noqa: BLE001 - a lookup must not fail a reply
+        set_active_root(None)
+        return
+
+    set_active_root(
+        project.root if project.type is ProjectType.CODING and project.root else None
+    )
 
 
 def _scope_for_project(project_id: str | None) -> str | None:

@@ -67,6 +67,12 @@ class Project:
     #: recall — it is a label for a human, and inventing structure in it would
     #: be modelling their business for them.
     note: str = ""
+    #: The folder this project's work lives in. Empty for every type but
+    #: `coding`, where it is the repository — and there it is **the sandbox
+    #: boundary**, not a convenience: the code tools resolve every path against
+    #: it and refuse anything that lands outside. It is stored here rather than
+    #: taken from a request because a root the model can name is not a sandbox.
+    root: str = ""
 
     @property
     def scope(self) -> str:
@@ -131,10 +137,24 @@ class ProjectRecords:
                     name       TEXT NOT NULL,
                     type       TEXT NOT NULL DEFAULT 'general',
                     created_at REAL NOT NULL,
-                    note       TEXT NOT NULL DEFAULT ''
+                    note       TEXT NOT NULL DEFAULT '',
+                    root       TEXT NOT NULL DEFAULT ''
                 )
                 """
             )
+            # Added after the table shipped, so an existing database needs the
+            # column rather than the definition above. `CREATE TABLE IF NOT
+            # EXISTS` is silent about a table that exists and differs, which is
+            # how a schema change becomes a `no such column` on somebody's
+            # machine and nowhere else.
+            columns = {
+                row["name"]
+                for row in conn.execute("PRAGMA table_info(projects)").fetchall()
+            }
+            if "root" not in columns:
+                conn.execute(
+                    "ALTER TABLE projects ADD COLUMN root TEXT NOT NULL DEFAULT ''"
+                )
 
     # ------------------------------------------------------------------ read
 
@@ -179,6 +199,7 @@ class ProjectRecords:
         type: ProjectType = ProjectType.GENERAL,
         note: str = "",
         project_id: str = "",
+        root: str = "",
     ) -> Project:
         """Make a project. Returns the stored record, id included.
 
@@ -205,11 +226,15 @@ class ProjectRecords:
                 type=ProjectType(type),
                 created_at=time.time(),
                 note=note.strip(),
+                root=root.strip(),
             )
             conn.execute(
-                "INSERT INTO projects (id, name, type, created_at, note) "
-                "VALUES (?, ?, ?, ?, ?)",
-                (project.id, project.name, project.type.value, project.created_at, project.note),
+                "INSERT INTO projects (id, name, type, created_at, note, root) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    project.id, project.name, project.type.value,
+                    project.created_at, project.note, project.root,
+                ),
             )
         logger.info("Created project %s (%s)", project.id, project.type.value)
         return project
@@ -292,6 +317,9 @@ def _from_row(row: sqlite3.Row) -> Project:
         type=_type_or_general(row["type"]),
         created_at=row["created_at"],
         note=row["note"],
+        # Tolerant of a row written before the column existed, for the same
+        # reason the type is: an older database must open, not raise.
+        root=row["root"] if "root" in row.keys() else "",
     )
 
 

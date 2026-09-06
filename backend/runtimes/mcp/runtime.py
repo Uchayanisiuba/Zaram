@@ -86,8 +86,43 @@ class McpRuntime:
         self._start_time = time.time()
         self._connections: Dict[str, McpServer] = {}
         self._calls = 0
+        #: Servers Zaram ships, by id. See `register_builtin`.
+        self._builtin: Dict[str, Any] = {}
         #: Injected. See `set_ranker`.
         self._rank: Optional[Callable[[str, Sequence[ToolDescriptor], int], List[ToolDescriptor]]] = None
+
+    def register_builtin(self, config: ServerConfig, server: Any) -> None:
+        """Attach a server Zaram ships, in process.
+
+        A pack's tools are MCP tools — `CLAUDE.md` says MCP is *the* tool
+        protocol and that no shim format may be invented — so they arrive here
+        rather than through a second mechanism, and inherit the policy gate,
+        the confirm-once flow, the injection scan and the log by doing so.
+
+        **Its config is not written to `mcp-servers.json`.** That file is the
+        user's list of servers *they* attached, and a built-in appearing in it
+        could be deleted, would come back on the next launch, and would make
+        the file disagree with the product. So the config lives here and
+        `_configs` merges the two views wherever one is needed.
+
+        In process rather than as a subprocess: a server Zaram ships needs no
+        isolation from Zaram, and spawning a child to talk to yourself buys a
+        process, a packaging entry point and a class of startup failure for
+        nothing.
+        """
+        self._builtin[config.server_id] = config
+        self._connections[config.server_id] = server
+
+    def _configs(self) -> Dict[str, ServerConfig]:
+        """Every server this runtime knows: the user's, then Zaram's.
+
+        Built-ins last so that a user who attaches a server under the same name
+        keeps their own — their machine, their choice, and silently preferring
+        ours would be the more surprising of the two.
+        """
+        merged: Dict[str, ServerConfig] = dict(self._builtin)
+        merged.update(self._store.load())
+        return merged
 
     def set_ranker(self, rank: Callable[[str, Sequence[ToolDescriptor], int], List[ToolDescriptor]]) -> None:
         """Give this runtime a way to choose which tools are relevant.
@@ -186,6 +221,10 @@ class McpRuntime:
     # ------------------------------------------------------------ connection
 
     async def _connect(self, cfg: ServerConfig) -> Optional[McpServer]:
+        # A built-in is already in `_connections`, put there by
+        # `register_builtin`, so it is returned here before the `reachable`
+        # check below — which asks whether a *subprocess* can be launched and
+        # is meaningless for a server running in this one.
         if cfg.server_id in self._connections:
             return self._connections[cfg.server_id]
         if not cfg.reachable:
@@ -208,7 +247,7 @@ class McpRuntime:
     async def available_tools(self, query: str = "") -> List[Dict[str, Any]]:
         """The tools worth putting in front of the model for this request."""
         found: List[ToolDescriptor] = []
-        for cfg in self._store.load().values():
+        for cfg in self._configs().values():
             server = await self._connect(cfg)
             if server is None:
                 continue
@@ -253,7 +292,7 @@ class McpRuntime:
         # model, and never inferred from the request.
         confirmed = bool(input_data.get("confirmed"))
 
-        cfg = self._store.load().get(server_id)
+        cfg = self._configs().get(server_id)
         if cfg is None:
             return {"success": False, "error": f"no server called {server_id!r} is configured"}
 

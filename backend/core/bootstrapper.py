@@ -359,6 +359,30 @@ class KernelBootstrapper:
         await self.mcp_runtime.initialize()
         register_runtime_for_health(self.mcp_runtime)
 
+        # The code pack's tools, attached the way any server is.
+        #
+        # They are MCP tools rather than a second mechanism, so they inherit
+        # the policy gate, the confirm-once flow, the scan on descriptions and
+        # the log without a line of new code — and the model reaches them
+        # exactly as it reaches a stranger's server. In process, because a
+        # server Zaram ships needs no isolation from Zaram.
+        #
+        # **Read-only, and structurally so.** `packs/code/tools.py` contains no
+        # write, so `WriteMode.READ_ONLY` here is a statement of what the module
+        # is rather than a restraint applied to it.
+        #
+        # The root comes from the open project through `active_root`, never
+        # from a tool argument: a folder the model can name is not a sandbox.
+        # With no coding project open it answers None and every tool refuses
+        # with that reason, which is the honest state on most requests.
+        from packs.code import SERVER_ID as CODE_SERVER, CodeTools, active_root
+        from runtimes.mcp.config import ServerConfig, WriteMode
+
+        self.mcp_runtime.register_builtin(
+            ServerConfig(server_id=CODE_SERVER, writes=WriteMode.READ_ONLY),
+            CodeTools(active_root),
+        )
+
         # **Registering it is not reaching it, and that distinction is the
         # whole reason this line exists.** The runtime was registered here for
         # a fortnight while `planner.py` contained no occurrence of "mcp", so
