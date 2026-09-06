@@ -517,12 +517,38 @@ class ProviderManager:
             for name, size in resident.items()
             if not self._is_embedding_model(name)
         }
-        if all(size is not None for size in chat.values()):
+        # `chat and` is load-bearing, and its absence was this method's own
+        # documented failure arriving by a quieter route. `all()` of an empty
+        # mapping is **vacuously true**, so a card on which Zaram's servers
+        # report nothing resident took the sum path and returned the entire
+        # budget — a confident claim that the card is empty, derived from
+        # evidence that only says *Zaram's own tenants* are absent.
+        #
+        # Measured 6 September 2026 on the 12 GB card. An `ollama app.exe`
+        # stopped without its child left `llama-server.exe` orphaned and
+        # holding **8.34 GB**; its parent was dead, `/api/ps` reported no
+        # models, and the driver reported 911 MiB free. The sum path would have
+        # graded a 10 GB model as fitting.
+        #
+        # An empty sum is not a measurement of the card. It is the absence of
+        # one, and the driver is the source that sees tenants Zaram did not put
+        # there — including its own leftovers.
+        if chat and all(size is not None for size in chat.values()):
             return max(budget - sum(size or 0 for size in chat.values()), 0)
 
         used = self._vram_used_bytes()
         if used is None:
-            return None
+            # No driver reading, so there is no measurement to prefer. With
+            # nothing resident to sum, the budget is the honest fallback rather
+            # than `None`: it is the same assumption `resident_budget_bytes`
+            # already makes by counting from total capacity, and refusing to
+            # answer here would turn every cold start on a machine without a
+            # VRAM probe — every fake in this suite, and Apple, and DirectML —
+            # into "cannot tell".
+            #
+            # An unsized tenant is different and still unknown: something *is*
+            # on the card and nothing can say how much.
+            return budget if not chat else None
 
         profile = self.hardware_profile()
         total = profile.vram_bytes or 0
