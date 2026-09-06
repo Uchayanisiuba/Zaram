@@ -1,8 +1,8 @@
 # Next session — handoff
 
 > **Out of date at the top, current at the bottom.** The newest prompt is
-> *"Prompt for the next session — written 5 September 2026, evening"*, at the
-> very end of this file, and the authoritative state is the **Current state — 5
+> *"Prompt for the next session — written 6 September 2026"*, at the very end
+> of this file, and the authoritative state is the **Current state — 6
 > September** block in `docs/MILESTONES.md`. Everything between here and that
 > prompt is an earlier brief: still accurate about what was built and why,
 > superseded on status. Read it for reasoning, not for what is true today.
@@ -626,9 +626,12 @@ not rediscovered.
 
 ---
 
-## Prompt for the next session — written 5 September 2026, evening
+## Prompt for the 5 September evening session — superseded
 
-**This is the current prompt.** Everything above it is an earlier brief, kept
+*A1, A2 and the seventeen failures all landed. The observation it opens on —
+watching a real model arrive — is still not done and is carried forward.*
+
+**This was the current prompt.** Everything above it is an earlier brief, kept
 for its reasoning and superseded on status. The authoritative state is
 **Current state — 5 September** in `docs/MILESTONES.md`.
 
@@ -753,3 +756,173 @@ files, then the suite once before committing.
   `backend/runtime/` (singular) is a dead web-search subsystem whose only
   importers are its own tests, sitting one letter from the live
   `backend/runtimes/`.
+
+---
+
+## Prompt for the next session — written 6 September 2026
+
+**This is the current prompt.** Everything above it is an earlier brief, kept
+for its reasoning and superseded on status. The authoritative state is
+**Current state — 6 September** in `docs/MILESTONES.md`.
+
+Paste from here down.
+
+---
+
+Read `docs/MILESTONES.md` — the **Current state — 6 September 2026** block —
+then `docs/CODE-PACK.md`, then `CLAUDE.md` for the rules. The code pack is the
+live work and `CODE-PACK.md` holds every decision already taken about it, so
+reading it first saves you re-arguing them.
+
+`main` is the trunk, the working tree is clean, and nothing is pushed since
+5 September. `git rev-list --count origin/main..main` is the count. The backend
+suite is **3,489 passed, 29 skipped, 0 failed** in ~23 minutes with Ollama up.
+A failure is yours.
+
+### The task: make it an agent, and make it survive its own context
+
+The retrieval and the tools are done. **The loop is not**, and the maintainer
+asked for two things on 6 September.
+
+**1. A bounded tool loop.**
+
+`_run_tool_round` in `core/execution_engine.py` is called from one place, once,
+and the follow-up generation gets the tool result with no tools attached. The
+comment beside it says so and explains the reasoning — read it before changing
+it. The consequence: the model can `search_code` **or** `read_lines`, never
+*search then read what it found*, which is the minimum useful sequence for a
+coding agent.
+
+**Bound it by tokens, not rounds.** That is a recommendation, not a decision —
+if you disagree, say why and put it to the maintainer. The argument for it: an
+8K local model and a 64K Tabby model should degrade differently rather than
+behave differently, and a round counter gives them the same allowance. Let the
+model keep calling until accumulated tool output reaches a fraction of the
+window, then force an answer.
+
+Three things must stay true, and one of them is a rule:
+
+* **The gate re-runs per call.** `McpRuntime.execute` calls `policy.decide`
+  itself. More rounds must not become one permission decision reused — that is
+  the "a shortlisted tool has earned nothing" line, and merging selection with
+  permission has cost this codebase three times.
+* **Tool results compete with recall for the window.** Three rounds of 400-line
+  reads will evict the memory that makes Zaram Zaram, and that trade is the
+  product's whole thesis. It must be a decision in the code with a comment, not
+  a consequence.
+* **Say when the loop stopped early.** A reply that quietly stops calling tools
+  is the silent-degradation failure `CLAUDE.md` names — the same rule that makes
+  a refused tool announce itself.
+
+**2. Continue the task when the context fills, without a restart.**
+
+The maintainer's words: *"I would also like the model to remember and continue
+the task if the context finishes without needing a restart."*
+
+**Do not solve this by persisting the transcript.** That is L0, and the patterns
+section rejects it outright: their pipeline keeps raw dialogue for verification,
+ours keeps provenance instead. Rule 7d says session state and long-term memory
+are separate stores, and conflating them is what produces duplicate citations
+and Zaram quoting its own replies.
+
+The Zaram-shaped answer already has a name in `CLAUDE.md`: **Project holds the
+plan** — *"the steps, decisions taken and decisions rejected"*. Continuation is
+reloading that object, not replaying a conversation. **The plan object does not
+exist yet**, and it is the missing piece for this *and* for diffs-as-cards, so
+building it well pays twice.
+
+Design questions worth putting to the maintainer before building:
+
+* What is a step, and when is one finished? A finished step is what survives.
+* Does a plan step become a `project:<id>` fact, or its own store? Rule 7i's
+  reasoning — one field on one store, because facts move and recall needs both
+  at once — argues for the former, but a plan has ordering and state that a
+  fact does not.
+* What does the user see and edit? `CODE-PACK.md` says a plan the user can read
+  before it runs; that is the reviewable-not-autonomous position the whole pack
+  rests on.
+
+### Before either, one hour that decides how good this feels
+
+**Nobody has watched the model drive any of it.** Not once, on any model. Do
+this first, because if a 14B cannot sequence two tool calls then the loop's
+design constraints change completely.
+
+Open a coding project with a `root` (API only for now — see the gap below), ask
+something that needs *search then read*, and watch what the model actually
+emits. `docs/AIDER.md` records the local ceiling; the maintainer's Tabby model
+has 64K on its next load and the Ollama `qwen3-14b-16k` is verified resident at
+16K.
+
+### The gap that blocks a user from any of it
+
+Nothing in the interface creates a coding project with a `root`. The tools work
+when one is open, and today that is reachable through the API only. Slice 4 in
+`CODE-PACK.md`: when a folder added to Knowledge looks like a repository, offer
+to make it a coding project — offered at the moment of doubt, never a choice in
+advance.
+
+### Still the maintainer's calls, not yours
+
+* A 24 GB machine is offered a **20 GB first download**. `readiness.py` states
+  the case and deliberately imposes no ceiling.
+* The model pull has **no cancel and no resume**.
+* Whether the loop's token bound is a fraction of the window or a fixed number.
+
+### How to verify, without launching Electron
+
+```
+cd backend && ZARAM_API_SECRET=dev venv/Scripts/python.exe -m uvicorn main:app --host 127.0.0.1 --port 8420
+cd frontend && ZARAM_API_SECRET=dev npx vite --port 5173 --strictPort
+```
+
+A mismatch presents as every Settings row reading "unavailable", which looks
+like a backend fault and is not one. The backend takes ~40s to boot.
+
+**You cannot screenshot the UI here.** The built-in browser pane refuses local
+URLs and Playwright's Chrome is not installed — report API payloads as evidence
+and say the visual half is unverified rather than promising a picture.
+
+### The gate
+
+```
+backend/venv/Scripts/python.exe -m pytest backend/tests/test_the_code_tools_are_reachable.py backend/tests/test_the_code_pack_is_wired.py backend/tests/test_an_empty_answer_is_not_an_empty_card.py -q
+npm run check:reachability && npm run check:guards
+cd frontend && npx tsc --noEmit && npx vitest run
+```
+
+The whole backend suite is ~23 minutes and is not the inner loop.
+
+### Traps this repository has already paid for
+
+* **`all()` of an empty collection is true.** That is the residency bug fixed on
+  6 September, and it is the shape to look for wherever an absence is read as a
+  measurement.
+* **Registering is not reaching.** A test asserting two lines of boot and
+  calling that reachability passed for a fortnight while nothing could call
+  `mcp.call`. `test_the_code_pack_is_wired.py` runs a real `kernel.boot()` for
+  exactly this reason; extend it rather than writing a fixture that repeats it.
+* **Classify a failure by the contract it asserts, never by its file.**
+* **Check the instrument.** On 6 September `nvidia-smi`'s process list named
+  Unreal and Maya as holding the card; Windows' own GPU counters showed the bulk
+  was an orphaned `llama-server.exe`. Two conclusions were published before the
+  right instrument was used.
+* **Anything that stops Ollama must stop `llama-server` too.**
+  `Get-Process ollama*` does not match the child, and the orphan holds gigabytes
+  that `ollama ps` cannot see.
+* **Two proxy lists** — `frontend/vite.config.js` and `electron/config.js` — for
+  any new route prefix. `check:proxy` catches a miss.
+* **Do not point Aider at `main.py`.** **5,221 lines** as of 6 September —
+  `docs/AIDER.md` says 5,143 and ~54,600 tokens, which was true on 5 September
+  and is the shape of the problem rather than the current figure. Aider is
+  installed and still **not proven to generate anything**.
+
+### Recorded, deliberately not done
+
+* `ServerStore.save()` freezes derived `writes` modes into `mcp-servers.json`,
+  after which the stored value beats `KNOWN_HOSTS`. Fix belongs in `config.py`.
+* **9,495 lines reached by nothing.** `backend/runtime/` (singular) is a dead
+  web-search subsystem whose only importers are its own tests, one letter from
+  the live `backend/runtimes/`.
+* **Packaging is still the actual blocker.** A stranger cannot install Zaram,
+  and a coding agent inside an uninstallable product reaches nobody.

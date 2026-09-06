@@ -11,7 +11,129 @@ accurate — it is the first thing anyone reads.
 
 ---
 
-## Current state — 5 September 2026
+## Current state — 6 September 2026
+
+*The latest work is first. Earlier sessions follow below.*
+
+**Everything below is committed on `main` and the working tree is clean.**
+Nothing has been pushed since the 5 September push;
+`git rev-list --count origin/main..main` is the count.
+
+**Measured: 3,489 passed, 29 skipped, 0 failed, 22m51s, with Ollama up.**
+
+### The code pack — a coding agent that is not a second product
+
+Four commits. `docs/CODE-PACK.md` holds the decisions in full and is the file
+to read before touching any of it; what follows is status.
+
+| | |
+|---|---|
+| a repository can be indexed | `.py`, `.ts`, `.go` were claimed by **nothing** |
+| a symbol can be found | `chunkCode` was one opaque token; camelCase was unsearchable |
+| the model has read tools | `list_files`, `read_lines`, `search_code`, sandboxed |
+| they are reachable | boot registration, asserted against a real `kernel.boot()` |
+
+**It is a pack, not a node**, and that question is settled in `CODE-PACK.md`
+with the walk-through of which of the six nodes already holds each part. It is
+also the second hand-built pack, which is what *"build two packs by hand before
+building the pack system"* asks for.
+
+**Provenance for code is a line range.** `readiness.py:156-181` can be opened;
+"somewhere in readiness.py" cannot. That is why the chunker exists rather than
+reusing the prose one — which also never splits mid-line, keeps a definition
+with its signature, and does **not** overlap, because overlapping would put the
+same function in two facts and that is rule 7d's duplicate-citation failure
+arriving through the chunker.
+
+**The sandbox is enforced, not promised.** Every path is resolved *before* the
+comparison, so `..`, an absolute path and a symlink out of the tree are refused
+by one check. The root comes from the open project through a ContextVar and
+never from a tool argument, because a root the model can name is not a sandbox.
+
+### The one thing that makes it not an agent
+
+**Zaram does exactly one tool call per message.** `_run_tool_round` is called
+from one place, once, and the follow-up generation is handed the tool's result
+with no tools attached. The engine's own comment says so:
+
+> Asked again, with what came back. No tools are offered this time, so
+> `MAX_TOOL_ROUNDS` is enforced by there being nothing to call rather than by a
+> counter somebody has to remember to decrement.
+
+Deliberate and documented, not an oversight — and for a coding agent it is the
+binding limit. The minimum useful sequence is *search, then read what you
+found*, and today the model must choose one of the two.
+
+**The maintainer asked for two things on 6 September and neither is built:**
+
+1. **A real loop**, bounded. The recommendation on the table is to bound it by
+   **tokens rather than rounds**, so it degrades gracefully from an 8K local
+   model to a 64K one instead of behaving differently on each. The gate already
+   re-runs per call — `McpRuntime.execute` calls `policy.decide` itself — so
+   more rounds is not a loosening of permission.
+2. **Continuation when the context fills, without a restart.** The task must
+   survive its own transcript. This is Zaram-shaped rather than generic: rule 7d
+   already says session state and long-term memory are separate stores, and
+   `CLAUDE.md` already assigns the plan — *"the steps, decisions taken and
+   decisions rejected"* — to **Project**. So continuation is reloading the plan
+   object from the project, not replaying a transcript. Persisting raw dialogue
+   to survive a context limit is L0, which the patterns section rejects outright.
+   **The plan object does not exist yet.** It is the missing piece for both this
+   and for slice 5.
+
+### A residency bug, found by making one
+
+`_headroom_bytes` took the sum path when every resident chat model reported a
+size — and `all()` of an empty mapping is **vacuously true**, so a card on
+which every server reported nothing returned the *entire* budget.
+
+Not hypothetical. Stopping `ollama app.exe` without its child left
+`llama-server.exe` orphaned holding **8.34 GB**: parent dead, `/api/ps`
+reporting no models, the driver reporting 911 MiB free. Zaram would have graded
+a 10 GB model as fitting onto 900 MB. It is the same defect the method's own
+docstring records fixing on 28 August; that fix merged the servers' answers and
+did not stop an empty merge being read as an empty card.
+
+`chat and all(...)` sends the empty case to the driver. **The first attempt was
+too aggressive and the suite caught it** — falling through to `None` when the
+driver cannot answer turned every cold start on a machine without a VRAM probe
+into "cannot tell", and four swap-preflight tests failed. The shape that
+survives prefers the driver, falls back to the budget only when there is no
+driver to ask, and stays unknown when something is on the card that nothing can
+size.
+
+### The maintainer's machine, since the next session will measure on it
+
+Not repository state, but it changes what a measurement means.
+
+| | |
+|---|---|
+| TabbyAPI | `Qwen3.8-27B-exl3-2.20bpw`, `max_seq_len` **16384 → 65536** |
+| | applies on next model load; config backed up beside itself |
+| Ollama | `qwen3-14b-16k` created, **verified fully resident**, 10.41 GB |
+| | `gemma4-26b-32k` created, **unverified** — 17 GB exceeds the card by design |
+| Ollama env | `OLLAMA_FLASH_ATTENTION=1`, `OLLAMA_KV_CACHE_TYPE=q8_0`, user scope |
+
+The KV setting saved 1.77 GB and is what makes 16K fit. Note that
+`[Environment]::SetEnvironmentVariable(...,'User')` writes the registry but does
+not refresh the calling session, so a server started from that same shell gets
+the old environment — which is how the first measurement came back wrong.
+
+**Exactly one of Tabby's 27B, Ollama's 14B, or FLUX can be resident at a time.**
+FLUX is 14 GB on disk against a 12 GB card and runs by CPU offload; no context
+setting changes that.
+
+### Still open from 5 September, unchanged
+
+* **A 24 GB machine is offered a 20 GB first download.** `readiness.py` states
+  the case and imposes no ceiling deliberately. Needs the maintainer's answer.
+* **The pull has no cancel and no resume.**
+* **Nobody has watched a model arrive**, and nobody has watched the model drive
+  the code tools. Neither has been observed once, on any model.
+
+---
+
+## Previous state — 5 September 2026
 
 *The latest work is first. Earlier sessions follow below.*
 
