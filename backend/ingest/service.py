@@ -14,7 +14,9 @@ scanning this package.
 from __future__ import annotations
 
 import logging
+import re
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Iterable, Iterator, Sequence
 
@@ -26,6 +28,7 @@ from .contracts import (
     ParseResult,
 )
 from .parsers import parsers_for, supported_suffixes
+from .parsers.code import CodeParser
 from .quality import grade
 
 logger = logging.getLogger(__name__)
@@ -166,6 +169,180 @@ def chunk(text: str, size: int = CHUNK_CHARS, overlap: int = CHUNK_OVERLAP) -> l
             break
         start = max(end - overlap, start + 1)
     return [c for c in chunks if c]
+
+
+#: Lines that begin a definition, in the languages `CodeParser` claims.
+#:
+#: Deliberately anchored near the left margin and deliberately incomplete. This
+#: is not a parser and must not grow into one — a real grammar per language is
+#: a dependency and a maintenance obligation, and the cost of *missing* a
+#: boundary here is small: the chunk falls back to splitting on lines, which is
+#: still whole lines and still numbered. The cost of a wrong boundary is the
+#: same. So patterns are added only when they are unambiguous.
+_DEFINITIONS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"^[ \t]{0,4}(?:async[ \t]+)?def[ \t]+(?P<name>\w+)"),
+    re.compile(r"^[ \t]{0,4}(?:export[ \t]+)?(?:abstract[ \t]+)?class[ \t]+(?P<name>\w+)"),
+    re.compile(
+        r"^[ \t]{0,4}(?:export[ \t]+)?(?:default[ \t]+)?(?:async[ \t]+)?"
+        r"function[ \t]+(?P<name>\w+)"
+    ),
+    re.compile(
+        r"^[ \t]{0,4}(?:export[ \t]+)?(?:const|let|var)[ \t]+(?P<name>\w+)"
+        r"[ \t]*(?::[^=]+)?=[ \t]*(?:async[ \t]*)?(?:\([^)]*\)|\w+)[ \t]*=>"
+    ),
+    re.compile(r"^[ \t]{0,4}(?:pub[ \t]+)?(?:async[ \t]+)?fn[ \t]+(?P<name>\w+)"),
+    re.compile(r"^[ \t]{0,4}func[ \t]+(?:\([^)]*\)[ \t]*)?(?P<name>\w+)"),
+    re.compile(
+        r"^[ \t]{0,4}(?:export[ \t]+)?(?:interface|type|enum|struct|impl|trait)"
+        r"[ \t]+(?P<name>\w+)"
+    ),
+)
+
+
+@dataclass(frozen=True)
+class CodeChunk:
+    """One retrievable piece of source, and where it came from.
+
+    The line range is the reason this type exists rather than a bare string.
+    Rule 2 says every recalled fact carries provenance, and for prose the file
+    name is enough — for code it is not. *"`readiness.py`, somewhere"* cannot
+    be checked; **`readiness.py:156-181`** can be opened, and an agent editing
+    the file needs the range to know what it is replacing.
+    """
+
+    text: str
+    #: 1-based and inclusive, the way an editor counts and a person reads.
+    start_line: int
+    end_line: int
+    #: Every definition this passage contains, in order. A tuple rather than a
+    #: single name because small definitions are merged into one chunk, and
+    #: labelling a passage that holds `first`, `second` and `Holder` with only
+    #: the first of them is a caption that is wrong about its own contents.
+    #: Empty for a file's header, or a language none of the patterns match.
+    symbols: tuple[str, ...] = ()
+
+    @property
+    def citation(self) -> str:
+        """`120-168`, for a caller to prefix with the file name."""
+        return f"{self.start_line}-{self.end_line}"
+
+
+def chunk_code(text: str, size: int = CHUNK_CHARS) -> list[CodeChunk]:
+    """Split source into pieces a model can be handed one at a time.
+
+    Three properties, and each is a thing `chunk()` gets right for prose and
+    wrong for code.
+
+    **Never split mid-line.** A chunk ending halfway through `if user.is_admin`
+    is not shorter, it is wrong — and a model reading it will complete the
+    thought itself, which is rule 9's failure with a syntax error attached.
+
+    **Prefer a whole definition.** Boundaries come from `_DEFINITIONS`, so a
+    function that fits arrives whole, with its signature. A retrieved body with
+    no `def` line above it is anonymous, and the model has to guess what it was
+    reading.
+
+    **No overlap, unlike prose.** `chunk()` overlaps so a sentence spanning a
+    boundary stays findable from both sides. Code is already aligned to
+    structure, and overlapping would put the same function in two facts —
+    which is the duplicate-citation failure rule 7d exists to prevent, arriving
+    through the chunker instead of through the session store.
+
+    A definition longer than ``size`` is split on line boundaries into as many
+    pieces as it needs. Every piece keeps the same symbols, so a 400-line
+    function retrieved in the middle still says which function it is.
+    """
+    lines = text.splitlines()
+    if not lines:
+        return []
+
+    segments = _segments(lines)
+
+    chunks: list[CodeChunk] = []
+    for start, end, symbols in segments:
+        body = "\n".join(lines[start:end])
+        if len(body) <= size:
+            if body.strip():
+                chunks.append(
+                    CodeChunk(text=body, start_line=start + 1, end_line=end, symbols=symbols)
+                )
+            continue
+
+        # Too long to hand over whole. Split it on lines, never inside one.
+        piece_start = start
+        length = 0
+        for index in range(start, end):
+            line_len = len(lines[index]) + 1
+            if length + line_len > size and index > piece_start:
+                body = "\n".join(lines[piece_start:index])
+                if body.strip():
+                    chunks.append(
+                        CodeChunk(
+                            text=body,
+                            start_line=piece_start + 1,
+                            end_line=index,
+                            symbols=symbols,
+                        )
+                    )
+                piece_start = index
+                length = 0
+            length += line_len
+
+        tail = "\n".join(lines[piece_start:end])
+        if tail.strip():
+            chunks.append(
+                CodeChunk(text=tail, start_line=piece_start + 1, end_line=end, symbols=symbols)
+            )
+
+    return chunks
+
+
+def _segments(lines: list[str]) -> list[tuple[int, int, tuple[str, ...]]]:
+    """`(start, end, symbols)` per definition, packed up to the chunk size.
+
+    Small adjacent definitions are merged rather than stored one per fact: a
+    file of six one-line getters should be one retrievable passage, not six
+    facts that each answer nothing and all compete for the same slot.
+    """
+    starts: list[tuple[int, str]] = []
+    for index, line in enumerate(lines):
+        for pattern in _DEFINITIONS:
+            found = pattern.match(line)
+            if found:
+                starts.append((index, found.group("name")))
+                break
+
+    if not starts:
+        return [(0, len(lines), "")]
+
+    # Whatever precedes the first definition is its own segment: imports, the
+    # licence header, the module docstring. That is often the most useful
+    # passage in the file and it belongs to no function.
+    boundaries: list[tuple[int, str]] = []
+    if starts[0][0] > 0:
+        boundaries.append((0, ""))
+    boundaries.extend(starts)
+
+    segments: list[tuple[int, int, tuple[str, ...]]] = []
+    for position, (start, symbol) in enumerate(boundaries):
+        end = boundaries[position + 1][0] if position + 1 < len(boundaries) else len(lines)
+        segments.append((start, end, (symbol,) if symbol else ()))
+
+    # Merge forwards while the result still fits.
+    merged: list[tuple[int, int, tuple[str, ...]]] = []
+    for segment in segments:
+        if not merged:
+            merged.append(segment)
+            continue
+        start, _end, symbols = merged[-1]
+        combined = sum(len(line) + 1 for line in lines[start:segment[1]])
+        if combined <= CHUNK_CHARS:
+            # The merged passage names everything inside it, so a chunk holding
+            # three short functions is captioned with all three.
+            merged[-1] = (start, segment[1], symbols + segment[2])
+        else:
+            merged.append(segment)
+    return merged
 
 
 def iter_ingest_folder(
@@ -309,11 +486,29 @@ def _store_chunks(
     path: Path, result: ParseResult, store_fact: Callable[[str, dict[str, Any]], str]
 ) -> tuple[str, ...]:
     ids: list[str] = []
-    pieces = chunk(result.text)
-    for index, piece in enumerate(pieces):
+
+    # Which chunker runs is decided by the parser that read the file, not by
+    # the suffix. One place makes the decision, and adding a suffix to
+    # `CodeParser` is then enough to route it correctly here.
+    if result.parser == CodeParser.name:
+        pieces = [
+            (piece.text, {
+                "start_line": piece.start_line,
+                "end_line": piece.end_line,
+                "symbols": list(piece.symbols),
+            })
+            for piece in chunk_code(result.text)
+        ]
+    else:
+        pieces = [(piece, {}) for piece in chunk(result.text)]
+
+    for index, (piece, located) in enumerate(pieces):
         metadata = {
             "source_path": str(path),
             "source_name": path.name,
+            # Where in the file, for code. Absent for prose, where the file
+            # name is provenance enough and a line number would be invented.
+            **located,
             # Rule 7b: every fact carries its origin. A passage from a file the
             # user wrote is not the same kind of thing as one Zaram generated,
             # and recall has to be able to say which.

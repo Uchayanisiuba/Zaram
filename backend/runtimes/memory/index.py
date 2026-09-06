@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import json
-import os
-import time
 import math
+import os
+import re
+import time
 from typing import Any
 
 from .contracts import MemoryIndex, MemoryQuery, MemoryRecord, RetrievalStrategy
@@ -90,20 +91,68 @@ where which who will with would you your
 """.split())
 
 
+#: An identifier's parts, for `content_tokens` below. Handles `snake_case` by
+#: splitting on the underscore first, then each remaining run by camel
+#: boundaries — including the acronym case, where `HTTPServer` is `HTTP` and
+#: `Server` rather than `H`, `T`, `T`, `P` and `Server`.
+_CAMEL = re.compile(r"[A-Z]+(?=[A-Z][a-z])|[A-Z]?[a-z]+|[A-Z]+|\d+")
+
+#: Below this an identifier part is noise — the `i` in `iPhone`, the `x` in
+#: `xPos`. Long enough to carry meaning, short enough to keep `id`, `db`, `os`.
+_MIN_PART = 2
+
+
+def identifier_parts(word: str) -> list[str]:
+    """`resident_budget_bytes` → `resident`, `budget`, `bytes`.
+
+    Returns the parts only when there is more than one; a plain word is not an
+    identifier and splitting it would return itself.
+    """
+    parts: list[str] = []
+    for run in word.split("_"):
+        parts.extend(_CAMEL.findall(run))
+    return parts if len(parts) > 1 else []
+
+
 def content_tokens(text: str) -> set[str]:
     """Tokens worth ranking on. Stopwords, punctuation and bare digits are not.
 
     Module-level and shared, because `HybridMemoryRetriever` needs exactly this
     rule and had its own whitespace-splitting version that disagreed — which is
     how `France?` became a term and `is` became a good one.
-    """
-    import re
 
-    return {
-        t
-        for t in re.findall(r"\b\w+\b", text.lower())
-        if t not in _STOPWORDS and not t.isdigit()
-    }
+    **An identifier is indexed whole and in parts**, and that is what makes a
+    codebase searchable at all. The previous version lowercased before
+    splitting on `\\w+`, so `chunkCode` became the single token `chunkcode` and
+    a search for *"chunk code"* could not match it — invisible, with no error,
+    across every camelCase name in a TypeScript project. `snake_case` failed
+    the same way in the other direction: `resident_budget_bytes` matched only
+    an exact repetition of itself.
+
+    So both are emitted. The whole identifier still scores when someone pastes
+    it exactly, which is the strongest possible signal that they mean *that*
+    symbol, and the parts let a half-remembered name find it. Splitting is
+    done on the original text, because lowercasing first destroys the camel
+    boundary this depends on.
+
+    This widens candidate *membership* and the keyword term in the ranking
+    blend. It does not touch the similarity a citation is judged against —
+    that stays the vector's answer, on the vector's scale.
+    """
+    tokens: set[str] = set()
+
+    for word in re.findall(r"\b\w+\b", text):
+        lowered = word.lower()
+        if lowered.isdigit():
+            continue
+        if lowered not in _STOPWORDS:
+            tokens.add(lowered)
+        for part in identifier_parts(word):
+            part = part.lower()
+            if len(part) >= _MIN_PART and part not in _STOPWORDS and not part.isdigit():
+                tokens.add(part)
+
+    return tokens
 
 
 class HybridMemoryIndex(MemoryIndex):

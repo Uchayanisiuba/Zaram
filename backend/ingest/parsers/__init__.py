@@ -14,6 +14,7 @@ from pathlib import Path
 
 from ..contracts import ParseResult
 from .base import Parser
+from .code import CodeParser
 from .docling import DoclingParser
 from .office import DocxParser, XlsxParser
 from .pdf import PdfParser
@@ -22,6 +23,11 @@ from .plaintext import PlainTextParser
 #: Order matters. Light parsers first; Docling last, as the fallback.
 PARSERS: tuple[Parser, ...] = (
     PlainTextParser(),
+    # Before the document parsers, after plaintext. It claims no suffix
+    # plaintext claims, so the order between those two never decides anything —
+    # but a source file must not fall through to Docling, which would load a
+    # multi-gigabyte model to read a `.py`.
+    CodeParser(),
     PdfParser(),
     DocxParser(),
     XlsxParser(),
