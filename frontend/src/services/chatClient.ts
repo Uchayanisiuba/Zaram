@@ -235,6 +235,14 @@ export interface ChatRequest {
    *  person comes back to next week. Keying transcripts on the session would
    *  file every reload as a new conversation and every restart as amnesia. */
   conversationId?: string | null;
+  /** Pick up a tool loop that stopped with work left, for this session.
+   *
+   *  The user's **Continue**. `text` is not a new question when this is set —
+   *  the backend resumes from the results the task had already gathered and
+   *  ignores it. Sent per session, because that is where the stopped loop is
+   *  parked: it does not survive a restart, and the notice that offers it
+   *  says so rather than implying a durability it does not have. */
+  continueTask?: boolean;
 }
 
 /** A failure that should be shown to the user, with the cause preserved. */
@@ -290,6 +298,7 @@ export async function* streamChat(
         domain_ids: req.domainIds ?? [],
         attachment_ids: req.attachmentIds ?? [],
         conversation_id: req.conversationId ?? '',
+        continue_task: req.continueTask ?? false,
       }),
       signal,
     });

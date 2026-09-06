@@ -33,10 +33,12 @@ import re
 import time
 from collections import OrderedDict
 from collections.abc import Iterator
+from dataclasses import dataclass
 from typing import Any
 
 from core.async_bridge import run_sync
 from core.capability_router import CapabilityRouter
+from core.context_budget import budget_for, estimate_tokens
 from core.contracts import (
     ExecutionPlan,
     ExecutionStep,
@@ -49,8 +51,12 @@ from core.execution_context import ExecutionContext
 from core.planner import IntentClassification, IntentPlanner, IntentType
 from core.streaming_events import StreamEvent
 from core.tool_loop import (
+    MAX_AUTO_CONTINUATIONS,
+    MAX_TOOL_ROUNDS,
     ToolCall,
+    ToolTurn,
     parse_call,
+    render_result,
     result_prompt,
     strip_calls,
     tool_instructions,
@@ -75,6 +81,35 @@ _NEVER_DEGRADE = frozenset({"image.generate"})
 #: `_scope_for` maintain. `test_mcp_reaches_chat` asserts the two agree, which
 #: is the difference between a comment claiming a relationship and a check.
 MCP_CALL = "mcp.call"
+
+
+@dataclass
+class _Continuation:
+    """A tool loop that ran out of room, kept so the user can say *Continue*.
+
+    **What is kept is what was established, not what was said.** The turns are
+    the calls that ran and what they returned; the model's prose between them is
+    working state and is dropped. Rule 7d draws exactly that line, and the
+    patterns section rejects persisting raw dialogue by name.
+
+    The system prompt travels with it because it carries the tools and the facts
+    recall found for the original question, and continuing a task under a
+    different context is not continuing it. It is session state, in memory, and
+    the retention answer is on `_continuations`.
+
+    This is **not** the plan object `CLAUDE.md` assigns to Project. That one
+    outlives a restart, holds decisions taken and rejected, and is something the
+    user reads before it runs. This holds one question's tool results for as
+    long as the process lives, and claims nothing more.
+    """
+
+    prompt: str
+    turns: list[ToolTurn]
+    system_prompt: str
+    model: str | None
+    #: Why it stopped, in the words the user was given. Repeated on resume so a
+    #: continuation that stops again reads as the same task, not a new one.
+    reason: str
 
 
 def _scope_for(project_id: str | None) -> str | None:
@@ -144,6 +179,22 @@ class ExecutionEngine:
         #: session_id → recent (prompt, answer) pairs, LRU-capped at
         #: MAX_SESSIONS. Ordered because eviction order is the point.
         self._session_turns: OrderedDict[str, list[tuple[str, str]]] = OrderedDict()
+        #: session_id → a tool loop that stopped with work left, for **Continue**.
+        #:
+        #: Session state, on the same terms as `_session_turns` above and for
+        #: the same rule: this is working state, not memory. What it holds is
+        #: the completed tool turns — what was found — never the dialogue, which
+        #: would be L0 and is rejected outright by `CLAUDE.md`'s patterns
+        #: section.
+        #:
+        #: **Its retention answer, because a store without one is an unshipped
+        #: feature.** One per session, replaced when that session stops again,
+        #: dropped the moment it is resumed or the loop finishes on its own,
+        #: evicted with the oldest session past `MAX_SESSIONS`, and gone on
+        #: restart. Continuing is therefore something you do now, not something
+        #: Zaram keeps for you — and the notice says so rather than implying a
+        #: durability this does not have.
+        self._continuations: OrderedDict[str, "_Continuation"] = OrderedDict()
         #: Returns one sentence to say in the transcript, or None. Injected so
         #: `core/` keeps no dependency on `ingest/`; `main.py` supplies it.
         self._notice_source: Any | None = None
@@ -608,12 +659,13 @@ class ExecutionEngine:
                     # they see — the call, the gate's verdict, and the answer —
                     # comes out of here.
                     spoken: list[str] = []
-                    for piece in self._run_tool_round(
+                    for piece in self._run_tool_loop(
                         buffered=step_output,
                         original_prompt=step.input_data.get("prompt", "") or prompt,
                         model=model,
                         system_prompt=system_prompt,
                         spoken=spoken,
+                        session_id=session_id,
                     ):
                         yield piece
                     # The transcript stores what was said, not the marker that
@@ -932,7 +984,7 @@ class ExecutionEngine:
         tools = parsed.get("tools")
         return [t for t in tools if isinstance(t, dict)] if isinstance(tools, list) else []
 
-    def _run_tool_round(
+    def _run_tool_loop(
         self,
         *,
         buffered: str,
@@ -940,90 +992,410 @@ class ExecutionEngine:
         model: str | None,
         system_prompt: str,
         spoken: list[str],
+        session_id: str = "default",
+        turns: list[ToolTurn] | None = None,
+        continuations_left: int = MAX_AUTO_CONTINUATIONS,
     ):
-        """One pass of: did the model call a tool, may it, and what did it say.
+        """Call a tool, show the model what came back, and let it call another.
 
         Yields what the user sees and appends the user-visible text to `spoken`,
         so the caller can store the answer rather than the marker that produced
         it.
 
-        **The gate is not consulted here and that is deliberate.** This method
-        asks `McpRuntime.execute`, which calls `policy.decide` itself. Reading
-        the verdict in two places is how a permission check becomes advisory —
-        and a shortlisted tool has earned nothing, which is the distinction
-        `CLAUDE.md` records paying for three times.
+        **Bounded by the window, not by a round count.** Every result is carried
+        into the next prompt, so what has to be bounded is the accumulation —
+        `ContextBudget.tool_output_tokens`, a share of the context the answering
+        model was actually loaded with. An 8K local model and a 64K remote one
+        then degrade differently instead of behaving identically under one
+        counter, and the number is read from `/api/ps` rather than assumed.
+
+        **That budget is a trade, and it is this one:** tool output competes for
+        the same window as the facts recall found. Three 400-line reads would
+        evict the memory that makes an answer Zaram's rather than any model's,
+        which is the product's whole thesis, so the share is a decision written
+        down in `TOOL_OUTPUT_SHARE` rather than a consequence nobody chose.
+
+        **The gate runs on every call, and is not consulted here.** Each pass
+        asks `McpRuntime.execute`, which calls `policy.decide` itself, so more
+        rounds is more permission decisions and never one decision reused.
+        Reading the verdict here as well is how a permission check becomes
+        advisory — the distinction `CLAUDE.md` records paying for three times.
+
+        **A full window is not the end of the task.** It carries itself on —
+        `MAX_AUTO_CONTINUATIONS` times — keeping what it found, dropping the
+        oldest of it when it no longer fits, and saying so each time. Only when
+        that allowance is spent does the loop close, and then it offers the
+        manual Continue rather than ending flat.
+
+        **Every stop and every carry-on is said out loud.** A reply that quietly
+        gave up on the tools is the silent-degradation failure `CLAUDE.md` names;
+        a reply that quietly spent four windows is the same failure pointing the
+        other way, and the user is the one paying for it in seconds.
         """
-        call = parse_call(buffered)
-        if call is None:
-            # No tool wanted. The ordinary reply, minus any half-written marker.
-            text = strip_calls(buffered)
-            spoken.append(text)
-            yield text
-            return
+        turns = list(turns or [])
+        #: What *this* window has spent on reading, and what it has called.
+        #:
+        #: Both start at zero even when turns were carried in by `continue_task`,
+        #: because that is what continuing means: a second allowance, spent under
+        #: the same rules. What stops it growing without end is not this counter
+        #: but the eviction in `continue_task`, which refuses to carry more than
+        #: the model's own window can hold.
+        spent = 0
+        rounds = 0
+        #: Every call this request has made, across every window. `rounds` is
+        #: reset by a carry-on and this is not, because the user is told how
+        #: much work was done and not how it was divided up.
+        made = 0
+        budget = None
+        text = buffered
 
-        runtime = self._router.try_resolve(MCP_CALL)
-        if runtime is None:
-            # The list step ran, so this should be unreachable. Degrade rather
-            # than raise: the model has already written something.
-            text = strip_calls(buffered)
-            spoken.append(text)
-            yield text
-            return
+        while True:
+            call = parse_call(text)
+            if call is None:
+                # Nothing more wanted: the answer, minus any half-written
+                # marker. The task finished, so nothing is left to continue.
+                self._continuations.pop(session_id, None)
+                answer = strip_calls(text)
+                spoken.append(answer)
+                yield answer
+                return
 
-        result = run_sync(runtime.execute(MCP_CALL, {
-            "server": call.server,
-            "tool": call.tool,
-            "arguments": call.arguments,
-            # Never set from here. `confirmed` means a surface asked a person,
-            # and this method has not — if it set the flag, the model's own
-            # request would be its own permission.
-        }))
-        if not isinstance(result, dict):
-            result = {"success": False, "error": "the tool returned nothing readable"}
+            runtime = self._router.try_resolve(MCP_CALL)
+            if runtime is None:
+                # The list step ran, so this should be unreachable. Degrade
+                # rather than raise: the model has already written something.
+                answer = strip_calls(text)
+                spoken.append(answer)
+                yield answer
+                return
 
-        if result.get("refused"):
-            reason = result.get("reason", "")
-            yield StreamEvent.tool_call(call.server, call.tool, "refuse", reason)
-            yield from self._answer_without_the_tool(
-                original_prompt, call, reason, model, system_prompt, spoken,
-                preamble=f"Zaram refused to run `{call.tool}`. {reason}",
+            if any(call.same_as(turn.call) for turn in turns):
+                # **A verbatim repeat is not progress.** Its result is already
+                # in the prompt, so running it again spends the window to say
+                # the same thing — and a token budget cannot catch it when the
+                # tool returns almost nothing, which is exactly what an empty
+                # search does.
+                yield from self._close_the_loop(
+                    original_prompt, turns, model, system_prompt, spoken, session_id,
+                    reason=(
+                        f"Zaram stopped after {made} tool "
+                        f"{'call' if made == 1 else 'calls'}: the model "
+                        f"asked for `{call.tool}` again with the same arguments, "
+                        "which would return what it already has."
+                    ),
+                )
+                return
+
+            result = run_sync(runtime.execute(MCP_CALL, {
+                "server": call.server,
+                "tool": call.tool,
+                "arguments": call.arguments,
+                # Never set from here. `confirmed` means a surface asked a
+                # person, and this method has not — if it set the flag, the
+                # model's own request would be its own permission.
+            }))
+            if not isinstance(result, dict):
+                result = {"success": False, "error": "the tool returned nothing readable"}
+
+            if result.get("refused"):
+                reason = result.get("reason", "")
+                yield StreamEvent.tool_call(call.server, call.tool, "refuse", reason)
+                yield from self._answer_without_the_tool(
+                    original_prompt, call, reason, model, system_prompt, spoken,
+                    preamble=f"Zaram refused to run `{call.tool}`. {reason}",
+                )
+                return
+
+            if result.get("needs_confirmation"):
+                reason = result.get("reason", "")
+                yield StreamEvent.tool_call(call.server, call.tool, "confirm", reason)
+                yield from self._answer_without_the_tool(
+                    original_prompt, call, reason, model, system_prompt, spoken,
+                    preamble=(
+                        f"`{call.tool}` on `{call.server}` needs your say-so "
+                        f"before it runs. {reason}"
+                    ),
+                )
+                return
+
+            # **A permission stops the loop; a failure does not.**
+            #
+            # A refusal and a pending confirmation are answers about what the
+            # user allows, and looping past them would let the model probe for
+            # a tool that happens to be permitted. A tool that ran and failed —
+            # a path that does not exist, an argument name it invented — is
+            # ordinary, is the model's to fix, and is precisely what a second
+            # round is for. It is handed back as the result it is.
+            if not result.get("success"):
+                error = result.get("error", "unknown error")
+                yield StreamEvent.tool_call(call.server, call.tool, "refuse", error)
+                payload: Any = {"error": error}
+            else:
+                yield StreamEvent.tool_call(call.server, call.tool, "allow", "ran")
+                payload = result.get("result")
+
+            turns.append(ToolTurn(call=call, result=payload))
+            spent += estimate_tokens(render_result(payload))
+            rounds += 1
+            made += 1
+
+            # Read after the first generation, never before: `/api/ps` reports
+            # the window of a *resident* model, and nothing is resident until
+            # something has been asked. Measured — asking first returned the
+            # 4,096 fallback for a model loaded with 16,384.
+            if budget is None:
+                budget = budget_for(model)
+
+            if spent >= budget.tool_output_tokens:
+                filled = (
+                    f"what it read has filled the {budget.tool_output_tokens:,} "
+                    "tokens this question can spend on reading, out of the "
+                    f"{budget.total_tokens:,} the model is loaded with"
+                )
+            elif rounds >= MAX_TOOL_ROUNDS:
+                filled = f"it has made {rounds} tool calls in one window"
+            else:
+                filled = ""
+
+            if filled:
+                # **The window fills; the task carries on.** The maintainer's
+                # call on 6 September — *"have it continue till the task is
+                # done"*. What continues is what was *found*: the turns travel
+                # into the fresh window, the oldest are dropped if they no
+                # longer fit, and the prose between them does not go, which is
+                # rule 7d and the reason this is not a transcript.
+                #
+                # Bounded, because "done" is the model's judgement and a model
+                # that keeps finding one more file to read would spend an
+                # unbounded amount of the user's time. When the allowance runs
+                # out the loop closes and offers the manual Continue, which is
+                # now the fallback rather than the only route.
+                if continuations_left > 0:
+                    carried, dropped = self._turns_that_still_fit(turns, model)
+                    if carried:
+                        continuations_left -= 1
+                        turns = carried
+                        spent = 0
+                        rounds = 0
+                        # Said out loud every time. Carrying on silently would
+                        # make a reply that took four windows indistinguishable
+                        # from one that took none, and the user is paying for
+                        # the difference in seconds — or, on a metered
+                        # provider, in money.
+                        lost = (
+                            f" The {dropped} earliest "
+                            f"{'result' if dropped == 1 else 'results'} were "
+                            "dropped to make room; Zaram can look them up again."
+                            if dropped
+                            else ""
+                        )
+                        yield StreamEvent.notice(
+                            f"Zaram is carrying on — {filled}, so it is "
+                            "continuing the task in a fresh window with what it "
+                            f"has found.{lost}",
+                            kind="tool_loop",
+                        )
+                        follow_up = ExecutionStep(
+                            capability_id="reasoning.generate",
+                            input_data={
+                                "prompt": result_prompt(
+                                    original_prompt, turns, may_call_again=True
+                                )
+                            },
+                            depends_on=[],
+                        )
+                        text = "".join(
+                            self._dispatcher.execute_step(follow_up, model, system_prompt)
+                        )
+                        continue
+
+                # `made`, not `rounds`: after a carry-on the window counter has
+                # been reset, and telling somebody it stopped after one call
+                # when it made twelve is the sort of small false number this
+                # codebase has decided not to print.
+                yield from self._close_the_loop(
+                    original_prompt, turns, model, system_prompt, spoken, session_id,
+                    reason=(
+                        f"Zaram stopped after {made} tool "
+                        f"{'call' if made == 1 else 'calls'} — {filled}."
+                    ),
+                )
+                return
+
+            # Asked again, carrying every result so far and still holding the
+            # tools. Buffered like the first generation and for the same
+            # measured reason: `[TOOL_CALL]` arrives split across tokens, so it
+            # cannot be recognised until the text is accumulated, and by then a
+            # streamed version has already been read.
+            follow_up = ExecutionStep(
+                capability_id="reasoning.generate",
+                input_data={
+                    "prompt": result_prompt(original_prompt, turns, may_call_again=True)
+                },
+                depends_on=[],
             )
-            return
+            text = "".join(self._dispatcher.execute_step(follow_up, model, system_prompt))
 
-        if result.get("needs_confirmation"):
-            reason = result.get("reason", "")
-            yield StreamEvent.tool_call(call.server, call.tool, "confirm", reason)
-            yield from self._answer_without_the_tool(
-                original_prompt, call, reason, model, system_prompt, spoken,
-                preamble=(
-                    f"`{call.tool}` on `{call.server}` needs your say-so before "
-                    f"it runs. {reason}"
-                ),
-            )
-            return
+    def _close_the_loop(
+        self,
+        original_prompt: str,
+        turns: list[ToolTurn],
+        model: str | None,
+        system_prompt: str,
+        spoken: list[str],
+        session_id: str,
+        *,
+        reason: str,
+    ):
+        """Answer from what was gathered, say why it stopped, offer to continue.
 
-        if not result.get("success"):
-            error = result.get("error", "unknown error")
-            yield StreamEvent.tool_call(call.server, call.tool, "refuse", error)
-            yield from self._answer_without_the_tool(
-                original_prompt, call, error, model, system_prompt, spoken,
-                preamble=f"`{call.tool}` failed: {error}",
-            )
-            return
+        The answer comes first and the notice is a separate event, because the
+        two are different kinds of thing: one is the model's reply and one is
+        Zaram reporting on itself. Attributing the second to the model would be
+        putting words in its mouth, which is the note `StreamEvent.notice`
+        already carries.
 
-        yield StreamEvent.tool_call(call.server, call.tool, "allow", "ran")
+        **The final generation is buffered and stripped, not streamed.**
+        Measured on 6 September: told plainly not to call another tool, a model
+        whose one call had failed emitted ``[TOOL_CALL]`` anyway — reasonable
+        behaviour, and a raw marker on the user's screen for anything that
+        streams it. Obedience is not something to rely on when the check costs
+        one buffer.
+        """
+        self._continuations[session_id] = _Continuation(
+            prompt=original_prompt,
+            turns=list(turns),
+            system_prompt=system_prompt,
+            model=model,
+            reason=reason,
+        )
+        while len(self._continuations) > self.MAX_SESSIONS:
+            self._continuations.popitem(last=False)
 
-        # Asked again, with what came back. No tools are offered this time, so
-        # `MAX_TOOL_ROUNDS` is enforced by there being nothing to call rather
-        # than by a counter somebody has to remember to decrement.
-        follow_up = ExecutionStep(
+        final = ExecutionStep(
             capability_id="reasoning.generate",
-            input_data={"prompt": result_prompt(original_prompt, call, result.get("result"))},
+            input_data={
+                "prompt": result_prompt(original_prompt, turns, may_call_again=False)
+            },
             depends_on=[],
         )
-        for token in self._dispatcher.execute_step(follow_up, model, system_prompt):
-            spoken.append(token)
-            yield token
+        answer = strip_calls(
+            "".join(self._dispatcher.execute_step(final, model, system_prompt))
+        )
+        spoken.append(answer)
+        yield answer
+        yield StreamEvent.notice(
+            f"{reason} Continue to give it another window — that offer lasts "
+            "for this session only.",
+            kind="tool_loop",
+            action="continue",
+        )
+
+    def continue_task(
+        self,
+        session_id: str = "default",
+        model: str | None = None,
+    ) -> Iterator[Any]:
+        """Resume the tool loop this session stopped, with a fresh window.
+
+        The user's *Continue*. It re-enters the same loop with the turns already
+        completed — what was found, not what was said — so the model picks up
+        from what it established rather than from a transcript it would have to
+        re-read. Rule 7d is the reason that distinction is load-bearing rather
+        than tidy: dialogue is session state, and persisting it to survive a
+        context limit is the L0 store `CLAUDE.md` rejects by name.
+
+        A session with nothing parked says so and yields nothing else. That is
+        the ordinary case after a restart, and it must read as *the offer has
+        expired* rather than as a fault.
+        """
+        pending = self._continuations.pop(session_id, None)
+        if pending is None:
+            yield StreamEvent.notice(
+                "There is nothing to continue — the earlier task is no longer "
+                "in this session. Ask again and Zaram will start it fresh.",
+                kind="tool_loop",
+            )
+            return
+
+        model = model or pending.model
+        turns, dropped = self._turns_that_still_fit(pending.turns, model)
+        if dropped:
+            # **Whole turns, oldest first, and said out loud.** The same call
+            # `transcript.py` makes when a conversation outgrows a window:
+            # evicting is deterministic, summarising is a generation, and rule 9
+            # exists because generations invent. Half a tool result is worse
+            # than none — the model would answer from a file that appears to
+            # end where the truncation did.
+            yield StreamEvent.notice(
+                f"Continuing without the {dropped} earliest "
+                f"{'result' if dropped == 1 else 'results'}: what was gathered "
+                "no longer fits the model's window alongside room to answer. "
+                "Zaram can look those up again if it needs them.",
+                kind="tool_loop",
+            )
+        if not turns:
+            yield StreamEvent.notice(
+                "That task cannot be continued on this model — a single result "
+                "from it does not fit the window. A model with a larger context "
+                "would carry it.",
+                kind="tool_loop",
+            )
+            return
+
+        spoken: list[str] = []
+        first = ExecutionStep(
+            capability_id="reasoning.generate",
+            input_data={
+                "prompt": result_prompt(pending.prompt, turns, may_call_again=True)
+            },
+            depends_on=[],
+        )
+        buffered = "".join(
+            self._dispatcher.execute_step(first, model, pending.system_prompt)
+        )
+        yield from self._run_tool_loop(
+            buffered=buffered,
+            original_prompt=pending.prompt,
+            model=model,
+            system_prompt=pending.system_prompt,
+            spoken=spoken,
+            session_id=session_id,
+            turns=turns,
+        )
+
+    def _turns_that_still_fit(
+        self, turns: list[ToolTurn], model: str | None
+    ) -> tuple[list[ToolTurn], int]:
+        """The most recent turns that fit the window, and how many were dropped.
+
+        Most recent kept rather than most relevant: relevance is a judgement and
+        this is arithmetic, and the last thing the model read is the thing it
+        was in the middle of. A dropped turn is not lost work — the tools are
+        still attached and it can look again, which the repeat guard permits
+        because a dropped call is no longer among the turns.
+        """
+        budget = budget_for(model)
+        # **What may be carried is everything except the room to read more.**
+        # Not `tool_output_tokens`: that is one window's *reading allowance*, and
+        # measuring the carry against it would refuse to continue exactly the
+        # loops that stopped — the results that filled the allowance are the
+        # results being carried. So the carry may fill the input budget up to
+        # the point where the next window's reading would not fit.
+        room = budget.input_tokens - budget.tool_output_tokens
+        kept: list[ToolTurn] = []
+        for turn in reversed(turns):
+            cost = estimate_tokens(render_result(turn.result))
+            if cost > room:
+                break
+            room -= cost
+            kept.append(turn)
+        kept.reverse()
+        return kept, len(turns) - len(kept)
+
+    def has_continuation(self, session_id: str = "default") -> bool:
+        """Whether this session has a stopped tool loop waiting."""
+        return session_id in self._continuations
 
     def _answer_without_the_tool(
         self,

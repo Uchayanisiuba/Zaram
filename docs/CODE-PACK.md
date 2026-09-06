@@ -134,6 +134,91 @@ silent about a table that exists and differs.
 Every read is capped: 400 lines, 60 matches, 500 files, each saying so when it
 truncates. A model told nothing concludes the file ends where the read did.
 
+**3b — the loop, and Continue. Done, 6 September.**
+
+`MAX_TOOL_ROUNDS` was **1**, so the model could `search_code` *or* `read_lines`
+and never *search then read what it found* — the minimum useful sequence, and
+the binding limit on everything above.
+
+* **Bounded by the window, not by rounds.** `ContextBudget.tool_output_tokens`
+  is `TOOL_OUTPUT_SHARE` (0.4) of the input budget, read from the context the
+  model was **actually loaded with** via `/api/ps`. An 8K model and a 64K model
+  then degrade differently rather than behaving identically under one counter.
+  The share sits below `DOCUMENT_SHARE` deliberately: a file the user attached
+  was chosen by a person, one the model asked for was chosen by a guess.
+* **The trade is written down.** Tool output competes for the same window as
+  recalled facts, and three 400-line reads would evict the memory that makes an
+  answer Zaram's. That is a decision in `TOOL_OUTPUT_SHARE`, not a consequence.
+* **Two backstops a token budget cannot provide.** A verbatim repeat stops the
+  loop — its result is already in the prompt — and `MAX_TOOL_ROUNDS` (now 6)
+  catches the model that varies a query that returns nothing each time.
+  `{"matches": []}` costs five tokens and would never fill a budget.
+* **A permission stops it; a failure does not.** A refusal or a pending
+  confirmation ends the loop, because looping past one lets the model shop for
+  a tool that happens to be permitted. A call that *ran and failed* is handed
+  back as its own result — that is the commonest recoverable error and the
+  whole reason there is a second round.
+* **The gate runs per call**, unchanged: `McpRuntime.execute` calls
+  `policy.decide` itself, so more rounds is more decisions and never one reused.
+* **A full window is not the end of the task.** It carries itself into a fresh
+  one, `MAX_AUTO_CONTINUATIONS` (3) times, keeping the turns and dropping the
+  oldest when they no longer fit — the maintainer's decision on 6 September:
+  *"have it continue till the task is done."* Bounded because "done" is the
+  model's judgement and a model that keeps finding one more file to read would
+  otherwise spend an unbounded amount of somebody's time, or their money on a
+  metered provider. It is **not** a loosening of permission: every call still
+  goes through `policy.decide`, so carrying on buys more decisions, not fewer.
+* **Every carry-on and every stop is said out loud.** A reply that quietly gave
+  up on the tools is the silent-degradation failure; a reply that quietly spent
+  four windows is the same failure pointing upward, and the user pays that one
+  in seconds.
+
+**Continue is session state, and it is not the plan object.** What is kept is
+the completed turns — what the tools *returned* — never the model's prose
+between them. Rule 7d draws that line and the patterns section rejects
+persisting raw dialogue by name. Retention, because a store without an answer
+is an unshipped feature: one per session, replaced when that session stops
+again, dropped on resume, evicted past `MAX_SESSIONS`, **gone on restart**, and
+the notice says so. Continuing evicts whole turns, oldest first, when they no
+longer fit — the call `transcript.py` already makes, for the same reason:
+evicting is deterministic and summarising is a generation.
+
+**The button is the fallback, not the route.** It appears only once the
+automatic allowance is spent, which is the honest moment to ask a person
+whether the task is worth more of their machine's time.
+
+The durable plan object `CLAUDE.md` assigns to Project — steps, decisions taken
+and rejected, surviving a restart, readable before it runs — **is still not
+built**, and this does not pretend to be it.
+
+**A UX cost taken deliberately, with a named way back.** Every generation in a
+tool-using reply is now buffered, so those replies arrive whole instead of
+typing out. The first one always was — a marker arrives split across tokens —
+and the terminal one joined it on measured evidence: told plainly not to call
+another tool, `qwen3-14b` emitted `[TOOL_CALL]` anyway. Streaming can return
+behind a holdback filter that withholds any trailing text which could be a
+marker prefix; that belongs in `tool_loop.py` with its own tests, and it is
+worth doing when tool replies are common enough for the lost typewriter effect
+to be felt.
+
+**Measured, 6 September — the first time a model has driven any of this.**
+`qwen3-14b-16k`, loaded with 16,384 tokens (measured, not assumed):
+`search_code` → `read_lines` → the right value, from the right file and line.
+`backend/tests/test_the_model_can_drive_the_tools.py -m measure`.
+
+Two defects that only a model could have found, both now fixed:
+
+* **The schema never reached the prompt.** `tool_instructions` listed a name and
+  a description, and `mcp.list_tools` carried `input_schema` all the way to the
+  point where it was dropped. So the model invented `start`/`end` for
+  `read_lines` and `text` for `search_code`. With the schema in front of it, on
+  the same question, it used `start_line`, `end_line` and `query`.
+* **A wrong argument name succeeded.** `read_lines` ignored `start` and read
+  from line 1; `search_code` with `text` searched for nothing and said "no query
+  was given". Both are rule 9's shape in a tool — a plausible answer to a
+  question nobody asked. An argument no schema declares is now refused by name,
+  which is what lets the next round fix it.
+
 **4 — next: the repository is offered as a project.** When a folder added to
 Knowledge looks like a repository, offer to make it a coding project, with its
 `root` set. Offer at the moment of doubt, never a choice in advance (7h). This
@@ -161,7 +246,21 @@ exactly why slice 1 exists and why chunks carry line ranges. But 8K is tight
 for a loop holding a plan, an excerpt and a diff at once, and 14B tool-calling
 reliability across many turns is unknown rather than merely pessimistic.
 
-**Two cheap measurements settle it, and neither has been taken:**
+**Measurement 2 is taken and the answer is yes** — `qwen3-14b-16k` is verified
+resident at 16,384 tokens on the 12 GB card, with `OLLAMA_FLASH_ATTENTION=1` and
+`OLLAMA_KV_CACHE_TYPE=q8_0` (which saved 1.77 GB and is what makes 16K fit). And
+the question underneath both measurements — *can the model drive it* — is
+answered above: search then read, correct answer, on a 14B.
+
+One thing the run exposed that neither measurement asked about: **a coding
+question phrased naturally does not reach these tools.** "search the code for X"
+and "find x in the code" both classify as `filesystem.search`, because the
+planner checks the filesystem intent before the tool intent. Only phrasings that
+name the tools — "use the code tools to…" — plan `mcp.list_tools`. That is a
+routing gap, it belongs with slice 4, and it means the pack is currently
+reachable by a user who already knows it exists.
+
+**The remaining measurement:**
 
 1. Aider is installed, configured, and has never produced a generation anybody
    has read. Point it at `core/readiness.py` (~2,100 tokens, comfortably inside

@@ -175,6 +175,21 @@ export default function ChatSurface({ navigate }: Props) {
     if (lastAsked) void send(lastAsked.text);
   }, [send]);
 
+  /** Pick up a tool loop that stopped because it had read all it was allowed.
+   *
+   *  **What continues is the task, not the conversation.** The backend resumes
+   *  from the tool results it had already gathered — what was *found*, never
+   *  what was said — because rule 7d keeps session state and memory apart and
+   *  persisting a transcript to survive a context limit is the L0 store
+   *  `CLAUDE.md` rejects by name.
+   *
+   *  Sent as an ordinary message so the press is visible in the transcript
+   *  where the user left it. The word is not read as a question: the backend
+   *  ignores the text when this flag is set. */
+  const continueTask = useCallback(() => {
+    void send('Continue', { continueTask: true });
+  }, [send]);
+
   // Typed out at a steady cadence rather than in the clumps tokens arrive in.
   //
   // **Display only, and that is load-bearing.** `streamingText` in the store is
@@ -948,6 +963,7 @@ export default function ChatSurface({ navigate }: Props) {
                       notice={notice}
                       onOpen={navigate}
                       onEnableSearch={enableSearchAndRetry}
+                      onContinue={continueTask}
                     />
                   ))}
                   {msg.error && (
@@ -1030,6 +1046,7 @@ export default function ChatSurface({ navigate }: Props) {
                       notice={notice}
                       onOpen={navigate}
                       onEnableSearch={enableSearchAndRetry}
+                      onContinue={continueTask}
                     />
                   ))}
                 </div>

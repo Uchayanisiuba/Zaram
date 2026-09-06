@@ -19,7 +19,9 @@ accurate — it is the first thing anyone reads.
 Nothing has been pushed since the 5 September push;
 `git rev-list --count origin/main..main` is the count.
 
-**Measured: 3,489 passed, 29 skipped, 0 failed, 22m51s, with Ollama up.**
+**Measured: 3,510 passed, 29 skipped, 0 failed, 29m06s, with Ollama up** —
+excluding `test_the_model_can_drive_the_tools.py`, which drives a real 14B and
+takes ten minutes on its own (`-m measure`, 2 passed in 10m27s).
 
 ### The code pack — a coding agent that is not a second product
 
@@ -50,36 +52,80 @@ comparison, so `..`, an absolute path and a symlink out of the tree are refused
 by one check. The root comes from the open project through a ContextVar and
 never from a tool argument, because a root the model can name is not a sandbox.
 
-### The one thing that makes it not an agent
+### It was one tool call per message. It is now a bounded loop.
 
-**Zaram does exactly one tool call per message.** `_run_tool_round` is called
-from one place, once, and the follow-up generation is handed the tool's result
-with no tools attached. The engine's own comment says so:
+**Zaram used to do exactly one tool call per message** — `_run_tool_round`
+called once, with the follow-up generation handed the result and no tools
+attached. Deliberate and documented rather than an oversight, and for a coding
+agent it was the binding limit: the minimum useful sequence is *search, then
+read what you found*, and the model had to choose one of the two.
 
-> Asked again, with what came back. No tools are offered this time, so
-> `MAX_TOOL_ROUNDS` is enforced by there being nothing to call rather than by a
-> counter somebody has to remember to decrement.
+`_run_tool_loop` replaces it, and the two things below say what that cost and
+what it bought.
 
-Deliberate and documented, not an oversight — and for a coding agent it is the
-binding limit. The minimum useful sequence is *search, then read what you
-found*, and today the model must choose one of the two.
+**Both of the things the maintainer asked for on 6 September are now built.**
+`docs/CODE-PACK.md`, slice 3b, holds the decisions; what follows is status.
 
-**The maintainer asked for two things on 6 September and neither is built:**
+1. **The loop is bounded by the window, not by rounds.**
+   `ContextBudget.tool_output_tokens` — 40% of the input budget, from the
+   context the model was *actually loaded with*. A verbatim repeat and a
+   ceiling of 6 catch what a token budget cannot: a tool returning
+   `{"matches": []}` costs five tokens and would never fill one. A refusal or a
+   pending confirmation still ends the loop; a call that ran and *failed* is
+   handed back so the model can fix it, which is the commonest recoverable
+   error. The gate runs on every call, unchanged.
+2. **Continuation is automatic, and the button is the fallback.** The
+   maintainer asked twice on 6 September and the second answer is the one that
+   ships: first *"users can simply click continue and it continues the task
+   from where it stopped"*, then *"pls do automatic continuation… have it
+   continue till the task is done."* So a full window is not the end of the
+   task — it carries itself into a fresh one, three times, keeping the tool
+   results and dropping the oldest when they no longer fit, saying so each
+   time. Only when that allowance is spent does it stop and offer the manual
+   Continue. What travels is what was *found*, never the dialogue: session
+   state, in memory, gone on restart, and the notice says so.
 
-1. **A real loop**, bounded. The recommendation on the table is to bound it by
-   **tokens rather than rounds**, so it degrades gracefully from an 8K local
-   model to a 64K one instead of behaving differently on each. The gate already
-   re-runs per call — `McpRuntime.execute` calls `policy.decide` itself — so
-   more rounds is not a loosening of permission.
-2. **Continuation when the context fills, without a restart.** The task must
-   survive its own transcript. This is Zaram-shaped rather than generic: rule 7d
-   already says session state and long-term memory are separate stores, and
-   `CLAUDE.md` already assigns the plan — *"the steps, decisions taken and
-   decisions rejected"* — to **Project**. So continuation is reloading the plan
-   object from the project, not replaying a transcript. Persisting raw dialogue
-   to survive a context limit is L0, which the patterns section rejects outright.
-   **The plan object does not exist yet.** It is the missing piece for both this
-   and for slice 5.
+   Bounded because "done" is the model's judgement and could be never. Not a
+   loosening of permission: every call still goes through `policy.decide`, so
+   carrying on buys more decisions rather than fewer.
+
+**What is still not built is the plan object**, and the distinction matters
+because it is easy to think this replaced it. `CLAUDE.md` assigns to Project
+*"the steps, decisions taken and decisions rejected"* — an object that survives
+a restart and that the user reads before it runs. What shipped holds one
+question's tool results for as long as the process lives. It is the missing
+piece for slice 5 still, and **the open decision is whether Continue should
+survive a restart**: doing so means persisting tool results to disk, which is a
+new store and needs its own retention answer.
+
+### Measured: a model drives the code tools, for the first time
+
+`qwen3-14b-16k`, loaded with 16,384 tokens (read from `/api/ps`, not assumed):
+`search_code` → `read_lines` → the right value from the right file and line.
+`backend/tests/test_the_model_can_drive_the_tools.py -m measure`, 2 passed in
+10m27s. Nobody had watched this on any model.
+
+It found two defects nothing else could have:
+
+* **The tool schema never reached the prompt.** `mcp.list_tools` carried
+  `input_schema` to the point where `tool_instructions` dropped it, so the
+  model invented `start`/`end` for `read_lines` and `text` for `search_code`.
+  With the schema in front of it, same question, it used the declared names.
+* **A wrong argument name succeeded.** `read_lines` ignored `start` and read
+  from line 1; `search_code` with `text` searched for nothing. Rule 9's shape
+  in a tool. An argument no schema declares is now refused by name.
+
+It also exposed a routing gap that belongs with slice 4: **"search the code
+for X" plans `filesystem.search`, not the code tools.** The planner checks the
+filesystem intent before the tool intent, so only phrasings that name the tools
+reach them. The pack is currently reachable by someone who already knows it is
+there.
+
+**A UX cost taken deliberately.** Every generation in a tool-using reply is now
+buffered, so those replies arrive whole rather than typing out — the first one
+always was, and the last one joined it because a model told not to call a tool
+emitted `[TOOL_CALL]` anyway. The named way back is a holdback filter in
+`tool_loop.py`; see `CODE-PACK.md`.
 
 ### A residency bug, found by making one
 
@@ -128,8 +174,12 @@ setting changes that.
 * **A 24 GB machine is offered a 20 GB first download.** `readiness.py` states
   the case and imposes no ceiling deliberately. Needs the maintainer's answer.
 * **The pull has no cancel and no resume.**
-* **Nobody has watched a model arrive**, and nobody has watched the model drive
-  the code tools. Neither has been observed once, on any model.
+* **Nobody has watched a model arrive.** The other half of this line — nobody
+  had watched the model drive the code tools — is answered above, on
+  `qwen3-14b-16k`.
+* **Nobody has watched Continue pressed in the real app.** The loop, the
+  notice, the button and the wiring are each asserted by test, and the visual
+  half is unverified: the browser pane refuses local URLs here.
 
 ---
 

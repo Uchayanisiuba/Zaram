@@ -1,9 +1,11 @@
 # Next session — handoff
 
 > **Out of date at the top, current at the bottom.** The newest prompt is
-> *"Prompt for the next session — written 6 September 2026"*, at the very end
-> of this file, and the authoritative state is the **Current state — 6
-> September** block in `docs/MILESTONES.md`. Everything between here and that
+> *"Prompt for the next session — written 6 September 2026, later the same
+> day"*, at the very end of this file, and the authoritative state is the
+> **Current state — 6 September** block in `docs/MILESTONES.md`. Note there are
+> two prompts dated 6 September; the later one supersedes the earlier, which
+> asks for a tool loop that now exists. Everything between here and that
 > prompt is an earlier brief: still accurate about what was built and why,
 > superseded on status. Read it for reasoning, not for what is true today.
 
@@ -759,11 +761,12 @@ files, then the suite once before committing.
 
 ---
 
-## Prompt for the next session — written 6 September 2026
+## Prompt for the next session — written 6 September 2026 *(superseded)*
 
-**This is the current prompt.** Everything above it is an earlier brief, kept
-for its reasoning and superseded on status. The authoritative state is
-**Current state — 6 September** in `docs/MILESTONES.md`.
+**Superseded the same day** by the prompt at the end of this file. Its task —
+a bounded tool loop, and continuation without a restart — was built; its
+reasoning about *why* those two, and what must stay true in them, is still the
+reasoning and is why it is kept.
 
 Paste from here down.
 
@@ -926,3 +929,108 @@ The whole backend suite is ~23 minutes and is not the inner loop.
   the live `backend/runtimes/`.
 * **Packaging is still the actual blocker.** A stranger cannot install Zaram,
   and a coding agent inside an uninstallable product reaches nobody.
+
+---
+
+## Prompt for the next session — written 6 September 2026, later the same day
+
+**This is the current prompt.** The one above it is the morning's brief for the
+same day: still right about the code pack's shape, superseded on status, and
+wrong in one specific way — the tool loop it asks for is built. The
+authoritative state is **Current state — 6 September** in `docs/MILESTONES.md`.
+
+Paste from here down.
+
+---
+
+Read `docs/MILESTONES.md` — the **Current state — 6 September 2026** block —
+then `docs/CODE-PACK.md` (slice 3b is the newest work), then `CLAUDE.md` for the
+rules.
+
+`main` is the trunk and nothing is pushed since 5 September;
+`git rev-list --count origin/main..main` is the count.
+
+### What landed, so you do not rebuild it
+
+`_run_tool_loop` in `core/execution_engine.py` replaced `_run_tool_round`. The
+model can now search then read; the loop is bounded by
+`ContextBudget.tool_output_tokens` rather than a round count; a refusal stops
+it and a *failed call* does not. **A full window is not the end of the task** —
+it carries itself into a fresh one `MAX_AUTO_CONTINUATIONS` (3) times, keeping
+the tool results and announcing each carry-on. Only when that runs out does it
+stop, park the task, and offer the manual Continue button, which resumes from
+the same evidence. `backend/tests/test_the_tool_loop_is_bounded.py` is the
+contract — 21 tests, all offline.
+
+**A model has now driven it**, on `qwen3-14b-16k`, and that measurement lives in
+`backend/tests/test_the_model_can_drive_the_tools.py -m measure`. It takes ~10
+minutes and it is the reason two silent defects are fixed. Run it when you
+change the prompt text, the tool descriptions, or the loop.
+
+### The task: three things, in this order
+
+**1. Watch a long task run, in the real app.** Nothing in this list matters if
+it does not work on screen, and that has not been observed once. Ask something
+that needs several windows of reading, watch the carry-on notices arrive, and
+press Continue when it finally stops. The loop is asserted by test; the visual
+half is unverified — this session could not screenshot it.
+
+While you are there, form a view on **whether three automatic continuations is
+the right number**, and on whether the carry-on notice reads as progress or as
+noise when four of them stack up in one reply. Both are judgements that need a
+person watching, and neither can be settled by a test.
+
+**2. Close the routing gap, which is slice 4 with a sharper edge.** *"Search the
+code for X"* plans `filesystem.search`, not `mcp.list_tools` — the planner
+checks the filesystem intent first — so the code tools are reachable only by a
+user who phrases it as *"use the code tools to…"*. A person coming from Claude
+Code will phrase it the first way every time. Two candidate fixes and they are
+not the same: teach the classifier that a coding project changes what those
+words mean, or make `filesystem.search` route to the code tools when a coding
+project is open. The second is smaller and probably right; argue it before
+building it.
+
+**3. Then the plan object, if the maintainer wants it now.** Continue is
+session state and says so — one per session, gone on restart. The durable object
+`CLAUDE.md` assigns to Project — *"the steps, decisions taken and decisions
+rejected"*, readable before it runs — is still not built, and it is still the
+missing piece for slice 5. **The decision to put to the maintainer first:**
+should Continue survive a restart? That means persisting tool results to disk,
+which is a new store, and `CLAUDE.md` says no new store ships without an answer
+to how long it keeps things and how the user shortens that.
+
+### Recorded, deliberately not done
+
+* **Tool replies no longer stream.** Every generation in a tool-using reply is
+  buffered, because a model told not to call a tool emitted `[TOOL_CALL]`
+  anyway. The way back is a holdback filter in `tool_loop.py` that withholds any
+  trailing text which could be a marker prefix — worth building when tool
+  replies are common enough for the lost typewriter effect to be felt, and not
+  before, because it is a new convention and needs its own tests.
+* **`TOOL_OUTPUT_SHARE` is 0.4 and is a judgement**, labelled as one. Nobody has
+  measured whether it is the right share on a real repository.
+* Everything in the previous prompt's "Recorded, deliberately not done" still
+  stands: `ServerStore.save()` freezing derived write modes, the 9,495 lines in
+  `backend/runtime/` reached by nothing, and packaging as the actual blocker.
+
+### The gate
+
+```
+backend/venv/Scripts/python.exe -m pytest backend/tests/test_the_tool_loop_is_bounded.py backend/tests/test_the_code_tools_are_reachable.py backend/tests/test_the_code_pack_is_wired.py backend/tests/test_mcp_reaches_chat.py -q
+npm run check:reachability && npm run check:guards
+cd frontend && npx tsc --noEmit && npx vitest run
+```
+
+### Traps, and one new one
+
+* **A test's own prompt has to route where the test thinks it does.** Half a
+  day's confusion in this session came from fixture prompts that classified as
+  `filesystem.search`, so the engine never reached the tool path and every
+  assertion failed with an empty call list that looked like a broken loop.
+  Check the plan before blaming the code.
+* **`all()` of an empty collection is true** — the 6 September residency bug.
+* **Registering is not reaching.** `test_the_tool_loop_is_bounded.py` ends with
+  a class asserting the Continue *flag* reaches `continue_task`, for exactly
+  this reason.
+* **Two proxy lists** — `frontend/vite.config.js` and `electron/config.js`.
+* **Do not point Aider at `main.py`.** 5,221 lines as of 6 September.

@@ -200,8 +200,12 @@ class TestNothingHereCanWrite:
         """A scan, because the guarantee is that the capability is *absent*.
         A test that only checked the tool list would pass on a module that
         grew a private writer."""
-        source = Path(CodeTools.__module__.replace(".", "/") + ".py")
-        text = (Path("backend") / source).read_text(encoding="utf-8")
+        # Located from the module itself, not from the working directory. It
+        # used to be `Path("backend") / …`, which passes from the repository
+        # root and raises `FileNotFoundError` from `backend/` — a guard that
+        # reports "no such file" instead of "a writer appeared" is a guard that
+        # can be switched off by a `cd`.
+        text = Path(sys.modules[CodeTools.__module__].__file__).read_text(encoding="utf-8")
 
         for forbidden in ("write_text(", "unlink(", "rmtree", "os.remove", "shutil."):
             assert forbidden not in text, forbidden

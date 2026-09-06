@@ -920,6 +920,14 @@ class ChatRequest(BaseModel):
     #: Empty means "start one", answered with a `conversation` event before the
     #: first token so the client knows what to send next time.
     conversation_id: str = ""
+    #: The user pressed **Continue** on a tool loop that stopped with work left.
+    #:
+    #: Not a new question: `text` is whatever the button sent and is not asked.
+    #: The engine picks the task up from the results it had already gathered,
+    #: for this `session_id`, and answers into the same stream. Nothing is
+    #: continued if that session has nothing parked — which is the ordinary
+    #: case after a restart, and says so rather than failing.
+    continue_task: bool = False
 
 
 def _domain_scope(domain_ids: list[str]) -> tuple[frozenset[str] | None, str]:
@@ -1540,6 +1548,7 @@ async def chat(request: ChatRequest):
             project_id=request.project_id or None,
             only_ids=only_ids,
             images=images or None,
+            resume=request.continue_task,
         ):
             _collect_answer(chunk, answer)
             yield chunk

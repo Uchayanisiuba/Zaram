@@ -89,3 +89,46 @@ describe('the action goes somewhere', () => {
     expect(screen.queryByTestId('notice-action')).toBeNull();
   });
 });
+
+describe('continuing a task that ran out of room', () => {
+  const stopped = () =>
+    notice({
+      kind: 'tool_loop',
+      action: 'continue',
+      content:
+        'Zaram stopped after 3 tool calls — what it read has filled the 4,915 ' +
+        'tokens this question can spend on reading.',
+    });
+
+  it('offers Continue and calls back when it is pressed', () => {
+    const onContinue = vi.fn();
+    render(<NoticeCard notice={stopped()} onContinue={onContinue} />);
+
+    fireEvent.click(screen.getByTestId('notice-continue'));
+
+    expect(onContinue).toHaveBeenCalledTimes(1);
+  });
+
+  it('is not a warning', () => {
+    // Nothing went wrong: the model spent the allowance it was given. An amber
+    // triangle here trains the warning away for the notices that need one.
+    render(<NoticeCard notice={stopped()} onContinue={vi.fn()} />);
+
+    expect(screen.getByTestId('chat-notice').getAttribute('data-kind')).toBe('tool_loop');
+  });
+
+  it('offers nothing when the handler is absent', () => {
+    // A card rendered without the wiring must still deliver the sentence. The
+    // disclosure is the part that cannot be optional.
+    render(<NoticeCard notice={stopped()} />);
+
+    expect(screen.getByTestId('chat-notice')).toBeTruthy();
+    expect(screen.queryByTestId('notice-continue')).toBeNull();
+  });
+
+  it('does not offer Continue on a notice that is not about a stopped loop', () => {
+    render(<NoticeCard notice={notice()} onContinue={vi.fn()} />);
+
+    expect(screen.queryByTestId('notice-continue')).toBeNull();
+  });
+});

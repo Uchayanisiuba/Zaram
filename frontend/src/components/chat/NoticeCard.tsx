@@ -21,7 +21,7 @@
  * away, and the amber one has real work to do.
  */
 import { useState } from 'react';
-import { AlertTriangle, ArrowRight, FileText, Library } from 'lucide-react';
+import { AlertTriangle, ArrowRight, FileText, Library, Wrench } from 'lucide-react';
 import type { ChatNotice } from '../../stores/chatStore';
 import type { WorkspaceId } from '@/runtime/shortcuts/registry';
 
@@ -50,6 +50,11 @@ const TONES: Record<string, { Icon: typeof AlertTriangle; color: string }> = {
   // amber warning triangle on it would be the exact failure the note above
   // describes, arriving through a third case.
   attachment: { Icon: FileText, color: 'var(--color-text-muted, #94a3b8)' },
+  // A tool loop that stopped because it had read as much as the window allows.
+  // Neutral for the same reason `domain` is: nothing went wrong, the model
+  // spent its reading allowance, and an amber triangle over "here is what I
+  // found so far" would train the warning away for the cases that need it.
+  tool_loop: { Icon: Wrench, color: 'var(--color-text-muted, #94a3b8)' },
 };
 
 const DEFAULT_TONE = { Icon: AlertTriangle, color: 'var(--color-amber, #d97706)' };
@@ -63,11 +68,19 @@ interface Props {
    *  on its own keeps working; when it is absent the card falls back to the
    *  Settings link it has always shown. */
   onEnableSearch?: () => Promise<void>;
+  /** Pick the stopped task up where it left off.
+   *
+   *  Optional like `onEnableSearch`, so a card rendered on its own still
+   *  works. The offer only appears when the backend sent `action: "continue"`,
+   *  which it does when a tool loop stopped with work left — never on a loop
+   *  that finished, because there would be nothing to continue. */
+  onContinue?: () => void;
 }
 
-export default function NoticeCard({ notice, onOpen, onEnableSearch }: Props) {
+export default function NoticeCard({ notice, onOpen, onEnableSearch, onContinue }: Props) {
   const destination = DESTINATIONS[notice.action];
   const { Icon, color } = TONES[notice.kind] ?? DEFAULT_TONE;
+  const offersContinue = notice.action === 'continue' && Boolean(onContinue);
 
   // **Rule 7h, which this card was one click short of.** "Offer at the moment
   // of doubt; never make the user choose in advance" — and the search notice
@@ -143,7 +156,19 @@ export default function NoticeCard({ notice, onOpen, onEnableSearch }: Props) {
           </>
         )}
 
-        {!offersSearch && destination && onOpen && (
+        {offersContinue && (
+          <button
+            onClick={onContinue}
+            className="mt-1.5 text-[11px] flex items-center gap-1"
+            style={{ color: 'var(--color-cyan-light)' }}
+            data-testid="notice-continue"
+          >
+            Continue
+            <ArrowRight size={10} />
+          </button>
+        )}
+
+        {!offersSearch && !offersContinue && destination && onOpen && (
           <button
             onClick={() => onOpen(destination.node)}
             className="mt-1.5 text-[11px] flex items-center gap-1"

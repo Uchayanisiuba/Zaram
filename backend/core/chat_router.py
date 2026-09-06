@@ -47,8 +47,15 @@ class ChatRouter:
         project_id: str | None = None,
         only_ids: frozenset[str] | None = None,
         images: list[str] | None = None,
+        resume: bool = False,
     ) -> AsyncGenerator:
         """Returns the correct generator based on the feature flag.
+
+        `resume` is the user's **Continue**: instead of asking a new question,
+        pick up the tool loop this session stopped, with the results it already
+        gathered. It goes through the same stream so a continued answer reaches
+        the surface exactly like any other — same events, same splitter, same
+        transcript.
 
         `project_id` scopes recall and capture to one project plus global
         (rule 7i). None means no project is active, which is a real answer:
@@ -65,7 +72,7 @@ class ChatRouter:
         if USE_NEW_KERNEL:
             return self._kernel_stream(
                 request_text, model, system_prompt, session_id, project_id,
-                only_ids, images,
+                only_ids, images, resume,
             )
         else:
             # The legacy path has no image plumbing and is not getting any.
@@ -82,6 +89,7 @@ class ChatRouter:
         project_id: str | None = None,
         only_ids: frozenset[str] | None = None,
         images: list[str] | None = None,
+        resume: bool = False,
     ) -> AsyncGenerator:
         """Streams structured StreamEvent lines from the new Execution Engine.
 
@@ -100,10 +108,20 @@ class ChatRouter:
         splitter = ReasoningSplitter()
         try:
             yield StreamEvent.start().to_ipc() + "\n"
-            async for item in iterate_in_threadpool(self.execution_engine.execute(
-                text, model, system_prompt, session_id,
-                project_id=project_id, only_ids=only_ids, images=images,
-            )):
+            # A continuation re-enters the stopped loop and asks nothing new, so
+            # it does not recall, does not plan, and does not re-derive a system
+            # prompt: the one the task was running under travels with it. That
+            # is what continuing means, and re-deriving it would quietly change
+            # the task's context between one half and the other.
+            source = (
+                self.execution_engine.continue_task(session_id, model)
+                if resume
+                else self.execution_engine.execute(
+                    text, model, system_prompt, session_id,
+                    project_id=project_id, only_ids=only_ids, images=images,
+                )
+            )
+            async for item in iterate_in_threadpool(source):
                 if isinstance(item, StreamEvent):
                     yield item.to_ipc() + "\n"
                 else:

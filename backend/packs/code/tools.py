@@ -136,6 +136,34 @@ class CodeTools:
 
     def call_tool(self, name: str, arguments: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         arguments = arguments or {}
+
+        # **An argument nobody declared is refused, not ignored.**
+        #
+        # Measured 6 September 2026: driving these tools with `qwen3-14b`, the
+        # model called `read_lines` with `start` and `end` and `search_code`
+        # with `text` — plausible names for parameters actually called
+        # `start_line`, `end_line` and `query`. Ignoring them read the file from
+        # line 1 and searched for nothing, and both *succeeded*: the read
+        # returned the wrong 400 lines and the search returned "no query was
+        # given", neither of which tells the model what it did wrong.
+        #
+        # That is rule 9's shape in a tool — a plausible answer to a question
+        # nobody asked. Naming the accepted arguments back is what lets the next
+        # round of the loop fix it, which is the whole reason there is a loop.
+        # Only for a tool that exists. "write_file does not take path" is a
+        # confusing thing to say about a tool this module does not have, and the
+        # honest answer to a call for one is that there is no such tool.
+        accepted = self._accepted(name)
+        unknown = sorted(set(arguments) - accepted) if accepted is not None else []
+        if unknown:
+            accepted = sorted(accepted)
+            return {
+                "error": (
+                    f"{name} does not take {', '.join(unknown)}. "
+                    f"Its arguments are: {', '.join(accepted) or 'none'}."
+                )
+            }
+
         root = self._root_for()
         if root is None:
             return {
@@ -170,6 +198,24 @@ class CodeTools:
             return {"error": f"could not be read: {exc}"}
 
         return {"error": f"no tool called {name!r}"}
+
+    def _accepted(self, name: str) -> Optional[set]:
+        """The argument names one tool declares, or ``None`` for no such tool.
+
+        Read from `list_tools` rather than written out again here, so a
+        parameter added to a descriptor cannot be rejected by a list nobody
+        remembered to update — the same reason the descriptions live in one
+        place.
+
+        ``None`` and an empty set are different answers and the caller depends
+        on it: one means "no tool of that name", the other means "a tool that
+        takes nothing". The same three-valued discipline `vram_bytes` keeps.
+        """
+        for descriptor in self.list_tools():
+            if descriptor.name == name:
+                properties = (descriptor.input_schema or {}).get("properties") or {}
+                return set(properties)
+        return None
 
     # ----------------------------------------------------------- the sandbox
 
