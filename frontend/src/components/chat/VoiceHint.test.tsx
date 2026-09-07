@@ -15,6 +15,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
 
 import VoiceHint from './VoiceHint';
+import { useChatStore } from '@/stores/chatStore';
 import { useMicStore } from '@/stores/micStore';
 
 function mic(over: { unavailableReason?: string | null; status?: string } = {}) {
@@ -29,12 +30,15 @@ function mic(over: { unavailableReason?: string | null; status?: string } = {}) 
   } as never);
 }
 
-beforeEach(() => mic());
+beforeEach(() => {
+  mic();
+  useChatStore.setState({ messages: [], streamingText: '' } as never);
+});
 afterEach(cleanup);
 
 describe('the voice hint', () => {
   it('offers the chord in an empty conversation', async () => {
-    render(<VoiceHint empty />);
+    render(<VoiceHint />);
     expect(await screen.findByText(/shift\s+space/i)).toBeInTheDocument();
   });
 
@@ -47,7 +51,7 @@ describe('the voice hint', () => {
     );
     const voice = REGISTRY.find((s) => s.id === 'voice')!;
 
-    render(<VoiceHint empty />);
+    render(<VoiceHint />);
 
     expect(
       await screen.findByText(new RegExp(chordTokens(voice, detectPlatform()), 'i')),
@@ -57,7 +61,8 @@ describe('the voice hint', () => {
   it('says nothing once something has been said', () => {
     // An instruction to start, so it goes the moment the thing has started —
     // the same rule that takes the landing's line away once the orb is clicked.
-    render(<VoiceHint empty={false} />);
+    useChatStore.setState({ messages: [{ id: 'm1' }] } as never);
+    render(<VoiceHint />);
     expect(screen.queryByText(/shift\s+space/i)).not.toBeInTheDocument();
   });
 
@@ -67,7 +72,7 @@ describe('the voice hint', () => {
     // belongs on the microphone button, where somebody is already asking about
     // voice.
     mic({ unavailableReason: 'Listening needs the mic extra: pip install zaram[mic] (81 MB).' });
-    render(<VoiceHint empty />);
+    render(<VoiceHint />);
 
     expect(screen.queryByText(/shift\s+space/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/81 MB/)).not.toBeInTheDocument();
@@ -77,7 +82,7 @@ describe('the voice hint', () => {
     // Telling somebody how to start something they have started reads as the
     // product not knowing what it is doing.
     mic({ status: 'recording' });
-    render(<VoiceHint empty />);
+    render(<VoiceHint />);
 
     expect(screen.queryByText(/shift\s+space/i)).not.toBeInTheDocument();
   });

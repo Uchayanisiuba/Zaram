@@ -1,10 +1,18 @@
 /**
- * The landing hint — "Click Orb to Chat".
+ * The line under the orb — one slot, and whichever instruction is true.
  *
- * Shown on the landing, and only while the conversation is closed. Tapping the
- * orb opens the conversation and the line goes with it: it is an instruction to
- * do a thing, so it has no reason to persist once the thing is done. It never
- * appears on Work, Memory, Knowledge, Activity or Settings.
+ * Closed, it is "Click Orb to Chat" (or "Click Avatar", following the
+ * renderer). Open, that instruction has been taken and would be noise, so the
+ * same place carries the one that is true now: `VoiceHint`, "Press Shift Space
+ * to talk". It never appears on Work, Memory, Knowledge, Activity or Settings.
+ *
+ * **One slot rather than two lines, decided 7 September 2026.** The voice hint
+ * lived briefly on the landing beside this one, and briefly inside the
+ * conversation's transcript, and both were wrong for the same reason: an
+ * instruction belongs under the thing it is about, and there is only ever one
+ * of those true at a time. Two at once asks somebody to choose between ways in
+ * before they have done anything; one in the transcript sits on the opposite
+ * side of the screen from the orb and competes with "Ask Zaram something".
  *
  * This was a persistent bar — glass panel, orb, clickable topic, and a mono
  * `local · <model> · N facts recalled` line — replaced on sight because the
@@ -30,6 +38,7 @@ import { useEffect } from 'react';
 import { useSystemStore } from '@/stores/systemStore';
 import { useChatModeStore } from '@/stores/chatModeStore';
 import { useEmbodimentStore } from '@/stores/embodimentStore';
+import VoiceHint from '@/components/chat/VoiceHint';
 import { useIsReducedMotion } from '@/hooks/useReducedMotion';
 
 interface LandingHintProps {
@@ -66,7 +75,8 @@ export default function LandingHint({ isLanding }: LandingHintProps) {
    */
   const renderer = useEmbodimentStore((s) => s.renderer);
 
-  if (!isLanding || chatOpen) return null;
+  // Never on Work, Memory, Knowledge, Activity or Settings.
+  if (!isLanding) return null;
 
   return (
     <footer
@@ -88,23 +98,33 @@ export default function LandingHint({ isLanding }: LandingHintProps) {
         pointerEvents: 'none',
       }}
     >
-      <span
-        style={{
-          // Same face and colour the status line used for "engine not running".
-          font: '400 18px/1.3 var(--font-mono, ui-monospace, "JetBrains Mono", monospace)',
-          color: '#6B7280',
-          letterSpacing: '0.01em',
-          userSelect: 'none',
-          // Arcade attract loop, slowed to a breath. Suppressed under reduced
-          // motion, where the line sits at its bright end — the instruction
-          // still reads, it just stops moving.
-          opacity: reduced ? 0.78 : undefined,
-          animation: reduced ? undefined : 'attract-blink 4.2s ease-in-out infinite',
-        }}
-      >
-        {renderer === 'avatar' ? 'Click Avatar to Chat' : 'Click Orb to Chat'}
-      </span>
-
+      {/* **One slot, two instructions, and only ever one of them.**
+          Closed, it names the way in. Open, the way in has been taken and the
+          line that is true now is how to talk — so the same place under the orb
+          carries it, rather than the instruction persisting after the thing it
+          instructed, or a second line appearing somewhere else on screen.
+          `VoiceHint` decides for itself whether it has anything to say, and
+          renders nothing when Zaram cannot listen. */}
+      {chatOpen ? (
+        <VoiceHint />
+      ) : (
+        <span
+          style={{
+            // Same face and colour the status line used for "engine not running".
+            font: '400 18px/1.3 var(--font-mono, ui-monospace, "JetBrains Mono", monospace)',
+            color: '#6B7280',
+            letterSpacing: '0.01em',
+            userSelect: 'none',
+            // Arcade attract loop, slowed to a breath. Suppressed under reduced
+            // motion, where the line sits at its bright end — the instruction
+            // still reads, it just stops moving.
+            opacity: reduced ? 0.78 : undefined,
+            animation: reduced ? undefined : 'attract-blink 4.2s ease-in-out infinite',
+          }}
+        >
+          {renderer === 'avatar' ? 'Click Avatar to Chat' : 'Click Orb to Chat'}
+        </span>
+      )}
     </footer>
   );
 }

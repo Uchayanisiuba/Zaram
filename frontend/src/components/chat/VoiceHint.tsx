@@ -10,11 +10,13 @@
  * putting a second beside it asks somebody to choose between two ways in before
  * they have done anything.
  *
- * Deliberately borrowed from `LandingHint`, down to the `attract-blink`
- * keyframes, the mono face and the muted grey — two hints in one product that
- * look like two different products is the cost of writing the second one fresh.
- * It is smaller, because the conversation is a working surface and the landing
- * is not.
+ * **It renders in the landing's own footer**, under the orb or the avatar,
+ * where "Click Orb to Chat" was a moment ago. Same slot, same face, same
+ * `attract-blink` keyframes, same muted grey — one line under the thing you are
+ * looking at, replaced by the instruction that is true now. Putting it in the
+ * transcript instead was tried first and was wrong twice over: it competed with
+ * "Ask Zaram something" for the same job, and it sat on the opposite side of
+ * the screen from the orb it belongs under.
  *
  * **Shown only while it is true**, which is three conditions and not one:
  *
@@ -39,18 +41,18 @@ import { useEffect } from 'react';
 
 import { useIsReducedMotion } from '@/hooks/useReducedMotion';
 import { REGISTRY, chordTokens, detectPlatform } from '@/runtime/shortcuts/registry';
+import { useChatStore } from '@/stores/chatStore';
 import { useMicStore } from '@/stores/micStore';
 
-export default function VoiceHint({
-  /** Whether anything has been said yet. */
-  empty,
-}: {
-  empty: boolean;
-}) {
+export default function VoiceHint() {
   const reduced = useIsReducedMotion();
   const unavailable = useMicStore((s) => s.unavailableReason);
   const status = useMicStore((s) => s.status);
   const check = useMicStore((s) => s.checkAvailability);
+  /** Whether anything has been said yet. Read here rather than passed in: the
+   *  component already owns the other two conditions, and a caller that had to
+   *  supply one of three would be the place they drift apart. */
+  const empty = useChatStore((s) => s.messages.length === 0 && !s.streamingText);
 
   // Above the early return, or the hooks order changes with the render.
   useEffect(() => {
@@ -61,11 +63,15 @@ export default function VoiceHint({
   if (!empty || !voice || unavailable !== null || status !== 'idle') return null;
 
   return (
-    <p
+    <span
       aria-live="off"
       style={{
-        textAlign: 'center',
-        font: '400 13px/1.3 var(--font-mono, ui-monospace, "JetBrains Mono", monospace)',
+        // Sized and coloured to sit under the orb where "Click Orb to Chat"
+        // sits, because it is the same kind of line in the same place — the
+        // instruction for the surface you are now on. Slightly smaller: the
+        // landing's is the only thing on screen, and this one shares the
+        // surface with a conversation.
+        font: '400 15px/1.3 var(--font-mono, ui-monospace, "JetBrains Mono", monospace)',
         color: '#6B7280',
         letterSpacing: '0.01em',
         userSelect: 'none',
@@ -78,6 +84,6 @@ export default function VoiceHint({
       }}
     >
       Press {chordTokens(voice, detectPlatform())} to talk
-    </p>
+    </span>
   );
 }
