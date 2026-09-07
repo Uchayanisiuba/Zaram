@@ -170,7 +170,31 @@ class KernelBootstrapper:
         # Falls back to the hash backend if Ollama or the model is unavailable —
         # recall still works, but only on keyword overlap.
         backend = os.getenv("ZARAM_EMBED_BACKEND", "ollama")
-        model = os.getenv("ZARAM_EMBED_MODEL", "bge-m3")
+
+        # **The user's choice outranks the environment variable, and that
+        # ordering is the whole reason the setting is not inert.**
+        #
+        # This model is what decides where a question goes: `CLAUDE.md` routes
+        # with embeddings rather than a generative model, so
+        # `SemanticIntentRouter` compares the query against task exemplars
+        # using whatever is built here. Until now it was an environment
+        # variable and appeared in no interface — a decision taken on every
+        # single message that the product never showed anybody.
+        #
+        # It is read once, here, because the embedder is constructed at boot
+        # and handed to the Spine. Settings says "takes effect when Zaram
+        # restarts" for exactly that reason; a control that silently applied
+        # to nothing until the next launch would be indistinguishable from one
+        # that does not work.
+        chosen = None
+        try:
+            from core.user_settings import get_user_settings
+
+            chosen = get_user_settings().router_model
+        except Exception as error:  # noqa: BLE001 - a preference never blocks boot
+            print(f"[Bootstrapper] Could not read the routing model ({error}).")
+
+        model = chosen or os.getenv("ZARAM_EMBED_MODEL", "bge-m3")
         dim = int(os.getenv("ZARAM_EMBED_DIM", "1024" if backend == "ollama" else "384"))
 
         runtime = create_memory_runtime(

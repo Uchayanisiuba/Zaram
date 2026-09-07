@@ -2501,6 +2501,9 @@ class RoutingPreferenceUpdate(BaseModel):
     #: reason `default_model` is nullable — a client setting the coding model
     #: must not have to resend the vision one and risk clobbering it.
     task_models: dict[str, str] | None = None
+    #: The embedding model that decides where questions go, or `""` to hand
+    #: the choice back. `None` leaves it unchanged.
+    router_model: str | None = None
 
 
 async def _task_assignment_refusal(slot: str, model: str) -> str:
@@ -2599,10 +2602,57 @@ async def set_routing_preference(update: RoutingPreferenceUpdate):
         for slot, model in update.task_models.items():
             settings.set_task_model(slot, model)
 
+    if update.router_model is not None:
+        named = update.router_model.strip()
+        if named:
+            refusal = await _router_model_refusal(named)
+            if refusal:
+                raise HTTPException(status_code=400, detail=refusal)
+        settings.set_router_model(update.router_model)
+
     if update.default_model is not None:
         settings.set_default_model(update.default_model)
 
     return _routing_payload()
+
+
+async def _router_model_refusal(model: str) -> str:
+    """Why ``model`` cannot be the router, or `""`.
+
+    **A capability gate, and the one that matters most on this control.**
+    Routing is a similarity problem — embed the query, compare against task
+    exemplars — so the model here has to produce embeddings. A chat model
+    cannot: Ollama answers `/api/embed` for most of them with something
+    unusable or nothing at all, and the failure would not be a worse route, it
+    would be no routing at all, silently, from the next restart onwards. That
+    is the *capability is a precondition, never a ranking* rule on the one
+    setting where getting it wrong disables the thing it configures.
+
+    Every uncertainty resolves to `""`, the same discipline the vision and
+    placement refusals keep: an empty catalogue, a name nothing can place, a
+    lookup that raised. Refusing on our own missing bookkeeping would tell
+    somebody their embedder cannot embed because discovery had not run.
+    """
+    manager = getattr(getattr(kernel, "providers_runtime", None), "manager", None)
+    if manager is None:
+        return ""
+    try:
+        await manager.ensure_scanned()
+        known = manager.catalog.all()
+        if not known:
+            return ""
+        found = next(
+            (m for m in known if m.display_name == model or m.id == model), None
+        )
+        if found is not None and not found.supports_embedding:
+            return (
+                f"{model} cannot produce embeddings, and routing is a similarity "
+                "question rather than something a model is asked in words. "
+                "Choose an embedding model, or leave this on Zaram's own."
+            )
+    except Exception:
+        logging.getLogger(__name__).debug("Router model eligibility check failed")
+    return ""
 
 
 class EgressPolicyUpdate(BaseModel):

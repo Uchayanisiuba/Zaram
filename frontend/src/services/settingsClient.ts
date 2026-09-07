@@ -251,6 +251,10 @@ export interface DiscoveredModel {
    *  besides, because a picker that can express an impossible setting is a
    *  picker that will be used to express one. */
   supportsVision: boolean;
+  /** Whether the model produces embeddings. The routing model must: routing is
+   *  a similarity question, so a chat model there does not route worse, it
+   *  does not route at all. */
+  supportsEmbedding: boolean;
   /** What the model is built for — `code`, or empty for general purpose.
    *
    *  Shown beside a name in the coding slot so the choice can be made without
@@ -315,6 +319,7 @@ function toDiscoveredModel(m: Record<string, unknown>): DiscoveredModel {
     // `=== true` rather than a coercion, matching `selectableByDefault` above:
     // a missing field must read as "no", never as a truthy object.
     supportsVision: m.supports_vision === true,
+    supportsEmbedding: m.supports_embedding === true,
     specialisation: typeof m.specialisation === 'string' ? m.specialisation : '',
   };
 }
@@ -349,6 +354,14 @@ export interface RoutingSettings {
   taskModels: Record<string, string>;
   /** Which slots this backend actually routes on. Empty until fetched. */
   taskSlots: string[];
+  /** The embedding model that decides where a question goes, or null for the
+   *  one Zaram picks.
+   *
+   *  Not a chat model. Routing is a similarity question — the query is embedded
+   *  and compared against task exemplars — so a model that cannot embed does
+   *  not route worse, it does not route at all. Takes effect when Zaram
+   *  restarts, because the embedder is built once at boot. */
+  routerModel: string | null;
 }
 
 function toRoutingSettings(raw: Record<string, unknown>): RoutingSettings {
@@ -369,6 +382,7 @@ function toRoutingSettings(raw: Record<string, unknown>): RoutingSettings {
           )
         : {},
     taskSlots: Array.isArray(slots) ? slots.filter((s): s is string => typeof s === 'string') : [],
+    routerModel: typeof raw.router_model === 'string' ? raw.router_model : null,
   };
 }
 
@@ -386,11 +400,14 @@ export async function updateRoutingSettings(update: {
   defaultModel?: string;
   /** Slot → model, or `''` for that slot to clear it. */
   taskModels?: Record<string, string>;
+  /** An embedding model, or `''` to hand the choice back to Zaram. */
+  routerModel?: string;
 }): Promise<RoutingSettings> {
   const raw = (await send('/routing/preference', 'POST', {
     routing_preference: update.routingPreference ?? null,
     default_model: update.defaultModel ?? null,
     task_models: update.taskModels ?? null,
+    router_model: update.routerModel ?? null,
   })) as Record<string, unknown>;
   // The POST answers with the same payload the GET does, `task_slots`
   // included, so replacing state with what came back cannot blank the list of

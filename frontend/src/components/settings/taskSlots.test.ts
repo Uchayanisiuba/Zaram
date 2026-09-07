@@ -28,6 +28,7 @@ function model(overrides: Partial<DiscoveredModel> & { id: string }): Discovered
     category: 'llm',
     supportsVision: false,
     specialisation: '',
+    supportsEmbedding: false,
     ...overrides,
   };
 }

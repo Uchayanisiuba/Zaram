@@ -29,9 +29,8 @@ import { useEffect } from 'react';
 
 import { useSystemStore } from '@/stores/systemStore';
 import { useChatModeStore } from '@/stores/chatModeStore';
-import { useMicStore } from '@/stores/micStore';
+import { useEmbodimentStore } from '@/stores/embodimentStore';
 import { useIsReducedMotion } from '@/hooks/useReducedMotion';
-import { chordTokens, detectPlatform, REGISTRY } from '@/runtime/shortcuts/registry';
 
 interface LandingHintProps {
   /** Whether the landing is the current surface. Passed in rather than read
@@ -50,35 +49,24 @@ export default function LandingHint({ isLanding }: LandingHintProps) {
   useEffect(() => startPolling(), [startPolling]);
 
   /**
-   * Whether the voice line may be shown, asked rather than assumed.
+   * What the user is being told to click, which is whatever is on screen.
    *
-   * `CLAUDE.md`: *disabled capabilities are visible, not silent* — and its
-   * mirror, *never render invented values*. Advertising "Shift Space for voice"
-   * on a machine without `zaram[mic]` installed offers a keystroke that does
-   * nothing, on the first line a new user reads. Silence is the honest answer
-   * there: the hint is an instruction to do a thing, and there is no thing.
+   * The hint names a target, and the target is a *choice the user already
+   * made* — `CLAUDE.md` puts the orb and the avatar behind one toggle and says
+   * they read the same state, so the instruction has to follow the toggle.
+   * Saying "Orb" to somebody looking at a character is not a small
+   * inaccuracy: it is the first line they read, naming a thing that is not
+   * there, which reads as the product not knowing what it is showing.
    *
-   * A loopback call to Zaram's own backend, in the same class as the `/health`
-   * poll this component already owns, so rule 7g is untouched — nothing leaves
-   * the device and there is nothing to consent to.
+   * It stays "Avatar" rather than becoming the name they gave it. A person who
+   * called it Ada would read "Click Ada to Chat" as friendlier, but the hint is
+   * an instruction about a control and the name is a fact from `user_settings`
+   * that this component would have to fetch — a network call on the landing,
+   * for a word. `identity_preamble` is where the name belongs.
    */
-  const checkMic = useMicStore((s) => s.checkAvailability);
-  const micUnavailable = useMicStore((s) => s.unavailableReason);
-  useEffect(() => {
-    void checkMic();
-  }, [checkMic]);
+  const renderer = useEmbodimentStore((s) => s.renderer);
 
   if (!isLanding || chatOpen) return null;
-
-  // Read from the registry rather than typed here, so the line and the chord
-  // that fires cannot drift apart. The help overlay renders the same tokens
-  // from the same source — an interface that advertises a chord the matcher
-  // does not answer to is a defect this registry has already recorded twice.
-  const voiceChord = REGISTRY.find((s) => s.id === 'voice');
-  const voiceHint =
-    voiceChord && micUnavailable === null
-      ? `Press ${chordTokens(voiceChord, detectPlatform())} to talk`
-      : null;
 
   return (
     <footer
@@ -92,12 +80,6 @@ export default function LandingHint({ isLanding }: LandingHintProps) {
         // column, so the line lands in the lower portion of the screen without
         // being absolutely positioned against it.
         justifyContent: 'center',
-        // A column now, because there are two lines. The second is quieter and
-        // smaller: one instruction is the way in, the other is a shortcut for
-        // it, and giving them equal weight would make the landing ask the user
-        // to choose before they have done anything — rule 7h, in miniature.
-        flexDirection: 'column',
-        gap: 4,
         padding: '8px 16px',
         minHeight: 52,
         background: 'transparent',
@@ -120,25 +102,9 @@ export default function LandingHint({ isLanding }: LandingHintProps) {
           animation: reduced ? undefined : 'attract-blink 4.2s ease-in-out infinite',
         }}
       >
-        Click Orb to Chat
+        {renderer === 'avatar' ? 'Click Avatar to Chat' : 'Click Orb to Chat'}
       </span>
 
-      {voiceHint && (
-        <span
-          style={{
-            font: '400 12px/1.3 var(--font-mono, ui-monospace, "JetBrains Mono", monospace)',
-            color: '#4B5563',
-            letterSpacing: '0.02em',
-            userSelect: 'none',
-            // No attract-blink. Two things blinking at each other on an
-            // otherwise still landing is not calm, and the motion budget is
-            // already spent on the line above.
-            opacity: reduced ? 0.72 : 0.85,
-          }}
-        >
-          {voiceHint}
-        </span>
-      )}
     </footer>
   );
 }

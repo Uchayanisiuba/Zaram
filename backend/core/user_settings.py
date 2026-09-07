@@ -156,6 +156,9 @@ class UserSettings:
         #: through to `default_model` and then to Zaram's own pick, exactly as
         #: every request did before this field existed.
         self._task_models: Dict[str, str] = {}
+        #: The embedding model that decides where a question goes. `None` means
+        #: whatever the Spine is using — see `router_model`.
+        self._router_model: Optional[str] = None
         self._web_search = False
         self._search_scope = SearchScope.LOCAL_ONLY
         # The character: what this person calls it, how they want it to write,
@@ -200,6 +203,47 @@ class UserSettings:
         Storing an explicit name here bypasses the *ranking*, never the gates.
         """
         return self._default_model
+
+    @property
+    def router_model(self) -> Optional[str]:
+        """The model that decides where a question goes, or ``None`` for the
+        one Zaram picks.
+
+        **This is an embedding model, and naming it "the planner" would be the
+        product's own misunderstanding written into a setting.** `CLAUDE.md` is
+        explicit — *"Route with embeddings, not a generative model. Task
+        classification is a similarity problem: embed the query, compare
+        against task exemplars, take the nearest"* — and that is what runs:
+        `SemanticIntentRouter` over `SemanticIndex`, built in
+        `core/bootstrapper.py` from whichever embedder the Spine is using.
+        Nothing generative plans anything, so a slot offering a chat model for
+        it would be a control over a code path that does not execute.
+
+        What it *is* is the thing the user was asking about: the model that
+        decides, under Auto, where a question goes. Until now it was an
+        environment variable and appeared in no interface at all, which is the
+        opposite failure — a real decision, taken on every message, that the
+        product never showed anybody.
+
+        **It takes effect on restart, and the interface has to say so.** The
+        embedder is constructed once during boot and handed to the Spine; a
+        setting that silently applied to nothing until the next launch would be
+        indistinguishable from one that does not work.
+        """
+        return self._router_model
+
+    def set_router_model(self, model: Optional[str]) -> Optional[str]:
+        """Choose it, or pass ``None``/``""`` to hand the choice back.
+
+        Not validated here. This module has no catalogue and loads before
+        discovery has run; the endpoint refuses a model that cannot embed,
+        which is where the catalogue lives.
+        """
+        cleaned = (model or "").strip() or None
+        with self._lock:
+            self._router_model = cleaned
+            self._save()
+        return self._router_model
 
     @property
     def task_models(self) -> Dict[str, str]:
@@ -257,6 +301,7 @@ class UserSettings:
             "routing_preference": self._routing.value,
             "default_model": self._default_model,
             "task_models": dict(self._task_models),
+            "router_model": self._router_model,
             "web_search": self._web_search,
             "search_scope": self._search_scope.value,
             "assistant_name": self._assistant_name,
@@ -399,6 +444,9 @@ class UserSettings:
         # reach `task_models`, where the chat path's "is anything assigned?"
         # guard would read it as yes and start classifying every message to
         # consult a slot that can never match.
+        router = raw.get("router_model")
+        self._router_model = router.strip() or None if isinstance(router, str) else None
+
         tasks = raw.get("task_models")
         if isinstance(tasks, dict):
             known = {s.value for s in TaskSlot}

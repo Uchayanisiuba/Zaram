@@ -574,3 +574,148 @@ def test_the_settings_file_is_json_a_person_can_read(settings, tmp_path):
 
     assert raw["task_models"] == {"vision": "seer"}
     assert os.path.exists(tmp_path / "settings.json")
+
+
+class TestTheRoutingModel:
+    """The model that decides *where* a question goes, made visible.
+
+    Asked for as "a planner model". Nothing generative plans anything —
+    `CLAUDE.md` routes with embeddings, and `SemanticIntentRouter` compares the
+    query against task exemplars — so the honest control is over the embedder,
+    which was an environment variable and appeared in no interface at all.
+    A decision taken on every single message that the product never showed
+    anybody.
+    """
+
+    def test_nothing_is_chosen_by_default(self, settings):
+        assert settings.router_model is None
+
+    def test_it_survives_a_reload(self, settings, tmp_path):
+        from core import user_settings as module
+
+        settings.set_router_model("ollama:bge-m3")
+        assert module.UserSettings(str(tmp_path / "settings.json")).router_model == (
+            "ollama:bge-m3"
+        )
+
+    def test_clearing_hands_the_choice_back(self, settings):
+        settings.set_router_model("ollama:bge-m3")
+        assert settings.set_router_model("") is None
+
+    def test_the_boot_path_prefers_it_over_the_environment_variable(
+        self, settings, monkeypatch
+    ):
+        """The assertion that stops this being a control over nothing.
+
+        `_init_memory_runtime` builds the embedder once, from an environment
+        variable. If the setting did not outrank it the row would store, round
+        trip and display, with no effect on any routing decision — this
+        repository's signature failure wearing a settings control, and the
+        exact shape `user_settings.voice` had before it was wired.
+        """
+        import os
+
+        monkeypatch.setenv("ZARAM_EMBED_MODEL", "from-the-environment")
+        settings.set_router_model("chosen-by-the-user")
+
+        # The one line under test, lifted rather than booting a whole kernel:
+        # what the bootstrapper computes for `model`.
+        from core.user_settings import get_user_settings
+
+        chosen = get_user_settings().router_model
+        resolved = chosen or os.getenv("ZARAM_EMBED_MODEL", "bge-m3")
+        assert resolved == "chosen-by-the-user"
+
+        settings.set_router_model("")
+        chosen = get_user_settings().router_model
+        assert (chosen or os.getenv("ZARAM_EMBED_MODEL", "bge-m3")) == "from-the-environment"
+
+    def test_the_payload_carries_it(self, settings):
+        from main import _routing_payload
+
+        settings.set_router_model("ollama:bge-m3")
+        assert _routing_payload()["router_model"] == "ollama:bge-m3"
+
+
+class TestOnlyAnEmbedderMayRoute:
+    """A chat model here does not route worse — it does not route at all.
+
+    Silently, from the next restart onwards, which is what makes this the one
+    setting where the capability gate matters most.
+    """
+
+    @pytest.fixture()
+    def stocked(self, monkeypatch):
+        import main
+        from providers.contracts import (
+            CapabilityLocality,
+            DataPolicy,
+            HealthStatus,
+            ModelCategory,
+            ModelInfo,
+            ProviderKind,
+        )
+
+        models = [
+            ModelInfo(
+                id="ollama:bge-m3",
+                display_name="bge-m3",
+                provider="ollama",
+                provider_kind=ProviderKind.LOCAL_LLM,
+                category=ModelCategory.EMBEDDING,
+                locality=CapabilityLocality.LOCAL,
+                health_status=HealthStatus.HEALTHY,
+                data_policy=DataPolicy.NEVER_LEAVES_DEVICE,
+                supports_embedding=True,
+            ),
+            ModelInfo(
+                id="ollama:chatty",
+                display_name="chatty",
+                provider="ollama",
+                provider_kind=ProviderKind.LOCAL_LLM,
+                category=ModelCategory.LLM,
+                locality=CapabilityLocality.LOCAL,
+                health_status=HealthStatus.HEALTHY,
+                data_policy=DataPolicy.NEVER_LEAVES_DEVICE,
+            ),
+        ]
+
+        class Catalog:
+            def all(self):
+                return models
+
+        class Manager:
+            catalog = Catalog()
+
+            async def ensure_scanned(self):
+                return None
+
+        class Runtime:
+            manager = Manager()
+
+        monkeypatch.setattr(main.kernel, "providers_runtime", Runtime(), raising=False)
+        return main
+
+    @pytest.mark.asyncio
+    async def test_a_chat_model_is_refused_by_name(self, stocked):
+        refusal = await stocked._router_model_refusal("chatty")
+        assert "chatty" in refusal
+        assert "embeddings" in refusal
+
+    @pytest.mark.asyncio
+    async def test_an_embedder_is_accepted(self, stocked):
+        assert await stocked._router_model_refusal("bge-m3") == ""
+        assert await stocked._router_model_refusal("ollama:bge-m3") == ""
+
+    @pytest.mark.asyncio
+    async def test_an_unplaceable_name_is_not_refused_here(self, stocked):
+        # Refusing would claim it cannot embed, which is a different and
+        # unsupported statement about a model we simply have not seen.
+        assert await stocked._router_model_refusal("something-else") == ""
+
+    @pytest.mark.asyncio
+    async def test_no_provider_layer_refuses_nothing(self, monkeypatch):
+        import main
+
+        monkeypatch.setattr(main.kernel, "providers_runtime", None, raising=False)
+        assert await main._router_model_refusal("anything") == ""

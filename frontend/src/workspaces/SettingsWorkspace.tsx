@@ -1138,6 +1138,78 @@ export default function SettingsWorkspace() {
                 </Row>
               );
             })}
+
+          {/* ------------------------------------------ the routing model
+              What the maintainer asked for as "a planner model", and this is
+              the honest version of it.
+
+              **Nothing generative plans anything.** `CLAUDE.md`: *"Route with
+              embeddings, not a generative model. Task classification is a
+              similarity problem: embed the query, compare against task
+              exemplars, take the nearest"* — and that is what runs. So a slot
+              offering a chat model here would configure a code path that does
+              not execute, which is the same failure as a "long documents" row.
+
+              What is real, and what was missing, is that this decision is
+              taken on **every message** and appeared in no interface at all:
+              it was an environment variable. So the row names the model that
+              actually decides, offers the embedding models on the machine, and
+              says both of the things that make it safe to touch — that it is
+              not a chat model, and that it applies from the next restart. */}
+          <Row
+            label="What decides where a question goes"
+            value={routingSettings?.routerModel ?? 'Zaram decides'}
+            state={routingSettings?.routerModel ? 'good' : 'neutral'}
+            detail={
+              'Zaram routes by similarity, not by asking a model in words: your question is ' +
+              'compared against examples of each kind of task, and the nearest wins. So this is ' +
+              'an embedding model and never writes an answer — only embedding models are ' +
+              'offered. It takes effect when Zaram restarts.'
+            }
+          >
+            {models !== null &&
+              (models.filter((m) => m.supportsEmbedding).length === 0 ? (
+                // Said rather than shown as an empty dropdown. "Nothing here
+                // can do this" is a fact about the machine worth knowing, and
+                // it is the state in which routing has quietly fallen back to
+                // keyword matching.
+                <p
+                  className="text-[11px] leading-snug"
+                  style={{ color: 'var(--color-text-faint)', maxWidth: '46ch' }}
+                >
+                  No embedding model was found here, so routing falls back to matching words.
+                  Installing one — bge-m3 is what Zaram expects — restores it.
+                </p>
+              ) : (
+                <select
+                  aria-label="What decides where a question goes"
+                  className="px-2 py-1.5 rounded-lg text-xs max-w-full"
+                  style={{
+                    background: 'transparent',
+                    border: '1px solid var(--color-border-subtle)',
+                    color: 'var(--color-text)',
+                  }}
+                  value={routingSettings?.routerModel ?? ''}
+                  disabled={busy === 'routing' || !routingSettings}
+                  onChange={(event) =>
+                    void run('routing', async () =>
+                      setRoutingSettings(
+                        await updateRoutingSettings({ routerModel: event.target.value }),
+                      ),
+                    )
+                  }
+                >
+                  <option value="">Zaram decides</option>
+                  {models
+                    .filter((m) => m.supportsEmbedding)
+                    .map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.displayName}
+                      </option>
+                    ))}
+                </select>
+              ))}
+          </Row>
         </Section>
 
         {/* --------------------------------------------------------- Cloud */}

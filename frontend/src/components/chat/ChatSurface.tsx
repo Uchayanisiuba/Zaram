@@ -42,6 +42,7 @@ import { useSystemStore } from '@/stores/systemStore';
 import ProjectScopePicker from './ProjectScopePicker';
 import DomainScopePicker from './DomainScopePicker';
 import MicButton from './MicButton';
+import VoiceHint from './VoiceHint';
 import CitationSummary from './CitationChips';
 import MessageActions from './MessageActions';
 import { AnsweredBy } from './AnsweredBy';
@@ -766,12 +767,22 @@ export default function ChatSurface({ navigate }: Props) {
       >
         <div className="flex flex-col gap-4 p-6">
           {isEmpty ? (
-            <p
-              className="text-xs uppercase text-slate-500"
-              style={{ letterSpacing: '0.05em' }}
-            >
-              Ask Zaram something
-            </p>
+            <>
+              <p
+                className="text-xs uppercase text-slate-500"
+                style={{ letterSpacing: '0.05em' }}
+              >
+                Ask Zaram something
+              </p>
+              {/* The conversation's counterpart to the landing's "Click Orb to
+                  Chat", in the same face and the same attract loop: one line
+                  naming the one gesture, on the surface where that gesture
+                  works. It renders nothing when Zaram cannot listen — an
+                  instruction to press a key that does nothing is an invented
+                  value, and the place to name a missing extra is the
+                  microphone button. */}
+              <VoiceHint empty={isEmpty} />
+            </>
           ) : (
             <>
               {messages.map((msg, msgIndex) => (
