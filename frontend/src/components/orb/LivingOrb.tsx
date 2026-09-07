@@ -13,20 +13,8 @@ import { useIsReducedMotion } from '@/hooks/useReducedMotion';
 import type { OrbState } from '@/stores/orbStore';
 import globeImage from '@/assets/living-orb-globe.png';
 import { frames, loop } from './stillness';
+import OrbitalParticles from './OrbitalParticles';
 
-// Deterministic particle positions
-const PARTICLES = [
-  { top: 10, left: 72, delay: 0,   size: 5,   color: '#818cf8' },
-  { top: 72, left: 8,  delay: 0.7, size: 4,   color: '#22d3ee' },
-  { top: 28, left: 4,  delay: 1.2, size: 5,   color: '#c084fc' },
-  { top: 5,  left: 38, delay: 1.8, size: 3,   color: '#818cf8' },
-  { top: 84, left: 58, delay: 0.4, size: 4,   color: '#22d3ee' },
-  { top: 50, left: 93, delay: 1.5, size: 4,   color: '#c084fc' },
-  { top: 18, left: 91, delay: 1.0, size: 3,   color: '#818cf8' },
-  { top: 90, left: 26, delay: 2.0, size: 4,   color: '#22d3ee' },
-  { top: 42, left: 2,  delay: 0.6, size: 3,   color: '#c084fc' },
-  { top: 64, left: 88, delay: 1.3, size: 4,   color: '#818cf8' },
-];
 
 // The waveform bar constants are gone with the bars they drove. Their being a
 // hardcoded array is the clearest statement of why: a level meter whose levels
@@ -408,35 +396,10 @@ const LivingOrb = ({
         />
       )}
 
-      {/* Floating particles */}
-      {showParticles &&
-        PARTICLES.map((p, i) => (
-          <motion.div
-            key={i}
-            className="absolute rounded-full z-10 pointer-events-none"
-            style={{
-              width: p.size,
-              height: p.size,
-              top: `${p.top}%`,
-              left: `${p.left}%`,
-              background: p.color,
-              boxShadow: `0 0 4px ${p.color}`,
-            }}
-            animate={{
-              y: frames([0, -24, 0], reduced),
-              x: frames([0, 12, 0], reduced),
-              opacity: reduced ? 0.55 : [0.2, 0.9, 0.2],
-            }}
-            // **One period, offset by delay — not ten periods.**
-            // This was `3.5 + p.delay`, which gave the ten particles ten
-            // different durations (3.5s to 5.5s). Ten cycles sharing no common
-            // factor is the largest single source of the orb's restlessness:
-            // they drift through every possible phase relationship and the
-            // field never repeats. A shared 8s with staggered starts looks the
-            // same at a glance and settles into one rhythm.
-            transition={{ ...loop(8, reduced), delay: reduced ? 0 : p.delay }}
-          />
-        ))}
+      {/* Floating particles — the shared field, so the avatar path can draw
+          the same one behind the character. It used to be markup here, which
+          is why choosing the avatar removed it entirely. */}
+      {showParticles && <OrbitalParticles />}
 
       {/* The speaking waveform bars are gone, deliberately.
        *

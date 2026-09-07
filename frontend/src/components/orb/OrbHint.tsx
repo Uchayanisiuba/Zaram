@@ -23,7 +23,17 @@ import { useIsReducedMotion } from '@/hooks/useReducedMotion';
 /** Long enough that anyone who acts immediately never sees it. */
 const APPEAR_AFTER_MS = 2600;
 
-export default function OrbHint({ offsetX = 0 }: { offsetX?: number }) {
+export default function OrbHint({
+  offsetX = 0,
+  /** Pixels from the top, computed by the landing so this and the status
+   *  label share one slot and one clearance from the orbit ring. Passed in
+   *  rather than recomputed: two formulae for one position is how a caption
+   *  and its subject come to disagree. */
+  top,
+}: {
+  offsetX?: number;
+  top?: number;
+}) {
   const reduced = useIsReducedMotion();
   const hasOpenedChat = useChatModeStore((s) => s.hasOpenedChat);
   const chatOpen = useChatModeStore((s) => s.chatView) === 'chat';
@@ -43,7 +53,7 @@ export default function OrbHint({ offsetX = 0 }: { offsetX?: number }) {
         <motion.p
           className="absolute left-1/2 z-20 text-[12px] tracking-wide pointer-events-none select-none"
           style={{
-            bottom: '8%',
+            ...(top == null ? { bottom: '8%' } : { top }),
             color: 'var(--color-text-muted)',
             fontFamily: 'var(--font-display)',
           }}

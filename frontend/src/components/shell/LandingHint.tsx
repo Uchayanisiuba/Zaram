@@ -40,6 +40,8 @@ import { useChatModeStore } from '@/stores/chatModeStore';
 import { useEmbodimentStore } from '@/stores/embodimentStore';
 import VoiceHint from '@/components/chat/VoiceHint';
 import { useIsReducedMotion } from '@/hooks/useReducedMotion';
+import { useViewport } from '@/hooks/useViewport';
+import { orbGeometry, useLayoutStore } from '@/stores/layoutStore';
 
 interface LandingHintProps {
   /** Whether the landing is the current surface. Passed in rather than read
@@ -75,6 +77,36 @@ export default function LandingHint({ isLanding }: LandingHintProps) {
    */
   const renderer = useEmbodimentStore((s) => s.renderer);
 
+  /**
+   * The line follows the orb sideways, because it is a caption for it.
+   *
+   * When the conversation opens, the orb travels from the viewport centre to
+   * the centre of the space the panel leaves — half the panel's width to the
+   * left. The footer did not move, so the hint stayed centred on the *window*
+   * while the thing it names sat well to the left of it, and the further the
+   * user dragged the panel wider the further apart they drifted.
+   *
+   * **`orbGeometry` is asked rather than the offset recomputed here**, which
+   * is the whole point: two formulae for one position is how a caption comes
+   * to disagree with its subject, and this one would only disagree while the
+   * panel was being resized — the moment nobody is looking at the footer.
+   * `containerScale: 1` because this line is not inside the orb's scaled
+   * container, so it wants the plain visual shift; `chatFraction` and not the
+   * workspace fraction, because this renders on the landing only.
+   *
+   * Vertical position is untouched: it comes from sitting last in the column,
+   * which already puts it under the orb.
+   */
+  const { width: viewportWidth } = useViewport();
+  const chatFraction = useLayoutStore((s) => s.chatFraction);
+  const { shiftX } = orbGeometry({
+    viewportWidth,
+    chatFraction,
+    chatOpen: chatOpen,
+    orbSize: 1,
+    containerScale: 1,
+  });
+
   // Never on Work, Memory, Knowledge, Activity or Settings.
   if (!isLanding) return null;
 
@@ -92,6 +124,11 @@ export default function LandingHint({ isLanding }: LandingHintProps) {
         justifyContent: 'center',
         padding: '8px 16px',
         minHeight: 52,
+        // Follows the orb sideways; see the `shiftX` note above. Eased at the
+        // panel's own tempo so the caption travels with its subject rather
+        // than snapping into place after it.
+        transform: shiftX ? `translateX(${shiftX}px)` : undefined,
+        transition: reduced ? 'none' : 'transform 0.28s ease',
         background: 'transparent',
         zIndex: 40,
         // Never intercept a click meant for the orb.

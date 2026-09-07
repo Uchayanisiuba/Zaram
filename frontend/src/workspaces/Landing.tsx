@@ -5,6 +5,7 @@ import { ORB_BEHAVIOUR } from '../components/orb/LivingOrb'
 import Embodiment from '@/components/embodiment/Embodiment'
 import OrbStatusLabel from '../components/orb/OrbStatusLabel'
 import OrbHint from '../components/orb/OrbHint'
+import OrbitalParticles from '../components/orb/OrbitalParticles'
 import { useEmbodimentStore } from '@/stores/embodimentStore'
 import { useChatModeStore } from '@/stores/chatModeStore'
 import { useLayoutStore, orbGeometry } from '@/stores/layoutStore'
@@ -117,7 +118,7 @@ export default function Landing({ onNavigate, onOrbTap }: LandingProps) {
   // surface and nothing else was mounted to own it. The persistent bar is
   // mounted on every surface including this one, so it owns the poll now — two
   // callers would mean two intervals.
-  const { width: viewportWidth } = useViewport()
+  const { width: viewportWidth, height: viewportHeight } = useViewport()
   const { shiftX, zoom } = orbGeometry({
     viewportWidth,
     chatFraction,
@@ -168,6 +169,29 @@ export default function Landing({ onNavigate, onOrbTap }: LandingProps) {
 
   const ring1Size = ORBIT_RADIUS * 2 + 60
   const ring2Size = ORBIT_RADIUS * 2 + 110
+
+  /**
+   * Where the low caption slot sits — the status label and the first-run hint.
+   *
+   * **It was `bottom: 8%`, and a percentage of the window cannot clear a ring
+   * measured in pixels.** The outer ring is centred on the orb and renders at
+   * `ring2Size * CONTAINER_SCALE` — 826px across — while the caption was
+   * anchored to the bottom edge, so the gap between them was whatever the
+   * window height happened to leave. On a laptop it left none: the text landed
+   * inside the ring's lower arc, which is what the maintainer photographed.
+   *
+   * Anchored to the thing it has to stay clear of instead. Below the ring's
+   * bottom edge with a real margin whenever the window is tall enough, and as
+   * low as it will go otherwise — because on a 900px window the ring alone is
+   * 826px and there is genuinely nowhere below it. Saying so in the arithmetic
+   * beats a percentage that is right on one monitor.
+   */
+  const ringBottomFromCentre = (ring2Size / 2) * CONTAINER_SCALE
+  const captionTop = Math.min(
+    viewportHeight / 2 + ringBottomFromCentre + 28,
+    // Never off the bottom. Two lines of note plus its own breathing room.
+    viewportHeight - 76,
+  )
 
   const orbShift = { scale: zoom, x: shiftX, y: 0 }
   // orbGeometry divides by the container scale for use *inside* the scaled
@@ -255,6 +279,39 @@ export default function Landing({ onNavigate, onOrbTap }: LandingProps) {
           animate={chat ? { opacity: 0, scale: reduced ? 1 : 1.15 } : { opacity: 1, scale: 1 }}
           transition={{ duration: reduced ? 0.2 : 0.4, delay: 0.04 }}
         />
+
+        {/* The particle field, for the avatar.
+         *
+         * **The rings were already shared and the particles were not.** These
+         * two orbit tracks are rendered here, so they sit behind either
+         * renderer; the motes were markup inside `LivingOrb`, so choosing the
+         * character removed half the atmosphere and left it standing on a
+         * plain background. `OrbitalParticles` is the same field the orb
+         * draws — extracted rather than copied, because two fields with one
+         * intent drift the first time either is tuned.
+         *
+         * Only on the avatar path, because the orb still draws its own inside
+         * its box: rendering both would double every mote. Sized to the orb's
+         * footprint so the field occupies the same region whichever renderer
+         * is mounted, and behind the character rather than over it — it is
+         * atmosphere, and a mote crossing the face would read as something
+         * the face was doing.
+         */}
+        {renderer === 'avatar' && !chat && (
+          <div
+            aria-hidden
+            className="absolute left-1/2 top-1/2 pointer-events-none"
+            style={{
+              width: ORB_SIZE,
+              height: ORB_SIZE,
+              transform: 'translate(-50%, -50%)',
+              opacity: panelsOpen ? 0.25 : 1,
+              transition: 'opacity 0.35s ease',
+            }}
+          >
+            <OrbitalParticles />
+          </div>
+        )}
 
         {/* Central Living Orb — zooms + glides into the open space beside the chat. */}
         <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-10 flex flex-col items-center">
@@ -490,7 +547,7 @@ export default function Landing({ onNavigate, onOrbTap }: LandingProps) {
       {/* First-run instruction, in the same low slot. Shown only before the
           conversation has ever been opened, so it never competes with the
           status label above. */}
-      <OrbHint offsetX={visualShiftX} />
+      <OrbHint offsetX={visualShiftX} top={captionTop} />
 
     </div>
   )
