@@ -19,7 +19,7 @@ accurate — it is the first thing anyone reads.
 Nothing has been pushed since the 5 September push;
 `git rev-list --count origin/main..main` is the count.
 
-**Measured: 3,535 passed, 28 skipped, 0 failed, 34m30s, with Ollama up** —
+**Measured: 3,543 passed, 23 skipped, 0 failed, 10m20s, with Ollama up** —
 excluding `test_the_model_can_drive_the_tools.py`, which drives a real 14B and
 takes ten minutes on its own (`-m measure`, 2 passed in 10m27s). The same suite
 took 29m06s earlier the same day on the same machine, which is what a wall-clock
@@ -172,6 +172,59 @@ Not repository state, but it changes what a measurement means.
 | Ollama | `qwen3-14b-16k` — **fully resident**, 10.41 GB, 30.5 tok/s |
 | | `gemma4-26b-32k` — **51% resident**, 9.17 of 18.14 GB, **17.8 tok/s** |
 | Ollama env | `OLLAMA_FLASH_ATTENTION=1`, `OLLAMA_KV_CACHE_TYPE=q8_0`, user scope |
+
+### Routing now knows what is loaded, which it did not
+
+`_rank_key` put `model_fits_resident` first and justified it in prose as
+preferring *"a general model that is already resident"*. Those are two
+questions. Fit asks **could this sit beside the embedder** — capacity.
+Residency asks **what is on the card right now**, and nothing in the key asked
+it.
+
+On a machine that holds one model at a time the gap has teeth: every local model
+on this card exceeds the resident budget, so the fit term was flat, and a reply
+could route to a *cold* model and evict the warm one that was already
+answering — a swap performed in the name of avoiding swaps, costing the 106
+seconds measured below.
+
+`_resident_models()` is now read **once per selection** — inside the sort key it
+would be one HTTP round trip per candidate on the critical path of every reply —
+and ranks ahead of fit. `None` stays "cannot tell" and goes flat rather than
+being promoted to "not loaded".
+
+**The cost is stickiness, deliberately.** A warm general model answers a coding
+question rather than spending two minutes loading the specialist — the same call
+the fit term already made whenever the specialist did not fit. The per-task
+assignment in Settings is the explicit override and does not come through this
+ranking.
+
+**And the probe may not fail the route.** The first version of the change let
+`_resident_models` raise through the sort: a manager whose registry is not wired
+threw `AttributeError` and took the whole selection with it — five failures
+across the suite, every one a routing decision dying because an optimisation
+could not answer. `_swap_preflight_event` already states the rule for itself —
+*"a broken residency probe must cost the user an indicator, never an answer"* —
+and it now holds at both callers, with a test that throws on purpose.
+
+### The disk is the other half, and it cannot be fixed by moving
+
+Model loading is disk-bound, measured: **196 MB/s** reading a real blob from
+`C:`, against load rates of 171–176 MB/s. So the 106-second load is the drive.
+
+Moving the store does not help, and the obvious candidates are both worse.
+Measured like for like with `dd`, 2 GB, `conv=fsync`:
+
+| | |
+|---|---|
+| `C:` (DIGIRICH DGSSDM22, 92% full) | **364 MB/s** write, 196 MB/s read |
+| `G:` (238 GB, empty) | **155 MB/s** write |
+| `F:` (737 GB free) | Hitachi HUA723030 — a **7200rpm spinning disk** |
+
+`C:` is the fastest thing on the machine despite being the fullest. Windows
+reports `G:` as `MediaType 4` (SSD) and it writes at less than half `C:`'s rate,
+which is why the label was not trusted — the same file also reports the
+Hitachi's spindle speed as `4294967295`, uint32 saturation, the identical shape
+to the `Win32_VideoController.AdapterRAM` trap `CLAUDE.md` already warns about.
 
 ### The Gemma is a mixture-of-experts model, and that changes the answer
 

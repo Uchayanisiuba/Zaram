@@ -1042,6 +1042,14 @@ keeping after the task finishes, given a finished task is otherwise deleted.
   pipeline, so the likely reading is that `SdxlProvider` loads and never
   unloads — meaning one picture costs every local chat model until a restart.
   Unconfirmed, and the most serious open thing in this file if it is true.
+* **Model switching is still ~106 s when it happens, and that is the disk.**
+  The residency term stops Zaram *choosing* a swap it did not need; it cannot
+  make a swap fast. Loading is disk-bound at ~196 MB/s and `C:` is already the
+  fastest drive on the machine — `G:` writes at 155 MB/s and `F:` is a spinning
+  disk, both measured. The remaining software lever is preloading: intent is
+  classified in 10–30 ms and recall takes hundreds, so a load could start
+  during recall rather than at dispatch. Worth a few hundred milliseconds
+  against 106 seconds, so probably not worth building.
 * **One frontend test is flaky.** A single failure in one full `vitest run` on
   7 September, passing on the two runs after it; the output scrolled before it
   could be named. Capture the run to a file when it recurs.

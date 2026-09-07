@@ -794,10 +794,33 @@ class ProviderManager:
         # true.
         cloud_first = preference == "prefer_cloud"
 
+        # **Read once, here, not inside the key.** `_resident_models` asks every
+        # local server over HTTP; called from the sort key it would run once per
+        # candidate, turning a routing decision into N round trips on the
+        # critical path of every reply. `None` is carried through unchanged and
+        # means "cannot tell", which the key treats as flat rather than as "not
+        # loaded" — the same three-valued discipline `model_fits_resident` keeps.
+        #
+        # **And it cannot be allowed to fail the routing decision.** This is the
+        # rule `_swap_preflight_event` states for itself — *"a broken residency
+        # probe must cost the user an indicator, never an answer"* — and the
+        # first version of this line did not keep it: a manager whose registry
+        # is not wired raised `AttributeError` here and took the whole selection
+        # down with it, which the suite caught in five places. An optimisation
+        # that can refuse to route is not an optimisation.
+        try:
+            resident = self._resident_models()
+        except Exception as exc:  # noqa: BLE001 - never fail a route over this
+            logger.debug("Residency unavailable for ranking: %s", exc)
+            resident = None
+
         return sorted(
             candidates,
             key=lambda m: self._rank_key(
-                m, cloud_first=cloud_first, specialisation=specialisation
+                m,
+                cloud_first=cloud_first,
+                specialisation=specialisation,
+                resident=resident,
             ),
         )[0]
 
@@ -862,18 +885,46 @@ class ProviderManager:
         *,
         cloud_first: bool,
         specialisation: Optional[str],
+        resident: Optional[Dict[str, Optional[int]]] = None,
     ) -> tuple:
         """Order among models that are all permitted and all capable.
 
-        Fit stays first, ahead of the task match, and that ordering is load
-        bearing: a specialist that forces an eviction costs seconds on this
-        exchange *and* on the next one that swaps back, which is a worse
-        answer than a general model that is already resident.
-        `test_fit_outranks_general_purpose` asserts the untasked half of it.
+        **What is already loaded comes first**, ahead of fit and ahead of the
+        task match. The docstring here used to justify the fit term by saying a
+        specialist that forces an eviction "is a worse answer than a general
+        model that is already resident" — and nothing in the key asked what was
+        resident. `model_fits_resident` answers *"could this be co-resident with
+        the embedder"*, which is a question about **capacity**; whether the
+        weights are on the card right now is a different question, and it is the
+        one the sentence was about.
+
+        The gap had teeth on a card that holds one model at a time. With a model
+        loaded and warm, a reply could route to a *cold* one that scored better
+        on capacity, evicting the model that was already answering — a swap
+        performed in the name of avoiding swaps. Measured on the maintainer's
+        12 GB card, 7 September: a cold load of the 26B costs **106 seconds**,
+        and every local model there exceeds the resident budget, so the fit term
+        was flat and nothing was avoiding anything.
+
+        **The cost of this is stickiness, and it is deliberate.** A warm general
+        model will answer a coding question rather than spend two minutes
+        loading the coding model, exactly as the fit term already did whenever
+        the specialist did not fit. Where that is the wrong call the remedy is
+        the per-task assignment in Settings, which is an explicit choice and
+        does not come through this ranking at all.
+
+        ``resident`` is ``None`` when residency could not be established — no
+        local server reachable, or one that reports nothing. Then the term is
+        **flat across every candidate** rather than a guess, so ordering falls
+        back to exactly what it was before. Never promoted to "not loaded":
+        that would rank a possibly-warm model behind a definitely-cold one on no
+        evidence.
         """
         fits = self.model_fits_resident(model)
         is_local = model.locality is CapabilityLocality.LOCAL
+        loaded = resident is not None and _matches_resident(model.id, resident)
         return (
+            0 if loaded else 1,
             0 if fits is True else 1,
             self._specialisation_rank(model, specialisation),
             (1 if is_local else 0) if cloud_first else (0 if is_local else 1),

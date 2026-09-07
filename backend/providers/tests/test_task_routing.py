@@ -240,3 +240,128 @@ class TestTheUntaskedDefaultIsUnchanged:
         )
 
         assert manager.select_default_model() == manager.select_model_for_task()
+
+
+class TestWhatIsAlreadyLoadedComesFirst:
+    """The swap-avoidance term, which for a long time avoided no swaps.
+
+    `_rank_key` put `model_fits_resident` first and justified it in prose as
+    preferring "a general model that is already resident". Those are two
+    different questions: fit is about **capacity** — could this sit beside the
+    embedder — and residency is about **what is on the card right now**. Nothing
+    in the key asked the second one.
+
+    On a machine that holds one model at a time the gap has teeth. Every local
+    model on the maintainer's 12 GB card exceeds the resident budget, so the fit
+    term was flat and a reply could route to a *cold* model, evicting the warm
+    one that was already answering — a swap performed in the name of avoiding
+    swaps, costing 106 seconds measured.
+    """
+
+    @pytest.fixture
+    def two_models(self, manager):
+        return _load(
+            manager,
+            _local("ollama:general:latest", size=10 * GB),
+            _local("ollama:coder:latest", size=10 * GB),
+        )
+
+    def test_the_warm_model_wins_over_a_cold_one(self, two_models, monkeypatch):
+        monkeypatch.setattr(
+            two_models, "_resident_models", lambda: {"coder:latest": 10 * GB}
+        )
+
+        chosen = two_models.select_model_for_task()
+
+        assert chosen is not None and chosen.id == "ollama:coder:latest"
+
+    def test_it_beats_the_task_match_too(self, two_models, monkeypatch):
+        """Deliberate, and the same call the fit term already made.
+
+        A warm general model answers a coding question rather than spending two
+        minutes loading the specialist. Where that is wrong the remedy is the
+        per-task assignment in Settings, which is explicit and does not come
+        through this ranking.
+        """
+        monkeypatch.setattr(
+            two_models, "_resident_models", lambda: {"general:latest": 10 * GB}
+        )
+
+        chosen = two_models.select_model_for_task(specialisation="code")
+
+        assert chosen is not None and chosen.id == "ollama:general:latest"
+
+    def test_unknown_residency_changes_nothing(self, two_models, monkeypatch):
+        """`None` is "cannot tell", never "not loaded".
+
+        A local server that reports nothing must not push a possibly-warm model
+        behind a definitely-cold one on no evidence — so the term goes flat and
+        ordering falls back to exactly what it was.
+        """
+        monkeypatch.setattr(two_models, "_resident_models", lambda: None)
+
+        without = two_models.select_model_for_task()
+
+        monkeypatch.setattr(two_models, "_resident_models", lambda: {})
+        with_empty_card = two_models.select_model_for_task()
+
+        assert without is not None and with_empty_card is not None
+        assert without.id == with_empty_card.id
+
+    def test_residency_is_read_once_and_not_per_candidate(self, two_models, monkeypatch):
+        """It asks every local server over HTTP.
+
+        Called from inside the sort key it would run once per candidate, turning
+        one routing decision into N round trips on the critical path of every
+        reply — a performance bug that no assertion about *ordering* would ever
+        catch.
+        """
+        calls: list[int] = []
+
+        def counted():
+            calls.append(1)
+            return {"coder:latest": 10 * GB}
+
+        monkeypatch.setattr(two_models, "_resident_models", counted)
+
+        two_models.select_model_for_task()
+
+        assert len(calls) == 1
+
+    def test_a_loosely_named_model_still_matches(self, manager, monkeypatch):
+        """`/api/ps` says `gemma:latest`; the catalogue says `ollama:gemma`.
+
+        Comparing those directly never matches, which would make this whole term
+        silently inert — the failure `_same_model` exists to prevent, arriving
+        through a new caller.
+        """
+        loaded = _load(
+            manager,
+            _local("ollama:gemma", size=10 * GB),
+            _local("ollama:other", size=10 * GB),
+        )
+        monkeypatch.setattr(loaded, "_resident_models", lambda: {"gemma:latest": 10 * GB})
+
+        chosen = loaded.select_model_for_task()
+
+        assert chosen is not None and chosen.id == "ollama:gemma"
+
+    def test_a_probe_that_throws_does_not_fail_the_route(self, two_models, monkeypatch):
+        """*"A broken residency probe must cost the user an indicator, never an
+        answer"* — the rule `_swap_preflight_event` states for itself, applied
+        to the new caller.
+
+        The first version of this term did not keep it. `_resident_models`
+        needs a wired registry, so a partially-built manager raised
+        `AttributeError` from inside the sort and took the whole selection down
+        — five failures across the suite, all of them a routing decision dying
+        because an optimisation could not answer.
+        """
+        def explode():
+            raise AttributeError("no registry here")
+
+        monkeypatch.setattr(two_models, "_resident_models", explode)
+
+        chosen = two_models.select_model_for_task()
+
+        assert chosen is not None
