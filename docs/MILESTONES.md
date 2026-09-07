@@ -24,29 +24,97 @@ excluding the two `-m measure` files, which drive real models and take ten
 minutes each. The same suite took 29m06s earlier on the same machine, which is
 what a wall-clock number is worth: nothing was made faster, the box was busier.
 
-### The model stack, as it stands on 7 September
+### The model stack, measured — 7 September
 
-Four models installed, **44 GB of blobs** — and that is now the honest figure
-rather than the 55.7 GB `ollama list` used to imply, because the duplicate
-manifests have been deleted.
+**All four are measured now, under one set of conditions**: a clear card, a
+fixed budget of 300 generated tokens each, thinking off, one prompt no model
+finishes early. Every one of those conditions was added because leaving it out
+produced a number that was wrong in a way that looked right — see *"What the
+measuring got wrong four times"* below.
 
-| | |
-|---|---|
-| `qwen3-coder:30b` | 18.56 GB, **just downloaded, never loaded, no `num_ctx` set** |
-| `gemma4-26b-32k` | 17.99 GB, 128-expert MoE, 51% resident, **17.8 tok/s** |
-| `qwen3-14b-16k` | 9.28 GB, dense, 100% resident, **30.5 tok/s** |
-| `bge-m3` | 1.16 GB, embeddings, resident continuously |
-| TabbyAPI, port **1234** | `Qwen3.8-27B-exl3-2.20bpw`, 64K, **never measured** |
+| | on card | context | cold load | tok/s |
+|---|---|---|---|---|
+| TabbyAPI `Qwen3.8-27B-exl3-2.20bpw` | **8.48 GiB, fits entirely** | **65,536** | 90 s | **26.3** |
+| `qwen3-14b-16k` | 10.41 GB, **100%** | 16,384 | 122 s | **32.0** |
+| `gemma4-26b-32k` | 9.17 of 18.14 GB, 51% | 32,768 | 164 s | 20.0 |
+| `qwen3-coder-30b-32k` | 10.61 of 20.56 GB, 52% | 32,768 | 178 s | 19.4 |
+| `bge-m3` | 1.16 GB, resident continuously | — | — | — |
 
-Deleted: `qwen3-14b-8k` and `gemma4:26b-a4b-it-q4_K_M`. Both were manifests
-sharing a blob with the model beside them, so it freed no space — the point was
-to stop a worse option being picked.
+`qwen3-coder-30b-32k` was created this session — the bare `qwen3-coder:30b` had
+no `num_ctx` and Ollama would have served 30.5B parameters through a 4,096
+window. It shares the parent's blob, so it cost kilobytes.
 
-**The stack is not set up, and `docs/NEXT-SESSION-PROMPTS.md` carries the
-brief.** Three things are missing and each is small: Coder has no context
-variant so it will load at Ollama's 4,096 default; Coder has never been
-measured; and Tabby has never been measured at all, because
-`test_what_actually_fits_this_card.py` only speaks to Ollama.
+Tabby reproduces: 25.9 and 26.3 tok/s on two clean runs, claiming 8.41 and 8.48
+GiB. Its first token arrives in **0.7 s**.
+
+**The decision this was for: Tabby is the default, and it is not close.** It is
+within 20% of the fastest model on the machine while holding **four times** the
+context, it is the only one that fits the card entirely, and it answers in
+under a second where an Ollama model spends 90–180 s loading. The 14B's 32.0
+tok/s buys nothing that a 16K window can hold.
+
+Two things follow, and neither should be done before it is checked:
+
+* **Gemma was being kept for vision, and Tabby may not need it to be.** Tabby's
+  own load log reads *"The provided model has vision capabilities, vision is
+  disabled in config"* — so that is a config flag to test, not a download. If
+  it works, 17.99 GB is free.
+* **Coder is the harder call, and the measurement is against it.** Tabby is
+  faster (26.3 against 19.4) *and* has double the window, so Coder's only
+  remaining claim is coding-specialisation. Worth one head-to-head on a real
+  editing task before 18.56 GB is deleted, because that is the one thing this
+  table cannot measure.
+
+Only one of these can be resident at a time, so a stack of four is a stack that
+swaps, at 90–180 s a swap. That is the argument for two, and it is why the
+routing change of 6 September — prefer the model already loaded — matters more
+than any of these numbers.
+
+Deleted 6 September: `qwen3-14b-8k` and `gemma4:26b-a4b-it-q4_K_M`. Both were
+manifests sharing a blob with the model beside them, so it freed no space — the
+point was to stop a worse option being picked.
+
+### What the measuring got wrong four times
+
+Kept because each one produced a plausible number, and three of them were
+already written down somewhere as fact.
+
+1. **A rate is meaningless without the token count it was taken over.** The
+   short prompt got 240 tokens out of Gemma and **13** out of Coder, which read
+   as Coder winning at 18.9 against 17.9. A longer prompt got 1,179 out of
+   Gemma and 199 out of Coder and reversed the order. Neither was wrong; they
+   were different measurements under one column heading, because warm-up
+   amortises over a long run and not a short one. Every row now generates
+   exactly 300.
+2. **Ollama acknowledges an unload long before the memory comes back.**
+   `/api/ps` answered `{"models":[]}` while Windows' counters showed
+   `llama-server` still holding 10.15 GB. Tabby, measured immediately after
+   Coder, reported **6.3 tok/s and a 317 s load**; measured on a settled card,
+   **26.3 tok/s and 90 s**. A 4× error from reading the card one second too
+   early. `SETTLE_TIMEOUT` waits for two consecutive clear readings.
+3. **A thinking block cut off by the token budget is reported nowhere.**
+   `gemma4-26b-32k` returned `eval_count: 300`, `done_reason: "length"`,
+   `response` of length zero and **no `thinking` key at all** — Ollama does not
+   surface a thinking block until it closes, and a truncated one never does.
+   The tokens were not lost; they are visible in the `context` array of the
+   same response. So the table printed 22.7 tok/s beside an assertion that the
+   model had said nothing, and both were true. `think: false` fixes it, and the
+   `spent on` column is the check that the flag was honoured.
+4. **A guard no machine can satisfy is a test that never runs, silently.** The
+   Tabby threshold was set at 11,000 MiB from its config; a Windows desktop
+   holds ~1.3 GB of a 12 GB card, so the most this machine ever offers is
+   ~10,750 and the row skipped every time. Its real claim is 8.4–8.5 GiB.
+
+Two further facts about the instrument, neither yet fixed:
+
+* `/api/ps` can answer `{}` about a model that has just replied — Coder did,
+  printing 0.00 GB and no context beside a good rate. The reading is now
+  retried five times over ~6 s.
+* **The `measure` marker is registered and never deselected.** A plain
+  `pytest` on these files runs the live GPU work — but only when the card
+  happens to be free, and skips in a second when it is not. The claim above
+  that the ~10-minute suite excludes them is true by accident rather than by
+  configuration.
 
 ### The code pack — a coding agent that is not a second product
 
