@@ -1384,3 +1384,101 @@ npm run check:reachability && npm run check:guards
 npm run test:electron            # with no Zaram running
 cd frontend && npx tsc --noEmit && npx vitest run
 ```
+
+---
+
+## Prompt for the next session — written 7 September 2026, late evening
+
+**This is the current prompt.** Everything above it is an earlier brief:
+accurate about what was built and why, superseded on status.
+
+Read `docs/MILESTONES.md` — the **Current state** block — then `CLAUDE.md`.
+`main` is the trunk, the working tree is clean, and nothing has been pushed
+since 5 September.
+
+### Start here: three things are built and unwatched
+
+This session was driven request by request and shipped seven commits. Every
+one is tested and typechecked; three of them have never been *used*, and this
+file's whole history is green suites over things that did not happen.
+
+1. **The latched microphone has never been spoken into.** Hold the microphone
+   button (or Alt-click it, or press Shift+Space anywhere) and it should stay
+   open across turns, show a ring that moves with what it hears, and stop
+   Zaram talking the moment you start. The ring and the level are wired to real
+   audio; barge-in is wired to `speechStore`. **`ONSET_RMS_WHILE_SPEAKING` in
+   `frontend/src/lib/voiceActivity.ts` is not a measured number** and says so
+   in the file. It is the one constant to turn after listening in a real room
+   with real speakers: too low and Zaram interrupts itself, too high and
+   barge-in never fires. Nothing else in that file needs touching to tune it.
+2. **Work has never been seen with files in it.** The layout was rebuilt —
+   toolbar, grouped headings, aligned columns, checkboxes, a selection strip —
+   and the browser pane cannot authenticate to the backend, so every listing
+   there is empty by construction. Open the real app and look at it with a
+   dozen artifacts in it. The three things to check are whether the group
+   headings earn their vertical space, whether the columns still read at the
+   narrow width Work gets beside the conversation, and whether the glass
+   checkbox is findable without being loud.
+3. **Removal has been exercised only in tests.** Select a few files, remove
+   them, and confirm three things by looking: they leave the listing, they are
+   sitting in `<output>/.trash/` with a timestamp prefix, and **Undo puts them
+   back**. Then delete one from the trash by hand and check the undo says so
+   rather than failing silently.
+
+### Then: the Tabby migration, which is one restart from its first real answer
+
+`C:\Users\user\tabbyAPI\config.yml` has `vision: true` and
+`vision_offload: true` set, with `use_as_default` extended to carry them —
+without that they would have applied only to a startup load, which this config
+never does, and every real request would have had vision off. Backup at
+`config.yml.bak-20260907`.
+
+**Nothing has been restarted, so nothing is proven.** In order:
+
+1. Restart TabbyAPI. Confirm `GET /v1/model` reports `use_vision: true` once a
+   model is loaded — that is the check, not the log line.
+2. Measure the card with vision on. It was **9,075 MB** for the process and
+   **11,758 of 12,288 MiB** for the card with vision off; if offload is doing
+   its job the first number should barely move. If it does move, `cache_size`
+   is the lever and 65536 → 32768 frees far more than the tower costs.
+3. Send it a real image and check the answer is about the image.
+4. **Only then** delete `gemma4-26b-32k` (17.99 GB), which was being kept for
+   exactly this job. The maintainer's standing instruction: a model pulled to
+   Tabby **replaces** its Ollama equivalent rather than joining it. On a disk
+   at 93% that is what stops the migration stalling.
+5. Then the exl3 replacements for the remaining Ollama models, one at a time,
+   measured before anything is deleted — the 7 September morning prompt above
+   has the budget arithmetic and the traps, and they still hold.
+
+### Still unfinished, from the earlier list
+
+* **The chat project picker cannot create a project.** It reads
+  `/artifacts/projects` — ids derived from artifacts — while a real store with
+  `create(name, type, note, root)` sits in `projectStore.ts` unused by it.
+  Creation must ask for a **type**, which `CLAUDE.md` calls the one thing that
+  cannot be asked later.
+* **The coding animation clip does not exist.** State, manifest slot and
+  fallback are wired; the asset is a licence decision.
+* **Does a generated image ever leave VRAM?** Still unconfirmed, still the most
+  serious open item anywhere in this file.
+
+### One diagnosis worth keeping
+
+The history lip was reported as "stopped working" and had not stopped working —
+it had stopped being **visible**, while remaining mounted and hit-testable. A
+`CSSTransition` on its opacity stalls at `currentTime: 0` after the first
+open-and-close and never advances, leaving a 22px transparent strip at the
+screen edge. Why it stalls is **still not established**. The fix does not
+depend on knowing: whether a control can be seen is never the output of an
+animation. If a control is ever reported as dead, measure
+`getComputedStyle` against the inline style before reading any code —
+they disagreed here, and that took ten minutes where reading took an hour.
+
+### The gate
+
+```
+backend/venv/Scripts/python.exe -m pytest backend/ -q -m "not measure"
+npm run check:reachability && npm run check:guards
+npm run test:electron            # with no Zaram running
+cd frontend && npx tsc --noEmit && npx vitest run
+```

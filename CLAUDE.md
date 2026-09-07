@@ -397,6 +397,24 @@ mutation, and permitting file edits does not permit cloud.
 output directory, never overwrite silently, and the write path has no delete or
 overwrite capability at all. A filename collision increments or asks.
 
+**That is a rule about generation, not about the user — clarified 7 September
+2026, when Work gained selection and removal.** It reads as though Zaram may
+never remove a file, and it was applied that way; but rule 4 says the user can
+delete what is stored, and a screen listing somebody's own output that cannot
+remove one is missing a verb everyone expects. The two are not in tension once
+the actors are separated: **generation must never be able to destroy a
+document, and a person must be able to remove their own.**
+
+So the write path is unchanged and still proven by a source scan, and the
+capability lives in a different module reached only from an endpoint a person
+triggers. It **moves rather than deletes**: the file goes to a trash folder
+inside the output root and its record is marked rather than dropped, because
+undo needs something to restore to. Mutative tier applies in full — undo is the
+move being reversible, sandbox is the same path confinement the write path
+draws, confirm is the interface's. Nothing in Zaram unlinks anything; emptying
+that folder stays the operating system's job, which is the part of the original
+sentence that was always right.
+
 **A retrieval score authorises nothing.** Retrieval produces a shortlist; the model
 chooses; the tier gate above still runs. Never let a similarity score stand in for a
 permission check.

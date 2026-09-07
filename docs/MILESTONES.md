@@ -15,6 +15,93 @@ accurate — it is the first thing anyone reads.
 
 *The latest work is first. Earlier sessions follow below.*
 
+### 7 September, evening session — seven commits, all on `main`
+
+Driven by the maintainer request by request rather than from the handoff's
+task list, so this reads as a list. **The TabbyAPI migration was not started**
+— it was offered and per-task model assignment was chosen instead, and nothing
+has been pulled, measured or deleted.
+
+| | |
+|---|---|
+| **Per-task model assignment** | `CLAUDE.md`'s third tier. Two slots — `code` and `vision` — and only two, because each is an argument `select_model_for_task` already takes. No long-document row: nothing classifies document length, so it would be a control that governs nothing. Precedence is message → assignment → default → Zaram's pick, and **the classifier runs only when its answer could change the outcome**, so nobody who leaves Advanced alone pays for the feature existing. |
+| **The routing model** | Asked for as "a planner model". Nothing generative plans anything, so the honest control is over the **embedder** — the thing that actually decides where a question goes, which was an environment variable and appeared in no interface. Wired through `_init_memory_runtime`, not merely stored. |
+| **Microphone: hold to latch** | Click is unchanged; hold (or Alt-click) opens a conversation mode that stays open across turns. `lib/voiceActivity.ts` fires `bargeIn()` on speech onset, so **Zaram's voice yields when the user talks**. `getUserMedia` now asks for `echoCancellation`; the detector raises its bar while Zaram speaks as a backstop. |
+| **Shift+Space** | Opens the conversation and starts that mode from anywhere. Not bare Space — `preventDefault()` would delete scrolling on every surface. |
+| **Work, rebuilt** | Toolbar (search · group · sort · density), single-line type filter, aligned columns, grouped rows under sticky headings. |
+| **Work: select and remove** | Per-row and per-group checkboxes — the group one *is* select-by-project and select-by-date. Files **move to a trash folder** and records are marked rather than dropped, so undo has both halves. |
+| **The history lip** | Two causes, both fixed and both watched. |
+
+**The history lip, because the diagnosis is the interesting part.** It was
+reported as "stopped working". It had not stopped working — it had stopped
+being *visible*, which is worse, because the control was still mounted and
+still hit-testable and nothing on screen said so. Measured on the running app:
+on a fresh mount it reads `opacity: 1` with no animations; open the panel and
+close it once and a `CSSTransition` on opacity appears, sits at
+`currentTime: 0` with `playState: "running"`, and never advances — four
+readings over four seconds returned `0` while the inline style said `1`. From
+then on it is a 22px transparent strip at the screen edge for the rest of the
+session.
+
+**Why the transition stalls is still not established**, and the fix does not
+depend on it: whether a control can be *seen* must never be the output of an
+animation. A stalled transform is a control in the wrong place; a stalled
+opacity is a control that does not exist.
+
+### What is measured, what is only tested, and what nobody has looked at
+
+Kept separate deliberately, because this file's own history is green suites
+over things that did not happen.
+
+**Watched on screen**, against the Vite dev server: the history lip through
+every gesture (visible at rest, hover peeks, click pins, close closes, lip
+returns, **reopens**), Work's new toolbar chrome, the landing hint.
+
+**Tested and typechecked only**: everything else. In particular —
+
+* **The microphone's latched mode has never been used.** The ring, the level
+  meter and barge-in need a real microphone and a real speaker, and
+  `ONSET_RMS_WHILE_SPEAKING` is explicitly **not a measured number**. It is the
+  one constant to turn after listening in a real room.
+* **Work has never been seen populated.** The browser pane cannot authenticate
+  to the backend — the credential is per-launch and IPC-only — so every listing
+  there is empty by construction. The toolbar, the checkboxes, the group
+  headings and the selection strip are unwatched with rows in them.
+* **The conversation's voice hint could not be watched** for the same reason:
+  `/voice/stt/health` 401s, so the hint correctly hides itself.
+
+### TabbyAPI: one change made, no download
+
+`C:\Users\user\tabbyAPI\config.yml` now sets `vision: true` and
+`vision_offload: true` (backup at `config.yml.bak-20260907`). **It takes effect
+on the next Tabby restart, which has not happened.**
+
+This is the handoff's own step 2 — *"test Gemma's replacement by enabling
+vision on the Qwen, not by downloading"* — and the evidence it is the right
+first move got stronger: `/v1/model` reports `use_vision: false` while the chat
+template it serves already renders `<|vision_start|><|image_pad|><|vision_end|>`
+with image and video branches. Nothing was missing but the flag.
+
+**Two things were measured to decide the offload.** With the model resident,
+TabbyAPI's process held **9,075 MB** and the card read **11,758 of 12,288
+MiB** — roughly 530 MiB spare, with the desktop, a browser and Zaram holding
+the rest. A vision tower does not fit in that, so its weights go to system RAM
+and the cost is vision speed rather than an OOM at the moment somebody attaches
+a screenshot.
+
+**The trap that was avoided, and it is this repo's signature one.** `vision`
+and `vision_offload` are *load-time* arguments and had to be added to
+`use_as_default`. Without that they would apply to a startup load — which this
+config never does, since `model_name` is empty — and every inline load, meaning
+every real request, would have had vision off. The flag set, the file reading
+as correct, and nothing changed.
+
+**Still to do, in order:** restart Tabby, confirm `use_vision` is true, send it
+a real image, and only then delete `gemma4-26b-32k` (17.99 GB). The maintainer's
+standing instruction is that **a model pulled to Tabby replaces its Ollama
+equivalent rather than joining it** — the switch removes the old one, which is
+what keeps a 93%-full disk from being the reason the migration stalls.
+
 ### What landed on 7 September, after the measurements
 
 Five commits, all on `main`, none pushed. `docs/NEXT-SESSION-PROMPTS.md` carries
