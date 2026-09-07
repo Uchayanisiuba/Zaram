@@ -1,18 +1,20 @@
 # Next session — handoff
 
 > **Out of date at the top, current at the bottom.** The newest prompt is
-> *"Prompt for the next session — written 7 September 2026, evening"*, at the
-> very end of this file, and the authoritative state is the **Current state**
-> block in `docs/MILESTONES.md`.
+> *"Prompt for the next session — written 8 September 2026"*, at the very end
+> of this file, and the authoritative state is the **Current state** block in
+> `docs/MILESTONES.md`.
 >
-> There are now three live-ish prompts and they are about different things. The
-> **7 September** one is the local model stack — measuring what is installed and
-> deciding what to keep. The **6 September (later)** one above it is the code
-> pack, and its tasks 2 and 3 are still open. The earlier 6 September prompt
-> asks for a tool loop that now exists and is superseded outright.
+> It starts with the **typing animation** — a sitting Mixamo clip that has to
+> drive the upper body only so the character stands, and which carries a
+> licence question that is a stop rather than a caveat.
 >
-> Everything else is an earlier brief: accurate about what was built and why,
-> superseded on status. Read it for reasoning, not for what is true today.
+> Two earlier prompts still hold something. The **7 September, evening** one is
+> the TabbyAPI migration, which is now one server restart from its first real
+> answer. The **6 September (later)** one is the code pack, and its tasks 2 and
+> 3 are still open. Everything else is an earlier brief: accurate about what was
+> built and why, superseded on status. Read those for reasoning, not for what is
+> true today.
 
 
 Rewritten 3 September 2026, then **updated the same day once tasks 1 and 2 were
@@ -1473,6 +1475,181 @@ depend on knowing: whether a control can be seen is never the output of an
 animation. If a control is ever reported as dead, measure
 `getComputedStyle` against the inline style before reading any code —
 they disagreed here, and that took ten minutes where reading took an hour.
+
+### The gate
+
+```
+backend/venv/Scripts/python.exe -m pytest backend/ -q -m "not measure"
+npm run check:reachability && npm run check:guards
+npm run test:electron            # with no Zaram running
+cd frontend && npx tsc --noEmit && npx vitest run
+```
+
+---
+
+## Prompt for the next session — written 8 September 2026
+
+**This is the current prompt.** Everything above it is an earlier brief:
+accurate about what was built and why, superseded on status.
+
+Read `docs/MILESTONES.md` — the **Current state** block — then `CLAUDE.md`.
+`main` is the trunk. The working tree is clean except for one untracked file,
+`avatar-source/animations/Typing.fbx`, which is the subject of task 1 and which
+**must not be committed until the licence question below is answered**.
+
+**Unreal is running on this machine.** Do not start the Zaram desktop app — it
+takes VRAM the maintainer is using. The Vite dev server plus the browser pane is
+how the interface was verified all session and is enough for everything here;
+note that the pane cannot authenticate to the backend, so every listing renders
+empty and only the chrome can be watched.
+
+---
+
+### Task 1 — the typing animation, standing rather than sitting
+
+`avatar-source/animations/Typing.fbx` is a **sitting** typing animation. The
+maintainer wants the character standing and typing, and proposed the right
+solution: **retarget the upper body only and leave the waist down alone.**
+
+Four things were established by reading the files, so none of it needs
+re-deriving:
+
+| | |
+|---|---|
+| **It is a Mixamo clip.** | First model node is `mixamorig9:Hips`. Every other clip in that folder is `Robot_Rig_0001:Robot_All_01:Hips` — exported from the character's own rig in Maya. |
+| **`retarget_animations.py` will skip it today.** | `on_character_rig()` looks for the literal `Robot_All_01` in the first model name and answers `False`. It is also absent from the `CLIPS` list. |
+| **But the bones would bind.** | `sanitize()` already compares only the trailing segment, and the character rig uses Mixamo naming: `Hips, Spine, Spine1, Spine2, Neck, Head, LeftShoulder…`. **All 65 character joints are present in `Typing.fbx`.** The 7 extras (`ch31body`, `ch31hair`, `ch31sweater`, …) are mesh nodes, not joints, and match nothing. |
+| **The waist split is clean.** | 11 lower-body joints — `Hips`, and `Left/Right` `UpLeg`, `Leg`, `Foot`, `ToeBase`, `Toe_End` — leaving **54 upper-body joints** to retarget. |
+
+So the work is small and the shape is decided:
+
+1. Add a per-clip **bone allow-list** to `retarget_animations.py`, so a clip can
+   name the joints it may drive. `Typing.fbx` drives the 54 upper-body joints
+   and leaves the 11 lower ones at the character's rest pose.
+   **`Hips` is the one that matters most** and it belongs in the excluded set:
+   it is the root, and a sitting clip carries the sit in it — lowered and
+   rotated back. Excluding it is what makes the character stand.
+2. `on_character_rig()` is a **proxy** for "will the bones match", and for this
+   file the proxy says no while the real answer is 65 of 65. Widen it to check
+   bone agreement rather than a namespace string, or allow the clip explicitly
+   — but keep a check. Its own comment records why: *"an Advanced Skeleton clip
+   imports perfectly happily and matches zero bones, and a clean run over zero
+   bones reads exactly like success."*
+3. Verify with `node frontend/scripts/check-rig-agreement.mjs`, which reads the
+   written files rather than Blender's idea of them.
+4. Add the clip to `frontend/public/avatars/animations/animations.json`, which
+   has **no `coding` entry today** — the slot is genuinely empty.
+
+**Watch it before believing it.** The gaze-tracking lesson is the exact
+precedent: unit tests plus a confirmed rig is not evidence that anything moved
+on screen, and the one check nobody made was the one that mattered. A standing
+character whose legs are at rest while its arms type is either right or
+obviously wrong, and a screenshot settles it in a second.
+
+#### The licence question, which is a stop rather than a caveat
+
+`CLAUDE.md`'s embodiment section and the 7 September handoff both already record
+this, and the file's provenance now confirms it: **Mixamo's terms restrict
+redistributing animation files, which is exactly what bundling one into this
+repository and the installer does.** Every other clip in that folder was
+authored on the character's own rig and carries no such restriction.
+
+This is the maintainer's call, not the next session's. Three routes, and the
+first is the one the script's own comments point at:
+
+* **Re-export the motion from `Robot_All_01` in Maya**, as the Listening pair
+  already was. Then it is the maintainer's own asset and the question goes away.
+* **Keep it out of the repository** — generated locally, gitignored, absent
+  from the installer, with the coding state falling back to `thinking` as it
+  does now.
+* **Confirm the licence permits it** before it is committed.
+
+Do not commit `Typing.fbx` or a `.glb` derived from it until one of those is
+settled.
+
+---
+
+### Task 2 — the typing state on the orb
+
+The maintainer asked for a typing state that fires *"as Zaram reads through
+portions of the LLM's reply that are code"* and *"when code data is being
+generated"*.
+
+**That already exists and already fires on both.** `codingActivity` in
+`frontend/src/lib/orbActivity.ts` derives `coding` from an opened code fence in
+the accumulated reply, or from the code tools having run — its own comment says
+so: *"the reply is writing code. An opened fence in the text so far is the
+literal thing the maintainer asked to see embodied."* Say so rather than
+building it a second time; this repository has shipped fifteen complete,
+tested, unreachable subsystems, and building over a working one is how the
+sixteenth arrives.
+
+**What is genuinely open is the look**, and it is a one-line decision the
+maintainer has now made differently twice:
+
+* 7 September: *"No new colour: thinking's violet, a different rhythm."*
+  `LivingOrb`'s `coding` entry is that — violet rings, violet glow.
+* 8 September: *"the orb stays pulsating with the default glow and behaviour."*
+
+Those disagree. The second is the more recent instruction, so unless the
+maintainer says otherwise, `coding` should render exactly as `idle` does —
+default glow, default pulse — while the *avatar* carries the typing clip. That
+is coherent with the embodiment rule: the character is where an activity is
+embodied, and the orb's job is to stay calm.
+
+If that is taken, `STATE_CONFIG.coding` in `LivingOrb.tsx` becomes a copy of
+`idle`'s glow and filter, keeping its own entry rather than being deleted, so
+the state still exists and can be given a look later. `OrbitalParticles`'
+`FIELD.coding` should follow the same decision — it currently borrows
+thinking's gesture at a shorter period.
+
+---
+
+### What landed on 8 September, and what was not watched
+
+Two commits, both on `main`.
+
+**`fix(memory)` — the one that matters.** The maintainer reported that Zaram
+does not keep context across a chat. The machinery was complete and three
+ceilings on top of it were all sized for a 4,096-token model: the history cap
+was computed from `FALLBACK_CONTEXT_TOKENS` (768 tokens for every model on
+every machine), the buffer was then sliced to three exchanges, and retention
+was eight. A model loaded with 65,536 tokens was shown three turns inside a
+budget belonging to a different model. It now uses `budget_for`'s **measured**
+window, the turn slice is gone — `fit` drops oldest-first and whole turns — and
+retention is 40.
+
+**`feat(landing)` and the aura.** The caption slot clears the orbit ring by
+arithmetic rather than by a percentage; the voice hint follows the orb sideways
+via `orbGeometry`; and `OrbAura` gives the avatar the same two state-coloured
+rings and ten motes the orb draws, inside the element that carries the shift
+and zoom so it travels into the conversation.
+
+**Not watched on screen, and it is the first thing to check:**
+
+* **The aura behind the avatar in the conversation.** The landing was verified
+  — 10 motes, 2 rings, no doubling on the orb path — but the *conversation*
+  view with the character selected was not, and that is precisely what the
+  maintainer reported missing. Confirm the rings appear and that no mote paints
+  across the visor.
+* **The memory fix has not been used in a real conversation.** It is measured
+  by tests against a pinned window. Open a long chat on the Tabby model and
+  check the engine's own log line, which now names the figure and whether it
+  was measured: `gave the reply N prior turn(s), M dropped for a K-token share
+  of a measured 65536-token window`.
+* **The particle states.** `thinking`, `listening`, `speaking`, `coding` and
+  `swapping` each move differently now. Only `idle` was seen.
+
+### Still unfinished, from the earlier list
+
+* **TabbyAPI still has not been restarted**, so `vision: true` and
+  `vision_offload: true` in `C:\Users\user\tabbyAPI\config.yml` are set and
+  unproven. Confirm `use_vision` on `/v1/model`, measure the card, send it a
+  real image, and only then delete `gemma4-26b-32k`. Backup at
+  `config.yml.bak-20260907`.
+* **The chat project picker cannot create a project.**
+* **Does a generated image ever leave VRAM?** Still unconfirmed, still the most
+  serious open item anywhere in this file.
 
 ### The gate
 

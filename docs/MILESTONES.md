@@ -11,9 +11,63 @@ accurate — it is the first thing anyone reads.
 
 ---
 
-## Current state — 7 September 2026
+## Current state — 8 September 2026
 
 *The latest work is first. Earlier sessions follow below.*
+
+### 8 September — the memory ceiling, and the avatar's aura
+
+Two commits on `main`. `docs/NEXT-SESSION-PROMPTS.md` carries the brief for
+what comes next: **the typing animation**, which is a sitting Mixamo clip that
+must drive the upper body only, and which carries a licence question that has
+to be answered before it is committed.
+
+**Zaram was not keeping context across a chat, and this is why.** The
+machinery was complete — the turn buffer, the transcript rehydration,
+`core.transcript.fit` — and three ceilings on top of it were all sized for a
+4,096-token model:
+
+| | |
+|---|---|
+| the history cap | computed from `FALLBACK_CONTEXT_TOKENS`: **768 tokens**, for every model on every machine |
+| the eligibility slice | `CONVERSATION_TURNS = 3`, applied *before* anything was fitted |
+| retention | `MAX_SESSION_TURNS = 8` |
+
+So a model loaded with 65,536 tokens was shown three exchanges inside a budget
+belonging to a different model. The cap now comes from `budget_for`'s
+**measured** window, the turn slice is gone — `fit` drops oldest-first and
+whole turns, which is a better bound than a number chosen against a window we
+can read — and retention is 40.
+
+The constant's own comment argued carefully for the wrong thing: that
+measuring costs a request and *"under-using a 16k window costs nothing"*. It
+costs the product's memory, and the measurement it declined is one loopback
+call with a one-second timeout against a reply that takes seconds to generate.
+
+**A ten-second memo on `budget_for` was written and removed the same hour.** It
+bought milliseconds of loopback and cost module-level state that made one
+test's answer depend on whether another had run first — the wrong trade on a
+number whose whole value is being current, since it changes on a model load and
+a load is the exact moment a stale answer would be quoted.
+
+**`OrbAura`.** The rings and motes were markup inside `LivingOrb`, so choosing
+the character removed the state-coloured rings, the particle field and the
+atmosphere with them. Extracted, with `ringColours` exported so there is one
+state→colour table, and placed inside the element carrying `orbShift` and the
+zoom so it travels into the conversation rather than staying behind. The field
+answers the orb's *state* and never a level — the amplitude of speech is
+exposed nowhere, and a field appearing to pulse with the voice would be the
+waveform bars again.
+
+Also: the landing's caption slot clears the orbit ring by arithmetic rather
+than a percentage of the window, and the voice hint follows the orb sideways
+via `orbGeometry` rather than staying centred on the viewport.
+
+**What was not watched.** The aura behind the avatar **in the conversation** —
+the landing was verified (10 motes, 2 rings, no doubling on the orb path) and
+the conversation view was not, which is exactly what was reported missing. The
+memory fix has never been used in a real chat; it is measured by tests against
+a pinned window. And only `idle` of the five particle states was seen.
 
 ### 7 September, evening session — seven commits, all on `main`
 
