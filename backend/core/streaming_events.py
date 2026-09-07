@@ -107,6 +107,26 @@ class EventType(str, Enum):
     #: cannot work out for itself -- it knows the id it sent, and needs to be
     #: told the id it did not.
     CONVERSATION = "conversation"
+    #: What this exchange cost, in tokens, as it is being spent.
+    #:
+    #: **Deltas, not a total**, and that is what lets it be honest. Every
+    #: generation passes through one place -- `_dispatcher.execute_step` -- so
+    #: what was sent and what came back are countable there without any layer
+    #: guessing on another's behalf. A surface adds them up; nothing here has to
+    #: know the running total, and no number is derived twice.
+    #:
+    #: `reclaimed` is the negative half and it is real rather than decorative:
+    #: at half the window a task compacts itself and the oldest tool results are
+    #: dropped, which genuinely removes tokens from the next request. It is the
+    #: only thing in this product a red minus honestly describes -- there are no
+    #: file edits to count, because every mutative tool is out of scope until v1.
+    #:
+    #: Carrying `limit` beside `measured` is the rule `vram_bytes` keeps.
+    #: `ContextBudget` knows whether the window came from `/api/ps` or from a
+    #: fallback constant, and a surface must not quote a fallback to a user as
+    #: though it were a fact about their machine -- so the flag travels with the
+    #: number rather than being inferred from it.
+    USAGE = "usage"
 
 
 @dataclass
@@ -132,6 +152,35 @@ class StreamEvent:
             "seq": self.seq,
             "correlation_id": self.correlation_id,
         })
+
+    @staticmethod
+    def usage(
+        added: int = 0,
+        reclaimed: int = 0,
+        limit: int | None = None,
+        measured: bool = False,
+        seq: int = 0,
+        correlation_id: str = "",
+    ) -> StreamEvent:
+        """One increment of what this exchange has cost.
+
+        `added` is tokens put in front of the model -- a prompt sent, a reply
+        generated. `reclaimed` is tokens a compaction took back out. Both are
+        non-negative and the sign lives in the field name, never in the value:
+        a surface that had to test for a negative would render a minus for an
+        addition the first time somebody passed the wrong argument.
+        """
+        return StreamEvent(
+            type=EventType.USAGE,
+            data={
+                "added": max(0, int(added)),
+                "reclaimed": max(0, int(reclaimed)),
+                "limit": limit,
+                "measured": bool(measured),
+            },
+            seq=seq,
+            correlation_id=correlation_id,
+        )
 
     @staticmethod
     def token(content: str, seq: int = 0, correlation_id: str = "") -> StreamEvent:

@@ -18,6 +18,7 @@ import {
   type ChatSource,
   type ChatRequest,
   type ImageProgress,
+  type TokenUsage,
 } from '@/services/chatClient';
 import type { Artifact } from '@/services/artifactsClient';
 import { useSystemStore } from '@/stores/systemStore';
@@ -132,6 +133,18 @@ interface ChatState {
    *  the attribution is on screen while the answer is being read rather than
    *  appearing under it once the reading is done. */
   streamingAnsweredBy: ChatAttribution | null;
+  /** What the exchange in flight has cost, in tokens.
+   *
+   *  **Per turn, and it survives the turn.** Reset when a message is sent and
+   *  accumulated from the increments the backend emits, so during a reply it
+   *  counts up and afterwards it stands as what that exchange cost. Clearing it
+   *  on `done` would blank the number at the exact moment somebody looks at it.
+   *
+   *  Accumulated here rather than totalled by the backend because only one of
+   *  the two knows what a *turn* is: the backend counts a step, the surface
+   *  knows which steps belong to the message on screen. Deriving the same
+   *  figure in both places is how two counters end up disagreeing. */
+  turnUsage: TokenUsage;
   isStreaming: boolean;
   /** Connection-level failure, as opposed to a failure within one reply. */
   connectionError: string | null;
@@ -234,6 +247,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   streamingToolCalls: [],
   streamingImageProgress: null,
   streamingAnsweredBy: null,
+  turnUsage: { added: 0, reclaimed: 0, limit: null, measured: false },
   isStreaming: false,
   connectionError: null,
   sessionId: `session-${newId()}`,
@@ -285,6 +299,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       streamingReasoning: '',
       streamingSources: [],
       streamingAnsweredBy: null,
+      turnUsage: { added: 0, reclaimed: 0, limit: null, measured: false },
       isStreaming: true,
       connectionError: null,
     }));
@@ -404,6 +419,24 @@ export const useChatStore = create<ChatState>((set, get) => ({
             // beside the finished image would be two claims about one thing,
             // and the second one is stale the moment the first arrives.
             set({ streamingArtifacts: [...artifacts], streamingImageProgress: null });
+            break;
+          }
+
+          case 'usage': {
+            // Summed, because the backend sends what each step spent rather
+            // than a running total. `limit` is carried forward when an event
+            // does not name one: only the compaction event knows the window,
+            // and losing it on the next ordinary step would make the figure
+            // flicker between known and unknown.
+            const prior = get().turnUsage;
+            set({
+              turnUsage: {
+                added: prior.added + event.usage.added,
+                reclaimed: prior.reclaimed + event.usage.reclaimed,
+                limit: event.usage.limit ?? prior.limit,
+                measured: event.usage.measured || prior.measured,
+              },
+            });
             break;
           }
 

@@ -132,8 +132,33 @@ export interface ImageProgress {
   percent: number;
 }
 
+/** What one exchange has cost so far, in tokens.
+ *
+ *  **Increments, never a running total.** The backend counts where every
+ *  generation actually passes and sends what that step spent; this client adds
+ *  them up. Nothing derives the same number twice, which is what stops the two
+ *  halves disagreeing on screen.
+ *
+ *  `reclaimed` is the red half and it is a real quantity rather than a
+ *  decorative one: at half the window a task compacts itself and drops its
+ *  oldest tool results, which removes those tokens from the next request. It is
+ *  the only subtraction this product can honestly show — there are no file
+ *  edits to count, since every mutative tool is out of scope until v1 ships.
+ *
+ *  `limit` is the model's loaded window and `measured` says whether it was read
+ *  from `/api/ps` or fell back to a constant. They travel together because a
+ *  surface must never quote a fallback as a fact about the user's machine —
+ *  the discipline `vram_bytes` keeps by returning null rather than zero. */
+export interface TokenUsage {
+  added: number;
+  reclaimed: number;
+  limit: number | null;
+  measured: boolean;
+}
+
 export type ChatEvent =
   | { type: 'token'; content: string }
+  | { type: 'usage'; usage: TokenUsage }
   /** The model's working, from a `<think>` block, with the tags removed.
    *
    *  Its own event rather than a flag on `token` because the destinations
@@ -455,6 +480,31 @@ function parseLine(line: string): ChatEvent | null {
   switch (evt.type) {
     case 'token':
       return { type: 'token', content: String(data.content ?? '') };
+
+    case 'usage': {
+      // Coerced through Number and floored at zero on both halves. A negative
+      // `added` arriving from anywhere would render as a green plus in front of
+      // a minus sign, and the sign is meant to live in the field rather than in
+      // the value.
+      const count = (value: unknown): number => {
+        const n = Number(value ?? 0);
+        return Number.isFinite(n) && n > 0 ? Math.round(n) : 0;
+      };
+      // `limit` stays null unless it is a real positive number. Zero is not a
+      // small window, it is an unreadable one, and a bar drawn against it would
+      // report every conversation as full.
+      const rawLimit = Number(data.limit ?? 0);
+      const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.round(rawLimit) : null;
+      return {
+        type: 'usage',
+        usage: {
+          added: count(data.added),
+          reclaimed: count(data.reclaimed),
+          limit,
+          measured: Boolean(data.measured),
+        },
+      };
+    }
 
     case 'reasoning':
       return { type: 'reasoning', content: String(data.content ?? '') };

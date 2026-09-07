@@ -18,6 +18,7 @@ import ArtifactGrid from '@/components/ArtifactGrid';
 import ImageProgressCard from '@/components/ImageProgressCard';
 import { groupArtifacts } from '@/lib/artifactGroups';
 import AttachmentChips from '@/components/chat/AttachmentChips';
+import { TokenUsageBar } from '@/components/chat/TokenUsageBar';
 import RoutingControl from '@/components/chat/RoutingControl';
 import { filesFromClipboard, withPasteName } from '@/lib/pastedFiles';
 import {
@@ -1051,7 +1052,7 @@ export default function ChatSurface({ navigate }: Props) {
                       `[TOOL_CALL]` arrives split across tokens, so without it
                       the surface shows nothing at all for the seconds the model
                       spends reading. */}
-                  {streamingToolCalls.length > 0 && <ToolCalls calls={streamingToolCalls} />}
+                  {streamingToolCalls.length > 0 && <ToolCalls calls={streamingToolCalls} active />}
                   {streamingNotices.map((notice, i) => (
                     <NoticeCard
                       key={i}
@@ -1105,6 +1106,10 @@ export default function ChatSurface({ navigate }: Props) {
         variants={item}
         style={{ backdropFilter: 'blur(20px) saturate(1.4)' }}
       >
+        {/* What the last exchange cost, above the box you type the next one
+            in -- the same reason the attachment chips are here. A cost shown
+            below the composer is read after the decision it should inform. */}
+        <TokenUsageBar />
         {/* What is in scope for the next message, above the box you type it
             in. Below the composer would put the evidence after the question. */}
         <AttachmentChips

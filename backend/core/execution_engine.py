@@ -64,6 +64,32 @@ from core.registry import RuntimeRegistry
 from core.scheduler import RuntimeScheduler
 from core.task_queue import TaskQueue
 
+
+def _step_tokens(step: Any) -> int:
+    """What a step's input costs, counted over the text it actually carries.
+
+    `input_data` is an open dictionary rather than a typed prompt, so this walks
+    the string values instead of naming one key. A key nobody thought of is then
+    counted rather than silently free -- which is the direction the error has to
+    fall, because a cost this under-reports reads as headroom the user does not
+    have.
+
+    Images are excluded deliberately. They travel through the same dictionary as
+    base64, where `estimate_tokens` would charge hundreds of thousands of tokens
+    for a photograph a vision model bills as a few hundred. A number that wrong
+    is worse than none, and no honest figure is available here.
+    """
+    data = getattr(step, "input_data", None)
+    if not isinstance(data, dict):
+        return 0
+    total = 0
+    for key, value in data.items():
+        if key == "images":
+            continue
+        if isinstance(value, str):
+            total += estimate_tokens(value)
+    return total
+
 logger = logging.getLogger(__name__)
 
 #: Capabilities that must refuse rather than fall back to an ordinary answer.
@@ -594,6 +620,14 @@ class ExecutionEngine:
             # the call leaves the text stream and this buffer goes with it.
             buffering = bool(offered_tools) and step.capability_id == "reasoning.generate"
 
+            # **What this step is about to cost, counted where every generation
+            # passes.** `execute_step` is the one route to a model on both the
+            # plain and the tool-driven path, so counting here needs no layer to
+            # estimate on another's behalf. A counter fed from the composer
+            # would have had to, and it would have missed recall entirely --
+            # which is most of what a Zaram prompt actually is.
+            sent = estimate_tokens(system_prompt) + _step_tokens(step)
+
             try:
                 for token in self._dispatcher.execute_step(step, model, system_prompt):
                     step_output += token
@@ -626,6 +660,12 @@ class ExecutionEngine:
                             )
                     else:
                         yield token
+
+                # Sent plus received, once the step is done. After the loop
+                # rather than per token: a figure that moved on every token
+                # would be arithmetic happening on screen rather than a number,
+                # and a reply is not a cost until it exists.
+                yield StreamEvent.usage(added=sent + estimate_tokens(step_output))
 
                 if step_output.strip().startswith("[FALLBACK]") or step_output.strip().startswith("[WARN]"):
                     step_failed = True
@@ -1178,6 +1218,21 @@ class ExecutionEngine:
                 # and could be never.
                 if continuations_left > 0:
                     carried, dropped = self._turns_that_still_fit(turns, model)
+                    # The red half, and the only honest one here. Compaction
+                    # genuinely removes these tokens from the next request -- it
+                    # is not a display of a saving, it is the saving. Counted
+                    # from the turns actually dropped rather than from the
+                    # threshold, because the threshold is what triggered the
+                    # compaction and not what it recovered.
+                    if dropped:
+                        yield StreamEvent.usage(
+                            reclaimed=sum(
+                                estimate_tokens(render_result(turn.result))
+                                for turn in turns[:dropped]
+                            ),
+                            limit=budget.total_tokens,
+                            measured=budget.measured,
+                        )
                     if carried:
                         continuations_left -= 1
                         turns = carried
