@@ -190,12 +190,20 @@ export default function App() {
       </AnimatePresence>
 
       {/* Past conversations, on a lip at the left edge.
-          Mounted only with the conversation, because history of the shell has
-          no meaning while a workspace is open -- and because `SourcePanelLayer`
-          below also comes from the left, so the two must not be on screen
-          competing for the same edge. Sources are transient and belong to the
-          reply being read; this is ambient and belongs to the shell, which is
-          why it sits under them in the stack. */}
+          Not on Work, Memory, Knowledge, Activity or Settings, because history
+          of the shell has no meaning while a workspace is open -- and because
+          `SourcePanelLayer` below also comes from the left, so the two must not
+          be on screen competing for the same edge. Sources are transient and
+          belong to the reply being read; this is ambient and belongs to the
+          shell, which is why it sits under them in the stack.
+
+          **It stays off the landing**, and that was checked rather than
+          assumed: mounting it there was tried on 7 September 2026 while
+          chasing "the lip stopped working" and reverted at the maintainer's
+          direction. History belongs to the conversation, and the landing has
+          one way in — the orb. The defect was never the mounting condition;
+          it was the control being invisible once used, which is fixed in
+          `HistoryPanel` itself. */}
       {chatView === 'chat' && <HistoryPanel />}
 
       {/* Source panels — over the orb region, beside the conversation. */}

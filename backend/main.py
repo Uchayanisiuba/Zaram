@@ -3140,6 +3140,165 @@ async def list_artifact_projects():
     return {"projects": artifact_service.records.projects()}
 
 
+class ArtifactIds(BaseModel):
+    #: The artifacts to act on. A list even for one, because every real use of
+    #: this is a selection and a single-item route would be the same code with
+    #: a second URL to keep in step.
+    ids: list[str]
+
+
+def _artifact_trash():
+    """The trash, rooted where the output folder is.
+
+    Built per request rather than held, because it owns no state — it is a
+    path and two moves — and a module-level handle would have to be rebuilt
+    anyway the moment `ZARAM_DATA_DIR` moved underneath it.
+    """
+    from artifacts.trash import ArtifactTrash
+
+    return ArtifactTrash(artifact_service.store.root)
+
+
+# Declared before `/artifacts/{artifact_id}` for the reason stated above it:
+# FastAPI matches in declaration order, so "delete" registered afterwards would
+# be read as an artifact id.
+@app.post("/artifacts/delete")
+async def delete_artifacts(body: ArtifactIds):
+    """Remove files the user selected. **Mutative tier, and it moves.**
+
+    `CLAUDE.md`'s tier table requires undo, confirm and sandbox for anything
+    that changes existing state, and each is answered by something real rather
+    than by a promise:
+
+    * **Undo** — the file goes to a trash folder inside the output root and the
+      record is *marked* rather than dropped, so `POST /artifacts/restore` has
+      both halves to put back. Nothing here unlinks anything, today or ever;
+      emptying that folder stays the operating system's job, which is the half
+      of `CLAUDE.md`'s original sentence that survives unchanged.
+    * **Sandbox** — `ArtifactTrash` confines every path to the output root, the
+      same boundary the write path draws, because these paths come from records
+      and records were written from filenames a *model* proposed.
+    * **Confirm** — the interface's, before it calls this.
+
+    **This is not the write path gaining a delete.** `store.py` still cannot
+    remove a file and `test_artifact_write_path.py` still proves it by reading
+    the source. Generation must never be able to destroy a document; a person
+    looking at a list of their own files reasonably expects to be able to
+    remove one, and rule 4 is on their side. Two different actors, two
+    different capabilities, two different modules.
+
+    Partial success is reported rather than raised. Deleting forty files where
+    one record has already lost its file must not fail the other thirty-nine
+    and leave the user with no idea which went.
+    """
+    trash = _artifact_trash()
+    removed: list[dict] = []
+    skipped: list[dict] = []
+
+    for artifact_id in body.ids:
+        record = artifact_service.records.get(artifact_id)
+        if record is None:
+            skipped.append({"id": artifact_id, "reason": "No such file"})
+            continue
+
+        # The record is marked only once the file has actually moved. The other
+        # order leaves a record saying "removed" over a file still sitting in
+        # the output folder, which is the state Work cannot render honestly.
+        if record.path:
+            try:
+                trash.send(record.path)
+            except FileNotFoundError:
+                # The record outlived its file — the user moved it themselves.
+                # Marking it removed is still the right answer: they are asking
+                # for it gone from Work, and it is already gone from disk.
+                # `logging.getLogger(__name__)` and not a bare `logger`, which
+                # is bound nowhere in this module — the exact `NameError` this
+                # repository has already shipped once, inside a handler whose
+                # whole purpose was that nothing there is worth a failed reply.
+                logging.getLogger(__name__).info(
+                    "no file to move for %s; marking it removed", artifact_id
+                )
+            except Exception as error:  # noqa: BLE001 - reported, never raised
+                skipped.append({"id": artifact_id, "reason": str(error)})
+                continue
+
+        artifact_service.records.soft_delete(artifact_id)
+        removed.append({"id": artifact_id, "filename": record.filename})
+
+    return {
+        "removed": removed,
+        "skipped": skipped,
+        # Said, not assumed — the same shape as deleting a conversation, which
+        # explains that the facts Zaram remembered are still in Memory. A user
+        # who removes an invoice has not asked to forget what it said, and
+        # leaving them to guess whether it did is worse than a sentence.
+        "note": (
+            "Moved to the trash folder beside your work, so nothing is gone yet. "
+            "Anything Zaram remembered from these stays in Memory until you "
+            "remove it there."
+        ),
+    }
+
+
+@app.post("/artifacts/restore")
+async def restore_artifacts(body: ArtifactIds):
+    """Put back what `POST /artifacts/delete` moved. The undo the tier requires.
+
+    Refuses to land on top of a file that has since been generated at the same
+    name — `ArtifactTrash.restore` raises, and it is reported here rather than
+    swallowed. An undo that quietly replaced a newer file would destroy
+    something the user never asked to lose while appearing to be the safe
+    operation.
+    """
+    trash = _artifact_trash()
+    restored: list[dict] = []
+    skipped: list[dict] = []
+
+    for artifact_id in body.ids:
+        record = artifact_service.records.get(artifact_id, include_deleted=True)
+        if record is None:
+            skipped.append({"id": artifact_id, "reason": "No such file"})
+            continue
+
+        if record.path:
+            trashed = _trashed_copy_of(trash, record.path)
+            if trashed is None:
+                skipped.append(
+                    {"id": artifact_id, "reason": "Not in the trash any more"}
+                )
+                continue
+            try:
+                trash.restore(trashed, record.path)
+            except Exception as error:  # noqa: BLE001 - reported, never raised
+                skipped.append({"id": artifact_id, "reason": str(error)})
+                continue
+
+        artifact_service.records.restore(artifact_id)
+        restored.append({"id": artifact_id, "filename": record.filename})
+
+    return {"restored": restored, "skipped": skipped}
+
+
+def _trashed_copy_of(trash, original_path: str):
+    """The most recent trashed file for ``original_path``, or ``None``.
+
+    Matched on the name the trash gave it — a timestamp prefix and the original
+    filename — and the **newest** wins, because a file deleted, regenerated and
+    deleted again leaves two, and the one the user just removed is the one they
+    mean by undo.
+    """
+    import os
+
+    name = os.path.basename(original_path)
+    root = trash.root
+    if not root.is_dir():
+        return None
+    matches = [p for p in root.iterdir() if p.is_file() and p.name.endswith(f"-{name}")]
+    if not matches:
+        return None
+    return max(matches, key=lambda p: p.stat().st_mtime)
+
+
 # --------------------------------------------------------------------------- #
 # Projects
 #

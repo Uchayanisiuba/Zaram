@@ -327,3 +327,56 @@ export async function setRemember(id: string, remember: boolean | null): Promise
   });
   if (!res.ok) throw await failure(res, 'Could not save that preference');
 }
+
+/** What a removal or a restore did, per file.
+ *
+ *  Reported rather than raised, because a selection is not one operation:
+ *  removing forty files where one record has already lost its file must not
+ *  fail the other thirty-nine and leave the user unable to tell which went. */
+export interface RemovalOutcome {
+  removed: Array<{ id: string; filename: string }>;
+  skipped: Array<{ id: string; reason: string }>;
+  /** The backend's own sentence about what removal does and does not touch —
+   *  rendered as it stands, so the wording tracks the behaviour rather than
+   *  drifting from a copy written here. */
+  note: string;
+}
+
+/**
+ * Move the selected files to the trash beside the output folder.
+ *
+ * **Nothing is destroyed.** The file moves and the record is marked, so
+ * `restoreArtifacts` can put both back — mutative tier requires undo, and a
+ * folder that is still there tomorrow is the version of undo that survives the
+ * session. Emptying it is the operating system's job.
+ *
+ * The caller confirms first. This function cannot know whether a person saw a
+ * dialog, and every call site that forgets one is a selection deleted by a
+ * mis-click.
+ */
+export async function deleteArtifacts(ids: string[]): Promise<RemovalOutcome> {
+  const res = await fetch(`${API_BASE}/artifacts/delete`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ids }),
+  });
+  if (!res.ok) throw await failure(res, 'Could not remove those files');
+  return (await res.json()) as RemovalOutcome;
+}
+
+/** Put back what `deleteArtifacts` moved.
+ *
+ *  Can partly fail, and honestly: a file generated at the same name since the
+ *  delete is reported in `skipped` rather than replaced, because an undo that
+ *  overwrote a newer file would destroy something nobody asked to lose. */
+export async function restoreArtifacts(
+  ids: string[],
+): Promise<{ restored: Array<{ id: string; filename: string }>; skipped: Array<{ id: string; reason: string }> }> {
+  const res = await fetch(`${API_BASE}/artifacts/restore`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ids }),
+  });
+  if (!res.ok) throw await failure(res, 'Could not put those files back');
+  return await res.json();
+}

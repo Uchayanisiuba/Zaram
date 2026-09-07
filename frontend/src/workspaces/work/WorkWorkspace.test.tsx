@@ -20,6 +20,8 @@ import userEvent from '@testing-library/user-event';
 import type { Artifact } from '@/services/artifactsClient';
 
 const listArtifacts = vi.fn();
+const deleteArtifacts = vi.fn();
+const restoreArtifacts = vi.fn();
 
 vi.mock('@/services/artifactsClient', async () => {
   const actual = await vi.importActual<typeof import('@/services/artifactsClient')>(
@@ -30,6 +32,8 @@ vi.mock('@/services/artifactsClient', async () => {
     listArtifacts: (...args: unknown[]) => listArtifacts(...(args as [])),
     getArtifact: vi.fn(async () => null),
     downloadArtifact: vi.fn(async () => undefined),
+    deleteArtifacts: (...args: unknown[]) => deleteArtifacts(...(args as [])),
+    restoreArtifacts: (...args: unknown[]) => restoreArtifacts(...(args as [])),
   };
 });
 
@@ -87,6 +91,14 @@ const ROWS = [
 beforeEach(() => {
   listArtifacts.mockReset();
   listArtifacts.mockResolvedValue({ artifacts: ROWS });
+  deleteArtifacts.mockReset();
+  deleteArtifacts.mockResolvedValue({
+    removed: [{ id: 'inv', filename: 'invoice-0007.pdf' }],
+    skipped: [],
+    note: 'Moved to the trash folder beside your work. Anything Zaram remembered stays in Memory until you remove it there.',
+  });
+  restoreArtifacts.mockReset();
+  restoreArtifacts.mockResolvedValue({ restored: [{ id: 'inv', filename: 'invoice-0007.pdf' }], skipped: [] });
 });
 
 afterEach(cleanup);
@@ -239,5 +251,138 @@ describe('when there is nothing to show', () => {
     render(<WorkWorkspace />);
 
     expect(await screen.findByText(/nothing here yet/i)).toBeInTheDocument();
+  });
+});
+
+describe('selecting and removing', () => {
+  it('selects one file at a time', async () => {
+    render(<WorkWorkspace />);
+    await screen.findByText('invoice-0007.pdf');
+
+    await user().click(screen.getByRole('checkbox', { name: /select invoice-0007\.pdf/i }));
+
+    expect(await screen.findByText('1 file selected')).toBeInTheDocument();
+  });
+
+  it('selects a whole group at once, which is select-by-project', async () => {
+    // Not a separate menu. The grouping already cuts the listing by project,
+    // so the heading's checkbox *is* select-by-project — and under "group by
+    // date" the same control is select-by-date.
+    render(<WorkWorkspace />);
+    await screen.findByRole('heading', { name: /invoices/i });
+
+    await user().selectOptions(screen.getByLabelText('Group by'), 'project');
+    await user().click(
+      screen.getByRole('checkbox', { name: /select everything under northwind/i }),
+    );
+
+    expect(await screen.findByText('1 file selected')).toBeInTheDocument();
+  });
+
+  it('selects by date under the date grouping', async () => {
+    render(<WorkWorkspace />);
+    await screen.findByRole('heading', { name: /invoices/i });
+
+    await user().selectOptions(screen.getByLabelText('Group by'), 'date');
+    await user().click(screen.getByRole('checkbox', { name: /select everything under today/i }));
+
+    expect(await screen.findByText('3 files selected')).toBeInTheDocument();
+  });
+
+  it('unticks a group that is already fully ticked', async () => {
+    render(<WorkWorkspace />);
+    await screen.findByRole('heading', { name: /invoices/i });
+
+    const heading = screen.getByRole('checkbox', { name: /select everything under invoices/i });
+    await user().click(heading);
+    expect(await screen.findByText('1 file selected')).toBeInTheDocument();
+
+    await user().click(heading);
+    expect(screen.queryByText(/file selected/)).not.toBeInTheDocument();
+  });
+
+  it('asks before it removes anything', async () => {
+    // Rule 6, and the tier table: mutative needs a confirm. A selection of
+    // forty files removed by a mis-click is what this is for.
+    render(<WorkWorkspace />);
+    await screen.findByText('invoice-0007.pdf');
+    await user().click(screen.getByRole('checkbox', { name: /select invoice-0007\.pdf/i }));
+
+    await user().click(screen.getByRole('button', { name: /^remove$/i }));
+
+    expect(deleteArtifacts).not.toHaveBeenCalled();
+    // And it says what will happen rather than asking for certainty.
+    expect(screen.getByText(/move to a trash folder/i)).toBeInTheDocument();
+  });
+
+  it('removes only on the second, explicit press', async () => {
+    render(<WorkWorkspace />);
+    await screen.findByText('invoice-0007.pdf');
+    await user().click(screen.getByRole('checkbox', { name: /select invoice-0007\.pdf/i }));
+    await user().click(screen.getByRole('button', { name: /^remove$/i }));
+
+    await user().click(screen.getByRole('button', { name: /remove 1 file/i }));
+
+    expect(deleteArtifacts).toHaveBeenCalledWith(['inv']);
+  });
+
+  it('cancelling leaves the selection alone', async () => {
+    render(<WorkWorkspace />);
+    await screen.findByText('invoice-0007.pdf');
+    await user().click(screen.getByRole('checkbox', { name: /select invoice-0007\.pdf/i }));
+    await user().click(screen.getByRole('button', { name: /^remove$/i }));
+
+    await user().click(screen.getByRole('button', { name: /cancel/i }));
+
+    expect(deleteArtifacts).not.toHaveBeenCalled();
+    expect(screen.getByText('1 file selected')).toBeInTheDocument();
+  });
+
+  it('offers to undo, and says what removal did not touch', async () => {
+    render(<WorkWorkspace />);
+    await screen.findByText('invoice-0007.pdf');
+    await user().click(screen.getByRole('checkbox', { name: /select invoice-0007\.pdf/i }));
+    await user().click(screen.getByRole('button', { name: /^remove$/i }));
+    await user().click(screen.getByRole('button', { name: /remove 1 file/i }));
+
+    expect(await screen.findByRole('button', { name: /undo/i })).toBeInTheDocument();
+    // The backend's own sentence, rendered as it stands.
+    expect(screen.getByText(/stays in Memory/i)).toBeInTheDocument();
+  });
+
+  it('puts them back on undo', async () => {
+    render(<WorkWorkspace />);
+    await screen.findByText('invoice-0007.pdf');
+    await user().click(screen.getByRole('checkbox', { name: /select invoice-0007\.pdf/i }));
+    await user().click(screen.getByRole('button', { name: /^remove$/i }));
+    await user().click(screen.getByRole('button', { name: /remove 1 file/i }));
+
+    await user().click(await screen.findByRole('button', { name: /undo/i }));
+
+    expect(restoreArtifacts).toHaveBeenCalledWith(['inv']);
+  });
+
+  it('shows what could not be removed rather than swallowing it', async () => {
+    // A partial result the user cannot see is a partial result they discover
+    // by missing something.
+    deleteArtifacts.mockResolvedValue({
+      removed: [],
+      skipped: [{ id: 'inv', reason: 'invoice-0007.pdf is not where Zaram left it' }],
+      note: 'nothing moved',
+    });
+    render(<WorkWorkspace />);
+    await screen.findByText('invoice-0007.pdf');
+    await user().click(screen.getByRole('checkbox', { name: /select invoice-0007\.pdf/i }));
+    await user().click(screen.getByRole('button', { name: /^remove$/i }));
+    await user().click(screen.getByRole('button', { name: /remove 1 file/i }));
+
+    expect(await screen.findByText(/not where Zaram left it/i)).toBeInTheDocument();
+  });
+
+  it('shows no selection strip until something is selected', () => {
+    // A permanent "0 selected" is a permanent instruction to select something,
+    // and it costs the listing a line on every visit.
+    render(<WorkWorkspace />);
+    expect(screen.queryByText(/selected/i)).not.toBeInTheDocument();
   });
 });

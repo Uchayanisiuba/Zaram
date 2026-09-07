@@ -64,13 +64,16 @@ import { useArtifactImage } from '@/hooks/useArtifactImage';
 import {
   KIND_LABELS,
   PICTORIAL_KINDS,
+  deleteArtifacts,
   downloadArtifact,
   getArtifact,
   listArtifacts,
+  restoreArtifacts,
   type Artifact,
   type ArtifactKind,
 } from '@/services/artifactsClient';
 import WorkToolbar, { type ViewMode } from './work/WorkToolbar';
+import SelectionBar, { type SelectionPhase } from './work/SelectionBar';
 import { group, search, type GroupBy, type SortBy } from './work/organise';
 
 // The second copy of this map, and the reason `ArtifactKind` is a union rather
@@ -154,6 +157,63 @@ export default function WorkWorkspace({ onOpenConversation }: WorkWorkspaceProps
   const [sortBy, setSortBy] = useState<SortBy>('newest');
   const [view, setView] = useState<ViewMode>('auto');
 
+  /**
+   * Which files are ticked, by id.
+   *
+   * **Ids, not artifacts.** The listing is replaced wholesale by every reload,
+   * so holding objects would leave a selection pointing at records that are no
+   * longer the ones on screen — and the failure would be a delete aimed at a
+   * stale set, which is the worst place for that class of bug.
+   */
+  const [ticked, setTicked] = useState<ReadonlySet<string>>(new Set());
+  const [phase, setPhase] = useState<SelectionPhase>('choosing');
+  const [removing, setRemoving] = useState(false);
+  /** What the last removal did: how many, what the backend said, what it could
+   *  not do. Cleared when the strip is dismissed. */
+  const [removal, setRemoval] = useState<{
+    ids: string[];
+    note: string;
+    skipped: Array<{ id: string; reason: string }>;
+  } | null>(null);
+
+  const toggle = useCallback((id: string) => {
+    setTicked((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  /** Tick or untick a whole group at once.
+   *
+   *  **This is what "select by project" and "select by date" are.** They are
+   *  not three more controls — the grouping already cuts the listing by type,
+   *  project or date, so a checkbox on the heading selects exactly that cut.
+   *  Building separate select-by-X menus would be a second organising system
+   *  beside the one on screen, and the two would disagree the first time a
+   *  filter was applied.
+   *
+   *  Ticks the whole group unless it is already entirely ticked, in which case
+   *  it clears it — the behaviour of every list with a header checkbox, and the
+   *  one people do not have to be told. */
+  const toggleGroup = useCallback((ids: string[]) => {
+    setTicked((current) => {
+      const next = new Set(current);
+      const allOn = ids.every((id) => next.has(id));
+      for (const id of ids) {
+        if (allOn) next.delete(id);
+        else next.add(id);
+      }
+      return next;
+    });
+  }, []);
+
+  const clearSelection = useCallback(() => {
+    setTicked(new Set());
+    setPhase('choosing');
+  }, []);
+
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -215,6 +275,58 @@ export default function WorkWorkspace({ onOpenConversation }: WorkWorkspaceProps
   // the contents.
   const resolvedView: 'list' | 'grid' =
     view === 'auto' ? (allPictures ? 'grid' : 'list') : view;
+
+  /**
+   * Remove what is ticked, having asked first.
+   *
+   * The listing is reloaded rather than patched in place. Patching is faster
+   * and would be a second model of what the server holds — and a partial
+   * removal is exactly the case where the two diverge, since some ids went and
+   * some did not. One source of truth, one request, and the strip reports what
+   * the server actually said.
+   */
+  const removeTicked = useCallback(async () => {
+    const ids = [...ticked];
+    if (ids.length === 0) return;
+    setRemoving(true);
+    try {
+      const outcome = await deleteArtifacts(ids);
+      setRemoval({
+        ids: outcome.removed.map((r) => r.id),
+        note: outcome.note,
+        skipped: outcome.skipped,
+      });
+      setTicked(new Set());
+      setPhase('removed');
+      // The open detail panel may be showing one of them. Closing it is not
+      // tidiness: it renders a download button for a file that has moved.
+      setSelected((current) => (current && ids.includes(current.id) ? null : current));
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not remove those files');
+      setPhase('choosing');
+    } finally {
+      setRemoving(false);
+    }
+  }, [ticked, load]);
+
+  const undoRemoval = useCallback(async () => {
+    if (!removal) return;
+    setRemoving(true);
+    try {
+      const outcome = await restoreArtifacts(removal.ids);
+      // Anything that could not go back is said rather than swallowed — a file
+      // generated at the same name since the delete is refused rather than
+      // replaced, and the user has to be told which.
+      setRemoval(outcome.skipped.length ? { ...removal, skipped: outcome.skipped } : null);
+      if (!outcome.skipped.length) setPhase('choosing');
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not put those files back');
+    } finally {
+      setRemoving(false);
+    }
+  }, [removal, load]);
 
   const kindCounts = useMemo(() => {
     const counts = {} as Record<ArtifactKind, number>;
@@ -299,6 +411,30 @@ export default function WorkWorkspace({ onOpenConversation }: WorkWorkspaceProps
           resolvedView={resolvedView}
         />
 
+        {/* Only when there is something to say. A strip that is always there,
+            reading "0 selected", is a permanent instruction to select
+            something — and it costs the listing a line of height on every
+            visit for the benefit of the visits where a file is being removed. */}
+        {(ticked.size > 0 || phase === 'removed') && (
+          <SelectionBar
+            phase={phase}
+            count={phase === 'removed' ? (removal?.ids.length ?? 0) : ticked.size}
+            note={phase === 'removed' ? (removal?.note ?? null) : null}
+            skipped={removal?.skipped ?? []}
+            busy={removing}
+            onSelectAll={() => setTicked(new Set(visible.map((a) => a.id)))}
+            onClear={clearSelection}
+            onAskToRemove={() => setPhase('confirming')}
+            onConfirmRemove={() => void removeTicked()}
+            onCancelRemove={() => setPhase('choosing')}
+            onUndo={() => void undoRemoval()}
+            onDismiss={() => {
+              setRemoval(null);
+              setPhase('choosing');
+            }}
+          />
+        )}
+
         <div className="flex-1 overflow-y-auto px-8 pb-8">
           {loading && artifacts.length === 0 ? (
             <LoadingState />
@@ -325,6 +461,7 @@ export default function WorkWorkspace({ onOpenConversation }: WorkWorkspaceProps
                   {g.label && (
                     <h3
                       id={`work-group-${g.key}`}
+                      data-group={g.key}
                       // Sticky, because the heading is the answer to "what am
                       // I looking at" and scrolling past it in a long listing
                       // takes that answer away at exactly the moment it is
@@ -336,6 +473,18 @@ export default function WorkWorkspace({ onOpenConversation }: WorkWorkspaceProps
                         background: 'var(--color-bg, #060911)',
                       }}
                     >
+                      {/* Select the whole cut. Under "group by project" this
+                          is select-by-project; under "group by date" it is
+                          select-by-date. One control, because the grouping is
+                          already on screen and a separate select-by menu would
+                          be a second organising system disagreeing with it. */}
+                      <input
+                        type="checkbox"
+                        aria-label={`Select everything under ${g.label}`}
+                        checked={g.artifacts.every((a) => ticked.has(a.id))}
+                        onChange={() => toggleGroup(g.artifacts.map((a) => a.id))}
+                        style={{ accentColor: 'var(--color-indigo-light)' }}
+                      />
                       {g.label}
                       <span
                         style={{
@@ -373,7 +522,9 @@ export default function WorkWorkspace({ onOpenConversation }: WorkWorkspaceProps
                           key={a.id}
                           artifact={a}
                           selected={selected?.id === a.id}
+                          ticked={ticked.has(a.id)}
                           onSelect={() => setSelected(a)}
+                          onTick={() => toggle(a.id)}
                         />
                       ))}
                     </div>
@@ -424,26 +575,54 @@ function ColumnHeader() {
   );
 }
 
-/** One artifact as a row. */
+/**
+ * One artifact as a row.
+ *
+ * **The checkbox is a sibling of the button, not inside it.** A control inside
+ * a `<button>` is invalid HTML and behaves accordingly — the click reaches both,
+ * so ticking a file would also open its detail panel, and a keyboard user
+ * tabbing to the checkbox would find it unreachable. So the row is a grid whose
+ * first cell is the checkbox and whose second is the button that opens the file.
+ */
 function Row({
   artifact: a,
   selected,
+  ticked,
   onSelect,
+  onTick,
 }: {
   artifact: Artifact;
   selected: boolean;
+  ticked: boolean;
   onSelect: () => void;
+  onTick: () => void;
 }) {
   return (
-    <button
-      onClick={onSelect}
-      aria-current={selected || undefined}
-      className="w-full flex items-center gap-3 px-4 py-2.5 text-left transition-colors hover:bg-white/[0.04]"
+    <div
+      className="flex items-center gap-3 pl-4 transition-colors hover:bg-white/[0.04]"
       style={{
         borderBottom: '1px solid var(--color-border-subtle)',
-        background: selected ? 'rgba(255,255,255,0.05)' : 'transparent',
+        background: ticked
+          ? 'rgba(129,140,248,0.10)'
+          : selected
+            ? 'rgba(255,255,255,0.05)'
+            : 'transparent',
       }}
     >
+      <input
+        type="checkbox"
+        checked={ticked}
+        onChange={onTick}
+        aria-label={`Select ${a.filename}`}
+        className="shrink-0"
+        style={{ accentColor: 'var(--color-indigo-light)' }}
+      />
+
+      <button
+        onClick={onSelect}
+        aria-current={selected || undefined}
+        className="flex flex-1 min-w-0 items-center gap-3 py-2.5 pr-4 text-left"
+      >
       <span className="shrink-0" style={{ color: KIND_COLOUR[a.kind] }}>
         {KIND_ICON[a.kind]}
       </span>
@@ -488,7 +667,8 @@ function Row({
           {bytes(a.size_bytes)}
         </span>
       </span>
-    </button>
+      </button>
+    </div>
   );
 }
 
