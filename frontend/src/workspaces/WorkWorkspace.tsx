@@ -12,6 +12,32 @@
  * is deleted — if nothing has been generated, this surface says so and shows
  * how to make something, which is a truthful empty state rather than a
  * convincing populated lie.
+ *
+ * **The layout, rebuilt 7 September 2026.** It was two wrapping rows of filter
+ * chips over one flat date-ordered list with no headings, no search and no way
+ * to arrange it. That is fine for nine files and unusable at two hundred, which
+ * is where a surface holding everything a person has ever made ends up — and it
+ * had a specific failure at the top, since the project chip row is unbounded
+ * and pushes the type row off the fold as work accumulates.
+ *
+ * Now: a toolbar (search · group · sort · density), a single-line type filter,
+ * aligned columns, and **grouped rows under sticky headings**. That is the
+ * shape every mature files view has converged on, and the convergence is the
+ * argument: a novel arrangement would spend the user's attention on learning
+ * the furniture instead of on finding their invoice.
+ *
+ * **Grouping is not a folder tree, and the difference is the whole reason it is
+ * allowed here.** `CLAUDE.md` refuses a hierarchy — *"a second organising
+ * system competing with the one that is the product"*, and *"if a tree is
+ * needed to find your own work then recall has failed"*. A group is not a
+ * place: nothing is ever filed anywhere, a file is in one bucket under Type and
+ * a different one under Date, and switching the control re-cuts the same set.
+ * Nobody is asked in advance where anything goes, which is rule 7h.
+ *
+ * **And it is still not a file browser.** Every row carries the conversation
+ * that produced it, the search looks *through* that conversation, and the
+ * detail panel opens it. Strip those and the operating system already ships
+ * this screen.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AnimatePresence } from 'framer-motion';
@@ -44,6 +70,8 @@ import {
   type Artifact,
   type ArtifactKind,
 } from '@/services/artifactsClient';
+import WorkToolbar, { type ViewMode } from './work/WorkToolbar';
+import { group, search, type GroupBy, type SortBy } from './work/organise';
 
 // The second copy of this map, and the reason `ArtifactKind` is a union rather
 // than a string: adding `deck` and `cv` to it broke both copies at compile
@@ -90,33 +118,20 @@ const bytes = (n: number) => {
  *  value nobody entered, and this surface does not invent any. */
 const projectLabel = (id: string) => id || 'No project';
 
-function Chip({
-  label,
-  count,
-  active,
-  onClick,
-}: {
-  label: string;
-  count: number;
-  active: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className="flex items-center gap-1.5 rounded-full px-3 py-1 text-[11px] transition-colors hover:bg-white/5"
-      style={{
-        border: `1px solid ${active ? 'var(--color-border)' : 'var(--color-border-subtle)'}`,
-        background: active ? 'rgba(255,255,255,0.08)' : 'transparent',
-        color: active ? 'var(--color-text)' : 'var(--color-text-muted)',
-      }}
-    >
-      {label}
-      {/* Live, so an empty filter says so before it is clicked. */}
-      <span style={{ fontFamily: 'var(--font-mono)', opacity: 0.6 }}>{count}</span>
-    </button>
-  );
-}
+/**
+ * The columns, in one place, so the header and the rows cannot drift apart.
+ *
+ * A grid template rather than a flex row, which is the change that makes this
+ * scannable: the previous layout right-aligned a two-line block per row, so
+ * project and date sat at a different x on every row depending on how long the
+ * filename was. Aligned columns are the whole reason a list view beats a stack
+ * of cards for finding something.
+ *
+ * Project and size collapse on a narrow surface — Work is often open beside the
+ * conversation, which takes a third of the width. The name and the conversation
+ * never collapse: they are what the row is *for*.
+ */
+const ROW_GRID = 'minmax(0,1fr) 140px 96px 72px';
 
 interface WorkWorkspaceProps {
   /** Leave Work and open the conversation. The shell owns that transition. */
@@ -130,6 +145,14 @@ export default function WorkWorkspace({ onOpenConversation }: WorkWorkspaceProps
   const [project, setProject] = useState<string>('all');
   const [kind, setKind] = useState<ArtifactKind | 'all'>('all');
   const [selected, setSelected] = useState<Artifact | null>(null);
+  const [query, setQuery] = useState('');
+  // Type is the default because it is the categorisation a person means when
+  // they say their files are not organised — what a thing *is*, before when it
+  // happened. Date is one control away for the days when recency is the
+  // question.
+  const [groupBy, setGroupBy] = useState<GroupBy>('type');
+  const [sortBy, setSortBy] = useState<SortBy>('newest');
+  const [view, setView] = useState<ViewMode>('auto');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -166,11 +189,13 @@ export default function WorkWorkspace({ onOpenConversation }: WorkWorkspaceProps
   );
 
   const visible = useMemo(
-    () =>
-      (kind === 'all' ? byProject : byProject.filter((a) => a.kind === kind))
-        .slice()
-        .sort((a, b) => b.created_at - a.created_at),
-    [byProject, kind],
+    () => search(kind === 'all' ? byProject : byProject.filter((a) => a.kind === kind), query),
+    [byProject, kind, query],
+  );
+
+  const groups = useMemo(
+    () => group(visible, groupBy, sortBy),
+    [visible, groupBy, sortBy],
   );
 
   // Whether this listing is entirely pictures, which is what earns the grid.
@@ -182,7 +207,21 @@ export default function WorkWorkspace({ onOpenConversation }: WorkWorkspaceProps
     [visible],
   );
 
-  const kinds = Object.keys(KIND_LABELS) as ArtifactKind[];
+  // `auto` is what shipped before this toolbar existed and it stays the
+  // default, because it is right almost always. What it was missing is a way
+  // to disagree with it: a listing of forty pictures is sometimes a list of
+  // names you want to read, and a listing of documents is sometimes worth
+  // seeing as tiles. Pressing the mode already in effect returns the choice to
+  // the contents.
+  const resolvedView: 'list' | 'grid' =
+    view === 'auto' ? (allPictures ? 'grid' : 'list') : view;
+
+  const kindCounts = useMemo(() => {
+    const counts = {} as Record<ArtifactKind, number>;
+    for (const k of Object.keys(KIND_LABELS) as ArtifactKind[]) counts[k] = 0;
+    for (const a of byProject) counts[a.kind] = (counts[a.kind] ?? 0) + 1;
+    return counts;
+  }, [byProject]);
 
   return (
     <div className="flex-1 flex overflow-hidden">
@@ -239,42 +278,26 @@ export default function WorkWorkspace({ onOpenConversation }: WorkWorkspaceProps
             </div>
           )}
 
-          <div className="mt-4 flex flex-wrap gap-1.5">
-            <Chip
-              label="All projects"
-              count={artifacts.length}
-              active={project === 'all'}
-              onClick={() => setProject('all')}
-            />
-            {projects.map((p) => (
-              <Chip
-                key={p.id}
-                label={projectLabel(p.id)}
-                count={p.count}
-                active={project === p.id}
-                onClick={() => setProject(p.id)}
-              />
-            ))}
-          </div>
-
-          <div className="mt-2 flex flex-wrap gap-1.5">
-            <Chip
-              label="All types"
-              count={byProject.length}
-              active={kind === 'all'}
-              onClick={() => setKind('all')}
-            />
-            {kinds.map((k) => (
-              <Chip
-                key={k}
-                label={KIND_LABELS[k]}
-                count={byProject.filter((a) => a.kind === k).length}
-                active={kind === k}
-                onClick={() => setKind(k)}
-              />
-            ))}
-          </div>
         </div>
+
+        <WorkToolbar
+          query={query}
+          onQuery={setQuery}
+          project={project}
+          projects={projects}
+          onProject={setProject}
+          kind={kind}
+          kindCounts={kindCounts}
+          totalInProject={byProject.length}
+          onKind={setKind}
+          groupBy={groupBy}
+          onGroupBy={setGroupBy}
+          sortBy={sortBy}
+          onSortBy={setSortBy}
+          view={view}
+          onView={setView}
+          resolvedView={resolvedView}
+        />
 
         <div className="flex-1 overflow-y-auto px-8 pb-8">
           {loading && artifacts.length === 0 ? (
@@ -285,84 +308,77 @@ export default function WorkWorkspace({ onOpenConversation }: WorkWorkspaceProps
               onClear={() => {
                 setProject('all');
                 setKind('all');
+                setQuery('');
               }}
             />
-          ) : allPictures ? (
-            /* A page of thumbnails rather than a page of filenames.
-             *
-             * Same store, same artifacts, different density — Work's job is to
-             * let someone find what they made, and for a picture the filename
-             * is close to useless for that. `image-3.png` and `image-4.png`
-             * are indistinguishable as rows and obvious as pictures.
-             *
-             * Only when *everything* showing is pictorial, which is the state
-             * the kind filter produces. A mixed listing keeps the rows: a grid
-             * with document tiles in it would be a grid of icons, which is
-             * worse than a list at the one thing a list is good at. */
-            <div
-              className="grid gap-3"
-              style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))' }}
-            >
-              {visible.map((a) => (
-                <Thumbnail
-                  key={a.id}
-                  artifact={a}
-                  selected={selected?.id === a.id}
-                  onSelect={() => setSelected(a)}
-                />
-              ))}
-            </div>
           ) : (
-            <div
-              className="rounded-xl overflow-hidden"
-              style={{ border: '1px solid var(--color-border-subtle)' }}
-            >
-              {visible.map((a) => (
-                <button
-                  key={a.id}
-                  onClick={() => setSelected(a)}
-                  className="w-full flex items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-white/[0.04]"
-                  style={{
-                    borderBottom: '1px solid var(--color-border-subtle)',
-                    background:
-                      selected?.id === a.id ? 'rgba(255,255,255,0.05)' : 'transparent',
-                  }}
-                >
-                  <span className="shrink-0" style={{ color: KIND_COLOUR[a.kind] }}>
-                    {KIND_ICON[a.kind]}
-                  </span>
+            <div className="flex flex-col gap-5">
+              {/* The column header, rendered once above every group rather
+                  than repeated per heading. Repeating it would turn a list
+                  into a stack of tables, which is what a spreadsheet looks
+                  like and not what a person scanning for one file needs.
+                  List view only: a grid has no columns to name. */}
+              {resolvedView === 'list' && <ColumnHeader />}
 
-                  <span className="flex-1 min-w-0">
-                    <span
-                      className="block truncate text-sm"
-                      style={{ color: 'var(--color-text)' }}
+              {groups.map((g) => (
+                <section key={g.key} aria-labelledby={`work-group-${g.key}`}>
+                  {g.label && (
+                    <h3
+                      id={`work-group-${g.key}`}
+                      // Sticky, because the heading is the answer to "what am
+                      // I looking at" and scrolling past it in a long listing
+                      // takes that answer away at exactly the moment it is
+                      // being used.
+                      className="sticky top-0 z-10 mb-2 flex items-baseline gap-2 py-1 text-[11px] uppercase tracking-wider"
+                      style={{
+                        fontFamily: 'var(--font-display)',
+                        color: 'var(--color-text-muted)',
+                        background: 'var(--color-bg, #060911)',
+                      }}
                     >
-                      {a.filename}
-                    </span>
-                    {/* The conversation that produced it, on the row rather
-                        than hidden in the panel. It is the reason this surface
-                        is not a file browser. */}
-                    <span
-                      className="mt-0.5 flex items-center gap-1.5 text-[11px] truncate"
-                      style={{ color: 'var(--color-text-secondary)' }}
-                    >
-                      <MessageSquare size={10} className="shrink-0" />
-                      <span className="truncate">
-                        {a.conversation_title || 'No conversation recorded'}
+                      {g.label}
+                      <span
+                        style={{
+                          fontFamily: 'var(--font-mono)',
+                          color: 'var(--color-text-faint)',
+                          letterSpacing: 0,
+                        }}
+                      >
+                        {g.artifacts.length}
                       </span>
-                    </span>
-                  </span>
+                    </h3>
+                  )}
 
-                  <span
-                    className="shrink-0 text-[11px] text-right"
-                    style={{ fontFamily: 'var(--font-mono)', color: 'var(--color-text-muted)' }}
-                  >
-                    <span className="block">{projectLabel(a.project_id)}</span>
-                    <span className="block" style={{ color: 'var(--color-text-secondary)' }}>
-                      {relative(a.created_at)}
-                    </span>
-                  </span>
-                </button>
+                  {resolvedView === 'grid' ? (
+                    <div
+                      className="grid gap-3"
+                      style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))' }}
+                    >
+                      {g.artifacts.map((a) => (
+                        <Thumbnail
+                          key={a.id}
+                          artifact={a}
+                          selected={selected?.id === a.id}
+                          onSelect={() => setSelected(a)}
+                        />
+                      ))}
+                    </div>
+                  ) : (
+                    <div
+                      className="rounded-xl overflow-hidden"
+                      style={{ border: '1px solid var(--color-border-subtle)' }}
+                    >
+                      {g.artifacts.map((a) => (
+                        <Row
+                          key={a.id}
+                          artifact={a}
+                          selected={selected?.id === a.id}
+                          onSelect={() => setSelected(a)}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </section>
               ))}
             </div>
           )}
@@ -380,6 +396,102 @@ export default function WorkWorkspace({ onOpenConversation }: WorkWorkspaceProps
     </div>
   );
 }
+
+/** The column names, aligned to `ROW_GRID`.
+ *
+ *  Labels rather than sort buttons. Sorting lives in the toolbar, where it
+ *  applies to a grid view too — click-a-column-to-sort would be a second
+ *  control for one setting, and the two would disagree the first time somebody
+ *  sorted in grid view and switched back. */
+function ColumnHeader() {
+  return (
+    <div
+      className="grid items-center gap-3 px-4 pb-1.5 text-[10px] uppercase tracking-wider"
+      style={{
+        gridTemplateColumns: ROW_GRID,
+        fontFamily: 'var(--font-display)',
+        color: 'var(--color-text-faint)',
+        // Indent matching the row's icon column, so "Name" sits over the
+        // filename rather than over the icon.
+        paddingLeft: 43,
+      }}
+    >
+      <span>Name and conversation</span>
+      <span className="hidden lg:block">Project</span>
+      <span>Made</span>
+      <span className="hidden lg:block text-right">Size</span>
+    </div>
+  );
+}
+
+/** One artifact as a row. */
+function Row({
+  artifact: a,
+  selected,
+  onSelect,
+}: {
+  artifact: Artifact;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <button
+      onClick={onSelect}
+      aria-current={selected || undefined}
+      className="w-full flex items-center gap-3 px-4 py-2.5 text-left transition-colors hover:bg-white/[0.04]"
+      style={{
+        borderBottom: '1px solid var(--color-border-subtle)',
+        background: selected ? 'rgba(255,255,255,0.05)' : 'transparent',
+      }}
+    >
+      <span className="shrink-0" style={{ color: KIND_COLOUR[a.kind] }}>
+        {KIND_ICON[a.kind]}
+      </span>
+
+      <span className="grid min-w-0 flex-1 items-center gap-3" style={{ gridTemplateColumns: ROW_GRID }}>
+        <span className="min-w-0">
+          <span className="block truncate text-sm" style={{ color: 'var(--color-text)' }}>
+            {a.filename}
+          </span>
+          {/* The conversation that produced it, on the row rather than hidden
+              in the panel. It is the reason this surface is not a file
+              browser. */}
+          <span
+            className="mt-0.5 flex items-center gap-1.5 text-[11px] truncate"
+            style={{ color: 'var(--color-text-secondary)' }}
+          >
+            <MessageSquare size={10} className="shrink-0" />
+            <span className="truncate">
+              {a.conversation_title || 'No conversation recorded'}
+            </span>
+          </span>
+        </span>
+
+        <span
+          className="hidden lg:block truncate text-[11px]"
+          style={{ fontFamily: 'var(--font-mono)', color: 'var(--color-text-muted)' }}
+        >
+          {projectLabel(a.project_id)}
+        </span>
+
+        <span
+          className="truncate text-[11px]"
+          style={{ fontFamily: 'var(--font-mono)', color: 'var(--color-text-secondary)' }}
+        >
+          {relative(a.created_at)}
+        </span>
+
+        <span
+          className="hidden lg:block text-right text-[11px]"
+          style={{ fontFamily: 'var(--font-mono)', color: 'var(--color-text-faint)' }}
+        >
+          {bytes(a.size_bytes)}
+        </span>
+      </span>
+    </button>
+  );
+}
+
 
 /** One picture in Work's grid.
  *

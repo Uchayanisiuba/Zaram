@@ -14,7 +14,7 @@
  * Settings, where somebody is already asking about voice — not the landing,
  * where nobody has asked anything yet.
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
 
 import LandingHint from './LandingHint';
