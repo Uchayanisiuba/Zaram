@@ -17,14 +17,25 @@
  * `webContents.copyImageAt(x, y)` copies the decoded bitmap the page is already
  * showing, as a real image the user can paste into anything.
  *
+ * **Spelling corrections live here, and only here.** Chromium finds the
+ * misspelling and computes the suggestions; what it has no opinion about is how
+ * to offer them, because an Electron app has no menu until it builds one. So
+ * the missing half of spell check was never the checking — it was that
+ * right-clicking a red-underlined word offered Cut, Copy, Paste and nothing
+ * else. See `spellcheck.js` for the other half, which is where the dictionary
+ * comes from and why it does not come from Google.
+ *
  * Deliberately small. This is not a place to put application commands: a menu
  * that grows into a second command surface is one more thing to keep in step
  * with the interface, and `CLAUDE.md` is explicit that capability belongs in
  * the conversation rather than in chrome. Copy an image, copy selected text,
- * and the editing commands a text field is expected to have.
+ * the corrections for a word that is wrong, and the editing commands a text
+ * field is expected to have.
  */
 
 const { Menu, clipboard, shell } = require('electron');
+
+const { spellingMenuItems } = require('./spellcheck');
 
 /**
  * Attach the menu to a window's web contents.
@@ -79,6 +90,19 @@ function attachContextMenu(win, logger) {
       if (items.length) items.push({ type: 'separator' });
       items.push({ label: 'Copy', role: 'copy' });
     }
+
+    // Spelling comes first, because it is what the word was right-clicked for.
+    // Cut and Paste are always available and are never the reason somebody aimed
+    // at one particular word. The items are built in `spellcheck.js`: it is the
+    // module that owns spelling, it needs no Electron to run, and that is what
+    // lets the menu's contents be asserted without opening a window.
+    items.push(
+      ...spellingMenuItems(params, {
+        replace: (word) => contents.replaceMisspelling(word),
+        addWord: (word) => contents.session.addWordToSpellCheckerDictionary(word),
+        logger,
+      }),
+    );
 
     // A text field gets what a text field is expected to have. `isEditable`
     // covers inputs, textareas and contenteditable, so the composer and every

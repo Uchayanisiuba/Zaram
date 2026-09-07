@@ -3,10 +3,11 @@
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
-const { app, ipcMain } = require('electron');
+const { app, ipcMain, session } = require('electron');
 
 const { createConfig } = require('./config');
 const { attachContextMenu } = require('./contextMenu');
+const { configureSpellChecker } = require('./spellcheck');
 const { createLogger } = require('./logger');
 const { MAIN_EVENTS } = require('./ipc/channels');
 const { registerHandlers } = require('./ipc/handlers');
@@ -239,6 +240,21 @@ async function bootstrap() {
         resolve();
       });
     }).catch((err) => logger.error('Static server failed', { error: err.message }));
+  }
+
+  // Before any window exists, and on the default session the main window
+  // uses. Chromium goes looking for a dictionary the first time a field is
+  // focused, so configuring this after the renderer is up would be a race
+  // against the user — and losing it means a request to Google's CDN that
+  // `EgressGate` never sees.
+  try {
+    const spelling = await configureSpellChecker(session.defaultSession, {
+      userDataPath: app.getPath('userData'),
+      logger: logger.child('spellcheck'),
+    });
+    if (!spelling.present) logger.warn('Spell check is off', { reason: spelling.reason });
+  } catch (err) {
+    logger.warn('Spell check could not be configured', { error: err.message });
   }
 
   windows = new WindowManager({ config, logger: logger.child('window') });

@@ -56,6 +56,12 @@ class WindowManager {
         nodeIntegration: false,
         sandbox: false,
         webSecurity: true,
+        // `true` is already the default. It is written down because the default
+        // is what silently sent Chromium looking for a dictionary on Google's
+        // CDN, and a reader deciding whether that can happen should find the
+        // answer here rather than in Electron's documentation. `spellcheck.js`
+        // is what makes it safe.
+        spellcheck: true,
       },
     });
     this.mainWindow = win;
