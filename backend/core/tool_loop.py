@@ -132,6 +132,52 @@ class ToolTurn:
     result: Any
 
 
+#: The longest a target may be before it is cut.
+#:
+#: A path and a search phrase are both short; anything long is either a pasted
+#: blob or an attempt to push something else off the line. Cut rather than
+#: refused, because the useful prefix of a long path is still the answer to
+#: "what did it read".
+TARGET_LIMIT = 120
+
+
+def call_target(tool: str, arguments: Any) -> str:
+    """What a call was aimed at, in a few words, or "".
+
+    The chat shows *that* a tool ran; this is what a reader has to have to know
+    whether it ran on the right thing. `read_lines` on `readiness.py:156-181` is
+    checkable and "read a file" is not, and provenance for code being a line
+    range is the whole reason the code chunker exists.
+
+    **The arguments are model-written, so this is third-party text.** It is
+    bounded here and rendered as text and never as markup — the tool-description
+    rule applied one layer along: nothing a model writes may widen what a
+    surface does. Control characters go because a newline in a path would break
+    one line into two and let a call appear to be two calls.
+    """
+    if not isinstance(arguments, dict):
+        return ""
+
+    # Named in preference order rather than taking whatever comes first: a dict
+    # has no order worth trusting, and the useful key differs by tool.
+    for key in ("path", "file", "query", "pattern", "directory"):
+        value = arguments.get(key)
+        if isinstance(value, str) and value.strip():
+            target = value.strip()
+            break
+    else:
+        return ""
+
+    # A line range earns its place: it is what makes a citation openable.
+    start = arguments.get("start")
+    end = arguments.get("end")
+    if isinstance(start, int) and isinstance(end, int) and start > 0 and end >= start:
+        target = f"{target}:{start}-{end}"
+
+    target = "".join(ch for ch in target if ch.isprintable())
+    return target[:TARGET_LIMIT]
+
+
 def render_result(result: Any) -> str:
     """A tool's answer as the text the model will be shown.
 

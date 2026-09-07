@@ -202,6 +202,12 @@ export type ChatEvent =
       tool: string;
       verdict: 'allow' | 'confirm' | 'refuse' | string;
       reason: string;
+      /** What the call was aimed at — a path, a search phrase, a line
+       *  range. *That* a tool ran is not a checkable claim and what it ran
+       *  on is: `readiness.py:156-181` can be opened and "read a file"
+       *  cannot. Model-written, bounded by the backend, and rendered as
+       *  text rather than markup. Empty when the tool named nothing. */
+      target: string;
     }
   /** What the reply is waiting for, sent *before* generation so the orb can
    *  say why rather than going quiet and letting the user guess.
@@ -663,6 +669,7 @@ function parseLine(line: string): ChatEvent | null {
         tool: String(data.tool ?? ''),
         verdict: String(data.verdict ?? ''),
         reason: String(data.reason ?? ''),
+        target: String(data.target ?? ''),
       };
 
     case 'status':

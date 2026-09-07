@@ -101,6 +101,8 @@ export interface ChatToolCall {
   /** `allow` — it ran. `confirm` — waiting on the user. `refuse` — it did not. */
   verdict: string;
   reason: string;
+  /** What the call was aimed at, or `''`. See `ChatEvent`'s note. */
+  target: string;
 }
 
 interface ChatState {
@@ -515,6 +517,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
               tool: event.tool,
               verdict: event.verdict,
               reason: event.reason,
+              target: event.target,
             });
             set({ streamingToolCalls: [...toolCalls] });
             break;

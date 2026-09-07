@@ -72,8 +72,18 @@ def _build_engine() -> ExecutionEngine:
 
 
 def test_execution_engine_flow_streams_tokens():
-    tokens = list(_build_engine().execute("test prompt"))
-    assert tokens == ["hello ", "world"]
+    """The reply's own text, in order.
+
+    Filtered to strings because `execute` yields two kinds of thing and always
+    has: *"plain strings for response tokens, and StreamEvent objects for
+    structured output"*, in its own docstring. Comparing the whole stream to a
+    list of tokens made this test an assertion about which events happen to be
+    emitted, so it went red when the usage counter started reporting what an
+    exchange cost -- a change that took nothing away from the tokens it is
+    named for.
+    """
+    streamed = list(_build_engine().execute("test prompt"))
+    assert [item for item in streamed if isinstance(item, str)] == ["hello ", "world"]
 
 
 def test_execution_engine_emits_plan_events():

@@ -375,6 +375,7 @@ class StreamEvent:
         verdict: str,
         reason: str = "",
         correlation_id: str = "",
+        target: str = "",
     ) -> StreamEvent:
         """One tool call, and what the gate said about it.
 
@@ -384,6 +385,12 @@ class StreamEvent:
         say how to permit the thing reads as a broken product — the note
         `CLAUDE.md` makes about disabled capabilities being visible rather
         than silent.
+
+        `target` is what the call was aimed at — a path, a search phrase, a line
+        range. Carried because *that* a tool ran is not a checkable claim and
+        *what it ran on* is: `readiness.py:156-181` can be opened and "read a
+        file" cannot. It is model-written text, bounded by `call_target` and to
+        be rendered as text rather than as markup.
         """
         return StreamEvent(
             type=EventType.TOOL_CALL,
@@ -392,6 +399,7 @@ class StreamEvent:
                 "tool": tool,
                 "verdict": verdict,
                 "reason": reason,
+                "target": target,
             },
             correlation_id=correlation_id,
         )

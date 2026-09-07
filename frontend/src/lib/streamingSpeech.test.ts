@@ -18,6 +18,7 @@ import { describe, it, expect } from 'vitest'
 
 import { takeCompleteUtterances } from './utterances'
 import { stripCitationMarkers } from './markers'
+import { speakableText } from './speakable'
 
 /** Feed a reply through the way the token stream does: a character at a time,
  *  handing over everything so far, exactly as `pushSpeech` is called. */
@@ -127,5 +128,72 @@ describe('what reaches the synthesiser', () => {
     // `[M1]` streams as `[M` then `1]`. A filter applied to each token sees
     // neither, which is why stripping happens on accumulated text.
     expect(stripCitationMarkers('paid' + ' [M' + '1]' + '.')).toBe('paid.')
+  })
+})
+
+describe('a code block is stepped over, not read', () => {
+  /**
+   * The whole pipeline `pushSpeech` runs: clean the accumulated reply, then
+   * take whatever utterances are now complete, advancing a character cursor
+   * that never looks back.
+   *
+   * **The two halves are tested apart and were never tested together.**
+   * `speakable.test.ts` proves the cleaned form of a prefix is a prefix of the
+   * cleaned form of the whole, and the harness above proves the cursor says
+   * everything once and in order — but it feeds on the raw reply, so nothing
+   * asserted that a code block stays out of the audio *while streaming*. That
+   * is the combination a listener actually gets.
+   */
+  const speakCleaned = (reply: string): string[] => {
+    const spoken: string[] = []
+    let consumed = 0
+    let cleaned = ''
+
+    for (let i = 1; i <= reply.length; i++) {
+      cleaned = speakableText(reply.slice(0, i))
+      if (cleaned.length <= consumed) continue
+      const { ready, rest } = takeCompleteUtterances(cleaned.slice(consumed))
+      consumed = cleaned.length - rest.length
+      spoken.push(...ready)
+    }
+    const { ready } = takeCompleteUtterances(cleaned.slice(consumed), true)
+    spoken.push(...ready)
+    return spoken
+  }
+
+  const REPLY_WITH_CODE =
+    'Here is the function that does it.\n\n' +
+    '```python\n' +
+    'def total(rows):\n' +
+    '    return sum(r.amount for r in rows)\n' +
+    '```\n\n' +
+    'Run it against the April invoices.'
+
+  it('says the prose on both sides and none of the code', () => {
+    const said = speakCleaned(REPLY_WITH_CODE).join(' ')
+
+    expect(said).toContain('Here is the function that does it.')
+    // The point of the request: the block is stepped over and the next block
+    // of prose is reached, rather than the reply ending at the code.
+    expect(said).toContain('Run it against the April invoices.')
+
+    for (const fragment of ['def total', 'return sum', 'r.amount', 'python', '```']) {
+      expect(said, `"${fragment}" reached the synthesiser`).not.toContain(fragment)
+    }
+  })
+
+  it('speaks the opening sentence before the block has closed', () => {
+    // Waiting for the fence to close would make the silence scale with how much
+    // code there is, which is the failure streaming speech exists to avoid.
+    const upToTheFence = REPLY_WITH_CODE.slice(0, REPLY_WITH_CODE.indexOf('def total'))
+    expect(speakCleaned(upToTheFence).join(' ')).toContain('Here is the function that does it.')
+  })
+
+  it('says nothing twice when the block closes', () => {
+    // The cursor advances over cleaned text. If closing the fence changed
+    // anything behind it, the sentence before the block would be replayed.
+    const said = speakCleaned(REPLY_WITH_CODE)
+    const first = said.filter((piece) => piece.includes('Here is the function'))
+    expect(first.length).toBe(1)
   })
 })

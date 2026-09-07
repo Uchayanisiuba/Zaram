@@ -55,6 +55,7 @@ from core.tool_loop import (
     ToolCall,
     ToolTurn,
     parse_call,
+    call_target,
     render_result,
     result_prompt,
     strip_calls,
@@ -1129,7 +1130,10 @@ class ExecutionEngine:
 
             if result.get("refused"):
                 reason = result.get("reason", "")
-                yield StreamEvent.tool_call(call.server, call.tool, "refuse", reason)
+                yield StreamEvent.tool_call(
+                    call.server, call.tool, "refuse", reason,
+                    target=call_target(call.tool, call.arguments),
+                )
                 yield from self._answer_without_the_tool(
                     original_prompt, call, reason, model, system_prompt, spoken,
                     preamble=f"Zaram refused to run `{call.tool}`. {reason}",
@@ -1138,7 +1142,10 @@ class ExecutionEngine:
 
             if result.get("needs_confirmation"):
                 reason = result.get("reason", "")
-                yield StreamEvent.tool_call(call.server, call.tool, "confirm", reason)
+                yield StreamEvent.tool_call(
+                    call.server, call.tool, "confirm", reason,
+                    target=call_target(call.tool, call.arguments),
+                )
                 yield from self._answer_without_the_tool(
                     original_prompt, call, reason, model, system_prompt, spoken,
                     preamble=(
@@ -1158,10 +1165,16 @@ class ExecutionEngine:
             # round is for. It is handed back as the result it is.
             if not result.get("success"):
                 error = result.get("error", "unknown error")
-                yield StreamEvent.tool_call(call.server, call.tool, "refuse", error)
+                yield StreamEvent.tool_call(
+                    call.server, call.tool, "refuse", error,
+                    target=call_target(call.tool, call.arguments),
+                )
                 payload: Any = {"error": error}
             else:
-                yield StreamEvent.tool_call(call.server, call.tool, "allow", "ran")
+                yield StreamEvent.tool_call(
+                    call.server, call.tool, "allow", "ran",
+                    target=call_target(call.tool, call.arguments),
+                )
                 payload = result.get("result")
 
             turns.append(ToolTurn(call=call, result=payload))

@@ -38,8 +38,10 @@
  * and belongs in the model's context rather than on the screen.
  */
 import { useState } from 'react';
+import { AnimatePresence } from 'framer-motion';
 import { Check, ChevronRight, CircleAlert, Clock } from 'lucide-react';
 import type { ChatToolCall } from '../../stores/chatStore';
+import ActivityPanel from './ActivityPanel';
 
 /** How each verdict reads. The gate's word, not the model's.
  *
@@ -137,7 +139,7 @@ export default function ToolCalls({
       {ran.length > 0 && (
         <button
           type="button"
-          onClick={() => setOpen((v) => !v)}
+          onClick={() => (active ? setOpen((v) => !v) : setOpen(true))}
           aria-expanded={expanded}
           className="flex items-center gap-1 text-[10px] leading-snug"
           style={{ color: 'var(--color-text-muted)' }}
@@ -158,14 +160,25 @@ export default function ToolCalls({
         </button>
       )}
 
-      {/* The fold, and only `allow` is inside it. */}
-      {expanded && ran.length > 0 && (
+      {/* Live work unfolds in place: while a buffered generation decides what
+          to do next this is the only thing on screen, and sending someone to a
+          panel to watch it would take the conversation away from them. */}
+      {active && ran.length > 0 && (
         <ul className="mt-1 flex flex-col gap-1 pl-3">
           {ran.map((call, i) => (
             <CallLine key={`${call.server}/${call.tool}/${i}`} call={call} />
           ))}
         </ul>
       )}
+
+      {/* Finished work opens where the detail has room for what it was aimed
+          at. The same overlay `ArtifactPreview` and `CitationPanel` use — one
+          way to bring something forward is a thing users learn once. */}
+      <AnimatePresence>
+        {open && !active && (
+          <ActivityPanel calls={calls} onClose={() => setOpen(false)} />
+        )}
+      </AnimatePresence>
 
       {/* Never folded. See the note at the top of the file. */}
       {notable.length > 0 && (

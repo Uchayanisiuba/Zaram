@@ -17,7 +17,6 @@
  */
 import { describe, expect, it } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 
 import ToolCalls from './ToolCalls';
 import type { ChatToolCall } from '@/stores/chatStore';
@@ -27,15 +26,16 @@ const call = (over: Partial<ChatToolCall> = {}): ChatToolCall => ({
   tool: 'search_code',
   verdict: 'allow',
   reason: 'ran',
+  target: '',
   ...over,
 });
 
 describe('the working is shown', () => {
-  it('summarises finished work in one line, and opens to every call', async () => {
+  it('summarises finished work in one line rather than listing it', async () => {
     // Folded once it is done, the shape Claude Code uses: a finished exchange
-    // should read as prose rather than as a log. Opening it must still name
-    // every call in the order it was used, because the summary is a summary and
-    // not a replacement.
+    // should read as prose rather than as a log. The detail is not lost, it
+    // moves — the summary opens the activity panel, which has room for what
+    // each call was aimed at. `ActivityPanel.test.tsx` asserts that half.
     render(
       <ToolCalls
         calls={[call(), call({ tool: 'read_lines' }), call({ tool: 'read_lines' })]}
@@ -45,14 +45,8 @@ describe('the working is shown', () => {
     expect(screen.getByTestId('tool-summary').textContent).toContain(
       'Searched code, read 2 files',
     );
+    // Nothing enumerated in the conversation itself.
     expect(screen.getByTestId('tool-calls').querySelectorAll('li').length).toBe(0);
-
-    await userEvent.click(screen.getByTestId('tool-summary'));
-
-    const rows = screen.getByTestId('tool-calls').querySelectorAll('li');
-    expect(rows.length).toBe(3);
-    expect(rows[0].textContent).toContain('code/search_code');
-    expect(rows[1].textContent).toContain('code/read_lines');
   });
 
   it('stays open while the work is still happening', () => {
