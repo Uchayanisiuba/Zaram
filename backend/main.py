@@ -413,10 +413,59 @@ def _task_model(requires_vision: bool, specialisation: str | None) -> str | None
     return model.display_name if model is not None else None
 
 
+def _assigned_slot(requires_vision: bool, specialisation: str | None) -> str | None:
+    """Which `TaskSlot` this request falls in, or ``None`` for an ordinary one.
+
+    **Vision outranks coding when both are true**, and the order is not
+    arbitrary. A coding specialisation is a *preference* — the general model
+    remains a real answer to a coding question — while vision is a
+    *precondition*: a model that cannot see is not a worse answer to "what is
+    wrong in this screenshot", it is not an answer. Asking the coding slot
+    first would satisfy the preference by breaking the precondition, which is
+    this codebase's most expensive recurring shape wearing yet another hat.
+
+    A specialisation this build has no slot for answers ``None`` rather than
+    being coerced into one, so adding a member to `INTENT_SPECIALISATION`
+    without adding the matching `TaskSlot` leaves routing exactly as it was.
+    """
+    from core.user_settings import TaskSlot
+
+    if requires_vision:
+        return TaskSlot.VISION.value
+    if specialisation is not None and specialisation in {s.value for s in TaskSlot}:
+        return specialisation
+    return None
+
+
+def _routing_choices() -> tuple[dict[str, str], str | None]:
+    """``(per-task assignments, the untasked default)`` from Settings.
+
+    Both read through one call, because two independent reads of the same
+    singleton are two chances for a preference file to be unreadable and for
+    the caller to end up with half of it.
+
+    Every failure yields ``({}, None)``, which is precisely "nobody has chosen"
+    — the state that hands the decision back to the provider layer. A
+    preference file must never be able to stop chat working.
+    """
+    try:
+        from core.user_settings import get_user_settings
+
+        settings = get_user_settings()
+        return settings.task_models, settings.default_model
+    except Exception:
+        logging.getLogger(__name__).debug("Settings unreadable; Zaram will choose")
+        return {}, None
+
+
 def _resolve_model(
     requested: str | None, prompt: str = "", has_images: bool = False
 ) -> _ModelChoice:
     """Which model answers: the request, then Settings, then Zaram's own pick.
+
+    Four inputs, in this order: what this message named, what the user assigned
+    to *this kind of* request, what they chose as the general default, and —
+    only if none of those spoke — the provider layer's own pick for the task.
 
     ``model=None`` is a real answer and the best one when nobody has chosen and
     the task says nothing — it means "use the engine default", which is the
@@ -425,41 +474,65 @@ def _resolve_model(
     which is exactly what the frontend's ``gemma3:latest`` did from the other
     end.
 
-    **The task decides only in the branch where nobody else did.** An explicit
-    choice — this message, or Settings — is returned untouched even when the
-    question looks like one another model would serve better. Overriding a
-    person's stated preference because a classifier disagreed is a product that
-    argues with its user, and the classifier is a similarity judgement rather
-    than a fact.
+    **Zaram's own task-aware pick decides only in the branch where nobody else
+    did.** An explicit choice — this message, Settings, or a task assignment —
+    is returned untouched even when the question looks like one another model
+    would serve better. Overriding a person's stated preference because a
+    classifier disagreed is a product that argues with its user, and the
+    classifier is a similarity judgement rather than a fact.
 
-    That leaves one case this deliberately does *not* handle yet: a chosen
-    model that cannot see, asked to read an image. It is not reachable today —
-    `ChatRequest` carries no image, so `requires_vision` is inferred from
-    wording alone, and re-routing off the word "screenshot" would be worse than
-    the gap. When image input lands, that becomes a refusal rather than a
-    silent substitution, because answering blind is rule 9's failure.
+    **The classification is used for two different things here and they must
+    not be confused.** Choosing the *slot* is a lookup: the intent names a kind
+    of request, and the user has or has not allocated a model to it. Choosing a
+    *model* from the intent — the last branch — is a judgement about which
+    installed model is better, and it is the one hedged with "only when it
+    differs from the untasked pick". A wrong slot sends the question to a model
+    the user picked by hand; a wrong judgement puts a routing claim under a
+    reply that was not routed.
+
+    One case is deliberately left to a later gate rather than handled here: a
+    chosen model that cannot see, asked to read an image. Re-routing off it
+    would be a silent substitution of the user's stated choice, so
+    `_vision_refusal` refuses instead — by name, with the model's own name in
+    it — for every path that reaches this function, an assignment included.
+    Answering blind is rule 9's failure; swapping their model without saying so
+    is a quieter one.
     """
     named = (requested or "").strip()
     if named:
         return _ModelChoice(named, "request")
 
-    try:
-        from core.user_settings import get_user_settings
+    assignments, settings_default = _routing_choices()
 
-        settings_default = get_user_settings().default_model
-    except Exception:
-        # A preference file must never be able to stop chat working.
-        settings_default = None
+    # **The classifier runs only when its answer could change the outcome**,
+    # and on a machine where nobody has opened Advanced it cannot. With a
+    # global default chosen and no slot assigned, every branch below returns
+    # that default whatever the question turns out to be, so classifying it
+    # would be a semantic-router round trip on the critical path of every
+    # single message, spent to reach a conclusion already known. This guard is
+    # what keeps the feature free for the people not using it.
+    requires_vision, specialisation = False, None
+    if assignments or not settings_default:
+        requires_vision, specialisation = _task_requirements(prompt)
+        # An attached image is not a guess. Wording-based inference stays for
+        # the case where someone describes a picture they have not attached,
+        # but a file that is actually here outranks it and can only ever add
+        # the requirement, never remove one the classifier found.
+        requires_vision = requires_vision or has_images
+
+    # Tier three, and it sits **above** the untasked default rather than
+    # beside it: "the model for coding questions" is a more specific statement
+    # of intent than "the model", and the specific one winning is the only
+    # reading under which setting both is coherent. Settings says so in as many
+    # words, because a rule the user cannot see is a rule they will read as a
+    # bug the first time a coding question reaches a model they did not pick.
+    slot = _assigned_slot(requires_vision, specialisation)
+    assigned = assignments.get(slot) if slot else None
+    if assigned:
+        return _ModelChoice(assigned, "assignment")
 
     if settings_default:
         return _ModelChoice(settings_default, "settings")
-
-    requires_vision, specialisation = _task_requirements(prompt)
-    # An attached image is not a guess. Wording-based inference stays for the
-    # case where someone describes a picture they have not attached, but a
-    # file that is actually here outranks it and can only ever add the
-    # requirement, never remove one the classifier found.
-    requires_vision = requires_vision or has_images
 
     # Nothing known about the task is not the same as a task with no
     # preference: only the second is worth a round trip through the provider
@@ -761,7 +834,14 @@ async def _unplaceable_model_refusal(choice: _ModelChoice) -> str:
     # Only what a person chose. `"task"` and `"zaram"` are the provider layer's
     # own picks, drawn from the catalogue, so they cannot fail to be in it —
     # and if they ever did, refusing would blame the user for our selection.
-    if choice.chosen_by not in {"request", "settings"}:
+    #
+    # `"assignment"` belongs on this side of the line for exactly the reason
+    # the docstring gives about the Advanced field: a per-task slot can hold a
+    # typed name, so it can hold a name the catalogue cannot place, and the
+    # dispatcher's fallback would then answer for Ollama about a model the
+    # user never associated with it. It is a person's choice; it is refused by
+    # name.
+    if choice.chosen_by not in {"request", "settings", "assignment"}:
         return ""
     named = (choice.model or "").strip()
     if not named:
@@ -2374,6 +2454,29 @@ async def adopt_letterhead(adoption: TemplateAdoption):
     return store.describe()
 
 
+def _routing_payload() -> dict:
+    """The routing settings and the vocabulary needed to render them.
+
+    **One payload for the read and the write.** A POST that answered with less
+    than the GET would hand the interface a response missing `task_slots`, and
+    the obvious client — replace state with what came back — would blank its
+    own list of slots the moment somebody used one of them. A control that
+    disappears when you touch it is a bug that costs nothing to design out.
+    """
+    from core.user_settings import RoutingPreference, TaskSlot, get_user_settings
+
+    return {
+        **get_user_settings().to_dict(),
+        "options": [p.value for p in RoutingPreference],
+        # The slots themselves, rather than a list the interface hardcodes.
+        # `TaskSlot`'s docstring is the argument for why there are two and not
+        # four, and a client that invented its own list would be free to
+        # disagree with it — offering a "long documents" row that this backend
+        # would accept the write for and then never consult.
+        "task_slots": [s.value for s in TaskSlot],
+    }
+
+
 @app.get("/routing/preference")
 async def routing_preference():
     """The second of `CLAUDE.md`'s three tiers of control, and the chosen model.
@@ -2382,13 +2485,7 @@ async def routing_preference():
     three is per-task assignment behind Advanced. Served together because a
     screen showing one without the other cannot explain what either does.
     """
-    from core.user_settings import RoutingPreference, get_user_settings
-
-    settings = get_user_settings()
-    return {
-        **settings.to_dict(),
-        "options": [p.value for p in RoutingPreference],
-    }
+    return _routing_payload()
 
 
 class RoutingPreferenceUpdate(BaseModel):
@@ -2399,11 +2496,71 @@ class RoutingPreferenceUpdate(BaseModel):
     #: field without a client having to send both and risk clobbering the one
     #: it did not mean to touch.
     default_model: str | None = None
+    #: Per-task assignments to change: `TaskSlot` value → model name, or `""`
+    #: to clear that one. Only the slots present are touched, for the same
+    #: reason `default_model` is nullable — a client setting the coding model
+    #: must not have to resend the vision one and risk clobbering it.
+    task_models: dict[str, str] | None = None
+
+
+async def _task_assignment_refusal(slot: str, model: str) -> str:
+    """Why ``model`` may not be assigned to ``slot``, or `""`.
+
+    **A capability is a precondition and it is checked here, on the way in,
+    rather than argued with later.** Assigning a text-only model to the vision
+    slot would produce a setting that looks configured and refuses on every
+    picture — `_vision_refusal` would catch it, correctly, but at the point
+    where the user has already attached a screenshot and asked a question. The
+    honest place to say "that model cannot see" is the moment they choose it.
+
+    `CLAUDE.md`'s rule is the one that decides which checks belong here:
+    capability gates, never ranking. So this refuses on `supports_vision` and
+    on nothing else. A model that is too large for the card is *slow*, which is
+    a different sentence — VRAM limits route a task, they do not reject one —
+    and a coding slot holding a general model is a preference the user is
+    entitled to.
+
+    **Every uncertainty resolves to `""`**, the same discipline
+    `_unplaceable_model_refusal` keeps: no provider layer, an empty catalogue,
+    a name the catalogue cannot place, a lookup that raised. Refusing a write
+    on our own missing bookkeeping would tell someone their model cannot see
+    because discovery had not run yet, and it would fire hardest on the first
+    visit after a boot.
+    """
+    from core.user_settings import TaskSlot
+
+    if slot != TaskSlot.VISION.value:
+        return ""
+
+    manager = getattr(getattr(kernel, "providers_runtime", None), "manager", None)
+    if manager is None:
+        return ""
+
+    try:
+        await manager.ensure_scanned()
+        known = manager.catalog.all()
+        if not known:
+            return ""
+        # Both spellings, because the picker sends a catalogue id and the
+        # Advanced field lets a display name be typed — being right about only
+        # one of them is the defect `_unplaceable_model_refusal` already names.
+        found = next(
+            (m for m in known if m.display_name == model or m.id == model), None
+        )
+        if found is not None and not found.supports_vision:
+            return (
+                f"{model} cannot read images, so it cannot be the model for "
+                "questions about pictures. Choose one that can see, or leave "
+                "this unassigned and Zaram will pick one that can."
+            )
+    except Exception:
+        logging.getLogger(__name__).debug("Task assignment eligibility check failed")
+    return ""
 
 
 @app.post("/routing/preference")
 async def set_routing_preference(update: RoutingPreferenceUpdate):
-    from core.user_settings import RoutingPreference, get_user_settings
+    from core.user_settings import RoutingPreference, TaskSlot, get_user_settings
 
     settings = get_user_settings()
 
@@ -2419,10 +2576,33 @@ async def set_routing_preference(update: RoutingPreferenceUpdate):
                 ),
             )
 
+    if update.task_models is not None:
+        # Validated in full before anything is written. A partial application
+        # would leave the user with one of the two slots they set, which is a
+        # state they did not ask for and cannot see they are in — the same
+        # argument `set_character` makes for writing its three fields together.
+        for slot, model in update.task_models.items():
+            if slot not in {s.value for s in TaskSlot}:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "task_models keys must be one of: "
+                        + ", ".join(s.value for s in TaskSlot)
+                    ),
+                )
+            named = (model or "").strip()
+            if named:
+                refusal = await _task_assignment_refusal(slot, named)
+                if refusal:
+                    raise HTTPException(status_code=400, detail=refusal)
+
+        for slot, model in update.task_models.items():
+            settings.set_task_model(slot, model)
+
     if update.default_model is not None:
         settings.set_default_model(update.default_model)
 
-    return settings.to_dict()
+    return _routing_payload()
 
 
 class EgressPolicyUpdate(BaseModel):

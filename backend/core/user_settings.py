@@ -13,6 +13,11 @@ Two do not, and this module is for those:
   overrode it, and it meant a second client (the phone, a browser tab) would
   disagree with the first about what "the model" is. A choice the user made
   once belongs where every client sees the same answer.
+* **Which model answers a particular *kind* of request.** `CLAUDE.md`'s third
+  tier of control, and the more specific half of the one above: a coding
+  question can be sent to a coding model without that model answering
+  everything else. See `TaskSlot` for why there are two slots rather than the
+  four a settings screen might suggest.
 * **The routing preference.** `CLAUDE.md`'s second tier of control: *Prefer
   local · Auto · Prefer cloud*, one control in plain language. It biases
   selection; it is not a per-message override, which is tier three and travels
@@ -44,6 +49,7 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "RoutingPreference",
     "SearchScope",
+    "TaskSlot",
     "UserSettings",
     "get_user_settings",
     "set_user_settings_path",
@@ -75,6 +81,48 @@ class SearchScope(str, Enum):
     ALWAYS = "always"
 
 
+class TaskSlot(str, Enum):
+    """The kinds of request a user may allocate a model to by hand.
+
+    `CLAUDE.md`'s **third** tier of control — *"per-task assignment — chat,
+    coding, vision, long-document — behind Advanced"*. Tier one is Zaram
+    deciding, tier two is `RoutingPreference`.
+
+    **There is a slot for every distinction the router actually makes, and no
+    others.** That is not tidiness, it is the *never render invented values*
+    rule applied to a control rather than to a readout: a "long documents" row
+    would be a dropdown a person could set, that would then govern nothing,
+    because nothing in `core.planner` classifies document length and no
+    argument to `ProviderManager.select_model_for_task` carries it. A control
+    over a decision the system does not take is worse than no control, because
+    the user believes they have configured something.
+
+    So there are exactly two, and each one is an argument the selection call
+    already takes:
+
+    * ``CODE`` is ``specialisation="code"``. Its value is deliberately the
+      string `INTENT_SPECIALISATION` maps `IntentType.CODE` to — one table
+      decides what a coding question is, and a second spelling here is how the
+      slot would come to be assigned and never consulted.
+    * ``VISION`` is ``requires_vision=True``.
+
+    **Chat is not a slot, and that is the point.** ``default_model`` above
+    already *is* the model for a request with no task, which is what chat is.
+    A second field meaning the same thing would be two sources of truth for
+    one answer, and the interface would have to invent a rule for which wins.
+
+    Drawing an image is not a slot either, for the reason the long-document row
+    is not one: ``requires_image_output`` is a gate `select_model_for_task`
+    implements and **nothing in the running product passes**, so a row for it
+    would configure a code path that does not execute.
+    """
+
+    #: A coding question. Matches `core.planner.INTENT_SPECIALISATION`'s value.
+    CODE = "code"
+    #: A question about a picture — attached, or described in the wording.
+    VISION = "vision"
+
+
 class RoutingPreference(str, Enum):
     """How much Zaram should lean on the cloud when nobody has said.
 
@@ -103,6 +151,11 @@ class UserSettings:
         self._lock = threading.Lock()
         self._routing = RoutingPreference.AUTO
         self._default_model: Optional[str] = None
+        #: `TaskSlot` value → model name. Absent keys mean "not assigned",
+        #: which is not the same as "no model": an unassigned slot falls
+        #: through to `default_model` and then to Zaram's own pick, exactly as
+        #: every request did before this field existed.
+        self._task_models: Dict[str, str] = {}
         self._web_search = False
         self._search_scope = SearchScope.LOCAL_ONLY
         # The character: what this person calls it, how they want it to write,
@@ -149,6 +202,34 @@ class UserSettings:
         return self._default_model
 
     @property
+    def task_models(self) -> Dict[str, str]:
+        """The per-task assignments, as a copy.
+
+        A copy rather than the dictionary itself, because a caller that mutated
+        it would change routing without the file on disk ever being written —
+        a setting that survives until restart and then silently reverts, which
+        is indistinguishable from Zaram forgetting.
+
+        **Empty is the normal state and the one that must stay free.** The chat
+        path only classifies a message when this has something in it, so a user
+        who never opens Advanced pays nothing for the feature existing.
+        """
+        return dict(self._task_models)
+
+    def model_for_task(self, slot: "TaskSlot | str") -> Optional[str]:
+        """The model assigned to ``slot``, or ``None``.
+
+        An unknown slot answers ``None`` rather than raising: this is read on
+        the path to an answer, and a settings lookup must never be able to cost
+        the user their reply.
+        """
+        try:
+            key = TaskSlot(slot).value
+        except ValueError:
+            return None
+        return self._task_models.get(key)
+
+    @property
     def assistant_name(self) -> str:
         """What this person calls it. Empty means "Zaram", which is not a name
         they chose but the product's own — the difference matters to the
@@ -175,6 +256,7 @@ class UserSettings:
         return {
             "routing_preference": self._routing.value,
             "default_model": self._default_model,
+            "task_models": dict(self._task_models),
             "web_search": self._web_search,
             "search_scope": self._search_scope.value,
             "assistant_name": self._assistant_name,
@@ -220,6 +302,38 @@ class UserSettings:
             self._default_model = cleaned
             self._save()
         return self._default_model
+
+    def set_task_model(
+        self, slot: "TaskSlot | str", model: Optional[str]
+    ) -> Dict[str, str]:
+        """Assign a model to one task, or clear it. Returns every assignment.
+
+        An empty string or ``None`` **removes** the key rather than storing a
+        blank, for the same reason `set_default_model` does: a cleared field
+        and "no preference" are one intention, and a stored ``""`` would become
+        a request for a model with no name.
+
+        Raises ``ValueError`` for a slot that is not a `TaskSlot`. This one
+        *does* raise where `model_for_task` does not, and the asymmetry is
+        deliberate: a bad write is a caller bug worth surfacing at the API
+        boundary, while a bad read sits on the path to an answer.
+
+        **Nothing here checks that the model can do the job**, and that is not
+        an oversight. This module has no catalogue and must load before
+        discovery has run; the capability precondition is enforced where the
+        catalogue lives — at the endpoint on the way in, and by
+        `_vision_refusal` on the way out, which already refuses a model that
+        cannot see when a picture is attached no matter how it was chosen.
+        """
+        key = TaskSlot(slot).value
+        cleaned = (model or "").strip()
+        with self._lock:
+            if cleaned:
+                self._task_models[key] = cleaned
+            else:
+                self._task_models.pop(key, None)
+            self._save()
+        return dict(self._task_models)
 
     def set_character(
         self,
@@ -277,6 +391,20 @@ class UserSettings:
 
         model = raw.get("default_model")
         self._default_model = model.strip() or None if isinstance(model, str) else None
+
+        # Per-task assignments. Read key by key against the enum rather than
+        # taken wholesale, so a file written by a newer version — or by hand —
+        # contributes the slots this build understands and silently drops the
+        # rest. Taking the dictionary as it stands would let an unknown key
+        # reach `task_models`, where the chat path's "is anything assigned?"
+        # guard would read it as yes and start classifying every message to
+        # consult a slot that can never match.
+        tasks = raw.get("task_models")
+        if isinstance(tasks, dict):
+            known = {s.value for s in TaskSlot}
+            for key, value in tasks.items():
+                if key in known and isinstance(value, str) and value.strip():
+                    self._task_models[key] = value.strip()
 
         # Read strictly: only an exact `true` turns it on. Anything else — a
         # truthy string, a 1, a value written by a newer version — leaves it

@@ -13,6 +13,7 @@ import {
   fetchCloudStatus,
   fetchProviderCatalogue,
   setKillSwitch,
+  fetchRoutingSettings,
   updateRoutingSettings,
 } from './settingsClient';
 
@@ -155,6 +156,10 @@ describe('routing updates leave untouched fields alone', () => {
     expect(lastCall().body).toEqual({
       routing_preference: 'prefer_local',
       default_model: null,
+      // A third field behind the same endpoint, and the same rule: a client
+      // setting the preference must not clear somebody's per-task assignments
+      // as a side effect of not mentioning them.
+      task_models: null,
     });
   });
 
@@ -164,5 +169,46 @@ describe('routing updates leave untouched fields alone', () => {
     await updateRoutingSettings({ defaultModel: '' });
 
     expect(lastCall().body).toMatchObject({ default_model: '' });
+  });
+
+  it('sends only the task slot that changed', async () => {
+    // The backend merges slot by slot, so a screen setting the coding model
+    // must not have to resend the vision one and risk clobbering it.
+    fetchMock.mockResolvedValue(
+      json({ routing_preference: 'auto', task_models: { code: 'coder' } }),
+    );
+
+    await updateRoutingSettings({ taskModels: { code: 'coder' } });
+
+    expect(lastCall().body).toMatchObject({ task_models: { code: 'coder' } });
+  });
+
+  it('reads the slots back, and a save does not blank them', async () => {
+    // The POST answers with the same payload the GET does. Without that, a
+    // client replacing its state with the response would lose its list of
+    // slots the moment somebody used one — a control that disappears when you
+    // touch it.
+    fetchMock.mockResolvedValue(
+      json({
+        routing_preference: 'auto',
+        task_models: { vision: 'seer' },
+        task_slots: ['code', 'vision'],
+      }),
+    );
+
+    const after = await updateRoutingSettings({ taskModels: { vision: 'seer' } });
+
+    expect(after.taskSlots).toEqual(['code', 'vision']);
+    expect(after.taskModels).toEqual({ vision: 'seer' });
+  });
+
+  it('drops a stored value that is not a usable model name', async () => {
+    // The settings file is a file, and a person can edit it. A value that is
+    // not a string has no business reaching a picker as a selected option.
+    fetchMock.mockResolvedValue(
+      json({ routing_preference: 'auto', task_models: { code: 17, vision: '' } }),
+    );
+
+    expect((await fetchRoutingSettings()).taskModels).toEqual({});
   });
 });

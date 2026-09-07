@@ -42,6 +42,11 @@ import type { ChatAttribution } from '@/stores/chatStore';
  *  value must not leak an identifier onto the screen. */
 const CHOSEN_BY: Record<string, string> = {
   request: 'asked for on this message',
+  // The user's standing answer for *this kind* of question, set under
+  // Advanced. Distinct from `task` on purpose: that one is Zaram's own match,
+  // and crediting the product with a choice the person made would be a false
+  // claim on the one line whose job is to say who chose.
+  assignment: 'your model for this kind of question',
   settings: 'your choice in Settings',
   task: 'matched to this question',
   zaram: "Zaram's pick",

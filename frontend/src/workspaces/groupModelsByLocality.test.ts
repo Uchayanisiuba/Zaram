@@ -25,6 +25,8 @@ function model(id: string, locality: string): DiscoveredModel {
     sizeBytes: null,
     residentCostBytes: null,
     residentBudgetBytes: null,
+    supportsVision: false,
+    specialisation: '',
   };
 }
 

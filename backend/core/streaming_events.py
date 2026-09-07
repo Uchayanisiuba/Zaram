@@ -331,8 +331,15 @@ class StreamEvent:
         confident false claim on the one thing the product asks to be trusted
         for; the interface renders nothing for a ``None`` instead.
 
-        `chosen_by` is `request`, `settings`, `task` or `zaram` — the honest
-        version of `CLAUDE.md`'s "routed to qwen2.5-coder — coding task".
+        `chosen_by` is `request`, `assignment`, `settings`, `task` or `zaram` —
+        the honest version of `CLAUDE.md`'s "routed to qwen2.5-coder — coding
+        task".
+
+        `assignment` and `task` are easy to confuse and are opposites in the
+        one way that matters: `assignment` is the *user's* standing answer for
+        this kind of question, and `task` is *Zaram's*. Reporting the second
+        where the first happened would credit the product with a decision the
+        person made, on the indicator whose whole job is to say who chose.
 
         `task` is the one that was promised here and is now real: the message
         was classified against the intent exemplars, the intent named a model

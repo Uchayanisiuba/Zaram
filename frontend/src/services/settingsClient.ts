@@ -243,6 +243,23 @@ export interface DiscoveredModel {
    *  already excludes embedders from its chat-model count; the picker was the
    *  one surface that did not. */
   category: string;
+  /** Whether the model can accept a picture.
+   *
+   *  A **precondition**, never a score — reading an image is not something a
+   *  text model does badly, it is something it does not do. The vision slot
+   *  offers only models where this is true, and the backend refuses the write
+   *  besides, because a picker that can express an impossible setting is a
+   *  picker that will be used to express one. */
+  supportsVision: boolean;
+  /** What the model is built for — `code`, or empty for general purpose.
+   *
+   *  Shown beside a name in the coding slot so the choice can be made without
+   *  reading model filenames, which the UI principles keep out of the primary
+   *  path. It marks; it does not filter. A general model answering coding
+   *  questions is a preference the user is entitled to, and the same
+   *  distinction `select_model_for_task` draws between its gates and its
+   *  ranking. */
+  specialisation: string;
 }
 
 /**
@@ -295,6 +312,10 @@ function toDiscoveredModel(m: Record<string, unknown>): DiscoveredModel {
     residentCostBytes:
       typeof m.resident_cost_bytes === 'number' ? m.resident_cost_bytes : null,
     category: String(m.category ?? ''),
+    // `=== true` rather than a coercion, matching `selectableByDefault` above:
+    // a missing field must read as "no", never as a truthy object.
+    supportsVision: m.supports_vision === true,
+    specialisation: typeof m.specialisation === 'string' ? m.specialisation : '',
   };
 }
 
@@ -307,35 +328,75 @@ export async function fetchModels(): Promise<DiscoveredModel[]> {
 
 export type RoutingPreference = 'prefer_local' | 'auto' | 'prefer_cloud';
 
+/** A kind of request a model can be allocated to by hand — the third of
+ *  `CLAUDE.md`'s tiers of control.
+ *
+ *  **The list comes from the backend, not from here.** `task_slots` on the
+ *  response is the authority, because a slot is only real if
+ *  `_resolve_model` consults it: a row this file invented would be a control
+ *  the user could set and that would then govern nothing. The type is written
+ *  out for the copy below to key off, and an unrecognised slot renders no row
+ *  rather than an untitled one. */
+export type TaskSlot = 'code' | 'vision';
+
 export interface RoutingSettings {
   routingPreference: RoutingPreference;
   /** The model the user chose, or null for "let Zaram decide" — which is the
    *  provider layer's vetted selection, not "no model". */
   defaultModel: string | null;
+  /** Slot → model, for the slots that have one. An absent key is "not
+   *  assigned", which falls through to `defaultModel` and then to Zaram. */
+  taskModels: Record<string, string>;
+  /** Which slots this backend actually routes on. Empty until fetched. */
+  taskSlots: string[];
 }
 
-export async function fetchRoutingSettings(): Promise<RoutingSettings> {
-  const raw = (await get('/routing/preference')) as Record<string, unknown>;
+function toRoutingSettings(raw: Record<string, unknown>): RoutingSettings {
+  const tasks = raw.task_models;
+  const slots = raw.task_slots;
   return {
     routingPreference: (raw.routing_preference as RoutingPreference) ?? 'auto',
     defaultModel: typeof raw.default_model === 'string' ? raw.default_model : null,
+    // Read value by value rather than cast wholesale. This object is written
+    // to a file on disk that a person can edit, so it is not this client's
+    // place to assume every value is a string.
+    taskModels:
+      tasks && typeof tasks === 'object' && !Array.isArray(tasks)
+        ? Object.fromEntries(
+            Object.entries(tasks as Record<string, unknown>).filter(
+              ([, v]) => typeof v === 'string' && v !== '',
+            ) as Array<[string, string]>,
+          )
+        : {},
+    taskSlots: Array.isArray(slots) ? slots.filter((s): s is string => typeof s === 'string') : [],
   };
 }
 
-/** Update either field. Omitting one leaves it alone rather than clearing it. */
+export async function fetchRoutingSettings(): Promise<RoutingSettings> {
+  return toRoutingSettings((await get('/routing/preference')) as Record<string, unknown>);
+}
+
+/** Update any field. Omitting one leaves it alone rather than clearing it.
+ *
+ *  `taskModels` is merged slot by slot on the backend for the same reason:
+ *  sending only the coding slot must not clear the vision one. */
 export async function updateRoutingSettings(update: {
   routingPreference?: RoutingPreference;
   /** `''` hands the choice back to Zaram. `undefined` leaves it unchanged. */
   defaultModel?: string;
+  /** Slot → model, or `''` for that slot to clear it. */
+  taskModels?: Record<string, string>;
 }): Promise<RoutingSettings> {
   const raw = (await send('/routing/preference', 'POST', {
     routing_preference: update.routingPreference ?? null,
     default_model: update.defaultModel ?? null,
+    task_models: update.taskModels ?? null,
   })) as Record<string, unknown>;
-  return {
-    routingPreference: (raw.routing_preference as RoutingPreference) ?? 'auto',
-    defaultModel: typeof raw.default_model === 'string' ? raw.default_model : null,
-  };
+  // The POST answers with the same payload the GET does, `task_slots`
+  // included, so replacing state with what came back cannot blank the list of
+  // slots the moment one of them is used. `_routing_payload` is where that is
+  // guaranteed rather than here.
+  return toRoutingSettings(raw);
 }
 
 // ------------------------------------------------------------- web search

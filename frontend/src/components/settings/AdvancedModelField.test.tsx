@@ -27,6 +27,8 @@ function model(over: Partial<DiscoveredModel> = {}): DiscoveredModel {
     residentCostBytes: 4_800_000_000,
     residentBudgetBytes: 11_700_000_000,
     category: 'llm',
+    supportsVision: false,
+    specialisation: '',
     ...over,
   };
 }

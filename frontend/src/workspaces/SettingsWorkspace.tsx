@@ -60,6 +60,11 @@ import {
 } from 'lucide-react';
 import SurfaceHeader from '../components/common/SurfaceHeader';
 import AdvancedModelField from '../components/settings/AdvancedModelField';
+import {
+  TASK_SLOT_COPY,
+  displayAssigned,
+  eligibleForSlot,
+} from '../components/settings/taskSlots';
 import { useSystemStore } from '@/stores/systemStore';
 import { useEmbodimentStore } from '@/stores/embodimentStore';
 import {
@@ -1045,6 +1050,94 @@ export default function SettingsWorkspace() {
               />
             </div>
           </Row>
+
+          {/* -------------------------------------------- tier three
+              Per-task assignment, and it sits under *Which model answers*
+              because it overrides it: "the model for coding questions" is a
+              more specific statement than "the model", and the specific one
+              winning is the only reading under which setting both is
+              coherent. `_resolve_model` implements that order; the detail
+              below says so, because a rule the user cannot see is a rule they
+              will read as a bug the first time a coding question reaches a
+              model they did not pick.
+
+              The rows come from the backend's `task_slots`. There is no row
+              for long documents even though `CLAUDE.md` lists one, and that
+              is deliberate: nothing classifies document length, so the row
+              would be a control that governs nothing. `TaskSlot`'s docstring
+              carries the argument. */}
+          {routingSettings?.taskSlots
+            .filter((slot) => slot in TASK_SLOT_COPY)
+            .map((slot) => {
+              const copy = TASK_SLOT_COPY[slot];
+              const stored = routingSettings.taskModels[slot] ?? '';
+              const eligible = models === null ? [] : eligibleForSlot(models, slot);
+              return (
+                <Row
+                  key={slot}
+                  label={copy.label}
+                  value={stored ? displayAssigned(models, stored) : copy.unassigned}
+                  state={stored ? 'good' : 'neutral'}
+                  detail={
+                    models === null
+                      ? `${copy.detail} Look for models above to choose one.`
+                      : copy.detail
+                  }
+                >
+                  {models !== null &&
+                    (eligible.length === 0 ? (
+                      // Said, not hidden. An empty picker and a missing row
+                      // look identical, and only one of them is a fact about
+                      // the user's machine worth knowing.
+                      <p className="text-[11px] leading-snug" style={{ color: 'var(--color-text-faint)', maxWidth: '46ch' }}>
+                        No model found here can do this, so there is nothing to assign. Zaram will
+                        say so when a question needs one rather than answering without it.
+                      </p>
+                    ) : (
+                      <select
+                        aria-label={copy.label}
+                        className="px-2 py-1.5 rounded-lg text-xs max-w-full"
+                        style={{
+                          background: 'transparent',
+                          border: '1px solid var(--color-border-subtle)',
+                          color: 'var(--color-text)',
+                        }}
+                        value={stored}
+                        disabled={busy === 'routing'}
+                        onChange={(event) =>
+                          void run('routing', async () =>
+                            setRoutingSettings(
+                              await updateRoutingSettings({
+                                taskModels: { [slot]: event.target.value },
+                              }),
+                            ),
+                          )
+                        }
+                      >
+                        <option value="">{copy.unassigned}</option>
+                        {groupModelsByLocality(eligible).map((group) => (
+                          <optgroup key={group.key} label={group.label}>
+                            {group.models.map((model) => (
+                              <option key={model.id} value={model.id}>
+                                {model.displayName}
+                                {/* Marked, never filtered — see
+                                    `eligibleForSlot`. */}
+                                {slot === 'code' && model.specialisation === 'code'
+                                  ? ' · built for code'
+                                  : ''}
+                                {model.dataPolicy ? '' : ' · terms unknown'}
+                                {model.fitsResident === false
+                                  ? ' · too large for this machine'
+                                  : ''}
+                              </option>
+                            ))}
+                          </optgroup>
+                        ))}
+                      </select>
+                    ))}
+                </Row>
+              );
+            })}
         </Section>
 
         {/* --------------------------------------------------------- Cloud */}
