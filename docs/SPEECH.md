@@ -135,14 +135,43 @@ was the one that spoke.
   change rather than on focus, because clicking into the composer to read it back
   is not an interruption, and stopping there would make speech feel fragile
   instead of responsive.
-* **By microphone.** `MicButton` calls `bargeIn()` before `start()`. Here it is a
-  **correctness** requirement rather than a courtesy: the microphone would
-  otherwise record Zaram's own voice from the speakers and transcribe it back as
-  if the user had said it.
+* **By microphone.** `MicButton` calls `bargeIn()` before `start()`, before
+  `startLatched()`, and — the one that matters — on every speech onset while
+  latched. Here it is a **correctness** requirement rather than a courtesy: the
+  microphone would otherwise record Zaram's own voice from the speakers and
+  transcribe it back as if the user had said it.
+* **By talking over it.** Added 7 September 2026, and it is the only one of the
+  three that is not a button press. In latched mode the microphone stays open
+  while Zaram speaks, so `lib/voiceActivity.ts` watches the level and fires
+  `bargeIn()` the moment it believes the user has started a sentence.
+
+  **The hard part is not hearing the user, it is not hearing Zaram.** An open
+  microphone beside a speaker hears the reply, and a naive detector would have
+  Zaram interrupt itself, record itself, transcribe itself and answer itself.
+  Two defences, in order: `getUserMedia` is asked for `echoCancellation`, which
+  is the real one and is the browser's; and the detector raises its onset
+  threshold while `speechStore.audio` is non-null, which is ours and is a
+  backstop. `ONSET_RMS_WHILE_SPEAKING` is **not a measured number** — it depends
+  on the room, the speakers and how well the canceller is doing — and it is
+  named separately so it is the one constant to turn after listening.
+
+  The raised bar applies to *starting* only. A sentence that needed a raised
+  voice to begin must not also need one to continue, or barge-in captures the
+  first syllable and drops the rest.
 
 `bargeIn()` is cheap when nothing is speaking, so callers may fire it on every
 keystroke without checking first. A caller that has to ask "is it speaking?"
 first is a caller that will eventually get the answer wrong.
+
+**The microphone is no longer disabled while a reply streams**, and that was the
+change that made barge-in reachable rather than theoretical. `ChatSurface` passed
+`disabled={isStreaming}`, which switched the control off during exactly the
+window it exists for.
+
+**Latched mode does not send.** A transcript lands in the composer as editable
+text in both modes, because a recogniser that mishears and then submits has
+spoken for the user — and a mode designed to be left running gives it far more
+chances to. Hands-free *sending* is a separate decision and is not built.
 
 **Generation counters, not flags.** `stop()` and each new `speak()` bump a
 counter that every async step checks, so a stopped utterance cannot have its

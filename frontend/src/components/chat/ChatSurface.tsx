@@ -1216,7 +1216,20 @@ export default function ChatSurface({ navigate }: Props) {
             >
               <Paperclip size={16} className="text-slate-300" />
             </motion.button>
-            <MicButton onTranscript={appendTranscript} disabled={isStreaming} />
+            {/* **Not disabled while a reply is streaming, and that is the
+                change rather than an oversight.** Interrupting an answer in
+                progress is precisely what the microphone is for now: both
+                gestures call `bargeIn()` before they open the stream, so a
+                press mid-reply stops Zaram talking and starts listening, which
+                is what a person does to another person. Disabling it made the
+                one moment barge-in exists for the one moment the control could
+                not be reached.
+
+                Nothing is sent on the user's behalf either way — the
+                transcript lands in the composer as editable text — so a
+                recording taken mid-reply costs them nothing if they change
+                their mind. */}
+            <MicButton onTranscript={appendTranscript} />
             {/* Send, or stop — the same control, because they are the same
                 decision at two moments and a second button would be dead for
                 most of the product's life.
