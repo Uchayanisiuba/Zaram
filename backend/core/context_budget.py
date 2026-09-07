@@ -190,6 +190,114 @@ def loaded_context_length(
     return None
 
 
+#: Local inference servers Zaram will ask, beyond Ollama.
+#:
+#: Loopback only, and guarded as such below -- a context length is not worth a
+#: hole in rule 3.
+LOCAL_SERVER_URLS = (
+    "http://127.0.0.1:1234",  # TabbyAPI / ExLlamaV3, the maintainer's
+    "http://127.0.0.1:8080",  # llama.cpp's `llama-server` default
+)
+
+
+def _tabby_window(payload: object) -> tuple[Optional[str], Optional[int]]:
+    """TabbyAPI's `/v1/model`: the served name and its loaded window.
+
+    **Not an OpenAI route**, despite the prefix. The OpenAI API has `/v1/models`
+    and it carries no context length at all, so nothing about this generalises
+    by standard -- it is one server's shape, and naming it after the standard
+    would mean a different server silently reporting nothing.
+    """
+    if not isinstance(payload, dict):
+        return None, None
+    parameters = payload.get("parameters")
+    if not isinstance(parameters, dict):
+        return None, None
+    window = parameters.get("max_seq_len")
+    return str(payload.get("id") or "").strip(), window if isinstance(window, int) else None
+
+
+def _llama_cpp_window(payload: object) -> tuple[Optional[str], Optional[int]]:
+    """llama.cpp's `/props`: the loaded model's path and its window.
+
+    A second shape rather than a second product decision. Zaram ships no
+    inference server and never will -- rule 1 -- so which one a user runs is
+    theirs to choose, and the cost of that choice must not be that Zaram stops
+    being able to size a request. `llama-server` is the likeliest alternative to
+    both of the maintainer's, being what Ollama wraps.
+
+    The name comes from `model_path`, since `/props` carries no id. Compared on
+    the basename, because a path is where a file is and a model name is what it
+    is called.
+    """
+    if not isinstance(payload, dict):
+        return None, None
+    settings = payload.get("default_generation_settings")
+    window = settings.get("n_ctx") if isinstance(settings, dict) else None
+    path = str(payload.get("model_path") or "").strip()
+    name = path.replace(chr(92), "/").rsplit("/", 1)[-1] if path else ""
+    if name:
+        name = name.rsplit(".", 1)[0]
+    return name, window if isinstance(window, int) else None
+
+
+#: Route to reader. Asked in order; the first that answers about *this* model wins.
+_SERVER_SHAPES = (
+    ("/v1/model", _tabby_window),
+    ("/props", _llama_cpp_window),
+)
+
+
+def local_server_context_length(
+    model: Optional[str],
+    *,
+    urls: tuple[str, ...] = LOCAL_SERVER_URLS,
+    timeout: float = 1.0,
+) -> Optional[int]:
+    """The window a non-Ollama local server loaded with, or ``None``.
+
+    **This is the half that was missing, and it was a 32x error.** Measured
+    7 September 2026: `loaded_context_length` can only ask Ollama's `/api/ps`,
+    so a TabbyAPI model answered ``None`` and `budget_for` fell back to 4,096 --
+    on a model whose own route reports **65,536**. A task there handed itself
+    over at 2,048 tokens, a thirty-second of the window it actually had.
+
+    **The dangerous part is not reading a second server, it is reading it for
+    the wrong model.** These routes describe whatever that server happens to
+    hold, regardless of what was asked for, so a lookup that skipped the name
+    check would hand every Ollama model TabbyAPI's window -- a confident wrong
+    budget, which is worse than the conservative one it replaces, because a
+    request sized against it does not fit. Every shape returns a name and it
+    must match.
+
+    Asked after Ollama, never before: Ollama is the common case, and this is two
+    HTTP calls to ports that are usually closed.
+    """
+    if not model:
+        return None
+    wanted = model.strip().lower()
+
+    for base_url in urls:
+        if not _is_loopback(base_url):
+            logger.warning("context length refused for a non-loopback host: %r", base_url)
+            continue
+        for route, read in _SERVER_SHAPES:
+            try:
+                response = requests.get(f"{base_url}{route}", timeout=timeout)
+                response.raise_for_status()
+                served, window = read(response.json())
+            except Exception as exc:
+                logger.debug("context unreadable at %s%s: %s", base_url, route, exc)
+                continue
+            # Zero is not a window: unreadable rather than a budget of nothing,
+            # which would make every document too large.
+            if not served or not window or window <= 0:
+                continue
+            if served.strip().lower() == wanted:
+                return window
+    return None
+
+
 @dataclass(frozen=True)
 class ContextBudget:
     """Room for one request, and whether the figure was measured or assumed.
@@ -288,7 +396,12 @@ def budget_for(
     which. This is the one function callers should reach for; the parts above
     are exposed for tests and for callers that genuinely want the raw figure.
     """
+    # Ollama first because it is the common case, then any OpenAI-compatible
+    # server on loopback. Both may answer `None`; only then is the fallback used,
+    # and `measured` still says so.
     measured = loaded_context_length(model, base_url=base_url)
+    if measured is None:
+        measured = local_server_context_length(model)
     total = measured if measured is not None else FALLBACK_CONTEXT_TOKENS
     return ContextBudget(
         total_tokens=total,

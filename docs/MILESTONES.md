@@ -11,9 +11,32 @@ accurate — it is the first thing anyone reads.
 
 ---
 
-## Current state — 6–7 September 2026
+## Current state — 7 September 2026
 
 *The latest work is first. Earlier sessions follow below.*
+
+### What landed on 7 September, after the measurements
+
+Five commits, all on `main`, none pushed. `docs/NEXT-SESSION-PROMPTS.md` carries
+the brief for what comes next: **moving the model stack onto TabbyAPI**, decided
+on the table below.
+
+| | |
+|---|---|
+| **Spell check** | The feature was already on and had no dictionary. Chromium's default source is Google's CDN, fetched silently on first focus and invisible to `EgressGate`. The 441 KB `.bdic` is fetched once at build time by `scripts/fetch-dictionary.mjs`, committed, and served to Chromium over loopback; with none bundled the download URL points at a dead port. It **serves** rather than copies because Chromium asks for `<lang>-<its own format version>.bdic`, so a copied file would be ignored the next time Electron bumped. |
+| **Token counter** | `+` green / `−` red beside the composer, counted at `execute_step` — the one route to a model on both paths. Increments, never a total. The red half is real: tokens a compaction removed. Draws no window share unless the window was *measured*. |
+| **Activity panel** | The tool line folds into one summary and opens the existing overlay, which now names **what each call was aimed at** — `StreamEvent.tool_call` carried no arguments before, so "which files" could not be rendered honestly at all. A refusal never folds. |
+| **Coding embodiment state** | `codingActivity` derives it from what the system is *doing* — code tools ran, or a fence opened — never from which model answered, which is routing. No new colour: thinking's violet, a different rhythm. |
+| **Auto is gated** | The Auto mode is offered only when two or more models exist that Zaram may route to on its own. An inert preference is a control over hardcoded data. |
+| **A second server's context window** | `local_server_context_length` reads TabbyAPI's `/v1/model` and llama.cpp's `/props`. Before it, a Tabby model fell back to 4,096 and **handed off at 2,048 tokens on a 65,536-token window** — a 32× error on the model that should be the default. |
+
+**Three defects were found in this session's own work before it shipped**, and
+they are the same three shapes this file keeps recording: a helper that was
+complete, tested and called by nothing (`displayedPreference`, deleted); a test
+whose assertion was always true (`is not None or True`, rewritten); and a
+function named for a standard it did not implement (`openai_compat_…` reading
+TabbyAPI's own route, renamed and generalised).
+
 
 **Everything below is committed on `main` and the working tree is clean.**
 Nothing has been pushed since the 5 September push;

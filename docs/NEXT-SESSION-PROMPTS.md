@@ -1,9 +1,9 @@
 # Next session — handoff
 
 > **Out of date at the top, current at the bottom.** The newest prompt is
-> *"Prompt for the next session — written 7 September 2026"*, at the very end of
-> this file, and the authoritative state is the **Current state — 6–7
-> September** block in `docs/MILESTONES.md`.
+> *"Prompt for the next session — written 7 September 2026, evening"*, at the
+> very end of this file, and the authoritative state is the **Current state**
+> block in `docs/MILESTONES.md`.
 >
 > There are now three live-ish prompts and they are about different things. The
 > **7 September** one is the local model stack — measuring what is installed and
@@ -1232,3 +1232,155 @@ cd frontend && npx tsc --noEmit && npx vitest run
 
 The whole backend suite is ~10–35 minutes depending on what else the machine is
 doing, and is not the inner loop.
+
+
+---
+
+## Prompt for the next session — written 7 September 2026, evening
+
+**This is the current prompt.** Everything above it is an earlier brief: accurate
+about what was built and why, superseded on status.
+
+Paste from here down.
+
+---
+
+Read `docs/MILESTONES.md` — the **Current state** block — then `CLAUDE.md` for
+the rules. `main` is the trunk, the working tree is clean, and nothing has been
+pushed since 5 September.
+
+### The task: move the model stack onto TabbyAPI
+
+The maintainer's decision, taken on the evidence below: **pull the exl3
+equivalents of the Ollama models and replace them.** Not because Ollama is bad,
+but because on a 12 GB card exl3 is the only format that fits a 27B *entirely*
+with a 64K window, and every GGUF model in the set spends half its weights in
+system RAM.
+
+### What was measured, so none of it is re-derived
+
+Every row: clear card, exactly 300 generated tokens, thinking off, one prompt no
+model finishes early. Those conditions are not decoration — each was added
+because leaving it out produced a number that was wrong in a way that looked
+right. `backend/tests/test_what_actually_fits_this_card.py -m measure -s` is the
+instrument and it now speaks to both servers.
+
+| | on card | context | cold load | tok/s |
+|---|---|---|---|---|
+| TabbyAPI `Qwen3.8-27B-exl3-2.20bpw` | **8.48 GiB, fits entirely** | **65,536** | 90 s | **26.3** |
+| `qwen3-14b-16k` | 10.41 GB, 100% | 16,384 | 122 s | 32.0 |
+| `gemma4-26b-32k` | 9.17 of 18.14 GB, 51% | 32,768 | 164 s | 20.0 |
+| `qwen3-coder-30b-32k` | 10.61 of 20.56 GB, 52% | 32,768 | 178 s | 19.4 |
+
+Tabby's first token arrives in **0.7 s**. It reproduces: 25.9 and 26.3 tok/s
+across two clean runs, claiming 8.41 and 8.48 GiB.
+
+**The budget for the whole card.** 12,288 MiB total; a Windows desktop holds
+~1.3 GB for the compositor and a browser, so **~10,750 MiB is the most this
+machine ever offers**. A threshold above that is a test that never runs — which
+is what happened when the Tabby guard was first set at 11,000.
+
+**Disk: 73 GB free on C:** (93% full), against 44 GB of Ollama blobs. Do not
+move the store — measured with `dd`, C: writes at 364 MB/s and reads at 196,
+G: writes at 155, F: is a spinning disk. C: is the fastest drive on the machine
+despite being nearly full.
+
+### The machine's Tabby setup, as it stands
+
+* `C:\Users\user\tabbyAPI\config.yml`, port **1234**, `disable_auth: true`
+* `model_dir: C:\Users\user\models` — holds **exactly one** model today
+* `inline_model_loading: true`, so a request naming a model loads it on the spot
+* `cache_mode: 4,4`, `cache_size: 65536`, `max_seq_len: 65536`
+* `gpu_split_auto: true`, `autosplit_reserve: [96]`
+* `/v1/models` lists what is in `model_dir`; `/v1/model` describes what is loaded
+
+**Tabby's Qwen already has vision, disabled in config.** Its own load log says
+so: *"The provided model has vision capabilities, vision is disabled in config."*
+That is the replacement path for Gemma — a config flag to test, not a download —
+and if it works, 17.99 GB of Ollama blobs go.
+
+### How to size a replacement
+
+At **2.20 bpw** the 27B costs 8.48 GiB *including* its 64K 4-bit cache, against
+~10,750 MiB available. So there is roughly **2 GiB of headroom**, which buys
+either a higher bpw on the same model or a larger one at low bpw. Spend it
+deliberately and measure after: this file's whole history is numbers that looked
+right and were not.
+
+Do **not** take exl3 repository names from this document — none are given on
+purpose, because inventing one that does not exist wastes a session. Find
+current quants and check the bpw against the budget above.
+
+### The order, and the part that matters most
+
+1. **Pull one replacement and measure it before deleting anything.** Add its
+   name to the `parametrize` list in `test_what_actually_fits_this_card.py` and
+   run the measure marker. A model that is slower or does not fit is a model
+   the Ollama original should outlive.
+2. **Test Gemma's replacement by enabling vision on the Qwen**, not by
+   downloading. It is a config change.
+3. **Only then delete**, and know that `ollama list` double-counts: derived
+   `num_ctx` variants share the parent's blob, so removing a manifest frees
+   kilobytes. Deleting is a decision about the picker, never about disk.
+4. **Re-run the measure suite and rewrite the MILESTONES table.** A table with
+   measured rows beside guesses is how guesses become facts.
+
+### Traps, every one of which has bitten in the last two days
+
+* **Something else is holding the card, and `nvidia-smi` will not say what.**
+  Windows' own counters will:
+  `(Get-Counter '\GPU Process Memory(*)\Dedicated Usage').CounterSamples | Where-Object {$_.CookedValue -gt 100MB}`.
+  Unreal held 6.24 GB; the Zaram app itself holds it while running.
+* **Ollama acknowledges an unload long before the memory comes back.**
+  `/api/ps` answered `{"models":[]}` while `llama-server` still held 10.15 GB,
+  and the row measured next read a quarter of its real speed. `SETTLE_TIMEOUT`
+  now waits for two consecutive clear readings; do not shorten it.
+* **The `measure` marker is registered and never deselected**, so a plain
+  `pytest` on those files runs the live GPU work — but only when the card
+  happens to be free, and skips in a second when it is not. A task chip exists
+  for this.
+* **Run the Electron suite with no Zaram running.** The single-instance lock
+  makes a running app look exactly like a regression.
+* **Only one model is resident at a time**, on either server. A Tabby switch is
+  ~90 s cold, which is why the 6 September routing change — prefer the model
+  already loaded over one that merely fits — matters more after this migration,
+  not less.
+* **Use the Grep tool, never a recursive shell grep.** The repository is
+  duplicated under `.kilo/`, `.trae/` and `.continue/`; a shell grep times out.
+* Python is `backend/venv/Scripts/python.exe`. The bare `python` on this machine
+  is broken (a missing 3.14 install path).
+
+### What this session left unfinished, in priority order
+
+1. **Per-task model assignment does not exist**, and the maintainer asked for
+   it: local and cloud models allocated to chat, coding, vision, image reading.
+   `RoutingSettings` carries one `defaultModel`; `INTENT_SPECIALISATION` maps an
+   intent to a *kind* of model (`code`), not to a user's choice. This is a
+   backend store, an API and a Settings surface — and the maintainer's stated
+   intent is that **it becomes what Auto uses as its strategy**.
+2. **The chat project picker cannot create a project**, and it reads
+   `/artifacts/projects` — ids derived from artifacts — while a real project
+   store with `create(name, type, note, root)` sits in `projectStore.ts` unused
+   by it. Creation must ask for a **type**, which `CLAUDE.md` says is the one
+   thing that cannot be asked later; `coding` also needs a root, which is the
+   code tools' sandbox boundary.
+3. **Nothing built on 7 September has been seen working on screen** — the
+   spell-check underline, the token counter, the activity panel, the coding
+   embodiment state. Every layer beneath them is measured and tested. The avatar
+   lesson applies exactly: gaze tracking shipped with green tests and a
+   confirmed rig while nothing moved, because the fringe covered the eyes.
+4. **The coding animation clip does not exist.** The state, the manifest slot
+   and the fallback are wired; the asset is a licence decision. Mixamo's terms
+   restrict redistributing animation files, which is what bundling one in a repo
+   and an installer does.
+5. **Does a generated image ever leave VRAM?** Still unconfirmed, still the most
+   serious open item anywhere in this file.
+
+### The gate
+
+```
+backend/venv/Scripts/python.exe -m pytest backend/ -q -m "not measure"
+npm run check:reachability && npm run check:guards
+npm run test:electron            # with no Zaram running
+cd frontend && npx tsc --noEmit && npx vitest run
+```
