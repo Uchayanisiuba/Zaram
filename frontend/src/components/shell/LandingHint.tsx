@@ -29,7 +29,9 @@ import { useEffect } from 'react';
 
 import { useSystemStore } from '@/stores/systemStore';
 import { useChatModeStore } from '@/stores/chatModeStore';
+import { useMicStore } from '@/stores/micStore';
 import { useIsReducedMotion } from '@/hooks/useReducedMotion';
+import { chordTokens, detectPlatform, REGISTRY } from '@/runtime/shortcuts/registry';
 
 interface LandingHintProps {
   /** Whether the landing is the current surface. Passed in rather than read
@@ -47,7 +49,36 @@ export default function LandingHint({ isLanding }: LandingHintProps) {
   const startPolling = useSystemStore((s) => s.startPolling);
   useEffect(() => startPolling(), [startPolling]);
 
+  /**
+   * Whether the voice line may be shown, asked rather than assumed.
+   *
+   * `CLAUDE.md`: *disabled capabilities are visible, not silent* — and its
+   * mirror, *never render invented values*. Advertising "Shift Space for voice"
+   * on a machine without `zaram[mic]` installed offers a keystroke that does
+   * nothing, on the first line a new user reads. Silence is the honest answer
+   * there: the hint is an instruction to do a thing, and there is no thing.
+   *
+   * A loopback call to Zaram's own backend, in the same class as the `/health`
+   * poll this component already owns, so rule 7g is untouched — nothing leaves
+   * the device and there is nothing to consent to.
+   */
+  const checkMic = useMicStore((s) => s.checkAvailability);
+  const micUnavailable = useMicStore((s) => s.unavailableReason);
+  useEffect(() => {
+    void checkMic();
+  }, [checkMic]);
+
   if (!isLanding || chatOpen) return null;
+
+  // Read from the registry rather than typed here, so the line and the chord
+  // that fires cannot drift apart. The help overlay renders the same tokens
+  // from the same source — an interface that advertises a chord the matcher
+  // does not answer to is a defect this registry has already recorded twice.
+  const voiceChord = REGISTRY.find((s) => s.id === 'voice');
+  const voiceHint =
+    voiceChord && micUnavailable === null
+      ? `Press ${chordTokens(voiceChord, detectPlatform())} to talk`
+      : null;
 
   return (
     <footer
@@ -61,6 +92,12 @@ export default function LandingHint({ isLanding }: LandingHintProps) {
         // column, so the line lands in the lower portion of the screen without
         // being absolutely positioned against it.
         justifyContent: 'center',
+        // A column now, because there are two lines. The second is quieter and
+        // smaller: one instruction is the way in, the other is a shortcut for
+        // it, and giving them equal weight would make the landing ask the user
+        // to choose before they have done anything — rule 7h, in miniature.
+        flexDirection: 'column',
+        gap: 4,
         padding: '8px 16px',
         minHeight: 52,
         background: 'transparent',
@@ -85,6 +122,23 @@ export default function LandingHint({ isLanding }: LandingHintProps) {
       >
         Click Orb to Chat
       </span>
+
+      {voiceHint && (
+        <span
+          style={{
+            font: '400 12px/1.3 var(--font-mono, ui-monospace, "JetBrains Mono", monospace)',
+            color: '#4B5563',
+            letterSpacing: '0.02em',
+            userSelect: 'none',
+            // No attract-blink. Two things blinking at each other on an
+            // otherwise still landing is not calm, and the motion budget is
+            // already spent on the line above.
+            opacity: reduced ? 0.72 : 0.85,
+          }}
+        >
+          {voiceHint}
+        </span>
+      )}
     </footer>
   );
 }

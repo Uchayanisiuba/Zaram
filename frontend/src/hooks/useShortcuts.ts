@@ -12,6 +12,8 @@ export interface ShortcutHandlers {
   navigate: (id: WorkspaceId) => void;
   openCommand: () => void;
   toggleChat: () => void;
+  /** Open the conversation and start listening, hands-free. */
+  startVoice: () => void;
   toggleDock: () => void;
   setOrb: (state: OrbState) => void;
   toggleHelp: () => void;
@@ -43,6 +45,9 @@ function dispatch(action: ShortcutAction, handlers: ShortcutHandlers): void {
       break;
     case 'chat':
       handlers.toggleChat();
+      break;
+    case 'voice':
+      handlers.startVoice();
       break;
     case 'dock':
       handlers.toggleDock();

@@ -18,6 +18,7 @@ import {
   REGISTRY,
   SHIFTED_KEYS,
   chordTokens,
+  keyForName,
   matches,
   type Platform,
   type Shortcut,
@@ -47,7 +48,12 @@ const MAC_OPTION_COMPOSES: Record<string, string> = { c: 'ç' };
 function eventFor(chord: string, platform: Platform = 'win'): KeyboardEvent {
   const parts = chord.split(' ');
   const printed = parts.pop() as string;
-  const typed = printed.length === 1 ? printed.toLowerCase() : printed;
+  // A key whose name is not its character — Space is printed "Space" and
+  // pressed as " ". Read back through the registry's own inverse rather than
+  // spelled again here: a second table is how a label and a matcher come to
+  // disagree, which is the failure this whole file exists to catch.
+  const named = keyForName(printed);
+  const typed = named.length === 1 ? named.toLowerCase() : named;
   const held = (...tokens: string[]) => tokens.some((t) => parts.includes(t));
   const altHeld = held('Alt', '⌥');
 

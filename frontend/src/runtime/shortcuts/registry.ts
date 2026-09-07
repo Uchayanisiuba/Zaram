@@ -20,6 +20,14 @@ export type ShortcutAction =
   | { type: 'help' }
   | { type: 'chat' }
   | { type: 'dock' }
+  //: Open the conversation and start listening, hands-free.
+  //:
+  //: Separate from `chat` even though it opens the conversation too, because
+  //: the two are different intentions and only one of them turns the
+  //: microphone on. Folding voice into `chat` would mean a keystroke somebody
+  //: presses to *read* their conversation also starts recording them, which is
+  //: the one side effect a microphone must never have.
+  | { type: 'voice' }
   | { type: 'orb'; target: OrbState };
 
 export interface Shortcut {
@@ -147,6 +155,30 @@ export const REGISTRY: Shortcut[] = [
     action: { type: 'chat' },
   },
   {
+    id: 'voice',
+    label: 'Voice Conversation',
+    group: 'window',
+    // **Shift+Space, and the Shift is what makes it safe.** Bare Space is the
+    // most-pressed key on the board and it scrolls; claiming it would mean
+    // `useShortcuts`' unconditional `preventDefault()` deleted scrolling on
+    // every surface, which is the Ctrl+C defect this registry already records
+    // twice. Shift+Space scrolls *up* in a document, which the shell does not
+    // do — nothing here is a scrolling document — and it is otherwise unclaimed
+    // by the OS, the browser and the menu bar.
+    //
+    // `useShortcuts` returns early inside an input, a textarea or anything
+    // contenteditable, so this cannot fire while somebody is writing. That
+    // guard is load-bearing rather than incidental here: Shift+Space is a
+    // capital-letter-shaped chord, and a microphone opening mid-sentence is
+    // the worst version of a misfire in the product.
+    //
+    // Matched on `event.key === ' '`, which is what Space produces on every
+    // layout. The `code`-based path exists for Alt+letter chords, where Option
+    // rewrites the character; Space has no such problem.
+    keys: { shift: true, key: ' ' },
+    action: { type: 'voice' },
+  },
+  {
     id: 'dock',
     label: 'Toggle Dock',
     group: 'window',
@@ -180,8 +212,28 @@ export function chordTokens(shortcut: Shortcut, platform: Platform): string {
   if (shortcut.keys.ctrl) parts.push(platform === 'mac' ? '\u2303' : 'Ctrl');
   if (shortcut.keys.alt) parts.push(platform === 'mac' ? '\u2325' : 'Alt');
   if (shortcut.keys.shift) parts.push(platform === 'mac' ? '\u21e7' : 'Shift');
-  parts.push(shortcut.keys.key.toUpperCase());
+  parts.push(KEY_NAMES[shortcut.keys.key] ?? shortcut.keys.key.toUpperCase());
   return parts.join(' ');
+}
+
+/** Keys whose character is not their name.
+ *
+ *  `' '.toUpperCase()` is `' '`, so a Space chord rendered as a chord token
+ *  produces "Shift " \u2014 a shortcut the help overlay advertises as having no
+ *  second key. Named rather than special-cased at the call site, because the
+ *  help overlay is not the only thing that renders a chord. */
+const KEY_NAMES: Record<string, string> = { ' ': 'Space' };
+
+/** The inverse of `KEY_NAMES`: the key a printed token stands for.
+ *
+ *  Exported and derived rather than restated, because the round-trip guard in
+ *  `registry.test.ts` reads a rendered chord back into the event a keyboard
+ *  would emit — and this file's whole history is the label and the matcher
+ *  being computed in two places and disagreeing. A second hand-written table
+ *  would be that defect again, in the test that exists to catch it. */
+export function keyForName(printed: string): string {
+  const found = Object.entries(KEY_NAMES).find(([, name]) => name === printed);
+  return found ? found[0] : printed;
 }
 
 /** Characters a standard layout cannot produce without Shift held. Exported so

@@ -308,6 +308,28 @@ export default function ChatSurface({ navigate }: Props) {
     setInputText((current) => (current ? `${current} ${text}` : text));
     inputRef.current?.focus();
   }, []);
+
+  /**
+   * Shift+Space asked for a hands-free conversation; this is where it starts.
+   *
+   * The microphone lives here because the transcript has to reach a composer
+   * and only this component has one. The keystroke is global and fires on the
+   * landing, where this is not mounted, so `voiceRequests` carries the request
+   * across the mount — see the store for why it is a counter rather than a
+   * flag.
+   *
+   * **Served, not replayed.** The number of the last request acted on is
+   * remembered, so a re-render, a resumed conversation or a second mount cannot
+   * reopen the microphone on a request that was already honoured. Reopening a
+   * microphone nobody asked for twice is the one failure worth the bookkeeping.
+   */
+  const voiceRequests = useChatModeStore((s) => s.voiceRequests);
+  const servedVoiceRequest = useRef(0);
+  useEffect(() => {
+    if (voiceRequests === 0 || voiceRequests === servedVoiceRequest.current) return;
+    servedVoiceRequest.current = voiceRequests;
+    void useMicStore.getState().startLatched(appendTranscript);
+  }, [voiceRequests, appendTranscript]);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   /**

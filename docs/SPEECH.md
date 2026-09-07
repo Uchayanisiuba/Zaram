@@ -16,6 +16,34 @@ could answer and no document could.
 | **Orb** (landing default) | Silent | A **Speak** button under each reply |
 | **Avatar** (character) | Speaks automatically, sentence by sentence | Nothing to press |
 
+## Listening — three ways in
+
+| Gesture | What it does |
+|---|---|
+| **Click the microphone** | One utterance. Press again to stop and transcribe. |
+| **Hold the microphone**, or Alt-click it | A conversation. The microphone stays open across turns. |
+| **Shift+Space**, anywhere | Opens the conversation and starts the same mode. |
+
+**Shift+Space and not Space.** `useShortcuts` calls `preventDefault()` on every
+match outside a text field, so claiming bare Space would not shadow scrolling —
+it would delete it, on every surface. That is the Ctrl+C defect the shortcut
+registry has already recorded twice. The same hook returns early inside an
+input, a textarea or anything contenteditable, which is load-bearing here rather
+than incidental: a microphone opening mid-sentence is the worst misfire in the
+product.
+
+The landing offers it in words beside *"Click Orb to Chat"*, and **only when
+Zaram can actually listen** — an instruction to press a key that does nothing is
+the invented value the UI principles forbid, on the first line a new user reads.
+The chord is rendered from the registry rather than typed into the hint, so the
+line and the matcher cannot drift.
+
+`voiceRequests` on `chatModeStore` is how a global keystroke reaches a
+microphone that lives inside the conversation: the chord fires on the landing
+where no composer is mounted, so it records a request and `ChatSurface` serves it
+once it exists. A counter, not a flag — a flag would need clearing, and whoever
+cleared it would race the mount.
+
 `CLAUDE.md`: *"Speech follows the renderer: avatar selected, replies speak; orb,
 silent unless asked."* One decision the user already made by choosing a face, so
 it needs no second setting — rule 7h, *never make the user choose in advance*.

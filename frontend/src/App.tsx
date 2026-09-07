@@ -51,6 +51,11 @@ export default function App() {
     navigate: (id) => { setWorkspace(id); setCommandOpen(false); },
     openCommand: () => setCommandOpen(true),
     toggleChat: () => useChatModeStore.getState().toggleChat(),
+    // Records the request and opens the conversation; `ChatSurface` turns the
+    // microphone on once it has a composer for the transcript to land in. The
+    // keystroke fires on the landing, where there is no composer yet, so the
+    // request has to outlive the mount — see `voiceRequests`.
+    startVoice: () => useChatModeStore.getState().requestVoiceConversation(),
     toggleDock: () => useShellStore.getState().toggleDock(),
     setOrb: (state) => useOrbStore.getState().setOrbState(state),
     toggleHelp: () => setHelpOpen((o) => !o),

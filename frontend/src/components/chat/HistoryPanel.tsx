@@ -173,6 +173,34 @@ export default function HistoryPanel() {
 
   const transition = reduced ? 'none' : 'transform 0.22s ease, opacity 0.22s ease';
 
+  /**
+   * The lip's transition, and it deliberately does **not** include `opacity`.
+   *
+   * **Measured on the running app, 7 September 2026.** On a fresh mount the lip
+   * reads `opacity: 1` and `getAnimations()` is empty. Open the panel and close
+   * it once, and a `CSSTransition` on opacity appears, sits at
+   * `currentTime: 0` with `playState: "running"`, and never advances — four
+   * readings over four seconds all returned `0` while the inline style said
+   * `1`. From then on the lip is fully transparent for the rest of the session.
+   *
+   * The control is still mounted and still hit-testable — `elementsFromPoint`
+   * puts it on top with `pointer-events: auto` — which is why this reads as
+   * *"the button stopped working"* rather than as a missing feature. It is a
+   * 22px invisible strip at the screen edge. Nobody can aim at that.
+   *
+   * **Why the transition stalls is not established**, and this comment does not
+   * pretend otherwise. What the fix rests on is the property, which needs no
+   * mechanism: *whether a control can be seen must never be the output of an
+   * animation.* A stalled transform is a control in the wrong place; a stalled
+   * opacity is a control that does not exist. The value is applied
+   * immediately, in both directions, and there is nothing left to stall.
+   *
+   * The panel keeps `transition` — it is a surface rather than a control, it
+   * carries `visibility` as a discrete authority beside its opacity, and its
+   * transition was observed working.
+   */
+  const lipTransition = 'none';
+
   return (
     <div
       className="fixed inset-y-0 left-0 z-[60] flex items-stretch pointer-events-none"
@@ -197,7 +225,9 @@ export default function HistoryPanel() {
           background: open ? 'var(--color-elevated)' : 'var(--color-glass)',
           backdropFilter: 'blur(8px)',
           cursor: 'pointer',
-          transition,
+          transition: lipTransition,
+          // Hidden only while the panel is over it, and hidden *at once* rather
+          // than faded. See `lipTransition`.
           opacity: open ? 0 : 1,
         }}
         onMouseEnter={beginPeek}
