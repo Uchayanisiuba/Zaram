@@ -19,7 +19,7 @@ accurate — it is the first thing anyone reads.
 Nothing has been pushed since the 5 September push;
 `git rev-list --count origin/main..main` is the count.
 
-**Measured: 3,531 passed, 29 skipped, 0 failed, 15m13s, with Ollama up** —
+**Measured: 3,535 passed, 28 skipped, 0 failed, 34m30s, with Ollama up** —
 excluding `test_the_model_can_drive_the_tools.py`, which drives a real 14B and
 takes ten minutes on its own (`-m measure`, 2 passed in 10m27s). The same suite
 took 29m06s earlier the same day on the same machine, which is what a wall-clock
@@ -169,9 +169,48 @@ Not repository state, but it changes what a measurement means.
 |---|---|
 | TabbyAPI | `Qwen3.8-27B-exl3-2.20bpw`, `max_seq_len` **16384 → 65536** |
 | | applies on next model load; config backed up beside itself |
-| Ollama | `qwen3-14b-16k` created, **verified fully resident**, 10.41 GB |
-| | `gemma4-26b-32k` created, **unverified** — 17 GB exceeds the card by design |
+| Ollama | `qwen3-14b-16k` — **fully resident**, 10.41 GB, 30.5 tok/s |
+| | `gemma4-26b-32k` — **51% resident**, 9.17 of 18.14 GB, **17.8 tok/s** |
 | Ollama env | `OLLAMA_FLASH_ATTENTION=1`, `OLLAMA_KV_CACHE_TYPE=q8_0`, user scope |
+
+### The Gemma is a mixture-of-experts model, and that changes the answer
+
+Measured 7 September, `test_what_actually_fits_this_card.py -m measure`. The
+line above read *"created, **unverified** — 17 GB exceeds the card by design"*
+for a day, and the design was better than the note.
+
+`gemma4:26b-a4b` is **128 experts with 8 firing per token** — read from
+`/api/show`, not from the name. So while 49% of it sits in system RAM, the
+weights that have to move for any one token are a fraction of the file, and it
+answers at **17.8 tok/s**. A dense 18 GB model half-offloaded would be in single
+digits. It also carries 32K context here (262K native), vision, and native tool
+calling, against the 14B's 16K and no vision.
+
+The 14B is still **1.7× faster** and fully resident, so neither wins: ~40% of
+the speed buys twice the context, a 25.8B knowledge base and eyes. Both are
+worth keeping, and the disk cost of doing so is not what `ollama list` implies —
+see below.
+
+**`ollama list` double-counts.** The `-8k`, `-16k` and `-32k` variants are
+Modelfiles that set `num_ctx` on **the same blob**: both Qwens are
+`a8cc1361f314`, both Gemmas are `7121486771cb`. The listing sums to 55.7 GB and
+`du` on the blobs directory says **27 GB**. Deleting a derived variant frees
+kilobytes, so it is a decision about what appears in the picker, never about
+space.
+
+**And the card has to be clear before any of this means anything.** The first
+attempt reported 193 MiB free: a Zaram backend left running from the previous
+evening — `pythonw.exe main.py`, started 18:20 — was holding **9.09 GB**.
+`nvidia-smi --query-compute-apps` did not show it, listing WhatsApp, Discord and
+Steam with `[N/A]`; Windows' own GPU counters named the PID immediately. That is
+the second time in two days the same instrument has been the wrong one, so the
+guard is now in the test rather than in a habit.
+
+**Open, and it is the more serious half:** a backend at rest should hold nothing
+on the card. 9 GB is the size of a resident image pipeline, so the likely cause
+is that generating an image loads SDXL into VRAM and never unloads it — meaning
+one picture would cost every local chat model until a restart. Not confirmed,
+and worth confirming before anything else on that path.
 
 The KV setting saved 1.77 GB and is what makes 16K fit. Note that
 `[Environment]::SetEnvironmentVariable(...,'User')` writes the registry but does

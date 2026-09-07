@@ -248,6 +248,57 @@ Two defects that only a model could have found, both now fixed:
   question nobody asked. An argument no schema declares is now refused by name,
   which is what lets the next round fix it.
 
+**3d — a user can actually point it at a repository. Done, 7 September.**
+
+Everything above was reachable by a test and by nobody else. `Project.root`
+shipped with its migration, its `ContextVar` and a sandbox check that resolves
+every path before comparing — and **no route could set it**:
+`ProjectCreateRequest` had no such field and neither did the update, so a
+repository could only be attached by calling `ProjectRecords` from Python. The
+handoff written the day before said "reachable through the API only"; reading
+the request model rather than the note is what found otherwise. This
+repository's own failure shape, arriving through a missing form field instead of
+a missing caller.
+
+* `root` on create and on `PATCH /projects/{id}`; `""` withdraws it, which is a
+  real operation and not a no-op.
+* **Checked at the boundary, not in the store.** Whether a folder exists is a
+  question about this machine right now — a drive gets unmounted — and
+  `active_root` already asks it every request and answers `None`, which is the
+  safety property. `_checked_root` in `main.py` normalises to an absolute path
+  and refuses one that is not a folder *with the sentence*, because a typo would
+  otherwise turn every later call into "outside the project folder": a true
+  sentence about the wrong problem, sending the user to look at permissions.
+* In Project: the folder field appears at creation when the type is `coding` —
+  the moment the type is chosen is the moment the question is obvious — and on
+  every coding project's row, since every one created before today has none. A
+  project without a folder says so in amber, because in that state every tool
+  call refuses.
+* A native directory picker in the desktop app, a typed path everywhere else.
+  The shape Knowledge already uses for folder ingest, for the same reason: a
+  browser tab cannot learn a folder's real path.
+
+**3e — the model's working is visible. Done, 7 September.**
+
+`StreamEvent.tool_call` carried the server, the tool and the gate's verdict for
+every call from the day the loop shipped, and `chatClient.parseEvent` dropped it
+in its `default:` case. No frontend file mentioned `tool_call`. A reply that
+searched a repository and read two files looked exactly like one answered from
+memory — *"show routing decisions in plain language"* inverted, and the
+difference between a claim and a checkable one.
+
+`ToolCalls.tsx` renders one line per call, under the answer and above the
+notices. Arguments and results are deliberately absent: a `read_lines` range is
+a wall of numbers, and the result is file contents, which belong in the model's
+context rather than on the screen. It is also what the surface shows *while* a
+tool-using reply is in flight — that generation is buffered, so without it
+nothing at all appears for the seconds the model spends reading.
+
+`check:reachability` could not have caught this: it reports backend **routes**
+no frontend file mentions, and has nothing to say about backend **events**
+nobody parses. Two tests in `chatClient.test.ts` are the instrument for that
+class.
+
 **4 — next: the repository is offered as a project.** When a folder added to
 Knowledge looks like a repository, offer to make it a coding project, with its
 `root` set. Offer at the moment of doubt, never a choice in advance (7h). This

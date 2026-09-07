@@ -979,14 +979,29 @@ contract, all offline.
 minutes and it is the reason two silent defects are fixed. Run it when you
 change the prompt text, the tool descriptions, or the loop.
 
+**A user can now point it at a repository, and see what it did** — 7 September,
+`CODE-PACK.md` slices 3d and 3e. `root` is on the project create and update
+routes with a folder field in Project, and `tool_call` events finally render
+(`ToolCalls.tsx`). Both were the same defect in different clothes: working
+backend machinery that nothing on the front reached, one through a missing
+request field and one through a `default:` case.
+
+**Which models actually fit is measured**, not estimated —
+`test_what_actually_fits_this_card.py -m measure` reports the GPU/RAM split from
+`/api/ps` and tok/s from `eval_duration`, and refuses to run at all when
+something else is holding the card. The Gemma is a 128-expert MoE with 8 firing
+per token: 51% resident, **17.8 tok/s**, against the fully-resident 14B's 30.5.
+
 ### The task: three things, in this order
 
 **1. Watch a long task run, in the real app.** Nothing in this list matters if
-it does not work on screen, and that has not been observed once. Ask something
-that needs several windows of reading, watch it hand over without saying
-anything, let it run out, then pick it up from Project. The loop, the store and
-the button are asserted by test; the visual half is unverified — this session
-could not screenshot it.
+it does not work on screen, and that has not been observed once. **Everything
+needed to do it now exists**: make a coding project, point it at a folder in the
+new field, ask something that needs several windows of reading, watch the tool
+lines appear, watch it hand over without saying anything, let it run out, then
+pick it up from Project. The loop, the store, the field and the button are each
+asserted by test; the visual half is unverified — this session could not
+screenshot it.
 
 Two numbers need a person watching and cannot be settled by a test: **three
 handoffs**, and **half the window** as the place to compact. Both are
@@ -1021,6 +1036,15 @@ keeping after the task finishes, given a finished task is otherwise deleted.
 * **`HANDOFF_SHARE` (0.5) and `CARRY_SHARE` (0.25) are judgements**, labelled as
   such. Nobody has measured whether they are right on a real repository, and the
   gap between them is what stops a task handing over on every call.
+* **Does a generated image ever leave VRAM?** On 7 September a Zaram backend
+  from the previous evening was holding **9.09 GB** of a 12 GB card while
+  Ollama reported nothing resident. 9 GB is the size of a loaded image
+  pipeline, so the likely reading is that `SdxlProvider` loads and never
+  unloads — meaning one picture costs every local chat model until a restart.
+  Unconfirmed, and the most serious open thing in this file if it is true.
+* **One frontend test is flaky.** A single failure in one full `vitest run` on
+  7 September, passing on the two runs after it; the output scrolled before it
+  could be named. Capture the run to a file when it recurs.
 * **A resumed task does not restore the code project's folder by itself.** The
   root comes from the open project through a ContextVar set by the API from the
   *request's* project, so Project's Continue sends the project with it. A

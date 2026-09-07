@@ -3013,6 +3013,12 @@ def _project_json(project) -> Dict[str, Any]:
         "created_at": project.created_at,
         "note": project.note,
         "scope": project.scope,
+        # Sent so the interface can show which folder a coding project reads and
+        # let somebody change it. Empty for every other type, and empty for a
+        # coding project nobody has pointed at a repository yet — which is the
+        # state the tools refuse in, and the state worth rendering as an
+        # unfinished setup rather than as nothing.
+        "root": project.root,
     }
 
 
@@ -3020,12 +3026,28 @@ class ProjectCreateRequest(BaseModel):
     name: str
     type: str = "general"
     note: str = ""
+    #: The repository a coding project may read. **This is the sandbox.**
+    #:
+    #: `Project.root`, the migration and the `ContextVar` that carries it into
+    #: the tools all shipped on 6 September, and nothing could set it: no route
+    #: had this field, so a coding project could only be given a folder by
+    #: calling `ProjectRecords.create` from Python. The tools were reachable and
+    #: the feature was not.
+    #:
+    #: Stored resolved and checked to exist — see `_resolved_root`. It is never
+    #: taken from anything the model can influence, only from a project record,
+    #: because a root the model can name is not a sandbox.
+    root: str = ""
 
 
 class ProjectUpdateRequest(BaseModel):
     name: str | None = None
     type: str | None = None
     note: str | None = None
+    #: Change or withdraw the repository. ``""`` clears it, which is a real
+    #: operation and not a no-op: it is how somebody takes the folder away
+    #: without deleting the project and everything scoped to it.
+    root: str | None = None
 
 
 @app.get("/plans")
@@ -3100,11 +3122,42 @@ async def _fact_count_for_scope(scope: str) -> int:
         return -1
 
 
+def _checked_root(root: str) -> str:
+    """A repository path as a person typed it, normalised, or a 400.
+
+    **Checked here rather than in the store, and read rather than write is why.**
+    Whether a folder exists is a question about this machine right now, and
+    `active_root` already asks it every request — a folder that has gone yields
+    no root and the tools refuse, which is the safety property. This check is
+    for the person: a path with a typo in it would otherwise be accepted
+    silently and turn every later tool call into "outside the project folder",
+    a true sentence about the wrong problem that sends them looking at
+    permissions.
+
+    Normalised so the stored value is absolute. The tools resolve both sides
+    before comparing, so a relative root is not a hole — it is a value that
+    means a different folder depending on where the backend was started, which
+    is a different thing in a checkout and in an install.
+    """
+    clean = (root or "").strip()
+    if not clean:
+        return ""
+    resolved = os.path.abspath(os.path.expanduser(clean))
+    if not os.path.isdir(resolved):
+        raise HTTPException(
+            status_code=400, detail=f"{clean} is not a folder on this machine."
+        )
+    return resolved
+
+
 @app.post("/projects")
 async def create_project(body: ProjectCreateRequest):
     try:
         project = project_records.create(
-            body.name, type=ProjectType(body.type), note=body.note
+            body.name,
+            type=ProjectType(body.type),
+            note=body.note,
+            root=_checked_root(body.root),
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
@@ -3264,6 +3317,8 @@ async def update_project(project_id: str, body: ProjectUpdateRequest):
             project = project_records.set_type(project_id, ProjectType(body.type))
         if body.note is not None:
             project = project_records.set_note(project_id, body.note)
+        if body.root is not None:
+            project = project_records.set_root(project_id, _checked_root(body.root))
     except UnknownProject:
         raise HTTPException(status_code=404, detail=f"No project called {project_id!r}.")
     except ValueError as exc:

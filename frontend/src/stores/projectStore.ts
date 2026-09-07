@@ -30,6 +30,14 @@ export interface Project {
   note: string;
   /** `project:<id>` — the scope its facts carry. */
   scope: string;
+  /** The repository a coding project reads. **This is the sandbox boundary**,
+   *  not a convenience: the code tools resolve every path against it and refuse
+   *  anything landing outside.
+   *
+   *  Empty for every other type, and empty for a coding project nobody has
+   *  pointed at a repository yet — which is a real state and the one worth
+   *  rendering, because in it every tool call refuses. */
+  root: string;
   /** How many generated files are assigned to it. */
   artifacts: number;
   /** How many facts are scoped to it, or **-1 when the Spine could not say**.
@@ -73,9 +81,21 @@ interface ProjectStore {
   error: string | null;
 
   load: () => Promise<void>;
-  create: (name: string, type: ProjectType, note?: string) => Promise<Project | null>;
+  create: (
+    name: string,
+    type: ProjectType,
+    note?: string,
+    root?: string,
+  ) => Promise<Project | null>;
   rename: (id: string, name: string) => Promise<void>;
   setType: (id: string, type: ProjectType) => Promise<void>;
+  /** Point a coding project at its repository, or pass "" to withdraw it.
+   *
+   *  Withdrawing is a real operation rather than a no-op: it is how somebody
+   *  takes the folder away without deleting the project and everything scoped
+   *  to it. The backend refuses a path that is not a folder and says so, which
+   *  is why this surfaces `error` like the rest of the store. */
+  setRoot: (id: string, root: string) => Promise<void>;
   adopt: (id: string, name: string, type: ProjectType) => Promise<void>;
   remove: (id: string, contents: DeleteContents) => Promise<void>;
 }
@@ -131,12 +151,12 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
     }
   },
 
-  create: async (name, type, note = '') => {
+  create: async (name, type, note = '', root = '') => {
     set({ error: null });
     const res = await fetch(`${API}/projects`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, type, note }),
+      body: JSON.stringify({ name, type, note, root }),
     });
     if (!res.ok) {
       set({ error: await readError(res, 'That project could not be created.') });
@@ -157,6 +177,22 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
     });
     if (!res.ok) {
       set({ error: await readError(res, 'That project could not be renamed.') });
+      return;
+    }
+    await get().load();
+  },
+
+  setRoot: async (id, root) => {
+    set({ error: null });
+    const res = await fetch(`${API}/projects/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ root }),
+    });
+    if (!res.ok) {
+      // The backend's own sentence — "C:\nope is not a folder on this machine"
+      // is something a person can act on, and a 400 is not.
+      set({ error: await readError(res, 'That folder could not be set.') });
       return;
     }
     await get().load();

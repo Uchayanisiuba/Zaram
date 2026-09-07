@@ -276,6 +276,35 @@ class ProjectRecords:
             raise UnknownProject(project_id)
         return self.get(project_id)
 
+    def set_root(self, project_id: str, root: str) -> Project:
+        """Point a coding project at its repository.
+
+        **Stored as given, and that is deliberate.** Whether the folder exists
+        is a question about the machine right now, and the answer changes: a
+        drive gets unmounted, a checkout is moved back. `active_root` already
+        asks it at read time and answers `None` for a folder that has gone, so
+        the tools refuse with "no coding project is open" rather than acting on
+        a stale path — that is the safety property, and it lives on the read.
+
+        What this store must not do is refuse to record what a caller told it.
+        Turning a missing folder into a `ValueError` here would make an
+        unmounted drive an error in a database write. Normalising and checking
+        the path belongs at the boundary where a person typed it and can be
+        given a sentence back — see `_checked_root` in `main.py`.
+
+        An empty string clears it, and that is a real operation: it is how
+        somebody withdraws the folder without deleting the project and
+        everything scoped to it.
+        """
+        clean = (root or "").strip()
+        with self._lock, self._connect() as conn:
+            changed = conn.execute(
+                "UPDATE projects SET root = ? WHERE id = ?", (clean, project_id)
+            ).rowcount
+        if not changed:
+            raise UnknownProject(project_id)
+        return self.get(project_id)
+
     def set_note(self, project_id: str, note: str) -> Project:
         with self._lock, self._connect() as conn:
             changed = conn.execute(

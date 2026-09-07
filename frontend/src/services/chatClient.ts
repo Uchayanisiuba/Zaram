@@ -159,6 +159,25 @@ export type ChatEvent =
    *  it is never rendered as the model speaking, and from `error` because
    *  nothing failed in this exchange. `action` names where to go about it. */
   | { type: 'notice'; content: string; kind: string; action: string }
+  /** One tool the model asked for, and what the gate said about it.
+   *
+   *  **Emitted since the tool loop shipped and rendered nowhere until now.**
+   *  The backend sent a verdict per call and `parseEvent` dropped it in its
+   *  default case, so a reply that searched a repository and then read two
+   *  files looked identical to one the model answered from memory. That is the
+   *  legibility rule inverted — *"show routing decisions in plain language"* —
+   *  and it is the one thing that makes an agent's working checkable.
+   *
+   *  `verdict` is the gate's word, not the model's: `allow` means it ran,
+   *  `confirm` means it is waiting on the user, `refuse` means it will not run
+   *  and `reason` says what would change that. */
+  | {
+      type: 'tool_call';
+      server: string;
+      tool: string;
+      verdict: 'allow' | 'confirm' | 'refuse' | string;
+      reason: string;
+    }
   /** What the reply is waiting for, sent *before* generation so the orb can
    *  say why rather than going quiet and letting the user guess.
    *
@@ -586,6 +605,15 @@ function parseLine(line: string): ChatEvent | null {
         action: String(data.action ?? ''),
       };
     }
+
+    case 'tool_call':
+      return {
+        type: 'tool_call',
+        server: String(data.server ?? ''),
+        tool: String(data.tool ?? ''),
+        verdict: String(data.verdict ?? ''),
+        reason: String(data.reason ?? ''),
+      };
 
     case 'status':
       return { type: 'status', state: String(data.state ?? '') };

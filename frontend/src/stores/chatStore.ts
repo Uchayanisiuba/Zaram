@@ -46,6 +46,10 @@ export interface ChatMessage {
    *  as the reply would attribute it to the model, and it is not something the
    *  model said. */
   notices: ChatNotice[];
+  /** Which tools the model used to reach this answer, in the order it used
+   *  them, with the gate's verdict on each. Usually empty — most replies call
+   *  nothing, and that is the ordinary case rather than a missing one. */
+  toolCalls?: ChatToolCall[];
   timestamp: number;
   /** Which model answered this, and where it ran.
    *
@@ -84,6 +88,20 @@ export interface ChatNotice {
   action: string;
 }
 
+/** One tool the model asked for, and the gate's verdict on it.
+ *
+ *  Kept on the message rather than only in the stream, because the working is
+ *  worth more *after* the answer than during it — the same reason `reasoning`
+ *  is kept. A reply that says "it returns 9137000000" is a claim; the same
+ *  reply with `search_code` and `read_lines` under it is a checkable one. */
+export interface ChatToolCall {
+  server: string;
+  tool: string;
+  /** `allow` — it ran. `confirm` — waiting on the user. `refuse` — it did not. */
+  verdict: string;
+  reason: string;
+}
+
 interface ChatState {
   messages: ChatMessage[];
   /** Text arriving for the in-flight reply. Not yet committed to messages. */
@@ -97,6 +115,11 @@ interface ChatState {
   streamingArtifacts: Artifact[];
   /** Notices for the in-flight reply. Arrive last, after the answer. */
   streamingNotices: ChatNotice[];
+  /** Tools called by the reply in flight, so the working appears as it happens
+   *  rather than all at once when the answer lands. On a tool-using reply the
+   *  generation is buffered — the marker cannot be recognised mid-token — so
+   *  these are the only thing on screen while the model reads. */
+  streamingToolCalls: ChatToolCall[];
   /** How far through drawing a picture the machine is, or `null`.
    *
    *  Held rather than accumulated: only the latest matters, and keeping the
@@ -208,6 +231,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   streamingSources: [],
   streamingArtifacts: [],
   streamingNotices: [],
+  streamingToolCalls: [],
   streamingImageProgress: null,
   streamingAnsweredBy: null,
   isStreaming: false,
@@ -295,6 +319,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const sources: ChatSource[] = [];
     const artifacts: Artifact[] = [];
     const notices: ChatNotice[] = [];
+    const toolCalls: ChatToolCall[] = [];
     const seen = new Set<string>();
     let replyError: string | undefined;
     let answeredBy: ChatAttribution | null = null;
@@ -447,6 +472,21 @@ export const useChatStore = create<ChatState>((set, get) => ({
             break;
           }
 
+          case 'tool_call': {
+            // The model's working, as it happens. These arrive *before* the
+            // answer on a tool-using reply — the generation is buffered, so for
+            // the seconds it spends reading, this is the only thing on screen
+            // saying anything is happening at all.
+            toolCalls.push({
+              server: event.server,
+              tool: event.tool,
+              verdict: event.verdict,
+              reason: event.reason,
+            });
+            set({ streamingToolCalls: [...toolCalls] });
+            break;
+          }
+
           case 'answering': {
             // Arrives ahead of the first token. Held locally as well as in the
             // store for the same reason the text is: the committed message
@@ -526,7 +566,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
     // backend genuinely produced would be worse than showing it labelled.
     set((s) => ({
       messages:
-        text_ || replyError || artifacts.length || notices.length || reasoning_
+        // A reply that called tools and then failed still has working worth
+        // keeping — "it searched and read two files, then broke" is a more
+        // useful record than an empty message, so this counts toward whether
+        // there is anything to commit.
+        text_ || replyError || artifacts.length || notices.length || reasoning_ || toolCalls.length
           ? [
               ...s.messages,
               {
@@ -536,6 +580,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 sources,
                 artifacts,
                 notices,
+                toolCalls: toolCalls.length ? toolCalls : undefined,
                 timestamp: Date.now(),
                 answeredBy,
                 reasoning: reasoning_ || undefined,
@@ -548,6 +593,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       streamingSources: [],
       streamingArtifacts: [],
       streamingNotices: [],
+  streamingToolCalls: [],
       streamingImageProgress: null,
       streamingAnsweredBy: null,
       isStreaming: false,
@@ -587,6 +633,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       streamingReasoning: '',
       streamingSources: [],
       streamingNotices: [],
+  streamingToolCalls: [],
       streamingImageProgress: null,
       streamingAnsweredBy: null,
     });
@@ -602,6 +649,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       streamingSources: [],
       streamingArtifacts: [],
       streamingNotices: [],
+  streamingToolCalls: [],
       streamingImageProgress: null,
       streamingAnsweredBy: null,
       isStreaming: false,
@@ -662,6 +710,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         streamingSources: [],
         streamingArtifacts: [],
         streamingNotices: [],
+  streamingToolCalls: [],
         streamingImageProgress: null,
         streamingAnsweredBy: null,
         isStreaming: false,

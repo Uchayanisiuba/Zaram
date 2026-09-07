@@ -495,3 +495,57 @@ describe('the conversation this reply is written into', () => {
     expect(events.map((e) => e.type)).toEqual(['token', 'done']);
   });
 });
+
+describe('the model\'s working survives the transport', () => {
+  // The defect: `tool_call` fell into `parseEvent`'s default case and was
+  // dropped, so every call the engine reported reached the client as nothing.
+  // These two are the instrument for that class — `check:reachability` reports
+  // backend *routes* no frontend file mentions, and has nothing to say about
+  // backend *events* nobody parses.
+
+  it('carries a tool call through with its verdict', async () => {
+    mockFetch(() =>
+      streamingResponse([
+        line({
+          type: 'tool_call',
+          data: { server: 'code', tool: 'search_code', verdict: 'allow', reason: 'ran' },
+        }),
+        token('It returns 9137000000.'),
+        done(),
+      ]),
+    );
+
+    const events = await collect(streamChat({ text: 'what does it return' }));
+
+    expect(events.map((e) => e.type)).toEqual(['tool_call', 'token', 'done']);
+    expect(events[0]).toMatchObject({
+      server: 'code',
+      tool: 'search_code',
+      verdict: 'allow',
+    });
+  });
+
+  it('carries a refusal, with the reason that would permit it', async () => {
+    mockFetch(() =>
+      streamingResponse([
+        line({
+          type: 'tool_call',
+          data: {
+            server: 'code',
+            tool: 'write_file',
+            verdict: 'refuse',
+            reason: 'writes are not granted for this project',
+          },
+        }),
+        done(),
+      ]),
+    );
+
+    const events = await collect(streamChat({ text: 'edit the file' }));
+
+    expect(events[0]).toMatchObject({
+      verdict: 'refuse',
+      reason: 'writes are not granted for this project',
+    });
+  });
+});

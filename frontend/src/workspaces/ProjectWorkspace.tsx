@@ -40,6 +40,7 @@ import {
   type UnfinishedTask,
 } from '@/services/plansClient';
 import { useChatStore } from '@/stores/chatStore';
+import { desktop, isDesktop } from '@/desktop/desktop-bridge';
 import { uploadFiles } from '@/services/ingestClient';
 import {
   assignToProject,
@@ -467,19 +468,102 @@ function countLabel(group: UnclaimedGroup): string {
   return `${files} · ${group.facts} ${group.facts === 1 ? 'fact' : 'facts'}`;
 }
 
+/**
+ * Which folder a coding project may read — **the sandbox boundary, as a field.**
+ *
+ * `Project.root` shipped on 6 September with its migration, its `ContextVar`,
+ * and a check that resolves every path before comparing it. Nothing could set
+ * it: no route carried the field, so a repository could only be attached by
+ * calling `ProjectRecords` from Python. Complete, tested, and unreachable by a
+ * user — this repository's own failure shape, arriving through a missing form
+ * field rather than a missing caller.
+ *
+ * **A typed path, with a picker in the app.** The same shape Knowledge already
+ * uses for folder ingest, and for the same reason: a browser tab cannot learn
+ * the real path of a folder, so the field is the thing that always works and
+ * the native dialog is the convenience on top. Nothing here validates the path
+ * — the backend answers whether it is a folder on this machine, and it is the
+ * one that can actually look.
+ */
+function RepositoryField({
+  value,
+  onChange,
+  label = 'Repository folder',
+}: {
+  value: string;
+  onChange: (next: string) => void;
+  label?: string;
+}) {
+  const pick = useCallback(async () => {
+    const answer = await desktop.dialog.selectDirectory({
+      title: 'Choose the repository',
+      properties: ['openDirectory'],
+    });
+    const chosen = answer?.filePaths?.[0];
+    if (chosen) onChange(chosen);
+  }, [onChange]);
+
+  return (
+    <div className="mt-3">
+      <label
+        className="block text-[10px] font-medium"
+        style={{ color: 'var(--color-text-muted)' }}
+      >
+        {label}
+      </label>
+      <div className="mt-1 flex items-center gap-2">
+        <input
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={
+            isDesktop
+              ? 'C:\\Zaram — or choose it'
+              : "C:\\Zaram — a browser tab can't read a folder, so type the path"
+          }
+          aria-label={label}
+          spellCheck={false}
+          className="min-w-0 flex-1 rounded bg-transparent px-2 py-1.5 text-xs outline-none placeholder-slate-500"
+          style={{ border: '1px solid rgba(255,255,255,.08)', fontFamily: 'var(--font-mono)' }}
+          data-testid="repository-path"
+        />
+        {isDesktop && (
+          <button
+            type="button"
+            onClick={() => void pick()}
+            className="shrink-0 rounded px-2 py-1.5 text-[11px]"
+            style={{ border: '1px solid rgba(255,255,255,.08)', color: 'var(--color-text-muted)' }}
+            data-testid="repository-choose"
+          >
+            Choose…
+          </button>
+        )}
+      </div>
+      <p className="mt-1 text-[10px] leading-snug" style={{ color: 'var(--color-text-faint)' }}>
+        Zaram reads this folder and nothing outside it. Leave it empty and the
+        code tools have nothing to read.
+      </p>
+    </div>
+  );
+}
+
 function CreateRow({ onDone }: { onDone: () => void }) {
   const create = useProjectStore((s) => s.create);
   const [name, setName] = useState('');
   const [type, setType] = useState<ProjectType>('general');
+  const [root, setRoot] = useState('');
   const [busy, setBusy] = useState(false);
 
   const submit = useCallback(async () => {
     if (!name.trim() || busy) return;
     setBusy(true);
-    const created = await create(name, type);
+    // The folder is sent only for a coding project. Storing one against a
+    // business project would be a value the product then ignores — `root` is
+    // read only for `coding` — and a field that is accepted and never used is
+    // worse than one that was not offered.
+    const created = await create(name, type, '', type === 'coding' ? root : '');
     setBusy(false);
     if (created) onDone();
-  }, [busy, create, name, onDone, type]);
+  }, [busy, create, name, onDone, root, type]);
 
   return (
     <div
@@ -522,6 +606,11 @@ function CreateRow({ onDone }: { onDone: () => void }) {
       <p className="mt-2 text-[10px]" style={{ color: 'var(--color-text-muted)' }}>
         {TYPE_BLURB[type]}
       </p>
+
+      {/* Only for coding, and only here at creation — which is where the type is
+          chosen, and so the one moment the folder is an obvious question rather
+          than a setting to go and find. Rule 7h: offer at the moment of doubt. */}
+      {type === 'coding' && <RepositoryField value={root} onChange={setRoot} />}
 
       <div className="mt-3 flex gap-2">
         <button
@@ -622,8 +711,101 @@ function ProjectRow({ project, onDelete }: { project: Project; onDelete: () => v
         </button>
       </div>
 
+      {project.type === 'coding' && <RepositoryRow project={project} />}
+
       {open && <ProjectContents project={project} />}
     </li>
+  );
+}
+
+/**
+ * The folder a coding project reads, on the row, editable.
+ *
+ * Shown **collapsed to one line** when it is set and expanded into the field
+ * when it is not, because those are two different situations: a project with a
+ * repository needs a fact stating which one, and a project without one is an
+ * unfinished setup in which every tool call refuses. Rendering them the same
+ * would hide the second inside the first.
+ *
+ * On the row rather than behind the disclosure triangle: every coding project
+ * created before 7 September has no folder, and a setting nobody can see is how
+ * they all stay that way.
+ */
+function RepositoryRow({ project }: { project: Project }) {
+  const setRoot = useProjectStore((s) => s.setRoot);
+  const [draft, setDraft] = useState(project.root);
+  const [editing, setEditing] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  const save = useCallback(async () => {
+    if (busy) return;
+    setBusy(true);
+    await setRoot(project.id, draft.trim());
+    setBusy(false);
+    setEditing(false);
+  }, [busy, draft, project.id, setRoot]);
+
+  if (project.root && !editing) {
+    return (
+      <div className="mt-2 flex items-center gap-2 pl-7 text-[10px]">
+        <span style={{ color: 'var(--color-text-faint)' }}>reads</span>
+        <code
+          className="truncate"
+          style={{ color: 'var(--color-text-muted)', fontFamily: 'var(--font-mono)' }}
+          data-testid="repository-current"
+        >
+          {project.root}
+        </code>
+        <button
+          type="button"
+          onClick={() => {
+            setDraft(project.root);
+            setEditing(true);
+          }}
+          style={{ color: 'var(--color-cyan-light)' }}
+          data-testid="repository-change"
+        >
+          Change
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="pl-7">
+      {!project.root && (
+        // Said plainly, because the alternative is a person asking a question
+        // of a project that cannot answer it and concluding the tools are
+        // broken. `CLAUDE.md`: disabled capabilities are visible, not silent.
+        <p className="mt-2 text-[10px]" style={{ color: '#fbbf24' }}>
+          No repository yet — the code tools have nothing to read until one is set.
+        </p>
+      )}
+      <RepositoryField value={draft} onChange={setDraft} label="" />
+      <div className="mt-2 flex gap-3 text-[11px]">
+        <button
+          type="button"
+          onClick={() => void save()}
+          disabled={busy}
+          style={{ color: 'var(--color-cyan-light)' }}
+          data-testid="repository-save"
+        >
+          {busy ? 'Saving…' : 'Save'}
+        </button>
+        {editing && (
+          <button
+            type="button"
+            onClick={() => {
+              setDraft(project.root);
+              setEditing(false);
+            }}
+            style={{ color: 'var(--color-text-faint)' }}
+          >
+            Cancel
+          </button>
+        )}
+      </div>
+    </div>
   );
 }
 

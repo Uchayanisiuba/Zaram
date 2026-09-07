@@ -163,3 +163,98 @@ async def test_the_bootstrapper_attaches_the_code_server():
         assert {"list_files", "read_lines", "search_code"} <= offered
     finally:
         await kernel.shutdown()
+
+
+class TestAUserCanPointItAtARepository:
+    """The gap that made every test above true and the feature unusable.
+
+    `Project.root` shipped on 6 September with its migration, its `ContextVar`
+    and a sandbox check on every path — and **no route could set it**.
+    `ProjectCreateRequest` had no such field and neither did the update, so a
+    coding project could only be given a folder by calling `ProjectRecords`
+    from Python. The tools were reachable; the feature was not, which is this
+    repository's own failure shape arriving through the API layer rather than
+    through a missing caller.
+
+    A handoff written the day before said it was "reachable through the API
+    only". That was wrong, and reading the request model rather than the note is
+    what found it.
+    """
+
+    @pytest.fixture
+    def client(self, monkeypatch, tmp_path):
+        import main
+        from fastapi.testclient import TestClient
+
+        monkeypatch.setattr(
+            main, "project_records", ProjectRecords(str(tmp_path / "projects.db"))
+        )
+        return TestClient(main.app)
+
+    def test_a_project_can_be_created_with_a_repository(self, client, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+
+        made = client.post(
+            "/projects", json={"name": "Zaram", "type": "coding", "root": str(repo)}
+        )
+
+        assert made.status_code == 200, made.text
+        assert made.json()["root"] == str(repo.resolve())
+
+    def test_a_repository_can_be_added_afterwards(self, client, tmp_path):
+        """Every project made before today has no folder, so this is the path
+        that matters most — a create-only field would strand all of them."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        made = client.post("/projects", json={"name": "Zaram", "type": "coding"}).json()
+
+        changed = client.patch(f"/projects/{made['id']}", json={"root": str(repo)})
+
+        assert changed.status_code == 200, changed.text
+        assert changed.json()["root"] == str(repo.resolve())
+
+    def test_a_folder_that_does_not_exist_is_refused_with_the_reason(self, client, tmp_path):
+        """Rule 9's shape: a root naming nothing makes every later tool call
+        refuse with "outside the project folder", which is a true sentence about
+        the wrong problem and sends the user looking at permissions."""
+        answer = client.post(
+            "/projects",
+            json={"name": "Zaram", "type": "coding", "root": str(tmp_path / "nope")},
+        )
+
+        assert answer.status_code == 400
+        assert "not a folder" in answer.json()["detail"]
+
+    def test_a_file_is_not_a_repository(self, client, tmp_path):
+        loose = tmp_path / "notes.md"
+        loose.write_text("hello", encoding="utf-8")
+
+        answer = client.post(
+            "/projects", json={"name": "Zaram", "type": "coding", "root": str(loose)}
+        )
+
+        assert answer.status_code == 400
+
+    def test_the_folder_can_be_withdrawn_without_deleting_the_project(self, client, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        made = client.post(
+            "/projects", json={"name": "Zaram", "type": "coding", "root": str(repo)}
+        ).json()
+
+        cleared = client.patch(f"/projects/{made['id']}", json={"root": ""})
+
+        assert cleared.status_code == 200
+        assert cleared.json()["root"] == ""
+
+    def test_the_listing_says_which_folder_each_project_reads(self, client, tmp_path):
+        """Without this the interface cannot show an unfinished setup — a coding
+        project with no folder looks identical to one with a folder."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        client.post("/projects", json={"name": "Zaram", "type": "coding", "root": str(repo)})
+
+        listed = client.get("/projects").json()
+
+        assert listed["projects"][0]["root"] == str(repo.resolve())

@@ -29,6 +29,7 @@ import {
   type RefusedAttachment,
 } from '@/services/attachmentsClient';
 import NoticeCard from '@/components/chat/NoticeCard';
+import ToolCalls from '@/components/chat/ToolCalls';
 import FirstRunPanel from '@/components/firstrun/FirstRunPanel';
 import { useReadiness, setupToOffer } from '@/hooks/useReadiness';
 import { useTypedText } from '@/hooks/useTypedText';
@@ -122,6 +123,7 @@ export default function ChatSurface({ navigate }: Props) {
   const streamingSources = useChatStore((s) => s.streamingSources);
   const streamingArtifacts = useChatStore((s) => s.streamingArtifacts);
   const streamingNotices = useChatStore((s) => s.streamingNotices);
+  const streamingToolCalls = useChatStore((s) => s.streamingToolCalls);
   const streamingImageProgress = useChatStore((s) => s.streamingImageProgress);
   const streamingAnsweredBy = useChatStore((s) => s.streamingAnsweredBy);
   const isStreaming = useChatStore((s) => s.isStreaming);
@@ -957,6 +959,10 @@ export default function ChatSurface({ navigate }: Props) {
                       <ArtifactCard key={group.artifact.id} artifact={group.artifact} />
                     ),
                   )}
+                  {/* Above the notices, below the answer: the working reads as
+                      what produced the reply rather than as an afterthought
+                      about it. */}
+                  {msg.toolCalls?.length ? <ToolCalls calls={msg.toolCalls} /> : null}
                   {msg.notices?.map((notice, i) => (
                     <NoticeCard
                       key={i}
@@ -1040,6 +1046,12 @@ export default function ChatSurface({ navigate }: Props) {
                       <ArtifactCard key={group.artifact.id} artifact={group.artifact} />
                     ),
                   )}
+                  {/* While a tool-using reply is in flight this is the only
+                      thing on screen: the generation is buffered because
+                      `[TOOL_CALL]` arrives split across tokens, so without it
+                      the surface shows nothing at all for the seconds the model
+                      spends reading. */}
+                  {streamingToolCalls.length > 0 && <ToolCalls calls={streamingToolCalls} />}
                   {streamingNotices.map((notice, i) => (
                     <NoticeCard
                       key={i}
