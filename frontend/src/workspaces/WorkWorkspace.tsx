@@ -74,6 +74,7 @@ import {
 } from '@/services/artifactsClient';
 import WorkToolbar, { type ViewMode } from './work/WorkToolbar';
 import SelectionBar, { type SelectionPhase } from './work/SelectionBar';
+import GlassCheckbox from './work/GlassCheckbox';
 import { group, search, type GroupBy, type SortBy } from './work/organise';
 
 // The second copy of this map, and the reason `ArtifactKind` is a union rather
@@ -478,12 +479,11 @@ export default function WorkWorkspace({ onOpenConversation }: WorkWorkspaceProps
                           select-by-date. One control, because the grouping is
                           already on screen and a separate select-by menu would
                           be a second organising system disagreeing with it. */}
-                      <input
-                        type="checkbox"
-                        aria-label={`Select everything under ${g.label}`}
+                      <GlassCheckbox
+                        label={`Select everything under ${g.label}`}
                         checked={g.artifacts.every((a) => ticked.has(a.id))}
                         onChange={() => toggleGroup(g.artifacts.map((a) => a.id))}
-                        style={{ accentColor: 'var(--color-indigo-light)' }}
+                        size={13}
                       />
                       {g.label}
                       <span
@@ -609,13 +609,10 @@ function Row({
             : 'transparent',
       }}
     >
-      <input
-        type="checkbox"
+      <GlassCheckbox
+        label={`Select ${a.filename}`}
         checked={ticked}
         onChange={onTick}
-        aria-label={`Select ${a.filename}`}
-        className="shrink-0"
-        style={{ accentColor: 'var(--color-indigo-light)' }}
       />
 
       <button
