@@ -54,6 +54,14 @@ export const STATE_PULSE: Record<EmbodimentState, StatePulse> = {
   idle: { colour: 0x6366f1, weight: 0.3, pulse: [1, 1.06, 1], pulseSeconds: 8 },
   listening: { colour: 0x22d3ee, weight: 0.45, pulse: [1.08, 1.14, 1.08], pulseSeconds: 2 },
   thinking: { colour: 0xa855f7, weight: 0.45, pulse: [1, 1.05, 1.02, 1.07, 1], pulseSeconds: 1.6 },
+  // **A rhythm, not a new hue.** Coding is thinking with the work named, so
+  // it keeps thinking's violet and changes its breath: an even, metronomic
+  // pulse against thinking's uneven one. A sixth colour would have to mean
+  // something on its own, and the two the palette has left are spoken for --
+  // `docs/UI-SPEC.md` gives violet to cloud, which is why the robot's face
+  // may never be violet, and inventing a sixth would be one more thing a
+  // user has to learn for a state that is a kind of the one above it.
+  coding: { colour: 0xa855f7, weight: 0.45, pulse: [1, 1.06, 1, 1.06, 1], pulseSeconds: 1.2 },
   speaking: { colour: 0x10b981, weight: 0.35, pulse: [1, 1.04, 1.08, 1.04, 1], pulseSeconds: 1 },
   swapping: { colour: 0x64748b, weight: 0.3, pulse: [1, 1.03, 1], pulseSeconds: 4 },
 }

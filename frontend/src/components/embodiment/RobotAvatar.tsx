@@ -82,6 +82,11 @@ function numberParam(name: string, fallback: number, min = -Infinity): number {
 const EYES_FOR_STATE: Record<EmbodimentState, EyeCell> = {
   idle: 'open',
   thinking: 'thinking',
+  // The thinking cell, deliberately. Coding is thinking with the work named,
+  // the body carries the difference, and the atlas has no seventh cell to give
+  // it -- a face expression invented for a state is the personality this rule
+  // exists to refuse.
+  coding: 'thinking',
   listening: 'listening',
   speaking: 'open',
   swapping: 'swapping',
@@ -837,7 +842,19 @@ export default function RobotAvatar({ px = 320, src = '/avatars/zaram-robo.glb' 
      * drawn from the idle set, and the swap is reported by the glow and by the
      * face. `ShuffleBag` picks it without repeating the one just played.
      */
-    const bagFor = (s: EmbodimentState) => bags.get(s) ?? bags.get('idle')
+    // **What a state falls back to when it has no clip, and it is not always
+    // idle.** `swapping` falls to idle deliberately, for the reason above: the
+    // body keeps doing what it was doing while weights move. `coding` must not.
+    // It is a *working* state, and playing the idle set under it would have the
+    // body say nothing is happening while Zaram reads a repository -- a
+    // confident wrong answer from the one channel whose job is to be trusted,
+    // and worse than the missing clip it is covering for. It falls to thinking,
+    // which is the state it narrows.
+    const FALLS_BACK_TO: Partial<Record<EmbodimentState, EmbodimentState>> = {
+      coding: 'thinking',
+    }
+    const bagFor = (s: EmbodimentState) =>
+      bags.get(s) ?? bags.get(FALLS_BACK_TO[s] ?? 'idle') ?? bags.get('idle')
 
     const playFor = (s: EmbodimentState, fade: number) => {
       const name = bagFor(s)?.next()

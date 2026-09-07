@@ -64,7 +64,7 @@ import {
 import { useChatModeStore } from '@/stores/chatModeStore';
 import { useMicStore } from '@/stores/micStore';
 import { useSpeechStore } from '@/stores/speechStore';
-import { preserveSpeaking, chatActivity } from '@/lib/orbActivity';
+import { preserveSpeaking, codingActivity } from '@/lib/orbActivity';
 import ResizeHandle from '@/components/common/ResizeHandle';
 import { useIsReducedMotion } from '@/hooks/useReducedMotion';
 import { useViewport } from '@/hooks/useViewport';
@@ -430,9 +430,26 @@ export default function ChatSurface({ navigate }: Props) {
     // the avatar's mouth never moved. Read with `getState()` rather than a
     // subscription: this must react to the stream changing, not to speech
     // changing, or it re-runs itself.
-    setOrbState(preserveSpeaking(useOrbStore.getState().orbState, chatActivity(isStreaming)));
-    setActivity(preserveSpeaking(useSystemStore.getState().activity, chatActivity(isStreaming)));
-  }, [isStreaming, setOrbState, setActivity]);
+    //
+    // **`coding` is `thinking` with the work named**, and it is derived from
+    // what the system is doing rather than from where it routed: the code tools
+    // having run, or a fence having opened in the reply. "A coding model
+    // answered" is a routing fact and is deliberately not read here -- see
+    // `codingActivity`, and the 13 August removal of `local` and `cloud` from
+    // this vocabulary for why that line matters.
+    //
+    // Depends on the reply text as well as the flag, so the state can change
+    // *during* a reply the moment a fence opens. `streamingText` already
+    // re-renders this component on every token, so this costs a regex on text
+    // that was going to be laid out anyway.
+    const activity = codingActivity(
+      isStreaming,
+      streamingText,
+      streamingToolCalls.map((c) => c.server),
+    );
+    setOrbState(preserveSpeaking(useOrbStore.getState().orbState, activity));
+    setActivity(preserveSpeaking(useSystemStore.getState().activity, activity));
+  }, [isStreaming, streamingText, streamingToolCalls, setOrbState, setActivity]);
 
   // What the backend already holds for this conversation.
   //

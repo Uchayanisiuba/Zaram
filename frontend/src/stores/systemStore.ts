@@ -26,7 +26,15 @@ const API_BASE = import.meta.env.VITE_ZARAM_API ?? '';
  *  the orb's state"), and it needs its own word because the remedy differs —
  *  warming passes on its own, while a swap recurring every other message is a
  *  model-assignment problem the user can fix in Settings. */
-export type OrbActivity = 'idle' | 'warming' | 'thinking' | 'speaking' | 'listening' | 'swapping';
+export type OrbActivity =
+  | 'idle'
+  | 'warming'
+  | 'thinking'
+  /** Thinking, narrowed: the work in hand is code. See `codingActivity`. */
+  | 'coding'
+  | 'speaking'
+  | 'listening'
+  | 'swapping';
 
 /** Where work is being routed. Today always 'local' — only Ollama is wired. */
 export type RoutingMode = 'local' | 'cloud' | 'mixed' | 'unknown';

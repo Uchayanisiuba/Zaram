@@ -21,7 +21,13 @@ import { create } from 'zustand';
  * directly, or the orb turns slate-grey while the label still reads
  * "Local only".
  */
-export type OrbState = 'idle' | 'thinking' | 'speaking' | 'listening' | 'swapping';
+export type OrbState =
+  | 'idle'
+  | 'thinking'
+  | 'coding'
+  | 'speaking'
+  | 'listening'
+  | 'swapping';
 
 interface OrbStore {
   /** Canonical field */

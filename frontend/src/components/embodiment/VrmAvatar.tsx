@@ -69,6 +69,10 @@ THREE.Cache.enabled = true
 const RIM_COLOUR: Record<EmbodimentState, number> = {
   idle: 0x93a3b8,
   thinking: 0x78dcf0,
+  // Working is working. The rim reports three things and coding is not a
+  // fourth: adding a colour here would put a legend back on the one indicator
+  // whose whole value is not needing one.
+  coding: 0x78dcf0,
   listening: 0x78dcf0,
   speaking: 0x78dcf0,
   // Every other state animates faster to signal effort. A swap is the one state
@@ -81,6 +85,10 @@ const RIM_COLOUR: Record<EmbodimentState, number> = {
 const MOTION_RATE: Record<EmbodimentState, number> = {
   idle: 1,
   thinking: 1.6,
+  // Steadier than thinking rather than busier. Sustained work reads as
+  // composure; a faster rate than the state it narrows would say coding is
+  // more urgent than thought, which is not a claim the product wants to make.
+  coding: 1.3,
   listening: 1.2,
   speaking: 1.4,
   swapping: 0.45,
