@@ -3272,7 +3272,7 @@ async def delete_artifacts(body: ArtifactIds):
                 skipped.append({"id": artifact_id, "reason": str(error)})
                 continue
 
-        artifact_service.records.soft_delete(artifact_id)
+        artifact_service.records.set_trashed(artifact_id)
         removed.append({"id": artifact_id, "filename": record.filename})
 
     return {
@@ -3305,7 +3305,7 @@ async def restore_artifacts(body: ArtifactIds):
     skipped: list[dict] = []
 
     for artifact_id in body.ids:
-        record = artifact_service.records.get(artifact_id, include_deleted=True)
+        record = artifact_service.records.get(artifact_id, include_trashed=True)
         if record is None:
             skipped.append({"id": artifact_id, "reason": "No such file"})
             continue

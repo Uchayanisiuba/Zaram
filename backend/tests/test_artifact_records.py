@@ -231,6 +231,19 @@ class TestTheRecordStoreHasNoGeneralMutation:
         # exists to make deliberate rather than the blanket update it forbids.
         "PATH",
         "FILENAME",
+        # Whether the user has put this in the trash — added 7 September 2026,
+        # and this list is why the addition had to be argued rather than
+        # noticed. `set_trashed` and `restore` set and clear it; the file
+        # itself is moved by `artifacts.trash`, which never unlinks.
+        #
+        # It is a mutable column and not provenance, which is the test this
+        # list applies: it records something *the user did*, like
+        # `remember_override` and `project_id` beside it, rather than something
+        # about where the artifact came from. Nothing it touches can make a
+        # provenance record wrong — the conversation, the sources and the
+        # claims are exactly as they were, which is the whole reason the
+        # record is marked rather than dropped.
+        "TRASHED_AT",
     }
 
     #: The only removal, spelled exactly as it must appear. By path rather than

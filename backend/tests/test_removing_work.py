@@ -196,7 +196,7 @@ class TestTheRecordIsMarkedNotDropped:
         record(records, "a")
         record(records, "b")
 
-        assert records.soft_delete("a") is True
+        assert records.set_trashed("a") is True
 
         assert [r.id for r in records.list()] == ["b"]
         assert records.count() == 1
@@ -209,30 +209,30 @@ class TestTheRecordIsMarkedNotDropped:
         claims, and "undo" would mean rebuilding a record from a filename.
         """
         record(records, "a", conversation_title="Northwind rate change")
-        records.soft_delete("a")
+        records.set_trashed("a")
 
-        kept = records.get("a", include_deleted=True)
+        kept = records.get("a", include_trashed=True)
         assert kept is not None
         assert kept.conversation_title == "Northwind rate change"
 
     def test_restoring_puts_it_back_in_the_listing(self, records):
         record(records, "a")
-        records.soft_delete("a")
+        records.set_trashed("a")
 
         assert records.restore("a") is True
         assert [r.id for r in records.list()] == ["a"]
 
     def test_removing_twice_reports_the_second_as_a_no_op(self, records):
         record(records, "a")
-        assert records.soft_delete("a") is True
-        assert records.soft_delete("a") is False
+        assert records.set_trashed("a") is True
+        assert records.set_trashed("a") is False
 
     def test_a_removed_file_leaves_the_project_counts(self, records):
         # Otherwise Work offers a project filter that leads to an empty list —
         # which is the thing `projects()` exists to make impossible.
         record(records, "a", project_id="northwind")
         record(records, "b", project_id="northwind")
-        records.soft_delete("a")
+        records.set_trashed("a")
 
         assert records.projects() == [{"id": "northwind", "count": 1}]
         assert records.count_for_project("northwind") == 1
@@ -269,5 +269,5 @@ class TestTheRecordIsMarkedNotDropped:
 
         # The pre-existing row survives, is listed, and can be removed.
         assert [r.id for r in opened.list()] == ["old"]
-        assert opened.soft_delete("old") is True
+        assert opened.set_trashed("old") is True
         assert opened.list() == []

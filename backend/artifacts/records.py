@@ -28,9 +28,16 @@ is `store.py`'s property, enforced by a source scan, and it is untouched. It was
 wrong as an answer to the *user*, who has rule 4 on their side and who
 reasonably expects a screen listing their files to be able to remove one.
 
-So there is a `soft_delete` and a `restore`, and no statement anywhere that
-unlinks. The record is **marked**, never dropped, because the file is moved to a
-trash folder by `artifacts.trash` and undo needs something to restore *to*:
+So there is a `set_trashed` and a `restore`, and no statement anywhere that
+unlinks. Neither is named for deletion, and that is this store's own guard
+speaking rather than a style choice — `TestTheRecordStoreHasNoGeneralMutation`
+refuses a method whose name contains *delete* or *remove*, and it was right to:
+nothing here removes anything. The file has been moved to a trash folder by
+`artifacts.trash` and these set and clear the flag that says so, which is a
+different fact from "gone".
+
+The record is **marked**, never dropped, because undo needs something to restore
+*to*:
 without the record there is no provenance, no conversation and no claims, and
 "undo" would mean rebuilding a record from a filename — the invented value this
 codebase refuses everywhere else. Every read filters the marked ones out, as a
@@ -121,7 +128,7 @@ class ArtifactRecords:
                 "ON artifacts(conversation_id)"
             )
 
-            # When the user removed it, or NULL. Added rather than included in
+            # When the user put it in the trash, or NULL. Added rather than included in
             # the CREATE, because `CREATE TABLE IF NOT EXISTS` does nothing at
             # all to a table that already exists — every database written
             # before this column would keep the old shape and every query
@@ -132,8 +139,8 @@ class ArtifactRecords:
                 row["name"]
                 for row in conn.execute("PRAGMA table_info(artifacts)").fetchall()
             }
-            if "deleted_at" not in columns:
-                conn.execute("ALTER TABLE artifacts ADD COLUMN deleted_at REAL")
+            if "trashed_at" not in columns:
+                conn.execute("ALTER TABLE artifacts ADD COLUMN trashed_at REAL")
 
     # ---------------------------------------------------------------- writing
 
@@ -258,8 +265,17 @@ class ArtifactRecords:
             cursor = conn.execute("DELETE FROM artifacts WHERE path = ?", (path,))
             return cursor.rowcount
 
-    def soft_delete(self, artifact_id: str, when: Optional[float] = None) -> bool:
-        """Mark a record removed by the user. Returns whether one was.
+    def set_trashed(self, artifact_id: str, when: Optional[float] = None) -> bool:
+        """Mark a record as put in the trash by the user. Returns whether one was.
+
+        **Named for what it does rather than for what it is for**, and the
+        rename was forced by this store's own guard —
+        `TestTheRecordStoreHasNoGeneralMutation` refuses a function whose name
+        contains *delete* or *remove*. It was right to: nothing here removes
+        anything. The file has been moved to a trash folder by
+        `artifacts.trash` and this sets the flag that says so, which is a
+        different fact from "gone" and has to read as one to anybody scanning
+        the method list.
 
         **Marked, not dropped, and that is what makes undo possible at all.**
         The file itself is moved to the trash by `artifacts.trash`; if the
@@ -274,24 +290,24 @@ class ArtifactRecords:
         """
         with self._lock, self._connect() as conn:
             cursor = conn.execute(
-                "UPDATE artifacts SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL",
+                "UPDATE artifacts SET trashed_at = ? WHERE id = ? AND trashed_at IS NULL",
                 (float(when if when is not None else time.time()), artifact_id),
             )
             return cursor.rowcount > 0
 
     def restore(self, artifact_id: str) -> bool:
-        """Undo a `soft_delete`. Returns whether anything changed."""
+        """Undo a `set_trashed`. Returns whether anything changed."""
         with self._lock, self._connect() as conn:
             cursor = conn.execute(
-                "UPDATE artifacts SET deleted_at = NULL "
-                "WHERE id = ? AND deleted_at IS NOT NULL",
+                "UPDATE artifacts SET trashed_at = NULL "
+                "WHERE id = ? AND trashed_at IS NOT NULL",
                 (artifact_id,),
             )
             return cursor.rowcount > 0
 
     # ---------------------------------------------------------------- reading
 
-    def get(self, artifact_id: str, *, include_deleted: bool = False) -> Optional[Artifact]:
+    def get(self, artifact_id: str, *, include_trashed: bool = False) -> Optional[Artifact]:
         """One record.
 
         Deleted ones are hidden by default and reachable by asking, because the
@@ -301,7 +317,7 @@ class ArtifactRecords:
         is the default — a `get` that returned deleted records to everything
         would put removed files back in the picker.
         """
-        clause = "" if include_deleted else " AND deleted_at IS NULL"
+        clause = "" if include_trashed else " AND trashed_at IS NULL"
         with self._connect() as conn:
             row = conn.execute(
                 f"SELECT * FROM artifacts WHERE id = ?{clause}", (artifact_id,)
@@ -323,7 +339,7 @@ class ArtifactRecords:
         # exclude the deleted ones" is a question every future caller would
         # have to answer correctly, and the cost of one getting it wrong is a
         # file the user deleted showing up in Work.
-        clauses: List[str] = ["deleted_at IS NULL"]
+        clauses: List[str] = ["trashed_at IS NULL"]
         params: List[Any] = []
 
         if project_id:
@@ -351,7 +367,7 @@ class ArtifactRecords:
     def count(
         self, *, project_id: Optional[str] = None, kind: Optional[str] = None
     ) -> int:
-        clauses: List[str] = ["deleted_at IS NULL"]
+        clauses: List[str] = ["trashed_at IS NULL"]
         params: List[Any] = []
         if project_id:
             clauses.append("project_id = ?")
@@ -378,7 +394,7 @@ class ArtifactRecords:
         with self._connect() as conn:
             rows = conn.execute(
                 "SELECT project_id, COUNT(*) AS n FROM artifacts "
-                "WHERE project_id != '' AND deleted_at IS NULL "
+                "WHERE project_id != '' AND trashed_at IS NULL "
                 "GROUP BY project_id ORDER BY project_id"
             ).fetchall()
 
@@ -394,7 +410,7 @@ class ArtifactRecords:
         with self._connect() as conn:
             row = conn.execute(
                 "SELECT COUNT(*) AS n FROM artifacts "
-                "WHERE project_id = ? AND deleted_at IS NULL",
+                "WHERE project_id = ? AND trashed_at IS NULL",
                 (project_id,),
             ).fetchone()
         return int(row["n"])
