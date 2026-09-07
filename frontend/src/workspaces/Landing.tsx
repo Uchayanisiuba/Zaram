@@ -5,7 +5,7 @@ import { ORB_BEHAVIOUR } from '../components/orb/LivingOrb'
 import Embodiment from '@/components/embodiment/Embodiment'
 import OrbStatusLabel from '../components/orb/OrbStatusLabel'
 import OrbHint from '../components/orb/OrbHint'
-import OrbitalParticles from '../components/orb/OrbitalParticles'
+import OrbAura from '../components/orb/OrbAura'
 import { useEmbodimentStore } from '@/stores/embodimentStore'
 import { useChatModeStore } from '@/stores/chatModeStore'
 import { useLayoutStore, orbGeometry } from '@/stores/layoutStore'
@@ -280,39 +280,6 @@ export default function Landing({ onNavigate, onOrbTap }: LandingProps) {
           transition={{ duration: reduced ? 0.2 : 0.4, delay: 0.04 }}
         />
 
-        {/* The particle field, for the avatar.
-         *
-         * **The rings were already shared and the particles were not.** These
-         * two orbit tracks are rendered here, so they sit behind either
-         * renderer; the motes were markup inside `LivingOrb`, so choosing the
-         * character removed half the atmosphere and left it standing on a
-         * plain background. `OrbitalParticles` is the same field the orb
-         * draws — extracted rather than copied, because two fields with one
-         * intent drift the first time either is tuned.
-         *
-         * Only on the avatar path, because the orb still draws its own inside
-         * its box: rendering both would double every mote. Sized to the orb's
-         * footprint so the field occupies the same region whichever renderer
-         * is mounted, and behind the character rather than over it — it is
-         * atmosphere, and a mote crossing the face would read as something
-         * the face was doing.
-         */}
-        {renderer === 'avatar' && !chat && (
-          <div
-            aria-hidden
-            className="absolute left-1/2 top-1/2 pointer-events-none"
-            style={{
-              width: ORB_SIZE,
-              height: ORB_SIZE,
-              transform: 'translate(-50%, -50%)',
-              opacity: panelsOpen ? 0.25 : 1,
-              transition: 'opacity 0.35s ease',
-            }}
-          >
-            <OrbitalParticles />
-          </div>
-        )}
-
         {/* Central Living Orb — zooms + glides into the open space beside the chat. */}
         <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-10 flex flex-col items-center">
           <motion.div
@@ -341,15 +308,36 @@ export default function Landing({ onNavigate, onOrbTap }: LandingProps) {
               }
             }}
           >
-            <div style={{ width: ORB_SIZE, height: ORB_SIZE }}>
-              {/* Same behaviour as the sub-menu — only the diameter differs.
-                  See ORB_BEHAVIOUR.
+            <div style={{ width: ORB_SIZE, height: ORB_SIZE, position: 'relative' }}>
+              {/* The aura, for the avatar.
+               *
+               * **The orb draws its own rings and motes; the character drew
+               * neither**, so choosing it removed the state-coloured rings,
+               * the particle field and the atmosphere with them — a robot on a
+               * flat background. `OrbAura` is the same two rings and the same
+               * ten motes, extracted so there is one state→colour table.
+               *
+               * Inside this box rather than beside it, which is why it
+               * survives into the conversation: this is the element carrying
+               * `orbShift` and the zoom, so the aura travels and scales with
+               * the character exactly as the orb's own does. A sibling pinned
+               * to the container's centre stayed behind when the character
+               * glided left, which is what the first attempt did.
+               *
+               * Only on the avatar path — the orb draws its own inside itself,
+               * and rendering both would double every ring and every mote.
+               */}
+              {renderer === 'avatar' && (
+                <OrbAura px={ORB_SIZE} dimmed={panelsOpen} />
+              )}
 
-                  Keyed by renderer so switching remounts rather than
-                  crossfades. docs/EMBODIMENT-SPIKE.md: a crossfade between a
-                  glowing sphere and a 3D character has no good frame in the
-                  middle, so the choice is made at mount. */}
+              {/* Above the aura, always. The avatar is a WebGL canvas in
+                  normal flow, so without a stacking context of its own a
+                  particle could paint across the face — and a mote crossing
+                  the visor reads as something the face is doing. */}
+              <div style={{ position: 'relative', zIndex: 1 }}>
               <Embodiment key={renderer} px={ORB_SIZE} {...ORB_BEHAVIOUR} />
+              </div>
             </div>
           </motion.div>
 

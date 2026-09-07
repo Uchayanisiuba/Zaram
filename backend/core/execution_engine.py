@@ -462,7 +462,9 @@ class ExecutionEngine:
                 system_prompt, session_id
             )
         else:
-            system_prompt = self._augment_with_conversation(system_prompt, session_id)
+            system_prompt = self._augment_with_conversation(
+                system_prompt, session_id, model
+            )
 
         # Said before the answer, not after it, and for the same reason the
         # empty-domain notice is: it is a *frame* for what follows. A reader who
@@ -830,28 +832,45 @@ class ExecutionEngine:
     RECALL_CANDIDATES = 25
 
     #: How many turns of ephemeral session state to keep, per session.
-    MAX_SESSION_TURNS = 8
-
-    #: How many recent exchanges an ordinary reply is shown.
     #:
-    #: The same three the document path uses. More would be a better answer to
-    #: "what were we talking about" and a worse one to everything else — on a
-    #: 4,096-token window the conversation would start crowding out recall,
-    #: which is the memory that makes the answer worth having. The buffer keeps
-    #: `MAX_SESSION_TURNS`; this is how much of it is put in front of a model.
-    CONVERSATION_TURNS = 3
-
-    #: The ceiling on that block, in tokens.
+    #: **Raised from 8 on 8 September 2026, because it was the last ceiling.**
+    #: With the block that reaches the model now sized against the *measured*
+    #: window, this became the binding limit on a large-context model: no
+    #: matter how much room the model had, the buffer only ever held eight
+    #: exchanges to draw on, so a long conversation forgot its own beginning
+    #: while the model had ample room for it.
     #:
-    #: **Sized for the smallest window Zaram assumes rather than measured, and
-    #: that is deliberate.** `budget_for` reads the model's real loaded context
-    #: from Ollama, costs a request with a one-second timeout, and is already
-    #: paid once per chat at the API layer; paying it a second time inside
-    #: every reply would put a network round trip in front of a block that is
-    #: three turns long. So the cap is computed from `FALLBACK_CONTEXT_TOKENS`
-    #: — 4,096, Ollama's default — less the reply reserve, times the share
-    #: below. It under-uses a 16k window, which costs nothing, and it never
-    #: overruns a 4k one, which is the case that would hurt.
+    #: 40 rather than unbounded, because this is memory held per session for
+    #: `MAX_SESSIONS` sessions and rule 7d says it is ephemeral working state
+    #: rather than a store. `fit` still decides what is *shown*; this only
+    #: decides what remains available to show. The worst case is bounded and
+    #: small — 64 sessions of 40 pairs of ordinary chat text.
+    #:
+    #: It is not a substitute for the Spine and must not become one: what is
+    #: remembered across conversations is the memory runtime's decision, and
+    #: nothing here reaches it.
+    MAX_SESSION_TURNS = 40
+
+
+    #: The share of the answering model's window this block may spend.
+    #:
+    #: **Of the measured window — corrected 8 September 2026**, and the comment
+    #: this replaces is worth keeping in outline because it argued carefully
+    #: for the wrong thing. It said the cap should come from
+    #: `FALLBACK_CONTEXT_TOKENS`, on the grounds that measuring costs a request
+    #: and *"under-using a 16k window costs nothing"*.
+    #:
+    #: Under-using it costs the product's memory. At 4,096 assumed this is 768
+    #: tokens; a model loaded with 65,536 has room for sixteen times that, and
+    #: the difference is the whole of *"Zaram does not follow a long
+    #: conversation"* — which is what the maintainer reported. The measurement
+    #: it declined to take is one loopback call with a one-second timeout,
+    #: against a reply that takes seconds to generate.
+    #:
+    #: A quarter of the input budget rather than more, because the rest has to
+    #: cover the identity preamble, recalled facts and the question — and
+    #: recall is the memory that makes the answer worth having. The same
+    #: reasoning `DOCUMENT_SHARE` states next door.
     #:
     #: `core.transcript.fit` spends it, so whole turns are dropped rather than
     #: sentences cut. Half a message attributed to a person is a fabrication.
@@ -2117,7 +2136,9 @@ class ExecutionEngine:
         logger.info("Engine: gave the document step %d prior turns", len(turns))
         return system_prompt + "\n".join(lines), True
 
-    def _augment_with_conversation(self, system_prompt: str, session_id: str) -> str:
+    def _augment_with_conversation(
+        self, system_prompt: str, session_id: str, model: str | None = None
+    ) -> str:
         """Put the recent exchange in front of an ordinary reply.
 
         **The machinery for this was complete and reached from one place.**
@@ -2141,22 +2162,24 @@ class ExecutionEngine:
         *keeps* — `_remember` is untouched and still stores the user's words
         only, so nothing here can make Zaram quote its own replies as sources.
 
-        *It is bounded twice.* `CONVERSATION_TURNS` caps how many exchanges are
-        eligible and `CONVERSATION_SHARE` caps what they may spend, with `fit`
-        dropping oldest-first and whole turns only.
+        *It is bounded by the budget, not by a turn count.* `CONVERSATION_SHARE`
+        of the answering model's **measured** window is what these may spend,
+        and `fit` drops oldest-first and whole turns only. There used to be a
+        `CONVERSATION_TURNS = 3` slice in front of that, taken against a
+        4,096-token constant — so a model loaded with 65,536 tokens was shown
+        three exchanges inside a budget belonging to a different model. That is
+        what "Zaram does not follow a long conversation" was, and the machinery
+        to fix it was already here and unasked.
 
         Silent when there is nothing: a first turn has nothing to follow, and a
         heading over an empty exchange teaches a model that the section is
         sometimes furniture.
         """
-        pairs = self._session_turns.get(session_id, [])[-self.CONVERSATION_TURNS :]
+        pairs = self._session_turns.get(session_id, [])
         if not pairs:
             return system_prompt
 
-        from core.context_budget import (
-            FALLBACK_CONTEXT_TOKENS,
-            REPLY_RESERVE_FRACTION,
-        )
+        from core.context_budget import budget_for
         from core.transcript import ASSISTANT, USER, Turn, as_prompt, fit
 
         turns: list[Turn] = []
@@ -2164,11 +2187,30 @@ class ExecutionEngine:
             turns.append(Turn(role=USER, text=question))
             turns.append(Turn(role=ASSISTANT, text=answer))
 
-        cap = int(
-            FALLBACK_CONTEXT_TOKENS
-            * (1 - REPLY_RESERVE_FRACTION)
-            * self.CONVERSATION_SHARE
-        )
+        # **The model's real window, not the fallback constant.**
+        #
+        # This computed `FALLBACK_CONTEXT_TOKENS * ... * CONVERSATION_SHARE` —
+        # 768 tokens — for every model on every machine, and sliced the buffer
+        # to the last three exchanges before even trying to fit them. So a
+        # model loaded with 65,536 tokens was shown three turns inside a budget
+        # sized for 4,096, which is what "Zaram does not follow a long
+        # conversation" is: the machinery was complete and the ceiling was a
+        # constant from a different model.
+        #
+        # `budget_for` is the measurement this codebase already built for
+        # exactly this — it reads Ollama's `/api/ps` and a local
+        # OpenAI-compatible server's own route, says whether the figure was
+        # measured, and falls back to the same constant only when it cannot
+        # tell. It is cached for ten seconds, so asking here does not add a
+        # round trip to a request whose chat route has already asked.
+        #
+        # The turn *count* is no longer capped separately either. `fit` drops
+        # oldest-first and drops whole turns, which is a better bound than a
+        # number chosen against a window we can now read: on a small context it
+        # keeps two or three exchanges exactly as before, and on a large one it
+        # keeps as many as genuinely fit.
+        budget = budget_for(model)
+        cap = int(budget.input_tokens * self.CONVERSATION_SHARE)
         kept, dropped = fit(turns, cap)
         if not kept:
             # Every turn was too long to fit. Saying nothing is right: a
@@ -2178,8 +2220,13 @@ class ExecutionEngine:
             return system_prompt
 
         logger.info(
-            "Engine: gave the reply %d prior turn(s), %d dropped for budget",
-            len(kept), dropped,
+            "Engine: gave the reply %d prior turn(s), %d dropped for a %d-token "
+            "share of a %s %d-token window",
+            len(kept),
+            dropped,
+            cap,
+            "measured" if budget.measured else "assumed",
+            budget.total_tokens,
         )
         return (system_prompt or "") + "\n".join([
             "",

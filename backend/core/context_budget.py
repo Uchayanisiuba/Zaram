@@ -34,6 +34,7 @@ records. Nothing here may be read as evidence about what left the machine.
 from __future__ import annotations
 
 import logging
+
 from dataclasses import dataclass
 from typing import Optional
 
@@ -403,8 +404,19 @@ def budget_for(
     if measured is None:
         measured = local_server_context_length(model)
     total = measured if measured is not None else FALLBACK_CONTEXT_TOKENS
+    # **Not cached, deliberately.** Two callers now ask per reply — the chat
+    # route to size attached documents, the engine to size how much of the
+    # conversation the model is shown — and a memo keyed on the model name was
+    # written and removed the same hour. It bought a couple of milliseconds of
+    # loopback against a request that spends seconds generating, and it cost
+    # module-level mutable state that made one test's answer depend on whether
+    # another had run first. That is the wrong trade on a number whose whole
+    # value is being current: it changes on a model load, and a load is the
+    # exact moment a stale answer would be quoted.
     return ContextBudget(
         total_tokens=total,
         measured=measured is not None,
         reply_reserve_tokens=int(total * REPLY_RESERVE_FRACTION),
     )
+
+

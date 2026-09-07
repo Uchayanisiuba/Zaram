@@ -420,4 +420,22 @@ const LivingOrb = ({
   );
 };
 
+/**
+ * The two energy-ring colours for a state.
+ *
+ * Exported so the avatar can wear the same aura the orb does without a second
+ * copy of the table. `CLAUDE.md` records what a second copy costs — the kind
+ * map in Work drifted and shipped two kinds with no icon — and a state colour
+ * is worse, because the rings are part of how the product reports what it is
+ * doing and two tables would eventually disagree about that.
+ *
+ * A function rather than the config object itself, deliberately: this hands
+ * out two strings, not a mutable record with the glow, the filter and the
+ * pulse timings in it. Everything else about the orb's look stays the orb's.
+ */
+export function ringColours(state: OrbState): { ring1: string; ring2: string } {
+  const cfg = STATE_CONFIG[state] ?? STATE_CONFIG.idle;
+  return { ring1: cfg.ring1Color, ring2: cfg.ring2Color };
+}
+
 export default LivingOrb;

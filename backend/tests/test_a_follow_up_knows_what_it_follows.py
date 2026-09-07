@@ -168,10 +168,56 @@ class TestTheFollowUpSeesTheExchange:
 
         assert FIRST not in chat.local.last_system_prompt
 
-    def test_the_oldest_turns_fall_away(self, chat):
-        """`CONVERSATION_TURNS` bounds what is shown, not what is kept."""
+    def test_short_turns_are_all_kept(self, chat):
+        """**The bound is the budget, not a turn count** — changed 8 September.
+
+        This asserted that six short exchanges lost their oldest, because
+        `CONVERSATION_TURNS = 3` sliced the buffer before anything was fitted.
+        That is what "Zaram does not follow a long conversation" was: three
+        turns, inside a budget computed from a 4,096-token constant, on a model
+        whose real window this codebase can read and which may be sixteen times
+        larger.
+
+        Six short questions cost a few dozen tokens. They fit, so they are all
+        shown, and dropping them was never anything but an arbitrary ceiling.
+        """
         for i in range(6):
             chat.ask(f"Question number {i}.")
+        chat.ask(FOLLOW_UP)
+
+        block = chat.local.last_system_prompt
+        assert "Question number 5." in block
+        assert "Question number 0." in block
+
+    def test_the_oldest_turns_fall_away_when_they_do_not_fit(self, chat, monkeypatch):
+        """And the bound is real, which is the other half of the same change.
+
+        **The window is pinned rather than measured**, and that is the point of
+        the test rather than a convenience. `budget_for` asks a live Ollama
+        what is loaded, so left alone this asserts something different on a
+        machine with a 65,536-token model resident than on one with nothing
+        running — a number without its conditions, which this repository has
+        paid for before. Pinned, it asserts what it claims: that `fit` drops
+        oldest-first when the turns exceed whatever share they are given.
+        """
+        from core import context_budget
+
+        monkeypatch.setattr(
+            context_budget,
+            "budget_for",
+            lambda model, **kw: context_budget.ContextBudget(
+                total_tokens=4096, measured=True, reply_reserve_tokens=1024
+            ),
+        )
+
+        # A share of 768 tokens against six exchanges of roughly 170 each, so
+        # a few fit and the oldest do not. Sized to fit *individually* on
+        # purpose: turns larger than the whole share make `fit` keep nothing,
+        # which is a different behaviour with its own test, and asserting it
+        # here by accident would leave this one green for the wrong reason.
+        filler = "word " * 100
+        for i in range(6):
+            chat.ask(f"Question number {i}. {filler}")
         chat.ask(FOLLOW_UP)
 
         block = chat.local.last_system_prompt
