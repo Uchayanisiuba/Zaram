@@ -47,6 +47,7 @@ import {
   type RoutingPreference,
 } from '@/services/settingsClient';
 import { cloudModelConnected, useSystemStore } from '@/stores/systemStore';
+import { autoAvailability } from '@/lib/autoRouting';
 
 /** The same three words Settings uses.
  *
@@ -216,6 +217,11 @@ export default function RoutingControl() {
   const local = chats.filter((m) => m.locality === 'local');
   const cloud = chats.filter((m) => m.locality !== 'local');
 
+  // Auto needs something to choose between. With one candidate all three modes
+  // resolve to the same model, and a preference that cannot change the answer
+  // is a control over hardcoded data.
+  const auto = autoAvailability(models, canLeaveDevice);
+
   const Icon = preference ? MODE_ICON[preference] : Shuffle;
   const modeLabel = MODES.find((m) => m.value === preference)?.label ?? '';
 
@@ -276,7 +282,9 @@ export default function RoutingControl() {
           </p>
           <div className="flex gap-1 mb-3">
             {MODES.map((mode) => {
-              const unavailable = mode.value === 'prefer_cloud' && !cloudUsable;
+              const unavailable =
+                (mode.value === 'prefer_cloud' && !cloudUsable) ||
+                (mode.value === 'auto' && !auto.usable);
               return (
                 <button
                   key={mode.value}
@@ -288,11 +296,13 @@ export default function RoutingControl() {
                   // causes are named separately because they are different
                   // problems with different fixes.
                   title={
-                    unavailable
-                      ? hasCloudModel
-                        ? 'Nothing may leave this device yet — allow it in Settings'
-                        : 'No cloud provider is connected'
-                      : undefined
+                    !unavailable
+                      ? undefined
+                      : mode.value === 'auto'
+                        ? auto.reason
+                        : hasCloudModel
+                          ? 'Nothing may leave this device yet — allow it in Settings'
+                          : 'No cloud provider is connected'
                   }
                   className="flex-1 px-2 py-1 rounded text-[10px] transition-colors disabled:opacity-40"
                   style={{
