@@ -129,19 +129,55 @@ export default function ActivityWorkspace() {
     () => entries.filter((e) => e.kind === 'request'),
     [entries],
   );
+  /**
+   * How far back the headline figure looks.
+   *
+   * **It was 24 hours and nothing else, which makes the number unanswerable.**
+   * "0 B left this device in the last 24 hours" is the surface's central claim,
+   * and the question anybody asks second is *"and before that?"* — a privacy
+   * readout that can only describe today is one you have to take on faith for
+   * every other day, which is the opposite of what this screen is for.
+   *
+   * Days rather than a date range, because a range asks somebody to pick two
+   * dates to answer "has anything been leaving". The log's retention setting
+   * sits beside this and uses the same units, so the two read as one idea:
+   * how long it is kept, and how far back you are looking.
+   */
+  const [windowDays, setWindowDays] = useState<number | null>(1);
+
+  const windowed = useMemo(() => {
+    if (windowDays === null) return requests;
+    const cutoff = Date.now() / 1000 - windowDays * 86400;
+    return requests.filter((e) => e.at >= cutoff);
+  }, [requests, windowDays]);
+
+  /** The rows on screen: this destination, in this window.
+   *
+   *  **One window governs the whole surface**, and it has to. A headline
+   *  reading "in the last 24 hours" over a list showing every request ever
+   *  recorded is two answers to one question on the screen whose entire job is
+   *  to be believed — and the discrepancy is invisible until somebody counts
+   *  the rows. Defined below `windowed` for that reason rather than beside the
+   *  other memos. */
   const shown = useMemo(
-    () => (hostFilter ? requests.filter((e) => e.host === hostFilter) : requests),
-    [requests, hostFilter],
+    () => (hostFilter ? windowed.filter((e) => e.host === hostFilter) : windowed),
+    [windowed, hostFilter],
   );
 
-  const sentToday = useMemo(() => {
-    const cutoff = Date.now() / 1000 - 86400;
-    return requests
-      .filter((e) => e.at >= cutoff && e.decision === 'allowed')
-      .reduce((sum, e) => sum + e.bytes, 0);
-  }, [requests]);
+  const sentToday = useMemo(
+    () =>
+      windowed
+        .filter((e) => e.decision === 'allowed')
+        .reduce((sum, e) => sum + e.bytes, 0),
+    [windowed],
+  );
 
-  const blockedCount = requests.filter((e) => e.decision !== 'allowed').length;
+  // Counted over the same window as the bytes beside it. They were computed
+  // over different sets — bytes over 24 hours, blocks over the whole log — so
+  // the line could read "0 B in the last 24 hours · 12 blocked" about two
+  // different spans of time, in one sentence, on the readout whose entire job
+  // is to be trusted.
+  const blockedCount = windowed.filter((e) => e.decision !== 'allowed').length;
 
   const changePolicy = async (
     host: string,
@@ -364,8 +400,31 @@ export default function ActivityWorkspace() {
             {bytes(sentToday)}
           </span>
           <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
-            left this device in the last 24 hours
+            left this device
           </span>
+          {/* The span the figure covers, chosen rather than assumed. Next to
+              the number it describes, because a window control anywhere else
+              leaves the headline reading as a claim about all time. */}
+          <select
+            aria-label="How far back to look"
+            value={windowDays === null ? 'all' : String(windowDays)}
+            onChange={(e) =>
+              setWindowDays(e.target.value === 'all' ? null : Number(e.target.value))
+            }
+            style={{
+              background: 'transparent',
+              border: '1px solid var(--color-border-subtle)',
+              color: 'var(--color-text-muted)',
+              borderRadius: 8,
+              padding: '3px 6px',
+              fontSize: 11,
+            }}
+          >
+            <option value="1">in the last 24 hours</option>
+            <option value="7">in the last 7 days</option>
+            <option value="30">in the last 30 days</option>
+            <option value="all">in everything still recorded</option>
+          </select>
           {blockedCount > 0 && (
             <span className="text-xs" style={{ color: 'var(--color-text-faint)', fontFamily: 'var(--font-mono)' }}>
               · {blockedCount} blocked

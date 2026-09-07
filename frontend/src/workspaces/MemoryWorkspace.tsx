@@ -58,6 +58,18 @@ import {
   type MemoryRecord,
   type MemoryStats,
 } from '@/services/memoryClient';
+import {
+  FILTER_LABELS,
+  GROUP_LABELS,
+  SORT_LABELS,
+  filterCounts,
+  group,
+  matchesFilter,
+  scopesPresent,
+  type MemoryFilter,
+  type MemoryGroupBy,
+  type MemorySortBy,
+} from './memory/organise';
 import { useSourceStore } from '@/stores/sourceStore';
 import { useProjectStore } from '@/stores/projectStore';
 
@@ -101,31 +113,53 @@ const bytes = (n: number) => {
   return `${(n / 1024 / 1024).toFixed(1)} MB`;
 };
 
-type Filter = 'all' | 'pinned' | 'corrected';
-
 /** The two kinds of thing Zaram believes: facts it was told, and
  *  commitments it read out of a document. Both are corrected the same way,
  *  which is why they share a surface, and they are separate views because
  *  they are separate shapes of record rather than two filters over one. */
 type View = 'facts' | 'commitments';
 
+/**
+ * One measured number, on the line rather than in a tile.
+ *
+ * **It was three boxes across the full width**, each with a label, a 24px
+ * figure and a note — a band of roughly ninety pixels above the working area,
+ * spent on numbers that are glanceable and almost never acted on. `CLAUDE.md`
+ * is blunt about the trade on a surface used daily: *density beats animation*,
+ * and the same argument applies to whitespace. The list is what people came
+ * for; the counts are context.
+ *
+ * Every value survives, including the note, which is the part that mattered —
+ * "unknown" with *why* under it is a different claim from "unknown", and on
+ * `Left device today` it is the difference between an unmeasured value and a
+ * measured zero.
+ */
 function Metric({ label, value, note }: { label: string; value: string; note?: string }) {
   return (
-    <div
-      className="flex-1 rounded-xl px-4 py-3"
-      style={{ background: 'var(--color-glass)', border: '1px solid var(--color-border-subtle)' }}
-    >
-      <div className="text-[10px] uppercase tracking-wider text-slate-500">{label}</div>
-      <div
-        className="mt-1 text-2xl"
-        style={{ fontFamily: 'var(--font-mono)', color: 'var(--color-text)' }}
-      >
+    <span className="flex items-baseline gap-1.5 whitespace-nowrap">
+      <span className="text-[10px] uppercase tracking-wider text-slate-500">{label}</span>
+      <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--color-text)', fontSize: 13 }}>
         {value}
-      </div>
-      {note && <div className="mt-0.5 text-[10px] text-slate-500">{note}</div>}
-    </div>
+      </span>
+      {note && (
+        <span className="text-[10px] text-slate-500" title={note}>
+          ({note})
+        </span>
+      )}
+    </span>
   );
 }
+
+/** The arrange controls, in the same face the rest of the product uses for a
+ *  select. Spelled once here rather than three times below. */
+const selectStyle: React.CSSProperties = {
+  background: 'transparent',
+  border: '1px solid var(--color-border-subtle)',
+  color: 'var(--color-text-muted)',
+  borderRadius: 8,
+  padding: '5px 8px',
+  fontSize: 11,
+};
 
 function Chip({
   label,
@@ -160,7 +194,14 @@ export default function MemoryWorkspace() {
   const [records, setRecords] = useState<MemoryRecord[]>([]);
   const [stats, setStats] = useState<MemoryStats | null>(null);
   const [query, setQuery] = useState('');
-  const [filter, setFilter] = useState<Filter>('all');
+  const [filter, setFilter] = useState<MemoryFilter>('all');
+  /** Rule 7i's own distinction, made askable. `global` is about the person and
+   *  `project:<id>` is about the work, and it was rendered on every row while
+   *  being filterable on none — so somebody wanting to know what Zaram thinks
+   *  it knows *about them* had to read the badges one at a time. */
+  const [scope, setScope] = useState<string>('all');
+  const [groupBy, setGroupBy] = useState<MemoryGroupBy>('none');
+  const [sortBy, setSortBy] = useState<MemorySortBy>('newest');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -234,20 +275,26 @@ export default function MemoryWorkspace() {
     [records, forgotten],
   );
 
-  const counts = useMemo(
-    () => ({
-      all: present.length,
-      pinned: present.filter((r) => r.pinned).length,
-      corrected: present.filter((r) => r.superseded_by).length,
-    }),
-    [present],
+  /** Everything in the chosen scope, before the cut is applied.
+   *
+   *  Scope narrows first and the chips count *within* it, so "Fading 3" means
+   *  three in what you are looking at rather than three somewhere on the
+   *  machine. A count that describes a set the user is not looking at is the
+   *  reason chip counts get distrusted. */
+  const inScope = useMemo(
+    () => (scope === 'all' ? present : present.filter((r) => (r.scope || 'global') === scope)),
+    [present, scope],
   );
 
-  const visible = useMemo(() => {
-    if (filter === 'pinned') return present.filter((r) => r.pinned);
-    if (filter === 'corrected') return present.filter((r) => r.superseded_by);
-    return present;
-  }, [present, filter]);
+  const counts = useMemo(() => filterCounts(inScope), [inScope]);
+  const scopes = useMemo(() => scopesPresent(present), [present]);
+
+  const visible = useMemo(
+    () => inScope.filter((r) => matchesFilter(r, filter)),
+    [inScope, filter],
+  );
+
+  const groups = useMemo(() => group(visible, groupBy, sortBy), [visible, groupBy, sortBy]);
 
   /** The replacement for a superseded fact, so the old one can point at it. */
   const replacementOf = useCallback(
@@ -328,8 +375,8 @@ export default function MemoryWorkspace() {
         ))}
       </div>
 
-      {/* Measured counts only. */}
-      <div className="px-8 flex gap-3">
+      {/* Measured counts only, and on one line. See `Metric`. */}
+      <div className="px-8 flex flex-wrap items-baseline gap-x-6 gap-y-1">
         {view === 'facts' ? (
           <>
             <Metric label="Facts stored" value={stats ? String(stats.total_records) : '—'} />
@@ -389,9 +436,66 @@ export default function MemoryWorkspace() {
               }}
             />
           </div>
-          <Chip label="All" count={counts.all} active={filter === 'all'} onClick={() => setFilter('all')} />
-          <Chip label="Pinned" count={counts.pinned} active={filter === 'pinned'} onClick={() => setFilter('pinned')} />
-          <Chip label="Corrected" count={counts.corrected} active={filter === 'corrected'} onClick={() => setFilter('corrected')} />
+          {/* **Fading is the addition that matters**, and it was the least
+              reachable thing on the surface. Rule 7e: facts decay if they are
+              never recalled, so which ones are about to go is the one question
+              here with an action attached — pin it, correct it, or let it. The
+              standing was rendered per row and could be asked of none of
+              them. */}
+          {(Object.keys(FILTER_LABELS) as MemoryFilter[]).map((key) => (
+            <Chip
+              key={key}
+              label={FILTER_LABELS[key]}
+              count={counts[key]}
+              active={filter === key}
+              onClick={() => setFilter(key)}
+            />
+          ))}
+        </div>
+
+        {/* Scope, and how the list is arranged. A second line, because the
+            first one is the one people use every visit and this one is for the
+            visit where they are looking for something in particular. */}
+        <div className="px-8 pb-3 flex items-center gap-2 flex-wrap">
+          <select
+            aria-label="What these facts are about"
+            value={scope}
+            onChange={(e) => setScope(e.target.value)}
+            style={selectStyle}
+          >
+            <option value="all">Everything Zaram remembers</option>
+            {scopes.map((s) => (
+              <option key={s.scope} value={s.scope}>
+                {s.label} ({s.count})
+              </option>
+            ))}
+          </select>
+
+          <select
+            aria-label="Group by"
+            value={groupBy}
+            onChange={(e) => setGroupBy(e.target.value as MemoryGroupBy)}
+            style={selectStyle}
+          >
+            {(Object.keys(GROUP_LABELS) as MemoryGroupBy[]).map((g) => (
+              <option key={g} value={g}>
+                Group by {GROUP_LABELS[g].toLowerCase()}
+              </option>
+            ))}
+          </select>
+
+          <select
+            aria-label="Sort by"
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value as MemorySortBy)}
+            style={selectStyle}
+          >
+            {(Object.keys(SORT_LABELS) as MemorySortBy[]).map((s) => (
+              <option key={s} value={s}>
+                {SORT_LABELS[s]}
+              </option>
+            ))}
+          </select>
         </div>
 
         <div className="flex-1 overflow-y-auto px-8 pb-8">
@@ -427,9 +531,38 @@ export default function MemoryWorkspace() {
             </div>
           )}
 
-          {visible.length > 0 && (
+          {/* Grouped, and the heading is sticky for the reason it is in Work:
+              it answers "what am I looking at", and scrolling past it in a long
+              list takes that answer away at the moment it is being used.
+              `group` returns one unlabelled group when grouping is off, so
+              there is one rendering path rather than two that can disagree
+              about the row markup. */}
+          {groups.map((g) => (
+            <section key={g.key} aria-labelledby={`memory-group-${g.key}`} className="mb-4">
+              {g.label && (
+                <h3
+                  id={`memory-group-${g.key}`}
+                  className="sticky top-0 z-10 mb-1.5 flex items-baseline gap-2 py-1 text-[11px] uppercase tracking-wider"
+                  style={{
+                    fontFamily: 'var(--font-display)',
+                    color: 'var(--color-text-muted)',
+                    background: 'var(--color-bg, #060911)',
+                  }}
+                >
+                  {g.label}
+                  <span
+                    style={{
+                      fontFamily: 'var(--font-mono)',
+                      color: 'var(--color-text-faint)',
+                      letterSpacing: 0,
+                    }}
+                  >
+                    {g.records.length}
+                  </span>
+                </h3>
+              )}
             <ul className="flex flex-col gap-1.5">
-              {visible.map((r) => {
+              {g.records.map((r) => {
                 const superseded = Boolean(r.superseded_by);
                 const isOpen = expanded === r.id;
                 const replacement = replacementOf(r.superseded_by);
@@ -716,7 +849,8 @@ export default function MemoryWorkspace() {
                 );
               })}
             </ul>
-          )}
+            </section>
+          ))}
         </div>
         </>
       ) : (
