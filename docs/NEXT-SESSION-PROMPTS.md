@@ -1,12 +1,17 @@
 # Next session — handoff
 
 > **Out of date at the top, current at the bottom.** The newest prompt is
-> *"Prompt for the next session — written 6 September 2026, later the same
-> day"*, at the very end of this file, and the authoritative state is the
-> **Current state — 6 September** block in `docs/MILESTONES.md`. Note there are
-> two prompts dated 6 September; the later one supersedes the earlier, which
-> asks for a tool loop that now exists. Everything between here and that
-> prompt is an earlier brief: still accurate about what was built and why,
+> *"Prompt for the next session — written 7 September 2026"*, at the very end of
+> this file, and the authoritative state is the **Current state — 6–7
+> September** block in `docs/MILESTONES.md`.
+>
+> There are now three live-ish prompts and they are about different things. The
+> **7 September** one is the local model stack — measuring what is installed and
+> deciding what to keep. The **6 September (later)** one above it is the code
+> pack, and its tasks 2 and 3 are still open. The earlier 6 September prompt
+> asks for a tool loop that now exists and is superseded outright.
+>
+> Everything else is an earlier brief: accurate about what was built and why,
 > superseded on status. Read it for reasoning, not for what is true today.
 
 
@@ -1082,3 +1087,148 @@ cd frontend && npx tsc --noEmit && npx vitest run
   this reason.
 * **Two proxy lists** — `frontend/vite.config.js` and `electron/config.js`.
 * **Do not point Aider at `main.py`.** 5,221 lines as of 6 September.
+
+---
+
+## Prompt for the next session — written 7 September 2026
+
+**This is the current prompt.** The two above it are earlier briefs for 6
+September, kept for their reasoning and superseded on status. The authoritative
+state is **Current state — 6–7 September** in `docs/MILESTONES.md`.
+
+This one is narrow on purpose: it is about the **local model stack**, not the
+code pack. The code pack's own brief is the prompt above.
+
+Paste from here down.
+
+---
+
+Read `docs/MILESTONES.md` — the **Current state — 6–7 September 2026** block,
+and in particular *"The model stack, as it stands on 7 September"*. Then
+`CLAUDE.md` for the rules.
+
+`main` is the trunk, the working tree is clean, and nothing is pushed since
+5 September. The backend suite is **3,543 passed, 23 skipped, 0 failed** in
+~10 minutes with Ollama up. A failure is yours.
+
+### The task: finish setting up the local model stack
+
+Four models are installed and **not one of the four decisions about them has
+been made on evidence**. Everything needed to decide exists; nobody has run it.
+
+**Before anything: check who has the card.** This is not boilerplate — it has
+gone wrong twice in two days, differently each time.
+
+* On 6 September a Zaram backend left running from the previous evening held
+  **9.09 GB**, `/api/ps` reported nothing, and `nvidia-smi --query-compute-apps`
+  listed WhatsApp and Steam with `[N/A]` while showing nothing of it.
+* On 7 September the maintainer was running **Unreal**, which held 6.7 GB of the
+  12 GB card, leaving 5,376 MiB free — not enough to measure anything honestly.
+
+The instrument that works is Windows' own counters, not nvidia-smi:
+
+```powershell
+(Get-Counter '\GPU Process Memory(*)\Dedicated Usage').CounterSamples |
+  Where-Object {$_.CookedValue -gt 100MB} | Sort-Object CookedValue -Descending
+```
+
+`test_what_actually_fits_this_card.py` refuses to run below 2 GB free, so it
+will skip rather than print a number measured against thrashing. Do not
+override that; close whatever is holding the card instead.
+
+**1. Give Coder a context window.** `qwen3-coder:30b` has no `num_ctx`, so
+Ollama will serve it at **4,096** regardless of what the weights declare —
+`core/context_budget.py` exists because of exactly this, with a measured example
+of a Gemma reporting 262,144 and loading with 4,096. A 4K coding model is
+useless: `ChatSurface.tsx` alone is ~15,000 tokens.
+
+```bash
+printf 'FROM qwen3-coder:30b\nPARAMETER num_ctx 32768\n' | ollama create qwen3-coder-30b-32k -f -
+```
+
+32K matches Gemma so the comparison is like for like. Try 40–65K afterwards if
+it fits — more context is more KV cache and less room for weights, which is the
+trade the measurement will show you.
+
+**2. Measure Coder.** Add `"qwen3-coder-30b-32k"` to the `parametrize` list in
+`test_what_actually_fits_this_card.py` — one line — and run:
+
+```bash
+cd backend && venv/Scripts/python.exe -m pytest tests/test_what_actually_fits_this_card.py -m measure -s
+```
+
+The prediction on the record, so it is checkable: **~50% resident, 18–22 tok/s**
+— Coder is 3B active against Gemma's 4B, so it should edge Gemma's 17.8. If it
+lands far off that, the reasoning behind the whole MoE argument is wrong and
+worth re-examining rather than explaining away.
+
+**3. Measure Tabby, which has never been measured at all.** It is up on
+**port 1234** with `Qwen3.8-27B-exl3-2.20bpw` and `inline_model_loading: true`,
+so a chat request naming the model loads it on the spot. Its own config records
+that it claims **~10.7 GiB of the 12.00 GiB card** when loaded — model 9.61 GiB
+plus cache — so unlike the Ollama models it fits *entirely*, and at 2.20 bpw it
+moves less memory per token than the 14B's Q4 does. **It may well be the fastest
+model on the machine**, which would overturn the advice given all through
+6–7 September that the 14B is the fast one.
+
+The test speaks Ollama only. Teaching it a second endpoint is perhaps thirty
+lines: `POST /v1/chat/completions` on 1234, and the OpenAI response carries
+`usage.completion_tokens` — time the call yourself, since there is no
+`eval_duration` equivalent. Residency comes from `/api/ps`-equivalent absence;
+`providers/manager.py` already treats TabbyAPI as *"resident, size unknown"*, so
+follow that shape rather than inventing a second one.
+
+**4. Then decide the stack, from the table rather than from argument.** The
+question the maintainer actually asked is whether two models can replace four.
+The candidate answer was **Tabby for chat + Coder for coding**, and it turns on
+step 3: if Tabby is fast, the 14B and Gemma are both redundant and ~27 GB can
+go. If Tabby is slow, the 14B stays as the fast default and Gemma stays for
+vision.
+
+Whatever is decided, **write the four numbers into `MILESTONES` beside the
+existing two.** A model table with two measured rows and two guesses is how the
+guesses become facts.
+
+### What is already settled, so it is not re-litigated
+
+* **`ollama list` double-counts.** Derived `num_ctx` variants share the parent's
+  blob. Deleting one frees kilobytes; it is a decision about the picker, never
+  about disk. Verified by digest: the two Qwens were `a8cc1361f314`, the two
+  Gemmas `7121486771cb`.
+* **Do not move the model store.** Measured with `dd`, 2 GB, `conv=fsync`:
+  `C:` writes at 364 MB/s and reads at 196; `G:` writes at **155**; `F:` is a
+  Hitachi 7200rpm spinning disk. `C:` is the fastest drive on the machine
+  despite being 93% full. Windows reports `G:` as `MediaType 4` (SSD) and it is
+  half the speed — the same table reports the Hitachi's spindle speed as
+  `4294967295`, uint32 saturation, the identical shape to the
+  `Win32_VideoController.AdapterRAM` trap `CLAUDE.md` warns about. **Trust the
+  measurement, not the label.**
+* **Switching cannot be made fast, only rarer.** Loading is disk-bound at ~196
+  MB/s, so a cold 26B costs 106 seconds and no configuration changes that. The
+  software half shipped on 7 September: routing now prefers the model that is
+  **already loaded** over one that merely fits.
+* **`qwen3-14b-16k` is capped at 16K by its Modelfile and the weights declare
+  40,960.** If it survives step 4, that is 2.5× the context for one
+  `ollama create` and no download.
+
+### Two things that are open and are not this task
+
+* **Does a generated image ever leave VRAM?** The 9.09 GB held by a Zaram
+  backend on 6 September is the size of a loaded image pipeline. If
+  `SdxlProvider` loads and never unloads, one picture costs every local chat
+  model until a restart. Unconfirmed and the most serious open item anywhere in
+  this file.
+* **Nobody has watched the code pack run in the real app.** See the previous
+  prompt; everything needed now exists, including a folder field and visible
+  tool calls.
+
+### The gate
+
+```
+backend/venv/Scripts/python.exe -m pytest backend/providers/tests/ backend/tests/test_routing_preference_is_not_inert.py -q
+npm run check:reachability && npm run check:guards
+cd frontend && npx tsc --noEmit && npx vitest run
+```
+
+The whole backend suite is ~10–35 minutes depending on what else the machine is
+doing, and is not the inner loop.

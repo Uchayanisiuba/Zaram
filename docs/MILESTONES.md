@@ -11,7 +11,7 @@ accurate — it is the first thing anyone reads.
 
 ---
 
-## Current state — 6 September 2026
+## Current state — 6–7 September 2026
 
 *The latest work is first. Earlier sessions follow below.*
 
@@ -20,10 +20,33 @@ Nothing has been pushed since the 5 September push;
 `git rev-list --count origin/main..main` is the count.
 
 **Measured: 3,543 passed, 23 skipped, 0 failed, 10m20s, with Ollama up** —
-excluding `test_the_model_can_drive_the_tools.py`, which drives a real 14B and
-takes ten minutes on its own (`-m measure`, 2 passed in 10m27s). The same suite
-took 29m06s earlier the same day on the same machine, which is what a wall-clock
-number is worth: nothing was made faster, the box was busier.
+excluding the two `-m measure` files, which drive real models and take ten
+minutes each. The same suite took 29m06s earlier on the same machine, which is
+what a wall-clock number is worth: nothing was made faster, the box was busier.
+
+### The model stack, as it stands on 7 September
+
+Four models installed, **44 GB of blobs** — and that is now the honest figure
+rather than the 55.7 GB `ollama list` used to imply, because the duplicate
+manifests have been deleted.
+
+| | |
+|---|---|
+| `qwen3-coder:30b` | 18.56 GB, **just downloaded, never loaded, no `num_ctx` set** |
+| `gemma4-26b-32k` | 17.99 GB, 128-expert MoE, 51% resident, **17.8 tok/s** |
+| `qwen3-14b-16k` | 9.28 GB, dense, 100% resident, **30.5 tok/s** |
+| `bge-m3` | 1.16 GB, embeddings, resident continuously |
+| TabbyAPI, port **1234** | `Qwen3.8-27B-exl3-2.20bpw`, 64K, **never measured** |
+
+Deleted: `qwen3-14b-8k` and `gemma4:26b-a4b-it-q4_K_M`. Both were manifests
+sharing a blob with the model beside them, so it freed no space — the point was
+to stop a worse option being picked.
+
+**The stack is not set up, and `docs/NEXT-SESSION-PROMPTS.md` carries the
+brief.** Three things are missing and each is small: Coder has no context
+variant so it will load at Ollama's 4,096 default; Coder has never been
+measured; and Tabby has never been measured at all, because
+`test_what_actually_fits_this_card.py` only speaks to Ollama.
 
 ### The code pack — a coding agent that is not a second product
 
