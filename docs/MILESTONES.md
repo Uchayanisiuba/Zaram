@@ -22,6 +22,77 @@ publishing step over rather than finding another route. `CLAUDE.md`,
 
 *The latest work is first. Earlier sessions follow below.*
 
+### 10 September, later — the window is the memory, so routing reads it
+
+Three findings, and the first two are the same shape: a number that was wrong
+and a number that was missing, neither of them read by anything.
+
+**`ModelInfo.context_length` held the architecture maximum.** Ollama discovery
+read `model_info["context_length"]` — 40,960 for `qwen3-14b-16k`, which loads
+with 16,384; 262,144 for a model Ollama serves at its 4,096 default. That is the
+number `core/context_budget.py` spends its whole docstring warning against, taken
+from the same `/api/show` reply that carries the right one under `parameters`.
+It now reads `num_ctx`, or `None` where there is none — Ollama's default is
+configurable, so asserting it here would be a guess about the server dressed as
+a measurement.
+
+**A TabbyAPI model had no window and no size, so it ranked last.** `_rank_key`
+tiebroke on `-(size_bytes or 0)`, and the OpenAI contract has no size field — so
+a model holding **65,536** tokens scored `0` and sorted behind a 14B holding
+16,384. Nothing preferred Ollama; the other side simply had nothing in the
+column being sorted on. `discover_models` now asks `/v1/model` **once per
+discovery, not once per model** and attaches the window to the entry that is
+loaded; every other entry keeps `None`, which is honest, because an exl3 folder
+on disk has no window until something loads it with one.
+
+**Routing now prefers the model that will forget least.** The window is the
+memory — the conversation gets a quarter of three quarters of it — so
+`-(context_length or 0)` sits in the rank key **above the size tiebreak** and
+below everything that is a real preference. Measured, per model:
+
+| | window | history | chat exchanges | code exchanges |
+|---|---|---|---|---|
+| no `num_ctx` | 4,096 | 768 tok | 1 | **0** |
+| `qwen3-14b-16k` | 16,384 | 3,072 tok | 7 | **2** |
+| the 32k models | 32,768 | 6,144 tok | 15 | **5** |
+| TabbyAPI | 65,536 | 12,288 tok | 30 | **11** |
+
+**Above size rather than inventing a size, and that choice is the interesting
+one.** Giving Tabby models a fabricated size would have fixed the ordering and
+not stayed there: `size_bytes` also feeds `model_fits_resident`, where it stops
+being a preference and becomes a capacity claim about somebody's card. Ordering
+on the window costs nothing, generalises to every engine, and puts no invented
+number anywhere near a fit decision.
+
+**It orders and never filters**, and there is a test saying so. Membership —
+consent, residency, capability — is settled before the rank key exists, and a
+window may not decide what a model is *allowed* to answer. Locality still
+outranks it too: a cloud model with a million-token window must not quietly beat
+a local one, because rule 5 is not something a context length argues with.
+
+**What this means in practice**: on a machine running Tabby, `auto` now routes
+there over a smaller-window Ollama model — *"make Tabby the default"* achieved
+without naming Tabby anywhere, so a Mac gets its largest-window Ollama model by
+the same rule.
+
+**Tabby is not a default for users and this does not make it one.** ExLlamaV3
+requires **NVIDIA Ampere or newer** and CUDA ≥ 12.4 — no Metal, no working
+ROCm — which excludes every Mac, every AMD card, every integrated-graphics
+laptop and every NVIDIA card older than the 30-series. That is the audience
+`CLAUDE.md` names as *"people for whom cloud AI is expensive or unreliable"*.
+First run recommends five Ollama tags and names no other engine; it should stay
+that way.
+
+**One claim in the 10 September notes was wrong and is corrected here.** It said
+a pull workflow could not be shipped for TabbyAPI. It has a `/v1/download`
+endpoint that fetches from HuggingFace with revision and token support, plus a
+CLI equivalent. The hardware objection is the real one and it stands alone.
+
+**Unwatched:** the `/v1/model` window probe has been tested against the contract
+and never against a live server, because TabbyAPI still has not been restarted.
+That restart now unblocks three items — `use_vision`, the window probe, and
+whether `auto` actually lands on Tabby.
+
 ### 10 September — the memory ceiling, found again by a different route
 
 **The maintainer reported the 8 September symptom a second time**, in its

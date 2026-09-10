@@ -1708,11 +1708,27 @@ from the description.
   cannot have it. First run recommends five Ollama tags and names no other
   engine, so moving off Ollama entirely means nobody is exercising the path
   every new user lands on.
-* **TabbyAPI has still not been restarted.** `vision: true` and
-  `vision_offload: true` are set in `C:\Users\user\tabbyAPI\config.yml`
-  (backup `config.yml.bak-20260907`) and unproven. Confirm `use_vision` on
-  `/v1/model`, send it a real image, and only then delete `gemma4-26b-32k`
-  (17.99 GB).
+* **TabbyAPI has still not been restarted, and it now blocks three things
+  rather than one.** `vision: true` and `vision_offload: true` are set in
+  `C:\Users\user\tabbyAPI\config.yml` (backup `config.yml.bak-20260907`) and
+  unproven. On the restart, in one pass:
+  1. confirm `use_vision` is true on `/v1/model`, send it a real image, and
+     only then delete `gemma4-26b-32k` (17.99 GB);
+  2. confirm the **window probe** reads `parameters.max_seq_len` off the same
+     route — it is tested against the contract and has never run against a live
+     server;
+  3. confirm `auto` actually routes to Tabby now that ranking prefers the
+     larger window. Every reply names the model that answered, so this is a
+     one-question check.
+
+* **Nothing has compared the models on quality, and the quantization gap makes
+  that a real gap rather than a tidy one.** Measured 10 September: every Ollama
+  chat model is **Q4_K_M** (~4.5 bits per weight) — `qwen3-14b-16k` is 14.8B at
+  9.28 GB — while the TabbyAPI model is `exl3-**2.20bpw**`, which is how a 27B
+  fits in 8.48 GiB. The table that made Tabby the default measures speed,
+  context and residency, and none of those is quality. A 27B squeezed to
+  2.2bpw against a 14.8B at Q4_K_M is not an obvious win in either direction,
+  and it is the one comparison the maintainer can make and a benchmark cannot.
 * ~~The memory fix has never run in a real conversation.~~ **Done, and it was
   incomplete.** See the 10 September entry in `docs/MILESTONES.md`: the budget
   was measured only from `/api/ps`, which goes silent when Ollama evicts an idle
@@ -1739,6 +1755,20 @@ from the description.
   file and a line number. The cheap fix is wording on the disabled card; the
   real one is letting the button run the installer, which is mutative and
   egressive and wants consent plus an egress entry. Read, not changed.
+* **`CONVERSATION_SHARE = 0.25` is a judgement nobody has tested.** It gives
+  the 14B ~9,200 characters of history — three or four code exchanges — and
+  Tabby ~36,900. Zaram now *says* when it drops turns, so the next report will
+  arrive with a number attached rather than as "it feels forgetful". Turn the
+  constant only with a transcript to point at.
+* **Should code Zaram writes reach the Spine?** Open, and the maintainer's call.
+  `_remember` stores the user's statements as facts and never the exchange,
+  which is right and is why Zaram stopped quoting its own replies. But
+  `transcript.py` justifies dropping turns rather than summarising them on the
+  grounds that *"Zaram has a second store"* — and that store holds what the user
+  said, not what Zaram produced. So an evicted code exchange is gone: not
+  summarised, not recalled, not recoverable. Rule 7b already indexes generated
+  *artifacts* with origin tagging; a code block in a reply is the same object
+  without a file.
 * **Four particle states have still not been *watched* moving**, only reasoned
   about. `?orb=thinking`, `?orb=listening`, `?orb=speaking` and `?orb=swapping`
   on the dev server put each one on screen. Note the instrument warning in
