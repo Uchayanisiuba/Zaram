@@ -59,45 +59,17 @@ That last group is where the **first pack** lives — invoices, quotes, expenses
 obligations. A pack adds parsers, tools, templates and routing exemplars. It adds no
 screens, and it is never a different product.
 
-## Why this is hard to copy
-
-The ambient-assistant pattern is proven — Grammarly's Superhuman Go docks a panel to the
-screen edge and offers to act on what you are typing. It works by sending that text to
-their servers, which is their business. They cannot ship the same product where sending
-it is the user's decision, because the sending is the company.
-
-The labs have memory too, and it is locked to their own model. Memory that works *across*
-competitors is against their interest to build, permanently.
-
-Zaram never buys inference — you bring your own key or your own model — so its cost of
-goods is approximately zero and an uncapped free tier is permanent rather than
-promotional. Nothing funded by token margin can match that.
-
-Local-first is copyable in principle by another small team. The accumulated memory of
-your own work is not, and neither is the discipline: provenance on every recalled fact,
-an append-only egress log, and a correction loop that changes the answers.
-
 ## A rented model can be taken back
 
-On 9 June 2026 Anthropic shipped Claude Fable 5 and Mythos 5. On 12 June a US
-export-control order barred access by any foreign national anywhere — and because
-nationality cannot be verified live, **both models were disabled worldwide, for
-everyone, paying US customers included**. Access was restored on 1 July. Eighteen
-days, no appeal, three days after launch.
+In June 2026 the most capable model available was disabled worldwide for eighteen days
+by an export-control order — for everyone, paying customers included, three days after
+launch. Cloud routing stops in that scenario; that half was always somebody else's.
+What keeps working is the model on your disk, your documents, and everything Zaram has
+learned about your work. The Spine exports in an open format, so the memory outlives
+the provider and Zaram itself.
 
-That is not a connectivity problem and not a developing-market problem. It is the
-most capable model available, switched off globally by the government of the country
-that built it, and nobody who had built their work around it had any recourse.
-
-**Be exact about what Zaram does and does not survive.** Cloud routing stops in that
-scenario too — that half was always somebody else's. What keeps working is the model
-on your disk, your documents, and everything Zaram has learned about your work. The
-Spine is exportable in an open format, so the memory outlives the provider, the
-order, and Zaram itself.
-
-That is the whole ownership claim, and it is deliberately narrow. What you own is
-what is on your machine. It is also, on the evidence of June, the only part anybody
-owned at all.
+What you own is what is on your machine. That is deliberately narrow, and on the
+evidence of June it is the only part anybody owned at all.
 
 ## Principles
 
@@ -114,13 +86,7 @@ owned at all.
 
 ## Status
 
-**Pre-v1.** This section is maintained against the code rather than carried forward,
-because it drifted once already — until 16 August 2026 it claimed there was no egress
-log, no cloud provider, no folder ingest and no installer, all of which had stopped
-being true. A status section that understates a project is the same defect as one that
-overstates it, and it sits on the page a stranger reads first.
-
-What has been observed working, rather than merely written:
+**Pre-v1.** What has been observed working, rather than merely written:
 
 - **The recall loop, end to end.** The Spine persists to SQLite with Ollama `bge-m3`
   embeddings, the index rebuilds on boot, and a fact stored in one session is recalled
@@ -164,41 +130,6 @@ What is not built:
   that happens, treat "a stranger can install this" as unproven. It is the actual
   blocker, and no amount of further capability substitutes for it.
 
-> **This list drifted again, and was corrected 29 August 2026 — understating, which
-> the preamble above already names as the same defect as overstating.** It carried
-> three entries that the 28 August work had made false, and a session building the
-> launch site nearly published the understatement:
->
-> * *"Obligation extraction is not wired… nothing outside its own tests imports it."*
->   `GET /obligations` is served at `main.py:3457` with `/correct`, `/dismiss` and
->   `/met` beside it, `ObligationRecords` is constructed at `main.py:3311`,
->   `services/obligationsClient.ts` calls all four, and `Commitments` is mounted at
->   `MemoryWorkspace.tsx:689`.
-> * *"Ingestion by drop, paste or upload — the way in does not exist."* `POST
->   /chat/attachments` resolves through `attachment_store.resolve` into
->   `compose_attachments`; the paperclip, a drag and `Ctrl`+`V` all reach `takeFiles`,
->   and the paste path was driven in a browser on 28 August.
-> * *"Images in either direction. In scope, not started."* Half right, and the wrong
->   half was load-bearing. Reading is built — `openai_compatible_engine.py` builds the
->   content-parts form from `images`, and a local vision model answers without the
->   picture leaving. Only *generation* is absent, which is why it is the one that
->   survives above.
->
-> The lesson is the one the preamble states and this section keeps failing: a status
-> list is only true on the day it is checked against the code. Check it, or delete it.
->
-> **A fourth entry survived that first correction and should not have.** *"Knowledge
-> domains"* was left in the not-built list because the session doing the correcting
-> carried it over from the old list instead of checking it — the same fault it was
-> mid-way through fixing, committed in the act of fixing it. Domains are built:
-> `GET`/`POST /knowledge/domains`, `PUT` and `DELETE` on one, and
-> `POST`/`DELETE /knowledge/domains/{id}/sources/{source_id}`, all at `main.py:3937`
-> onward; `KnowledgeDomains` constructed at `main.py:3929`; `_domain_scope` narrowing
-> retrieval in the chat path at `main.py:1292`; `services/domainsClient.ts` calling
-> every route, `DomainList` in Knowledge and `DomainScopePicker` in the composer.
-> **Verifying the entries you delete is half the job; the other half is verifying the
-> ones you keep.**
-
 ## v1 scope
 
 In scope:
@@ -232,9 +163,7 @@ figma-assets/ Design exports.
 ```
 
 Known duplication: `electron/` and `desktop/` are two implementations of the same
-desktop host, and the root build scripts do not agree on which one ships. There are also
-two virtualenvs. Both pairs are internally consistent, so no guard catches either, and
-each has already cost a session. `docs/RUNNING.md` has the detail.
+desktop host, and there are two virtualenvs. `docs/RUNNING.md` has the detail.
 
 ## Reading the code
 
@@ -245,9 +174,7 @@ real app and the four ways it fails that each look like something else.
 
 The working agreement in short: read before you write, verify against the code rather
 than the documentation, and when a plan and the codebase disagree, the codebase wins.
-Assume a subsystem is unreachable until you have seen its caller — fifteen complete,
-tested, unreachable subsystems have been found in this repository, and "the tests pass"
-has repeatedly meant nothing.
+Assume a subsystem is unreachable until you have seen its caller.
 
 ## Licence
 

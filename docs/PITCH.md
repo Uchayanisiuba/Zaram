@@ -247,6 +247,25 @@ user's own material, indexed on their machine. A wrapper around somebody's API c
 copy every technique in the build and still start every conversation with nothing
 to retrieve.
 
+**Three structural reasons, moved here from the README on 10 September 2026** — they answer a competitor's question rather than a user's, and the README is the
+page a user reads first.
+
+The ambient-assistant pattern is proven — Grammarly's Superhuman Go docks a panel to the
+screen edge and offers to act on what you are typing. It works by sending that text to
+their servers, which is their business. They cannot ship the same product where sending
+it is the user's decision, because the sending is the company.
+
+The labs have memory too, and it is locked to their own model. Memory that works *across*
+competitors is against their interest to build, permanently.
+
+Zaram never buys inference — you bring your own key or your own model — so its cost of
+goods is approximately zero and an uncapped free tier is permanent rather than
+promotional. Nothing funded by token margin can match that.
+
+Local-first is copyable in principle by another small team. The accumulated memory of
+your own work is not, and neither is the discipline: provenance on every recalled fact,
+an append-only egress log, and a correction loop that changes the answers.
+
 ## Traction
 
 > ____

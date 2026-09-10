@@ -896,6 +896,48 @@ setting changes that.
 
 ---
 
+### The README status list drifted twice, and the note lived on the README
+
+Moved here 10 September 2026. It is a maintenance record, and it was sitting on
+the page a stranger reads first — where its actual message was that this
+project's documentation cannot be trusted. The lesson it carries is worth
+keeping; the place was wrong.
+
+> **This list drifted again, and was corrected 29 August 2026 — understating, which
+> the preamble above already names as the same defect as overstating.** It carried
+> three entries that the 28 August work had made false, and a session building the
+> launch site nearly published the understatement:
+>
+> * *"Obligation extraction is not wired… nothing outside its own tests imports it."*
+>   `GET /obligations` is served at `main.py:3457` with `/correct`, `/dismiss` and
+>   `/met` beside it, `ObligationRecords` is constructed at `main.py:3311`,
+>   `services/obligationsClient.ts` calls all four, and `Commitments` is mounted at
+>   `MemoryWorkspace.tsx:689`.
+> * *"Ingestion by drop, paste or upload — the way in does not exist."* `POST
+>   /chat/attachments` resolves through `attachment_store.resolve` into
+>   `compose_attachments`; the paperclip, a drag and `Ctrl`+`V` all reach `takeFiles`,
+>   and the paste path was driven in a browser on 28 August.
+> * *"Images in either direction. In scope, not started."* Half right, and the wrong
+>   half was load-bearing. Reading is built — `openai_compatible_engine.py` builds the
+>   content-parts form from `images`, and a local vision model answers without the
+>   picture leaving. Only *generation* is absent, which is why it is the one that
+>   survives above.
+>
+> The lesson is the one the preamble states and this section keeps failing: a status
+> list is only true on the day it is checked against the code. Check it, or delete it.
+>
+> **A fourth entry survived that first correction and should not have.** *"Knowledge
+> domains"* was left in the not-built list because the session doing the correcting
+> carried it over from the old list instead of checking it — the same fault it was
+> mid-way through fixing, committed in the act of fixing it. Domains are built:
+> `GET`/`POST /knowledge/domains`, `PUT` and `DELETE` on one, and
+> `POST`/`DELETE /knowledge/domains/{id}/sources/{source_id}`, all at `main.py:3937`
+> onward; `KnowledgeDomains` constructed at `main.py:3929`; `_domain_scope` narrowing
+> retrieval in the chat path at `main.py:1292`; `services/domainsClient.ts` calling
+> every route, `DomainList` in Knowledge and `DomainScopePicker` in the composer.
+> **Verifying the entries you delete is half the job; the other half is verifying the
+> ones you keep.**
+
 ## Previous state — 5 September 2026
 
 *The latest work is first. Earlier sessions follow below.*
