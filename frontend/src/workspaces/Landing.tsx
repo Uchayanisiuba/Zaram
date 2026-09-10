@@ -167,9 +167,19 @@ export default function Landing({ onNavigate, onOrbTap }: LandingProps) {
    * lives up there but the mark in the corner.
    */
   const TOP_RESERVE = 20
-  const BOTTOM_RESERVE = 96
   const RING_GAP = 28
-  const CAPTION_BLOCK = 76
+  /** The caption block's own height. Four short lines: the locality line plus
+   *  the sentence under it, which wraps to three at this measure. */
+  const CAPTION_BLOCK = 84
+  /** Breathing room under the caption. Without it the block ends flush against
+   *  the window edge, which measured exactly that way at 1040px before this
+   *  existed: `captionBottom` 1040 in a 1040px window. */
+  const CAPTION_FOOT = 18
+  /** Derived, not chosen. The room below the ring is exactly the gap, the block
+   *  that sits in it, and the margin under that -- three numbers that used to
+   *  disagree, so the reserve protected a caption of one size while the
+   *  placement drew one of another. */
+  const BOTTOM_RESERVE = RING_GAP + CAPTION_BLOCK + CAPTION_FOOT
   const DESIGN_DIAMETER = ORBIT_RADIUS * 2 + 110
 
   /**
@@ -189,7 +199,22 @@ export default function Landing({ onNavigate, onOrbTap }: LandingProps) {
    * because the reserve is asymmetric it barely has to: 794px at 910px tall
    * against the 826px it was drawn at.
    */
-  const availableHeight = viewportHeight - TOP_RESERVE - BOTTOM_RESERVE
+  /**
+   * Sized so a **centred** ring fits, which means the bottom reserve is paid
+   * at both ends.
+   *
+   * This took `vh - TOP - BOTTOM`, sized the ring for that band, and then
+   * lifted it when the band was not centred on the window. The lift is the
+   * thing the maintainer noticed and disliked, twice -- and it is avoidable:
+   * with the larger reserve counted on both sides the ring is centred by
+   * construction and never has to move.
+   *
+   * The cost is a slightly smaller ring, and that is the right side of the
+   * trade. At 1040px it is 780 against the 826 it was drawn at -- 94%, which
+   * nobody can see -- where the alternative was a 23px lift, which was seen
+   * immediately.
+   */
+  const availableHeight = viewportHeight - 2 * BOTTOM_RESERVE
   const fitScale = Math.max(
     0.62,
     Math.min(CONTAINER_SCALE, availableHeight / DESIGN_DIAMETER, viewportWidth / DESIGN_DIAMETER),
@@ -291,7 +316,7 @@ export default function Landing({ onNavigate, onOrbTap }: LandingProps) {
   const captionTop = Math.min(
     viewportHeight / 2 + orbitOffsetY + ringBottomFromCentre + RING_GAP,
     // Never off the bottom. Two lines of note plus its own breathing room.
-    viewportHeight - CAPTION_BLOCK,
+    viewportHeight - CAPTION_BLOCK - CAPTION_FOOT,
   )
 
   const orbShift = { scale: zoom, x: shiftX, y: 0 }
@@ -635,7 +660,22 @@ export default function Landing({ onNavigate, onOrbTap }: LandingProps) {
       {chat && (
         <motion.div
           className="absolute left-1/2 z-20"
-          style={{ bottom: '8%' }}
+          /**
+           * `captionTop`, not a percentage -- corrected 10 September 2026.
+           *
+           * This was `bottom: '8%'`, which is the exact thing that caption's
+           * own docstring was written about: *"a percentage of the window
+           * cannot clear a ring measured in pixels"*. `OrbHint` was moved onto
+           * the formula and this was not, so the two things that share the low
+           * slot were placed by two different rules -- and this one, the one
+           * that actually renders while the conversation is open, floated with
+           * the window height instead of following the ring.
+           *
+           * On a 1040px window that put it roughly 80px above where the
+           * arithmetic says it belongs, which is what the maintainer saw:
+           * the status text crowding the ring rather than sitting under it.
+           */
+          style={{ top: captionTop }}
           initial={{ opacity: 0, y: 6 }}
           animate={{
             opacity: panelsOpen ? 0 : 1,
