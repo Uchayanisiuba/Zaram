@@ -3,7 +3,7 @@ import { motion } from 'framer-motion'
 import { Brain, BookOpen, FileText, Layers, Settings, ShieldCheck } from 'lucide-react'
 import { ORB_BEHAVIOUR } from '../components/orb/LivingOrb'
 import Embodiment from '@/components/embodiment/Embodiment'
-import ZaramMark, { MARK_SRC } from '@/components/brand/ZaramMark'
+import ZaramMark from '@/components/brand/ZaramMark'
 import OrbStatusLabel from '../components/orb/OrbStatusLabel'
 import OrbHint from '../components/orb/OrbHint'
 import OrbAura from '../components/orb/OrbAura'
@@ -345,21 +345,7 @@ export default function Landing({ onNavigate, onOrbTap }: LandingProps) {
          * codebase keeps paying for: the lip that could open the panel and
          * never close it, fixed the same day as this. Identical asset at an
          * identical size either way, so nothing moves when it becomes live. */}
-        {chat ? (
-          <ZaramMark onHome={closeChat} size={56} />
-        ) : (
-          <img
-            src={MARK_SRC}
-            alt=""
-            aria-hidden
-            width={56}
-            height={56}
-            style={{ display: 'block' }}
-            // The asset may be missing in a partial build. A broken-image icon
-            // in the corner of the landing is worse than no mark at all.
-            onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
-          />
-        )}
+        <ZaramMark onHome={closeChat} size={56} interactive={chat} />
       </div>
 
       {/* Orbital system — keeps the same shell; only the orbital motion is gated. */}
