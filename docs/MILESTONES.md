@@ -15,6 +15,107 @@ accurate — it is the first thing anyone reads.
 
 *The latest work is first. Earlier sessions follow below.*
 
+### 8 September, later — the typing clip, and the orb standing down
+
+**The character types, and it types standing up.** `avatar-source/Typing.fbx`
+is a *sitting* Mixamo clip. `retarget_animations.py` now takes a per-clip set of
+joints a clip may **not** drive, and `coding_a` drives the 54 upper-body joints
+while the 11 below the waist are held at the character's rest pose. `Hips` is
+the one that matters: it is the root and a sitting clip carries the sit in it,
+so excluding it is what makes the character stand.
+
+Measured, in that order:
+
+| | |
+|---|---|
+| the export | **54 bones driven, 11 held**, 495 frames, 16.5 s, 1.29 MB |
+| the container | 65 rotation channels and **no translation or scale**; the 11 held tracks carry two keys each, both exactly the character's rest quaternion |
+| `check-rig-agreement.mjs` | `coding_a.glb` agrees, worst 0.04deg, 0 over tolerance |
+| on screen | standing, torso vertical, arms forward and moving, base at the same height as `idle` |
+
+**The namespace check was replaced by the check it was standing in for.**
+`on_character_rig` asked whether the first model node contained the literal
+`Robot_All_01` — a good proxy while every clip came out of Maya, and wrong for a
+clip authored elsewhere on the same skeleton. `Typing.fbx` is a Mixamo export
+(`mixamorig9:Hips`) that names **65 of the character's 65 joints**, so the proxy
+said no while the real answer was yes. It now reads the character's joints out
+of the GLB's JSON chunk and asks which of them a source file names, and it
+reports that number for every clip on every run. **All ten name 65/65**, so
+widening the check changed no existing verdict — which is the measurement the
+change needed, not an assumption about it.
+
+**The held joints are keyed at rest rather than left unkeyed**, and the
+difference only appears in a crossfade: a track absent from a clip is not a
+track at rest, and `AnimationMixer` would have left the hips wherever the
+outgoing idle clip stopped them.
+
+**`coding` on the orb is now `idle` exactly**, which is a reversal on the
+record. 7 September was *"no new colour: thinking's violet, a different
+rhythm"*; 8 September was *"the orb stays pulsating with the default glow and
+behaviour"*. The later instruction is the one taken, in `STATE_PULSE`,
+`LivingOrb`'s `STATE_CONFIG` and `OrbitalParticles`' `FIELD` — three places,
+one decision, and the entries stay rather than folding into `idle` so the state
+can be given a look later in one line. `embodimentPulse`'s own prose said every
+working state animates faster than idle with `swapping` the sole exception;
+that is now two exceptions and it says so.
+
+**The typing *state* was not built, because it already exists.** `codingActivity`
+fires on an opened code fence and on the code tools having run. Recorded here so
+it is not built a third time.
+
+**`?orb=<state>` pins the orb's starting state, in development only.** Four of
+the six states had never been watched, and the reason was mechanical: `swapping`
+needs a model swap and `coding` needs a reply that opens a fence, and the dev
+server has no backend to produce either. It is a starting value rather than an
+override, so nothing can make the indicator disagree with what is happening, and
+`import.meta.env.DEV` folds it out of a production bundle — stricter than
+`?noAnim=1`, because this one changes what the indicator *says*.
+
+**A test was carrying a private copy of the state vocabulary.**
+`animationSet.test.ts` listed five states and had never gained `coding`, so it
+would have rejected a valid clip while reading as a manifest error. It now
+spreads the exported `ORB_STATES`.
+
+**One backend test was failing before any of this, and it is the retention
+change from earlier the same day.** `test_only_the_most_recent_turns_are_kept`
+seeded a literal 30 pairs against a `MAX_SESSION_TURNS` that had just gone from
+8 to 40, so the input no longer overflowed the bound: the truncation the test is
+named for never ran and it failed on the count. The setup now counts from the
+constant. **The suite has not been run since that commit** — it is the only
+explanation for a failure that predates this session and matches its cause
+exactly, and it is the reason a gate is run rather than assumed.
+
+#### The instrument note, which contradicts a diagnosis in this file
+
+**`document.timeline.currentTime` does not advance in the browser pane between
+tool calls.** Measured: 42,649 → **200,699** across one screenshot, then +84 ms
+across a JS call, with all ten of the page's animations frozen at one value in
+between and `playState: "running"` throughout. Time advances on paint, not on
+wall clock.
+
+That is the exact signature the 7 September history-lip entry reports as
+evidence of a stalled `CSSTransition` — *"four readings over four seconds
+returned 0 while the inline style said 1"*. **Four readings over four seconds is
+not a measurement in this pane**, so that half of the diagnosis is unsupported;
+the entry already says the cause was never established, and the fix stands on
+its own reasoning — whether a control can be *seen* must not be the output of an
+animation.
+
+#### The licence stop, unresolved by design
+
+`Typing.fbx` and the `coding_a.glb` built from it are **untracked and not
+committed**. Mixamo's terms restrict redistributing animation files, which is
+what committing one here and shipping it in the installer would be. The
+manifest entry is out too, so `coding` falls back to `thinking` — watched, with
+nine clips loading and none failing. `animationSet.test.ts` asserts `coding` and
+`swapping` as the states without clips and names the reason.
+
+Re-wire it locally in two steps: build with
+`blender --background --python avatar-source/retarget_animations.py -- coding_a`,
+then add `{ "file": "coding_a.glb", "state": "coding", "role": "loop" }` to
+`frontend/public/avatars/animations/animations.json`. Committing it is one more
+line in the test.
+
 ### 8 September — the memory ceiling, and the avatar's aura
 
 Two commits on `main`. `docs/NEXT-SESSION-PROMPTS.md` carries the brief for

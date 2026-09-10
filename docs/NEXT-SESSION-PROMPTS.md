@@ -1,15 +1,17 @@
 # Next session — handoff
 
 > **Out of date at the top, current at the bottom.** The newest prompt is
-> *"Prompt for the next session — written 8 September 2026"*, at the very end
-> of this file, and the authoritative state is the **Current state** block in
-> `docs/MILESTONES.md`.
+> *"Prompt for the next session — written 8 September 2026, later"*, at the very
+> end of this file, and the authoritative state is the **Current state** block
+> in `docs/MILESTONES.md`.
 >
-> It starts with the **typing animation** — a sitting Mixamo clip that has to
-> drive the upper body only so the character stands, and which carries a
-> licence question that is a stop rather than a caveat.
+> It opens with the one thing waiting on the maintainer rather than on a
+> session: **the Mixamo licence question**. The typing clip is built, watched
+> and standing; it is untracked because committing it is the thing the licence
+> restricts.
 >
-> Two earlier prompts still hold something. The **7 September, evening** one is
+> Three earlier prompts still hold something. The **8 September** one is the
+> brief for that clip and still carries the reasoning behind the waist split. The **7 September, evening** one is
 > the TabbyAPI migration, which is now one server restart from its first real
 > answer. The **6 September (later)** one is the code pack, and its tasks 2 and
 > 3 are still open. Everything else is an earlier brief: accurate about what was
@@ -1489,8 +1491,9 @@ cd frontend && npx tsc --noEmit && npx vitest run
 
 ## Prompt for the next session — written 8 September 2026
 
-**This is the current prompt.** Everything above it is an earlier brief:
-accurate about what was built and why, superseded on status.
+**Superseded on status by the 8 September, later prompt at the end of this
+file.** Tasks 1 and 2 below are built; the reasoning in them still holds and
+the licence question in task 1 is still open.
 
 Read `docs/MILESTONES.md` — the **Current state** block — then `CLAUDE.md`.
 `main` is the trunk. The working tree is clean except for one untracked file,
@@ -1650,6 +1653,79 @@ and zoom so it travels into the conversation.
 * **The chat project picker cannot create a project.**
 * **Does a generated image ever leave VRAM?** Still unconfirmed, still the most
   serious open item anywhere in this file.
+
+### The gate
+
+```
+backend/venv/Scripts/python.exe -m pytest backend/ -q -m "not measure"
+npm run check:reachability && npm run check:guards
+npm run test:electron            # with no Zaram running
+cd frontend && npx tsc --noEmit && npx vitest run
+```
+
+
+---
+
+## Prompt for the next session — written 8 September 2026, later
+
+**This is the current prompt.** Everything above it is an earlier brief:
+accurate about what was built and why, superseded on status.
+
+Read `docs/MILESTONES.md` — the **Current state** block — then `CLAUDE.md`.
+`main` is the trunk and the working tree is clean apart from two untracked
+files, `avatar-source/animations/Typing.fbx` and
+`frontend/public/avatars/animations/coding_a.glb`, which are the subject of the
+decision below and **must not be committed until it is made**.
+
+**Unreal is running on this machine.** Do not start the Zaram desktop app. The
+Vite dev server plus the browser pane is how the avatar was watched, and
+`?orb=<state>` now pins the orb's starting state in development so any of the
+six can be looked at without a backend.
+
+---
+
+### The decision, which is the maintainer's and not a session's
+
+**Mixamo's terms restrict redistributing animation files.** `Typing.fbx` is a
+Mixamo export, and committing it — or the `coding_a.glb` retargeted from it —
+puts it in the repository and in the installer. Three routes, unchanged from
+the 8 September brief above:
+
+* **Re-export the motion from `Robot_All_01` in Maya**, as the Listening pair
+  already was. Then it is the maintainer's own asset and the question is gone.
+  The retarget script needs no change for this: the exclusion table is keyed by
+  clip name, not by rig.
+* **Keep it out of the repository** — built locally, absent from the installer,
+  `coding` falling back to `thinking` as it does today. This is the current
+  state and it is watched, not assumed.
+* **Confirm the licence permits it**, then commit.
+
+Everything on the code side is done and green either way. Taking route 1 or 3 is
+three edits: the `.glb`, the manifest line, and the expectation in
+`animationSet.test.ts` that names `coding` as a state without a clip.
+
+---
+
+### What is still open, in the order it was left
+
+* **TabbyAPI has still not been restarted.** `vision: true` and
+  `vision_offload: true` are set in `C:\Users\user\tabbyAPI\config.yml`
+  (backup `config.yml.bak-20260907`) and unproven. Confirm `use_vision` on
+  `/v1/model`, send it a real image, and only then delete `gemma4-26b-32k`
+  (17.99 GB).
+* **The memory fix has never run in a real conversation.** It is measured by
+  tests against a pinned window. One long chat on the Tabby model settles it —
+  the engine logs `gave the reply N prior turn(s), M dropped for a K-token share
+  of a measured 65536-token window`.
+* **The chat project picker cannot create a project.**
+* **Does a generated image ever leave VRAM?** Still unconfirmed, still the most
+  serious open item anywhere in this file.
+* **Four particle states have still not been *watched* moving**, only reasoned
+  about. `?orb=thinking`, `?orb=listening`, `?orb=speaking` and `?orb=swapping`
+  on the dev server put each one on screen. Note the instrument warning in
+  `docs/MILESTONES.md`: sampling `currentTime` from JS in the browser pane
+  measures nothing, because the document timeline only advances on paint.
+  Screenshots separated by a wait are the honest instrument.
 
 ### The gate
 
