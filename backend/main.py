@@ -648,7 +648,24 @@ def _seed_turns_from_transcript(
         if turns and turns[-1].role == USER:
             turns = turns[:-1]
 
-        kept, _dropped = fit(turns, budget.document_tokens)
+        # **The whole input budget, because this fills a cache rather than a
+        # prompt.** It read `budget.document_tokens` — 60% of the input budget,
+        # a share belonging to attached files and borrowed here for want of a
+        # better number. That was harmless while the live conversation took a
+        # fixed quarter, which is comfortably less; it stopped being harmless
+        # the moment the live path started taking the request's remainder.
+        # Measured on a 16,384-token window: rehydration would seed 7,372
+        # tokens into a buffer the live path is willing to spend 11,788 from,
+        # so **reopening an old conversation remembered less than continuing a
+        # live one** — a shortfall of about a third, and invisible, because
+        # both halves looked correct on their own.
+        #
+        # `_session_turns` is bounded by `MAX_SESSION_TURNS` regardless, so the
+        # turn count is already capped; this only bounds their size, and the
+        # live path fits from the buffer afterwards. Seeding a superset is the
+        # right shape for a cache: it can only be trimmed later, never
+        # recovered.
+        kept, _dropped = fit(turns, budget.input_tokens)
 
         # Back into the (question, answer) pairs the buffer holds. A reply with
         # no question ahead of it is dropped rather than paired with whatever
