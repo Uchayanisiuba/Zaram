@@ -105,6 +105,61 @@ const FIELD: Record<OrbState, FieldMotion> = {
 };
 
 /**
+ * Where along the loop each mote is sampled.
+ *
+ * Nine points from 0 to 2π, so the last equals the first and the loop closes on
+ * itself. Eight would leave a seam; more buys nothing a 3-5px dot can show.
+ */
+const PHASES = Array.from({ length: 9 }, (_, i) => (i * Math.PI * 2) / 8);
+
+/**
+ * A mote's displacement at one phase of its loop.
+ *
+ * **A closed curve through the origin, not a line out and back.** The motion
+ * was `[0, offset, 0]`: every mote travelled a straight line, stopped dead,
+ * and retraced it. Two full stops per cycle is what made a field of ten dots
+ * read as a mechanism rather than as something drifting.
+ *
+ * Tangential rides `sin`, so it swings one way and then the other. Radial
+ * rides `(1 - cos) / 2`, which leaves rest, reaches full displacement at the
+ * halfway point and returns. Together they trace a closed lens: the mote is
+ * never stationary in both axes at once, so there is no frame where it stops.
+ *
+ * **It starts and ends at rest**, which is not a nicety — `frames()` parks on
+ * the first keyframe when the reader has asked for less motion, and
+ * `stillness.ts` is explicit that every looping array here must begin at the
+ * resting value so a still mote sits where it belongs rather than mid-drift.
+ * At θ=0 both terms are zero.
+ */
+function displacement(
+  phase: number,
+  axes: ReturnType<typeof axesFor>,
+  tangential: number,
+  radial: number,
+) {
+  const along = tangential * Math.sin(phase);
+  const out = (radial * (1 - Math.cos(phase))) / 2;
+  return {
+    x: axes.tanX * along + axes.outX * out,
+    y: axes.tanY * along + axes.outY * out,
+  };
+}
+
+/**
+ * How far this mote swings, as a fraction of the state's amplitude.
+ *
+ * **Individual, and still deterministic.** `PARTICLES` is fixed precisely so a
+ * screenshot can be compared against the last one, and one `Math.random()`
+ * here would end that -- the same trap the docstring above names about the
+ * waveform bars. So the spread is derived from the delay each mote already
+ * carries: 0.78 to 1.22, which is enough that no two neighbours travel the same
+ * distance and not so much that one dot becomes the thing you watch.
+ */
+function amplitudeFor(delay: number) {
+  return 0.78 + ((delay * 0.37) % 1) * 0.44;
+}
+
+/**
  * A mote's own tangent and radius, from where it sits in the box.
  *
  * Derived rather than authored, so `PARTICLES` stays a list of positions and
@@ -150,11 +205,13 @@ export default function OrbitalParticles() {
   return (
     <>
       {PARTICLES.map((p, i) => {
-        const { outX, outY, tanX, tanY } = axesFor(p.top, p.left);
-        // One offset per mote, composed from the two axes. The state supplies
-        // the magnitudes; the position supplies the directions.
-        const dx = tanX * field.tangential + outX * field.radial;
-        const dy = tanY * field.tangential + outY * field.radial;
+        const axes = axesFor(p.top, p.left);
+        const amp = amplitudeFor(p.delay);
+        // The state supplies the magnitudes, the position supplies the
+        // directions, and the mote's own delay supplies how far it goes.
+        const path = PHASES.map((phase) =>
+          displacement(phase, axes, field.tangential * amp, field.radial * amp),
+        );
         return (
         <motion.div
           key={i}
@@ -168,8 +225,8 @@ export default function OrbitalParticles() {
             boxShadow: `0 0 4px ${p.color}`,
           }}
           animate={{
-            y: frames([0, dy, 0], reduced),
-            x: frames([0, dx, 0], reduced),
+            y: frames(path.map((d) => d.y), reduced),
+            x: frames(path.map((d) => d.x), reduced),
             opacity: reduced ? 0.55 : field.opacity,
           }}
           // **One period for the whole field, offset by delay — not ten
@@ -188,7 +245,12 @@ export default function OrbitalParticles() {
           // than half a cycle at 3.6s, and the field tears into two clumps at
           // exactly the moment it should look most coherent.
           transition={{
-            ...loop(field.seconds, reduced),
+            // Linear, unlike the rest of the orb's easing. `easeInOut` over a
+            // closed loop slows the mote at the seam and speeds it through the
+            // middle, which puts back the pulse the closed curve exists to
+            // remove -- and the seam is arbitrary here, since the loop has no
+            // beginning the reader can see.
+            ...loop(field.seconds, reduced, 'linear'),
             delay: reduced ? 0 : p.delay * (field.seconds / 8),
           }}
         />
