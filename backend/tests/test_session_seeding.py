@@ -79,7 +79,15 @@ class TestALiveSessionWins:
 
 class TestTheBoundsAreTheOnesTheBufferAlreadyKeeps:
     def test_only_the_most_recent_turns_are_kept(self, engine):
-        pairs = [(f"q{i}", f"a{i}") for i in range(30)]
+        # **More pairs than the cap, counted from the cap.** This read a literal
+        # 30 against a `MAX_SESSION_TURNS` of 8. When retention became 40 on
+        # 8 September the input stopped overflowing the bound, so the truncation
+        # this test is named for never ran and the assertion failed on the count
+        # rather than on the contract -- a test whose setup does not reach the
+        # boundary it is testing is not testing it, and a literal is what let
+        # the two drift apart.
+        over = ExecutionEngine.MAX_SESSION_TURNS + 10
+        pairs = [(f"q{i}", f"a{i}") for i in range(over)]
 
         engine.seed_session_turns("s", pairs)
 
@@ -87,7 +95,7 @@ class TestTheBoundsAreTheOnesTheBufferAlreadyKeeps:
         assert len(kept) == ExecutionEngine.MAX_SESSION_TURNS
         # The recent end, not the start: a resumed conversation needs what was
         # just said, not what opened it.
-        assert kept[-1] == ("q29", "a29")
+        assert kept[-1] == (f"q{over - 1}", f"a{over - 1}")
 
     def test_the_session_map_stays_bounded(self, engine):
         """The frontend mints a session id per page load, so without eviction
