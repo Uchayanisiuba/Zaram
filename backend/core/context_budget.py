@@ -249,6 +249,66 @@ _SERVER_SHAPES = (
 )
 
 
+def configured_context_length(
+    model: Optional[str], *, base_url: str = "http://127.0.0.1:11434", timeout: float = 1.0
+) -> Optional[int]:
+    """The window a model is **configured** to load with, or ``None``.
+
+    **This is the half `loaded_context_length` cannot answer, and the gap was
+    costing the product its memory.** `/api/ps` lists what is resident *now*,
+    so it goes quiet the moment Ollama evicts a model -- which it does after a
+    few minutes idle. Between two turns of a conversation the user spends
+    reading an answer, the model is gone, the budget falls back to 4,096, and
+    the share of it the conversation may spend collapses to 768 tokens. A reply
+    containing a code block is bigger than that, so `fit` keeps nothing and the
+    follow-up is answered by a model that was shown none of what it follows.
+    Measured 10 September 2026: every installed chat model read 4,096 while
+    idle, and 16,384 or 32,768 the moment it was resident.
+
+    **`parameters`, never `model_info`.** The module docstring's whole argument
+    is that a model's declared maximum is the wrong number -- `qwen3-14b-16k`
+    reports `qwen3.context_length: 40960` there while loading with 16,384. What
+    is read here is the `num_ctx` in the model's own parameters, which is the
+    figure Ollama will actually serve it with. That is a measurement of a
+    setting rather than of a running process, and it is still not a guess.
+
+    ``None`` when there is no explicit `num_ctx`, and that is the right answer
+    rather than a gap: a model created without one gets Ollama's default, which
+    is the fallback constant this returns to. Measured on the same machine --
+    `qwen3-coder:30b` and `bge-m3` carry no `num_ctx`, the three models built
+    with one report it.
+
+    Never raises, for the same reason as its neighbour.
+    """
+    if not model:
+        return None
+    if not _is_loopback(base_url):
+        logger.warning("configured context refused for a non-loopback host: %r", base_url)
+        return None
+    try:
+        response = requests.post(
+            f"{base_url}/api/show", json={"model": model}, timeout=timeout
+        )
+        response.raise_for_status()
+        parameters = response.json().get("parameters")
+    except Exception as exc:
+        logger.debug("configured context unreadable for %r: %s", model, exc)
+        return None
+    if not isinstance(parameters, str):
+        return None
+
+    # Ollama renders the parameters as the Modelfile's own lines, so this is a
+    # text field rather than a mapping. Anchored per line so a parameter whose
+    # *name* ends in `num_ctx` cannot answer for it.
+    import re
+
+    match = re.search(r"^num_ctx\s+(\d+)", parameters, re.MULTILINE)
+    if not match:
+        return None
+    value = int(match.group(1))
+    return value if value > 0 else None
+
+
 def local_server_context_length(
     model: Optional[str],
     *,
@@ -310,12 +370,21 @@ class ContextBudget:
     a user as though it were a fact about their machine.
     """
 
-    #: The model's real loaded window, or the fallback when unknown.
+    #: The model's real window, or the fallback when unknown.
     total_tokens: int
-    #: Whether `total_tokens` came from `/api/ps` or from the fallback.
+    #: Whether `total_tokens` was read from the model rather than assumed.
     measured: bool
     #: Held back for the reply.
     reply_reserve_tokens: int
+    #: Which reading answered, for the log.
+    #:
+    #: Carried because "measured" turned out to hide the thing that mattered.
+    #: A budget read from `/api/ps` and one read from the fallback are easy to
+    #: tell apart; a budget that *used* to be measured and is now assumed
+    #: because Ollama evicted the model is the same boolean on Tuesday and
+    #: Thursday, and that is the failure this field exists to make legible in a
+    #: log line rather than in an investigation.
+    source: str = "assumed"
 
     @property
     def input_tokens(self) -> int:
@@ -397,13 +466,32 @@ def budget_for(
     which. This is the one function callers should reach for; the parts above
     are exposed for tests and for callers that genuinely want the raw figure.
     """
-    # Ollama first because it is the common case, then any OpenAI-compatible
-    # server on loopback. Both may answer `None`; only then is the fallback used,
-    # and `measured` still says so.
-    measured = loaded_context_length(model, base_url=base_url)
-    if measured is None:
-        measured = local_server_context_length(model)
-    total = measured if measured is not None else FALLBACK_CONTEXT_TOKENS
+    # **Four readings, most specific first, and the second one is why this
+    # function stopped lying between turns.**
+    #
+    # `/api/ps` is the best answer when it can be had: it is what the running
+    # instance was actually given. But it only speaks for a *resident* model,
+    # and Ollama evicts after a few minutes idle -- so across the pause a user
+    # spends reading a reply, the same model answers 16,384 and then 4,096. The
+    # conversation share of the second is 768 tokens, which is smaller than one
+    # code answer, so the follow-up was shown nothing at all. That is what
+    # "Zaram does not keep the thread of a conversation" turned out to be the
+    # second time it was reported.
+    #
+    # `/api/show` answers for an idle model because it reads the configuration
+    # rather than a process. It is a weaker claim and still not a guess, and
+    # `source` says which was used.
+    total = loaded_context_length(model, base_url=base_url)
+    source = "loaded"
+    if total is None:
+        total = configured_context_length(model, base_url=base_url)
+        source = "configured"
+    if total is None:
+        total = local_server_context_length(model)
+        source = "server"
+    measured = total
+    if total is None:
+        total, source = FALLBACK_CONTEXT_TOKENS, "assumed"
     # **Not cached, deliberately.** Two callers now ask per reply — the chat
     # route to size attached documents, the engine to size how much of the
     # conversation the model is shown — and a memo keyed on the model name was
@@ -417,6 +505,7 @@ def budget_for(
         total_tokens=total,
         measured=measured is not None,
         reply_reserve_tokens=int(total * REPLY_RESERVE_FRACTION),
+        source=source,
     )
 
 

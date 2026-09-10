@@ -47,10 +47,21 @@ def _ps(monkeypatch, payload) -> None:
 
 
 def _unreachable(monkeypatch) -> None:
+    """Ollama down — **both** verbs, and the second one is not decoration.
+
+    `configured_context_length` was added on 10 September and asks `/api/show`
+    over `requests.post`. Until this line existed, `test_an_unknown_window_
+    falls_back_and_admits_it` escaped the stub and asked the developer's real
+    Ollama — and passed anyway, purely because `gemma4:12b` happens not to be
+    installed on that machine and the 404 produced the same answer the test
+    wanted. A test that is right for a reason outside its own file is one
+    `ollama pull` away from being wrong, and nothing would have said why.
+    """
     def _boom(url, **kw):
         raise OSError("connection refused")
 
     monkeypatch.setattr("core.context_budget.requests.get", _boom)
+    monkeypatch.setattr("core.context_budget.requests.post", _boom)
 
 
 class TestTheLoadedContextIsRead:

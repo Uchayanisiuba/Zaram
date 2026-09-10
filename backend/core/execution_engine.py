@@ -2216,17 +2216,31 @@ class ExecutionEngine:
             # Every turn was too long to fit. Saying nothing is right: a
             # heading with nothing under it claims a continuity that is not
             # being supplied.
-            logger.info("Engine: no prior turn fits %d tokens; none sent", cap)
+            # **Names the window and where the figure came from, because this
+            # line was the diagnosis and it did not carry it.** The first time
+            # the conversation stopped being followed, the cause was a ceiling
+            # from a different model; the second time it was the same ceiling
+            # arriving by a different route -- `/api/ps` cannot see an evicted
+            # model, so a budget measured on turn one was assumed on turn two.
+            # A log that says only "768" invites a search for a constant that
+            # is no longer there.
+            logger.info(
+                "Engine: no prior turn fits %d tokens; none sent "
+                "(%s %d-token window, source=%s)",
+                cap, "measured" if budget.measured else "assumed",
+                budget.total_tokens, budget.source,
+            )
             return system_prompt
 
         logger.info(
             "Engine: gave the reply %d prior turn(s), %d dropped for a %d-token "
-            "share of a %s %d-token window",
+            "share of a %s %d-token window (source=%s)",
             len(kept),
             dropped,
             cap,
             "measured" if budget.measured else "assumed",
             budget.total_tokens,
+            budget.source,
         )
         return (system_prompt or "") + "\n".join([
             "",

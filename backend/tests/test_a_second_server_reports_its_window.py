@@ -56,8 +56,20 @@ def _serving(payload):
 
 @pytest.fixture
 def no_ollama(monkeypatch):
-    """Ollama absent, so the second lookup is the only one that can answer."""
+    """Ollama absent, so the second lookup is the only one that can answer.
+
+    **Both Ollama readings, not just the resident one.** `configured_context_length`
+    was added on 10 September and asks `/api/show` over `requests.post`, while
+    every stub in this file replaces `requests.get` — so for one day this
+    fixture left a hole that the tests below walked through to the *real*
+    Ollama on the developer's machine, and `test_a_model_this_server_does_not_hold`
+    started answering 16,384 because that is what `qwen3-14b-16k` is actually
+    configured with. A test whose answer depends on what happens to be
+    installed is not testing anything, and it is the shape this repository
+    keeps paying for: the suite was green and the code path was different.
+    """
     monkeypatch.setattr(context_budget, "loaded_context_length", lambda *a, **k: None)
+    monkeypatch.setattr(context_budget, "configured_context_length", lambda *a, **k: None)
 
 
 class TestItReadsTheSecondServer:
