@@ -4,21 +4,62 @@
 # Aider is a tool the maintainer runs, not something Zaram ships or depends
 # on. Only its configuration belongs here, and only because it encodes facts
 # about *this* repository that anyone driving Aider needs.
+#
+# Rewired 10 September 2026. The previous config named `qwen3-14b-8k`, which
+# is not installed — Ollama answers `model not found`, so Aider had been
+# pointed at nothing. Every ceiling in docs/AIDER.md was computed against that
+# model's 8,192-token window and is stale in the same stroke.
 
-# Ollama, over loopback. `ollama_chat/` is the prefix LiteLLM wants; plain
-# `ollama/` uses the completion endpoint and formats prompts worse.
-model: ollama_chat/qwen3-14b-8k
+# TabbyAPI, over loopback. OpenAI-compatible, so the `openai/` prefix plus a
+# base URL is all LiteLLM needs. `disable_auth: true` in tabbyAPI/config.yml,
+# but LiteLLM refuses to send without *some* key, hence the placeholder.
+#
+# Why this and not Ollama: 65,536 tokens against 32,768 for the coder and
+# 16,384 for the 14B, and it is the only one of the three that fits VRAM
+# whole on a 12 GB card — 8.48 GiB resident, 26.3 tok/s measured, 0.7 s to
+# first token. The 30B coder is 18.56 GB and would spill to CPU.
+model: openai/Qwen3.8-27B-exl3-2.20bpw
+openai-api-base: http://127.0.0.1:1234/v1
+openai-api-key: tabby-local-no-auth
 
-# Whole-file replacement rather than diffs. A 14B model produces malformed
-# search/replace blocks often enough that the retry loop costs more than
-# resending the file — but see the context note in docs/AIDER.md, because
-# `whole` is only viable on files that fit twice over in 8k tokens.
-edit-format: whole
+# Windows are declared here because LiteLLM knows nothing about a local model
+# it has never seen. Without it Aider assumes a default and silently truncates.
+model-metadata-file: .aider.model.metadata.json
 
-# The repo map competes with the files for a very small context window.
-# Off by default; raise it deliberately when a task needs cross-file awareness
-# and the files themselves are small.
-map-tokens: 0
+# Per-model facts live in their own file: reasoning tags, per-model edit
+# format, repo-map opt-in. `reasoning-tag` is NOT a command-line option in
+# 0.86.2 — passing it here is an argument error, not a warning.
+model-settings-file: .aider.model.settings.yml
+
+# Thinking is disabled in `.aider.model.settings.yml`, not here.
+#
+# `thinking-tokens: 0` lived at this spot for an hour and did nothing. Aider
+# accepts it and TabbyAPI ignores it: a smoke test with it set still returned
+# a full reasoning trace — ~65% of the output tokens, paid for and discarded.
+# The setting that works passes `enable_thinking: false` to the chat template.
+# A configured, ineffective option is worse than no option, so it is gone
+# rather than left in as a hopeful no-op.
+
+
+# One `litellm.APIConnectionError: timed out` and a retry on the first real
+# round trip. A 27B on a busy 12 GB card is slower than the default allows.
+timeout: 600
+
+# Diffs, not whole files — the change that actually decides wall-clock.
+# Output tokens dominate: `whole` re-emits an entire file for a three-line
+# change, so a 15,000-token file costs ~10 minutes at 26 tok/s before the
+# model has said anything useful. A diff costs the edited lines.
+#
+# The old config chose `whole` because a 14B produced malformed search/replace
+# blocks often enough that retries cost more than resending. That was measured
+# on a different model; this one is 27B. If diffs come back malformed, fall
+# back with `--edit-format whole` on the command line and record what you saw.
+edit-format: diff
+
+# The repo map was off because it competed with the files for 8k tokens. With
+# 64k there is room, and cross-file awareness is the thing that makes a change
+# land in the right place rather than a plausible one.
+map-tokens: 2048
 
 # One commit per change, so a bad edit costs `git revert` rather than an
 # archaeology session. This is the property that makes delegation survivable.

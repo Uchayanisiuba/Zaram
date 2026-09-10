@@ -1,0 +1,26 @@
+{
+  "openai/Qwen3.8-27B-exl3-2.20bpw": {
+    "max_input_tokens": 65536,
+    "max_output_tokens": 8192,
+    "input_cost_per_token": 0,
+    "output_cost_per_token": 0,
+    "litellm_provider": "openai",
+    "mode": "chat"
+  },
+  "ollama_chat/qwen3-coder-30b-32k": {
+    "max_input_tokens": 32768,
+    "max_output_tokens": 8192,
+    "input_cost_per_token": 0,
+    "output_cost_per_token": 0,
+    "litellm_provider": "ollama_chat",
+    "mode": "chat"
+  },
+  "ollama_chat/qwen3-14b-16k": {
+    "max_input_tokens": 16384,
+    "max_output_tokens": 4096,
+    "input_cost_per_token": 0,
+    "output_cost_per_token": 0,
+    "litellm_provider": "ollama_chat",
+    "mode": "chat"
+  }
+}

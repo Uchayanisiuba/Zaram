@@ -1,0 +1,41 @@
+# Per-model settings Aider cannot infer for a local endpoint it has never seen.
+#
+# Separate from `.aider.conf.yml` because that file holds *run* options and
+# this one holds facts about a *model*. `reasoning_tag` in particular is only
+# read here — it is not a command-line flag, and passing it as one is an
+# argument error rather than a warning.
+
+- name: openai/Qwen3.8-27B-exl3-2.20bpw
+  # Qwen3's chat template prefills the opening tag, so a reply carries
+  # reasoning text terminated by a bare `</think>`. Unstripped it lands
+  # inside the edit block and corrupts the write.
+  reasoning_tag: think
+  edit_format: diff
+  use_repo_map: true
+  streaming: true
+  examples_as_sys_msg: true
+  # Thinking OFF at the template, which is the only thing that actually works.
+  # Measured 10 September 2026 against the live server: `--thinking-tokens 0`
+  # is accepted by Aider and ignored by TabbyAPI — a smoke test with it set
+  # still returned a full reasoning trace, ~65% of the output tokens. Passing
+  # `enable_thinking: false` through to the chat template returned the literal
+  # two characters "OK" with no trace at all. `reasoning_tag` above stays as a
+  # belt-and-braces for anything that slips through.
+  extra_params:
+    extra_body:
+      chat_template_kwargs:
+        enable_thinking: false
+
+- name: ollama_chat/qwen3-coder-30b-32k
+  # Qwen3-Coder is not a reasoning model, so no tag to strip. 18.56 GB against
+  # a ~9 GB budget on a 12 GB card: it spills to CPU and is the quality option
+  # rather than the fast one. Measure before believing either way.
+  edit_format: diff
+  use_repo_map: true
+  streaming: true
+
+- name: ollama_chat/qwen3-14b-16k
+  reasoning_tag: think
+  edit_format: diff
+  use_repo_map: true
+  streaming: true
