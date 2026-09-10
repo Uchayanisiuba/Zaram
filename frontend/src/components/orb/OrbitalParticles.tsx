@@ -63,12 +63,11 @@ const FIELD: Record<OrbState, FieldMotion> = {
   idle: { drift: { x: 12, y: -24 }, seconds: 8, opacity: [0.2, 0.9, 0.2] },
   // Gathering: quicker, tighter, drawn slightly in.
   thinking: { drift: { x: -8, y: -16 }, seconds: 5, opacity: [0.25, 1, 0.25] },
-  // Working, and it borrows thinking's gesture on purpose. The state was added
-  // on 7 September with the note *"no new colour: thinking's violet, a
-  // different rhythm"*, and the same reasoning applies to the field — coding
-  // is thinking with tools in its hands, not a different kind of activity. A
-  // shorter period is the rhythm; the direction is unchanged.
-  coding: { drift: { x: -8, y: -16 }, seconds: 3.2, opacity: [0.25, 1, 0.25] },
+  // Idle's field, following the same reversal as `STATE_PULSE.coding`: the
+  // 8 September instruction is that the orb keeps its default glow and
+  // behaviour while coding, and a field that quickens under a calm orb would
+  // be the state announcing itself through the one channel left.
+  coding: { drift: { x: 12, y: -24 }, seconds: 8, opacity: [0.2, 0.9, 0.2] },
   // Attending: pulled toward the centre and brighter.
   listening: { drift: { x: -14, y: 14 }, seconds: 4.5, opacity: [0.3, 1, 0.3] },
   // Emanating: pushed outward, in step with the ripples the orb already draws

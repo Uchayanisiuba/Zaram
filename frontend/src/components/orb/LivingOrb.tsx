@@ -133,15 +133,16 @@ const STATE_CONFIG: Record<OrbState, StateConfig> = {
     ring2Color: 'rgba(34,211,238,0.35)',
     filter: 'drop-shadow(0 0 40px rgba(168,85,247,0.65))',
   },
-  // Thinking's palette with a steadier ring. The difference a viewer reads is
-  // the rhythm in `STATE_PULSE`, not the hue: violet already means "working" on
-  // this indicator, and cyan and slate are spoken for. See the note there.
+  // Idle's chrome, matching `STATE_PULSE.coding` — the orb stays calm while
+  // the character types. The reversal and its reasoning are recorded there;
+  // this entry only has to agree with it, and the glow already does by reading
+  // the same table.
   coding: {
-    glowColor: glowOf('coding', 0.45),
-    glowColor2: 'rgba(99,102,241,0.32)',
-    ring1Color: 'rgba(168,85,247,0.34)',
-    ring2Color: 'rgba(99,102,241,0.30)',
-    filter: 'drop-shadow(0 0 36px rgba(168,85,247,0.55))',
+    glowColor: glowOf('coding', 0.30),
+    glowColor2: 'rgba(168,85,247,0.18)',
+    ring1Color: 'rgba(34,211,238,0.18)',
+    ring2Color: 'rgba(168,85,247,0.28)',
+    filter: 'drop-shadow(0 0 28px rgba(99,102,241,0.45))',
   },
   speaking: {
     glowColor: glowOf('speaking', 0.35),

@@ -45,23 +45,34 @@ export interface StatePulse {
  * Per state, matching `LivingOrb`'s `STATE_CONFIG` exactly.
  *
  * The rhythms carry as much meaning as the hues, and they are not arbitrary:
- * every working state animates *faster* than idle to signal effort, and
- * `swapping` is the sole exception — slower and dimmer, because a swap is the
- * one state where nothing is resident and nothing is being worked on. Making it
- * a busier `thinking` would say the opposite of what is true.
+ * a working state animates *faster* than idle to signal effort. Two entries sit
+ * outside that and both are deliberate. `swapping` is slower and dimmer,
+ * because it is the one state where nothing is resident and nothing is being
+ * worked on, and making it a busier `thinking` would say the opposite of what
+ * is true. `coding` is idle's values outright, because the character types
+ * under it and the indicator has nothing left to add — see the entry.
  */
 export const STATE_PULSE: Record<EmbodimentState, StatePulse> = {
   idle: { colour: 0x6366f1, weight: 0.3, pulse: [1, 1.06, 1], pulseSeconds: 8 },
   listening: { colour: 0x22d3ee, weight: 0.45, pulse: [1.08, 1.14, 1.08], pulseSeconds: 2 },
   thinking: { colour: 0xa855f7, weight: 0.45, pulse: [1, 1.05, 1.02, 1.07, 1], pulseSeconds: 1.6 },
-  // **A rhythm, not a new hue.** Coding is thinking with the work named, so
-  // it keeps thinking's violet and changes its breath: an even, metronomic
-  // pulse against thinking's uneven one. A sixth colour would have to mean
-  // something on its own, and the two the palette has left are spoken for --
-  // `docs/UI-SPEC.md` gives violet to cloud, which is why the robot's face
-  // may never be violet, and inventing a sixth would be one more thing a
-  // user has to learn for a state that is a kind of the one above it.
-  coding: { colour: 0xa855f7, weight: 0.45, pulse: [1, 1.06, 1, 1.06, 1], pulseSeconds: 1.2 },
+  // **Idle's values exactly, and this is a reversal on the record.** On
+  // 7 September the instruction was *"no new colour: thinking's violet, a
+  // different rhythm"*, and this entry was violet on a metronomic 1.2s breath.
+  // On 8 September it was *"the orb stays pulsating with the default glow and
+  // behaviour"*. The second is the later instruction and it is the one taken.
+  //
+  // It is also the more coherent one now that there is something to be coherent
+  // with. `CLAUDE.md` puts an activity on the character rather than on the
+  // indicator, and `coding` is the first state to get a body clip of its own —
+  // the avatar types. An indicator that changes hue *and* rhythm underneath
+  // that says the same thing three times, and spends the orb's whole attention
+  // budget on a state that is a kind of thinking.
+  //
+  // The entry stays rather than being folded into `idle`. The state still
+  // exists and still fires; giving it a look later is then one line here
+  // instead of re-deriving which states there are.
+  coding: { colour: 0x6366f1, weight: 0.3, pulse: [1, 1.06, 1], pulseSeconds: 8 },
   speaking: { colour: 0x10b981, weight: 0.35, pulse: [1, 1.04, 1.08, 1.04, 1], pulseSeconds: 1 },
   swapping: { colour: 0x64748b, weight: 0.3, pulse: [1, 1.03, 1], pulseSeconds: 4 },
 }

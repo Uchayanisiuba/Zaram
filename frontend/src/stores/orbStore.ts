@@ -21,13 +21,16 @@ import { create } from 'zustand';
  * directly, or the orb turns slate-grey while the label still reads
  * "Local only".
  */
-export type OrbState =
-  | 'idle'
-  | 'thinking'
-  | 'coding'
-  | 'speaking'
-  | 'listening'
-  | 'swapping';
+export const ORB_STATES = [
+  'idle',
+  'thinking',
+  'coding',
+  'speaking',
+  'listening',
+  'swapping',
+] as const;
+
+export type OrbState = (typeof ORB_STATES)[number];
 
 interface OrbStore {
   /** Canonical field */
@@ -40,10 +43,45 @@ interface OrbStore {
   state: OrbState;
 }
 
+/**
+ * A starting state named in the query string, in development only.
+ *
+ * **Four of the six states had never been seen on screen**, and the reason was
+ * mechanical rather than neglect: `swapping` needs a model swap, `coding` needs
+ * a reply that opens a code fence, and the dev server has no backend to produce
+ * either. So the rhythms in `STATE_PULSE`, the fields in `OrbitalParticles` and
+ * the rings in `OrbAura` were shipped tested and unwatched — which is this
+ * repository's most expensive recurring shape, and the gaze-tracking removal is
+ * what it costs when the one check nobody made was the one that mattered.
+ *
+ * `?orb=coding` sets the store's initial value, so every reader sees it: both
+ * renderers, the field and the aura. It is a starting value rather than an
+ * override, so the system still moves the state normally afterwards and nothing
+ * here can make the indicator disagree with what is happening.
+ *
+ * **Development only, and that is stricter than the debug flags on
+ * `RobotAvatar`.** `?noAnim=1` and `?avatarBg` survive into a build because
+ * they change how the character is drawn; this changes what the indicator
+ * *says*, and `CLAUDE.md` is explicit that a status indicator over invented
+ * values is worse than no indicator. Vite folds `import.meta.env.DEV` to a
+ * literal, so in a production bundle this collapses to `null` and the parameter
+ * does not exist.
+ */
+function pinnedState(): OrbState | null {
+  if (!import.meta.env.DEV || typeof window === 'undefined') return null;
+  const raw = new URLSearchParams(window.location.search).get('orb');
+  return raw !== null && (ORB_STATES as readonly string[]).includes(raw)
+    ? (raw as OrbState)
+    : null;
+}
+
+/** Read once, so the field and its alias cannot start out disagreeing. */
+const START: OrbState = pinnedState() ?? 'idle';
+
 export const useOrbStore = create<OrbStore>((set) => ({
-  orbState: 'idle',
+  orbState: START,
   setOrbState: (orbState) => set({ orbState, state: orbState }),
   // Aliases
-  state: 'idle',
+  state: START,
   setState: (orbState) => set({ orbState, state: orbState }),
 }));
