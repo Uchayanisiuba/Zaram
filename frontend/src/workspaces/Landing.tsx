@@ -321,17 +321,51 @@ export default function Landing({ onNavigate, onOrbTap }: LandingProps) {
         aria-hidden
         data-testid="landing-mark"
       >
+        {/* The mark sits on a tile, 10 September.
+         *
+         * Same surface language as the six nav chips — `rounded-2xl`, glass,
+         * `blur(10px)`, the same drop shadow — because a second visual idiom
+         * on a surface this sparse reads as an accident. **Quieter than they
+         * are, deliberately**: no coloured glow and no hover, because this is
+         * identity rather than a target and it is already `pointer-events-none`
+         * and `aria-hidden`. A tile that looked exactly like a nav chip would
+         * invite a click that goes nowhere.
+         *
+         * Indigo, and the choice is not aesthetic. `docs/UI-SPEC.md` assigns
+         * violet to **cloud**, so a violet tile would put "your data left the
+         * device" in the corner of a resting screen — the 15 August face-colour
+         * argument in `CLAUDE.md`, which lands on indigo for the same reason:
+         * it is the implementation's own accent and it is nobody's state.
+         *
+         * The gradient runs from the accent to nothing rather than between two
+         * colours. Two stops of equal weight make a badge; one fading out
+         * makes a surface catching light. */}
+        <div
+          className="w-[60px] h-[60px] rounded-2xl flex items-center justify-center"
+          style={{
+            background:
+              'linear-gradient(145deg, rgba(99,102,241,0.20), rgba(255,255,255,0.03))',
+            border: '1px solid rgba(99,102,241,0.28)',
+            backdropFilter: 'blur(10px)',
+            boxShadow: '0 4px 24px rgba(0,0,0,0.3)',
+          }}
+        >
         <img
           src="/brand/zaram-mark.svg"
           alt=""
-          width={28}
-          height={28}
+          // Doubled from 28 on 10 September. At 28 the mark was legible only
+          // as a smudge in the corner — it is the one thing on this surface
+          // saying which application you are looking at, and the landing is
+          // otherwise wordless. The opacity above still keeps it quiet.
+          width={38}
+          height={38}
           // The asset may not exist yet — see `public/brand/README.md`. A
           // broken image icon in the corner of the landing would be worse than
           // no mark at all, so a failure removes it rather than showing the
           // browser's placeholder.
           onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
         />
+        </div>
       </div>
 
       {/* Orbital system — keeps the same shell; only the orbital motion is gated. */}
