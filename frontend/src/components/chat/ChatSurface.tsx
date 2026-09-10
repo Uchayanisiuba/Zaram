@@ -47,6 +47,7 @@ import MessageActions from './MessageActions';
 import { AnsweredBy } from './AnsweredBy';
 import SpeakButton from './SpeakButton';
 import ReasoningPanel from './ReasoningPanel';
+import MessageBody from './MessageBody';
 import CitationPanel from './CitationPanel';
 import CodePreviewPanel from './CodePreviewPanel';
 import {
@@ -822,8 +823,12 @@ export default function ChatSurface({ navigate }: Props) {
                   {msg.role === 'assistant' && msg.reasoning && (
                     <ReasoningPanel text={msg.reasoning} streaming={false} />
                   )}
-                  <p
-                    className="text-sm leading-relaxed whitespace-pre-wrap"
+                  <div
+                    className={
+                      msg.role === 'user'
+                        ? 'text-sm leading-relaxed whitespace-pre-wrap'
+                        : 'text-sm leading-relaxed'
+                    }
                     style={{
                       color:
                         msg.role === 'user'
@@ -849,8 +854,16 @@ export default function ChatSurface({ navigate }: Props) {
                       padding: msg.role === 'user' ? '8px 12px' : undefined,
                     }}
                   >
-                    {stripMarkers(msg.text)}
-                  </p>
+                    {/* The user's own text is left exactly as typed. They
+                        did not ask for their asterisks to become emphasis,
+                        and a message that reformats itself after sending
+                        reads as the product editing them. */}
+                    {msg.role === 'assistant' ? (
+                      <MessageBody text={stripMarkers(msg.text)} />
+                    ) : (
+                      stripMarkers(msg.text)
+                    )}
+                  </div>
                   {/* Copy, and re-ask. Rendered for both speakers because both
                       are worth copying, and because "ask again" belongs on the
                       user's own message — that is the text being re-sent, and
@@ -1041,16 +1054,22 @@ export default function ChatSurface({ navigate }: Props) {
                       >
                         Zaram
                       </p>
-                      <p
-                        className="text-sm leading-relaxed whitespace-pre-wrap"
+                      <div
+                        className="text-sm leading-relaxed"
                         style={{
                           color: 'var(--color-cyan)',
                           borderLeft: '2px solid var(--color-cyan-light)',
                           paddingLeft: 10,
                         }}
                       >
-                        {typedText}
-                      </p>
+                        {/* Markdown while streaming, as every other assistant
+                            does. A fence that has opened and not yet closed
+                            renders as text until it does, which is a moment of
+                            plainness rather than a defect -- and the
+                            alternative, plain text that reflows into markdown
+                            at the end, is a much louder one. */}
+                        <MessageBody text={typedText} />
+                      </div>
                     </>
                   )}
                   {/* The attribution arrives before the first token, which is
