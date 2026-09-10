@@ -196,14 +196,29 @@ export default function Landing({ onNavigate, onOrbTap }: LandingProps) {
   )
 
   /**
-   * Centred in the band it was given, not in the window.
+   * Centred in the window, and lifted **only as far as it has to be**.
    *
-   * A constant `(TOP_RESERVE - BOTTOM_RESERVE) / 2`, which is the only honest
-   * consequence of reserving different amounts at each end. Without it the ring
-   * would be sized for the band and then drawn in the middle of the window,
-   * which puts back the collision at the bottom and wastes the room at the top.
+   * This was a constant `(TOP_RESERVE - BOTTOM_RESERVE) / 2` -- a flat 38px
+   * lift applied on every screen. That is right when the ring is being squeezed
+   * and wrong the rest of the time: on a tall window there is room to spare at
+   * both ends, and the lift just parks the character above centre for no
+   * reason. Reported from the running app on a 1040px window, where the shift
+   * buys nothing and is plainly visible.
+   *
+   * So the ring wants true centre and accepts less only when the reserves say
+   * it cannot have it. On a tall window both clamps are slack and the offset
+   * comes out at exactly zero; on a short one it lands on the same 38px it used
+   * to apply everywhere. One expression covers both instead of a constant that
+   * is correct in one case.
    */
-  const orbitOffsetY = (TOP_RESERVE - BOTTOM_RESERVE) / 2
+  const ringDiameter = DESIGN_DIAMETER * fitScale
+  const lowestCentre = viewportHeight - BOTTOM_RESERVE - ringDiameter / 2
+  const highestCentre = TOP_RESERVE + ringDiameter / 2
+  const orbitCentreY = Math.min(
+    Math.max(viewportHeight / 2, highestCentre),
+    lowestCentre,
+  )
+  const orbitOffsetY = orbitCentreY - viewportHeight / 2
 
   const { shiftX, zoom } = orbGeometry({
     viewportWidth,
