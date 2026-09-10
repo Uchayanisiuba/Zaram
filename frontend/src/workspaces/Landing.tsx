@@ -119,12 +119,53 @@ export default function Landing({ onNavigate, onOrbTap }: LandingProps) {
   // mounted on every surface including this one, so it owns the poll now — two
   // callers would mean two intervals.
   const { width: viewportWidth, height: viewportHeight } = useViewport()
+
+  /**
+   * The scale the orbital system **fits in**, not the one it was designed at.
+   *
+   * `CONTAINER_SCALE` is 1.4 and was applied unconditionally — and a second,
+   * hardcoded `scale(1.4)` sat on the wrapper below, which is the "two
+   * formulae for one position" that `LandingHint` warns about in its own
+   * docstring. At 1.4 the outer ring is 826px across, so on any window under
+   * about 1030px tall it does not fit, and the caption slot below it has
+   * nowhere to go.
+   *
+   * The comment on `captionTop` records the previous attempt: it moved the
+   * *caption* down as far as it would go and concluded that "on a 900px window
+   * the ring alone is 826px and there is genuinely nowhere below it". That is
+   * true, and it is the wrong thing to accept — the caption was made to yield
+   * to a ring that had no business being that size on that screen. Measured 10
+   * September on an 800px window: ring 826px, footer 52px, overlap 52px, the
+   * hint sitting on the Settings and Activity labels.
+   *
+   * So the ring yields instead. Solve for the scale at which the ring's lower
+   * edge, its margin and the caption block all land inside the window:
+   *
+   *     vh/2 + (D·scale)/2 + GAP + CAPTION <= vh
+   *     scale <= (vh - 2·GAP - 2·CAPTION) / D
+   *
+   * capped at the design scale so a large monitor still gets exactly what was
+   * drawn, and floored so a very small window shrinks rather than collapsing.
+   * Width is checked too — a wide-but-short window and a narrow-but-tall one
+   * fail differently and both fail.
+   */
+  const CAPTION_BLOCK = 76
+  const RING_GAP = 28
+  const DESIGN_DIAMETER = ORBIT_RADIUS * 2 + 110
+  const fitScale = Math.max(
+    0.62,
+    Math.min(
+      CONTAINER_SCALE,
+      (viewportHeight - 2 * (RING_GAP + CAPTION_BLOCK)) / DESIGN_DIAMETER,
+      viewportWidth / DESIGN_DIAMETER,
+    ),
+  )
   const { shiftX, zoom } = orbGeometry({
     viewportWidth,
     chatFraction,
     chatOpen: chat,
     orbSize: ORB_SIZE,
-    containerScale: CONTAINER_SCALE,
+    containerScale: fitScale,
   })
 
   // --- Orbital rAF: gated to 'landing' so the orbit FREEZES during chat.
@@ -186,17 +227,17 @@ export default function Landing({ onNavigate, onOrbTap }: LandingProps) {
    * 826px and there is genuinely nowhere below it. Saying so in the arithmetic
    * beats a percentage that is right on one monitor.
    */
-  const ringBottomFromCentre = (ring2Size / 2) * CONTAINER_SCALE
+  const ringBottomFromCentre = (ring2Size / 2) * fitScale
   const captionTop = Math.min(
     viewportHeight / 2 + ringBottomFromCentre + 28,
     // Never off the bottom. Two lines of note plus its own breathing room.
-    viewportHeight - 76,
+    viewportHeight - CAPTION_BLOCK,
   )
 
   const orbShift = { scale: zoom, x: shiftX, y: 0 }
   // orbGeometry divides by the container scale for use *inside* the scaled
   // wrapper. Anything outside it needs the undivided value.
-  const visualShiftX = shiftX * CONTAINER_SCALE
+  const visualShiftX = shiftX * fitScale
   const orbTransition = isResizing
     ? // Track the divider exactly while it is being dragged; a spring here
       // makes the orb drift behind the panel edge.
@@ -252,7 +293,9 @@ export default function Landing({ onNavigate, onOrbTap }: LandingProps) {
       {/* Orbital system — keeps the same shell; only the orbital motion is gated. */}
       <div
         className="relative w-full h-full flex items-center justify-center"
-        style={{ transform: 'scale(1.4)', transformOrigin: 'center center' }}
+        // One value, computed above. The literal that used to sit here
+        // disagreed with `CONTAINER_SCALE` the moment either changed.
+        style={{ transform: `scale(${fitScale})`, transformOrigin: 'center center' }}
       >
         {/* Orbit track rings — dissolve / restore (centering via framer offset, never inline transform). */}
         <motion.div
