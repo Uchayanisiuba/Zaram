@@ -1780,8 +1780,8 @@ from the description.
 
 **Everything that reaches GitHub goes out in the maintainer's name, from the
 maintainer's account** — `Anisiuba Uche`, `Uchayanisiuba/Zaram`. Commits,
-branches, pushes, PRs, releases, issues. Claude appears as a `Co-Authored-By:`
-trailer and nowhere else: co-author, not author, and never a second publisher.
+branches, pushes, PRs, releases, issues. Commits carry no `Co-Authored-By:`
+trailer — revised 10 September 2026 — and a session is never a second author.
 
 A session that cannot authenticate as the maintainer **stops and hands over**.
 It does not hunt for another route, read a stored credential, or ask for a token
@@ -1907,8 +1907,8 @@ Memory" as the next step.
 
 **Everything that reaches GitHub goes out in the maintainer's name, from the
 maintainer's account** — `Anisiuba Uche`, `Uchayanisiuba/Zaram`. Commits,
-branches, pushes, PRs, releases, issues. Claude appears as a `Co-Authored-By:`
-trailer and nowhere else: co-author, not author, and never a second publisher.
+branches, pushes, PRs, releases, issues. Commits carry no `Co-Authored-By:`
+trailer — revised 10 September 2026 — and a session is never a second author.
 
 A session that cannot authenticate as the maintainer **stops and hands over**.
 It does not hunt for another route, read a stored credential, or ask for a token

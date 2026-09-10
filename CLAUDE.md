@@ -1199,12 +1199,19 @@ under the maintainer's own name and account.** `Anisiuba Uche`, the account
 branches, pushes, pull requests, releases, issues and comments — there is no
 category of publication that goes out under anything else.
 
-**A session or an agent is never a second publisher.** Claude may write code,
-stage it and compose a commit, and it appears where a contributor belongs: as a
-`Co-Authored-By:` trailer. Co-author, not author. The commit's author is the
-maintainer, the push is the maintainer's, and the PR is opened from the
-maintainer's account. The trailer and this rule are not in tension — one records
-who helped, the other records who published.
+**A session or an agent is never a second author.** Claude may write code, stage
+it and compose a commit. The commit's author is the maintainer, the push is the
+maintainer's, and the PR is opened from the maintainer's account.
+
+**No `Co-Authored-By:` trailer is added — revised 10 September 2026**, reversing
+the earlier rule that required one. GitHub resolves that trailer to the account
+`claude` and lists it in the repository's contributor sidebar, so a courtesy
+convention was putting a second name on the most-read summary of a solo project.
+The direction, the decisions and the publishing are the maintainer's, and the
+record now says so without qualification.
+
+This changes attribution only. It does not license a session to publish under
+another identity, and the hand-over rule below is unchanged.
 
 **A session that cannot authenticate as the maintainer stops and hands over.**
 It does not look for another route, does not read a stored credential, does not

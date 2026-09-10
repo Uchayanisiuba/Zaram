@@ -11,7 +11,7 @@ accurate — it is the first thing anyone reads.
 
 **Everything published about Zaram goes out in the maintainer's name and from
 the maintainer's account** — commits, branches, pushes, PRs, releases, issues.
-Claude appears as a `Co-Authored-By:` trailer, never as a publisher, and a
+Commits carry no `Co-Authored-By:` trailer — revised 10 September 2026 — and a
 session that cannot authenticate as the maintainer stops and hands the
 publishing step over rather than finding another route. `CLAUDE.md`,
 *"Publishing: one name, one account"*.
