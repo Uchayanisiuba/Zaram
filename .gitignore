@@ -249,3 +249,15 @@ backend/tests/_flux_sample.png
 .aider.chat.history.md
 .aider.input.history
 .aider.tags.cache*
+
+# The Mixamo typing source, and this is a licence rule rather than a tidiness
+# one. Every other .fbx in avatar-source/animations/ is tracked, because every
+# other one was authored on the character's own rig -- so a file here sits in a
+# directory where `git add -A` would sweep it in, and Mixamo's terms restrict
+# redistributing animation files. The shipped clip is built from Typing_01.fbx,
+# a re-export from Robot_All_01, which carries no such restriction.
+#
+# The file itself was deleted on 10 September once the re-export replaced it.
+# The rule stays: it is one download from existing again, and the cost of the
+# line is nothing against the cost of committing it by accident.
+/avatar-source/animations/Typing.fbx

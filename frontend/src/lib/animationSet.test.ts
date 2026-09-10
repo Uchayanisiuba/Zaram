@@ -151,19 +151,10 @@ describe('the shipped animation manifest', () => {
     // rather than the bug: a retarget can satisfy every number available to it
     // and still be measured from the wrong frame, and only looking says so. The
     // rest stay out of the manifest until their source is re-exported too.
-    // **`coding` is here for a licence reason rather than an export one, and
-    // that is worth telling apart from `swapping` above.** The clip exists —
-    // `retarget_animations.py` builds `coding_a.glb` from `Typing.fbx`, 54
-    // upper-body joints driven and the 11 below the waist held at rest so the
-    // character stands while it types. `Typing.fbx` is a Mixamo export, and
-    // Mixamo's terms restrict redistributing animation files, which is what
-    // committing it and shipping it in the installer would be. So the asset is
-    // built locally and neither it nor its manifest entry is in the
-    // repository, and `coding` falls back to `thinking` at runtime.
-    //
-    // The maintainer's decision, 10 September 2026, is to re-export the motion
-    // from `Robot_All_01` in Maya, which is what the Listening pair already is.
-    // When that lands, this line and the manifest change together.
-    expect(statesWithoutClips(manifest, ALL).sort()).toEqual(['coding', 'swapping'])
+    // `coding` left this list on 10 September 2026, and it is the first state
+    // to do so since the retarget landed. `coding_a.glb` is built from
+    // `Typing_01.fbx`, a re-export from `Robot_All_01` — the character
+    // standing and typing, joints only, on its own rig.
+    expect(statesWithoutClips(manifest, ALL).sort()).toEqual(['swapping'])
   })
 })

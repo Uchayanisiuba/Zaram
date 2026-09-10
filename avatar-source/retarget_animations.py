@@ -73,46 +73,25 @@ CLIPS = [
     ("Talk_2.fbx", "speaking_b"),
     ("Talk_3.fbx", "speaking_c"),
     ("Thinking.fbx", "thinking_a"),
-    # **Mixamo today, `Robot_All_01` next, and neither is in the repository.**
-    # `Typing.fbx` as it stands is a Mixamo export, and Mixamo's terms restrict
-    # redistributing animation files -- which is what committing one here and
-    # shipping it in the installer would be. The maintainer's decision,
-    # 10 September 2026, is to **re-export the motion from the character's own
-    # rig in Maya**, as the Listening pair already was; then it is their asset
-    # and the question is gone.
+    # **The sitting-clip workaround was built for this entry and then deleted,
+    # and the deletion is the interesting part.** The first source here was a
+    # Mixamo `Typing.fbx` of somebody sitting, so the script grew a per-clip
+    # table of joints a clip may not drive: `coding_a` drove the 54 upper-body
+    # joints while the 11 below the waist were keyed at the character's rest
+    # pose, `Hips` above all, because the root is where a sitting clip carries
+    # the sit. It worked and it was watched.
     #
-    # **Nothing in this file changes when that lands.** `HELD_AT_REST` is keyed
-    # by clip name rather than by rig, and the check below asks which joints a
-    # source names rather than which namespace it carries -- so a Maya re-export
-    # saved over this filename drops straight in. Saved under a different name,
-    # this line is the one to edit.
+    # It is gone because the maintainer fixed the problem where it belonged --
+    # `Typing_01.fbx` is their own re-export from `Robot_All_01`, standing,
+    # joints only -- and a retarget-time workaround for a problem solved at the
+    # source is weight this file does not need to carry. A future third-party
+    # clip that needs it can have it back out of the history; guessing at that
+    # in advance is how a facility nothing exercises survives.
     #
-    # Until then the source is generated locally, a missing file prints MISSING
-    # and the run continues, and `coding` falls back to `thinking` at runtime.
-    ("Typing.fbx", "coding_a"),
+    # Mixamo's terms also restrict redistributing animation files, so the
+    # original source was never committed. This one has no such constraint.
+    ("Typing_01.fbx", "coding_a"),
 ]
-
-
-# Joints a clip may **not** drive, per clip. Absent means all 65.
-#
-# `Typing.fbx` is a *sitting* animation and the character should stand while it
-# types, so the clip drives the 54 upper-body joints and the 11 below the waist
-# stay at the character's rest pose. **`Hips` is the one that matters.** It is
-# the root, and a sitting clip carries the sit in it -- lowered and rotated
-# back -- so excluding it is what makes the character stand; excluding the legs
-# and keeping the root would leave a standing character sitting on nothing.
-#
-# Written as the 11 to exclude rather than the 54 to allow because eleven names
-# can be read and checked and fifty-four cannot, and a typo in a long list is
-# the silent kind. `retarget` exits when a name here matches no bone on the
-# character, which is the guard that makes the short form safe.
-LOWER_BODY = (
-    "Hips",
-    "LeftUpLeg", "LeftLeg", "LeftFoot", "LeftToeBase", "LeftToe_End",
-    "RightUpLeg", "RightLeg", "RightFoot", "RightToeBase", "RightToe_End",
-)
-
-HELD_AT_REST = {"coding_a": LOWER_BODY}
 
 
 def sanitize(name):
@@ -269,37 +248,18 @@ def hierarchy_order(armature):
     return out
 
 
-def retarget(target, source, clip_name, held=()):
-    """Bake source's motion onto target's rest pose, rotation only.
-
-    `held` names joints the clip may not drive; they stay at the character's
-    rest pose. See `LOWER_BODY`.
-    """
+def retarget(target, source, clip_name):
+    """Bake source's motion onto target's rest pose, rotation only."""
     action = source.animation_data.action if source.animation_data else None
     if action is None:
-        return None, 0, 0
+        return None, 0
 
     start = int(math.floor(action.frame_range[0]))
     end = int(math.ceil(action.frame_range[1]))
 
-    # A name here that matches no bone on the character would silently hold
-    # nothing, which is the failure this whole file keeps recording in another
-    # costume: a clean run over the wrong set reads exactly like success.
-    by_key = {sanitize(b.name): b.name for b in target.data.bones}
-    unmatched = [n for n in held if sanitize(n) not in by_key]
-    if unmatched:
-        sys.exit(
-            "[retarget] %s holds joints the character does not have: %s"
-            % (clip_name, ", ".join(unmatched))
-        )
-    held_keys = {sanitize(n) for n in held}
-    held_names = [by_key[k] for k in held_keys]
-
     src_bones = {sanitize(b.name): b.name for b in source.data.bones}
     pairs = []
     for bone in hierarchy_order(target):
-        if sanitize(bone.name) in held_keys:
-            continue
         name = src_bones.get(sanitize(bone.name))
         if name:
             pairs.append((bone, name))
@@ -375,31 +335,7 @@ def retarget(target, source, clip_name, held=()):
             pose_bone.scale = (1, 1, 1)
             pose_bone.keyframe_insert("rotation_quaternion", frame=frame, group=bone.name)
 
-    # **The held joints are keyed at rest rather than left unkeyed, and the
-    # difference only shows up in a crossfade.** A track absent from a clip is
-    # not a track at rest: `AnimationMixer` leaves that node wherever the
-    # previously-playing clip left it, so entering this state out of an idle
-    # clip would freeze the hips and legs mid-sway for as long as the state
-    # lasts -- a different pose every time and none of them the rest pose the
-    # exclusion is for. Two keys hold them still and let the crossfade land
-    # them there. First and last only, because the value between two identical
-    # keys is constant and 11 bones times every frame is a bigger file saying
-    # the same thing.
-    #
-    # It is also what makes the maths above correct. A bone whose parent is
-    # held falls into the unparented branch, which puts it at `solved[bone]`
-    # outright -- and that is exactly right *because* the parent sits at rest:
-    # its pose matrix is its rest matrix, and the two cancel. Let a held joint
-    # drift and that branch quietly starts answering a different question.
-    for name in held_names:
-        pose_bone = target.pose.bones[name]
-        pose_bone.rotation_quaternion = (1, 0, 0, 0)
-        pose_bone.location = (0, 0, 0)
-        pose_bone.scale = (1, 1, 1)
-        for frame in (start, end):
-            pose_bone.keyframe_insert("rotation_quaternion", frame=frame, group=name)
-
-    return baked, len(pairs), len(held_names)
+    return baked, len(pairs)
 
 
 def export(target, clip_name):
@@ -458,9 +394,7 @@ def main():
             print("[retarget] no armature in %s" % source_name)
             continue
 
-        baked, matched, held = retarget(
-            target, source, clip_name, HELD_AT_REST.get(clip_name, ())
-        )
+        baked, matched = retarget(target, source, clip_name)
         if baked is None:
             print("[retarget] %s carries no action -- skipped" % source_name)
             continue
@@ -492,15 +426,8 @@ def main():
         size = export(target, clip_name)
         frames = int(baked.frame_range[1] - baked.frame_range[0]) + 1
         print(
-            "[retarget] %s -> %s.glb: %d bones%s, %d frames, %d bytes"
-            % (
-                source_name,
-                clip_name,
-                matched,
-                (" (+%d held at rest)" % held) if held else "",
-                frames,
-                size,
-            )
+            "[retarget] %s -> %s.glb: %d bones, %d frames, %d bytes"
+            % (source_name, clip_name, matched, frames, size)
         )
         wrote.append(clip_name)
 

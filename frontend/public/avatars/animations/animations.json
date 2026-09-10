@@ -9,6 +9,7 @@
     { "file": "speaking_a.glb", "state": "speaking", "role": "loop" },
     { "file": "speaking_b.glb", "state": "speaking", "role": "loop" },
     { "file": "speaking_c.glb", "state": "speaking", "role": "loop" },
-    { "file": "thinking_a.glb", "state": "thinking", "role": "loop" }
+    { "file": "thinking_a.glb", "state": "thinking", "role": "loop" },
+    { "file": "coding_a.glb", "state": "coding", "role": "loop" }
   ]
 }
