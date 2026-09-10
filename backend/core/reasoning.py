@@ -101,9 +101,33 @@ class ReasoningSplitter:
         "under Thought process. Ask again, or try a shorter question."
     )
 
-    def __init__(self) -> None:
+    def __init__(self, starts_in_reasoning: bool = False) -> None:
+        """``starts_in_reasoning`` for a model whose template prefills the tag.
+
+        **A reply can be reasoning without ever saying so.** Qwen3's chat
+        template emits ``<think>`` itself, before the model writes a token, so
+        what arrives over the wire is working-out terminated by a bare
+        ``</think>`` and no opening tag anywhere. Measured 10 September 2026
+        against TabbyAPI serving Qwen3.8-27B: ``reasoning_content`` came back
+        ``null`` and the whole monologue was in ``content``.
+
+        Left to itself the loop below finds no ``<think>``, emits the entire
+        monologue **as the answer**, and renders the stray closing tag in the
+        middle of it. The user reads the model talking to itself and concludes
+        the product is broken.
+
+        It cannot be inferred from the stream. By the time the closing tag
+        arrives the text before it has already been emitted as answer, and a
+        token stream cannot be un-emitted — holding it back instead would
+        delay the first paint of *every* reply, including from models that
+        never think, which `docs/SPEECH.md` is emphatic about.
+
+        So it is declared rather than detected, and the caller is the one who
+        knows: **if the request asked for thinking, the reply may open in it.**
+        No guess, no held tokens, no per-model tag list.
+        """
         self._buffer = ""
-        self._in_reasoning = False
+        self._in_reasoning = starts_in_reasoning
         #: Whether anything has ever been emitted as answer.
         #:
         #: Tracked rather than derived at the end from `_in_reasoning`, because
@@ -168,9 +192,34 @@ class ReasoningSplitter:
                 self._in_reasoning = False
                 continue
 
+            # A closing tag while not in reasoning is a tag nobody opened.
+            # `starts_in_reasoning` is the fix for the case Zaram can predict;
+            # this is the floor under the case it cannot — an unexpected model,
+            # a prefill nobody declared. The classification is already lost,
+            # because the text before it went out as answer. What is still
+            # recoverable is that **the user never reads a raw tag**, so it is
+            # dropped rather than rendered. Silently: there is nothing here the
+            # reader could act on, and the reply itself is intact.
+            stray = self._buffer.find(CLOSE_TAG)
             index = self._buffer.find(OPEN_TAG)
+            if stray != -1 and (index == -1 or stray < index):
+                if stray:
+                    out.append((ANSWER, self._buffer[:stray]))
+                    self._saw(ANSWER, self._buffer[:stray])
+                self._buffer = self._buffer[stray + len(CLOSE_TAG):]
+                continue
+
             if index == -1:
-                hold = _partial_tag_suffix(self._buffer, OPEN_TAG)
+                # Both tags, because either may be the next thing to arrive and
+                # they share a prefix. Holding only the opening one lets a
+                # chunk boundary inside `</thi` escape as answer text, and the
+                # reader sees the tag split across two paints — the exact
+                # defect `_partial_tag_suffix` exists to prevent, reintroduced
+                # by handling one tag and not its pair.
+                hold = max(
+                    _partial_tag_suffix(self._buffer, OPEN_TAG),
+                    _partial_tag_suffix(self._buffer, CLOSE_TAG),
+                )
                 ready = self._buffer[: len(self._buffer) - hold]
                 if ready:
                     out.append((ANSWER, ready))
