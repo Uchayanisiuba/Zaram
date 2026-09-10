@@ -21,7 +21,7 @@
  * away, and the amber one has real work to do.
  */
 import { useState } from 'react';
-import { AlertTriangle, ArrowRight, FileText, Library, Wrench } from 'lucide-react';
+import { AlertTriangle, ArrowRight, Brain, FileText, Library, Wrench } from 'lucide-react';
 import type { ChatNotice } from '../../stores/chatStore';
 import type { WorkspaceId } from '@/runtime/shortcuts/registry';
 
@@ -55,6 +55,12 @@ const TONES: Record<string, { Icon: typeof AlertTriangle; color: string }> = {
   // spent its reading allowance, and an amber triangle over "here is what I
   // found so far" would train the warning away for the cases that need it.
   tool_loop: { Icon: Wrench, color: 'var(--color-text-muted, #94a3b8)' },
+  // The conversation outgrew the model's window, so the earliest exchanges are
+  // no longer in front of it. Neutral for the same reason `tool_loop` is:
+  // nothing failed, a bounded window was reached, and an amber triangle would
+  // say something broke. `Brain` is the icon the Memory node already wears, so
+  // the notice reads as being about memory without needing to say so twice.
+  memory: { Icon: Brain, color: 'var(--color-text-muted, #94a3b8)' },
 };
 
 const DEFAULT_TONE = { Icon: AlertTriangle, color: 'var(--color-amber, #d97706)' };

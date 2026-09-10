@@ -183,6 +183,14 @@ class ExecutionEngine:
         #: session_id → recent (prompt, answer) pairs, LRU-capped at
         #: MAX_SESSIONS. Ordered because eviction order is the point.
         self._session_turns: OrderedDict[str, list[tuple[str, str]]] = OrderedDict()
+        #: Sessions already told their conversation outgrew the model's window.
+        #:
+        #: Bounded like the buffer beside it and for the same reason: the
+        #: frontend mints a session id per page load, so an unbounded set of
+        #: dead sessions is a slow leak. `set` rather than `OrderedDict`
+        #: because nothing here needs recency -- being told once is being told,
+        #: and evicting an arbitrary entry costs at worst one repeated notice.
+        self._told_about_dropped_turns: set[str] = set()
         #: Where an unfinished task is written down, injected by `main.py`.
         #:
         #: `projects.plans.PlanRecords`, and `None` when nothing supplied one —
@@ -462,9 +470,16 @@ class ExecutionEngine:
                 system_prompt, session_id
             )
         else:
-            system_prompt = self._augment_with_conversation(
+            system_prompt, memory_notice = self._augment_with_conversation(
                 system_prompt, session_id, model
             )
+            # **Forgetting is said out loud.** The task loop already tells the
+            # user when it drops the earliest tool results; the conversation
+            # dropped turns in silence, and silence is what made a bounded
+            # window read as "Zaram is forgetful". `UI-SPEC`: disabled
+            # capabilities are visible, not silent.
+            if memory_notice is not None:
+                yield memory_notice
 
         # Said before the answer, not after it, and for the same reason the
         # empty-domain notice is: it is a *frame* for what follows. A reader who
@@ -2138,7 +2153,7 @@ class ExecutionEngine:
 
     def _augment_with_conversation(
         self, system_prompt: str, session_id: str, model: str | None = None
-    ) -> str:
+    ) -> tuple[str, Any | None]:
         """Put the recent exchange in front of an ordinary reply.
 
         **The machinery for this was complete and reached from one place.**
@@ -2177,7 +2192,7 @@ class ExecutionEngine:
         """
         pairs = self._session_turns.get(session_id, [])
         if not pairs:
-            return system_prompt
+            return system_prompt, None
 
         from core.context_budget import budget_for
         from core.transcript import ASSISTANT, USER, Turn, as_prompt, fit
@@ -2230,7 +2245,17 @@ class ExecutionEngine:
                 cap, "measured" if budget.measured else "assumed",
                 budget.total_tokens, budget.source,
             )
-            return system_prompt
+            # Always said, every turn, unlike the partial case below: this is
+            # not a shorter memory, it is none at all, and a reply answered as
+            # though nothing came before it is the failure the user reported.
+            return system_prompt, StreamEvent.notice(
+                "Answering this on its own: none of the earlier conversation "
+                "fits alongside room to reply, on a model with a "
+                f"{budget.total_tokens:,}-token window. The exchange is still "
+                "above — quote what Zaram needs to see, or switch to a "
+                "model with a larger window.",
+                kind="memory",
+            )
 
         logger.info(
             "Engine: gave the reply %d prior turn(s), %d dropped for a %d-token "
@@ -2242,6 +2267,25 @@ class ExecutionEngine:
             budget.total_tokens,
             budget.source,
         )
+
+        # **Said once per session, not once per turn.** Past the budget every
+        # subsequent turn drops something, so a notice per reply would be a
+        # permanent banner and would train the user to stop reading notices --
+        # which is how a warning dies. The first drop is the moment the
+        # behaviour changes and the only moment the user needs telling.
+        notice = None
+        if dropped and session_id not in self._told_about_dropped_turns:
+            self._told_about_dropped_turns.add(session_id)
+            while len(self._told_about_dropped_turns) > self.MAX_SESSIONS:
+                self._told_about_dropped_turns.pop()
+            notice = StreamEvent.notice(
+                f"This conversation is now longer than {self._model_label(model)} "
+                f"can hold, so Zaram is answering from the last "
+                f"{max(1, len(kept) // 2)} exchange(s). The earlier ones are "
+                "still in the transcript above but are no longer in front of "
+                "the model — quote anything it needs to see.",
+                kind="memory",
+            )
         return (system_prompt or "") + "\n".join([
             "",
             "=== THE CONVERSATION SO FAR ===",
@@ -2254,7 +2298,19 @@ class ExecutionEngine:
             "unless you are asked to.",
             "=" * 42,
             "",
-        ])
+        ]), notice
+
+    def _model_label(self, model: str | None) -> str:
+        """How to name the model in a sentence the user reads.
+
+        Named rather than elided, because the limit *is* this model's. A notice
+        that says "the model" invites the reading that Zaram is forgetful
+        rather than that this model is small -- the wrong conclusion, and the
+        one that loses a user. Falls back to a phrase still true when routing
+        has not resolved a name.
+        """
+        name = (model or "").strip()
+        return f"“{name}”" if name else "this model"
 
     def _augment_system_prompt(self, system_prompt: str, recalled: list[Any]) -> str:
         """Fold recalled memories into the system prompt, with citation markers.
