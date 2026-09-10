@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Any, Dict, Iterator, List, Optional
 
 import requests
@@ -31,6 +32,26 @@ from ..contracts import (
 logger = logging.getLogger(__name__)
 
 DEFAULT_BASE_URL = "http://127.0.0.1:11434"
+
+
+
+#: `num_ctx` as Ollama renders it in `/api/show`.
+#:
+#: The parameters come back as the Modelfile's own lines rather than as a
+#: mapping, so this is text. Anchored per line so a parameter whose *name* ends
+#: in `num_ctx` cannot answer for it.
+_NUM_CTX = re.compile(r"^num_ctx\s+(\d+)", re.MULTILINE)
+
+
+def _served_context(parameters: Any) -> Optional[int]:
+    """The window this model is configured to load with, or ``None``."""
+    if not isinstance(parameters, str):
+        return None
+    match = _NUM_CTX.search(parameters)
+    if not match:
+        return None
+    value = int(match.group(1))
+    return value if value > 0 else None
 
 
 class OllamaAdapter:
@@ -132,9 +153,30 @@ class OllamaAdapter:
             caps = show.get("capabilities") or []
             capabilities.update(str(c).lower() for c in caps)
             model_info = show.get("model_info", {}) or {}
-            ctx = model_info.get("context_length")
-            if isinstance(ctx, int):
-                context_length = ctx
+            # **The window it will actually serve, not the one the weights
+            # allow, and the two differ by more than a factor of two.**
+            #
+            # This read `model_info["context_length"]`, which is the
+            # architecture maximum: `qwen3-14b-16k` reports **40,960** there
+            # and loads with **16,384**; a model with no `num_ctx` at all
+            # reports 262,144 and is served Ollama's 4,096 default.
+            # `core/context_budget.py` exists because sizing a prompt against
+            # that number overflows the context on almost every real request,
+            # and its docstring says so at length -- while this discoverer
+            # recorded exactly the number it warns about, from the same
+            # `/api/show` reply that carries the right one.
+            #
+            # It was read by nothing, which is why it never showed up as a
+            # wrong answer. That is not a reason to leave it: a wrong value in
+            # a field named `context_length` is a trap primed for whoever uses
+            # it next, and the ranking below is now that caller.
+            #
+            # `None` when there is no explicit `num_ctx`. Ollama's default is
+            # what such a model gets, and `budget_for` already falls back to it
+            # deliberately -- but the default is configurable, so asserting it
+            # here would be a guess about the server dressed as a measurement.
+            # Unknown is a third answer.
+            context_length = _served_context(show.get("parameters"))
             q = (
                 show.get("details", {}).get("quantization_level")
                 or model_info.get("quantization_level")

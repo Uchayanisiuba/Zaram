@@ -559,7 +559,12 @@ def test_ollama_adapter_discovers_and_infers():
     }
     show = {
         "capabilities": ["tools", "vision"],
-        "model_info": {"context_length": 8192},
+        # The served window comes from `parameters`; `model_info` carries the
+        # architecture maximum, which is several times larger on a real model
+        # and is the number `core/context_budget.py` was written about. Both
+        # are here so the assertion below says which one is taken.
+        "parameters": 'num_ctx                        8192\ntemperature                    0.7',
+        "model_info": {"context_length": 131072},
         "details": {"quantization_level": "Q4_K_M"},
     }
     with patch("requests.get", return_value=_FakeResponse(tags)), patch(
@@ -576,6 +581,7 @@ def test_ollama_adapter_discovers_and_infers():
     m = models[0]
     assert m.id == "ollama:llama3:latest"
     assert m.provider == "ollama"
+    # The served window, never the declared maximum beside it.
     assert m.context_length == 8192
     assert m.quantization == "Q4_K_M"
     assert m.supports_vision is True

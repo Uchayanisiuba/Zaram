@@ -913,6 +913,13 @@ class ProviderManager:
         the per-task assignment in Settings, which is an explicit choice and
         does not come through this ranking at all.
 
+        **Then the context window, above the size tiebreak.** The window is
+        how much conversation survives into the next turn, so ordering by it
+        picks the model that forgets least. It sits above `size_bytes` because
+        size is missing entirely on an OpenAI-compatible server, and a model
+        that reports no size was sorting behind every model that did — on a
+        missing field rather than on a judgement.
+
         ``resident`` is ``None`` when residency could not be established — no
         local server reachable, or one that reports nothing. Then the term is
         **flat across every candidate** rather than a guess, so ordering falls
@@ -928,6 +935,33 @@ class ProviderManager:
             0 if fits is True else 1,
             self._specialisation_rank(model, specialisation),
             (1 if is_local else 0) if cloud_first else (0 if is_local else 1),
+            # **How much of the conversation it can hold, above the size
+            # tiebreak and below everything that is a real preference.**
+            #
+            # This is the term that answers "Zaram does not follow a long
+            # conversation" at the routing layer rather than at the budget
+            # layer. The window *is* the memory: the conversation gets a
+            # quarter of three quarters of it, so 16,384 holds about seven
+            # ordinary exchanges and 65,536 holds about thirty. Ordering by it
+            # picks the model that will forget least, which is the whole
+            # complaint.
+            #
+            # **Above `size_bytes`, and that placement is the point.** Size is
+            # a proxy for capability and is *absent* on an OpenAI-compatible
+            # server, which reports no size at all -- so `-(size_bytes or 0)`
+            # gave such a model `0` and sorted it behind every Ollama model
+            # that reported one. Measured: a TabbyAPI model holding 65,536
+            # tokens ranked below a 14B holding 16,384, on nothing but a
+            # missing field. Deciding on the window first fixes that without
+            # inventing a size, which would be a false measurement feeding
+            # `model_fits_resident`, where it would be a capacity claim.
+            #
+            # Unknown is 0 and therefore last among known windows, which is
+            # the right way round: prefer the model known to hold more over
+            # one that cannot say. It is a preference and never a filter --
+            # membership was settled before this key was built, and a window
+            # has no business deciding what a model is allowed to answer.
+            -(model.context_length or 0),
             -(model.size_bytes or 0),
             model.id,  # deterministic across equal candidates
         )

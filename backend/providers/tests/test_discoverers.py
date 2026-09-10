@@ -56,10 +56,26 @@ OLLAMA_TAGS = {
     ]
 }
 
+#: `/api/show` as Ollama actually answers it, carrying **both** numbers.
+#:
+#: `parameters` is the Modelfile's own text and holds `num_ctx` -- the window
+#: the model will be served with. `model_info.context_length` is the
+#: architecture maximum, which on a real model is several times larger:
+#: `qwen3-14b-16k` reports 40,960 there and loads with 16,384. Both are in the
+#: fixture on purpose, so the assertion below can say which one is taken.
 OLLAMA_SHOW = {
     "details": {"family": "llama", "quantization_level": "Q4_K_M"},
-    "model_info": {"context_length": 8192},
+    "parameters": 'num_ctx                        8192\nstop                           "<|eot_id|>"\ntemperature                    0.7',
+    "model_info": {"context_length": 131072},
     "capabilities": ["tools", "vision"],
+}
+
+#: The same reply from a model created without an explicit `num_ctx`.
+OLLAMA_SHOW_NO_NUM_CTX = {
+    "details": {"family": "llama"},
+    "parameters": 'stop                           "<|eot_id|>"',
+    "model_info": {"context_length": 131072},
+    "capabilities": [],
 }
 
 
@@ -79,10 +95,33 @@ async def test_ollama_adapter_parses_models(monkeypatch):
     assert m.category is ModelCategory.LLM
     assert m.size_bytes == 5_000_000_000
     assert m.quantization == "Q4_K_M"
+    # The served window, never the architecture maximum sitting beside it.
     assert m.context_length == 8192
+    assert m.context_length != OLLAMA_SHOW["model_info"]["context_length"]
     assert m.supports_tools is True
     assert m.supports_vision is True
     assert m.available is True
+
+
+async def test_ollama_reports_no_window_when_none_is_configured(monkeypatch):
+    """Unknown rather than the declared maximum, and rather than a guess.
+
+    A model with no `num_ctx` is served Ollama's default. That default is
+    configurable, so asserting it here would be a guess about the server
+    dressed as a measurement -- and `budget_for` already falls back to it
+    deliberately, where the fallback is labelled as one. What must never
+    happen is the 131,072 in `model_info` being reported as this model's
+    window: it is the number `core/context_budget.py` was written about.
+    """
+    base = "http://127.0.0.1:11434"
+    fake = _FakeRequests(
+        {f"{base}/api/tags": OLLAMA_TAGS, f"{base}/api/show": OLLAMA_SHOW_NO_NUM_CTX}
+    )
+    monkeypatch.setattr(ollama_mod, "requests", fake)
+
+    models = await OllamaAdapter(base_url=base).discover_models(timeout=1.0)
+
+    assert models[0].context_length is None
 
 
 async def test_ollama_adapter_handles_failure(monkeypatch):

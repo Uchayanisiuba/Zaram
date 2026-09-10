@@ -133,13 +133,66 @@ class OpenAICompatibleAdapter:
             )
             return []
 
+        # **One extra call, not one per model, and only for a local server.**
+        #
+        # `/v1/models` is the OpenAI list contract: an id and an owner, nothing
+        # about the window. `/v1/model` describes the one that is *loaded*, and
+        # it does carry the window — so a single probe names the window of the
+        # model this server would actually answer with. Every other entry keeps
+        # `None`, which is honest: an exl3 folder on disk has no window until
+        # something loads it with one.
+        #
+        # A cloud provider is skipped outright. It has no `/v1/model`, the
+        # answer is known in advance, and asking would put a network call on
+        # the discovery path for nothing.
+        loaded_id, loaded_window = (
+            (None, None)
+            if self.kind is ProviderKind.CLOUD_API
+            else await asyncio.to_thread(self._loaded_window, timeout)
+        )
+
         models: List[ModelInfo] = []
         for entry in payload.get("data", []) or []:
             model_id = entry.get("id")
             if not model_id:
                 continue
-            models.append(self._to_model(model_id, entry))
+            model = self._to_model(model_id, entry)
+            if loaded_window and model_id == loaded_id:
+                model.context_length = loaded_window
+            models.append(model)
         return models
+
+    def _loaded_window(self, timeout: float) -> tuple[Optional[str], Optional[int]]:
+        """The loaded model's id and the window it was loaded with.
+
+        ``(None, None)`` for every failure, and never a partial guess. This is
+        an enrichment: a server that will not say costs a model with no window
+        recorded, which ranks it as unknown rather than as small. Never raises,
+        for the same reason `resident_models` beside it does not — discovery
+        must not fail because one optional field could not be read.
+
+        The window lives under `parameters`, which is where TabbyAPI puts the
+        load settings; `max_seq_len` is its name for what Ollama calls
+        `num_ctx`. Read positively rather than by scanning for anything
+        integer-shaped: a cache size sits in the same object.
+        """
+        try:
+            payload = self._get("/v1/model", timeout=timeout)
+        except Exception as exc:
+            logger.debug("%s window probe failed: %s", self.provider_id, exc)
+            return None, None
+        if not isinstance(payload, dict):
+            return None, None
+        model_id = payload.get("id")
+        parameters = payload.get("parameters")
+        if not model_id or not isinstance(parameters, dict):
+            return None, None
+        window = parameters.get("max_seq_len")
+        if not isinstance(window, int) or window <= 0:
+            # Zero or absent is unknown, never a window of nothing -- the false
+            # zero this codebase has already paid for on `vram_bytes`.
+            return str(model_id), None
+        return str(model_id), window
 
     async def health(self) -> Dict[str, Any]:
         try:
