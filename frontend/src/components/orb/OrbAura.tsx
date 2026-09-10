@@ -45,10 +45,29 @@ export default function OrbAura({
   const state = useOrbStore((s) => s.orbState);
   const colours = ringColours(state);
 
-  // The same proportions `LivingOrb` uses, so the two renderers wear an
-  // identically sized aura rather than one that happens to look close.
+  /**
+   * Sized against the **subject**, not against the box — corrected 10 September.
+   *
+   * These were `LivingOrb`'s own proportions, 0.82 and 0.71, on the reasoning
+   * that identical numbers give "an identically sized aura rather than one that
+   * happens to look close". Identical proportions of the *container* are not an
+   * identical aura, because the two renderers fill their containers completely
+   * differently: the orb's sphere occupies about a third of its box, and the
+   * character occupies nearly all of it.
+   *
+   * Measured on the running app, `px` scaling to a 448px canvas: ring 2 came
+   * out at **318px inside a 448px character** -- 65px behind it on every side,
+   * invisible, which is the ring the maintainer reported missing. Ring 1 came
+   * out at 465px against 448px, clearing by 8.5px, so it traced the canvas edge
+   * and read as an outline drawn on the character rather than an orbit around
+   * it.
+   *
+   * Ring 1 needs no change: with `outerGlowOffset` added below it already
+   * renders at 1.04x the box. Ring 2 moves out to clear the silhouette, and the
+   * gap between the two is what makes them read as two.
+   */
   const ring1 = Math.round(px * 0.82);
-  const ring2 = Math.round(px * 0.71);
+  const ring2 = Math.round(px * 0.86);
   const outerGlowOffset = Math.round(px * 0.22);
 
   // Below the character. See the note above — this is the whole reason the

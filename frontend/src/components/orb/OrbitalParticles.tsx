@@ -54,28 +54,78 @@ import { frames, loop } from './stillness';
  * froze would read as the application having hung.
  */
 interface FieldMotion {
-  drift: { x: number; y: number };
+  /**
+   * Along each mote's **own tangent**, in px. This is what makes the field
+   * circulate instead of slide.
+   *
+   * It was a single `drift: {x, y}` applied to every mote, so all ten
+   * travelled the same direction at the same moment -- a shoal sliding one way
+   * and back, which is most of why the field read as inert rather than alive.
+   */
+  tangential: number;
+  /**
+   * Along each mote's **own radius**, in px. Negative draws inward.
+   *
+   * The docstring above has always said `listening` pulls the motes inward and
+   * `speaking` pushes them outward. A shared `(x, y)` vector cannot do that --
+   * it moves the mote at the top and the mote at the bottom the same way, so
+   * one approaches the centre while the other leaves it. The behaviour was
+   * described and not implemented; this is the field it was describing.
+   */
+  radial: number;
   seconds: number;
   opacity: [number, number, number];
 }
 
+/** Everything is measured from the middle of the box the caller gives us. */
+const CENTRE_PCT = 50;
+
 const FIELD: Record<OrbState, FieldMotion> = {
-  idle: { drift: { x: 12, y: -24 }, seconds: 8, opacity: [0.2, 0.9, 0.2] },
-  // Gathering: quicker, tighter, drawn slightly in.
-  thinking: { drift: { x: -8, y: -16 }, seconds: 5, opacity: [0.25, 1, 0.25] },
+  // At rest the field turns and barely breathes. Almost all tangent: a resting
+  // system is neither taking in nor giving out, and a mote that visibly
+  // approached the orb while nothing was happening would be reporting
+  // something.
+  idle: { tangential: 15, radial: -3, seconds: 8, opacity: [0.2, 0.9, 0.2] },
+  // Gathering: quicker, tighter, drawn in.
+  thinking: { tangential: 9, radial: -11, seconds: 5, opacity: [0.25, 1, 0.25] },
   // Idle's field, following the same reversal as `STATE_PULSE.coding`: the
   // 8 September instruction is that the orb keeps its default glow and
-  // behaviour while coding, and a field that quickens under a calm orb would
+  // behaviour while coding, and a field that quickened under a calm orb would
   // be the state announcing itself through the one channel left.
-  coding: { drift: { x: 12, y: -24 }, seconds: 8, opacity: [0.2, 0.9, 0.2] },
-  // Attending: pulled toward the centre and brighter.
-  listening: { drift: { x: -14, y: 14 }, seconds: 4.5, opacity: [0.3, 1, 0.3] },
+  coding: { tangential: 15, radial: -3, seconds: 8, opacity: [0.2, 0.9, 0.2] },
+  // Attending: drawn toward the centre and brighter. The strongest inward pull
+  // of the five, because listening is the one state that is entirely intake.
+  listening: { tangential: 6, radial: -16, seconds: 4.5, opacity: [0.3, 1, 0.3] },
   // Emanating: pushed outward, in step with the ripples the orb already draws
-  // while it speaks.
-  speaking: { drift: { x: 20, y: -34 }, seconds: 3.6, opacity: [0.3, 1, 0.3] },
+  // while it speaks. The only state with a positive radius, which is what
+  // makes taking-in and giving-out legible without a colour.
+  speaking: { tangential: 10, radial: 18, seconds: 3.6, opacity: [0.3, 1, 0.3] },
   // Busy elsewhere. Slow and faint, never still.
-  swapping: { drift: { x: 6, y: -10 }, seconds: 12, opacity: [0.12, 0.45, 0.12] },
+  swapping: { tangential: 5, radial: -2, seconds: 12, opacity: [0.12, 0.45, 0.12] },
 };
+
+/**
+ * A mote's own tangent and radius, from where it sits in the box.
+ *
+ * Derived rather than authored, so `PARTICLES` stays a list of positions and
+ * cannot fall out of step with the directions -- and so a position moved by
+ * eye gets the right motion without anyone recomputing an angle.
+ *
+ * No trigonometry per frame: this is two divisions per mote per render, and
+ * the animation itself is still keyframes handed to the compositor.
+ */
+function axesFor(topPct: number, leftPct: number) {
+  const dx = leftPct - CENTRE_PCT;
+  const dy = topPct - CENTRE_PCT;
+  // A mote exactly on the centre has no radius and therefore no direction to
+  // move along. It gets the identity rather than a NaN.
+  const len = Math.hypot(dx, dy) || 1;
+  const outX = dx / len;
+  const outY = dy / len;
+  // Perpendicular, taken one way for the whole field so the circulation has a
+  // single sense. Alternating it would read as turbulence.
+  return { outX, outY, tanX: -outY, tanY: outX };
+}
 
 /** Deterministic positions — never random, so the field is the same on every
  *  load and a screenshot can be compared against the last one. */
@@ -99,7 +149,13 @@ export default function OrbitalParticles() {
 
   return (
     <>
-      {PARTICLES.map((p, i) => (
+      {PARTICLES.map((p, i) => {
+        const { outX, outY, tanX, tanY } = axesFor(p.top, p.left);
+        // One offset per mote, composed from the two axes. The state supplies
+        // the magnitudes; the position supplies the directions.
+        const dx = tanX * field.tangential + outX * field.radial;
+        const dy = tanY * field.tangential + outY * field.radial;
+        return (
         <motion.div
           key={i}
           className="absolute rounded-full z-10 pointer-events-none"
@@ -112,8 +168,8 @@ export default function OrbitalParticles() {
             boxShadow: `0 0 4px ${p.color}`,
           }}
           animate={{
-            y: frames([0, field.drift.y, 0], reduced),
-            x: frames([0, field.drift.x, 0], reduced),
+            y: frames([0, dy, 0], reduced),
+            x: frames([0, dx, 0], reduced),
             opacity: reduced ? 0.55 : field.opacity,
           }}
           // **One period for the whole field, offset by delay — not ten
@@ -136,7 +192,8 @@ export default function OrbitalParticles() {
             delay: reduced ? 0 : p.delay * (field.seconds / 8),
           }}
         />
-      ))}
+        );
+      })}
     </>
   );
 }
