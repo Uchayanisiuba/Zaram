@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import * as THREE from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { useEmbodimentState, type EmbodimentState } from '@/hooks/useEmbodimentState'
+import { useChatModeStore } from '@/stores/chatModeStore'
 import { useSpeechStore } from '@/stores/speechStore'
 import { visemeAt } from '@/lib/visemes'
 import { inspectAvatar } from '@/lib/vrmSafety'
@@ -179,6 +180,62 @@ function neutralHold(): [number, number] {
 function smileHold(): [number, number] {
   const held = numberParam('smileHold', 0, 0.1)
   return held > 0 ? [held, held] : [SMILE_HOLD_MIN, SMILE_HOLD_MAX]
+}
+
+/**
+ * The greeting: what the character does when the conversation opens.
+ *
+ * **Derived from an event, not from a state, and that is the exception being
+ * made.** The rule above is that the face belongs to the state and an
+ * expression arriving over one would be the character editorialising about the
+ * work. Opening the conversation is not work — it is the moment the user
+ * arrives, and `swapping` is the precedent: a smile held for the duration of
+ * something the user is living through rather than drawn from a schedule.
+ *
+ * It is confined to `idle` for the same reason the idle smile is. If a reply is
+ * already streaming when this fires, the state owns the face and the greeting
+ * does not happen at all.
+ *
+ * ## Different every time, welcoming every time
+ *
+ * The face cannot carry the variety: `MOUTH_CELLS` has exactly one `smile` and
+ * the eyes have one `happy`, so there is no second welcoming shape to alternate
+ * with. Inventing one would be the talk ladder again — a second vocabulary to
+ * keep in step with the first.
+ *
+ * So the variation is in **time and body**, which is where it reads anyway:
+ *
+ * * **A beat before it lands.** Sometimes the character notices you at once,
+ *   sometimes a moment later. This is the single largest contributor to the
+ *   greeting feeling different, because a fixed onset is what makes a
+ *   scripted gesture read as scripted.
+ * * **How long it is held**, drawn fresh each time, the same way the idle
+ *   smile draws both its phases rather than holding a fixed length.
+ * * **A fresh idle clip**, taken from the shuffle bag, so the body is never the
+ *   one it just played and the greeting arrives on a different posture.
+ *
+ * Randomness is right here and wrong in `OrbitalParticles`: nothing compares
+ * two greetings side by side, and the idle smile beside it already draws its
+ * phases the same way.
+ */
+const GREET_BEAT_MIN = 0.15
+const GREET_BEAT_MAX = 0.9
+const GREET_HOLD_MIN = 2.2
+const GREET_HOLD_MAX = 3.8
+/** Long enough to read as the body changing its mind, short enough to overlap
+ *  the beat rather than arrive after the smile has already gone. */
+const GREET_FADE_SECONDS = 0.45
+
+/** The beat before the greeting lands, overridable as `?greetBeat=0`. */
+function greetBeat(): [number, number] {
+  const beat = numberParam('greetBeat', -1, 0)
+  return beat >= 0 ? [beat, beat] : [GREET_BEAT_MIN, GREET_BEAT_MAX]
+}
+
+/** How long the greeting is held, overridable as `?greetHold=6`. */
+function greetHold(): [number, number] {
+  const held = numberParam('greetHold', 0, 0.1)
+  return held > 0 ? [held, held] : [GREET_HOLD_MIN, GREET_HOLD_MAX]
 }
 
 /** The mouth shapes speech walks when it is playing with no viseme track.
@@ -597,6 +654,27 @@ export default function RobotAvatar({ px = 320, src = '/avatars/zaram-robo.glb' 
 
   const state = useEmbodimentState()
   stateRef.current = state
+
+  /**
+   * Armed when the conversation opens, read by the frame loop.
+   *
+   * A ref rather than state: the loop below lives in an effect that runs once,
+   * and re-running it to deliver a greeting would rebuild the scene, the mixer
+   * and every action -- which is a reload, not a smile.
+   */
+  const greetRef = useRef<{ startAt: number; endAt: number; played: boolean } | null>(null)
+  const chatOpen = useChatModeStore((s) => s.chatView === 'chat')
+  useEffect(() => {
+    // Only on the way in. Closing the conversation is a departure and the
+    // character has nothing to say about it.
+    if (!chatOpen) return
+    const [beatMin, beatMax] = greetBeat()
+    const [holdMin, holdMax] = greetHold()
+    const beat = beatMin + Math.random() * (beatMax - beatMin)
+    const hold = holdMin + Math.random() * (holdMax - holdMin)
+    const startAt = performance.now() + beat * 1000
+    greetRef.current = { startAt, endAt: startAt + hold * 1000, played: false }
+  }, [chatOpen])
 
   useEffect(() => {
     const mount = mountRef.current
@@ -1435,8 +1513,34 @@ export default function RobotAvatar({ px = 320, src = '/avatars/zaram-robo.glb' 
 
       // Run the idle expression before the eyes, because both halves of the
       // face wear it and the eyes are drawn first.
+      // The greeting, before anything else looks at the face. Confined to
+      // `idle`: if a reply is already streaming the state owns the face, and an
+      // expression over it would be the character editorialising about the work.
+      let greeting = false
+      const greet = greetRef.current
+      if (greet) {
+        const now = performance.now()
+        if (now >= greet.endAt) {
+          greetRef.current = null
+        } else if (now >= greet.startAt) {
+          greeting = s === 'idle'
+          if (greeting && !greet.played) {
+            // A fresh idle from the shuffle bag, so the greeting arrives on a
+            // posture the character was not already holding.
+            greet.played = true
+            playFor('idle', GREET_FADE_SECONDS)
+          }
+        }
+      }
+
       let smiling = false
-      if (s === 'swapping') {
+      if (greeting) {
+        smiling = true
+        // Hold the idle schedule off while the greeting owns the face, so a
+        // scheduled smile cannot arrive on its heels and read as a twitch.
+        idleSmiling = false
+        idlePhaseLeft = pick(neutralMin, neutralMax)
+      } else if (s === 'swapping') {
         // **The one state that smiles on purpose rather than on a timer.**
         // Swapping is the only transition the user is made to wait through, and
         // the body is borrowing an idle clip for it, so without this the face
