@@ -149,17 +149,61 @@ export default function Landing({ onNavigate, onOrbTap }: LandingProps) {
    * Width is checked too — a wide-but-short window and a narrow-but-tall one
    * fail differently and both fail.
    */
-  const CAPTION_BLOCK = 76
+  /**
+   * Reserved above and below, and they are **not the same number** -- which is
+   * the whole reason the first version of this shrank too far.
+   *
+   * A centred ring pays twice for every pixel reserved, so a symmetric reserve
+   * spends the top margin on a caption that only exists at the bottom. The
+   * first fix reserved 104px each side and took the ring from 826px to 592px
+   * on an 800px window: correct, and much smaller than it needed to be.
+   *
+   * Measured on the running app, 10 September: the caption line is **24px**
+   * tall with 14px beneath it. `BOTTOM` allows two of those lines, because the
+   * slot carries the locality label -- "Local only", "Local . can send",
+   * "Cloud enabled" -- as well as the hint, and a reserve that fits one line
+   * collides the moment the second appears. `TOP` is margin only; nothing
+   * lives up there but the mark in the corner.
+   */
+  const TOP_RESERVE = 20
+  const BOTTOM_RESERVE = 96
   const RING_GAP = 28
+  const CAPTION_BLOCK = 76
   const DESIGN_DIAMETER = ORBIT_RADIUS * 2 + 110
+
+  /**
+   * The scale the orbital system **fits in**, not the one it was designed at.
+   *
+   * `CONTAINER_SCALE` is 1.4 and was applied unconditionally -- and a second,
+   * hardcoded `scale(1.4)` sat on the wrapper below, the "two formulae for one
+   * position" that `LandingHint` warns about in its own docstring. At 1.4 the
+   * outer ring is 826px across, so on any window under about 1030px tall it
+   * does not fit and the caption below it has nowhere to go.
+   *
+   * `captionTop`'s comment records the previous attempt: it moved the *caption*
+   * down as far as it would go and concluded that "on a 900px window the ring
+   * alone is 826px and there is genuinely nowhere below it". True, and the
+   * wrong thing to accept -- the caption was made to yield to a ring that had
+   * no business being that size on that screen. Now the ring yields, and
+   * because the reserve is asymmetric it barely has to: 794px at 910px tall
+   * against the 826px it was drawn at.
+   */
+  const availableHeight = viewportHeight - TOP_RESERVE - BOTTOM_RESERVE
   const fitScale = Math.max(
     0.62,
-    Math.min(
-      CONTAINER_SCALE,
-      (viewportHeight - 2 * (RING_GAP + CAPTION_BLOCK)) / DESIGN_DIAMETER,
-      viewportWidth / DESIGN_DIAMETER,
-    ),
+    Math.min(CONTAINER_SCALE, availableHeight / DESIGN_DIAMETER, viewportWidth / DESIGN_DIAMETER),
   )
+
+  /**
+   * Centred in the band it was given, not in the window.
+   *
+   * A constant `(TOP_RESERVE - BOTTOM_RESERVE) / 2`, which is the only honest
+   * consequence of reserving different amounts at each end. Without it the ring
+   * would be sized for the band and then drawn in the middle of the window,
+   * which puts back the collision at the bottom and wastes the room at the top.
+   */
+  const orbitOffsetY = (TOP_RESERVE - BOTTOM_RESERVE) / 2
+
   const { shiftX, zoom } = orbGeometry({
     viewportWidth,
     chatFraction,
@@ -229,7 +273,7 @@ export default function Landing({ onNavigate, onOrbTap }: LandingProps) {
    */
   const ringBottomFromCentre = (ring2Size / 2) * fitScale
   const captionTop = Math.min(
-    viewportHeight / 2 + ringBottomFromCentre + 28,
+    viewportHeight / 2 + orbitOffsetY + ringBottomFromCentre + RING_GAP,
     // Never off the bottom. Two lines of note plus its own breathing room.
     viewportHeight - CAPTION_BLOCK,
   )
@@ -295,7 +339,10 @@ export default function Landing({ onNavigate, onOrbTap }: LandingProps) {
         className="relative w-full h-full flex items-center justify-center"
         // One value, computed above. The literal that used to sit here
         // disagreed with `CONTAINER_SCALE` the moment either changed.
-        style={{ transform: `scale(${fitScale})`, transformOrigin: 'center center' }}
+        style={{
+          transform: `translateY(${orbitOffsetY}px) scale(${fitScale})`,
+          transformOrigin: 'center center',
+        }}
       >
         {/* Orbit track rings — dissolve / restore (centering via framer offset, never inline transform). */}
         <motion.div
