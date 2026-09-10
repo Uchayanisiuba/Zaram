@@ -1191,6 +1191,36 @@ spent rebuilding the former is an hour not spent on the latter.
   explain is how a broken instrument survives, exactly as a stable count nobody
   reads is how a real regression hides.
 
+## Publishing: one name, one account
+
+**Everything about Zaram that reaches GitHub is published by the maintainer,
+under the maintainer's own name and account.** `Anisiuba Uche`, the account
+`Uchayanisiuba`, the repository `Uchayanisiuba/Zaram`. That covers commits,
+branches, pushes, pull requests, releases, issues and comments — there is no
+category of publication that goes out under anything else.
+
+**A session or an agent is never a second publisher.** Claude may write code,
+stage it and compose a commit, and it appears where a contributor belongs: as a
+`Co-Authored-By:` trailer. Co-author, not author. The commit's author is the
+maintainer, the push is the maintainer's, and the PR is opened from the
+maintainer's account. The trailer and this rule are not in tension — one records
+who helped, the other records who published.
+
+**A session that cannot authenticate as the maintainer stops and hands over.**
+It does not look for another route, does not read a stored credential, does not
+open a PR from some other identity, and does not ask for a password or a token
+to be pasted to it. It pushes the branch if git's own credential helper allows
+it — which never puts a secret in front of the session — says exactly what is
+left to do, and leaves the publishing step to the person whose name is on it.
+This is not caution for its own sake: the thing being published argues that
+people should own their own data, and a repository whose history is signed by
+somebody else's tooling makes that argument badly.
+
+**The corollary for anything Zaram itself publishes later** — a pack, an avatar,
+an artifact shared outward — is the same rule seen from the product side, and
+rule 5 already covers it: nothing leaves without an explicit, per-item decision
+by the person it belongs to. Attribution is that decision applied to authorship.
+
 ## Patterns worth borrowing (not adopting)
 
 - **Session / memory split** — two stores, not one. See rule 7d.

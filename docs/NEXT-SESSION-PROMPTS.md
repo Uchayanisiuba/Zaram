@@ -1746,6 +1746,19 @@ from the description.
   measures nothing, because the document timeline only advances on paint.
   Screenshots separated by a wait are the honest instrument.
 
+### Publishing
+
+**Everything that reaches GitHub goes out in the maintainer's name, from the
+maintainer's account** — `Anisiuba Uche`, `Uchayanisiuba/Zaram`. Commits,
+branches, pushes, PRs, releases, issues. Claude appears as a `Co-Authored-By:`
+trailer and nowhere else: co-author, not author, and never a second publisher.
+
+A session that cannot authenticate as the maintainer **stops and hands over**.
+It does not hunt for another route, read a stored credential, or ask for a token
+to be pasted to it. Push the branch if git's own helper allows it, say what is
+left, and leave the publishing step to the person whose name is on it.
+`CLAUDE.md` carries the full rule under *"Publishing: one name, one account"*.
+
 ### The gate
 
 ```
