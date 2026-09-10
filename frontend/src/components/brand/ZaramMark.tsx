@@ -13,9 +13,18 @@
  * is the way *into* the conversation, the mark is the way *back to the start*.
  * A logo that opened chat would make the orb's one job ambiguous.
  *
- * **It is absent on the landing**, because `TopNav` is. The landing is already
- * the brand moment — the orb is the largest thing on screen — and a second mark
- * in the corner would compete with it for the same meaning.
+ * **It was absent on the landing, and is not any more — corrected 10 September
+ * 2026.** The reasoning here was that the landing is already the brand moment,
+ * the orb being the largest thing on screen, so a second mark would compete for
+ * the same meaning. A mark was added there later anyway, and the two never met:
+ * the landing drew a *bare glyph in a tile it built itself* while this rendered
+ * the icon with the tile baked into the asset. Two silhouettes for one identity
+ * — the exact failure the note below about the taskbar argues against.
+ *
+ * The landing now uses this component. It renders as a **button only while the
+ * conversation is open**, since `onHome` closes the chat and returns to the
+ * landing at rest, and with the chat already closed that is where you are — a
+ * button there would be a control that does nothing.
  *
  * ## The asset
  *

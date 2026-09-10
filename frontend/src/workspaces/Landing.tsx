@@ -3,6 +3,7 @@ import { motion } from 'framer-motion'
 import { Brain, BookOpen, FileText, Layers, Settings, ShieldCheck } from 'lucide-react'
 import { ORB_BEHAVIOUR } from '../components/orb/LivingOrb'
 import Embodiment from '@/components/embodiment/Embodiment'
+import ZaramMark, { MARK_SRC } from '@/components/brand/ZaramMark'
 import OrbStatusLabel from '../components/orb/OrbStatusLabel'
 import OrbHint from '../components/orb/OrbHint'
 import OrbAura from '../components/orb/OrbAura'
@@ -316,56 +317,49 @@ export default function Landing({ onNavigate, onOrbTap }: LandingProps) {
           It also gives the landing somewhere to put the locality line, which
           at rest currently reports nowhere. */}
       <div
-        className="absolute left-8 top-7 z-20 pointer-events-none select-none"
-        style={{ opacity: panelsOpen ? 0.25 : 0.55, transition: 'opacity 0.35s ease' }}
-        aria-hidden
+        className="absolute left-8 top-7 z-20 select-none"
+        style={{
+          opacity: panelsOpen ? 0.25 : 0.8,
+          transition: 'opacity 0.35s ease',
+          // A control only while there is somewhere for it to go. See below.
+          pointerEvents: chat ? 'auto' : 'none',
+        }}
         data-testid="landing-mark"
       >
-        {/* The mark sits on a tile, 10 September.
+        {/* One mark, one asset, 10 September.
          *
-         * Same surface language as the six nav chips — `rounded-2xl`, glass,
-         * `blur(10px)`, the same drop shadow — because a second visual idiom
-         * on a surface this sparse reads as an accident. **Quieter than they
-         * are, deliberately**: no coloured glow and no hover, because this is
-         * identity rather than a target and it is already `pointer-events-none`
-         * and `aria-hidden`. A tile that looked exactly like a nav chip would
-         * invite a click that goes nowhere.
+         * This was a bare `zaram-mark.svg` in a CSS tile built here, while
+         * `TopNav` rendered `ZaramMark` — the icon **on its rounded ground**,
+         * with the tile baked into the asset. Two silhouettes for one identity,
+         * and the component's own docstring already argues against exactly
+         * that: this corner is the same object the user clicked on their
+         * desktop and sees in the taskbar, and *"making it a different
+         * silhouette in the third place they meet it is how a mark stops being
+         * recognised"*. So the tile drawn here is gone and the shared component
+         * is used instead.
          *
-         * Indigo, and the choice is not aesthetic. `docs/UI-SPEC.md` assigns
-         * violet to **cloud**, so a violet tile would put "your data left the
-         * device" in the corner of a resting screen — the 15 August face-colour
-         * argument in `CLAUDE.md`, which lands on indigo for the same reason:
-         * it is the implementation's own accent and it is nobody's state.
-         *
-         * The gradient runs from the accent to nothing rather than between two
-         * colours. Two stops of equal weight make a badge; one fading out
-         * makes a surface catching light. */}
-        <div
-          className="w-[60px] h-[60px] rounded-2xl flex items-center justify-center"
-          style={{
-            background:
-              'linear-gradient(145deg, rgba(99,102,241,0.20), rgba(255,255,255,0.03))',
-            border: '1px solid rgba(99,102,241,0.28)',
-            backdropFilter: 'blur(10px)',
-            boxShadow: '0 4px 24px rgba(0,0,0,0.3)',
-          }}
-        >
-        <img
-          src="/brand/zaram-mark.svg"
-          alt=""
-          // Doubled from 28 on 10 September. At 28 the mark was legible only
-          // as a smudge in the corner — it is the one thing on this surface
-          // saying which application you are looking at, and the landing is
-          // otherwise wordless. The opacity above still keeps it quiet.
-          width={38}
-          height={38}
-          // The asset may not exist yet — see `public/brand/README.md`. A
-          // broken image icon in the corner of the landing would be worse than
-          // no mark at all, so a failure removes it rather than showing the
-          // browser's placeholder.
-          onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
-        />
-        </div>
+         * **A button only when the chat is open**, and the bare icon otherwise.
+         * `onHome` closes the conversation and returns to the landing at rest —
+         * which, with the chat already closed, is where you are. Rendering a
+         * button there would be a control that does nothing, which this
+         * codebase keeps paying for: the lip that could open the panel and
+         * never close it, fixed the same day as this. Identical asset at an
+         * identical size either way, so nothing moves when it becomes live. */}
+        {chat ? (
+          <ZaramMark onHome={closeChat} size={56} />
+        ) : (
+          <img
+            src={MARK_SRC}
+            alt=""
+            aria-hidden
+            width={56}
+            height={56}
+            style={{ display: 'block' }}
+            // The asset may be missing in a partial build. A broken-image icon
+            // in the corner of the landing is worse than no mark at all.
+            onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
+          />
+        )}
       </div>
 
       {/* Orbital system — keeps the same shell; only the orbital motion is gated. */}
