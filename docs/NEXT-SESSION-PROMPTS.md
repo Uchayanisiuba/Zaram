@@ -5,13 +5,13 @@
 > end of this file, and the authoritative state is the **Current state** block
 > in `docs/MILESTONES.md`.
 >
-> It opens with the one thing waiting on the maintainer rather than on a
-> session: **the Mixamo licence question**. The typing clip is built, watched
-> and standing; it is untracked because committing it is the thing the licence
-> restricts.
+> **The typing clip is done and shipped** — re-exported from `Robot_All_01`,
+> standing, and the waist-exclusion workaround it needed while the source was a
+> sitting Mixamo file was deleted with it.
 >
 > Three earlier prompts still hold something. The **8 September** one is the
-> brief for that clip and still carries the reasoning behind the waist split. The **7 September, evening** one is
+> brief for that clip, and its reasoning about the waist split is now history
+> rather than instruction. The **7 September, evening** one is
 > the TabbyAPI migration, which is now one server restart from its first real
 > answer. The **6 September (later)** one is the code pack, and its tasks 2 and
 > 3 are still open. Everything else is an earlier brief: accurate about what was
@@ -1684,53 +1684,61 @@ six can be looked at without a backend.
 
 ---
 
-### The decision, taken 10 September 2026
+### The typing clip is done — 10 September 2026
 
-**Mixamo's terms restrict redistributing animation files**, and committing
-`Typing.fbx` — or the `coding_a.glb` retargeted from it — puts one in the
-repository and in the installer. The maintainer's answer is to **re-export the
-motion from `Robot_All_01` in Maya**, as the Listening pair already was. Then it
-is their own asset and the question is gone.
+**Closed, not carried.** The maintainer re-exported the motion from
+`Robot_All_01` in Maya (`Typing_01.fbx`, standing, joints only), so Mixamo's
+redistribution terms no longer apply and `coding_a.glb` ships. `coding` has a
+body clip; only `swapping` is still without one, deliberately.
 
-**That is a Maya job and nothing in the code waits on it.** `HELD_AT_REST` is
-keyed by clip name rather than by rig, and the agreement check asks which joints
-a source names rather than which namespace it carries, so a re-export saved over
-`avatar-source/animations/Typing.fbx` drops straight in. Saved under another
-name, the `CLIPS` entry in `retarget_animations.py` is the one line to edit.
+The per-clip waist-exclusion table that made the sitting Mixamo source stand was
+deleted with it. It was a retarget-time workaround for a problem fixed at the
+source, and the rebuilt clip is byte-identical without it. If a third-party clip
+ever needs that facility, take it out of the history rather than rebuilding it
+from the description.
 
-When the re-export lands, three steps finish it:
-
-```
-blender --background --python avatar-source/retarget_animations.py -- coding_a
-node frontend/scripts/check-rig-agreement.mjs
-```
-
-then add `{ "file": "coding_a.glb", "state": "coding", "role": "loop" }` to
-`frontend/public/avatars/animations/animations.json`, and drop `coding` from the
-expectation in `animationSet.test.ts` that names the states without clips.
-**Watch it before believing it** — `?orb=coding&headFraction=0.2` on the dev
-server, and the character should stand with its torso vertical while its arms
-move. That is the check the gaze-tracking removal was the price of skipping.
-
-Until then `coding` falls back to `thinking`, which is watched: nine clips load
-and none fail.
+**Nothing here is open.** The rest of this list is.
 
 ---
 
 ### What is still open, in the order it was left
 
+* **Keep one Ollama chat model installed**, whatever happens to the rest. The
+  10 September bug was an *Ollama* bug — eviction — and TabbyAPI structurally
+  cannot have it. First run recommends five Ollama tags and names no other
+  engine, so moving off Ollama entirely means nobody is exercising the path
+  every new user lands on.
 * **TabbyAPI has still not been restarted.** `vision: true` and
   `vision_offload: true` are set in `C:\Users\user\tabbyAPI\config.yml`
   (backup `config.yml.bak-20260907`) and unproven. Confirm `use_vision` on
   `/v1/model`, send it a real image, and only then delete `gemma4-26b-32k`
   (17.99 GB).
-* **The memory fix has never run in a real conversation.** It is measured by
-  tests against a pinned window. One long chat on the Tabby model settles it —
-  the engine logs `gave the reply N prior turn(s), M dropped for a K-token share
-  of a measured 65536-token window`.
+* ~~The memory fix has never run in a real conversation.~~ **Done, and it was
+  incomplete.** See the 10 September entry in `docs/MILESTONES.md`: the budget
+  was measured only from `/api/ps`, which goes silent when Ollama evicts an idle
+  model, so the conversation's share collapsed back to the same 768 tokens the
+  8 September commit was written to delete. Fixed by reading the model's
+  configured `num_ctx` from `/api/show`, and verified in a real chat with the
+  model force-evicted between turns.
+
+  **What is left is a judgement, not a bug.** `CONVERSATION_SHARE = 0.25` gives
+  the 14B ~9,200 characters of history — three or four code exchanges — and
+  nobody has tested that against real use. Turn it only with a transcript to
+  point at.
 * **The chat project picker cannot create a project.**
 * **Does a generated image ever leave VRAM?** Still unconfirmed, still the most
   serious open item anywhere in this file.
+* **First run dead-ends a stranger with no engine, and the place is known.**
+  `readiness.py` builds an `INSTALL_ENGINE` offer — *"Set up a local model"*,
+  with `ENGINE_BYTES + model size` quoted as one number — but
+  `canBeCarriedOut` in `FirstRunPanel.tsx` permits only `explore`,
+  `use_cloud_key` and `pull_model`, so the card renders disabled under *"Zaram
+  can't set this up for you yet."* The word **Ollama appears nowhere in the
+  first-run UI** and there is no link. It is scrupulously honest and it names no
+  next step, which is `CLAUDE.md`'s "a stranger cannot install this" with a
+  file and a line number. The cheap fix is wording on the disabled card; the
+  real one is letting the button run the installer, which is mutative and
+  egressive and wants consent plus an egress entry. Read, not changed.
 * **Four particle states have still not been *watched* moving**, only reasoned
   about. `?orb=thinking`, `?orb=listening`, `?orb=speaking` and `?orb=swapping`
   on the dev server put each one on screen. Note the instrument warning in

@@ -15,6 +15,81 @@ accurate — it is the first thing anyone reads.
 
 *The latest work is first. Earlier sessions follow below.*
 
+### 10 September — the memory ceiling, found again by a different route
+
+**The maintainer reported the 8 September symptom a second time**, in its
+sharpest form: *"generate code with a slight error, then ask it to fix the
+error, and it doesn't seem to follow the conversation."* The 8 September fix was
+not wrong; it was incomplete, and the way it was incomplete is worth keeping.
+
+That fix replaced a hardcoded ceiling with a **measured** one — and the
+measurement came only from Ollama's `/api/ps`, which lists what is **resident**.
+Ollama evicts an idle model after a few minutes. That is precisely the gap a
+user spends reading an answer and finding the error in it, so between two turns
+the same model measured 16,384 tokens and then 4,096. Measured 10 September on
+the installed set:
+
+| | idle | resident |
+|---|---|---|
+| `qwen3-14b-16k` | 4,096 | 16,384 |
+| `gemma4-26b-32k` | 4,096 | 32,768 |
+| `qwen3-coder-30b-32k` | 4,096 | 32,768 |
+
+The conversation's quarter-share of 4,096 is **768 tokens — the exact number
+the 8 September commit was written to delete**, arriving by a route that commit
+did not close. A 120-line code answer costs 1,477 tokens, so `fit` kept **zero
+of two turns** and the follow-up was answered by a model shown none of the code
+it was being asked to fix. That is why it failed *specifically on code*: short
+chat fits in 2,300 characters and a code block does not.
+
+**The fix is a second reading, not a bigger fallback.** `configured_context_length`
+asks `/api/show` for the model's own `num_ctx` — what it *will* load with —
+which answers for an idle model because it reads configuration rather than a
+process. `parameters`, **never** `model_info`: the latter reports the
+architecture maximum (40,960 for a model that loads with 16,384; 262,144 for one
+that loads with 4,096) and is the exact trap this module's docstring was written
+about. A model with no explicit `num_ctx` still reads `None`, which is correct
+rather than a gap — Ollama serves it the 4,096 default.
+
+`ContextBudget` now carries `source` — `loaded` / `configured` / `server` /
+`assumed` — and both engine log lines name it. "Measured" hid the thing that
+mattered: a budget that *was* measured and is now assumed because the model was
+evicted is the same boolean on Tuesday and Thursday.
+
+**Verified in a real conversation, which had never been done.** With Unreal
+closed, against a scratch `ZARAM_DATA_DIR`: turn one produced a 4,369-character
+class, the model was then **force-evicted** (`keep_alive: 0`, `/api/ps` empty),
+and the follow-up named the method and the line — `adjust_quantity`,
+`item["quantity"] = new_quantity`. At the old cap `fit` would have kept nothing.
+
+A first attempt at that proof used a *short* code answer and would have passed
+before the fix too; the 60-line sample in the test costs 743 tokens and fits 768
+by twenty-five. Both were caught by measuring instead of estimating, and the
+test records the near-miss so the sample is never trimmed back.
+
+**The change put a hole in two test helpers, and one of them passed anyway.**
+Every stub in this codebase patches `requests.get`; `/api/show` is a POST, so it
+escaped. `test_a_second_server_reports_its_window` started answering 16,384
+because it reached the *real* Ollama; `test_context_budget`'s `_unreachable`
+helper did too and still passed, purely because `gemma4:12b` is not installed
+here and the 404 gave the answer the test wanted. A test that is right for a
+reason outside its own file is one `ollama pull` away from being wrong. Both
+helpers now stub both verbs.
+
+**Still open, and it is a judgement rather than a bug:** `CONVERSATION_SHARE`
+is 0.25, which on the 14B is ~9,200 characters — three or four code exchanges.
+Nobody has tested that against real use. It is the next constant to turn if the
+symptom returns, and TabbyAPI's 65,536-token window (12,288 tokens of history)
+is the other half of the answer.
+
+**A note on dogfooding, because it changes what may be deleted.** This was an
+*Ollama* bug: eviction is the cause, and TabbyAPI holds its model resident and
+never had it. Moving off Ollama entirely would mean the maintainer stops
+exercising the path most users will be on — first run recommends five Ollama
+tags and names no other engine. **Keep one Ollama chat model installed** even if
+Tabby becomes the daily driver; `gemma4-26b-32k` and `qwen3-coder-30b-32k` are
+still fair to delete once vision and the coding head-to-head are settled.
+
 ### 8 September, later — the typing clip, and the orb standing down
 
 **The character types, and it types standing up.** `avatar-source/Typing.fbx`
@@ -101,36 +176,32 @@ the entry already says the cause was never established, and the fix stands on
 its own reasoning — whether a control can be *seen* must not be the output of an
 animation.
 
-#### The licence stop, and the route the maintainer took
+#### The licence answer, and the workaround it deleted
 
-**Decided 10 September 2026: re-export the motion from `Robot_All_01` in
-Maya**, as the Listening pair already was. Then the clip is the maintainer's own
-asset and Mixamo's redistribution terms stop applying to it.
+**The maintainer re-exported the motion from `Robot_All_01` in Maya**, as the
+Listening pair already was — `Typing_01.fbx`, the character standing and typing,
+joints only, 65 nodes on its own rig and 4.1 MB against the Mixamo file's 55 MB.
+So the clip is their asset, Mixamo's redistribution terms stop applying, and
+`coding_a.glb` and its manifest entry are committed.
 
-**Nothing in the pipeline waits on that.** `HELD_AT_REST` is keyed by clip name
-rather than by rig, and the agreement check asks which joints a source names
-rather than which namespace it carries — so a Maya re-export saved over
-`avatar-source/animations/Typing.fbx` drops straight in and needs no code
-change. Saved under a different name, the `CLIPS` entry is the one line to edit.
+**The waist-exclusion facility was deleted the same hour, and the deletion is
+the part worth recording.** It existed for one reason: the Mixamo source was
+*sitting*, so the clip drove 54 upper-body joints while the 11 below the waist
+were keyed at rest. It worked, it was watched, and it was a retarget-time
+workaround for a problem that belonged in Maya — which is where it was then
+fixed. Keeping it would have left a per-clip table with nothing in it feeding a
+branch nothing runs, which is this repository's most-recorded shape wearing the
+one costume that looks like foresight. The history has it if a third-party clip
+ever needs it back.
 
-Three edits land it after that: build the clip, add the manifest line, and
-change the expectation in `animationSet.test.ts` that names `coding` as a state
-without one.
+The simplification is proved rather than assumed: the rebuilt `coding_a.glb` is
+**byte-identical** to the one the parameterised path produced, 1,582,880 bytes.
 
-
-
-`Typing.fbx` and the `coding_a.glb` built from it are **untracked and not
-committed**. Mixamo's terms restrict redistributing animation files, which is
-what committing one here and shipping it in the installer would be. The
-manifest entry is out too, so `coding` falls back to `thinking` — watched, with
-nine clips loading and none failing. `animationSet.test.ts` asserts `coding` and
-`swapping` as the states without clips and names the reason.
-
-Re-wire it locally in two steps: build with
-`blender --background --python avatar-source/retarget_animations.py -- coding_a`,
-then add `{ "file": "coding_a.glb", "state": "coding", "role": "loop" }` to
-`frontend/public/avatars/animations/animations.json`. Committing it is one more
-line in the test.
+Measured on the shipped clip: 65 bones, 495 frames, 16.5 s; 65 rotation channels
+and no translation or scale; `check-rig-agreement.mjs` agrees at worst 0.04deg.
+Watched at `?orb=coding&headFraction=0.2` — standing, upright, hands moving,
+base at a constant height, and the head dipping to the keyboard now that the
+hips are driven again.
 
 ### 8 September — the memory ceiling, and the avatar's aura
 
