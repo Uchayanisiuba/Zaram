@@ -461,3 +461,65 @@ textarea:focus-visible,
 select:focus-visible {
   outline-offset: 0;
 }
+
+
+/* ---------------------------------------------------------------------------
+ * Syntax highlighting for fenced code in a reply.
+ *
+ * highlight.js ships its own themes and none of them is used here. They carry
+ * fixed hex colours chosen against somebody else's background, so they fight
+ * this surface — and several of them lean on purple for keywords, which on
+ * this product is not an aesthetic choice: `docs/UI-SPEC.md` assigns
+ * `--color-violet` to **cloud**, and colouring every `def` and `import` with
+ * it would quietly say a request left the machine. Violet appears nowhere
+ * below, deliberately.
+ *
+ * Everything here is one of the tokens already defined above, so a theme
+ * change moves the code with it instead of leaving it behind.
+ * ------------------------------------------------------------------------ */
+.zaram-md .hljs {
+  color: var(--color-text);
+  background: transparent;
+}
+.zaram-md .hljs-comment,
+.zaram-md .hljs-quote {
+  color: var(--color-text-secondary);
+  font-style: italic;
+}
+.zaram-md .hljs-keyword,
+.zaram-md .hljs-selector-tag,
+.zaram-md .hljs-meta-keyword,
+.zaram-md .hljs-doctag {
+  color: var(--color-indigo-light);
+}
+.zaram-md .hljs-string,
+.zaram-md .hljs-regexp,
+.zaram-md .hljs-addition {
+  color: var(--color-emerald);
+}
+.zaram-md .hljs-number,
+.zaram-md .hljs-literal,
+.zaram-md .hljs-symbol {
+  color: var(--color-amber);
+}
+.zaram-md .hljs-title,
+.zaram-md .hljs-title.function_,
+.zaram-md .hljs-section {
+  color: var(--color-cyan-light);
+}
+.zaram-md .hljs-built_in,
+.zaram-md .hljs-type,
+.zaram-md .hljs-class .hljs-title {
+  color: var(--color-cyan);
+}
+.zaram-md .hljs-attr,
+.zaram-md .hljs-attribute,
+.zaram-md .hljs-property,
+.zaram-md .hljs-variable {
+  color: var(--color-indigo);
+}
+.zaram-md .hljs-deletion {
+  color: var(--color-red);
+}
+.zaram-md .hljs-emphasis { font-style: italic; }
+.zaram-md .hljs-strong { font-weight: 600; }

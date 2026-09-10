@@ -105,6 +105,43 @@ describe('a reply rendered as the markdown it already is', () => {
     expect(container.textContent).toContain('https://example.com/page');
   });
 
+  it('highlights a fence that names its language', () => {
+    const { container } = render(
+      <MessageBody
+        text={['```python', 'def f():', '    return "x"', '```'].join('\n')}
+      />,
+    );
+
+    expect(container.querySelector('.hljs-keyword')?.textContent).toBe('def');
+    expect(container.querySelector('.hljs-string')).not.toBeNull();
+  });
+
+  /**
+   * `detect: false` is a decision rather than a default.
+   *
+   * With detection on, highlight.js guesses at every unlabelled fence, and a
+   * wrong guess colours words as keywords that are not keywords — a confident
+   * wrong answer rendered into the interface, which the UI principles rule out
+   * for status indicators and which is no better here.
+   */
+  it('leaves an unlabelled fence unguessed', () => {
+    const { container } = render(
+      <MessageBody text={['```', 'def f(): return 1', '```'].join('\n')} />,
+    );
+
+    expect(container.querySelector('pre')).not.toBeNull();
+    expect(container.querySelector('.hljs-keyword')).toBeNull();
+    expect(container.textContent).toContain('def f(): return 1');
+  });
+
+  it('renders a fence in a language nobody registered rather than throwing', () => {
+    const { container } = render(
+      <MessageBody text={['```notalanguage', 'some text', '```'].join('\n')} />,
+    );
+
+    expect(container.querySelector('pre')?.textContent).toContain('some text');
+  });
+
   it('leaves an ordinary reply looking ordinary', () => {
     const { container } = render(
       <MessageBody text={'Routed to qwen3 — a coding question.'} />,

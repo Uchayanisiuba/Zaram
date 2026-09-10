@@ -1,5 +1,6 @@
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import rehypeHighlight from 'rehype-highlight';
 import type { ReactNode } from 'react';
 
 /**
@@ -50,6 +51,19 @@ export default function MessageBody({ text }: { text: string }) {
     <div className="zaram-md text-sm leading-relaxed">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
+        /**
+         * `detect: false` is the decision, not the default talking.
+         *
+         * Left on, highlight.js guesses a language for every unlabelled fence
+         * — and a wrong guess is not neutral: it colours words as keywords
+         * that are not keywords, which is a confident wrong answer rendered
+         * in the interface. An unlabelled block stays plain, which is honest
+         * and is what the writer asked for by not naming a language.
+         *
+         * `ignoreMissing` so a fence tagged with a language nobody registered
+         * renders as plain code instead of throwing inside a reply.
+         */
+        rehypePlugins={[[rehypeHighlight, { detect: false, ignoreMissing: true }]]}
         components={{
           /**
            * A link is text here, not a control.
