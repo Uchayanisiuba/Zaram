@@ -14,8 +14,20 @@ import {
   type AnimationManifest,
 } from './animationSet'
 import type { EmbodimentState } from '@/hooks/useEmbodimentState'
+import { ORB_STATES } from '@/stores/orbStore'
 
-const ALL: EmbodimentState[] = ['idle', 'thinking', 'listening', 'speaking', 'swapping']
+/**
+ * Every state the embodiment has, taken from the store rather than listed here.
+ *
+ * **It was listed here, and it drifted.** `coding` was added to `OrbState` on
+ * 7 September and never reached this literal, so the assertion below — that no
+ * clip is filed under a state the embodiment does not have — would have
+ * rejected a perfectly valid `coding` clip while reading as a manifest error.
+ * A test carrying a private copy of a vocabulary is the same defect
+ * `useEmbodimentState` documents for renderers, and it fails in the more
+ * expensive direction: the product is right and the test says otherwise.
+ */
+const ALL: EmbodimentState[] = [...ORB_STATES]
 
 describe('ShuffleBag', () => {
   it('exhausts the set before repeating anything', () => {
@@ -90,7 +102,8 @@ describe('clipsByState / statesWithoutClips', () => {
   })
 
   it('names the states with no clip at all', () => {
-    expect(statesWithoutClips(manifest, ALL).sort()).toEqual(['listening', 'speaking', 'swapping'])
+    expect(statesWithoutClips(manifest, ALL).sort())
+      .toEqual(['coding', 'listening', 'speaking', 'swapping'])
   })
 })
 
@@ -138,6 +151,17 @@ describe('the shipped animation manifest', () => {
     // rather than the bug: a retarget can satisfy every number available to it
     // and still be measured from the wrong frame, and only looking says so. The
     // rest stay out of the manifest until their source is re-exported too.
-    expect(statesWithoutClips(manifest, ALL).sort()).toEqual(['swapping'])
+    // **`coding` is here for a licence reason rather than an export one, and
+    // that is worth telling apart from `swapping` above.** The clip exists —
+    // `retarget_animations.py` builds `coding_a.glb` from `Typing.fbx`, 54
+    // upper-body joints driven and the 11 below the waist held at rest so the
+    // character stands while it types. `Typing.fbx` is a Mixamo export, and
+    // Mixamo's terms restrict redistributing animation files, which is what
+    // committing it and shipping it in the installer would be. So the asset is
+    // built locally and neither it nor its manifest entry is in the
+    // repository, and `coding` falls back to `thinking` at runtime.
+    //
+    // When that is settled, this line and the manifest change together.
+    expect(statesWithoutClips(manifest, ALL).sort()).toEqual(['coding', 'swapping'])
   })
 })

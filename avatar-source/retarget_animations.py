@@ -44,6 +44,7 @@ importer re-orients bones on the way in, so a Blender-side comparison answers a
 different question and answers it wrongly.
 """
 
+import json
 import math
 import os
 import re
@@ -72,21 +73,36 @@ CLIPS = [
     ("Talk_2.fbx", "speaking_b"),
     ("Talk_3.fbx", "speaking_c"),
     ("Thinking.fbx", "thinking_a"),
+    # **Not in the repository.** `Typing.fbx` is a Mixamo clip, and Mixamo's
+    # terms restrict redistributing animation files -- which is what committing
+    # one here and shipping it in the installer would be. It is generated
+    # locally and the entry stays, because a missing source prints MISSING and
+    # the run continues. See `docs/NEXT-SESSION-PROMPTS.md` for the three routes
+    # out; until one is taken, `coding` falls back to `thinking` at runtime.
+    ("Typing.fbx", "coding_a"),
 ]
 
 
-def on_character_rig(path):
-    """True if this FBX was exported from `Robot_All_01`, read from the file.
+# Joints a clip may **not** drive, per clip. Absent means all 65.
+#
+# `Typing.fbx` is a *sitting* animation and the character should stand while it
+# types, so the clip drives the 54 upper-body joints and the 11 below the waist
+# stay at the character's rest pose. **`Hips` is the one that matters.** It is
+# the root, and a sitting clip carries the sit in it -- lowered and rotated
+# back -- so excluding it is what makes the character stand; excluding the legs
+# and keeping the root would leave a standing character sitting on nothing.
+#
+# Written as the 11 to exclude rather than the 54 to allow because eleven names
+# can be read and checked and fifty-four cannot, and a typo in a long list is
+# the silent kind. `retarget` exits when a name here matches no bone on the
+# character, which is the guard that makes the short form safe.
+LOWER_BODY = (
+    "Hips",
+    "LeftUpLeg", "LeftLeg", "LeftFoot", "LeftToeBase", "LeftToe_End",
+    "RightUpLeg", "RightLeg", "RightFoot", "RightToeBase", "RightToe_End",
+)
 
-    The re-export happens one clip at a time in Maya, so the directory holds a
-    mixture. Checked before Blender is asked to do anything, because an
-    Advanced Skeleton clip imports perfectly happily and matches zero bones --
-    and a clean run over zero bones reads exactly like success.
-    """
-    with open(path, "rb") as fh:
-        head = fh.read()
-    models = re.findall(b"([ -~]{2,120}?)" + bytes([0, 1]) + b"Model", head)
-    return bool(models) and b"Robot_All_01" in models[0]
+HELD_AT_REST = {"coding_a": LOWER_BODY}
 
 
 def sanitize(name):
@@ -105,6 +121,68 @@ def sanitize(name):
     zero-bones-reads-as-success failure above, reached by a second route.
     """
     return "".join(c for c in name.split(":")[-1] if c.isalnum()).lower()
+
+
+def glb_json(path):
+    """The JSON chunk of a GLB, read without Blender.
+
+    Header is magic/version/length as three uint32, then chunks of
+    length/type/data; the first chunk is always JSON per the spec. Parsed from
+    the bytes rather than after an import for the same reason
+    `check-rig-agreement.mjs` does it: Blender's glTF importer re-orients bones
+    on the way in, so what it reports is the rig Blender chose rather than the
+    one in the file -- and this check has to answer before Blender is asked to
+    do anything.
+    """
+    with open(path, "rb") as fh:
+        header = fh.read(20)
+        if header[:4] != b"glTF":
+            sys.exit("%s is not a GLB" % path)
+        if header[16:20] != b"JSON":
+            sys.exit("%s: first chunk is not JSON" % path)
+        return json.loads(fh.read(int.from_bytes(header[12:16], "little")).decode("utf-8"))
+
+
+def character_joints():
+    """The character's skinned joints, sanitized. 65 of them."""
+    gltf = glb_json(CHARACTER)
+    skinned = {j for skin in gltf.get("skins", []) for j in skin.get("joints", [])}
+    nodes = gltf.get("nodes", [])
+    return {sanitize(nodes[i].get("name") or ("node%d" % i)) for i in skinned}
+
+
+def joints_named_by(path):
+    """Every model node this FBX carries, sanitized.
+
+    Names sit uncompressed in the node records -- only array properties are
+    zipped -- so they can be read off the bytes. Mesh nodes come back too and
+    match nothing, which is harmless: the question below is whether the
+    character's joints are all present, not whether anything else is.
+    """
+    with open(path, "rb") as fh:
+        blob = fh.read()
+    models = re.findall(b"([ -~]{2,120}?)" + bytes([0, 1]) + b"Model", blob)
+    return {sanitize(m.decode("ascii", "ignore")) for m in models}
+
+
+def missing_joints(path, wanted):
+    """Which of the character's joints this clip does not name.
+
+    **This replaced a namespace check, and the namespace was a proxy for the
+    wrong thing.** `on_character_rig` asked whether the first model node
+    contained the literal `Robot_All_01`, which answers "was this exported from
+    the character's rig in Maya" -- a good proxy while every clip came from
+    there, and wrong for a clip authored elsewhere on the same skeleton.
+    `Typing.fbx` is a Mixamo export (`mixamorig9:Hips`) that names 65 of the
+    character's 65 joints, so the proxy said no while the real answer was yes.
+
+    The check itself stays, and its original reason is unchanged: an Advanced
+    Skeleton clip imports perfectly happily, matches zero bones, and a clean run
+    over zero bones reads exactly like success. Asking about bone agreement is
+    that check made direct rather than removed -- and it is now the same
+    question the run is about to answer, instead of a stand-in for it.
+    """
+    return wanted - joints_named_by(path)
 
 
 def armature_of(objects):
@@ -181,18 +259,37 @@ def hierarchy_order(armature):
     return out
 
 
-def retarget(target, source, clip_name):
-    """Bake source's motion onto target's rest pose, rotation only."""
+def retarget(target, source, clip_name, held=()):
+    """Bake source's motion onto target's rest pose, rotation only.
+
+    `held` names joints the clip may not drive; they stay at the character's
+    rest pose. See `LOWER_BODY`.
+    """
     action = source.animation_data.action if source.animation_data else None
     if action is None:
-        return None, 0
+        return None, 0, 0
 
     start = int(math.floor(action.frame_range[0]))
     end = int(math.ceil(action.frame_range[1]))
 
+    # A name here that matches no bone on the character would silently hold
+    # nothing, which is the failure this whole file keeps recording in another
+    # costume: a clean run over the wrong set reads exactly like success.
+    by_key = {sanitize(b.name): b.name for b in target.data.bones}
+    unmatched = [n for n in held if sanitize(n) not in by_key]
+    if unmatched:
+        sys.exit(
+            "[retarget] %s holds joints the character does not have: %s"
+            % (clip_name, ", ".join(unmatched))
+        )
+    held_keys = {sanitize(n) for n in held}
+    held_names = [by_key[k] for k in held_keys]
+
     src_bones = {sanitize(b.name): b.name for b in source.data.bones}
     pairs = []
     for bone in hierarchy_order(target):
+        if sanitize(bone.name) in held_keys:
+            continue
         name = src_bones.get(sanitize(bone.name))
         if name:
             pairs.append((bone, name))
@@ -268,7 +365,31 @@ def retarget(target, source, clip_name):
             pose_bone.scale = (1, 1, 1)
             pose_bone.keyframe_insert("rotation_quaternion", frame=frame, group=bone.name)
 
-    return baked, len(pairs)
+    # **The held joints are keyed at rest rather than left unkeyed, and the
+    # difference only shows up in a crossfade.** A track absent from a clip is
+    # not a track at rest: `AnimationMixer` leaves that node wherever the
+    # previously-playing clip left it, so entering this state out of an idle
+    # clip would freeze the hips and legs mid-sway for as long as the state
+    # lasts -- a different pose every time and none of them the rest pose the
+    # exclusion is for. Two keys hold them still and let the crossfade land
+    # them there. First and last only, because the value between two identical
+    # keys is constant and 11 bones times every frame is a bigger file saying
+    # the same thing.
+    #
+    # It is also what makes the maths above correct. A bone whose parent is
+    # held falls into the unparented branch, which puts it at `solved[bone]`
+    # outright -- and that is exactly right *because* the parent sits at rest:
+    # its pose matrix is its rest matrix, and the two cancel. Let a held joint
+    # drift and that branch quietly starts answering a different question.
+    for name in held_names:
+        pose_bone = target.pose.bones[name]
+        pose_bone.rotation_quaternion = (1, 0, 0, 0)
+        pose_bone.location = (0, 0, 0)
+        pose_bone.scale = (1, 1, 1)
+        for frame in (start, end):
+            pose_bone.keyframe_insert("rotation_quaternion", frame=frame, group=name)
+
+    return baked, len(pairs), len(held_names)
 
 
 def export(target, clip_name):
@@ -291,21 +412,34 @@ def export(target, clip_name):
 def main():
     os.makedirs(OUT, exist_ok=True)
     wrote = []
+    joints = character_joints()
 
     # `-- listening_a` rebuilds just that one, so adding a clip does not
     # re-export the ones already working.
     wanted = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
 
     for source_name, clip_name in CLIPS:
-        if wanted and clip_name not in wanted:
-            continue
         path = os.path.join(SOURCE, source_name)
         if not os.path.exists(path):
             print("[retarget] MISSING %s" % source_name)
             continue
-        if not on_character_rig(path):
-            print("[retarget] %s is still on the Advanced Skeleton rig "
-                  "-- re-export from Robot_All_01" % source_name)
+
+        # Reported for every clip, including the ones this run is not
+        # rebuilding, because it is the one number that says whether a source
+        # file can bind at all -- and it costs a file read.
+        missing = missing_joints(path, joints)
+        print(
+            "[retarget] %s names %d/%d of the character's joints"
+            % (source_name, len(joints) - len(missing), len(joints))
+        )
+        if missing:
+            print(
+                "[retarget] %s is on another rig -- %d joint(s) absent, "
+                "including %s. Re-export from Robot_All_01."
+                % (source_name, len(missing), ", ".join(sorted(missing)[:4]))
+            )
+            continue
+        if wanted and clip_name not in wanted:
             continue
 
         target = import_character()
@@ -314,7 +448,9 @@ def main():
             print("[retarget] no armature in %s" % source_name)
             continue
 
-        baked, matched = retarget(target, source, clip_name)
+        baked, matched, held = retarget(
+            target, source, clip_name, HELD_AT_REST.get(clip_name, ())
+        )
         if baked is None:
             print("[retarget] %s carries no action -- skipped" % source_name)
             continue
@@ -346,8 +482,15 @@ def main():
         size = export(target, clip_name)
         frames = int(baked.frame_range[1] - baked.frame_range[0]) + 1
         print(
-            "[retarget] %s -> %s.glb: %d bones, %d frames, %d bytes"
-            % (source_name, clip_name, matched, frames, size)
+            "[retarget] %s -> %s.glb: %d bones%s, %d frames, %d bytes"
+            % (
+                source_name,
+                clip_name,
+                matched,
+                (" (+%d held at rest)" % held) if held else "",
+                frames,
+                size,
+            )
         )
         wrote.append(clip_name)
 
