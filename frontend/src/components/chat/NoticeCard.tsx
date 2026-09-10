@@ -31,6 +31,12 @@ const DESTINATIONS: Record<string, { node: WorkspaceId; label: string }> = {
   // the switch. Search being off is the first case: telling someone their
   // answer is stale and leaving them to find the setting is half a disclosure.
   settings: { node: 'settings', label: 'Open Settings' },
+  // A contradiction between two stored facts is a question only the user can
+  // settle, and Memory is where `correct()` lives. Without this entry the
+  // notice renders the question and no way to answer it — which is the same
+  // half-disclosure as telling someone search is off and leaving them to find
+  // the switch.
+  memory: { node: 'memory', label: 'Open Memory' },
 };
 //: Typed `WorkspaceId` rather than `string`, for the reason `LeftRail` types
 //: its own map that way: a destination that is not a real node should fail to

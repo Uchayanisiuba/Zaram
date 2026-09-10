@@ -38,6 +38,7 @@ import pytest
 
 from core.contracts import Capability, RuntimeMetadata, RuntimeState
 from core.event_bus import EventBus
+from core.context_budget import CHARS_PER_TOKEN
 from core.execution_engine import ExecutionEngine
 from core.registry import RuntimeRegistry
 from core.streaming_events import StreamEvent
@@ -210,12 +211,29 @@ class TestTheFollowUpSeesTheExchange:
             ),
         )
 
-        # A share of 768 tokens against six exchanges of roughly 170 each, so
-        # a few fit and the oldest do not. Sized to fit *individually* on
-        # purpose: turns larger than the whole share make `fit` keep nothing,
-        # which is a different behaviour with its own test, and asserting it
-        # here by accident would leave this one green for the wrong reason.
-        filler = "word " * 100
+        # **Sized from the cap rather than against a remembered number.**
+        #
+        # This read `"word " * 100` — six exchanges of roughly 170 tokens
+        # against a 768-token share. When the conversation stopped taking a
+        # fixed quarter and started taking the request's remainder, the cap on
+        # this pinned window went to ~2,950 and all six fitted: the eviction
+        # this test is named for stopped happening and the assertion below
+        # would have been the only thing to notice. That is the same failure
+        # the retention test hit on 10 September, so the setup is derived now
+        # and cannot drift again.
+        #
+        # A third of the cap each, so three or four fit and the oldest do not.
+        # Individually fitting on purpose: a turn larger than the whole cap
+        # makes `fit` keep nothing, which is different behaviour with its own
+        # test, and reaching it here by accident would leave this one green for
+        # the wrong reason.
+        from core.context_budget import estimate_tokens
+
+        budget = context_budget.budget_for(LOCAL_MODEL)
+        cap = budget.input_tokens - ExecutionEngine.CONVERSATION_MARGIN
+        words = max(20, (cap // 3) * CHARS_PER_TOKEN // len("word "))
+        filler = "word " * words
+        assert estimate_tokens(filler) < cap, "one turn must still fit on its own"
         for i in range(6):
             chat.ask(f"Question number {i}. {filler}")
         chat.ask(FOLLOW_UP)
@@ -305,27 +323,48 @@ class TestItIsBounded:
         assert "xxxx" not in block
         assert "CONVERSATION SO FAR" not in block
 
-    def test_the_block_stays_inside_the_smallest_window(self, chat):
-        """The cap is a quarter of a 4,096-token model's input budget.
+    def test_the_whole_prompt_stays_inside_the_smallest_window(self, chat, monkeypatch):
+        """The invariant, asserted directly rather than through a constant.
 
-        Asserted as a number rather than a proportion because the point is the
-        machine at the bottom of the range: a model loaded with Ollama's
-        default must still have room for recall and the question. Turns long
-        enough that three pairs would overrun it, so the cap is doing work
-        rather than sitting above the traffic.
+        **This used to bound the conversation block alone, at 1,024 tokens.**
+        That number was a quarter of a 4,096-token model's window, and it was
+        standing in for the thing actually worth protecting: on the machine at
+        the bottom of the range, everything sent must still leave the model
+        room to reply. When the conversation began taking the request's
+        remainder instead of a fixed quarter the block legitimately grew past
+        1,024 — and the old assertion would have called that a regression while
+        the real invariant was never in danger.
+
+        So it asserts the real one now: system prompt plus question inside the
+        input budget, which already excludes the reply reserve. That cannot go
+        stale when a share moves, and it is strictly stronger — the old form
+        said nothing about the preamble or the recalled facts sitting above the
+        block.
+
+        The window is pinned for the reason the sibling test states: left to a
+        live `budget_for` this asserts something different on a machine with a
+        65,536-token model resident, which is a number without its conditions.
         """
+        from core import context_budget
         from core.context_budget import estimate_tokens
+
+        monkeypatch.setattr(
+            context_budget,
+            "budget_for",
+            lambda model, **kw: context_budget.ContextBudget(
+                total_tokens=4096, measured=True, reply_reserve_tokens=1024
+            ),
+        )
 
         for i in range(6):
             chat.ask(f"Question number {i}. " + "words " * 120)
         chat.ask(FOLLOW_UP)
 
         block = chat.local.last_system_prompt
-        start = block.index("=== THE CONVERSATION SO FAR ===")
+        budget = context_budget.budget_for(LOCAL_MODEL)
 
-        assert estimate_tokens(block[start:]) <= 1024
-        # And it kept something: a cap that admits nothing would also pass the
-        # assertion above.
+        assert estimate_tokens(block) + estimate_tokens(FOLLOW_UP) <= budget.input_tokens
+        # And it kept something: a cap admitting nothing would also pass above.
         assert "Question number 5." in block
 
 

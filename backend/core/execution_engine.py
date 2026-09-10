@@ -471,7 +471,7 @@ class ExecutionEngine:
             )
         else:
             system_prompt, memory_notice = self._augment_with_conversation(
-                system_prompt, session_id, model
+                system_prompt, session_id, model, question=prompt
             )
             # **Forgetting is said out loud.** The task loop already tells the
             # user when it drops the earliest tool results; the conversation
@@ -791,7 +791,19 @@ class ExecutionEngine:
 
         # --- Remember: commit what the user told us to the Spine. ---
         answer = step_results.get("reasoning.generate", "")
-        self._remember(prompt, answer, session_id, recalled, project_id)
+        conflicts = self._remember(prompt, answer, session_id, recalled, project_id)
+        # **Asked, never decided.** The detector composes the question; the
+        # user answers it in Memory, where `correct()` already knows how to
+        # write a replacement and strike the original through. One notice for
+        # the first conflict rather than one per conflict: a reply that ends in
+        # a stack of questions is a reply nobody finishes reading.
+        if conflicts:
+            first = conflicts[0]
+            yield StreamEvent.notice(
+                getattr(first, "question", "") or "That contradicts something stored.",
+                kind="memory",
+                action="memory",
+            )
         # Ephemeral, and separate from the Spine write above. This is what a
         # later "write that up" resolves against.
         self._record_exchange(session_id, prompt, answer)
@@ -882,14 +894,36 @@ class ExecutionEngine:
     #: it declined to take is one loopback call with a one-second timeout,
     #: against a reply that takes seconds to generate.
     #:
-    #: A quarter of the input budget rather than more, because the rest has to
-    #: cover the identity preamble, recalled facts and the question — and
-    #: recall is the memory that makes the answer worth having. The same
-    #: reasoning `DOCUMENT_SHARE` states next door.
+    #: **A floor now, not the ration it used to be.**
+    #:
+    #: This was the whole allowance: a quarter of the input budget on every
+    #: request, whatever the request actually contained. The argument for a
+    #: quarter was that the rest must cover the identity preamble, recalled
+    #: facts and the question — sound, except that it reserved room for costs
+    #: it never measured, alongside a `DOCUMENT_SHARE` holding 60% of the same
+    #: budget for attached files that most turns do not have. The conversation
+    #: was rationed against a window that was usually three-quarters idle.
+    #:
+    #: `_augment_with_conversation` now spends what is genuinely left after
+    #: this request's real system prompt and question, and keeps this as the
+    #: minimum it may claim — so a request whose preamble has swallowed the
+    #: window still shows the model *something*, which is exactly the case a
+    #: referential follow-up ("fix that bug") needs.
     #:
     #: `core.transcript.fit` spends it, so whole turns are dropped rather than
     #: sentences cut. Half a message attributed to a person is a fabrication.
     CONVERSATION_SHARE = 0.25
+
+    #: Room held back from the remainder for the heading this block adds and
+    #: for the estimator's own error.
+    #:
+    #: `estimate_tokens` deliberately overstates cost — three characters per
+    #: token against English's nearer four — so the remainder is already
+    #: conservative. This is the second belt: the wrapper text around the
+    #: transcript is real tokens that no estimate above counted, and running
+    #: the input budget to the last token would spend the reply's room on a
+    #: heading.
+    CONVERSATION_MARGIN = 96
 
     #: How many sessions to keep state for at once, evicted least-recently-used.
     #:
@@ -2152,7 +2186,11 @@ class ExecutionEngine:
         return system_prompt + "\n".join(lines), True
 
     def _augment_with_conversation(
-        self, system_prompt: str, session_id: str, model: str | None = None
+        self,
+        system_prompt: str,
+        session_id: str,
+        model: str | None = None,
+        question: str = "",
     ) -> tuple[str, Any | None]:
         """Put the recent exchange in front of an ordinary reply.
 
@@ -2194,7 +2232,7 @@ class ExecutionEngine:
         if not pairs:
             return system_prompt, None
 
-        from core.context_budget import budget_for
+        from core.context_budget import budget_for, estimate_tokens
         from core.transcript import ASSISTANT, USER, Turn, as_prompt, fit
 
         turns: list[Turn] = []
@@ -2225,7 +2263,43 @@ class ExecutionEngine:
         # keeps two or three exchanges exactly as before, and on a large one it
         # keeps as many as genuinely fit.
         budget = budget_for(model)
-        cap = int(budget.input_tokens * self.CONVERSATION_SHARE)
+
+        # **The conversation gets what is left, not a fixed slice.**
+        #
+        # This was `input_tokens * CONVERSATION_SHARE` — a quarter, forever,
+        # regardless of what the rest of the request actually cost. The other
+        # slices are not spent nearly as often: `DOCUMENT_SHARE` reserves 60%
+        # of the same budget for attached files, and on an ordinary turn with
+        # nothing attached that 60% is allocated to nothing at all. So the
+        # conversation was held to a quarter of a window that was three
+        # quarters empty, and "Zaram does not follow a long conversation" was
+        # partly just that arithmetic.
+        #
+        # By the time this runs, `system_prompt` already carries the identity
+        # preamble and every recalled fact, and `question` already carries any
+        # attached document the chat route composed in. Both are *this
+        # request's real content*, so the room left for the conversation is
+        # simply what they did not use. Measured on a 16,384-token window: a
+        # quarter-share gave 3,072 tokens, and the remainder gives roughly
+        # 10,700 — the same window, three and a half times the memory.
+        #
+        # **It cannot overflow**, and that is why this is safe rather than
+        # merely generous: `input_tokens` already excludes the reply reserve,
+        # so spending the remainder leaves exactly the room the model needs to
+        # answer. And when a large document *is* attached the remainder shrinks
+        # and the conversation yields to it — correct, because the document is
+        # what the question is about, and no longer silent, because the notice
+        # below says so.
+        #
+        # `CONVERSATION_SHARE` survives as a **floor**, not a ceiling. A
+        # request whose system prompt has already eaten the window would
+        # otherwise show the model nothing, and a referential follow-up — "fix
+        # that bug" — is exactly the case that then fails. The floor is capped
+        # by the remainder's own ceiling so it can never reintroduce overflow.
+        spent = estimate_tokens(system_prompt or "") + estimate_tokens(question or "")
+        remaining = budget.input_tokens - spent - self.CONVERSATION_MARGIN
+        floor = int(budget.input_tokens * self.CONVERSATION_SHARE)
+        cap = max(0, min(max(remaining, floor), budget.input_tokens - self.CONVERSATION_MARGIN))
         kept, dropped = fit(turns, cap)
         if not kept:
             # Every turn was too long to fit. Saying nothing is right: a
@@ -2473,6 +2547,14 @@ class ExecutionEngine:
     #: Internal citation markers. The model is told not to print them but does
     #: anyway, so they are stripped rather than merely discouraged.
     _MARKER_RE = re.compile(r"\s*\[[MS]\d+\]")
+
+    #: A fenced block in a reply, with its optional language tag dropped.
+    #:
+    #: Non-greedy and `DOTALL`, so three blocks in one answer are three
+    #: matches rather than one spanning the lot. Closing fence required: an
+    #: unterminated fence is a truncated reply, and storing what follows it
+    #: would store the rest of the message as though it were code.
+    _CODE_FENCE_RE = re.compile(r"```[^\n`]*\n(.*?)```", re.DOTALL)
 
     #: Openings that mark a message as a question rather than a statement.
     #: A question adds nothing to the Spine; a statement might.
@@ -2726,8 +2808,17 @@ class ExecutionEngine:
         session_id: str,
         recalled: list[Any] | None = None,
         project_id: str | None = None,
-    ) -> None:
+    ) -> list[Any]:
         """Store what the user told us, so a later question can recall it.
+
+        Returns any **conflicts** the new fact raises with ones already stored
+        — normally an empty list. They are returned rather than resolved here:
+        `conflicts.py` is explicit that detection surfaces a question and the
+        user answers it, because auto-resolving on recency would be wrong about
+        as often as it was right ("I prefer local models" and "send this one to
+        Claude" are a preference and an exception, not a contradiction), and
+        auto-resolving on confidence would let a well-phrased line in a PDF
+        overwrite something the user said out loud.
 
         Stores the user's own words, not the exchange. Storing
         "User asked: X / Zaram answered: Y" caused three visible problems:
@@ -2744,11 +2835,11 @@ class ExecutionEngine:
         """
         runtime = self._memory_runtime()
         if runtime is None:
-            return
+            return []
         answer = self.strip_markers(answer or "").strip()
         prompt = (prompt or "").strip()
         if not prompt or not answer or answer.startswith("[FALLBACK]"):
-            return
+            return []
 
         # Questions are not facts, and are never stored.
         #
@@ -2764,9 +2855,17 @@ class ExecutionEngine:
         #
         # Whether a prompt is a question does not depend on what recall
         # returned, so neither does this.
+        # **Before the door check, deliberately.** What Zaram *wrote* is kept
+        # on a different rule from what the user *said*, and the common case
+        # proves it: "write me a function that…" is an instruction, which
+        # `_carries_new_information` refuses — correctly, it is not a fact
+        # about the user. Downstream of that gate this would never run on the
+        # exact turn it exists for.
+        self._remember_generated(runtime, prompt, answer, session_id, project_id)
+
         if not self._carries_new_information(prompt):
             logger.debug("Engine: not storing — the prompt is a question, not a fact")
-            return
+            return []
 
         # Imported lazily: core/ does not depend on a runtime at module load.
         from runtimes.memory.contracts import MemoryType
@@ -2778,12 +2877,38 @@ class ExecutionEngine:
         # messages is recognised as the same fact rather than stored twice.
         fact = self._fact_from(prompt)
         if not fact:
-            return
+            return []
 
         # Do not store something the Spine already holds almost verbatim.
         if self._already_known(runtime, fact):
             logger.debug("Engine: not storing — near-identical record exists")
-            return
+            return []
+
+        # **Does this contradict something already stored?**
+        #
+        # `runtimes/memory/conflicts.py` has answered this since the day it was
+        # written and nothing ever asked it — a complete, tested detector with
+        # no production caller, which is this repository's most-repeated
+        # failure and the sixteenth instance of it. Meanwhile the ordinary path
+        # was to store both facts and let recall choose between them, and
+        # recall choosing between "the target is developers" and "the target is
+        # ordinary consumers" is a coin toss wearing the costume of an answer.
+        # **`or "global"`, and leaving it out cost an hour.**
+        #
+        # `_scope_for` answers `None` for "no project active", and its own
+        # docstring is explicit that this is *not* the same as `global`.
+        # `remember` below resolves that `None` to `global` when it writes the
+        # record — so the fact is stored under one spelling while the detector
+        # was handed the other, and `find_conflicts` compares scope for
+        # equality (rule 7i: one client's terms do not contradict another's).
+        # Every conflict was silently no-conflict, the detector looked wired
+        # and behaved exactly as it had when it was not.
+        #
+        # The scope passed here has to be the scope the record will be stored
+        # with, not the one the caller happens to hold.
+        conflicts = self._conflicts_with(
+            runtime, fact, _scope_for(project_id) or "global"
+        )
 
         try:
             run_sync(runtime.remember(
@@ -2810,6 +2935,139 @@ class ExecutionEngine:
             )
         except Exception as exc:
             logger.warning("Engine: remember failed: %s: %s", type(exc).__name__, exc)
+            return []
+        return conflicts
+
+    #: A generated block small enough to be noise. "pip install x" is not an
+    #: artifact and storing it costs a record that can only dilute recall.
+    GENERATED_MIN_CHARS = 200
+
+    #: And large enough that recalling it would crowd out the answer. Skipped
+    #: rather than truncated: half a function is the same fabrication half a
+    #: message is, and `transcript.fit` refuses that for the same reason.
+    GENERATED_MAX_CHARS = 6000
+
+    #: How many blocks one reply may contribute. A reply that shows three
+    #: variations of the same function should not put three near-identical
+    #: records in the Spine.
+    GENERATED_PER_TURN = 2
+
+    def _remember_generated(
+        self,
+        runtime: Any,
+        prompt: str,
+        answer: str,
+        session_id: str,
+        project_id: str | None,
+    ) -> None:
+        """Keep the code Zaram wrote, so losing it from the window is not losing it.
+
+        **The gap this closes was argued *for* by the code that had it.**
+        `core/transcript.py` justifies dropping the oldest turns rather than
+        summarising them on the grounds that *"Zaram has a second store: facts
+        from an old turn are in the Spine, with provenance, and recall brings
+        them back when they are relevant."* True of what the user said, and
+        false of what Zaram said — `_remember` stores the user's words and
+        never the reply. So when a code exchange fell out of the window it was
+        simply gone: not summarised, not recalled, not recoverable. The second
+        store did not cover the case the maintainer actually hit.
+
+        **Safe because origin tagging is real here, not because the blocks are
+        small.** Rule 7b: *"the protection against Zaram citing its own
+        restatements is origin tagging, not exclusion"*, and that is wired —
+        `Origin.GENERATED` is persisted and migrated, and `MemoryRanker`
+        subtracts `GENERATED_PENALTY` so a user source saying the same thing
+        wins. Recall can also say *which* it is, which is the half that matters
+        to somebody deciding whether to trust an answer.
+
+        **Fenced blocks only, and nothing else from the reply.** Prose is the
+        model restating what it was told, which is exactly the material that
+        made storing whole exchanges produce Zaram quoting itself. A fenced
+        block is an artifact that happens to have no file — rule 7b already
+        indexes generated artifacts by default, and a `.py` written to disk and
+        the same code shown in a reply are the same object.
+
+        The request line is stored above the block because the later query is
+        prose — *"fix the bug in adjust_quantity"* — and a bare block gives the
+        embedder nothing prose-shaped to match. The rare tokens inside it (a
+        method name, an identifier) are what the keyword index catches, so both
+        signals have something to work with.
+
+        Retention is the decay engine's, the same as every other record, and
+        the user can delete one from Memory. No new store, so no new answer
+        owed about how long it keeps things.
+        """
+        blocks = self._code_blocks(answer)
+        if not blocks:
+            return
+
+        from runtimes.memory.contracts import MemoryType, Origin
+
+        headline = " ".join((prompt or "").split())[:160] or "a request"
+        for block in blocks:
+            try:
+                run_sync(runtime.remember(
+                    content=f"Code Zaram wrote for: {headline}" + '\n\n' + block,
+                    memory_type=MemoryType.CONVERSATION,
+                    session_id=session_id,
+                    metadata={"prompt": prompt},
+                    tags=["conversation", "generated", "code"],
+                    scope=_scope_for(project_id),
+                    origin=Origin.GENERATED,
+                ))
+            except Exception as exc:
+                logger.debug("Engine: generated block not stored: %s", exc)
+                return
+        logger.info("Engine: stored %d generated block(s)", len(blocks))
+
+    def _code_blocks(self, answer: str) -> list[str]:
+        """The fenced blocks in a reply worth keeping, largest first.
+
+        Bounded at both ends and in count — see the constants. Returns an empty
+        list far more often than not, which is the point: most replies contain
+        no code and must add nothing to the Spine.
+        """
+        text = self.strip_markers(answer or "")
+        if "```" not in text:
+            return []
+        found = self._CODE_FENCE_RE.findall(text)
+        blocks = []
+        for body in found:
+            body = (body or "").strip()
+            if self.GENERATED_MIN_CHARS <= len(body) <= self.GENERATED_MAX_CHARS:
+                blocks.append(body)
+        blocks.sort(key=len, reverse=True)
+        return blocks[: self.GENERATED_PER_TURN]
+
+    def _conflicts_with(self, runtime: Any, fact: str, scope: str) -> list[Any]:
+        """Stored facts this one contradicts, or an empty list.
+
+        **Candidates come from recall rather than from a scan**, and that is
+        what makes this affordable on the reply path: `bge-m3` is resident for
+        the Spine already, so asking it for the handful of facts nearest this
+        one costs the embedding it was going to compute anyway. A full pass
+        over the store would grow with the Spine and put a table scan in front
+        of every answer.
+
+        `find_conflicts` then does the exact work — same subject, same scope,
+        genuinely different value, no hedges — and it is deliberately narrow.
+        It returns nothing far more often than not, which is the design: a
+        missed conflict costs one stale fact the user can still correct by
+        hand, and a false one costs an interruption that makes every future
+        interruption easier to dismiss.
+
+        Never raises. A detector that cannot run must cost the *question*, not
+        the fact being stored.
+        """
+        try:
+            from runtimes.memory.conflicts import find_conflicts
+
+            results = run_sync(runtime.retrieve(query=fact, max_results=8))
+            records = [r.record for r in (results or []) if getattr(r, "record", None)]
+            return find_conflicts(fact, records, scope=scope)
+        except Exception as exc:
+            logger.debug("Engine: conflict check skipped: %s", exc)
+            return []
 
     # ------------------------------------------------------------------
     # Async execution with TaskQueue (new path)
