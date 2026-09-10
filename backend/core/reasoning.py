@@ -101,33 +101,24 @@ class ReasoningSplitter:
         "under Thought process. Ask again, or try a shorter question."
     )
 
-    def __init__(self, starts_in_reasoning: bool = False) -> None:
-        """``starts_in_reasoning`` for a model whose template prefills the tag.
+    def __init__(self) -> None:
+        """No ``starts_in_reasoning`` here, and the reason is worth recording.
 
-        **A reply can be reasoning without ever saying so.** Qwen3's chat
-        template emits ``<think>`` itself, before the model writes a token, so
-        what arrives over the wire is working-out terminated by a bare
-        ``</think>`` and no opening tag anywhere. Measured 10 September 2026
-        against TabbyAPI serving Qwen3.8-27B: ``reasoning_content`` came back
-        ``null`` and the whole monologue was in ``content``.
+        A reply can be reasoning without ever saying so -- Qwen3's template
+        emits ``<think>`` into the *prompt*, so the model begins its output
+        already inside the block and the stream carries only a closing tag.
+        That is real, and it is **already handled one layer up**:
+        ``OpenAICompatibleEngine`` asks ``/v1/model`` for the template, reads
+        what the template does, and supplies the opening tag itself before the
+        first frame. See ``_template_opens_thinking``.
 
-        Left to itself the loop below finds no ``<think>``, emits the entire
-        monologue **as the answer**, and renders the stray closing tag in the
-        middle of it. The user reads the model talking to itself and concludes
-        the product is broken.
-
-        It cannot be inferred from the stream. By the time the closing tag
-        arrives the text before it has already been emitted as answer, and a
-        token stream cannot be un-emitted — holding it back instead would
-        delay the first paint of *every* reply, including from models that
-        never think, which `docs/SPEECH.md` is emphatic about.
-
-        So it is declared rather than detected, and the caller is the one who
-        knows: **if the request asked for thinking, the reply may open in it.**
-        No guess, no held tokens, no per-model tag list.
+        A flag here would be a second answer to a question already answered,
+        set by a caller that knows less than the engine does. It was added on
+        10 September and removed the same day, on the evidence that nothing
+        called it.
         """
         self._buffer = ""
-        self._in_reasoning = starts_in_reasoning
+        self._in_reasoning = False
         #: Whether anything has ever been emitted as answer.
         #:
         #: Tracked rather than derived at the end from `_in_reasoning`, because
@@ -193,8 +184,8 @@ class ReasoningSplitter:
                 continue
 
             # A closing tag while not in reasoning is a tag nobody opened.
-            # `starts_in_reasoning` is the fix for the case Zaram can predict;
-            # this is the floor under the case it cannot — an unexpected model,
+            # The engine supplies the opening tag when it knows the template
+            # prefills one. This is the floor under the case nothing knows — an unexpected model,
             # a prefill nobody declared. The classification is already lost,
             # because the text before it went out as answer. What is still
             # recoverable is that **the user never reads a raw tag**, so it is

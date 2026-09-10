@@ -1,26 +1,38 @@
-"""A reply can be reasoning without ever saying so.
+"""A closing tag nobody opened must never reach the reader.
 
-Qwen3's chat template emits ``<think>`` itself, before the model writes a
-token. What arrives over the wire is the working-out, a bare ``</think>``, and
-then the answer -- with no opening tag anywhere in the stream.
+**Corrected 10 September 2026, and the correction is the useful part.** This
+file was written that morning claiming a live defect: that a reply whose
+thinking arrives with only a closing tag -- Qwen3's template emits ``<think>``
+into the *prompt*, so the model begins its output already inside the block --
+was being filed as the answer and rendered on screen.
 
-Measured 10 September 2026 against TabbyAPI serving ``Qwen3.8-27B-exl3-2.20bpw``:
-``reasoning_content`` came back ``null`` and the whole monologue sat in
-``content``. Tabby's own ``reasoning: true`` splitter fails for the same reason
-this one did, so there is no upstream to defer to.
+That case is real. It was **already handled**, one layer up, since 3 September.
+``OpenAICompatibleEngine._template_opens_thinking`` asks ``/v1/model`` for the
+chat template, reads what the template actually does, and supplies the opening
+tag itself before the first frame reaches this splitter. It is called on the
+live streaming path and cached, one request per engine.
 
-Before the fix the splitter found no ``<think>``, emitted the entire monologue
-**as the answer**, and rendered the stray closing tag in the middle of it. On
-screen that is the model talking to itself where the reply should be, which
-reads as the product being broken rather than as a model that thinks out loud.
+The claim that nothing called it came from a truncated grep read as an absence
+-- ``CLAUDE.md``'s *check the instrument before reading its output*, committed
+by the session quoting that rule. A ``starts_in_reasoning`` flag was added here
+on the strength of it and removed the same day: nothing called it either, so it
+was a second answer to an answered question, set by a caller that knows less
+than the engine does.
+
+What survives is narrower and still worth having: a **floor** under the case
+nothing upstream recognises. An engine with no template route, a provider that
+prefills without saying so, a shape nobody has met yet. The classification is
+lost there -- the monologue has already gone out as answer and a token stream
+cannot be un-emitted -- but the reader never reads a raw tag, which is the part
+that reads as the product being broken.
 """
 
 from core.reasoning import ANSWER, REASONING, ReasoningSplitter
 
 
-def drain(chunks, **kwargs):
+def drain(chunks):
     """Feed a stream one chunk at a time and flush, as a caller would."""
-    splitter = ReasoningSplitter(**kwargs)
+    splitter = ReasoningSplitter()
     events = []
     for chunk in chunks:
         events += splitter.feed(chunk)
@@ -32,32 +44,13 @@ def text_of(events, kind):
     return "".join(body for seen, body in events if seen == kind)
 
 
-def test_a_declared_prefill_puts_the_monologue_under_reasoning():
-    """The case Zaram can predict: it asked for thinking, so thinking may open.
+def test_a_closing_tag_nobody_opened_is_never_rendered():
+    """The floor. Not a classification fix -- a "no raw tags" guarantee.
 
-    This is the whole point of the flag. The caller that enabled thinking is
-    the only party that knows the reply may begin mid-block, and it cannot be
-    inferred from the stream -- by the time the closing tag arrives, the text
-    before it has already gone out.
-    """
-    events = drain(
-        ["The user wants a comment line.", " Let me check the file.", "</think>", "\n\nDone."],
-        starts_in_reasoning=True,
-    )
-
-    assert text_of(events, REASONING) == (
-        "The user wants a comment line. Let me check the file."
-    )
-    assert text_of(events, ANSWER).strip() == "Done."
-
-
-def test_an_undeclared_prefill_never_renders_a_raw_tag():
-    """The floor under the case Zaram cannot predict.
-
-    An unexpected model, or a prefill nobody declared. The classification is
-    already lost -- the monologue went out as answer and a token stream cannot
-    be un-emitted. What is still recoverable is that the reader never sees
-    ``</think>`` sitting in the middle of their reply.
+    Reaching this means something upstream did not recognise a prefilled
+    template. The thinking is already filed as answer and cannot be moved. The
+    tag itself can be, and is, silently: there is nothing in it a reader could
+    act on and the reply around it is intact.
     """
     events = drain(["Let me think.", "</think>", "Hello."])
 
@@ -71,7 +64,8 @@ def test_a_closing_tag_split_across_chunks_does_not_leak():
 
     ``<think>`` and ``</think>`` share a prefix, so a chunk ending in ``</thi``
     is a partial *closing* tag that the opening-tag hold does not recognise.
-    Emitted, it reaches the reader as a tag split across two paints.
+    Emitted, it reaches the reader as a tag split across two paints -- which is
+    exactly what ``_partial_tag_suffix`` exists to stop.
     """
     events = drain(["Thinking", "</thi", "nk>", "Answer."])
 
@@ -81,11 +75,16 @@ def test_a_closing_tag_split_across_chunks_does_not_leak():
     assert body == "ThinkingAnswer."
 
 
-def test_the_ordinary_tagged_form_is_unchanged():
-    """The convention still works, and the flag defaults to off."""
-    events = drain(["<think>", "working it out", "</think>", "the answer"])
+def test_the_engine_supplied_opening_tag_still_works():
+    """What the live path actually sends.
 
-    assert text_of(events, REASONING) == "working it out"
+    ``_tokens`` yields ``OPEN_TAG`` before the first frame when the template
+    prefills, so by the time a stream reaches this splitter it is the ordinary
+    tagged shape. This is that stream.
+    """
+    events = drain(["<think>", "the working out", "</think>", "the answer"])
+
+    assert text_of(events, REASONING) == "the working out"
     assert text_of(events, ANSWER) == "the answer"
 
 
@@ -100,16 +99,3 @@ def test_a_reply_with_no_tags_at_all_is_untouched():
 
     assert text_of(events, ANSWER) == "Just an ordinary answer."
     assert text_of(events, REASONING) == ""
-
-
-def test_a_declared_prefill_that_thinks_and_stops_still_says_so():
-    """`NO_ANSWER` must survive the new entry path.
-
-    A model that thinks at length and never gets to the point is the failure
-    this splitter already names in words. Starting mid-block must not turn
-    that into a blank bubble again.
-    """
-    events = drain(["thinking, at length, forever"], starts_in_reasoning=True)
-
-    assert text_of(events, REASONING) == "thinking, at length, forever"
-    assert text_of(events, ANSWER) == ReasoningSplitter.NO_ANSWER
