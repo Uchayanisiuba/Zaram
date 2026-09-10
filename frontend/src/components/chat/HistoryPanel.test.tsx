@@ -153,3 +153,31 @@ describe('the lip cannot become invisible', () => {
     expect(lip().style.opacity).toBe('1');
   });
 });
+
+/**
+ * The lip opened the panel and could not close it.
+ *
+ * `onClick` set `pinned` to true unconditionally, so closing meant finding the
+ * X inside the panel. The lip carries `aria-expanded`, which promises a
+ * toggle, and the clearest way to meet that promise is the keyboard path: tab
+ * to the lip, Enter to open, Enter again and nothing happened at all.
+ *
+ * Asserted on `aria-expanded` rather than on the panel's presence, because the
+ * attribute is the claim being made and it is the one an assistive technology
+ * reads.
+ */
+describe('the lip is a toggle', () => {
+  it('opens on the first click and closes on the second', async () => {
+    const user = userEvent.setup();
+    render(<HistoryPanel />);
+
+    const lip = screen.getByRole('button', { name: /past conversations/i });
+    expect(lip).toHaveAttribute('aria-expanded', 'false');
+
+    await user.click(lip);
+    expect(lip).toHaveAttribute('aria-expanded', 'true');
+
+    await user.click(lip);
+    expect(lip).toHaveAttribute('aria-expanded', 'false');
+  });
+});

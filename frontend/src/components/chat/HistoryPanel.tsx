@@ -234,6 +234,24 @@ export default function HistoryPanel() {
         onFocus={() => setPeeking(true)}
         onClick={() => {
           clearTimers();
+          // **A toggle, because `aria-expanded` above promises one.** This set
+          // `pinned` to true unconditionally, so the lip could open the panel
+          // and never close it: closing meant finding the X inside. A control
+          // that announces itself as expandable and cannot collapse is telling
+          // an assistive technology something untrue, and the plainest way to
+          // meet it is the keyboard path — tab to the lip, Enter to open,
+          // Enter again and nothing at all happens.
+          //
+          // Tested on `pinned`, not on `open`. `open` includes the hover peek,
+          // and a click during a peek should commit it rather than dismiss it
+          // — the header comment above is explicit that a hover is
+          // non-committal and a click is what commits. Reading `open` here
+          // would make clicking a hovered-open panel close it, which is the
+          // opposite of what the gesture means.
+          if (pinned) {
+            dismiss();
+            return;
+          }
           setPinned(true);
           setPeeking(true);
         }}
