@@ -161,7 +161,9 @@ describe('the shipped animation manifest', () => {
     // built locally and neither it nor its manifest entry is in the
     // repository, and `coding` falls back to `thinking` at runtime.
     //
-    // When that is settled, this line and the manifest change together.
+    // The maintainer's decision, 10 September 2026, is to re-export the motion
+    // from `Robot_All_01` in Maya, which is what the Listening pair already is.
+    // When that lands, this line and the manifest change together.
     expect(statesWithoutClips(manifest, ALL).sort()).toEqual(['coding', 'swapping'])
   })
 })

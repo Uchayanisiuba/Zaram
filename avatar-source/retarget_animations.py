@@ -73,12 +73,22 @@ CLIPS = [
     ("Talk_2.fbx", "speaking_b"),
     ("Talk_3.fbx", "speaking_c"),
     ("Thinking.fbx", "thinking_a"),
-    # **Not in the repository.** `Typing.fbx` is a Mixamo clip, and Mixamo's
-    # terms restrict redistributing animation files -- which is what committing
-    # one here and shipping it in the installer would be. It is generated
-    # locally and the entry stays, because a missing source prints MISSING and
-    # the run continues. See `docs/NEXT-SESSION-PROMPTS.md` for the three routes
-    # out; until one is taken, `coding` falls back to `thinking` at runtime.
+    # **Mixamo today, `Robot_All_01` next, and neither is in the repository.**
+    # `Typing.fbx` as it stands is a Mixamo export, and Mixamo's terms restrict
+    # redistributing animation files -- which is what committing one here and
+    # shipping it in the installer would be. The maintainer's decision,
+    # 10 September 2026, is to **re-export the motion from the character's own
+    # rig in Maya**, as the Listening pair already was; then it is their asset
+    # and the question is gone.
+    #
+    # **Nothing in this file changes when that lands.** `HELD_AT_REST` is keyed
+    # by clip name rather than by rig, and the check below asks which joints a
+    # source names rather than which namespace it carries -- so a Maya re-export
+    # saved over this filename drops straight in. Saved under a different name,
+    # this line is the one to edit.
+    #
+    # Until then the source is generated locally, a missing file prints MISSING
+    # and the run continues, and `coding` falls back to `thinking` at runtime.
     ("Typing.fbx", "coding_a"),
 ]
 

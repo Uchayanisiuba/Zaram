@@ -101,7 +101,23 @@ the entry already says the cause was never established, and the fix stands on
 its own reasoning — whether a control can be *seen* must not be the output of an
 animation.
 
-#### The licence stop, unresolved by design
+#### The licence stop, and the route the maintainer took
+
+**Decided 10 September 2026: re-export the motion from `Robot_All_01` in
+Maya**, as the Listening pair already was. Then the clip is the maintainer's own
+asset and Mixamo's redistribution terms stop applying to it.
+
+**Nothing in the pipeline waits on that.** `HELD_AT_REST` is keyed by clip name
+rather than by rig, and the agreement check asks which joints a source names
+rather than which namespace it carries — so a Maya re-export saved over
+`avatar-source/animations/Typing.fbx` drops straight in and needs no code
+change. Saved under a different name, the `CLIPS` entry is the one line to edit.
+
+Three edits land it after that: build the clip, add the manifest line, and
+change the expectation in `animationSet.test.ts` that names `coding` as a state
+without one.
+
+
 
 `Typing.fbx` and the `coding_a.glb` built from it are **untracked and not
 committed**. Mixamo's terms restrict redistributing animation files, which is

@@ -1684,25 +1684,36 @@ six can be looked at without a backend.
 
 ---
 
-### The decision, which is the maintainer's and not a session's
+### The decision, taken 10 September 2026
 
-**Mixamo's terms restrict redistributing animation files.** `Typing.fbx` is a
-Mixamo export, and committing it — or the `coding_a.glb` retargeted from it —
-puts it in the repository and in the installer. Three routes, unchanged from
-the 8 September brief above:
+**Mixamo's terms restrict redistributing animation files**, and committing
+`Typing.fbx` — or the `coding_a.glb` retargeted from it — puts one in the
+repository and in the installer. The maintainer's answer is to **re-export the
+motion from `Robot_All_01` in Maya**, as the Listening pair already was. Then it
+is their own asset and the question is gone.
 
-* **Re-export the motion from `Robot_All_01` in Maya**, as the Listening pair
-  already was. Then it is the maintainer's own asset and the question is gone.
-  The retarget script needs no change for this: the exclusion table is keyed by
-  clip name, not by rig.
-* **Keep it out of the repository** — built locally, absent from the installer,
-  `coding` falling back to `thinking` as it does today. This is the current
-  state and it is watched, not assumed.
-* **Confirm the licence permits it**, then commit.
+**That is a Maya job and nothing in the code waits on it.** `HELD_AT_REST` is
+keyed by clip name rather than by rig, and the agreement check asks which joints
+a source names rather than which namespace it carries, so a re-export saved over
+`avatar-source/animations/Typing.fbx` drops straight in. Saved under another
+name, the `CLIPS` entry in `retarget_animations.py` is the one line to edit.
 
-Everything on the code side is done and green either way. Taking route 1 or 3 is
-three edits: the `.glb`, the manifest line, and the expectation in
-`animationSet.test.ts` that names `coding` as a state without a clip.
+When the re-export lands, three steps finish it:
+
+```
+blender --background --python avatar-source/retarget_animations.py -- coding_a
+node frontend/scripts/check-rig-agreement.mjs
+```
+
+then add `{ "file": "coding_a.glb", "state": "coding", "role": "loop" }` to
+`frontend/public/avatars/animations/animations.json`, and drop `coding` from the
+expectation in `animationSet.test.ts` that names the states without clips.
+**Watch it before believing it** — `?orb=coding&headFraction=0.2` on the dev
+server, and the character should stand with its torso vertical while its arms
+move. That is the check the gaze-tracking removal was the price of skipping.
+
+Until then `coding` falls back to `thinking`, which is watched: nine clips load
+and none fail.
 
 ---
 
