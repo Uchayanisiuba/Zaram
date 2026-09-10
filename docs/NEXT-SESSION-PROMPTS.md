@@ -1,7 +1,7 @@
 # Next session — handoff
 
 > **Out of date at the top, current at the bottom.** The newest prompt is
-> *"Prompt for the next session — written 8 September 2026, later"*, at the very
+> *"Prompt for the next session — written 10 September 2026"*, at the very
 > end of this file, and the authoritative state is the **Current state** block
 > in `docs/MILESTONES.md`.
 >
@@ -1666,10 +1666,10 @@ cd frontend && npx tsc --noEmit && npx vitest run
 
 ---
 
-## Prompt for the next session — written 8 September 2026, later
+## Prompt for the next session — written 8 September 2026, later *(superseded)*
 
-**This is the current prompt.** Everything above it is an earlier brief:
-accurate about what was built and why, superseded on status.
+**Superseded by the 10 September prompt at the end of this file.** Kept for
+its reasoning; not current on status.
 
 Read `docs/MILESTONES.md` — the **Current state** block — then `CLAUDE.md`.
 `main` is the trunk and the working tree is clean apart from two untracked
@@ -1775,6 +1775,133 @@ from the description.
   `docs/MILESTONES.md`: sampling `currentTime` from JS in the browser pane
   measures nothing, because the document timeline only advances on paint.
   Screenshots separated by a wait are the honest instrument.
+
+### Publishing
+
+**Everything that reaches GitHub goes out in the maintainer's name, from the
+maintainer's account** — `Anisiuba Uche`, `Uchayanisiuba/Zaram`. Commits,
+branches, pushes, PRs, releases, issues. Claude appears as a `Co-Authored-By:`
+trailer and nowhere else: co-author, not author, and never a second publisher.
+
+A session that cannot authenticate as the maintainer **stops and hands over**.
+It does not hunt for another route, read a stored credential, or ask for a token
+to be pasted to it. Push the branch if git's own helper allows it, say what is
+left, and leave the publishing step to the person whose name is on it.
+`CLAUDE.md` carries the full rule under *"Publishing: one name, one account"*.
+
+### The gate
+
+```
+backend/venv/Scripts/python.exe -m pytest backend/ -q -m "not measure"
+npm run check:reachability && npm run check:guards
+npm run test:electron            # with no Zaram running
+cd frontend && npx tsc --noEmit && npx vitest run
+```
+
+---
+
+## Prompt for the next session — written 10 September 2026
+
+**This is the current prompt.** Everything above it is an earlier brief:
+accurate about what was built and why, superseded on status.
+
+Read `docs/MILESTONES.md` — the **Current state** block, whose top three
+entries are all 10 September — then `CLAUDE.md`. `main` is the trunk and the
+working tree is clean.
+
+**Unreal was closed for the memory verification and may be running again.** Do
+not start the Zaram desktop app without checking. The Vite dev server plus the
+browser pane is how the avatar is watched, and `?orb=<state>` pins the orb's
+starting state in development so any of the six can be looked at without a
+backend.
+
+---
+
+### What closed on 10 September
+
+Four memory items, and two of them were on this list as open questions.
+
+* **The context ceiling, twice.** An evicted Ollama model reports no window on
+  `/api/ps`, so the budget silently fell back to 4,096 and the conversation got
+  768 tokens of it. Fixed by reading the configured `num_ctx` from `/api/show`,
+  and verified in a real chat with the model force-evicted between turns.
+* **~~`CONVERSATION_SHARE = 0.25` is a judgement nobody has tested.~~** It is no
+  longer the number that decides. The conversation takes the request's
+  *remainder* — the system prompt and question measured, a 96-token margin held
+  back — with the quarter kept only as a floor so a long document cannot starve
+  it. 11,788 tokens on the 14B rather than 3,072. There is nothing left to
+  "turn" here; if the symptom returns it is a different bug.
+* **~~Should code Zaram writes reach the Spine?~~ Yes, and it is built.**
+  Fenced blocks only, 200–6,000 characters, two per turn, request prepended,
+  `Origin.GENERATED` on every one so `MemoryRanker`'s penalty applies and a user
+  source still wins. It runs before the fact gate, because *"write me a
+  function"* is an instruction and the gate refuses instructions.
+* **The conflict detector has a caller** — the sixteenth complete, tested,
+  unreachable subsystem found here. It notices and never resolves: both facts
+  are stored, one question is raised in the reply, and the user settles it in
+  Memory.
+
+Zaram also now **says when it drops turns**, once per conversation, with "Open
+Memory" as the next step.
+
+---
+
+### What is still open, in the order it was left
+
+* **TabbyAPI has still not been restarted, and it blocks three things.**
+  `vision: true` and `vision_offload: true` are set in
+  `C:\Users\user\tabbyAPI\config.yml` (backup `config.yml.bak-20260907`) and
+  unproven. On the restart, in one pass:
+  1. confirm `use_vision` is true on `/v1/model`, send it a real image, and
+     only then delete `gemma4-26b-32k` (17.99 GB);
+  2. confirm the **window probe** reads `parameters.max_seq_len` off the same
+     route — tested against the contract, never against a live server;
+  3. confirm `auto` actually routes to Tabby now that ranking prefers the
+     larger window. Every reply names the model that answered, so this is a
+     one-question check.
+* **Keep one Ollama chat model installed**, whatever happens to the rest. The
+  eviction bug was an *Ollama* bug and TabbyAPI structurally cannot have it.
+  First run recommends five Ollama tags and names no other engine, so moving off
+  Ollama entirely means nobody is exercising the path every new user lands on.
+* **Nothing has compared the models on quality, and the quantization gap makes
+  that a real gap.** Every Ollama chat model is **Q4_K_M** (~4.5 bits per
+  weight); the TabbyAPI model is `exl3-**2.20bpw**`, which is how a 27B fits in
+  8.48 GiB. The table that made Tabby win measures speed, context and residency
+  — none of those is quality — and this is the one comparison the maintainer can
+  make and a benchmark cannot.
+* **`find_conflicts` is called on the remember path only.** Recall does not ask
+  it, so a contradiction already sitting in the Spine is raised the next time
+  the subject comes up rather than on sight. Deliberate — it is the cheaper half
+  and the half the reported symptom needed — but it is the obvious next reach if
+  contradictions turn out to be common.
+* **Lexical retrieval is still naive term overlap.** `CLAUDE.md` names BM25
+  beside the vectors as the one retrieval change with a documented failure
+  waiting for it: rare tokens — a client name, a reference number — are exactly
+  what a dense embedding is worst at. Fuse by rank (RRF), never by score, and
+  for **ordering** only.
+* **The chat project picker cannot create a project.**
+* **Does a generated image ever leave VRAM?** Still unconfirmed, still the most
+  serious open item anywhere in this file.
+* **First run dead-ends a stranger with no engine, and the place is known.**
+  `readiness.py` builds an `INSTALL_ENGINE` offer — *"Set up a local model"*,
+  with `ENGINE_BYTES + model size` quoted as one number — but `canBeCarriedOut`
+  in `FirstRunPanel.tsx` permits only `explore`, `use_cloud_key` and
+  `pull_model`, so the card renders disabled under *"Zaram can't set this up for
+  you yet."* The word **Ollama appears nowhere in the first-run UI** and there
+  is no link. It is scrupulously honest and it names no next step, which is
+  `CLAUDE.md`'s "a stranger cannot install this" with a file and a line number.
+  The cheap fix is wording on the disabled card; the real one is letting the
+  button run the installer, which is mutative and egressive and wants consent
+  plus an egress entry. Read, not changed.
+* **Four particle states have still not been *watched* moving**, only reasoned
+  about. `?orb=thinking`, `?orb=listening`, `?orb=speaking` and `?orb=swapping`
+  on the dev server put each one on screen. Note the instrument warning in
+  `docs/MILESTONES.md`: sampling `currentTime` from JS in the browser pane
+  measures nothing, because the document timeline only advances on paint.
+  Screenshots separated by a wait are the honest instrument.
+* **The draft PR was never opened.** `gh` is installed and unauthenticated, and
+  the publishing rule below is why this session stopped rather than finding
+  another route.
 
 ### Publishing
 

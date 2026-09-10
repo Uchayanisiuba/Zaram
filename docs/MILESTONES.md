@@ -18,9 +18,93 @@ publishing step over rather than finding another route. `CLAUDE.md`,
 
 ---
 
-## Current state — 8 September 2026
+## Current state — 10 September 2026
 
 *The latest work is first. Earlier sessions follow below.*
+
+### 10 September, last — three things the memory did not do, and one it undid
+
+The window fixes in the two sections below made the conversation *fit*. These are about what goes
+into it, and the fourth is the regression the third one caused.
+
+**The conversation now takes the request's remainder, not a fixed quarter.**
+`CONVERSATION_SHARE` at 0.25 was the constant the section below flagged as
+the next one to turn, and turning it was the wrong move — a share is a guess
+about a request nobody has read yet. The engine now spends what is actually
+left: the system prompt and the question are measured, `CONVERSATION_MARGIN`
+(96 tokens) is held back for the joins, and the remainder goes to history, with
+the old quarter kept as a **floor** so a long document cannot starve the
+conversation to nothing. On a 16,384-token window that is 11,788 tokens rather
+than 3,072 — the difference between two code exchanges and eleven.
+
+**When turns are dropped, the user is told once.** Silent truncation is the
+symptom the maintainer reported twice, and both times the product's answer was
+to look correct. A `memory` notice now says so in the reply, with "Open Memory"
+as the next step, and `_told_about_dropped_turns` keeps it to once per
+conversation — a banner on every turn is a banner nobody reads. The notice
+distinguishes "some of this conversation" from "none of it fitted", because
+those are different problems and the second one is a machine that cannot hold
+one exchange.
+
+**The conflict detector had no caller, and that is the sixteenth.**
+`runtimes/memory/conflicts.py` has been able to answer *"does this contradict
+something already stored"* since the day it was written, tested, and asked by
+nothing. What happened instead was the ordinary path: store both and let recall
+choose, which for *"the target is developers"* against *"the target is ordinary
+consumers"* is a coin toss wearing the costume of an answer. It is now called
+on the fact being remembered and surfaces **one** question in the reply.
+
+**Noticed, never resolved**, and the tests pin that distinction because it is
+the part most likely to be argued away later. Auto-resolving on recency would
+be wrong about as often as it was right — *"I prefer local models"* and *"send
+this one to Claude"* are a preference and an exception, not a contradiction.
+Auto-resolving on confidence would let a well-phrased line in an uploaded PDF
+overwrite something the user said out loud. Both are silent, and both destroy
+the record rule 4 exists to protect. So both facts are stored and the user
+settles it in Memory, where `correct()` already writes a replacement.
+
+**The wiring bug inside the wiring is the lesson.** `_scope_for(project_id)`
+returns `None` for a global fact, not `"global"`, and the detector compares
+scopes for equality — so every conflict was silently no-conflict. It looked
+wired and behaved exactly as it had when it was not. Caught only because the
+test asserts the notice reaches the **stream**, not that the detector was
+called.
+
+**Code Zaram writes now reaches the Spine.** `core/transcript.py` argued for
+dropping old turns on the grounds that *"facts from an old turn are in the
+Spine"* — true of what the user said, false of what Zaram said, because
+`_remember` stored the question and never the reply. So a code answer that fell
+out of the window was gone: not summarised, not recalled, not recoverable,
+which is the maintainer's exact report. Fenced blocks only (prose is the model
+restating what it was told), 200–6,000 characters, at most two per turn, the
+request prepended so a later prose query has something to match on, and
+`Origin.GENERATED` on every one — rule 7b's protection is origin tagging, and
+`MemoryRanker` already subtracts `GENERATED_PENALTY` so a user source saying
+the same thing still wins. It runs **before** the fact gate, deliberately:
+*"write me a function"* is an instruction and `_carries_new_information`
+refuses instructions, correctly, which is also the commonest way to ask for
+code.
+
+**And the regression that came with it, which is the useful part.** Reopening a
+conversation seeds the buffer from the transcript, and that path fitted to
+`budget.document_tokens` — 60% of the input budget, a share belonging to
+attached files and borrowed for want of a better number. Harmless while the
+live path took a quarter; the moment the live path took the remainder it became
+the tighter constraint. Measured on a 16,384-token window: **7,372 seeded into
+a buffer the live path will spend 11,788 from**, so reopening yesterday's
+conversation remembered about a third less than never having closed it. Neither
+half looked wrong on its own. It now seeds the whole input budget — this fills
+a cache rather than a prompt, `MAX_SESSION_TURNS` already bounds the turn
+count, and a superset can be trimmed later whereas a dropped turn cannot be
+recovered.
+
+Suite with Ollama up: **3,662 passed, 29 skipped, 0 failed**. Frontend 684
+passed, `tsc` clean.
+
+**Still open, and unchanged by any of this:** `find_conflicts` is now called on
+the *remember* path only — recall does not ask it, so a contradiction already
+in the Spine before today is raised the next time the subject comes up rather
+than on sight. That is the cheaper half and it is the half the symptom needed.
 
 ### 10 September, later — the window is the memory, so routing reads it
 
