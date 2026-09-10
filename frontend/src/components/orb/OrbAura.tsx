@@ -63,11 +63,24 @@ export default function OrbAura({
    * it.
    *
    * Ring 1 needs no change: with `outerGlowOffset` added below it already
-   * renders at 1.04x the box. Ring 2 moves out to clear the silhouette, and the
-   * gap between the two is what makes them read as two.
+   * renders at 1.04x the box.
+   *
+   * **Ring 2 crosses the character rather than clearing it**, and the two
+   * failures either side of that are worth keeping. At 0.71 it was entirely
+   * inside the silhouette and read as missing. At 0.86 it cleared the shoulders
+   * completely, which made it visible and made it a second outline floating
+   * free of the subject. At 0.80 it passes *through* the character's shoulders:
+   * occluded where the robot is opaque, visible where the canvas is not, which
+   * is what reads as an orbit going behind something rather than a circle drawn
+   * near it.
+   *
+   * That occlusion is free and already correct. `OrbAura` sits at `zIndex: 0`
+   * inside the embodiment's box and the canvas is mounted above it at `z: 1`
+   * with `alpha: true` -- confirmed with `elementsFromPoint` at the robot's
+   * centre, which returns the canvas topmost. Nothing needs a mask.
    */
   const ring1 = Math.round(px * 0.82);
-  const ring2 = Math.round(px * 0.86);
+  const ring2 = Math.round(px * 0.80);
   const outerGlowOffset = Math.round(px * 0.22);
 
   // Below the character. See the note above — this is the whole reason the
