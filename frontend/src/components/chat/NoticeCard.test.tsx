@@ -132,3 +132,47 @@ describe('continuing a task that ran out of room', () => {
     expect(screen.queryByTestId('notice-continue')).toBeNull();
   });
 });
+
+describe('the images runtime speaks in two registers', () => {
+  // Both arrive as `kind: images`. The one that names no destination is
+  // housekeeping — "drawing this unloads qwen3-14b first" — and must not wear
+  // the warning triangle, or the triangle stops meaning anything by the third
+  // picture. The one that points at Settings is a refusal, and that one is a
+  // warning: the card was not drawn, and here is who is holding the card.
+  it('announces an unload without warning about it', () => {
+    render(
+      <NoticeCard
+        notice={notice({
+          kind: 'images',
+          action: '',
+          content: 'Drawing this unloads qwen3-14b-16k first. The next question reloads it.',
+        })}
+      />,
+    );
+
+    const card = screen.getByTestId('chat-notice');
+    expect(card.getAttribute('data-kind')).toBe('images');
+    expect(card.getAttribute('data-tone')).toBe('neutral');
+    expect(screen.queryByTestId('notice-action')).toBeNull();
+  });
+
+  it('warns when the card is held and offers Settings', () => {
+    const navigate = vi.fn();
+    render(
+      <NoticeCard
+        notice={notice({
+          kind: 'images',
+          action: 'settings',
+          content:
+            'Drawing needs about 8.4 GB of the graphics card and only 1.0 GB is free. ' +
+            'Qwen3.8-27B is held by TabbyAPI, and Zaram cannot unload it.',
+        })}
+        onOpen={navigate}
+      />,
+    );
+
+    expect(screen.getByTestId('chat-notice').getAttribute('data-tone')).toBe('warning');
+    fireEvent.click(screen.getByTestId('notice-action'));
+    expect(navigate).toHaveBeenCalledWith('settings');
+  });
+});

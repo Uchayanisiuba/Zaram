@@ -80,7 +80,7 @@ class _CannotDraw:
         raise AssertionError("nothing should ask a provider that cannot draw")
 
 
-def _engine(tmp_path, provider):
+def _engine(tmp_path, provider, card=None):
     """An engine wired exactly as the bootstrapper wires it, minus the models.
 
     `ImagesRuntime` is registered through the real `RuntimeRegistry`, so the
@@ -92,7 +92,7 @@ def _engine(tmp_path, provider):
         ArtifactRecords(str(tmp_path / "artifacts.db")),
         ArtifactStore(tmp_path / "out"),
     )
-    runtime = ImagesRuntime(service, provider)
+    runtime = ImagesRuntime(service, provider, card=card)
     registry.register(runtime)
     return ExecutionEngine(registry, EventBus()), service
 
@@ -216,16 +216,20 @@ class TestNothingCanDrawOnThisMachine:
         engine, _ = _engine(tmp_path, _CannotDraw())
         events = _events(engine)
 
-        text = "".join(e for e in events if isinstance(e, str))
-        errors = "".join(
-            str(e.data.get("content", ""))
-            for e in events
-            if isinstance(e, StreamEvent) and e.type is EventType.ERROR
-        )
-        said = text + errors
+        notices = [
+            e for e in events if isinstance(e, StreamEvent) and e.type is EventType.NOTICE
+        ]
+        said = "".join(str(e.data.get("content", "")) for e in notices)
 
         assert "No image model is installed" in said
         assert "6.9 GB" in said
+        # As the system speaking, with a way to the screen that fixes it —
+        # not as `[ERROR] ...` in the reply text, which is where it used to
+        # land and which attributed the refusal to a model that was never
+        # asked anything.
+        assert notices[-1].data["kind"] == "images"
+        assert notices[-1].data["action"] == "settings"
+        assert "[ERROR]" not in "".join(e for e in events if isinstance(e, str))
 
     def test_nothing_was_written(self, tmp_path):
         engine, _ = _engine(tmp_path, _CannotDraw())
@@ -240,3 +244,118 @@ class TestNothingCanDrawOnThisMachine:
         assert not [
             e for e in events if isinstance(e, StreamEvent) and e.type is EventType.ARTIFACT
         ]
+
+
+class TestTheCardIsSpokenForOnTheStream:
+    """The freeze fix, seen from the conversation.
+
+    `test_drawing_never_asks_the_card_for_memory_it_does_not_have.py` pins the
+    runtime's order of operations against fakes. This is the other half: that
+    what the runtime says on the way — "drawing this unloads qwen3-14b first",
+    or the refusal naming who holds the card — crosses the dispatcher's marker
+    channel and the engine's conversion and arrives as a `NOTICE` event, in
+    order, with no marker text reaching the reader. A sentence the runtime
+    says into a sink nothing forwards is the fifteen-times failure again.
+    """
+
+    class _Flux(_Draws):
+        name = "fake-flux"
+        vram_needed_bytes = 8_400_000_000
+        loaded = False
+
+        def generate(self, request, on_progress=None):
+            self.loaded = True
+            return super().generate(request, on_progress)
+
+        def unload(self):
+            self.loaded = False
+
+    class _Card:
+        def __init__(self, free, resident, outcome, free_after):
+            self._free, self._resident, self._outcome, self._after = (
+                free, resident, outcome, free_after,
+            )
+
+        def free_bytes(self):
+            return self._free
+
+        def resident(self):
+            return self._resident
+
+        def release(self):
+            self._free = self._after
+            return dict(self._outcome)
+
+    @staticmethod
+    def _notices(events):
+        return [
+            e for e in events if isinstance(e, StreamEvent) and e.type is EventType.NOTICE
+        ]
+
+    def test_the_unload_is_announced_before_the_picture(self, tmp_path):
+        card = self._Card(
+            free=1_000_000_000,
+            resident={"qwen3-14b-16k:latest": 10_000_000_000},
+            outcome={"qwen3-14b-16k:latest": "released"},
+            free_after=11_000_000_000,
+        )
+        engine, _ = _engine(tmp_path, self._Flux(), card=card)
+        events = _events(engine)
+
+        notices = self._notices(events)
+        assert notices, "the runtime spoke and nothing forwarded it"
+        assert "qwen3-14b-16k" in notices[0].data["content"]
+        assert notices[0].data["kind"] == "images"
+
+        # Said before the bar moved and before the card landed.
+        order = [
+            e.type
+            for e in events
+            if isinstance(e, StreamEvent)
+            and e.type in (EventType.NOTICE, EventType.IMAGE_PROGRESS, EventType.ARTIFACT)
+        ]
+        assert order[0] is EventType.NOTICE
+        assert order[-1] is EventType.ARTIFACT
+
+    def test_a_held_card_is_refused_by_name_once(self, tmp_path):
+        card = self._Card(
+            free=1_000_000_000,
+            resident={"Qwen3.8-27B-exl3-2.20bpw": None},
+            outcome={
+                "Qwen3.8-27B-exl3-2.20bpw": (
+                    "not released: TabbyAPI has no unload route; stop or "
+                    "unload it from that app"
+                )
+            },
+            free_after=1_000_000_000,
+        )
+        engine, _ = _engine(tmp_path, self._Flux(), card=card)
+        events = _events(engine)
+
+        notices = self._notices(events)
+        # The attempt is announced, then the refusal. Two sentences, and
+        # both true: the release was tried, and it did not get the card back.
+        assert "Qwen3.8-27B" in notices[0].data["content"]
+        refusals = [n for n in notices if "cannot unload" in n.data["content"]]
+        # Once. The runtime says it through the sink and the dispatcher must
+        # not say it again from the result.
+        assert len(refusals) == 1, [n.data["content"] for n in notices]
+        assert "TabbyAPI" in refusals[0].data["content"]
+        assert "Qwen3.8-27B" in refusals[0].data["content"]
+        assert refusals[0].data["action"] == "settings"
+
+        assert not [
+            e for e in events if isinstance(e, StreamEvent) and e.type is EventType.ARTIFACT
+        ]
+        assert list((tmp_path / "out").iterdir()) == []
+
+    def test_no_notice_marker_reaches_the_reader(self, tmp_path):
+        card = self._Card(
+            free=1_000_000_000,
+            resident={"qwen3-14b-16k:latest": 10_000_000_000},
+            outcome={"qwen3-14b-16k:latest": "released"},
+            free_after=11_000_000_000,
+        )
+        engine, _ = _engine(tmp_path, self._Flux(), card=card)
+        text = "".join(e for e in _events(engine) if isinstance(e, str))
+        assert "[NOTICE]" not in text

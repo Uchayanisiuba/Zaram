@@ -389,10 +389,26 @@ class KernelBootstrapper:
         # is actually wired in. An image capability that registers only when it
         # works is one that says nothing on every machine where it does not.
         from imaging.local_flux import FluxProvider
+        from runtimes.images.card import GpuCard
         from runtimes.images.runtime import ImagesRuntime
 
+        # The card, so the runtime can ask what is free, release the chat
+        # model, and refuse by name — before it loads 8.4 GB onto a card
+        # already holding 10. Without this the runtime draws exactly as it did
+        # on 12 September 2026, which froze the maintainer's machine. Injected
+        # like the preload's probe above, and for the same reason: the runtime
+        # does not import the hardware layer, and a probe that cannot be built
+        # must cost the guard rather than boot.
+        card = None
+        try:
+            from providers.discoverers.hardware import vram_free_bytes
+
+            card = GpuCard(self.providers_runtime.manager, vram_free_bytes)
+        except Exception as error:  # noqa: BLE001
+            print(f"[Bootstrapper] Images will load without a VRAM preflight ({error}).")
+
         self.images_runtime = ImagesRuntime(
-            artifact_service, FluxProvider(), self.event_bus
+            artifact_service, FluxProvider(), self.event_bus, card=card
         )
         self.registry.register(self.images_runtime)
         await self.images_runtime.initialize()

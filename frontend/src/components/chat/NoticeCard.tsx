@@ -21,7 +21,15 @@
  * away, and the amber one has real work to do.
  */
 import { useState } from 'react';
-import { AlertTriangle, ArrowRight, Brain, FileText, Library, Wrench } from 'lucide-react';
+import {
+  AlertTriangle,
+  ArrowRight,
+  Brain,
+  FileText,
+  Image as ImageIcon,
+  Library,
+  Wrench,
+} from 'lucide-react';
 import type { ChatNotice } from '../../stores/chatStore';
 import type { WorkspaceId } from '@/runtime/shortcuts/registry';
 
@@ -71,6 +79,20 @@ const TONES: Record<string, { Icon: typeof AlertTriangle; color: string }> = {
 
 const DEFAULT_TONE = { Icon: AlertTriangle, color: 'var(--color-amber, #d97706)' };
 
+// The images runtime speaks in two registers under one kind, and the action
+// tells them apart. "Drawing this unloads qwen3-14b first" names no
+// destination: it is housekeeping the user can do nothing about and should
+// not be warned over. "TabbyAPI is holding the card and Zaram cannot unload
+// it" points at Settings, and that one *is* a refusal — the amber default is
+// right for it. Keyed on the action rather than on a second kind so the
+// backend's one tag stays one tag.
+const IMAGES_HOUSEKEEPING = { Icon: ImageIcon, color: 'var(--color-text-muted, #94a3b8)' };
+
+function toneFor(notice: ChatNotice) {
+  if (notice.kind === 'images' && !notice.action) return IMAGES_HOUSEKEEPING;
+  return TONES[notice.kind] ?? DEFAULT_TONE;
+}
+
 interface Props {
   notice: ChatNotice;
   onOpen?: (node: WorkspaceId) => void;
@@ -91,7 +113,8 @@ interface Props {
 
 export default function NoticeCard({ notice, onOpen, onEnableSearch, onContinue }: Props) {
   const destination = DESTINATIONS[notice.action];
-  const { Icon, color } = TONES[notice.kind] ?? DEFAULT_TONE;
+  const tone = toneFor(notice);
+  const { Icon, color } = tone;
   const offersContinue = notice.action === 'continue' && Boolean(onContinue);
 
   // **Rule 7h, which this card was one click short of.** "Offer at the moment
@@ -136,6 +159,7 @@ export default function NoticeCard({ notice, onOpen, onEnableSearch, onContinue 
       }}
       data-testid="chat-notice"
       data-kind={notice.kind || 'default'}
+      data-tone={tone === DEFAULT_TONE ? 'warning' : 'neutral'}
     >
       <Icon size={13} className="mt-0.5 shrink-0" style={{ color }} />
       <div className="flex-1 min-w-0">

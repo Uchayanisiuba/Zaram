@@ -34,6 +34,12 @@ ARTIFACT_MARKER = "[ARTIFACT]"
 #: line and the engine converts it before anything user-facing.
 PROGRESS_MARKER = "[IMAGE_PROGRESS]"
 
+#: Prefix for something a runtime has to *say* while it works — "drawing this
+#: unloads qwen3-14b first", or a refusal naming who holds the card. Becomes a
+#: `StreamEvent.notice` in the engine, so it renders as the system speaking
+#: rather than as reply text, and it can carry an action the interface routes.
+NOTICE_MARKER = "[NOTICE]"
+
 logger = logging.getLogger(__name__)
 
 
@@ -279,11 +285,14 @@ class ExecutionDispatcher:
 
         from core.async_bridge import _background_loop
 
-        updates: "queue.Queue[dict]" = queue.Queue()
+        updates: "queue.Queue[tuple[str, dict]]" = queue.Queue()
 
         payload = dict(step.input_data or {})
         # Filled from the sampling thread; `Queue.put` is what makes that safe.
-        payload["progress_sink"] = updates.put
+        # One queue for both channels, so what the runtime says and what it
+        # measures reach the reader in the order they happened.
+        payload["progress_sink"] = lambda update: updates.put((PROGRESS_MARKER, update))
+        payload["notice_sink"] = lambda notice: updates.put((NOTICE_MARKER, notice))
 
         future = asyncio.run_coroutine_threadsafe(
             runtime.execute(step.capability_id, payload), _background_loop()
@@ -292,9 +301,10 @@ class ExecutionDispatcher:
         def drain() -> Iterator[str]:
             while True:
                 try:
-                    yield PROGRESS_MARKER + json.dumps(updates.get_nowait()) + "\n"
+                    marker, body = updates.get_nowait()
                 except queue.Empty:
                     return
+                yield marker + json.dumps(body) + "\n"
 
         while not future.done():
             yield from drain()
@@ -329,15 +339,29 @@ class ExecutionDispatcher:
 
         error = result.get("error", "unknown") if isinstance(result, dict) else "unknown"
         remedy = result.get("remedy", "") if isinstance(result, dict) else ""
-        # `[ERROR]`, not `[FALLBACK]`, when nothing on the machine can draw.
-        # A fallback invites the engine to answer some other way, and the only
-        # other way available is a text model writing about a picture it never
-        # made — the exact failure this capability exists to prevent.
-        marker = (
-            "[ERROR]" if isinstance(result, dict) and result.get("unavailable")
-            else "[FALLBACK]"
-        )
-        yield f"{marker} {error}{(' ' + remedy) if remedy else ''}\n"
+        if isinstance(result, dict) and result.get("unavailable"):
+            # A refusal, not a fallback. A fallback invites the engine to
+            # answer some other way, and the only other way available is a
+            # text model writing about a picture it never made — the exact
+            # failure this capability exists to prevent. So it is said as a
+            # notice, which the reader sees as the system speaking, with the
+            # route to Settings where an image model or provider is set up —
+            # and nothing else is generated for this step.
+            #
+            # The runtime may already have said it through the notice sink
+            # (a held card does); a second notice with the same words would
+            # be the same sentence twice on screen, so the sink's is kept.
+            yield from drain()
+            if not result.get("said"):
+                yield NOTICE_MARKER + json.dumps(
+                    {
+                        "content": f"{error}{(' ' + remedy) if remedy else ''}".strip(),
+                        "kind": "images",
+                        "action": "settings",
+                    }
+                ) + "\n"
+            return
+        yield f"[FALLBACK] {error}{(' ' + remedy) if remedy else ''}\n"
 
     # ------------------------------------------------------------------
     # Async dispatch with ExecutionContext (new interface)

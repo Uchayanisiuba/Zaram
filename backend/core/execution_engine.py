@@ -44,7 +44,12 @@ from core.contracts import (
     PlanState,
     TaskPriority,
 )
-from core.dispatcher import ARTIFACT_MARKER, PROGRESS_MARKER, ExecutionDispatcher
+from core.dispatcher import (
+    ARTIFACT_MARKER,
+    NOTICE_MARKER,
+    PROGRESS_MARKER,
+    ExecutionDispatcher,
+)
 from core.event_bus import EventBus, ZaramEvent
 from core.execution_context import ExecutionContext
 from core.planner import IntentClassification, IntentPlanner, IntentType
@@ -701,6 +706,22 @@ class ExecutionEngine:
                         except json.JSONDecodeError:
                             logger.exception(
                                 "Image step emitted an unparseable progress marker"
+                            )
+                    elif token.startswith(NOTICE_MARKER):
+                        # Becomes a notice, never text. What a runtime had to
+                        # say while it worked — the image runtime naming what
+                        # it is about to unload, or who holds the card — and
+                        # it renders as the system speaking, not the model.
+                        try:
+                            said = json.loads(token[len(NOTICE_MARKER):].strip())
+                            yield StreamEvent.notice(
+                                str(said.get("content", "")),
+                                kind=str(said.get("kind", "")),
+                                action=str(said.get("action", "")),
+                            )
+                        except (json.JSONDecodeError, AttributeError):
+                            logger.exception(
+                                "A step emitted an unparseable notice marker"
                             )
                     elif token.startswith(ARTIFACT_MARKER):
                         # Becomes a card, never text. Reaching the user as a

@@ -88,8 +88,34 @@ SOURCE_REPO = "magespace/FLUX.1-schnell-bnb-nf4"
 SOURCE_SIZE = "13.4 GB"
 
 #: Resident VRAM, NF4 transformer plus the NF4 T5 encoder, with the pipeline
-#: offloading components it is not currently using. Used to warn, never to
-#: block — CLAUDE.md settles that VRAM routes a task and does not reject one.
+#: offloading components it is not currently using.
+#:
+#: **Read by `ImagesRuntime`'s preflight, through `vram_needed_bytes`.** Until
+#: 12 September 2026 this said *"used to warn, never to block"* and had no
+#: caller at all, so the design was "warn" and the behaviour was "load 8.4 GB
+#: onto a card already holding a 10 GB chat model". On a 12 GB card the driver
+#: paged GPU memory through system RAM for every process on the machine and
+#: the offload hook dragged components across that bus on every step — the
+#: maintainer's PC froze. The rule the old comment cited was being misread:
+#: *VRAM routes a task* means send it somewhere that can do it — the card once
+#: it has been freed, or a provider that can draw — not run it into a wall.
+#:
+#: **Measured 12 September 2026, on the 12 GB card, by `_log_peak`:** drawing
+#: holds ~7.8 GB, which this figure covers — but the *load* peaks at
+#: **11.02 GB allocated** (11.16 reserved), because `from_pretrained` puts
+#: every NF4 component on the card before the offload hooks move any of them
+#: off. On a card with a 2 GB desktop that already over-commits by ~1 GB, which
+#: is why a load takes two minutes rather than tens of seconds.
+#:
+#: The figure is deliberately *not* raised to 11 GB: that would refuse every
+#: 12 GB card with a desktop on it, including the one this was measured on,
+#: which draws. It is the bar below which the preflight refuses outright —
+#: the 20-GB-on-12 case that froze the machine — and above which the load
+#: pages briefly and then draws. The work that closes the gap is in `_load`,
+#: not here: load components one at a time and offload each before the next,
+#: so the peak is the largest component (~6.7 GB) rather than the sum. Until
+#: then the true load peak is the number above, and `_log_peak` prints it on
+#: every load so nobody has to take this comment's word for it.
 APPROXIMATE_VRAM_BYTES = 8_400_000_000
 
 #: Schnell is guidance-distilled: it is trained to produce its result in a few
@@ -246,6 +272,49 @@ def _module_present(name: str) -> bool:
         return False
 
 
+def _log_peak(moment: str) -> None:
+    """Record the most the pipeline has held on the card so far.
+
+    This is the instrument `APPROXIMATE_VRAM_BYTES` is calibrated against.
+    `nvidia-smi` cannot tell live tensors from PyTorch's cache — on 12
+    September 2026 it read the card at 12.04 of 12.29 GB for forty seconds
+    during a load, which is either paging or an allocator filling what it was
+    given, and the two need very different responses. `max_memory_allocated`
+    is the live figure; `max_memory_reserved` is what the allocator kept.
+    Logged, never returned: nothing decides on it, it is for the person who
+    reads the log with the constant open in the other window.
+    """
+    try:
+        import torch
+
+        if not torch.cuda.is_available():
+            return
+        logger.info(
+            "FLUX peak VRAM %s: %.2f GB allocated, %.2f GB reserved",
+            moment,
+            torch.cuda.max_memory_allocated() / 1e9,
+            torch.cuda.max_memory_reserved() / 1e9,
+        )
+    except Exception:  # noqa: BLE001 - a log line never fails a draw
+        logger.debug("Could not read peak VRAM", exc_info=True)
+
+
+def _cuda_available() -> bool:
+    """Whether a draw here would use the card at all.
+
+    A function rather than an inline import so the preflight's tests can
+    answer it without a GPU: the point of `vram_needed_bytes` is what it
+    returns on each side of this, and a test that needs real CUDA to reach one
+    side is a test that only runs on the maintainer's machine.
+    """
+    try:
+        import torch
+
+        return bool(torch.cuda.is_available())
+    except Exception:  # noqa: BLE001 - torch absent is "no CUDA", not an error
+        return False
+
+
 def _force_hub_offline() -> None:
     """Make ``huggingface_hub`` refuse the network, for real this time.
 
@@ -280,9 +349,12 @@ def _force_hub_offline() -> None:
 class FluxProvider:
     """Draws with FLUX.1 [schnell] on the local GPU.
 
-    One pipeline is held and reused. Loading costs tens of seconds and most of
-    the card, so reloading per request would make the second image as slow as
-    the first for no reason.
+    One pipeline is held while requests are in flight, and `ImagesRuntime`
+    calls `unload` once the last of them has its picture. Loading costs tens
+    of seconds and most of the card; holding it *between* requests costs the
+    chat model its home, on a card where only one of them fits — so pictures
+    asked for together share one load, and a picture asked for an hour later
+    pays for its own.
     """
 
     name = "flux-schnell"
@@ -388,6 +460,26 @@ class FluxProvider:
         model = self.model
         return model.name if model else self.name
 
+    @property
+    def vram_needed_bytes(self) -> Optional[int]:
+        """What loading this would take from the card, or None for nothing.
+
+        The reader `APPROXIMATE_VRAM_BYTES` did not have. `ImagesRuntime`
+        compares the card's free memory against this before `_load` runs, and
+        releases the chat model or refuses when it is short — see the note on
+        the constant for what happened while nothing did.
+
+        None on a machine without CUDA: a CPU draw is tens of minutes and its
+        own warning in `availability`, but it takes nothing from the card, and
+        releasing the chat model for it would cost a cold start for nothing.
+        """
+        return APPROXIMATE_VRAM_BYTES if _cuda_available() else None
+
+    @property
+    def loaded(self) -> bool:
+        """Whether the pipeline is on the card right now."""
+        return self._pipeline is not None
+
     # ------------------------------------------------------------- sampling
 
     def _load(self) -> Any:
@@ -448,6 +540,7 @@ class FluxProvider:
         pipeline.set_progress_bar_config(disable=True)
 
         self._pipeline = pipeline
+        _log_peak("after load")
         return pipeline
 
     def unload(self) -> None:
@@ -556,4 +649,5 @@ class FluxProvider:
                     )
                 )
 
+            _log_peak("after drawing")
             return results

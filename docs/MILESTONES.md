@@ -22,7 +22,124 @@ publishing step over rather than finding another route. `CLAUDE.md`,
 
 *The latest work is first. Earlier sessions follow below.*
 
-### 12 September, last — handoff: image generation froze the PC after a local LLM
+### 12 September, latest — image generation no longer asks the card for memory it does not have
+
+The freeze in the entry below is fixed, pinned by 25 tests, and measured on
+the 12 GB card. Nothing loads FLUX until the card has been read, released
+and read again; a card that is still held is refused by name; the model is
+unloaded when the picture is saved. The handoff's six steps, and which shipped:
+
+1. **Preflight on free VRAM** — `ImagesRuntime._make_room`, before
+   `to_thread(generate)`. Compares `vram_free_bytes()` against
+   `FluxProvider.vram_needed_bytes`, which is `APPROXIMATE_VRAM_BYTES`. **The
+   constant has its reader** and `TestTheConstantIsRead` keeps it one. No
+   margin: the comparison is against exactly the figure, and if a load that
+   passed still thrashes, the figure is what to raise — from a measurement.
+2. **Release first, re-read second.** Short of memory, the runtime says
+   what it is about to unload, calls `release_resident()`, and **reads the
+   card again** before loading — Ollama saying "released" says nothing about
+   what TabbyAPI or a game still holds. Only models with bytes *on the card*
+   are named or released: the first live run announced it would unload
+   `bge-m3`, which Ollama reported resident with `size_vram: 0` — on the CPU
+   — and recall lost its embedder for nothing. Zero is known, not unknown.
+3. **Refused by name.** `"Qwen3.8-27B is held by TabbyAPI, and Zaram cannot
+   unload it. Unload it from that app, or connect an image provider, and ask
+   again."` — or, when nothing Zaram's servers hold explains the shortfall,
+   `"something else on this machine is using the rest"`, which is the UE5
+   case and was the one measured. No CPU fallback, no offload on a full card,
+   no force flag. `unavailable: True` still stops the dispatcher falling
+   through to prose.
+4. **The cloud route — not built, and the honest reason is below.**
+5. **Unloaded after the picture.** `_in_flight` counts requests between
+   preflight and picture; the last one out calls `unload()` off the loop.
+   Pictures asked for together share one load; a picture an hour later pays
+   for its own. Rather that than the chat model and FLUX on one card, which
+   is what the keep-alive produced.
+6. **Said before it happens.** A new channel: runtimes get a `notice_sink`
+   beside `progress_sink`, the dispatcher carries it as `NOTICE_MARKER`, the
+   engine turns it into `StreamEvent.notice`. `"Drawing this unloads
+   qwen3-14b-16k first — the card has 1.0 GB free and the picture needs about
+   8.4 GB. The next question reloads it."` reaches the screen before the
+   release. `/health.images` now reports `vram_needed_bytes`, `loaded`
+   (live — the old comment's *"readiness, never residency"* stopped being
+   true when the unload landed) and `last_preflight` with its `checked_at`,
+   because re-probing a subprocess and two servers on every ten-second poll
+   was the thrash the previous entry had just removed.
+
+**The refusal is a notice now, not `[ERROR]` text.** Every image refusal —
+no model installed, held card — arrives as `kind: images, action: settings`
+and renders as the system speaking with *Open Settings* under it, instead of
+`[ERROR] No image model…` inside the reply, which attributed it to a model
+that was never asked anything. `NoticeCard` gives an `images` notice with no
+action the neutral image icon (housekeeping) and one pointing at Settings the
+amber triangle (a refusal); `data-tone` makes that assertable.
+
+**Measured, with UE5 holding the card** (the day's real situation: the
+maintainer was running Unreal). Before: 11,832 of 12,288 MiB used, FLUX not
+loaded. Request: two notices in 0.5 s — the announcement, then *"only 0.5 GB
+is free — something else on this machine is using the rest"*. After: 11,838
+MiB. **Peak during the request 11,838 ≤ 12,288**, nothing loaded, the
+machine untouched. The old code would have loaded 8.4 GB onto 0.5 GB.
+
+**Measured, release-then-draw** — the exact situation that froze the
+machine, reproduced with UE5 closed: `qwen3-14b-16k` fully resident on
+Ollama (10.4 GB on the card), 11,847 of 12,288 MiB used, 0.5 GB free. Then
+"draw me a picture of a lighthouse at dawn":
+
+| t | card (MiB) | what |
+|---|---|---|
+| 0 s | 11,847 | notice: *"Drawing this unloads qwen3-14b-16k … first"* |
+| 14 s | 1,999 | Ollama released the 14B; card re-read; load begins |
+| 72–115 s | **12,042 peak** | `from_pretrained` — every NF4 component on the card |
+| 116–127 s | 9,787 | four denoising steps, ~3.7 s each |
+| 139 s | 2,109 | artifact saved, FLUX unloaded, card handed back |
+
+**Peak 12,042 ≤ 12,288 throughout, the chat model released rather than
+paged, the machine responsive the whole time.** 211 samples at 0.5 s. The
+same request on the old code loaded 8.4 GB onto 0.5 GB.
+
+**And a third run, on the empty card, with the instrument the constant was
+missing.** `_log_peak` now prints `torch.cuda.max_memory_allocated` after
+the load and after the picture: **11.02 GB allocated, 11.16 GB reserved,
+at the end of the load** — live tensors, not cache — and no higher while
+drawing (~7.8 GB from nvidia-smi). So `APPROXIMATE_VRAM_BYTES = 8.4 GB` is
+right about drawing and **2.6 GB short about loading**: `from_pretrained`
+puts every NF4 component on the card before the offload hooks move any off,
+and even the empty card over-commits by ~1 GB during those forty seconds,
+which is why a load takes two minutes and why the card read 372 MiB
+afterwards (the desktop's own memory had been paged out).
+
+The constant is deliberately *not* raised to 11 GB — that refuses every
+12 GB card with a desktop on it, this one included, and this one draws. It
+is the bar for the freeze case, and the gap above it is closed in `_load`,
+not in the number: **load components one at a time and offload each before
+the next**, so the peak is the largest component (~6.7 GB) rather than the
+sum. That is the next piece of image work, it is measured rather than
+guessed, and `_log_peak` will say when it has landed.
+
+**What was not built — the cloud image route (step 4).** There is no cloud
+`ImageProvider`. `ModelInfo.emits_image` exists and the picker gates on it,
+`DataClass.IMAGE` consent exists for *sending* a picture, and the egress gate
+is in the path — but nothing turns "a connected model that can draw" into a
+call to an images endpoint and a PNG back. That is a provider class
+(`imaging/cloud.py`, OpenAI-compatible `/images/generations` first) behind
+the same `ImageProvider` protocol, plus the runtime choosing between local
+and cloud on the preflight's verdict. The refusal already says *"or connect
+an image provider"*, which is true as a remedy only once that exists; until
+then the sentence names a route that is not there. **Re-entry point:** the
+runtime's `_make_room` returns the refusal dict — the cloud offer goes where
+that return is, before it.
+
+**Two smaller things the measurement found.** `pythonw main.py` — TabbyAPI
+with no model loaded — holds ~1 GB of the card as a bare CUDA context, and
+the pytest suite itself holds ~830 MB once any test touches torch; neither
+is Zaram's to release but both are in the arithmetic. And
+`release_resident()` still unloads Ollama's embedder along with the chat
+model when it *is* on the card (0.66 GB): correct for "I am about to open
+Unreal", a recall cold-start for a picture. Worth a `keep=` argument when
+something depends on it.
+
+### 12 September — handoff, now done above: image generation froze the PC after a local LLM
 
 **The report.** After using a local model, the maintainer asked Zaram to
 generate an image and the machine froze. Not slow — frozen. Diagnosed from
