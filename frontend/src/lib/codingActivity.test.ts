@@ -14,7 +14,8 @@
  */
 import { describe, it, expect } from 'vitest';
 
-import { codingActivity, chatActivity, preserveSpeaking } from './orbActivity';
+import { codingActivity, chatActivity, offeredServers } from './orbActivity';
+import { composeOrbState } from '@/stores/orbStore';
 
 describe('when it says coding', () => {
   it('says coding once a fence opens in the reply', () => {
@@ -72,9 +73,34 @@ describe('what it does not disturb', () => {
   });
 
   it('never lands on top of speech', () => {
-    // Speech outlives the stream by design. `preserveSpeaking` is what stopped
-    // the old `idle` clobbering it on every reply, and coding must not
-    // reintroduce that — it is the reason the avatar's mouth never moved.
-    expect(preserveSpeaking('speaking', codingActivity(true, '```py'))).toBe('speaking');
+    // Speech outlives the stream by design and is drawn over the activity.
+    // Coding is an activity, so a fence opening mid-clip changes what will be
+    // drawn when the clip ends — never what is drawn while it plays.
+    expect(composeOrbState(codingActivity(true, '```py'), true)).toBe('speaking');
+    expect(composeOrbState(codingActivity(true, '```py'), false)).toBe('coding');
+  });
+});
+
+describe('the buffered case: tools offered, nothing on screen yet', () => {
+  it('reports coding from the offer alone', () => {
+    // A tool-driven reply is buffered until it finishes, so neither a fence
+    // nor a call reaches the screen while it runs. The offer is the one fact
+    // available, and it is system state: the engine chose to hand the model
+    // a repository.
+    expect(codingActivity(true, '', [], ['code'])).toBe('coding');
+  });
+
+  it('an offer of some other server is not coding', () => {
+    expect(codingActivity(true, '', [], ['blender'])).toBe('thinking');
+  });
+
+  it('reads the servers off the tools notices only', () => {
+    expect(
+      offeredServers([
+        { kind: 'search', servers: ['code'] },
+        { kind: 'tools', servers: ['code', 'blender'] },
+        { kind: 'tools' },
+      ]),
+    ).toEqual(['code', 'blender']);
   });
 });

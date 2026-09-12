@@ -32,16 +32,21 @@
  * and "disabled capabilities are visible, not silent" is not a preference
  * about summaries. So the fold covers `allow` and nothing else.
  *
- * Still one line per call and nothing more. The *arguments* are not shown — a
- * `read_lines` on a 400-line range is a wall of numbers that tells a reader
- * nothing they wanted — and neither is the result, which is the file contents
- * and belongs in the model's context rather than on the screen.
+ * Still one line per call. The *arguments* are not shown — a `read_lines` on
+ * a 400-line range is a wall of numbers that tells a reader nothing they
+ * wanted. **The result is, on request — revised 12 September 2026.** This
+ * used to say the result "belongs in the model's context rather than on the
+ * screen", and that is right as a default and wrong as a rule: a step that
+ * cannot be opened cannot be checked, and "read `readiness.py:156-181`" is a
+ * claim until the lines are there. So each row that ran opens to a bounded
+ * pane of what came back — see `StepOutput` — and stays a row until asked.
  */
 import { useState } from 'react';
 import { AnimatePresence } from 'framer-motion';
 import { Check, ChevronRight, CircleAlert, Clock } from 'lucide-react';
 import type { ChatToolCall } from '../../stores/chatStore';
 import ActivityPanel from './ActivityPanel';
+import StepOutput from './StepOutput';
 
 /** How each verdict reads. The gate's word, not the model's.
  *
@@ -94,23 +99,53 @@ export function summarise(calls: ChatToolCall[]): string {
 
 function CallLine({ call }: { call: ChatToolCall }) {
   const { Icon, color, label } = VERDICTS[call.verdict] ?? UNKNOWN;
+  const [showOutput, setShowOutput] = useState(false);
+  const openable = Boolean(call.output);
   return (
     <li
-      className="flex items-start gap-1.5 text-[10px] leading-snug"
+      className="flex flex-col text-[10px] leading-snug"
       style={{ color: 'var(--color-text-muted)' }}
       data-verdict={call.verdict}
     >
-      <Icon size={11} className="mt-px shrink-0" style={{ color }} aria-hidden />
-      <span style={{ fontFamily: 'var(--font-mono)' }}>
-        {call.server}/{call.tool}
-      </span>
-      {label && <span style={{ color: 'var(--color-text-faint)' }}>· {label}</span>}
-      {/* The reason only when there is one, and there is one exactly when
-          something did not go as asked. A "ran" carries none, and inventing
-          filler for it would make the line longer and say less. */}
-      {call.reason && call.verdict !== 'allow' && (
-        <span style={{ color: 'var(--color-text-faint)' }}>· {call.reason}</span>
-      )}
+      {/* A row is a button only when there is something behind it. A chevron
+          on a step with no output would open onto nothing, which teaches the
+          reader that chevrons are furniture. */}
+      <button
+        type="button"
+        onClick={openable ? () => setShowOutput((v) => !v) : undefined}
+        aria-expanded={openable ? showOutput : undefined}
+        disabled={!openable}
+        className="flex items-start gap-1.5 text-left disabled:cursor-default"
+        style={{ color: 'inherit', background: 'none', border: 0, padding: 0 }}
+        data-testid="step-row"
+      >
+        {openable ? (
+          <ChevronRight
+            size={11}
+            className="mt-px shrink-0 transition-transform"
+            style={{ transform: showOutput ? 'rotate(90deg)' : 'none', color }}
+            aria-hidden
+          />
+        ) : (
+          <Icon size={11} className="mt-px shrink-0" style={{ color }} aria-hidden />
+        )}
+        <span style={{ fontFamily: 'var(--font-mono)' }}>
+          {call.server}/{call.tool}
+        </span>
+        {call.target && (
+          <span className="break-all" style={{ color: 'var(--color-text-faint)', fontFamily: 'var(--font-mono)' }}>
+            {call.target}
+          </span>
+        )}
+        {label && <span style={{ color: 'var(--color-text-faint)' }}>· {label}</span>}
+        {/* The reason only when there is one, and there is one exactly when
+            something did not go as asked. A "ran" carries none, and inventing
+            filler for it would make the line longer and say less. */}
+        {call.reason && call.verdict !== 'allow' && (
+          <span style={{ color: 'var(--color-text-faint)' }}>· {call.reason}</span>
+        )}
+      </button>
+      {showOutput && <StepOutput text={call.output ?? ''} />}
     </li>
   );
 }

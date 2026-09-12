@@ -36,7 +36,7 @@ import logging
 from collections.abc import Iterator
 from typing import Callable, Optional, Tuple
 
-from .base_engine import ERROR_PREFIX, LLMEngine
+from .base_engine import ERROR_PREFIX, LLMEngine, forward_stream
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +80,7 @@ class CloudFanout(LLMEngine):
         system_prompt: str = "",
         model: str | None = None,
         images: list[str] | None = None,
+        tools: list[dict] | None = None,
     ) -> Iterator[str]:
         try:
             resolved = self._resolve(model)
@@ -97,4 +98,11 @@ class CloudFanout(LLMEngine):
 
         engine, wire_name = resolved
         logger.info("cloud fanout: %s -> %s as %r", model, type(engine).__name__, wire_name)
-        yield from engine.stream_response(prompt, system_prompt, wire_name)
+        # **`images` was accepted here and never passed on — fixed 12
+        # September 2026 while adding `tools`.** An image attached to a
+        # message bound for a connected cloud provider reached this line and
+        # went no further; the model answered about a picture it never saw,
+        # which is rule 9's silent form. The per-provider engine already
+        # asks the gate for `DataClass.IMAGE` consent when the body carries
+        # one, so passing them through is what makes that consent real.
+        yield from forward_stream(engine, prompt, system_prompt, wire_name, images, tools)

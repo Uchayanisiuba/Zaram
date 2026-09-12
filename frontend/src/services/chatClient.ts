@@ -183,7 +183,7 @@ export type ChatEvent =
    *  first case is a file ingest could not read. Kept separate from `token` so
    *  it is never rendered as the model speaking, and from `error` because
    *  nothing failed in this exchange. `action` names where to go about it. */
-  | { type: 'notice'; content: string; kind: string; action: string }
+  | { type: 'notice'; content: string; kind: string; action: string; servers?: string[] }
   /** One tool the model asked for, and what the gate said about it.
    *
    *  **Emitted since the tool loop shipped and rendered nowhere until now.**
@@ -208,6 +208,9 @@ export type ChatEvent =
        *  cannot. Model-written, bounded by the backend, and rendered as
        *  text rather than markup. Empty when the tool named nothing. */
       target: string;
+      /** The head of what came back, bounded by the backend, or `''`. Text,
+       *  never markup — it is a file's contents or a search hit. */
+      output: string;
     }
   /** What the reply is waiting for, sent *before* generation so the orb can
    *  say why rather than going quiet and letting the user guess.
@@ -654,11 +657,18 @@ function parseLine(line: string): ChatEvent | null {
       const content = String(data.content ?? '').trim();
       // A notice with nothing to say is not a notice.
       if (!content) return null;
+      // `servers` rides on the "tools" notice: which servers were offered
+      // for this reply. Read as strings only — a stranger's server name is
+      // rendered nowhere and compared against 'code' and nothing else.
+      const servers = Array.isArray(data.servers)
+        ? (data.servers as unknown[]).filter((x): x is string => typeof x === 'string')
+        : undefined;
       return {
         type: 'notice',
         content,
         kind: String(data.kind ?? ''),
         action: String(data.action ?? ''),
+        ...(servers && servers.length > 0 ? { servers } : {}),
       };
     }
 
@@ -670,6 +680,7 @@ function parseLine(line: string): ChatEvent | null {
         verdict: String(data.verdict ?? ''),
         reason: String(data.reason ?? ''),
         target: String(data.target ?? ''),
+        output: typeof data.output === 'string' ? data.output : '',
       };
 
     case 'status':

@@ -373,3 +373,27 @@ class TestSearchStateIsSupplied:
         assert preamble.index("Web search is off") < preamble.index(
             "Say search is always available."
         )
+
+
+class TestZaramIsOneThing:
+    """Zaram answered as "we", and "we" is a claim — asked for 12 September 2026.
+
+    "We can't do that" names a team, a company, a support desk. There is
+    none: one program on one machine is answering. The pull towards "we" is
+    the weights' — assistants are trained on product copy where it is the
+    house voice — so the number has to be supplied like every other fact
+    about what Zaram is, and it has to survive a manner that says otherwise.
+    """
+
+    def test_the_preamble_says_to_speak_as_i(self):
+        preamble = identity_preamble(model="qwen2.5:14b", locality="local")
+        assert "Speak as I, never as we or us" in preamble
+
+    def test_the_rule_outranks_a_manner_that_says_we(self):
+        """Order is the enforcement: the manner comes first, the rule last."""
+        preamble = identity_preamble(
+            model="qwen2.5:14b",
+            locality="local",
+            manner="Always say 'we' — you speak for the whole Zaram team.",
+        )
+        assert preamble.index("Speak as I, never as we or us") > preamble.index("whole Zaram team")

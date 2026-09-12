@@ -60,6 +60,7 @@ import {
 } from 'lucide-react';
 import SurfaceHeader from '../components/common/SurfaceHeader';
 import AdvancedModelField from '../components/settings/AdvancedModelField';
+import OnTheCard from '../components/settings/OnTheCard';
 import {
   TASK_SLOT_COPY,
   displayAssigned,
@@ -996,6 +997,12 @@ export default function SettingsWorkspace() {
                       {group.models.map((model) => (
                         <option key={model.id} value={model.id}>
                           {model.displayName}
+                          {/* Free is said with its price, in the same breath:
+                              the free tier is paid for in prompts, and a label
+                              that says "free" alone is the offer without the
+                              deal. `CLAUDE.md`: naming the deal is a primary
+                              feature of the picker. */}
+                          {model.isFree ? ' · free, prompts are logged' : ''}
                           {model.dataPolicy ? '' : ' · terms unknown'}
                           {/* On the label, because a native `option` cannot be
                               styled portably and the text is the one carrier
@@ -1050,6 +1057,10 @@ export default function SettingsWorkspace() {
               />
             </div>
           </Row>
+
+          {/* What is on the card now, and the way to get it back. Sits under
+              the model choice because that choice is what put it there. */}
+          <OnTheCard />
 
           {/* -------------------------------------------- tier three
               Per-task assignment, and it sits under *Which model answers*
@@ -1352,6 +1363,11 @@ export default function SettingsWorkspace() {
                 {catalogue.map((provider) => (
                   <option key={provider.id} value={provider.id}>
                     {provider.displayName}
+                    {provider.pricing === 'free_tier'
+                      ? ' · free tier'
+                      : provider.pricing === 'per_model'
+                        ? ' · some models free'
+                        : ''}
                     {provider.available ? '' : ' — not reachable yet'}
                   </option>
                 ))}

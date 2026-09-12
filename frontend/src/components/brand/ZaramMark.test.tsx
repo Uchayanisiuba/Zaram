@@ -69,11 +69,15 @@ describe('the mark', () => {
     expect(screen.getByRole('button', { name: /zaram/i }).textContent).toBe('');
   });
 
-  it('uses the rounded app-icon tile, not the bare glyph', () => {
-    // The same silhouette the user clicked on their desktop. A different one
-    // in the third place they meet it is how a mark stops being recognised.
+  it('draws the bare mark on a tile it builds itself, not the baked icon', () => {
+    // Decided 10 September 2026 (5eda403): the tile is CSS, made of the same
+    // tokens as everything around it, so a theme change moves it. The asset
+    // with the ground baked in — `zaram-icon.svg` — is what this must *not*
+    // render, because a fixed bitmap of a colour decision is left behind by
+    // every theme change. This test asserted the opposite for two days.
     render(<ZaramMark onHome={() => {}} />);
-    expect(MARK_SRC).toContain('zaram-icon');
+    expect(MARK_SRC).toContain('zaram-mark');
+    expect(MARK_SRC).not.toContain('zaram-icon');
     const img = screen.getByRole('presentation', { hidden: true });
     expect(img.getAttribute('src')).toBe(MARK_SRC);
   });

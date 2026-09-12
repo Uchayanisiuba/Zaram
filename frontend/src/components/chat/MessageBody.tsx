@@ -1,7 +1,7 @@
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
-import type { ReactNode } from 'react';
+import { memo, type ReactNode } from 'react';
 
 /**
  * A reply, rendered as the markdown it already is.
@@ -22,7 +22,29 @@ import type { ReactNode } from 'react';
  * other assistant makes the same call for the same reason — rich content goes
  * in a sandboxed container, never in the message body — and Zaram already has
  * that container in `ArtifactPreview` and `CodePreviewPanel`.
+ *
+ * **Memoised, and the reason is the hang the maintainer reported — 12
+ * September 2026.** The typewriter reveals the streaming reply at up to sixty
+ * frames a second, and each reveal re-rendered `ChatSurface`, which
+ * re-rendered every message in the transcript, which re-ran remark, GFM and
+ * highlight.js over every one of them. A conversation with ten code replies
+ * re-tokenised ten code blocks per frame while an eleventh streamed. `memo`
+ * on a component whose only prop is a string means an unchanged message costs
+ * nothing, and `StreamingReply` keeps the reveal out of the surface entirely.
+ *
+ * **No syntax highlighting while streaming.** `highlight.js` tokenises the
+ * whole block from scratch on every call, and a block that is still being
+ * written is tokenised again on the next frame — the work is thrown away as
+ * fast as it is done, and it is the expensive path in the whole pipeline.
+ * While `streaming` the fence renders as plain code; the finished reply is
+ * highlighted once, when the stream closes and the text stops changing.
  */
+
+/** Plugin lists as module constants: a new array per render is a new
+ *  `rehypePlugins` prop and a new processor, which defeats the memo. */
+const REMARK = [remarkGfm];
+const REHYPE_HIGHLIGHT = [[rehypeHighlight, { detect: false, ignoreMissing: true }]] as const;
+const REHYPE_NONE: never[] = [];
 
 /** Muted, bordered, and never violet — that token means cloud. */
 const RULE = '1px solid var(--color-border)';
@@ -46,11 +68,11 @@ function Fence({ children }: { children?: ReactNode }) {
   );
 }
 
-export default function MessageBody({ text }: { text: string }) {
+function MessageBodyImpl({ text, streaming = false }: { text: string; streaming?: boolean }) {
   return (
     <div className="zaram-md text-sm leading-relaxed">
       <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
+        remarkPlugins={REMARK}
         /**
          * `detect: false` is the decision, not the default talking.
          *
@@ -63,7 +85,7 @@ export default function MessageBody({ text }: { text: string }) {
          * `ignoreMissing` so a fence tagged with a language nobody registered
          * renders as plain code instead of throwing inside a reply.
          */
-        rehypePlugins={[[rehypeHighlight, { detect: false, ignoreMissing: true }]]}
+        rehypePlugins={streaming ? REHYPE_NONE : (REHYPE_HIGHLIGHT as unknown as never[])}
         components={{
           /**
            * A link is text here, not a control.
@@ -194,3 +216,6 @@ export default function MessageBody({ text }: { text: string }) {
     </div>
   );
 }
+
+const MessageBody = memo(MessageBodyImpl);
+export default MessageBody;

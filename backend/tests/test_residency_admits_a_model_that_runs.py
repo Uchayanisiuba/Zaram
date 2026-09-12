@@ -137,16 +137,28 @@ class TestTheVerdictMatchesTheMeasurement:
             "the KV allowance is under-charging"
         )
 
-    def test_the_budget_leaves_room_for_the_embedder(self, measured):
-        """Recall runs on every exchange, so the embedder is a permanent tenant.
+    def test_the_budget_is_the_whole_card_when_the_embedder_is_on_the_cpu(self, measured, monkeypatch):
+        """Recall runs on every exchange, so the embedder is a permanent tenant
+        — **of the CPU, on this card, since 12 September 2026.**
 
-        Still charged on-disk (1.16 GB) rather than resident (0.66 GB), which
-        over-reserves by half a gigabyte. That is a known imprecision and it
-        errs in the safe direction; it is recorded in `CLAUDE.md` and it is not
-        what broke the gate.
+        Measured that day: the embedder and a 10.4 GB chat model could not
+        share the 12 GB card, and Ollama evicted whichever was not being asked
+        for, ~10 GB across PCIe on every exchange. `embed_on_gpu` now keeps
+        bge-m3 in system RAM below 16 GB of VRAM, so docking the budget for it
+        would reserve room for a tenant that is not there — and keep excluding
+        the model that now fits. The same pure function decides both the
+        placement and the budget, so they cannot disagree.
         """
-        assert measured.resident_budget_bytes() == CARD_BYTES - BGE_M3
+        monkeypatch.delenv("ZARAM_EMBED_DEVICE", raising=False)
+        assert measured.resident_budget_bytes() == CARD_BYTES
         assert BGE_M3_RESIDENT < BGE_M3
+
+    def test_the_budget_is_docked_where_the_embedder_is_on_the_card(self, measured, monkeypatch):
+        """Forced onto the GPU, the embedder is charged as before — on-disk
+        (1.16 GB) rather than resident (0.66 GB), the known half-gigabyte
+        over-reserve `CLAUDE.md` records, erring in the safe direction."""
+        monkeypatch.setenv("ZARAM_EMBED_DEVICE", "gpu")
+        assert measured.resident_budget_bytes() == CARD_BYTES - BGE_M3
 
 
 class TestAutoRoutingIsNeverEmptyForVram:

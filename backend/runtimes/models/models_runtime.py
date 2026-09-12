@@ -72,6 +72,18 @@ class ModelsRuntime(Runtime):
         #: environment variables read at boot, which cannot express more than
         #: one provider and cannot change while the process runs.
         self._cloud_engine_factory: Optional[Any] = None
+        #: Answers "how much of the card is free right now", in bytes, or
+        #: ``None``. Injected (see `set_free_vram_probe`) for the same reason
+        #: the provider manager is typed loosely: this runtime does not import
+        #: the hardware probe. With no probe, the preload sizes nothing and
+        #: behaves as it did before.
+        self._free_vram_probe: Optional[Any] = None
+        #: Why the last preload did not happen, in a sentence the interface
+        #: can show. Empty when it happened, or was never attempted.
+        self.preload_skipped_because: str = ""
+
+    def set_free_vram_probe(self, probe) -> None:
+        self._free_vram_probe = probe
 
     def get_runtime_id(self) -> str:
         return "models"
@@ -216,6 +228,23 @@ class ModelsRuntime(Runtime):
             )
             return False
 
+        # **Three reasons not to, each measured on 12 September 2026, and each
+        # one a preload that made the machine slower rather than faster.**
+        #
+        # The user's routing preference was `prefer_cloud`, their day-to-day
+        # model lived on a second local server holding 9.5 GB, and the desktop
+        # held another 3 GB — and this still loaded Ollama's 10.4 GB pick at
+        # boot, because the only question it asked was "is a model selected".
+        # On a 12 GB card that is 23 GB asked for, the driver paging GPU memory
+        # over PCIe for every process, and a 14B split across GPU and CPU
+        # pegging every core whenever anything touched it.
+        skipped = self._preload_refusal()
+        if skipped:
+            self.preload_skipped_because = skipped
+            logger.info("[ModelsRuntime] No preload: %s", skipped)
+            return False
+        self.preload_skipped_because = ""
+
         engine = getattr(self._service, "engine", None)
         # `RoutedEngine` wraps the local one. Warming the wrapper would send an
         # empty prompt down whichever path the router picks, which for a cloud
@@ -229,6 +258,80 @@ class ModelsRuntime(Runtime):
         import asyncio
 
         return await asyncio.to_thread(warm, self._selected_model)
+
+    def _preload_refusal(self) -> str:
+        """Why the selected model should not be preloaded now, or ``""``.
+
+        Three checks, in the order of how sure each one is:
+
+        1. **The user prefers cloud.** Warming a local model they have asked
+           not to use by default spends the card on nothing. They can still
+           pick one by name, and it loads then — a cold start they chose,
+           once, rather than 10 GB pinned all session for a preference they
+           did not express.
+        2. **Their chosen default lives on another local server.** A second
+           server gets no preload (see `LocalDispatchEngine.warm`), but the
+           first one did, so Ollama's pick was loaded *beside* the model the
+           user actually answers with. Two chat models on one card is the
+           case this exists to refuse.
+        3. **It does not fit in what is free now.** The residency gate sizes
+           against the card's *total*; this is the only moment "what is free
+           beside everything else running" is the right question, and it is
+           asked of the driver. Unknown size or unknown free space preloads
+           as before: refusing on a number nobody has is a guess, and a guess
+           here costs a first-message cold start that cannot be explained.
+
+        Every read is guarded: a preference file that cannot be read, or a
+        provider layer that has not scanned yet, must not stop a preload that
+        would otherwise have been right.
+        """
+        try:
+            from core.user_settings import get_user_settings
+
+            settings = get_user_settings()
+            preference = getattr(getattr(settings, "routing_preference", None), "value", None)
+            chosen_default = getattr(settings, "default_model", None) or ""
+        except Exception:  # noqa: BLE001 - a preference never blocks a preload
+            preference, chosen_default = None, ""
+
+        if preference == "prefer_cloud":
+            return "routing prefers cloud, so the local model is loaded only when asked for"
+
+        if chosen_default:
+            # `_local_endpoint_for` answers a URL only for a model served by an
+            # OpenAI-compatible local server — LM Studio, TabbyAPI — and None
+            # for Ollama's own and for anything it cannot place.
+            try:
+                elsewhere = self._local_endpoint_for(chosen_default)
+            except Exception:  # noqa: BLE001 - see the docstring
+                elsewhere = None
+            if elsewhere:
+                return (
+                    f"the chosen model ({chosen_default}) is served by another local "
+                    f"server at {elsewhere}; loading a second chat model beside it "
+                    "would not fit"
+                )
+
+        free = None
+        if callable(self._free_vram_probe):
+            try:
+                free = self._free_vram_probe()
+            except Exception:  # noqa: BLE001
+                free = None
+        size = self._model_size_bytes(self._selected_model)
+        if free is not None and size is not None and size > free:
+            return (
+                f"{self._selected_model} needs {size / 1e9:.1f} GB and the card has "
+                f"{free / 1e9:.1f} GB free beside what is already running"
+            )
+        return ""
+
+    def _model_size_bytes(self, model: Optional[str]) -> Optional[int]:
+        """On-disk size of the catalogued model, or None. `_catalogued` does
+        the id/display-name resolution every other lookup here uses."""
+        info = self._catalogued(model) if model else None
+        size = getattr(info, "size_bytes", None) if info is not None else None
+        return int(size) if isinstance(size, (int, float)) and size > 0 else None
 
     def reload_engine(self) -> bool:
         """Rebuild the engine from the current configuration. Returns whether cloud is present.

@@ -335,3 +335,38 @@ class HardwareProfiler:
         except ValueError:
             return None
         return mib * 1024 * 1024 if mib >= 0 else None
+
+
+def vram_free_bytes() -> Optional[int]:
+    """How much of the card is free *right now*, or None.
+
+    Deliberately separate from `HardwareProfiler`, which reports the card's
+    total and says why: the residency gate subtracts the models it intends to
+    hold, and a reading that depends on when the probe ran would make that
+    arithmetic drift. This is the other question — not "what could the card
+    hold" but "what could it hold *now*, beside everything else the user is
+    running" — and it is asked at exactly one moment, just before a preload.
+
+    **Measured 12 September 2026:** the desktop alone held 2.2–3.0 GB on a
+    12 GB card (Electron, a browser, a game launcher, an editor), and a second
+    local server held 9.5 GB. A preload sized against the card's *total*
+    concluded a 10.4 GB model fitted, loaded it, and the driver paged GPU
+    memory over PCIe for every process on the machine.
+
+    NVIDIA only, through the driver's own tool. Anything else answers None —
+    unknown, never a guess — and the caller preloads as it always did.
+    """
+    out = HardwareProfiler._run(
+        ["nvidia-smi", "--query-gpu=memory.total,memory.used", "--format=csv,noheader,nounits"]
+    )
+    if not out:
+        return None
+    try:
+        total_text, _, used_text = out.splitlines()[0].partition(",")
+        total = int(total_text.strip())
+        used = int(used_text.strip())
+    except ValueError:
+        return None
+    if total <= 0 or used < 0 or used > total:
+        return None
+    return (total - used) * 1024 * 1024

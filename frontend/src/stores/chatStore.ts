@@ -87,6 +87,8 @@ export interface ChatNotice {
   kind: string;
   /** Where to go about it, e.g. "knowledge". Empty when there is nowhere. */
   action: string;
+  /** On the "tools" notice: which servers were offered for this reply. */
+  servers?: string[];
 }
 
 /** One tool the model asked for, and the gate's verdict on it.
@@ -103,6 +105,9 @@ export interface ChatToolCall {
   reason: string;
   /** What the call was aimed at, or `''`. See `ChatEvent`'s note. */
   target: string;
+  /** The head of what the tool returned, or `''` when it did not run.
+   *  Bounded by the backend; rendered as text in a pane of its own. */
+  output?: string;
 }
 
 interface ChatState {
@@ -502,6 +507,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
               content: event.content,
               kind: event.kind,
               action: event.action,
+              ...(event.servers ? { servers: event.servers } : {}),
             });
             set({ streamingNotices: [...notices] });
             break;
@@ -518,6 +524,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
               verdict: event.verdict,
               reason: event.reason,
               target: event.target,
+              output: event.output,
             });
             set({ streamingToolCalls: [...toolCalls] });
             break;

@@ -101,7 +101,7 @@ const MOTION_RATE: Record<EmbodimentState, number> = {
  * import site is a change to the tests, not to the behaviour.
  */
 export { renderScaleFor, approachRate, applyTextureFiltering, RIM_EASE_SECONDS } from '@/lib/renderTuning'
-import { renderScaleFor, approachRate, applyTextureFiltering, RIM_EASE_SECONDS } from '@/lib/renderTuning'
+import { renderScaleFor, approachRate, applyTextureFiltering, RIM_EASE_SECONDS, FrameGate } from '@/lib/renderTuning'
 
 
 interface VrmAvatarProps {
@@ -325,8 +325,13 @@ export default function VrmAvatar({ px = 320, src = '/avatars/AvatarSample_Z.vrm
       setReason(err instanceof Error ? err.message : 'The avatar file could not be read.')
     }
 
+    // Capped, and skipped while the document is hidden — see `FrameGate`.
+    // The gate runs before `getDelta`, so a skipped frame's time is carried
+    // into the next drawn one rather than lost.
+    const gate = new FrameGate()
     const tick = () => {
       raf = requestAnimationFrame(tick)
+      if (!gate.due(performance.now())) return
       const dt = clock.getDelta()
       const now = clock.elapsedTime
       const s = stateRef.current

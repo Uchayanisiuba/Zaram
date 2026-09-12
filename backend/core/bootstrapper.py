@@ -197,6 +197,25 @@ class KernelBootstrapper:
         model = chosen or os.getenv("ZARAM_EMBED_MODEL", "bge-m3")
         dim = int(os.getenv("ZARAM_EMBED_DIM", "1024" if backend == "ollama" else "384"))
 
+        # **Where the embedder's weights go is decided by the card, here,
+        # because the memory runtime must not know about hardware.** On a
+        # 12 GB card the embedder and the chat model cannot both be resident,
+        # and Ollama resolved that by evicting whichever was not being asked
+        # for -- a 10 GB swap on every exchange, measured 12 September 2026.
+        # `embed_on_gpu` holds the threshold and the reasoning; this only
+        # supplies the reading. Unknown VRAM answers CPU, which is slower
+        # rather than wrong.
+        from runtimes.memory.embeddings import embed_on_gpu
+
+        vram = None
+        try:
+            from providers.discoverers.hardware import HardwareProfiler
+
+            vram = HardwareProfiler().profile().vram_bytes
+        except Exception as error:  # noqa: BLE001 - a probe never blocks boot
+            print(f"[Bootstrapper] Could not read VRAM for embedder placement ({error}).")
+        on_gpu = embed_on_gpu(vram, os.getenv("ZARAM_EMBED_DEVICE"))
+
         runtime = create_memory_runtime(
             store_type="sqlite",
             db_path=spine_path,
@@ -205,8 +224,12 @@ class KernelBootstrapper:
             embedding_backend=backend,
             embedding_model=model,
             event_bus=self.event_bus,
+            embed_on_gpu=on_gpu,
         )
-        print(f"[Bootstrapper] Spine at {spine_path} (embeddings: {backend}/{model}, dim={dim})")
+        print(
+            f"[Bootstrapper] Spine at {spine_path} (embeddings: {backend}/{model}, "
+            f"dim={dim}, on {'GPU' if on_gpu else 'CPU'})"
+        )
         return runtime
 
     async def _init_knowledge_runtime(self, memory_runtime):
@@ -301,6 +324,15 @@ class KernelBootstrapper:
             self.knowledge_runtime,
             provider_manager=self.providers_runtime.manager,
         )
+        # The preload asks the driver what is free *now*, beside everything
+        # else the user is running. Injected, because the runtime does not
+        # import the hardware probe; without it the preload sizes nothing.
+        try:
+            from providers.discoverers.hardware import vram_free_bytes
+
+            models_runtime.set_free_vram_probe(vram_free_bytes)
+        except Exception as error:  # noqa: BLE001 - a probe never blocks boot
+            print(f"[Bootstrapper] No free-VRAM probe for the preload ({error}).")
         self.registry.register(models_runtime)
         await models_runtime.initialize()
         register_runtime_for_health(models_runtime)

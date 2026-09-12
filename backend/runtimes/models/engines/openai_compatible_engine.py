@@ -88,6 +88,7 @@ from typing import Any, Dict, Optional
 
 from core.egress import DataClass, EgressDenied, get_gate
 from core.reasoning import CLOSE_TAG, OPEN_TAG
+from core.tool_loop import marker_for_native_call
 
 from .base_engine import ERROR_PREFIX, LLMEngine
 
@@ -531,6 +532,7 @@ class OpenAICompatibleEngine(LLMEngine):
         system_prompt: str,
         model: str | None,
         images: list[str] | None = None,
+        tools: list[dict] | None = None,
     ) -> dict[str, Any]:
         """The exact object that will be sent, built before anything is checked.
 
@@ -570,6 +572,13 @@ class OpenAICompatibleEngine(LLMEngine):
             "messages": messages,
             "stream": True,
         }
+        # The native channel. Every server this engine reaches — TabbyAPI,
+        # LM Studio, OpenRouter, the paid providers — accepts OpenAI's
+        # ``tools`` array; the calls come back as ``delta.tool_calls`` and are
+        # re-emitted as markers by `_tokens`. Sent only when there are some,
+        # so an ordinary reply's body is byte-for-byte what it always was.
+        if tools:
+            body["tools"] = list(tools)
         if self._sampling:
             body.update(self._sampling)
         return body
@@ -605,6 +614,7 @@ class OpenAICompatibleEngine(LLMEngine):
         system_prompt: str = "",
         model: str | None = None,
         images: list[str] | None = None,
+        tools: list[dict] | None = None,
     ) -> Iterator[str]:
         """Stream plain text tokens, per `LLMEngine`.
 
@@ -622,7 +632,7 @@ class OpenAICompatibleEngine(LLMEngine):
         outcome M10 cannot afford.
         """
         try:
-            body = self._body(prompt, system_prompt, model, images)
+            body = self._body(prompt, system_prompt, model, images, tools)
         except ValueError as unreadable:
             # Said here rather than swallowed by the general handler below,
             # which would report it as "could not reach" — a network problem,
@@ -738,6 +748,37 @@ class OpenAICompatibleEngine(LLMEngine):
         no special handling at all.
         """
         in_reasoning = False
+        #: Native tool calls, assembled across deltas. The wire sends a
+        #: call's name in one frame and its arguments in pieces over the next
+        #: several, keyed by ``index`` — the same split-across-frames shape as
+        #: `</think>` and `[M1]`, and handled the same way: accumulate, emit
+        #: once at the end. Emitted as markers, so the loop downstream reads
+        #: a native call and a typed one identically.
+        native_calls: dict[int, dict[str, str]] = {}
+
+        def _collect(delta: dict) -> None:
+            for call in delta.get("tool_calls") or []:
+                if not isinstance(call, dict):
+                    continue
+                index = call.get("index")
+                if not isinstance(index, int):
+                    index = len(native_calls)
+                slot = native_calls.setdefault(index, {"name": "", "arguments": ""})
+                function = call.get("function") or {}
+                if isinstance(function, dict):
+                    if function.get("name"):
+                        slot["name"] += str(function["name"])
+                    if function.get("arguments"):
+                        slot["arguments"] += str(function["arguments"])
+
+        def _flush_calls() -> Iterator[str]:
+            for index in sorted(native_calls):
+                slot = native_calls[index]
+                marker = marker_for_native_call(slot["name"], slot["arguments"])
+                if marker:
+                    yield marker
+            native_calls.clear()
+
         #: Set once the model closes the block the prompt opened, so the
         #: end-of-stream tidy-up can tell "it finished thinking" from "it never
         #: did".
@@ -769,6 +810,7 @@ class OpenAICompatibleEngine(LLMEngine):
                 # reply, showing the user nothing at all.
                 if in_reasoning and not model_closed_its_block:
                     yield CLOSE_TAG
+                yield from _flush_calls()
                 return
             try:
                 frame = json.loads(data)
@@ -786,6 +828,7 @@ class OpenAICompatibleEngine(LLMEngine):
 
             for choice in frame.get("choices") or ():
                 delta = choice.get("delta") or {}
+                _collect(delta)
 
                 thinking = _thinking_from(delta)
                 if thinking:
@@ -862,3 +905,5 @@ class OpenAICompatibleEngine(LLMEngine):
         # tag left open means the splitter releases nothing at all.
         if in_reasoning and not model_closed_its_block:
             yield CLOSE_TAG
+        # A stream that ended without `[DONE]` still hands over its calls.
+        yield from _flush_calls()

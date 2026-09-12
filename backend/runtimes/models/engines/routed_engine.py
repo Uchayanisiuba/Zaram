@@ -34,7 +34,7 @@ import logging
 from collections.abc import Iterator
 from typing import Callable, Optional
 
-from .base_engine import ERROR_PREFIX, LLMEngine
+from .base_engine import ERROR_PREFIX, LLMEngine, forward_stream
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +81,7 @@ class RoutedEngine(LLMEngine):
         system_prompt: str = "",
         model: str | None = None,
         images: list[str] | None = None,
+        tools: list[dict] | None = None,
     ) -> Iterator[str]:
         try:
             remote = bool(model) and self._is_remote(model)
@@ -90,7 +91,7 @@ class RoutedEngine(LLMEngine):
             remote = False
 
         if not remote:
-            yield from self._local.stream_response(prompt, system_prompt, model, images)
+            yield from forward_stream(self._local, prompt, system_prompt, model, images, tools)
             return
 
         if self._cloud is None:
@@ -124,4 +125,4 @@ class RoutedEngine(LLMEngine):
         # `_local_endpoint_for` shipped: four call sites resolving a model one
         # way and a fifth resolving it another. One chokepoint, asked once.
         logger.info("routing to cloud engine for model=%s images=%s", model, bool(images))
-        yield from self._cloud.stream_response(prompt, system_prompt, model, images)
+        yield from forward_stream(self._cloud, prompt, system_prompt, model, images, tools)

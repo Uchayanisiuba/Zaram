@@ -233,6 +233,16 @@ async def startup_event():
     if providers_runtime is not None:
         set_providers_runtime(providers_runtime)
 
+    # `/providers/resident` shows why the preload did not happen, in the
+    # models runtime's own words. Handed over rather than looked up from the
+    # provider routes, which do not know the registry exists.
+    from providers.api import set_models_runtime
+
+    try:
+        set_models_runtime(kernel.registry.get_runtime("models"))
+    except Exception:  # noqa: BLE001 - the sentence is optional
+        pass
+
     # Only `/tools/health` needs this. The rest of the tool routes read the
     # store on disk, so Settings can list what is configured before the kernel
     # has finished starting -- and, more importantly, without connecting to

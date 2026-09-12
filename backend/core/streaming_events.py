@@ -14,6 +14,7 @@ import json
 import time
 from dataclasses import dataclass, field
 from enum import Enum
+from typing import Any
 
 from core.contracts import ExecutionToken
 
@@ -383,6 +384,7 @@ class StreamEvent:
         reason: str = "",
         correlation_id: str = "",
         target: str = "",
+        output: str = "",
     ) -> StreamEvent:
         """One tool call, and what the gate said about it.
 
@@ -407,6 +409,9 @@ class StreamEvent:
                 "verdict": verdict,
                 "reason": reason,
                 "target": target,
+                # The head of what came back, for the step's output pane.
+                # Empty for a call that did not run. See `output_excerpt`.
+                "output": output,
             },
             correlation_id=correlation_id,
         )
@@ -426,17 +431,32 @@ class StreamEvent:
         )
 
     @staticmethod
-    def notice(content: str, kind: str = "", action: str = "", correlation_id: str = "") -> StreamEvent:
+    def notice(
+        content: str,
+        kind: str = "",
+        action: str = "",
+        correlation_id: str = "",
+        servers: list[str] | None = None,
+    ) -> StreamEvent:
         """Something the user should know, alongside the answer.
 
         `action` names where to go about it — "knowledge" — so the surface can
         offer a route rather than leaving the user to find it. Rendered
         distinctly from the reply: attributing this to the model would be
         putting words in its mouth.
+
+        `servers` rides on the ``tools`` notice only: which tool servers were
+        put in front of the model for this reply. A tool-driven reply is
+        buffered until it finishes, so nothing else about it reaches the
+        screen while it runs — this is the one fact the orb can read to say
+        *coding* from the first second rather than after the buffer lands.
         """
+        data: dict[str, Any] = {"content": content, "kind": kind, "action": action}
+        if servers:
+            data["servers"] = list(servers)
         return StreamEvent(
             type=EventType.NOTICE,
-            data={"content": content, "kind": kind, "action": action},
+            data=data,
             correlation_id=correlation_id,
         )
 

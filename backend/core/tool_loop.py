@@ -178,6 +178,30 @@ def call_target(tool: str, arguments: Any) -> str:
     return target[:TARGET_LIMIT]
 
 
+#: How much of a tool's answer travels to the screen. The model sees the
+#: whole rendering, bounded by the token budget; the screen gets the head of
+#: it, enough to check *what came back* without turning a step list into a
+#: log. Four thousand characters is roughly a hundred lines of code.
+OUTPUT_EXCERPT_LIMIT = 4000
+
+
+def output_excerpt(result: Any) -> str:
+    """The head of a tool's answer, as text for a step's output pane.
+
+    Added 12 September 2026, against Claude Code: each step opens to show
+    what it produced, in its own bounded, scrollable pane. Tool output is
+    **third-party text** — a file's contents, a search hit — and it is
+    rendered as text and never as markup, the same rule `call_target` keeps.
+    Control characters other than newline and tab go, so the pane cannot be
+    steered by what it shows.
+    """
+    text = render_result(result)
+    kept = "".join(ch for ch in text if ch in "\n\t" or ch.isprintable())
+    if len(kept) > OUTPUT_EXCERPT_LIMIT:
+        return kept[:OUTPUT_EXCERPT_LIMIT] + "\n…"
+    return kept
+
+
 def render_result(result: Any) -> str:
     """A tool's answer as the text the model will be shown.
 
@@ -272,6 +296,121 @@ def _argument_line(schema: Any) -> str:
         marks = ", ".join(part for part in (kind, "required" if name in required else "") if part)
         rendered.append(f"{name} ({marks})" if marks else str(name))
     return "; ".join(rendered)
+
+
+#: Joins a server name and a tool name into one function name for the native
+#: channel, and splits it back. Two underscores, because OpenAI's function
+#: names allow ``[A-Za-z0-9_-]`` and nothing else, so a slash or a dot cannot
+#: be the separator — and a server named with a double underscore is refused
+#: (see `native_tool_specs`) rather than decoded wrongly.
+NATIVE_NAME_SEPARATOR = "__"
+
+#: What the provider accepts in a function name. Anything else is replaced.
+_NATIVE_NAME_CHARS = re.compile(r"[^A-Za-z0-9_-]")
+
+#: OpenAI caps function names at 64 characters; Ollama passes them through.
+_NATIVE_NAME_LIMIT = 64
+
+#: A description is third-party text and goes on the wire; bound it as the
+#: prompt fragment does, so a server cannot put a page of instructions into
+#: the tool list.
+_NATIVE_DESCRIPTION_LIMIT = 400
+
+
+def native_tool_specs(tools: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """The attached tools as the ``tools`` array every chat API speaks.
+
+    **The native channel, added 12 September 2026.** The module docstring
+    calls the text marker "the honest intermediate" and says the provider
+    layer would one day grow a real tool-call channel. This is that channel
+    — with one design decision that keeps the rest of the loop unchanged: an
+    engine that receives a native tool call **re-emits it as the marker** on
+    the text stream (`marker_for_native_call`), so `parse_call`, the gate,
+    the budget, the stripper and every test double see exactly what they saw
+    before. What changes is who writes the call: the server's grammar and
+    template rather than the model's memory of an example in the prompt,
+    which is the difference between a call that parses and one that mostly
+    does.
+
+    Shape is OpenAI's — ``{"type": "function", "function": {name, description,
+    parameters}}`` — because Ollama's ``/api/chat``, TabbyAPI, LM Studio,
+    OpenRouter and every other server here accept that one. The MCP
+    ``input_schema`` is already JSON Schema and travels as ``parameters``;
+    a tool with none gets an empty object schema, which is what "no
+    arguments" is in that vocabulary.
+
+    A tool whose server or name contains the separator is left out rather
+    than encoded ambiguously; it remains reachable through the marker, which
+    the prompt still teaches.
+    """
+    specs: list[dict[str, Any]] = []
+    for tool in tools:
+        server = str(tool.get("server") or "").strip()
+        name = str(tool.get("name") or "").strip()
+        if not server or not name:
+            continue
+        if NATIVE_NAME_SEPARATOR in server or NATIVE_NAME_SEPARATOR in name:
+            logger.info(
+                "tool %s/%s left off the native channel: name contains %r",
+                server, name, NATIVE_NAME_SEPARATOR,
+            )
+            continue
+        function_name = _NATIVE_NAME_CHARS.sub("-", f"{server}{NATIVE_NAME_SEPARATOR}{name}")
+        if len(function_name) > _NATIVE_NAME_LIMIT:
+            logger.info("tool %s/%s left off the native channel: name too long", server, name)
+            continue
+        description = " ".join(str(tool.get("description") or "").split())[:_NATIVE_DESCRIPTION_LIMIT]
+        schema = tool.get("input_schema")
+        if not isinstance(schema, Mapping) or schema.get("type", "object") != "object":
+            schema = {"type": "object", "properties": {}}
+        specs.append({
+            "type": "function",
+            "function": {
+                "name": function_name,
+                "description": description,
+                "parameters": dict(schema),
+            },
+        })
+    return specs
+
+
+def split_native_name(function_name: str) -> tuple[str, str] | None:
+    """``"code__read_lines"`` → ``("code", "read_lines")``, or None."""
+    if not function_name or NATIVE_NAME_SEPARATOR not in function_name:
+        return None
+    server, _, tool = function_name.partition(NATIVE_NAME_SEPARATOR)
+    server, tool = server.strip(), tool.strip()
+    if not server or not tool:
+        return None
+    return server, tool
+
+
+def marker_for_native_call(function_name: str, arguments: Any) -> str:
+    """A native tool call, as the one line the rest of the loop already reads.
+
+    ``arguments`` arrive as a dict from Ollama and as a JSON *string* from the
+    OpenAI wire; both are accepted. Unparseable arguments become an empty
+    object rather than a dropped call — the gate then refuses or the tool
+    reports a missing argument, either of which the user sees, whereas a
+    silently dropped call is a reply that pretends no tool was wanted.
+
+    Returns ``""`` for a name this loop cannot place, so an engine yields
+    nothing for it rather than a marker that `parse_call` would reject.
+    """
+    parts = split_native_name(function_name)
+    if parts is None:
+        return ""
+    server, tool = parts
+    if isinstance(arguments, str):
+        try:
+            arguments = json.loads(arguments) if arguments.strip() else {}
+        except json.JSONDecodeError:
+            logger.info("native tool call %s carried unparseable arguments", function_name)
+            arguments = {}
+    if not isinstance(arguments, Mapping):
+        arguments = {}
+    payload = {"server": server, "tool": tool, "arguments": dict(arguments)}
+    return "\n" + TOOL_CALL_MARKER + " " + json.dumps(payload) + "\n"
 
 
 def tool_instructions(tools: Sequence[Mapping[str, Any]]) -> str:

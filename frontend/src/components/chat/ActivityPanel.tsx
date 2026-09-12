@@ -37,6 +37,7 @@ import { useLayoutStore } from '@/stores/layoutStore';
 import { useChatModeStore } from '@/stores/chatModeStore';
 import { useViewport } from '@/hooks/useViewport';
 import type { ChatToolCall } from '@/stores/chatStore';
+import StepOutput from './StepOutput';
 
 const VERDICTS: Record<string, { Icon: typeof Check; color: string; label: string }> = {
   allow: { Icon: Check, color: 'var(--color-text-faint)', label: 'ran' },
@@ -173,6 +174,10 @@ export default function ActivityPanel({
                       {call.reason}
                     </div>
                   )}
+                  {/* What came back, in its own scrolling pane, so a run that
+                      read four files is four rows and any one can be checked
+                      without unrolling the rest. */}
+                  {call.output && <StepOutput text={call.output} />}
                 </div>
               </li>
             );

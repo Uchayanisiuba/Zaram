@@ -196,6 +196,15 @@ class ModelInfo:
     #: The task this model is tuned for ("code", "math", ...), or ``None`` for a
     #: general-purpose model. Set by the adapter at discovery time.
     specialisation: Optional[str] = None
+    #: Whether asking this model costs nothing per token, or ``None`` when the
+    #: provider's listing does not say. **Free is a fact about money and says
+    #: nothing about data**: the deal behind a free model is almost always
+    #: that prompts are logged and trained on, and `data_policy` carries that
+    #: separately so the picker can show both — "free · prompts are logged".
+    #: Three-valued for the same reason `data_policy` is: an unknown price is
+    #: not a free one, and a router's paid model must never be shown as free
+    #: because the field defaulted.
+    is_free: Optional[bool] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
 
     @property
@@ -293,6 +302,8 @@ class ModelInfo:
             "selectable_by_default": self.selectable_by_default,
             "specialisation": self.specialisation,
             "is_general_purpose": self.is_general_purpose,
+            # Null for unknown, never false — the UI says "free" only on true.
+            "is_free": self.is_free,
             "metadata": dict(self.metadata),
         }
 
@@ -318,6 +329,7 @@ class ModelInfo:
             available=bool(data.get("available", False)),
             health_status=HealthStatus.from_value(data.get("health_status")),
             endpoint=data.get("endpoint"),
+            is_free=data.get("is_free") if isinstance(data.get("is_free"), bool) else None,
             data_policy=DataPolicy.from_value(data.get("data_policy")),
             specialisation=data.get("specialisation"),
             metadata=dict(data.get("metadata", {})),

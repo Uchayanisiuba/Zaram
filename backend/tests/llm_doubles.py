@@ -49,6 +49,7 @@ class FakeLLM:
         system_prompt: str = "",
         model: str | None = None,
         images: list[str] | None = None,
+        tools: list[dict] | None = None,
     ) -> Iterator[str]:
         # `images` is on the double for the reason the contract test exists at
         # all: a fake exempt from the interface is the original bug. It kept a

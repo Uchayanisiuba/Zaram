@@ -37,7 +37,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Callable, Dict, Iterator, Optional
 
-from .base_engine import LLMEngine
+from .base_engine import LLMEngine, forward_stream
 from .openai_compatible_engine import LOCAL_SAMPLING, OpenAICompatibleEngine
 
 logger = logging.getLogger(__name__)
@@ -213,6 +213,7 @@ class LocalDispatchEngine(LLMEngine):
         system_prompt: str = "",
         model: Optional[str] = None,
         images: Optional[Any] = None,
+        tools: Optional[list] = None,
     ) -> Iterator[str]:
         # **The default is a choice, and it has to be resolved like one.** An
         # absent `model` does not mean "no model" -- it means the runtime's own
@@ -238,7 +239,7 @@ class LocalDispatchEngine(LLMEngine):
             # `model`, not `chosen`. Ollama holds its own copy of the default
             # and applies it itself, so forwarding the argument untouched keeps
             # the Ollama-served path byte-for-byte what it was.
-            yield from self._ollama.stream_response(prompt, system_prompt, model, images)
+            yield from forward_stream(self._ollama, prompt, system_prompt, model, images, tools)
             return
 
         wire = chosen
@@ -249,4 +250,4 @@ class LocalDispatchEngine(LLMEngine):
 
         logger.info("[LocalDispatch] %s -> %s (as %r)", chosen, endpoint, wire)
         engine = self._engine_for(endpoint, wire)
-        yield from engine.stream_response(prompt, system_prompt, wire, images)
+        yield from forward_stream(engine, prompt, system_prompt, wire, images, tools)

@@ -1,34 +1,18 @@
-import type { OrbState } from '@/stores/orbStore';
-import type { OrbActivity } from '@/stores/systemStore';
-
 /**
- * Speech owns `speaking`; chat activity may not overwrite it.
+ * Chat's half of the orb's state, as pure rules.
  *
- * **Two writers, one state, and only one of them was guarding — found 19 August
- * 2026.** `ChatSurface` set `thinking` while a request was in flight and `idle`
- * the moment it finished. `speechStore` sets `speaking` while a clip plays, and
- * already refused to stand down over anybody else's state:
- * *"only stand down if nothing else has taken the state in the meantime"*. That
- * asymmetry is the whole bug. Speech starts on the first sentence that will not
- * change again and outlives the stream **by design** — `CLAUDE.md` requires
- * exactly that — so the `idle` written when generation ended landed on top of
- * `speaking` every time, on every reply.
- *
- * **Nothing looked broken, which is why it survived.** The rim light is the
- * same cyan for `thinking` and for `speaking`, so the only renderer that could
- * show the difference was the avatar's mouth, and a mouth that never opens
- * reads as "lip sync was never finished" rather than as a state bug. Measured
- * in the browser before the fix: audio playing, `currentTime` advancing 0 →
- * 8.1s, `paused` false throughout, and the mouth shut in all 40 frames.
- *
- * A rule about a shared store, expressed as a function so a test can assert it
- * rather than a component having to be rendered to find out.
+ * **`preserveSpeaking` lived here until 12 September 2026 and was removed on
+ * purpose.** It guarded one field written by two owners — chat and speech —
+ * by refusing every chat state while a clip played. That fixed the mouth never
+ * opening (19 August) and caused the next report: a fence opening mid-sentence
+ * could not turn the orb to `coding`, and speech standing down wrote `idle`
+ * over a reply still streaming. The orb store now holds `activity` and
+ * `speaking` as separate fields with one owner each and composes them — see
+ * `composeOrbState` — so there is nothing left here to guard.
  */
-export function preserveSpeaking<T extends OrbState | OrbActivity>(current: T, next: T): T {
-  return current === 'speaking' ? current : next;
-}
 
-/** What chat activity alone would say. The other half of the sentence above. */
+
+/** What chat activity alone would say. Sticky rules live in `codingActivity`. */
 export function chatActivity(isStreaming: boolean): 'thinking' | 'idle' {
   return isStreaming ? 'thinking' : 'idle';
 }
@@ -50,8 +34,14 @@ const OPENS_A_CODE_BLOCK = /(^|\n)\s*```/;
  *   repository, whatever model was asked.
  * - **the reply is writing code.** An opened fence in the text so far is the
  *   literal thing the maintainer asked to see embodied — Zaram writing code.
+ * - **the code tools were put in front of the model.** Added 12 September
+ *   2026, for the buffered case: a reply that may call a tool is held back
+ *   until it finishes, so no fence and no call reaches the screen while it
+ *   runs, and the orb sat on `thinking` for the whole of a coding run. The
+ *   offer is system state — the engine chose to hand the model a repository
+ *   — and it is the only fact available until the buffer lands.
  *
- * Either is enough. The fence check runs on the accumulated reply rather than
+ * Any is enough. The fence check runs on the accumulated reply rather than
  * per token, for the reason every other rule in this codebase does: a fence
  * arrives split across tokens, and a per-token test would never see one.
  *
@@ -63,11 +53,22 @@ export function codingActivity(
   isStreaming: boolean,
   replySoFar: string,
   toolServers: readonly string[] = [],
+  offeredServers: readonly string[] = [],
 ): 'coding' | 'thinking' | 'idle' {
   // The base answer first, so "streaming means thinking, otherwise idle" is
   // stated in exactly one place and this function only ever narrows it.
   const base = chatActivity(isStreaming);
   if (base === 'idle') return base;
-  if (toolServers.includes('code')) return 'coding';
+  if (toolServers.includes('code') || offeredServers.includes('code')) return 'coding';
   return OPENS_A_CODE_BLOCK.test(replySoFar ?? '') ? 'coding' : base;
+}
+
+/** The servers named by the "tools" notices of the reply in flight. */
+export function offeredServers(notices: readonly { kind: string; servers?: string[] }[]): string[] {
+  const out = new Set<string>();
+  for (const n of notices) {
+    if (n.kind !== 'tools') continue;
+    for (const s of n.servers ?? []) out.add(s);
+  }
+  return [...out];
 }

@@ -93,6 +93,13 @@ export interface CatalogueProvider {
   compatibility: string;
   /** `none` means a local server on loopback, so no key is needed. */
   auth: string;
+  /** `free_tier` | `paid` | `trial` | `per_model` | `unknown`. A router is
+   *  `per_model`: its listing says which models are free, and each one
+   *  carries `isFree`. `trial` is a grant behind a card and is not free. */
+  pricing: string;
+  /** Whether a person can get answers here without paying — for a router,
+   *  "some models". The model list settles which. */
+  hasFreeTier: boolean;
 }
 
 export interface ProviderCatalogue {
@@ -119,6 +126,8 @@ export async function fetchProviderCatalogue(): Promise<ProviderCatalogue> {
       keyUrl: String(p.key_url ?? ''),
       compatibility: String(p.compatibility ?? ''),
       auth: String(p.auth ?? ''),
+      pricing: String(p.pricing ?? 'unknown'),
+      hasFreeTier: p.has_free_tier === true,
     })),
   };
 }
@@ -264,6 +273,10 @@ export interface DiscoveredModel {
    *  distinction `select_model_for_task` draws between its gates and its
    *  ranking. */
   specialisation: string;
+  /** Costs nothing per token (true), is priced (false), or the listing did
+   *  not say (null). Money only — the data policy beside it says what the
+   *  free one costs instead. */
+  isFree?: boolean | null;
 }
 
 /**
@@ -321,6 +334,9 @@ function toDiscoveredModel(m: Record<string, unknown>): DiscoveredModel {
     supportsVision: m.supports_vision === true,
     supportsEmbedding: m.supports_embedding === true,
     specialisation: typeof m.specialisation === 'string' ? m.specialisation : '',
+    // `=== true` and `=== false` separately: null is "the listing did not
+    // say", and it must not read as either. See `ModelInfo.is_free`.
+    isFree: m.is_free === true ? true : m.is_free === false ? false : null,
   };
 }
 
@@ -583,4 +599,63 @@ export async function downloadExport(): Promise<string> {
   anchor.remove();
   URL.revokeObjectURL(url);
   return filename;
+}
+
+// ------------------------------------------------------------------ the card
+
+/** One model a local server holds in memory right now. */
+export interface ResidentModel {
+  name: string;
+  /** Bytes on the card, or null where the server reports residency without a
+   *  size — TabbyAPI, LM Studio. Never read null as zero. */
+  bytes: number | null;
+}
+
+/** What is on the card, and what is free beside everything else running. */
+export interface CardStatus {
+  /** null when residency could not be established — a local server that
+   *  cannot say what it holds makes the whole answer unknown. Draw that as
+   *  "unknown", never as an empty list that reads as "nothing loaded". */
+  resident: ResidentModel[] | null;
+  /** The driver's free figure for the whole card, or null without one. */
+  freeVramBytes: number | null;
+  /** Why no model was preloaded at boot, in the backend's words. Empty when
+   *  one was, or when the question never arose. */
+  preloadSkippedBecause: string;
+  /** Present after a release: model name → "released" or "not released: …". */
+  outcome?: Record<string, string>;
+}
+
+function toCardStatus(raw: Record<string, unknown>): CardStatus {
+  const rows = Array.isArray(raw.resident)
+    ? (raw.resident as Array<Record<string, unknown>>).map((r) => ({
+        name: String(r.name ?? ''),
+        bytes: typeof r.bytes === 'number' ? r.bytes : null,
+      }))
+    : null;
+  return {
+    resident: rows,
+    freeVramBytes: typeof raw.free_vram_bytes === 'number' ? raw.free_vram_bytes : null,
+    preloadSkippedBecause:
+      typeof raw.preload_skipped_because === 'string' ? raw.preload_skipped_because : '',
+    ...(raw.outcome && typeof raw.outcome === 'object'
+      ? { outcome: raw.outcome as Record<string, string> }
+      : {}),
+  };
+}
+
+export async function fetchCardStatus(): Promise<CardStatus> {
+  return toCardStatus((await get('/providers/resident')) as Record<string, unknown>);
+}
+
+/**
+ * Give the card back: unload every model every local server can unload.
+ *
+ * The "I am about to open Unreal" action. Loopback only, never egress. The
+ * answer carries the same shape as `fetchCardStatus` plus an `outcome` per
+ * model, so what could *not* be released — a server with no unload route —
+ * is shown rather than assumed done.
+ */
+export async function releaseCard(): Promise<CardStatus> {
+  return toCardStatus((await send('/providers/release', 'POST')) as Record<string, unknown>);
 }

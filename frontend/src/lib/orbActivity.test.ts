@@ -1,46 +1,104 @@
 /**
- * Who owns `speaking`.
+ * Who owns what on the orb, and what nobody can clobber.
  *
- * The defect these are written against: `ChatSurface` wrote `idle` the moment
- * generation finished, and speech had already set `speaking` and was still
- * playing. Speech starts on the first sentence that will not change again and
- * outlives the stream *by design*, so the two collided on every reply — and
- * because the rim light is the same colour for `thinking` and `speaking`, the
- * only symptom was an avatar whose mouth never opened.
+ * Two defects, one field, and the second was caused by fixing the first.
  *
- * The first test is the regression. The rest exist so the guard cannot be
- * satisfied by a function that simply never changes anything.
+ * 19 August 2026: `ChatSurface` wrote `idle` the moment generation finished
+ * while speech was still playing, so the avatar's mouth never opened. The fix
+ * was a guard, `preserveSpeaking`, refusing every chat state while a clip
+ * played.
+ *
+ * 12 September 2026: that guard meant a fence opening mid-sentence could not
+ * turn the orb to `coding`, and when the clip ended speech stood down to
+ * `idle` in the middle of a reply that was still streaming — the state cycled
+ * thinking → speaking → idle → coding → speaking. The maintainer's words: "it
+ * doesn't go and stay in the coding state".
+ *
+ * The store now holds `activity` (chat's) and `speaking` (speech's) and
+ * composes them. These tests drive the real store, because the guarantee is
+ * about what the two setters can and cannot reach.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 
-import { preserveSpeaking, chatActivity } from './orbActivity';
+import { chatActivity } from './orbActivity';
+import { composeOrbState, useOrbStore } from '@/stores/orbStore';
 
-describe('speech owns the speaking state', () => {
-  it('a finished stream does not silence a clip that is still playing', () => {
-    // Exactly the sequence that failed: generation ends, audio continues.
-    expect(preserveSpeaking('speaking', chatActivity(false))).toBe('speaking');
+beforeEach(() => {
+  useOrbStore.getState().setSpeaking(false);
+  useOrbStore.getState().setActivity('idle');
+});
+
+describe('composeOrbState', () => {
+  it('draws speech over whatever the system is doing', () => {
+    expect(composeOrbState('coding', true)).toBe('speaking');
+    expect(composeOrbState('thinking', true)).toBe('speaking');
+    expect(composeOrbState('idle', true)).toBe('speaking');
   });
 
-  it('a starting stream does not interrupt it either', () => {
-    expect(preserveSpeaking('speaking', chatActivity(true))).toBe('speaking');
+  it('draws the activity when nothing is being said', () => {
+    for (const activity of ['idle', 'thinking', 'coding', 'listening', 'swapping'] as const) {
+      expect(composeOrbState(activity, false)).toBe(activity);
+    }
   });
 });
 
-describe('it still reports chat activity', () => {
-  it('is thinking while the request is in flight', () => {
-    expect(preserveSpeaking('idle', chatActivity(true))).toBe('thinking');
+describe('speech owns the speaking state', () => {
+  it('a finished stream does not silence a clip that is still playing', () => {
+    // Exactly the sequence that failed on 19 August: generation ends, audio continues.
+    useOrbStore.getState().setSpeaking(true);
+    useOrbStore.getState().setActivity(chatActivity(false));
+    expect(useOrbStore.getState().orbState).toBe('speaking');
   });
 
-  it('is idle once it is not', () => {
-    expect(preserveSpeaking('thinking', chatActivity(false))).toBe('idle');
+  it('a starting stream does not interrupt it either', () => {
+    useOrbStore.getState().setSpeaking(true);
+    useOrbStore.getState().setActivity(chatActivity(true));
+    expect(useOrbStore.getState().orbState).toBe('speaking');
+  });
+});
+
+describe('chat owns the activity, and speech cannot reach it', () => {
+  it('coding survives a clip starting and ending — the 12 September regression', () => {
+    useOrbStore.getState().setActivity('coding');
+    useOrbStore.getState().setSpeaking(true);
+    expect(useOrbStore.getState().orbState).toBe('speaking');
+    useOrbStore.getState().setSpeaking(false);
+    // Speech stood down; the reply is still streaming code. Not idle.
+    expect(useOrbStore.getState().orbState).toBe('coding');
+    expect(useOrbStore.getState().activity).toBe('coding');
   });
 
-  it('replaces every state except speaking', () => {
-    // A guard that preserved anything it happened to find would pass the two
-    // tests above and quietly freeze the orb on `swapping` or `listening`.
-    for (const current of ['idle', 'thinking', 'listening', 'swapping', 'warming'] as const) {
-      expect(preserveSpeaking(current, chatActivity(true))).toBe('thinking');
-    }
+  it('a fence opening while a clip plays is recorded and drawn when the clip ends', () => {
+    useOrbStore.getState().setActivity('thinking');
+    useOrbStore.getState().setSpeaking(true);
+    useOrbStore.getState().setActivity('coding'); // the fence opened mid-sentence
+    expect(useOrbStore.getState().orbState).toBe('speaking');
+    useOrbStore.getState().setSpeaking(false);
+    expect(useOrbStore.getState().orbState).toBe('coding');
+  });
+
+  it('is thinking while the request is in flight, idle once it is not', () => {
+    useOrbStore.getState().setActivity(chatActivity(true));
+    expect(useOrbStore.getState().orbState).toBe('thinking');
+    useOrbStore.getState().setActivity(chatActivity(false));
+    expect(useOrbStore.getState().orbState).toBe('idle');
+  });
+});
+
+describe('the old single setter still routes to the right owner', () => {
+  it("'speaking' sets the speech field and leaves the activity alone", () => {
+    useOrbStore.getState().setActivity('coding');
+    useOrbStore.getState().setOrbState('speaking');
+    expect(useOrbStore.getState().speaking).toBe(true);
+    expect(useOrbStore.getState().activity).toBe('coding');
+  });
+
+  it('anything else sets the activity and leaves the mouth alone', () => {
+    useOrbStore.getState().setSpeaking(true);
+    useOrbStore.getState().setOrbState('swapping');
+    expect(useOrbStore.getState().activity).toBe('swapping');
+    expect(useOrbStore.getState().speaking).toBe(true);
+    expect(useOrbStore.getState().orbState).toBe('speaking');
   });
 });

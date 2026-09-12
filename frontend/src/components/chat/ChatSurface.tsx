@@ -33,7 +33,6 @@ import NoticeCard from '@/components/chat/NoticeCard';
 import ToolCalls from '@/components/chat/ToolCalls';
 import FirstRunPanel from '@/components/firstrun/FirstRunPanel';
 import { useReadiness, setupToOffer } from '@/hooks/useReadiness';
-import { useTypedText } from '@/hooks/useTypedText';
 import { stripCitationMarkers } from '@/lib/markers';
 import { useChatStore } from '@/stores/chatStore';
 import { useSourceStore } from '@/stores/sourceStore';
@@ -48,6 +47,7 @@ import { AnsweredBy } from './AnsweredBy';
 import SpeakButton from './SpeakButton';
 import ReasoningPanel from './ReasoningPanel';
 import MessageBody from './MessageBody';
+import StreamingReply from './StreamingReply';
 import CitationPanel from './CitationPanel';
 import CodePreviewPanel from './CodePreviewPanel';
 import {
@@ -65,7 +65,7 @@ import {
 import { useChatModeStore } from '@/stores/chatModeStore';
 import { useMicStore } from '@/stores/micStore';
 import { useSpeechStore } from '@/stores/speechStore';
-import { preserveSpeaking, codingActivity } from '@/lib/orbActivity';
+import { codingActivity, offeredServers } from '@/lib/orbActivity';
 import ResizeHandle from '@/components/common/ResizeHandle';
 import { useIsReducedMotion } from '@/hooks/useReducedMotion';
 import { useViewport } from '@/hooks/useViewport';
@@ -194,16 +194,11 @@ export default function ChatSurface({ navigate }: Props) {
     void send('Continue', { continueTask: true });
   }, [send]);
 
-  // Typed out at a steady cadence rather than in the clumps tokens arrive in.
-  //
-  // **Display only, and that is load-bearing.** `streamingText` in the store is
-  // still the truth, and it is what `chatStore` hands to `pushSpeech` — so the
-  // voice starts on the first sentence that will not change again no matter how
-  // much of it has been drawn. Speech must never wait on an animation.
-  //
-  // Markers are stripped *before* the reveal, not after, so `[M1]` disappearing
-  // mid-flight cannot make the line jump backwards.
-  const typedText = useTypedText(stripMarkers(streamingText), !isStreaming);
+  // The typewriter used to live here, and every reveal frame re-rendered
+  // this whole surface. It now lives in `StreamingReply`, which is the one
+  // thing it draws — see that file for the measurement. Markers are still
+  // stripped *before* the reveal, so `[M1]` disappearing mid-flight cannot
+  // make the line jump backwards.
 
   // Files attached to the message being composed. Working state in the
   // truest sense — it lives here rather than in `chatStore`, because
@@ -222,7 +217,7 @@ export default function ChatSurface({ navigate }: Props) {
   // the cursor passes over the composer or a message.
   const dragDepth = useRef(0);
 
-  const { setOrbState } = useOrbStore((s) => ({ setOrbState: s.setOrbState }));
+  const setOrbActivity = useOrbStore((s) => s.setActivity);
   const setActivity = useSystemStore((s) => s.setActivity);
 
   // On a working surface the conversation is an assistant beside your work and
@@ -441,18 +436,19 @@ export default function ChatSurface({ navigate }: Props) {
   }, [messages, streamingText, atBottom, scrollToLatest]);
 
   // The Orb reports system state; it does not perform. Thinking while the
-  // request is in flight, idle otherwise — but never over the top of speech.
+  // request is in flight, idle otherwise. Speech is drawn *over* this, never
+  // instead of it — see `composeOrbState`.
   useEffect(() => {
     // Both orbs read the same activity, so the small one in the top bar and the
     // large one on the landing can never disagree about what is happening.
     //
-    // `preserveSpeaking` is what stops this effect clobbering the one state it
-    // does not own. Speech begins on the first finished sentence and outlives
-    // the stream by design, so the `idle` written here when generation ends
-    // used to land on top of `speaking` on every single reply — which is why
-    // the avatar's mouth never moved. Read with `getState()` rather than a
-    // subscription: this must react to the stream changing, not to speech
-    // changing, or it re-runs itself.
+    // **Written to `activity`, which chat owns, and never to the composed
+    // state.** A guard (`preserveSpeaking`) used to stop this effect
+    // clobbering `speaking`; it did so by refusing every chat state while a
+    // clip played, so a fence opening mid-sentence could not turn the orb to
+    // `coding`, and speech standing down wrote `idle` over a reply still
+    // streaming. With two fields and one owner each there is nothing to
+    // guard: this cannot touch the mouth, and speech cannot touch this.
     //
     // **`coding` is `thinking` with the work named**, and it is derived from
     // what the system is doing rather than from where it routed: the code tools
@@ -469,10 +465,11 @@ export default function ChatSurface({ navigate }: Props) {
       isStreaming,
       streamingText,
       streamingToolCalls.map((c) => c.server),
+      offeredServers(streamingNotices),
     );
-    setOrbState(preserveSpeaking(useOrbStore.getState().orbState, activity));
-    setActivity(preserveSpeaking(useSystemStore.getState().activity, activity));
-  }, [isStreaming, streamingText, streamingToolCalls, setOrbState, setActivity]);
+    setOrbActivity(activity);
+    setActivity(activity);
+  }, [isStreaming, streamingText, streamingToolCalls, streamingNotices, setOrbActivity, setActivity]);
 
   // What the backend already holds for this conversation.
   //
@@ -1068,7 +1065,10 @@ export default function ChatSurface({ navigate }: Props) {
                             plainness rather than a defect -- and the
                             alternative, plain text that reflows into markdown
                             at the end, is a much louder one. */}
-                        <MessageBody text={typedText} />
+                        <StreamingReply
+                          text={stripMarkers(streamingText)}
+                          done={!isStreaming}
+                        />
                       </div>
                     </>
                   )}

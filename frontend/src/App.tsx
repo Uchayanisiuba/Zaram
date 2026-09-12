@@ -1,14 +1,19 @@
 /**
- * Zaram App — Project A UI + Zaram Architecture
- * 
- * Wires Project A's clean UI to Zaram's runtime system:
- * - useRuntimeLoop drives the 4-stage pipeline
- * - orbStore, conversationStore manage state
- * - All core/ simulation/frame architecture preserved
+ * Zaram App — the shell.
+ *
+ * **No frame loop here, and the absence is deliberate — removed 12 September
+ * 2026.** `useRuntimeLoop(60)` ran a *mock* physics simulation — two hardcoded
+ * nodes and a presence state cycled every three seconds "for demonstration" —
+ * sixty times a second for the life of the app, pushing a frame into a store
+ * whose only readers were two components nothing mounts. Unlike the other
+ * unreachable subsystems this one was reachable and running, which is why it
+ * cost something: a React store write per frame on the same main thread as
+ * the avatar, the orb and the streaming reply. The orb and the avatar own
+ * their own loops and read `useEmbodimentState`; nothing in the live shell
+ * needs a frame pipeline.
  */
 import { useState } from 'react';
 import { AnimatePresence } from 'framer-motion';
-import { useRuntimeLoop } from '@/hooks/useRuntimeLoop';
 import TopNav from './components/TopNav';
 import LeftRail from './components/LeftRail';
 import ChatSurface from './components/chat/ChatSurface';
@@ -36,9 +41,6 @@ import HelpOverlay from '@/components/shortcuts/HelpOverlay';
 import type { WorkspaceId } from '@/runtime/shortcuts/registry';
 
 export default function App() {
-  // Start Zaram's core runtime loop (FrameState pipeline)
-  useRuntimeLoop(60);
-
   const [workspace, setWorkspace] = useState<WorkspaceId>('landing');
   const [commandOpen, setCommandOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);

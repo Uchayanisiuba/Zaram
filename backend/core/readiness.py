@@ -199,6 +199,48 @@ _CLOUD = Offer(
 )
 
 
+#: The manifest's tier ceilings, in bytes, and what a person can expect from
+#: each. **The boundaries are the manifest's** — `models.manifest.json` groups
+#: recommendations at 3, 5, 9 and 18 GB of budget — so the sentence about the
+#: machine and the download offered for it can never disagree. The words are
+#: about what the machine *does*, never about a model: `CLAUDE.md` keeps
+#: filenames and parameter counts out of the primary path, and "runs a 14B"
+#: is a fact about weights while "handles code and longer reasoning" is a
+#: fact about the person's day.
+_GB = 1024**3
+MACHINE_TIERS: tuple[tuple[Optional[int], str], ...] = (
+    (3 * _GB, "This machine has very little graphics memory: a small model can hold a "
+              "conversation here, and anything demanding is better sent to a cloud key."),
+    (5 * _GB, "This machine can run a compact model locally — good for writing, editing "
+              "and summarising; harder questions can go to a cloud key."),
+    (9 * _GB, "This machine runs a capable local model at a comfortable speed. Most of "
+              "what you do day to day stays here."),
+    (18 * _GB, "This machine runs a strong local model with room for the memory index "
+               "beside it — code, longer reasoning and documents all stay here."),
+    (None, "This machine has room for the largest local models. Very little needs to "
+           "leave it."),
+)
+
+#: No card could be measured — no NVIDIA driver, a Mac, or no GPU at all.
+#: A true sentence, not a guess: on a Mac the pool is shared and can be large,
+#: and on a laptop with integrated graphics it is small, and this cannot tell
+#: which. What it can say is what still works.
+MACHINE_UNMEASURED = (
+    "Zaram could not measure this machine's graphics memory. A local model may "
+    "still run; a cloud key works regardless, and the memory stays here either way."
+)
+
+
+def machine_sentence(budget_bytes: Optional[int]) -> str:
+    """One sentence on what this machine can do, in the manifest's tiers."""
+    if budget_bytes is None:
+        return MACHINE_UNMEASURED
+    for ceiling, sentence in MACHINE_TIERS:
+        if ceiling is None or budget_bytes <= ceiling:
+            return sentence
+    return MACHINE_TIERS[-1][1]
+
+
 def model_to_offer(budget_bytes: Optional[int]) -> Recommendation:
     """What to suggest for a machine with this much room, or the fallback.
 
@@ -262,13 +304,17 @@ def diagnose(
         )
 
     recommended = model_to_offer(budget_bytes)
+    # Said before any download is priced: what this machine can do is the
+    # context the price is read in. A 7 GB download means one thing on a card
+    # that will run it comfortably and another on one that will not.
+    machine = machine_sentence(budget_bytes)
 
     if engine_installed:
         return Diagnosis(
             readiness=Readiness.ENGINE_WITHOUT_MODEL,
             summary=(
                 "Almost there. The local engine is running but has no model "
-                "that can hold a conversation yet."
+                f"that can hold a conversation yet. {machine}"
             ),
             offers=(
                 Offer(
@@ -295,7 +341,7 @@ def diagnose(
         readiness=Readiness.NO_ENGINE,
         summary=(
             "Zaram has nothing to answer with yet. Everything else works — "
-            "you just need a model."
+            f"you just need a model. {machine}"
         ),
         offers=(
             Offer(

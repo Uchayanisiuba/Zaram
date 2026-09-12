@@ -386,3 +386,53 @@ def test_nothing_in_this_module_touches_the_network():
     source = open(module.__file__, encoding="utf-8").read()
     for forbidden in ("requests.", "httpx.", "urlopen(", "aiohttp", "socket."):
         assert forbidden not in source, forbidden
+
+
+class TestTheMachineIsDescribedInTheManifestsTiers:
+    """The first-run screen says what this machine can do, before it prices a
+    download — and it says it in the manifest's own tiers, so the sentence and
+    the model offered can never disagree. Added 12 September 2026 from the
+    market question: which PCs Zaram serves is answered per machine, on
+    screen, rather than in a deck."""
+
+    def test_boundaries_are_the_manifests(self):
+        from core.readiness import MACHINE_TIERS
+
+        assert [c for c, _ in MACHINE_TIERS[:-1]] == [3 * 1024**3, 5 * 1024**3, 9 * 1024**3, 18 * 1024**3]
+        assert MACHINE_TIERS[-1][0] is None
+
+    def test_each_tier_gets_a_different_true_sentence(self):
+        from core.readiness import machine_sentence
+
+        gb = 1024**3
+        sentences = [machine_sentence(int(b * gb)) for b in (2, 4, 8, 12, 24)]
+        assert len(set(sentences)) == 5
+        assert "cloud key" in sentences[0] and "cloud key" in sentences[1]
+        assert "largest" in sentences[4]
+
+    def test_unmeasured_is_a_true_sentence_not_a_guess(self):
+        from core.readiness import MACHINE_UNMEASURED, machine_sentence
+
+        assert machine_sentence(None) == MACHINE_UNMEASURED
+        assert "could not measure" in MACHINE_UNMEASURED
+
+    def test_no_model_names_or_parameter_counts_reach_the_person(self):
+        from core.readiness import MACHINE_TIERS, MACHINE_UNMEASURED
+        import re
+
+        for _, sentence in list(MACHINE_TIERS) + [(None, MACHINE_UNMEASURED)]:
+            assert not re.search(r"\d+\s?[bB]\b|qwen|llama|gemma|Q4|GGUF", sentence), sentence
+
+    def test_the_sentence_reaches_both_unready_summaries(self):
+        from core.readiness import diagnose, machine_sentence
+
+        budget = 12 * 1024**3
+        for engine_installed in (True, False):
+            d = diagnose(engine_installed=engine_installed, budget_bytes=budget)
+            assert machine_sentence(budget) in d.summary
+
+    def test_ready_says_nothing_extra(self):
+        from core.readiness import diagnose
+
+        d = diagnose(engine_installed=True, chat_models=["x"], budget_bytes=12 * 1024**3)
+        assert "This machine" not in d.summary

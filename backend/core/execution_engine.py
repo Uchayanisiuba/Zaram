@@ -60,6 +60,8 @@ from core.tool_loop import (
     result_prompt,
     strip_calls,
     tool_instructions,
+    output_excerpt,
+    native_tool_specs,
 )
 from core.registry import RuntimeRegistry
 from core.scheduler import RuntimeScheduler
@@ -176,6 +178,9 @@ class ExecutionEngine:
         self._planner = IntentPlanner(semantic_router=semantic_router)
         self._router = CapabilityRouter(registry)
         self._dispatcher = ExecutionDispatcher(self._router)
+        #: Wire-shape tools re-listed by `_context_for` on resume, for the
+        #: native channel. Set there, read by `_resume_task`; empty otherwise.
+        self._resumed_native_tools: list[dict[str, Any]] = []
         self._task_queue = task_queue
         self._scheduler = scheduler
         self._active_plans: dict[str, ExecutionPlan] = {}
@@ -412,8 +417,14 @@ class ExecutionEngine:
 
         # --- Recall: what does the Spine already know that bears on this? ---
         recalled = self._recall(prompt, session_id, project_id, only_ids)
+        # **Composed now, appended last.** The block is built here so the
+        # conversation budget below can account for it, but it is not put on
+        # the prompt until after the conversation — see the note above
+        # `_augment_with_conversation`'s call: recall changes every turn, and
+        # anything that changes every turn must come *after* everything that
+        # does not, or the local server's prompt cache never hits.
+        recall_block = self._recall_block(recalled) if recalled else ""
         if recalled:
-            system_prompt = self._augment_system_prompt(system_prompt, recalled)
             # Before the sources, before the answer. A reader who is told
             # afterwards that one of the cited passages was trying to give
             # orders has already read the reply that used it.
@@ -464,6 +475,21 @@ class ExecutionEngine:
         # 9's refusal hangs off that flag, and an ordinary reply has no such
         # duty. Never both, or the same exchange arrives twice under two
         # headings.
+        #
+        # **Stable prefix first; what changes every turn goes last.** Until
+        # 12 September 2026 the order was identity, *then recall*, then the
+        # conversation. Recall differs on every question, so the prompt's
+        # prefix differed on every question, and a local server's prompt cache
+        # — ExLlamaV3's, llama.cpp's, Ollama's — matched nothing: the whole
+        # history was prefilled again on every message. On a 65,536-token
+        # window with history taking the remainder, that is tens of thousands
+        # of tokens re-read per turn on a card that reads a few hundred a
+        # second — the "hang before the first token" that grew with every
+        # exchange. Identity is constant for a session and the history is
+        # append-only, so with recall moved after them the server re-reads
+        # only the new turn. The ordering guarantee `_recall_block` relies on
+        # is unchanged: the recalled text still sits *before* its closing
+        # rule, and the question still comes after everything.
         context_resolved = False
         if self._is_document_request(prompt):
             system_prompt, context_resolved = self._augment_with_recent_turns(
@@ -471,7 +497,8 @@ class ExecutionEngine:
             )
         else:
             system_prompt, memory_notice = self._augment_with_conversation(
-                system_prompt, session_id, model, question=prompt
+                system_prompt, session_id, model, question=prompt,
+                reserved=recall_block,
             )
             # **Forgetting is said out loud.** The task loop already tells the
             # user when it drops the earliest tool results; the conversation
@@ -480,6 +507,7 @@ class ExecutionEngine:
             # capabilities are visible, not silent.
             if memory_notice is not None:
                 yield memory_notice
+        system_prompt = (system_prompt or "") + recall_block
 
         # Said before the answer, not after it, and for the same reason the
         # empty-domain notice is: it is a *frame* for what follows. A reader who
@@ -511,6 +539,9 @@ class ExecutionEngine:
         #: common case and it costs nothing: no instructions are added, no
         #: buffering happens, and the reply streams exactly as it always did.
         offered_tools: list[dict[str, Any]] = []
+        #: The same tools in the wire shape, for engines with a native channel.
+        #: Empty whenever `offered_tools` is; see `native_tool_specs`.
+        native_specs: list[dict[str, Any]] = []
 
         for i, step in enumerate(plan.steps):
             self._publish("execution.step_started", {
@@ -623,6 +654,13 @@ class ExecutionEngine:
                 step.input_data = dict(step.input_data or {})
                 step.input_data["images"] = list(images)
 
+            # The native tool channel, on the generation step only and only
+            # when tools were offered. The prompt still carries the marker
+            # instructions, so an engine without the channel is unchanged.
+            if native_specs and not internal and step.capability_id == "reasoning.generate":
+                step.input_data = dict(step.input_data or {})
+                step.input_data["tools"] = list(native_specs)
+
             # **A generation that may call a tool is buffered, not streamed.**
             #
             # `[TOOL_CALL]` arrives split across tokens exactly as `[M1]` does,
@@ -711,6 +749,7 @@ class ExecutionEngine:
                         system_prompt=system_prompt,
                         spoken=spoken,
                         session_id=session_id,
+                        native_tools=native_specs,
                     ):
                         yield piece
                     # The transcript stores what was said, not the marker that
@@ -748,6 +787,7 @@ class ExecutionEngine:
                     offered_tools = self._parse_tool_list(step_output)
                     if offered_tools:
                         system_prompt += tool_instructions(offered_tools)
+                        native_specs = native_tool_specs(offered_tools)
                         # Said out loud, because `CLAUDE.md` requires disabled
                         # capabilities to be visible rather than silent — and
                         # the inverse is just as true. A reply that quietly
@@ -758,6 +798,14 @@ class ExecutionEngine:
                             f"{'s are' if len(offered_tools) != 1 else ' is'} "
                             "available for this question.",
                             kind="tools",
+                            # Which servers, so the orb can report *coding*
+                            # while the buffered reply is still being
+                            # written — the only signal it gets until then.
+                            servers=sorted({
+                                str(t.get("server") or "")
+                                for t in offered_tools
+                                if t.get("server")
+                            }),
                         )
 
             self._publish("execution.step_completed" if not step_failed else "execution.step_failed", {
@@ -1091,8 +1139,14 @@ class ExecutionEngine:
         session_id: str = "default",
         turns: list[ToolTurn] | None = None,
         continuations_left: int | None = None,
+        native_tools: list[dict[str, Any]] | None = None,
     ):
         """Call a tool, show the model what came back, and let it call another.
+
+        ``native_tools`` are the offered tools in wire shape; they ride on
+        every follow-up generation so a model that called natively on round
+        one can call natively on round two, rather than falling back to the
+        typed marker the moment the loop takes over.
 
         Yields what the user sees and appends the user-visible text to `spoken`,
         so the caller can store the answer rather than the marker that produced
@@ -1239,11 +1293,12 @@ class ExecutionEngine:
                 )
                 payload: Any = {"error": error}
             else:
+                payload = result.get("result")
                 yield StreamEvent.tool_call(
                     call.server, call.tool, "allow", "ran",
                     target=call_target(call.tool, call.arguments),
+                    output=output_excerpt(payload),
                 )
-                payload = result.get("result")
 
             turns.append(ToolTurn(call=call, result=payload))
             rounds += 1
@@ -1328,7 +1383,8 @@ class ExecutionEngine:
                             input_data={
                                 "prompt": result_prompt(
                                     original_prompt, turns, may_call_again=True
-                                )
+                                ),
+                                **({"tools": native_tools} if native_tools else {}),
                             },
                             depends_on=[],
                         )
@@ -1358,7 +1414,8 @@ class ExecutionEngine:
             follow_up = ExecutionStep(
                 capability_id="reasoning.generate",
                 input_data={
-                    "prompt": result_prompt(original_prompt, turns, may_call_again=True)
+                    "prompt": result_prompt(original_prompt, turns, may_call_again=True),
+                    **({"tools": native_tools} if native_tools else {}),
                 },
                 depends_on=[],
             )
@@ -1571,13 +1628,20 @@ class ExecutionEngine:
         if scope:
             self._project_ids[session_id] = scope
 
+        # `_context_for` re-lists the tools and leaves their wire shape here;
+        # cleared first so a resume that finds none does not inherit last
+        # time's. The attribute form, rather than a second return value,
+        # keeps `_context_for`'s signature what its tests expect.
+        self._resumed_native_tools = []
         system_prompt = self._context_for(pending, session_id, system_prompt)
+        native_tools = list(self._resumed_native_tools)
 
         spoken: list[str] = []
         first = ExecutionStep(
             capability_id="reasoning.generate",
             input_data={
-                "prompt": result_prompt(pending.question, turns, may_call_again=True)
+                "prompt": result_prompt(pending.question, turns, may_call_again=True),
+                **({"tools": native_tools} if native_tools else {}),
             },
             depends_on=[],
         )
@@ -1590,6 +1654,7 @@ class ExecutionEngine:
             spoken=spoken,
             session_id=session_id,
             turns=turns,
+            native_tools=native_tools,
         )
 
     def _pending_plan(self, plan_id: str, session_id: str, project_id: str):
@@ -1647,6 +1712,7 @@ class ExecutionEngine:
                 )
                 if tools:
                     system_prompt += tool_instructions(tools)
+                    self._resumed_native_tools = native_tool_specs(tools)
         except Exception:
             logger.exception("Could not re-attach tools while resuming")
         return system_prompt
@@ -2191,8 +2257,16 @@ class ExecutionEngine:
         session_id: str,
         model: str | None = None,
         question: str = "",
+        reserved: str = "",
     ) -> tuple[str, Any | None]:
         """Put the recent exchange in front of an ordinary reply.
+
+        `reserved` is text the caller will append *after* this block — the
+        recall block, today — and it is counted against the budget here even
+        though it is not on the prompt yet. Placing it after the conversation
+        is what keeps the prompt's prefix stable between turns (see
+        `execute`); budgeting it here is what stops that placement overflowing
+        the window.
 
         **The machinery for this was complete and reached from one place.**
         `_session_turns` is bounded and LRU, `seed_session_turns` rehydrates it
@@ -2296,7 +2370,11 @@ class ExecutionEngine:
         # otherwise show the model nothing, and a referential follow-up — "fix
         # that bug" — is exactly the case that then fails. The floor is capped
         # by the remainder's own ceiling so it can never reintroduce overflow.
-        spent = estimate_tokens(system_prompt or "") + estimate_tokens(question or "")
+        spent = (
+            estimate_tokens(system_prompt or "")
+            + estimate_tokens(question or "")
+            + estimate_tokens(reserved or "")
+        )
         remaining = budget.input_tokens - spent - self.CONVERSATION_MARGIN
         floor = int(budget.input_tokens * self.CONVERSATION_SHARE)
         cap = max(0, min(max(remaining, floor), budget.input_tokens - self.CONVERSATION_MARGIN))
@@ -2389,6 +2467,15 @@ class ExecutionEngine:
     def _augment_system_prompt(self, system_prompt: str, recalled: list[Any]) -> str:
         """Fold recalled memories into the system prompt, with citation markers.
 
+        Kept as the composition of `_recall_block` onto a prompt for callers
+        and tests that want the whole thing in one call. `execute` uses the
+        block directly so it can place it after the conversation.
+        """
+        return (system_prompt or "") + self._recall_block(recalled)
+
+    def _recall_block(self, recalled: list[Any]) -> str:
+        """The recalled-memory block, with citation markers, as text to append.
+
         Each memory is numbered so the model can cite it, and the instruction
         block tells it to say when it is drawing on memory.
 
@@ -2442,7 +2529,7 @@ class ExecutionEngine:
             "=" * 42,
             "",
         ]
-        return (system_prompt or "") + "\n".join(lines)
+        return "\n".join(lines)
 
     def _untrusted_notice(self, recalled: list[Any]) -> Any | None:
         """Tell the user when recalled content reads like an instruction.

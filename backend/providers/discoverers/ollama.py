@@ -125,6 +125,37 @@ class OllamaAdapter:
             resident[name] = int(entry.get("size_vram") or 0)
         return resident
 
+    def release_resident(self, *, timeout: float = 10.0) -> Dict[str, str]:
+        """Unload everything Ollama holds, now. Name to outcome.
+
+        `keep_alive: 0` on an empty prompt is Ollama's documented way to drop
+        a model without generating — the mirror of how `warm` loads one. The
+        card is what a game, a render or a second server needs, and until
+        this existed the only way to get it back from Zaram was to wait out
+        the thirty-minute keep-alive or quit.
+
+        Loopback only, so not egress. Per model rather than one call, because
+        Ollama unloads by name; a failure on one is reported and the rest
+        continue.
+        """
+        resident = self.resident_models(timeout=min(timeout, 2.0))
+        if not resident:
+            return {}
+        outcome: Dict[str, str] = {}
+        for name in resident:
+            try:
+                response = requests.post(
+                    f"{self.base_url}/api/generate",
+                    json={"model": name, "prompt": "", "stream": False, "keep_alive": 0},
+                    timeout=timeout,
+                )
+                response.raise_for_status()
+                outcome[name] = "released"
+            except Exception as exc:  # noqa: BLE001 - reported, never raised
+                logger.debug("Ollama would not release %s: %s", name, exc)
+                outcome[name] = f"not released: {exc}"
+        return outcome
+
     def to_dict(self) -> Dict[str, Any]:
         return ProviderSummary(
             id=self.provider_id,

@@ -1,7 +1,7 @@
 # backend/runtimes/models/models_service.py
 from typing import Iterator
 import json
-from .engines.base_engine import LLMEngine
+from .engines.base_engine import LLMEngine, accepts_tools
 
 
 class ModelsService:
@@ -15,6 +15,7 @@ class ModelsService:
         system_prompt: str = "",
         model: str | None = None,
         images: list[str] | None = None,
+        tools: list[dict] | None = None,
     ) -> Iterator[str]:
         """Orchestrates the prompt generation.
 
@@ -29,7 +30,14 @@ class ModelsService:
         # a chunk prefixed with ERROR_PREFIX. This used to parse SSE frames the
         # engine had just built, so both sides had to agree on a wire format
         # that never went over a wire.
-        yield from self.engine.stream_response(full_prompt, system_prompt, model, images)
+        # Passed only when there are some, for the reason the dispatcher
+        # gives about images: a dozen doubles implement this signature.
+        if tools and accepts_tools(self.engine.stream_response):
+            yield from self.engine.stream_response(
+                full_prompt, system_prompt, model, images, tools=tools
+            )
+        else:
+            yield from self.engine.stream_response(full_prompt, system_prompt, model, images)
 
     def search_knowledge(self, query: str, persona: str = "zaram_prime") -> Iterator[str]:
         """Search knowledge across all providers."""

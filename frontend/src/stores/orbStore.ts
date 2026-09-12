@@ -33,14 +33,60 @@ export const ORB_STATES = [
 export type OrbState = (typeof ORB_STATES)[number];
 
 interface OrbStore {
-  /** Canonical field */
+  /**
+   * What the renderers draw. **Derived, never written directly**: it is
+   * `speaking` when a clip is playing and `activity` otherwise. Every reader
+   * keeps using this field; only the writers changed.
+   */
   orbState: OrbState;
-  /** Canonical setter */
+  /**
+   * What the system is doing, owned by chat and the model layer: idle,
+   * thinking, coding, listening, swapping. Sticky for as long as its owner
+   * says so — speech starting and stopping does not touch it.
+   */
+  activity: OrbActivityState;
+  /** Whether sound is coming out. Owned by `speechStore` and nobody else. */
+  speaking: boolean;
+  /** Chat and the model layer set this. Never `'speaking'`. */
+  setActivity: (activity: OrbActivityState) => void;
+  /** Speech sets this. */
+  setSpeaking: (speaking: boolean) => void;
+  /**
+   * The old single setter, kept for the command registry and the dev pin.
+   * Routes to the field that owns the word: `'speaking'` sets `speaking`,
+   * anything else sets `activity`. It cannot clobber the other field, which
+   * is the whole point of the split.
+   */
   setOrbState: (state: OrbState) => void;
   /** @deprecated alias kept for backward-compat — use setOrbState */
   setState: (state: OrbState) => void;
   /** @deprecated alias kept for backward-compat — use orbState */
   state: OrbState;
+}
+
+/** Everything the orb can report except speech, which has its own field. */
+export type OrbActivityState = Exclude<OrbState, 'speaking'>;
+
+/**
+ * The one rule: speech is drawn over whatever the system is doing.
+ *
+ * **Two writers, one field, and the guard was the bug — found 12 September
+ * 2026.** `preserveSpeaking` stopped chat from overwriting `speaking`, which
+ * fixed the mouth never opening (19 August). It did so by refusing *every*
+ * chat state while a clip played, so a code fence opening mid-sentence could
+ * not turn the orb to `coding`; and when the clip ended, speech stood down to
+ * `idle` in the middle of a reply that was still streaming. The state cycled
+ * thinking → speaking → idle → coding → speaking, and the maintainer's report
+ * was "it doesn't go and stay in the coding state".
+ *
+ * A guard between two writers of one field is a rule somebody has to remember.
+ * Two fields with one owner each is a rule nobody can break: speech cannot
+ * clobber `coding` because it never writes `activity`, and chat cannot clobber
+ * the mouth because it never writes `speaking`. Pure, so a test can hold it
+ * without mounting anything.
+ */
+export function composeOrbState(activity: OrbActivityState, speaking: boolean): OrbState {
+  return speaking ? 'speaking' : activity;
 }
 
 /**
@@ -77,11 +123,23 @@ function pinnedState(): OrbState | null {
 
 /** Read once, so the field and its alias cannot start out disagreeing. */
 const START: OrbState = pinnedState() ?? 'idle';
+const START_SPEAKING = START === 'speaking';
+const START_ACTIVITY: OrbActivityState = START === 'speaking' ? 'idle' : START;
 
-export const useOrbStore = create<OrbStore>((set) => ({
-  orbState: START,
-  setOrbState: (orbState) => set({ orbState, state: orbState }),
-  // Aliases
-  state: START,
-  setState: (orbState) => set({ orbState, state: orbState }),
-}));
+export const useOrbStore = create<OrbStore>((set, get) => {
+  const publish = (activity: OrbActivityState, speaking: boolean) => {
+    const orbState = composeOrbState(activity, speaking);
+    set({ activity, speaking, orbState, state: orbState });
+  };
+  return {
+    orbState: START,
+    state: START,
+    activity: START_ACTIVITY,
+    speaking: START_SPEAKING,
+    setActivity: (activity) => publish(activity, get().speaking),
+    setSpeaking: (speaking) => publish(get().activity, speaking),
+    setOrbState: (next) =>
+      next === 'speaking' ? publish(get().activity, true) : publish(next, get().speaking),
+    setState: (next) => get().setOrbState(next),
+  };
+});

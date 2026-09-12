@@ -342,3 +342,39 @@ of those scenarios; that half was always somebody else's. What keeps working is
 the model on the disk, the documents, and everything Zaram has learned about the
 work — and rule 7 makes the Spine exportable in an open format, so the memory
 outlives the provider, the order, and Zaram itself.
+
+## Who can run it — added 12 September 2026
+
+**Do not restrict Zaram to RTX cards, and do not pitch it as needing one.** The
+question was asked as "should we restrict it to PCs with VRAM", and the honest
+answer is that the architecture serves every tier, with the local half growing
+as the card does and the cloud half — the user's own keys — covering what the
+card cannot. The tiers below are the ones `models.manifest.json` already
+recommends by, and the first-run screen now says which one a person is on
+before it prices a download.
+
+| Machine | What runs locally | What the product is for them |
+|---|---|---|
+| No GPU, or one Zaram cannot measure (integrated graphics, most office laptops) | Nothing, or a very small model | The memory and control layer over **free-tier and paid keys** — rule 1 as written. The Spine, provenance, correction and the egress log all work with no card at all. |
+| ~4–6 GB (older or entry laptops) | A compact model: writing, editing, summarising, rewriting | The five daily jobs, fast, on the machine; harder questions routed to a key with the disclosure on screen. |
+| ~8 GB (the most common discrete card) | A capable model at a comfortable speed | Most of a working day stays local. This tier only became viable on 12 September, when the memory index stopped competing with the chat model for the card. |
+| 12–16 GB (the maintainer's 3060 is 12) | A strong model **and** the index resident together | Code, longer reasoning, documents — the daily driver as designed. |
+| 24 GB+ and Apple Silicon with 32 GB+ unified memory | The largest local models | Agentic work locally; very little needs to leave. |
+
+Two things this table settles. **Apple Silicon is a first-class target**, not an
+afterthought: unified memory means the chat model and the index never fight for
+a card, which is exactly the failure the 12 GB tier just had to be engineered
+around, and Macs are a large share of the writers, researchers and consultants
+the vision names. And **the no-GPU tier is not a degraded Zaram** — it is the
+"everything you already use, in one place, and it tells you the truth about
+each one" pitch with the free tiers the catalogue now labels as free and
+logged. The person who cannot run a model locally is the person for whom
+naming the deal behind a free key matters most.
+
+**Market size is not stated here on purpose.** The claim that survives
+scrutiny is structural — every tier of consumer hardware is served, and the
+two largest tiers by unit volume (no discrete GPU; 8 GB) are the two the
+product handles through keys and through the September residency work
+respectively. Put a number on it only from a sourced hardware survey, dated,
+and never from this file.
+

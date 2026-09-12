@@ -6,6 +6,7 @@ from collections.abc import Iterator
 from typing import Callable, Optional
 
 from core.reasoning import CLOSE_TAG, OPEN_TAG
+from core.tool_loop import marker_for_native_call
 
 from .base_engine import ERROR_PREFIX, LLMEngine
 
@@ -125,8 +126,8 @@ class OllamaEngine(LLMEngine):
         #: fresher name.
         self.default_model: Optional[str] = None
         self._wire_name = wire_name
-        #: Which models `/api/show` says can think. See `_supports_thinking`.
-        self._thinking_capable: dict[str, bool] = {}
+        #: What `/api/show` says each model can do. See `_capabilities`.
+        self._capabilities_of: dict[str, frozenset[str]] = {}
 
     def _wire(self, model: Optional[str]) -> Optional[str]:
         """The name to put in the request body for `model`.
@@ -165,22 +166,39 @@ class OllamaEngine(LLMEngine):
         the alternative is an extra loopback round trip before every message on
         the one path whose whole thesis is speed.
         """
+        return "thinking" in self._capabilities(model)
+
+    def _supports_tools(self, model: Optional[str]) -> bool:
+        """Whether Ollama will accept a ``tools`` array for this model.
+
+        Same probe, same direction as `_supports_thinking`: `/api/show` lists
+        ``tools`` among a model's capabilities, and Ollama refuses the whole
+        request for a model that lacks it — so a wrong ``True`` costs the
+        answer and a wrong ``False`` costs only the native channel, leaving the
+        marker in the prompt to do what it did before.
+        """
+        return "tools" in self._capabilities(model)
+
+    def _capabilities(self, model: Optional[str]) -> frozenset[str]:
+        """What `/api/show` says `model` can do. Empty on any doubt. Cached."""
         if not model:
-            return False
-        if model in self._thinking_capable:
-            return self._thinking_capable[model]
-        supported = False
+            return frozenset()
+        cached = self._capabilities_of.get(model)
+        if cached is not None:
+            return cached
+        found: frozenset[str] = frozenset()
         try:
             response = requests.post(
                 f"{self.base_url}/api/show", json={"model": model}, timeout=2.0
             )
             response.raise_for_status()
             capabilities = response.json().get("capabilities")
-            supported = isinstance(capabilities, list) and "thinking" in capabilities
+            if isinstance(capabilities, list):
+                found = frozenset(str(c) for c in capabilities)
         except Exception as exc:
-            logger.debug("thinking-capability check failed for %r: %s", model, exc)
-        self._thinking_capable[model] = supported
-        return supported
+            logger.debug("capability check failed for %r: %s", model, exc)
+        self._capabilities_of[model] = found
+        return found
 
     def _is_resident(self, model: Optional[str]) -> Optional[bool]:
         """Whether Ollama already holds `model`'s weights. Never raises.
@@ -249,6 +267,75 @@ class OllamaEngine(LLMEngine):
         if attached:
             return COLD_START_TIMEOUT
         return IDLE_TIMEOUT if self._is_resident(model) is True else COLD_START_TIMEOUT
+
+    def _chat_with_tools(self, payload: dict, tools: list[dict]) -> Iterator[str]:
+        """One `/api/chat` turn with a tools array; calls re-emitted as markers.
+
+        **Not streamed, and that costs nothing here.** A generation that may
+        call a tool is already buffered by `ExecutionEngine` — the marker has
+        to be parsed off accumulated text — so a streamed reply on this path
+        would be assembled and held anyway. One response, read once.
+
+        Ollama answers with ``message.content`` (prose, possibly empty) and
+        ``message.tool_calls`` (``[{"function": {"name", "arguments"}}]``).
+        The content is yielded first so anything the model said before
+        calling is kept, then one marker per call, in the order given; the
+        loop runs the first and shows the model what came back, exactly as it
+        does for a marker the model typed itself.
+
+        ``think`` is carried across from the generate payload; thinking on
+        `/api/chat` arrives under ``message.thinking`` and is re-tagged the
+        same way the streaming path re-tags it.
+        """
+        body = {
+            "model": payload["model"],
+            "messages": [
+                *([{"role": "system", "content": payload["system"]}] if payload.get("system") else []),
+                {
+                    "role": "user",
+                    "content": payload["prompt"],
+                    **({"images": payload["images"]} if payload.get("images") else {}),
+                },
+            ],
+            "tools": tools,
+            "stream": False,
+            "keep_alive": payload.get("keep_alive", KEEP_ALIVE),
+        }
+        if payload.get("think"):
+            body["think"] = True
+        try:
+            response = requests.post(
+                f"{self.base_url}/api/chat",
+                json=body,
+                timeout=(CONNECT_TIMEOUT, self._read_timeout(payload["model"], attached=bool(payload.get("images")))),
+            )
+            response.raise_for_status()
+            data = response.json()
+        except Exception as exc:
+            logger.error("OllamaEngine._chat_with_tools failed: %s", exc)
+            yield ERROR_PREFIX + f"Ollama request failed: {exc}"
+            return
+        if "error" in data:
+            yield ERROR_PREFIX + str(data["error"])
+            return
+        message = data.get("message") or {}
+        thinking = message.get("thinking")
+        if thinking:
+            yield OPEN_TAG
+            yield str(thinking)
+            yield CLOSE_TAG
+        content = message.get("content")
+        if content:
+            yield str(content)
+        for call in message.get("tool_calls") or []:
+            function = call.get("function") if isinstance(call, dict) else None
+            if not isinstance(function, dict):
+                continue
+            marker = marker_for_native_call(
+                str(function.get("name") or ""), function.get("arguments")
+            )
+            if marker:
+                yield marker
 
     def warm(self, model: str | None = None, *, timeout: float = COLD_START_TIMEOUT) -> bool:
         """Load the model into memory without generating anything.
@@ -345,8 +432,17 @@ class OllamaEngine(LLMEngine):
         system_prompt: str = "",
         model: str | None = None,
         images: list[str] | None = None,
+        tools: list[dict] | None = None,
     ) -> Iterator[str]:
         """Stream plain text tokens, per `LLMEngine`.
+
+        ``tools`` — the attached tools as `native_tool_specs` shapes them —
+        route the request through `/api/chat`, which is where Ollama accepts
+        a tools array; `/api/generate` has no such field. A model whose
+        capabilities do not include ``tools`` takes the ordinary path with the
+        marker instructions still in the prompt, so nothing is lost when the
+        native channel is unavailable, and nothing changes for a request that
+        offers no tools at all.
 
         This used to yield SSE frames that `ModelsService` immediately parsed
         back into tokens — transport framing invented by the engine and undone
@@ -438,6 +534,9 @@ class OllamaEngine(LLMEngine):
             len(attached),
             prompt[:50],
         )
+        if tools and self._supports_tools(payload["model"]):
+            yield from self._chat_with_tools(payload, tools)
+            return
         try:
             # **The wait before the first token and the wait between tokens are
             # different questions, and one number was answering both.**

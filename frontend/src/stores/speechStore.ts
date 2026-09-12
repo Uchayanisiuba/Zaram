@@ -278,15 +278,16 @@ export const useSpeechStore = create<SpeechStore>((set, get) => ({
     // an accompaniment to the reply and must never be something the reply has
     // to wait for.
     void (async () => {
-      const setOrbState = useOrbStore.getState().setOrbState;
+      // Speech owns exactly one field on the orb store and writes only that
+      // one. It used to write `orbState` and stand down to `idle`, which
+      // clobbered `coding` mid-reply — see `composeOrbState`.
+      const setSpeaking = useOrbStore.getState().setSpeaking;
 
       // One piece ahead, no more. Two would synthesise work that a `stop()` is
       // about to discard, and Kokoro is the scarce resource here.
       const first = await mineQueue.next();
       if (first === null || generation !== mine) {
-        if (generation === mine && useOrbStore.getState().orbState === 'speaking') {
-          setOrbState('idle');
-        }
+        if (generation === mine) setSpeaking(false);
         return;
       }
 
@@ -324,7 +325,7 @@ export const useSpeechStore = create<SpeechStore>((set, get) => ({
         // to open its mouth and reads `audio.currentTime` to decide the shape;
         // both need the clip in the store *before* the state says speaking, or
         // the first frames scrub against the previous utterance.
-        setOrbState('speaking');
+        setSpeaking(true);
         await playToEnd(current.audio);
         URL.revokeObjectURL(current.objectUrl);
 
@@ -333,8 +334,9 @@ export const useSpeechStore = create<SpeechStore>((set, get) => ({
       }
 
       if (generation !== mine) return;
-      // Only stand down if nothing else has taken the state in the meantime.
-      if (useOrbStore.getState().orbState === 'speaking') setOrbState('idle');
+      // Standing down releases only the speech field; whatever chat set
+      // `activity` to in the meantime is drawn again, untouched.
+      setSpeaking(false);
       set({ audio: null, track: [] });
     })();
   },
@@ -395,9 +397,7 @@ export const useSpeechStore = create<SpeechStore>((set, get) => ({
       audio.pause();
       audio.currentTime = 0;
     }
-    if (useOrbStore.getState().orbState === 'speaking') {
-      useOrbStore.getState().setOrbState('idle');
-    }
+    useOrbStore.getState().setSpeaking(false);
     set({ audio: null, track: [] });
   },
 }));

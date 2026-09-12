@@ -78,11 +78,15 @@ class OpenRouterAdapter(OpenAICompatibleAdapter):
             # The one case we can state. Free is not a good enough reason to
             # route here on the user's behalf, and the label is what makes a
             # deliberate choice an informed one.
+            model.is_free = True
             model.data_policy = DataPolicy.LOGGED_AND_TRAINED_ON
             model.metadata["policy_source"] = (
                 "OpenRouter free tier — prompts are logged and may be trained on"
             )
         else:
+            # Priced, when the listing carries a price; unknown when it does
+            # not. Never "not free" by default — see `ModelInfo.is_free`.
+            model.is_free = False if _has_pricing(entry) else None
             model.metadata["policy_source"] = (
                 "unknown — OpenRouter routes to downstream providers whose terms "
                 "this API does not report. Set it per model once established."
@@ -167,6 +171,19 @@ def _apply_modality(model: ModelInfo, entry: Dict[str, Any]) -> None:
         model.metadata["output_modalities"] = emits
         if "image" in emits and "text" not in emits:
             model.category = ModelCategory.IMAGE
+
+
+def _has_pricing(entry: Dict[str, Any]) -> bool:
+    """Whether the listing states a per-token price at all."""
+    pricing = entry.get("pricing")
+    if not isinstance(pricing, dict):
+        return False
+    try:
+        return any(
+            float(pricing.get(k) or 0) >= 0 for k in ("prompt", "completion") if k in pricing
+        )
+    except (TypeError, ValueError):
+        return False
 
 
 def _is_free_tier(model_id: str, entry: Dict[str, Any]) -> bool:

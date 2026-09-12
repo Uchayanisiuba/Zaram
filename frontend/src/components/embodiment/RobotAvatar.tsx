@@ -6,7 +6,7 @@ import { useChatModeStore } from '@/stores/chatModeStore'
 import { useSpeechStore } from '@/stores/speechStore'
 import { visemeAt } from '@/lib/visemes'
 import { inspectAvatar } from '@/lib/vrmSafety'
-import { renderScaleFor, approachRate, applyTextureFiltering, RIM_EASE_SECONDS } from '@/lib/renderTuning'
+import { renderScaleFor, approachRate, applyTextureFiltering, RIM_EASE_SECONDS, FrameGate } from '@/lib/renderTuning'
 import {
   EYE_CELLS, MOUTH_CELLS, transformForCell, texelAspect, uvIslandOf,
   type EyeCell, type MouthCell, type UvIsland,
@@ -1462,8 +1462,13 @@ export default function RobotAvatar({ px = 320, src = '/avatars/zaram-robo.glb' 
 
     // ---------------------------------------------------------------- frame
 
+    // Capped, and skipped while the document is hidden — see `FrameGate`.
+    // The gate runs before `getDelta`, so a skipped frame's time is carried
+    // into the next drawn one rather than lost.
+    const gate = new FrameGate()
     const tick = () => {
       raf = requestAnimationFrame(tick)
+      if (!gate.due(performance.now())) return
       const dt = clock.getDelta()
       const now = clock.elapsedTime
       const s = stateRef.current

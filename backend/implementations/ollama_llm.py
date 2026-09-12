@@ -40,6 +40,7 @@ class OllamaLLM:
         system_prompt: str = "",
         model: str | None = None,
         images: list[str] | None = None,
+        tools: list[dict] | None = None,
     ) -> Iterator[str]:
         chosen = model or self.default_model
         if not chosen:

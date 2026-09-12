@@ -64,6 +64,7 @@ class MemoryRuntimeImpl(MemoryRuntime):
         embedding_backend: str = "hash",
         embedding_model: str = "nomic-embed-text",
         event_bus: Any | None = None,
+        embed_on_gpu: bool = True,
     ):
         self._runtime_id = "memory"
         self._state = MemoryStatus.INITIALIZING
@@ -84,7 +85,10 @@ class MemoryRuntimeImpl(MemoryRuntime):
         self._episodic: EpisodicMemory = EpisodicMemory(self)
         self._semantic: SemanticMemory = SemanticMemory(self)
         self._embedder: EmbeddingService = create_embedding_service(
-            backend=embedding_backend, dim=embedding_dim, ollama_model=embedding_model
+            backend=embedding_backend,
+            dim=embedding_dim,
+            ollama_model=embedding_model,
+            on_gpu=embed_on_gpu,
         )
         self._graph: MemoryGraph = create_memory_graph()
         self._decay_engine: MemoryDecayEngine = create_decay_engine()

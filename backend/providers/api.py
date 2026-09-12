@@ -249,6 +249,73 @@ async def health_report() -> dict:
     return manager.health_report()
 
 
+# ---------------------------------------------------------------- the card
+
+#: The models runtime, for the one sentence it owns about the card: why the
+#: preload did not happen. Set by `main.py` after boot, beside
+#: `set_providers_runtime`; ``None`` until then, which reads as no sentence.
+_models_runtime: Any = None
+
+
+def set_models_runtime(runtime: Any) -> None:
+    global _models_runtime
+    _models_runtime = runtime
+
+
+def _resident_payload(manager: ProviderManager) -> dict:
+    """What is on the card now, in the shape Settings draws.
+
+    `resident` is ``None`` when residency cannot be established — a local
+    server that cannot say what it holds makes the whole answer unknown, and
+    the interface must show *unknown* rather than an empty list that reads as
+    "nothing loaded". `free_vram_bytes` is the driver's answer for the card as
+    a whole, beside every other process; ``None`` where there is no NVIDIA
+    driver to ask.
+
+    `preload_skipped_because` is the models runtime's own sentence for why it
+    did not warm a model at boot — the preference, another server, or the
+    space that was free at the time. Empty when it did, or was never asked.
+    """
+    from .discoverers.hardware import vram_free_bytes
+
+    resident = manager.resident_now()
+    rows = None
+    if resident is not None:
+        rows = [{"name": name, "bytes": size} for name, size in sorted(resident.items())]
+
+    skipped = getattr(_models_runtime, "preload_skipped_because", "") or ""
+
+    return {
+        "resident": rows,
+        "free_vram_bytes": vram_free_bytes(),
+        "preload_skipped_because": skipped,
+    }
+
+
+@router.get("/resident")
+async def resident_models() -> dict:
+    """What is holding the card, and how much of it is free right now."""
+    manager = _manager()
+    await manager.ensure_scanned()
+    return _resident_payload(manager)
+
+
+@router.post("/release")
+async def release_resident() -> dict:
+    """Give the card back.
+
+    The user's "I am about to open Unreal" action. Unloads every model every
+    local server can unload, reports the ones it cannot, and answers with the
+    same payload `GET /resident` does so the screen redraws from one shape.
+    Loopback only, never egress; a person pressed it, so it needs no confirm
+    beyond the button.
+    """
+    manager = _manager()
+    await manager.ensure_scanned()
+    outcome = manager.release_resident()
+    return {**_resident_payload(manager), "outcome": outcome}
+
+
 # --------------------------------------------------------------- catalogue
 
 

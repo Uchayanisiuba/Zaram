@@ -25,6 +25,40 @@ from typing import Protocol, runtime_checkable
 ERROR_PREFIX = "[ERROR] "
 
 
+def accepts_tools(generate) -> bool:
+    """Whether a generate/stream callable takes a ``tools`` keyword. Never raises.
+
+    The native tool channel is offered only to an implementation that can
+    take it. A dozen engine and service doubles implement the older
+    signature, and the marker instructions are still in the prompt, so an
+    implementation without the keyword answers exactly as it did before. A
+    signature check rather than a caught ``TypeError``: a generator that
+    raises on its first ``next()`` has already been reported as a failed
+    generation by the caller's fallback.
+    """
+    try:
+        import inspect
+
+        parameters = inspect.signature(generate).parameters
+    except (TypeError, ValueError):
+        return False
+    if "tools" in parameters:
+        return True
+    return any(p.kind is inspect.Parameter.VAR_KEYWORD for p in parameters.values())
+
+
+def forward_stream(engine, prompt, system_prompt, model, images, tools):
+    """Call ``engine.stream_response`` with ``tools`` only if it can take them.
+
+    For the wrapper engines, which sit between the service and whichever
+    engine — real or a test double — actually answers. Keeps the old
+    positional call for an inner engine without the keyword.
+    """
+    if tools and accepts_tools(engine.stream_response):
+        return engine.stream_response(prompt, system_prompt, model, images, tools=tools)
+    return engine.stream_response(prompt, system_prompt, model, images)
+
+
 @runtime_checkable
 class LLMEngine(Protocol):
     """The universal interface for all Language Model Engines.
@@ -55,8 +89,18 @@ class LLMEngine(Protocol):
         system_prompt: str = "",
         model: str | None = None,
         images: list[str] | None = None,
+        tools: list[dict] | None = None,
     ) -> Iterator[str]:
         """Stream plain text tokens from the LLM.
+
+        ``tools`` are the attached tools in the ``tools``-array shape every
+        chat API speaks (`core.tool_loop.native_tool_specs`). An engine that
+        can put them on the wire does, and re-emits any call the model makes
+        as the ``[TOOL_CALL]`` marker on the text stream, so the loop above
+        reads a native call and a typed one identically. An engine that
+        cannot ignores them; the marker instructions are still in the prompt.
+        Optional, and passed only when there are some, so every existing
+        implementation and double is unchanged for an ordinary reply.
 
         ``images`` are base64-encoded, without a data-URI prefix, and are the
         images attached to *this* message. An engine whose model cannot see

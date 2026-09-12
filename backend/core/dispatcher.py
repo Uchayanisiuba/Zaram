@@ -197,9 +197,12 @@ class ExecutionDispatcher:
                     # `execute_step`, because that is what `input_data` is for
                     # and every other per-request value already travels there.
                     images = step.input_data.get("images") or None
+                    # The native tool channel, same conveyance and same rule
+                    # as images: on `input_data`, passed only when present.
+                    tools = step.input_data.get("tools") or None
                     logger.debug(
-                        "Dispatcher: calling generate_response prompt='%s...' model=%s images=%s",
-                        prompt[:50], model, bool(images),
+                        "Dispatcher: calling generate_response prompt='%s...' model=%s images=%s tools=%d",
+                        prompt[:50], model, bool(images), len(tools or []),
                     )
                     # `model` was logged here and then not passed, so every
                     # request answered with the engine default whatever it asked
@@ -215,9 +218,22 @@ class ExecutionDispatcher:
                     # loudly when one is actually attached: the `TypeError`
                     # surfaces through the fallback path and is reported. What
                     # it no longer does is fail when no image is involved.
+                    # **Tools are offered only to a service that can take
+                    # them.** The marker instructions are still in the prompt,
+                    # so a service without the native channel answers exactly
+                    # as it did before — which is also why this is a signature
+                    # check rather than a `TypeError` caught after the fact: a
+                    # generator that raises on its first `next()` has already
+                    # been reported as a failed generation by the fallback.
+                    from runtimes.models.engines.base_engine import accepts_tools
+
+                    if tools and not accepts_tools(service.generate_response):
+                        tools = None
                     yield from self._execute_with_fallback(
                         lambda: (
-                            service.generate_response(prompt, system_prompt, model, images)
+                            service.generate_response(prompt, system_prompt, model, images, tools=tools)
+                            if tools
+                            else service.generate_response(prompt, system_prompt, model, images)
                             if images
                             else service.generate_response(prompt, system_prompt, model)
                         ),

@@ -18,9 +18,162 @@ publishing step over rather than finding another route. `CLAUDE.md`,
 
 ---
 
-## Current state — 10 September 2026
+## Current state — 12 September 2026
 
 *The latest work is first. Earlier sessions follow below.*
+
+### 12 September — why the machine was slow, measured, and what was done about it
+
+The maintainer's report: *the PC is slow most of the time, Zaram hangs upon
+responses, especially code; the orb does not go into or stay in the coding
+state; the typing animation loops.* Unreal closed. Four causes, each measured on
+the 12 GB RTX 3060 before anything was changed, and none of them was the model
+being slow.
+
+**1. The chat model and the embedder could not share the card, so every
+exchange swapped ~10 GB.** `qwen3-14b-16k` held 10.4 GB entirely in VRAM; one
+`bge-m3` embedding call loaded 0.66 GB and Ollama evicted the chat model to make
+room; the next reply loaded the chat model back and evicted the embedder.
+Recall runs before every reply and the duplicate check after it, so each
+exchange moved ~10 GB across PCIe at least twice, and the whole desktop stalled
+while it did — with `prefer_cloud` set, because recall still embeds. The
+maintainer's day-to-day model is on TabbyAPI (9.5 GB) on top of that, and the
+desktop itself holds 2.2–3.0 GB, so the boot preload of Ollama's pick was asking
+23 GB of a 12 GB card.
+
+*Done:* the embedder runs on the CPU below 16 GB of VRAM (`num_gpu: 0`;
+measured 0 GB resident, 89 ms per query), decided in the bootstrapper from the
+card's size — `runtimes/memory/embeddings.py::embed_on_gpu`,
+`ZARAM_EMBED_DEVICE` overrides. The preload refuses under `prefer_cloud`, when
+the chosen default lives on another local server, and when the model does not
+fit what the driver says is free *now* — `ModelsRuntime._preload_refusal`,
+`providers/discoverers/hardware.py::vram_free_bytes`. Unknown answers preload
+as before. And **Release the card**: `POST /providers/release` unloads every
+model every local server can unload and *reports* the ones it cannot (TabbyAPI
+has no unload route); Settings › Models › *On the card* shows what is resident,
+what is free, why nothing was preloaded, and the button.
+
+**2. The prompt's prefix changed every turn, so the local server's cache never
+hit.** The order was identity → *recall* → conversation → question. Recall
+differs per question, so ExLlamaV3/llama.cpp/Ollama re-prefilled the entire
+history on every message; on Tabby's 65,536-token window with history taking
+the remainder (10 September), that is tens of thousands of tokens re-read per
+turn at a few hundred a second — the "hang before the first token", growing
+with every exchange. *Done:* identity → conversation → recall → question, with
+recall still budgeted (`reserved=` on `_augment_with_conversation`) and its
+closing rule still last. `tests/test_prompt_prefix_is_stable_between_turns.py`
+pins the order and that turn N+1's prompt begins byte-for-byte with turn N's
+up to the last turn.
+
+**3. Every typewriter frame re-parsed the whole transcript.** `useTypedText`
+set state at up to 60 Hz at the top of the 1,400-line `ChatSurface`; every
+frame re-ran remark + GFM + highlight.js over the streaming reply *and every
+earlier assistant message*, nothing memoised. *Done:* `StreamingReply` owns the
+reveal; `MessageBody` is `memo`'d and skips highlighting while streaming;
+plugin arrays are module constants. Also removed: `useRuntimeLoop(60)` in
+`App.tsx`, a *mock* physics simulation running 60×/s for the life of the app
+into a store nothing mounted read — the seventeenth unreachable subsystem,
+except this one was reachable and running. The avatar is capped at 30 fps and
+draws nothing while hidden (`FrameGate` in `renderTuning.ts`); the landing's
+orbit re-renders in 0.2° steps rather than per display frame.
+
+**4. `speaking` and `coding` were two writers of one field, and the guard was
+the bug.** `preserveSpeaking` (19 August) refused every chat state while a clip
+played, so a fence opening mid-sentence could not turn the orb to `coding`, and
+speech standing down wrote `idle` over a reply still streaming: thinking →
+speaking → idle → coding → speaking. *Done:* `orbStore` holds `activity`
+(chat's) and `speaking` (speech's) and composes `orbState`; neither writer can
+reach the other's field; `preserveSpeaking` is deleted. For buffered
+tool-driven replies — where no fence and no call reaches the screen until the
+end — the `tools` notice now carries which servers were offered, and `code`
+among them reads as coding from the first second.
+
+**Also landed, asked for the same day:**
+
+- *Free models are named with their price.* `ModelInfo.is_free` (three-valued;
+  OpenRouter's listing decides), `ProviderEntry.pricing` (`free_tier` · `paid` ·
+  `trial` · `per_model` · `unknown`). The picker says "free, prompts are
+  logged" in one breath and the provider list says "free tier" / "some models
+  free". Groq, NVIDIA NIM, SambaNova, Gemini and Mistral are free tiers;
+  Cerebras and Together are trials; OpenRouter is per model.
+  `tests/test_free_models_are_named_with_their_price.py`.
+- *Each tool step opens to its output.* `tool_call` events carry a bounded
+  excerpt (`output_excerpt`, 4,000 chars, text never markup); `StepOutput` is
+  the pane — its own scrollbar, `overscroll-behavior: contain`, 240 px — in
+  both the live list and the Activity panel.
+
+Suite with Ollama up: backend see the line below; frontend **714 passed**,
+`tsc` clean. A stale brand test (`ZaramMark`) asserting the contract 5eda403
+reversed was fixed.
+
+**Measured after the change, on Ollama with the 14B, an eight-turn history
+of ~2,900 tokens and one new question:** old order, second turn **21.5 s** to
+the first token; new order, second turn **3.9 s**. Same tokens, same card; the
+difference is the cache reusing the history. (`prompt_eval_count` reports the
+whole prompt either way — Ollama counts cached tokens — so the timing is the
+instrument, not the count.)
+
+Backend suite with Ollama up: **3,480 passed, 23 skipped, 0 failed**
+(17.5 min). `POST /providers/release` exercised against a live backend:
+released `qwen3-14b-16k` and `bge-m3`, reported TabbyAPI's 27B as not
+releasable with the reason, driver usage fell from 11.4 GB to 2.6 GB.
+
+**And on TabbyAPI (Qwen3.8-27B-exl3, 65k window), same history, one turn
+added: old order 9.1 s, new order 2.8 s.** The gap is linear in history
+length — on the 30–60k tokens a long session reaches at 65k, that is the
+difference between a minute and a few seconds before the first token.
+
+### 12 September, later — the provider layer has a real tool-call channel
+
+**The marker was "the honest intermediate" and now it is the fallback.**
+`core/tool_loop.py` said the provider layer would one day grow a native
+channel and the parser would be the one function to change. Built with a
+different cut, and the cut is the point: **the engines put the tools on the
+wire and re-emit any call as the marker**, so `parse_call`, the gate, the
+budget, the stripper and every test double see exactly what they saw before.
+What changed is who writes the call — the server's template and grammar
+rather than the model's memory of an example in the prompt.
+
+- `native_tool_specs` turns the offered MCP tools into OpenAI's `tools` array
+  (`server__tool` names; the MCP `input_schema` travels as `parameters`;
+  descriptions flattened and bounded — they are third-party text).
+  `marker_for_native_call` is the way back.
+- Ollama: a `tools` request goes through `/api/chat` (`/api/generate` has no
+  such field), only for a model whose `/api/show` capabilities include
+  `tools`; non-streamed, because a tool-capable generation is buffered
+  upstream anyway. `_capabilities` now caches the whole list once, so the
+  thinking and tools probes are one round trip.
+- OpenAI-compatible: `tools` in the body; `delta.tool_calls` assembled across
+  frames by `index` and emitted at `[DONE]`.
+- Wrappers pass `tools` through — **and `CloudFanout` was dropping `images`
+  on the floor**, so a picture bound for a connected cloud provider went
+  nowhere and the model answered about what it never saw. Fixed on the way
+  past; `DataClass.IMAGE` consent in the per-provider engine is now reachable.
+- The execution engine puts the specs on the generation step and on every
+  follow-up in the loop and on resume; the dispatcher hands them over only to
+  a service whose `generate_response` accepts `tools`, so the dozen doubles
+  are untouched.
+
+**Measured live, Ollama, qwen3-14b-16k:** asked for lines 1–20 of
+`backend/main.py` with the code tools offered, the model made a *native*
+`read_lines` call through `/api/chat`, it came back as the marker, and
+`parse_call` read it — `tests/test_native_tool_calls_reach_the_loop.py`
+carries the wire-level assertions.
+
+**Still open, in order:**
+- **Phase 2, the rest of the agent** — a plan object that outlives the request
+  (Project's), model-per-role with plain-word presets, mutative gates for file
+  writes (sandbox, patch-stack undo, confirm once per project and data class,
+  egress preview naming the files). "Edited N files" and a diff pane belong
+  here: Zaram has no write tool yet, so there is nothing to diff.
+- **Stream the native path.** Ollama's `/api/chat` and the OpenAI wire both
+  stream tool calls; today the reply is buffered on this path as it always
+  was. When the prose before a call is worth seeing as it arrives, stream it
+  and hold only the call.
+- ~~The market question~~ — moved to `docs/PITCH.md` ("Who can run it") and
+  onto the first-run screen: `core/readiness.py::machine_sentence` says which
+  tier a machine is on, in the manifest's own boundaries, before a download
+  is priced.
 
 ### 10 September, last — three things the memory did not do, and one it undid
 

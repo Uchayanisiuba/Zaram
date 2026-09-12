@@ -138,3 +138,37 @@ export function applyTextureFiltering(root: THREE.Object3D, maxAnisotropy: numbe
 
   return seen.size
 }
+
+/**
+ * How often the avatar is allowed to draw a frame.
+ *
+ * **Measured 12 September 2026: the avatar rendered at the display's refresh
+ * rate, at 2× supersample, whether or not anything on it had changed.** On a
+ * 144 Hz monitor that is 144 WebGL frames a second, permanently, in an app
+ * whose brief is to sit in the background — beside a resident local model and
+ * whatever else the user has open. Thirty a second is indistinguishable for a
+ * breathing idle and a rim-light ease, and it is a quarter of the cost on the
+ * displays where the cost was highest. A hidden document draws nothing at all:
+ * the compositor is not going to show it, so the work has no reader.
+ *
+ * A gate rather than a `setInterval`, so the loop stays on `requestAnimationFrame`
+ * and keeps the browser's own throttling in background tabs and minimised
+ * windows.
+ */
+export const AVATAR_MAX_FPS = 30
+
+export class FrameGate {
+  private last = 0
+  constructor(private readonly maxFps: number = AVATAR_MAX_FPS) {}
+
+  /** Whether a frame may be drawn now. Advances the clock when it says yes. */
+  due(nowMs: number, hidden: boolean = typeof document !== 'undefined' && document.hidden): boolean {
+    if (hidden) return false
+    const interval = 1000 / this.maxFps
+    if (nowMs - this.last < interval) return false
+    // Anchor to the grid rather than to `now`, so a late frame does not push
+    // every following frame late with it and the rate stays at the cap.
+    this.last = nowMs - ((nowMs - this.last) % interval)
+    return true
+  }
+}

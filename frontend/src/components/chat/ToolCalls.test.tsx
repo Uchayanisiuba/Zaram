@@ -16,7 +16,7 @@
  * parsing, a refusal says why, and a tool that ran is not dressed as a warning.
  */
 import { describe, expect, it } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 
 import ToolCalls from './ToolCalls';
 import type { ChatToolCall } from '@/stores/chatStore';
@@ -122,5 +122,44 @@ describe('the working is shown', () => {
     const { container } = render(<ToolCalls calls={[]} />);
 
     expect(container.firstChild).toBeNull();
+  });
+});
+
+describe('a step opens to what it produced', () => {
+  // Asked for 12 September 2026 against Claude Code: each step's output in a
+  // bounded pane of its own, scrolled with the wheel, the transcript still.
+  it('a step with output is a row that opens a bounded, scrolling pane', () => {
+    render(
+      <ToolCalls
+        active
+        calls={[call({ tool: 'read_lines', target: 'readiness.py:1-40', output: 'line one\nline two' })]}
+      />,
+    );
+    const row = screen.getByTestId('step-row');
+    expect(row.getAttribute('aria-expanded')).toBe('false');
+    expect(screen.queryByTestId('step-output')).toBeNull();
+
+    fireEvent.click(row);
+
+    const pane = screen.getByTestId('step-output');
+    expect(pane.textContent).toBe('line one\nline two');
+    expect(pane.style.overflow).toBe('auto');
+    expect(pane.style.overscrollBehavior).toBe('contain');
+    expect(pane.style.maxHeight).not.toBe('');
+  });
+
+  it('a step with nothing behind it is not a button', () => {
+    render(<ToolCalls active calls={[call({ output: '' })]} />);
+    const row = screen.getByTestId('step-row');
+    expect(row.hasAttribute('aria-expanded')).toBe(false);
+    expect((row as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('output is rendered as text, never as markup', () => {
+    render(<ToolCalls active calls={[call({ output: '<img src=x onerror=alert(1)>' })]} />);
+    fireEvent.click(screen.getByTestId('step-row'));
+    const pane = screen.getByTestId('step-output');
+    expect(pane.querySelector('img')).toBeNull();
+    expect(pane.textContent).toContain('<img');
   });
 });

@@ -18,13 +18,27 @@ class EmbeddingService:
     - 'hash': Deterministic hash-based embeddings (fallback, no dependencies)
     """
 
-    def __init__(self, backend: str = "hash", dim: int = 384, ollama_url: str = "http://localhost:11434", ollama_model: str = "nomic-embed-text"):
+    def __init__(
+        self,
+        backend: str = "hash",
+        dim: int = 384,
+        ollama_url: str = "http://localhost:11434",
+        ollama_model: str = "nomic-embed-text",
+        on_gpu: bool = True,
+    ):
         self._backend = backend
         self._dim = dim
         self._ollama_url = ollama_url
         self._ollama_model = ollama_model
+        #: Whether Ollama may put the embedder's weights on the card. See
+        #: `_embed_ollama` and `embed_on_gpu` for the measurement behind it.
+        self._on_gpu = on_gpu
         self._cache: dict[str, list[float]] = {}
         self._degraded = False
+
+    @property
+    def on_gpu(self) -> bool:
+        return self._on_gpu
 
     def get_dim(self) -> int:
         return self._dim
@@ -96,11 +110,23 @@ class EmbeddingService:
         # Not imported from `runtimes.models`: this module is the memory
         # runtime and must not depend on the model runtime. Two constants, one
         # value, and a mismatch costs nothing worse than an idle model.
-        payload = json.dumps({
+        payload_dict: dict[str, Any] = {
             "model": self._ollama_model,
             "prompt": text,
             "keep_alive": _KEEP_ALIVE,
-        }).encode()
+        }
+        # **On a card that cannot hold both, the embedder is what evicts the
+        # chat model — measured 12 September 2026.** On a 12 GB card holding a
+        # 10.4 GB chat model, one embedding call loaded bge-m3 (0.66 GB) and
+        # Ollama evicted the chat model to make room; the next reply loaded
+        # the chat model back and evicted the embedder. Every exchange moved
+        # ~10 GB through PCIe twice, and the whole desktop stalled while it
+        # did. `num_gpu: 0` keeps the embedder's weights in system RAM: a
+        # single query embedding on CPU costs ~100 ms, and 0.66 GB of VRAM is
+        # the margin that decides whether a 14B fits beside it.
+        if not self._on_gpu:
+            payload_dict["options"] = {"num_gpu": 0}
+        payload = json.dumps(payload_dict).encode()
 
         req = urllib.request.Request(
             f"{self._ollama_url}/api/embeddings",
@@ -136,3 +162,33 @@ class EmbeddingService:
 def create_embedding_service(backend: str = "hash", dim: int = 384, **kwargs) -> EmbeddingService:
     """Factory for creating embedding services."""
     return EmbeddingService(backend=backend, dim=dim, **kwargs)
+
+
+#: Below this much VRAM the embedder runs on the CPU.
+#:
+#: Measured rather than chosen: a 14B at Q4_K_M with a 16k window holds
+#: 10.4 GB, the desktop under it holds 2.2-3.0 GB, and bge-m3 holds 0.66 GB.
+#: That sum clears 12 GB and does not clear 16 GB, so 16 GB is the smallest
+#: common card size on which the embedder and a mid-size chat model can share
+#: the card without one evicting the other. Above it the GPU makes folder
+#: ingestion several times faster and costs nothing that matters; below it the
+#: same 0.66 GB is the difference between a resident chat model and a 10 GB
+#: swap on every question.
+EMBED_ON_GPU_MIN_VRAM_BYTES = 16 * 1024**3
+
+
+def embed_on_gpu(vram_bytes: int | None, preference: str | None = None) -> bool:
+    """Whether the embedder's weights may go on the card.
+
+    ``preference`` is the `ZARAM_EMBED_DEVICE` override -- ``"gpu"``, ``"cpu"``,
+    or anything else for automatic. Automatic decides from the card's size and
+    answers **CPU when the size is unknown**: an unmeasurable card is the case
+    where a confident wrong answer costs the most, and CPU embedding is slower
+    rather than broken.
+    """
+    choice = (preference or "").strip().lower()
+    if choice == "gpu":
+        return True
+    if choice == "cpu":
+        return False
+    return vram_bytes is not None and vram_bytes >= EMBED_ON_GPU_MIN_VRAM_BYTES

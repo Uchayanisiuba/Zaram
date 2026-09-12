@@ -163,6 +163,31 @@ class Support(str, Enum):
     UNAVAILABLE = "unavailable"
 
 
+class Pricing(Enum):
+    """What asking this provider costs, at the level the provider sets it.
+
+    **The offer `CLAUDE.md` says is missing** — "add a free Gemini key; your
+    prompts train Google, and Zaram will tell you every time one goes" — needs
+    the picker to know which providers *have* a free tier, and until now that
+    lived only in prose notes a person had to read. This is the same fact as
+    a field, so a "Free" group can be drawn and a first-run offer can be made
+    without guessing from the note.
+
+    ``PER_MODEL`` is the router case: OpenRouter prices each model, and its
+    listing says which are free, so the answer lives on `ModelInfo.is_free`
+    rather than here. ``TRIAL`` is a grant behind a card — Cerebras — which is
+    not a free tier and must not be shown as one. ``UNKNOWN`` is the honest
+    default, and it is not ``PAID``: a provider whose terms nobody has read
+    is not thereby a paid one.
+    """
+
+    FREE_TIER = "free_tier"
+    PAID = "paid"
+    TRIAL = "trial"
+    PER_MODEL = "per_model"
+    UNKNOWN = "unknown"
+
+
 @dataclass(frozen=True)
 class ProviderEntry:
     """One provider, as a person choosing between them needs to see it."""
@@ -196,10 +221,19 @@ class ProviderEntry:
     #: The variable a picker would set. A name, never a value.
     key_env: str = ""
     endpoint_env: str = ""
+    #: What it costs to ask. See `Pricing` for why this is a field and not a
+    #: sentence in `note`.
+    pricing: Pricing = Pricing.UNKNOWN
 
     @property
     def available(self) -> bool:
         return self.support is Support.AVAILABLE
+
+    @property
+    def has_free_tier(self) -> bool:
+        """Whether a person can get answers here without paying — the router
+        case says "some models", which the model list settles."""
+        return self.pricing in (Pricing.FREE_TIER, Pricing.PER_MODEL)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -217,6 +251,8 @@ class ProviderEntry:
             "note": self.note,
             "key_env": self.key_env,
             "endpoint_env": self.endpoint_env,
+            "pricing": self.pricing.value,
+            "has_free_tier": self.has_free_tier,
         }
 
 
@@ -227,6 +263,7 @@ def _openai_compatible(
     key_url: str,
     *,
     note: str = "",
+    pricing: Pricing = Pricing.UNKNOWN,
 ) -> ProviderEntry:
     """An entry for a service reachable through the existing engine.
 
@@ -250,6 +287,7 @@ def _openai_compatible(
         note=note,
         key_env=GENERIC_KEY_ENV,
         endpoint_env=GENERIC_ENDPOINT_ENV,
+        pricing=pricing,
     )
 
 
@@ -262,6 +300,7 @@ PROVIDERS: Tuple[ProviderEntry, ...] = (
         "OpenAI",
         "https://api.openai.com/v1",
         "https://platform.openai.com/api-keys",
+        pricing=Pricing.PAID,
     ),
     ProviderEntry(
         id="anthropic",
@@ -304,6 +343,11 @@ PROVIDERS: Tuple[ProviderEntry, ...] = (
             "A small change to how endpoints are built would fix it. OpenRouter "
             "reaches Gemini today."
         ),
+        # A standing free tier, and the one `CLAUDE.md` names for the offer:
+        # "your prompts train Google, and Zaram will tell you every time one
+        # goes". Stated even while the entry is unreachable, so the day the
+        # endpoint is fixed the picker already knows the deal.
+        pricing=Pricing.FREE_TIER,
     ),
     _openai_compatible(
         "openrouter",
@@ -316,36 +360,54 @@ PROVIDERS: Tuple[ProviderEntry, ...] = (
             "route here on its own — free models in particular are logged and may "
             "be trained on."
         ),
+        # Priced per model; the listing says which are free and Zaram marks
+        # each one — see `ModelInfo.is_free`.
+        pricing=Pricing.PER_MODEL,
     ),
     _openai_compatible(
         "deepseek",
         "DeepSeek",
         "https://api.deepseek.com/v1",
         "https://platform.deepseek.com/api_keys",
+        pricing=Pricing.PAID,
     ),
     _openai_compatible(
         "groq",
         "Groq",
         "https://api.groq.com/openai/v1",
         "https://console.groq.com/keys",
+        note=(
+            "Open-weight models, very fast, with a standing free tier and no "
+            "card required. Rate-limited per minute and per day. Free means "
+            "your prompts may be logged."
+        ),
+        pricing=Pricing.FREE_TIER,
     ),
     _openai_compatible(
         "mistral",
         "Mistral",
         "https://api.mistral.ai/v1",
         "https://console.mistral.ai/api-keys/",
+        note=(
+            "Has a free experiment tier; enabling it means agreeing that "
+            "prompts may be used for training. The paid tier does not."
+        ),
+        pricing=Pricing.FREE_TIER,
     ),
     _openai_compatible(
         "xai",
         "Grok (xAI)",
         "https://api.x.ai/v1",
         "https://console.x.ai/",
+        pricing=Pricing.PAID,
     ),
     _openai_compatible(
         "together",
         "Together AI",
         "https://api.together.xyz/v1",
         "https://api.together.xyz/settings/api-keys",
+        note="A small starting credit, then paid. Not a standing free tier.",
+        pricing=Pricing.TRIAL,
     ),
     ProviderEntry(
         id="qwen",
@@ -409,6 +471,7 @@ PROVIDERS: Tuple[ProviderEntry, ...] = (
             "minute. Free means your prompts are logged, and Zaram will tell "
             "you every time one goes."
         ),
+        pricing=Pricing.FREE_TIER,
     ),
     _openai_compatible(
         "sambanova",
@@ -420,6 +483,7 @@ PROVIDERS: Tuple[ProviderEntry, ...] = (
             "200,000 tokens a day per model and no card required. Prompts are "
             "logged."
         ),
+        pricing=Pricing.FREE_TIER,
     ),
     _openai_compatible(
         "cerebras",
@@ -432,6 +496,7 @@ PROVIDERS: Tuple[ProviderEntry, ...] = (
             "so its grant is a trial rather than a free tier. Listed as paid "
             "for that reason."
         ),
+        pricing=Pricing.TRIAL,
     ),
     ProviderEntry(
         # **The id is a legacy label and is not a claim about the product.**

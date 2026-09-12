@@ -238,6 +238,18 @@ class ProviderManager:
             return None
 
         vram = hardware.vram_bytes or 0
+        # **The embedder is only a tenant of the card when it is on the card.**
+        # Since 12 September 2026 the bootstrapper keeps it on the CPU below
+        # 16 GB of VRAM (see `runtimes.memory.embeddings.embed_on_gpu` for the
+        # measurement), and docking a budget for a tenant that is not there
+        # would keep excluding the 14B that now fits. The same pure function
+        # of the same reading, so this and the bootstrapper cannot disagree.
+        import os
+
+        from runtimes.memory.embeddings import embed_on_gpu
+
+        if not embed_on_gpu(hardware.vram_bytes, os.getenv("ZARAM_EMBED_DEVICE")):
+            return vram
         return max(vram - self.embedding_footprint_bytes(), 0)
 
     def resident_cost_bytes(self, model: ModelInfo) -> Optional[int]:
@@ -398,6 +410,43 @@ class ProviderManager:
             ):
                 return candidate
         return None
+
+    def release_resident(self) -> Dict[str, str]:
+        """Give the card back: unload every model every local server holds.
+
+        Model name to outcome. A server with no release route — TabbyAPI, LM
+        Studio and the other OpenAI-compatible servers have no standard one —
+        reports each of its resident models as *not released* with the
+        reason, so the interface can say "still holding 9.5 GB" rather than
+        "done". Cloud providers hold nothing on this machine and are skipped.
+
+        This is the user's "I am about to open Unreal" action, and it is the
+        mutative half of the preload: `warm` spends the card and this hands
+        it back. Loopback only, never egress.
+        """
+        outcome: Dict[str, str] = {}
+        for adapter in self.registry.list_model_providers():
+            if getattr(adapter, "kind", None) is ProviderKind.CLOUD_API:
+                continue
+            release = getattr(adapter, "release_resident", None)
+            if callable(release):
+                try:
+                    outcome.update(release())
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug("release failed on %s: %s", getattr(adapter, "provider_id", "?"), exc)
+                continue
+            probe = getattr(adapter, "resident_models", None)
+            held = probe() if callable(probe) else None
+            for name in (held or {}):
+                outcome[name] = (
+                    f"not released: {getattr(adapter, 'provider_id', 'this server')} "
+                    "has no unload route; stop or unload it from that app"
+                )
+        return outcome
+
+    def resident_now(self) -> Optional[Dict[str, Optional[int]]]:
+        """What every local server holds right now. See `_resident_models`."""
+        return self._resident_models()
 
     def _resident_models(self) -> Optional[Dict[str, Optional[int]]]:
         """Live residency across **every** local server, or None for unknown.

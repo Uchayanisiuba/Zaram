@@ -71,6 +71,9 @@ interface LandingProps {
 
 const ORB_SIZE = 320
 const ORBIT_RADIUS = 240
+/** How far the orbit turns between React renders. 0.2° at 240px
+ *  of radius is under a pixel of travel — see the tick in the orbit effect. */
+const ORBIT_STEP_DEG = 0.2
 /** The orbital system is rendered inside this scale, so any transform applied
  *  within it is multiplied by the same factor. See orbGeometry(). */
 const CONTAINER_SCALE = 1.4
@@ -271,11 +274,25 @@ export default function Landing({ onNavigate, onOrbTap }: LandingProps) {
       offsetRef.current = elapsedRef.current
       startRef.current = 0
     }
+    // **A React render per display frame, for a rotation of four degrees a
+    // second — throttled 12 September 2026.** `setOrbitAngle` re-renders the
+    // landing, its six draggable nodes and the embodiment beneath them, and it
+    // did so at the display's refresh rate: 144 renders a second on a 144 Hz
+    // monitor to move each node ~0.03° per frame, a fraction of a pixel at
+    // this radius. The state now advances in steps of `ORBIT_STEP_DEG`, which
+    // at 220 px of radius is under a pixel and reads as the same continuous
+    // drift, at about a sixth of the renders. The clock still runs every
+    // frame, so a resume is continuous and drag compensation stays exact.
+    let published = -Infinity
     const tick = (ts: number) => {
       if (!startRef.current) startRef.current = ts
       const elapsed = (ts - startRef.current) + offsetRef.current
       elapsedRef.current = elapsed
-      setOrbitAngle((elapsed / 90000) * 360)
+      const angle = (elapsed / 90000) * 360
+      if (Math.abs(angle - published) >= ORBIT_STEP_DEG) {
+        published = angle
+        setOrbitAngle(angle)
+      }
       rafRef.current = requestAnimationFrame(tick)
     }
     rafRef.current = requestAnimationFrame(tick)
