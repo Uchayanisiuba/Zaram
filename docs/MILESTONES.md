@@ -22,6 +22,101 @@ publishing step over rather than finding another route. `CLAUDE.md`,
 
 *The latest work is first. Earlier sessions follow below.*
 
+### 12 September, last — handoff: image generation froze the PC after a local LLM
+
+**The report.** After using a local model, the maintainer asked Zaram to
+generate an image and the machine froze. Not slow — frozen. Diagnosed from
+the code on 12 September; not yet fixed. This is the next session's first
+job, and everything needed to do it is below.
+
+**The mechanism, and it is the September thrash again with a bigger tenant.**
+`backend/imaging/local_flux.py` loads FLUX.1 [schnell] NF4 — its own constant
+says **~8.4 GB resident** (`APPROXIMATE_VRAM_BYTES`) — onto CUDA with
+`enable_model_cpu_offload`. Its only preflight is `torch.cuda.is_available()`.
+It never asks how much of the card is *free*, and it never releases the chat
+model that was answering a moment earlier. On the 12 GB card that means:
+
+- Tabby's 27B (9.5–10.8 GB measured) or Ollama's 14B (10 GB) still resident,
+  **plus** 8.4 GB of FLUX, **plus** the 2.2–3 GB desktop — 20+ GB asked of
+  12. The Windows driver pages GPU memory through system RAM for every
+  process on the machine, and the offload hook then moves whole components
+  back and forth across the same starved bus on every denoising step. That
+  is a freeze, not a stall.
+- `from_pretrained` also streams ~13 GB of weights through system RAM at
+  the same time.
+
+**The constant was written to warn and nothing reads it.** The comment on
+`APPROXIMATE_VRAM_BYTES` says *"used to warn, never to block — CLAUDE.md
+settles that VRAM routes a task and does not reject one."* Grep: it has no
+caller. So the design was "warn" and the behaviour was "silently
+over-commit", which is the seventeenth-unreachable-subsystem shape on the one
+path where it can take the whole machine down. The rule it cites is also
+being misread: *routes a task* means send it somewhere that can do it — a
+cloud image provider, or the card after it is freed — not run it into a wall.
+A freeze is worse than a refusal, and rule 9's posture applies: **stop rather
+than guess.**
+
+**The fix, in order, with the pieces that already exist:**
+
+1. **Preflight on free VRAM, in `ImagesRuntime.execute` before `to_thread`.**
+   Read `providers.discoverers.hardware.vram_free_bytes()` (built 12 September;
+   nvidia-smi, returns None without a driver). If
+   `free < APPROXIMATE_VRAM_BYTES + margin`, do not load. The constant gets
+   its first reader.
+2. **Release first, then re-check.** `ProviderManager.release_resident()`
+   (built 12 September) unloads what Ollama holds and *reports* what it
+   cannot — TabbyAPI has no unload route. Call it, re-read free VRAM, and only
+   then load FLUX. This is the honest version of "routes a task": the card is
+   given back before the picture is drawn, and the next chat question reloads
+   the chat model (a cold start the user can see, with the orb saying so).
+3. **Refuse with a sentence when the card still is not free**, naming the
+   holder from `release_resident()`'s outcome: *"TabbyAPI is holding
+   Qwen3.8-27B (about 10 GB) and Zaram cannot unload it. Unload it in
+   TabbyAPI, or connect an image provider, and ask again."* Emit it as a
+   notice on the stream, kind `images`, action `settings`. Never fall through
+   to CPU or to offload on a full card — that is the freeze.
+4. **Offer the cloud route when one is connected**, before refusing: a
+   provider whose `ModelInfo.emits_image` is true, through the existing
+   fan-out and egress gate with `DataClass.IMAGE` consent. This is what
+   `CLAUDE.md`'s images section already describes as the shape.
+5. **Unload FLUX after the picture.** `LocalFlux.unload()` exists (line ~453)
+   and frees the card; call it from the runtime once the images are saved,
+   unless another request is queued. Holding 8.4 GB of image weights resident
+   after one picture is the same mistake as the 30-minute keep-alive, on a
+   model used once an hour.
+6. **Say what will happen before it happens.** `/health` already reports
+   `images.can_draw`; add the preflight's verdict there and to the images
+   notice, so *"drawing this will unload qwen3-14b first"* is on screen before
+   the user spends the wait. Same posture as `swap_preflight` for chat.
+
+**Tests to write, before the fix, so the freeze is pinned:**
+- `ImagesRuntime.execute` with a fake `vram_free_bytes` returning 1 GB and a
+  fake `release_resident` returning `{"Qwen3.8-27B": "not released: ..."}`
+  → no `_load`, a notice naming the holder reaches the stream.
+- Same with `release_resident` freeing the card → `_load` runs after release,
+  never before.
+- `APPROXIMATE_VRAM_BYTES` has a reader (assert the preflight compares
+  against it, so the constant cannot go dark again).
+- After a successful draw, `unload()` was called.
+
+**Measure before and after**, the way the residency work was: `nvidia-smi`
+before the request, during the load, after the picture. The number that
+proves it is *peak used ≤ card total* throughout, with the chat model shown
+as released rather than paged.
+
+**What not to do.** Do not lower FLUX's precision or move it to the CPU as
+the fix — tens of minutes per image is a different broken product. Do not
+make the image request wait for the chat model's 30-minute keep-alive to
+expire. Do not add a "force" flag; the whole point is that the machine is
+never asked for memory it does not have.
+
+**Environment for the measurement:** the 12 GB RTX 3060; TabbyAPI on 1234
+usually holding the 27B; `qwen3-14b-16k` on Ollama; FLUX at
+`backend/models/image/flux1-schnell-nf4`. `docs/RUNNING.md` for launching the
+real app; `POST /providers/release` for clearing the card by hand; the dev
+backend can be started with `ZARAM_API_SECRET=<x> ZARAM_DATA_DIR=<scratch>`
+and hit with `X-Zaram-Auth: <x>`.
+
 ### 12 September — why the machine was slow, measured, and what was done about it
 
 The maintainer's report: *the PC is slow most of the time, Zaram hangs upon
