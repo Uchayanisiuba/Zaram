@@ -401,9 +401,10 @@ function armScene() {
  *  visor is blank. It does three things the still cannot: the eyes look
  *  toward the pointer (attention, not drift — the head already leans the
  *  same way), it blinks now and then, and while the demo is working the eyes
- *  become the thinking pattern the app uses. The rest face is the flat line,
- *  as in the product: a mascot may smile on the site, but this is the
- *  embodiment and it reports state.
+ *  become the thinking pattern the app uses. On the site it is the mascot,
+ *  so it mostly smiles — eyes and mouth — and drops to the product's rest
+ *  face for a few seconds now and then, switching behind a blink so the
+ *  change is never a jump.
  *
  *  Geometry is measured from the render (900×981): two 8×10 dot blocks and
  *  a 13-dot line, 12 px pitch, on a head turned a few degrees so the right
@@ -429,10 +430,30 @@ function armFace(canvas, img) {
   let blinkAt = performance.now() + 2600 + Math.random() * 3000;
   let blinking = 0;                    // 0 open … 1 shut
   let t0 = performance.now();
+  // Mostly smiling; the rest face for a few seconds every so often. The
+  // switch is made at the shut point of a blink.
+  let mode = "smile";
+  let switchAt = performance.now() + 9000 + Math.random() * 6000;
+  let pendingMode = null;
 
   function dot(x, y, a, r = R) {
     ctx.fillStyle = `rgba(${COLOUR},${a})`;
     ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+  }
+
+  /** A smiling eye: an arch two dots thick, the shape the render carries
+   *  as its own smile cell, shifted toward the gaze like the block is. */
+  function eyeSmile(origin, gx, gy, shut) {
+    const dx = Math.round(gx * 1.6), dy = Math.round(gy * 1.2) + 3;
+    const arch = [7, 6, 5, 4, 4, 5, 6, 7];
+    const lift = Math.round(shut * 3);              // a blink lowers the arch
+    for (let c = 0; c < COLS; c++) {
+      for (let k = 0; k < 2; k++) {
+        const r = arch[c] + k + lift;
+        if (r >= ROWS) continue;
+        dot(origin.x + (c + dx) * PITCH, origin.y + (r + dy) * PITCH, 0.92);
+      }
+    }
   }
 
   /** One eye: a rounded block of dots, shifted toward the gaze, its rows
@@ -460,19 +481,38 @@ function armFace(canvas, img) {
 
   return function draw(mx, my, thinking) {
     const now = performance.now();
+    if (now > switchAt && pendingMode === null) {
+      pendingMode = mode === "smile" ? "rest" : "smile";
+      blinkAt = Math.min(blinkAt, now);              // change behind a blink
+    }
     if (now > blinkAt) {
       const k = (now - blinkAt) / 140;               // 140 ms down, 140 up
       blinking = k < 1 ? k : k < 2 ? 2 - k : 0;
+      if (k >= 1 && pendingMode) {
+        mode = pendingMode; pendingMode = null;
+        switchAt = now + (mode === "rest" ? 2500 + Math.random() * 1500 : 9000 + Math.random() * 6000);
+      }
       if (k >= 2) { blinkAt = now + 2600 + Math.random() * 4200; blinking = 0; }
     }
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.shadowColor = `rgba(${COLOUR},0.55)`; ctx.shadowBlur = 6;
-    eye(LEFT, mx, my, blinking, now, thinking);
-    eye(RIGHT, mx, my, blinking, now, thinking);
-    // the mouth: the flat line at rest; a slightly wider one while thinking
-    const n = thinking ? MOUTH.n - 2 : MOUTH.n;
-    const x0 = MOUTH.x + ((MOUTH.n - n) / 2) * PITCH;
-    for (let i = 0; i < n; i++) dot(x0 + i * PITCH, MOUTH.y, 0.85, R - 0.6);
+    const smiling = mode === "smile" && !thinking;
+    if (smiling) {
+      eyeSmile(LEFT, mx, my, blinking);
+      eyeSmile(RIGHT, mx, my, blinking);
+      // the mouth: an arc, ends up, thirteen dots
+      for (let i = 0; i < MOUTH.n; i++) {
+        const u = (i - (MOUTH.n - 1) / 2) / ((MOUTH.n - 1) / 2);   // −1 … 1
+        dot(MOUTH.x + i * PITCH, MOUTH.y - 9 + (1 - u * u) * 22, 0.88, R - 0.4);
+      }
+    } else {
+      eye(LEFT, mx, my, blinking, now, thinking);
+      eye(RIGHT, mx, my, blinking, now, thinking);
+      // the flat line at rest; a slightly narrower one while thinking
+      const n = thinking ? MOUTH.n - 2 : MOUTH.n;
+      const x0 = MOUTH.x + ((MOUTH.n - n) / 2) * PITCH;
+      for (let i = 0; i < n; i++) dot(x0 + i * PITCH, MOUTH.y, 0.85, R - 0.6);
+    }
   };
 }
 
