@@ -584,7 +584,8 @@ footer nav a:hover { color: var(--text); }
    and the layers sit where they were laid out. */
 
 /* The floor and the star field run past the edges on purpose; the page must not. */
-.hero { overflow-x: clip; }
+main { overflow-x: clip; }
+.scene-caption { display: none; }
 
 .scene {
   --mx: 0; --my: 0; --sy: 0;
@@ -605,7 +606,7 @@ footer nav a:hover { color: var(--text); }
   will-change: transform;
   transform: translate3d(
     calc(var(--mx) * var(--d) * -34px),
-    calc(var(--my) * var(--d) * -22px + var(--sy) * var(--d) * -0.22px),
+    calc(var(--my) * var(--d) * -22px + var(--sy) * var(--d) * -0.12px),
     0
   );
 }
@@ -619,7 +620,7 @@ footer nav a:hover { color: var(--text); }
   background:
     linear-gradient(rgba(94,231,220,.10) 1px, transparent 1px) 0 0 / 100% 44px,
     linear-gradient(90deg, rgba(94,231,220,.10) 1px, transparent 1px) 0 0 / 44px 100%;
-  transform: translate3d(calc(var(--mx) * -10px), calc(var(--sy) * -0.04px), 0)
+  transform: translate3d(calc(var(--mx) * -10px), calc(var(--sy) * -0.02px), 0)
              perspective(700px) rotateX(72deg);
   transform-origin: 50% 100%;
   -webkit-mask-image: linear-gradient(to top, rgba(0,0,0,.9) 0%, rgba(0,0,0,.35) 45%, transparent 90%);
@@ -697,8 +698,6 @@ footer nav a:hover { color: var(--text); }
 }
 .scene .avatar-img {
   display: block; width: 100%; height: auto;
-  -webkit-mask-image: linear-gradient(to bottom, #000 84%, transparent 100%);
-          mask-image: linear-gradient(to bottom, #000 84%, transparent 100%);
   filter: drop-shadow(0 30px 40px rgba(0,0,0,.65)) drop-shadow(0 0 48px rgba(129,140,248,.28));
   animation: hover 6.5s ease-in-out infinite;
   transform: translateZ(40px);
@@ -725,9 +724,21 @@ footer nav a:hover { color: var(--text); }
   max-width: 60ch; margin: 18px auto 0;
 }
 
-/* The demo panel now sits under the scene, centred, as one column. */
+/* The demo panel is the hero's picture, centred, as one column. */
 .hero-showcase {
-  display: block; max-width: 680px; margin: 34px auto 0;
+  display: block; max-width: 680px; margin: 40px auto 0;
+}
+
+/* The scene lives in its own section further down, smaller, beside the
+   words that say what the two things are for. */
+.embodiment { grid-template-columns: 1.05fr 1fr; align-items: center; }
+.embodiment .scene { height: clamp(320px, 34vw, 430px); margin: 0; max-width: none; }
+.embodiment .scene .orb-layer { left: 0; top: 4%; width: 48%; }
+.embodiment .scene .avatar-layer { right: 0; bottom: -4%; width: 46%; }
+.embodiment .scene .floor { display: none; }
+.embodiment .scene .orb-state { white-space: nowrap; font-size: .78rem; }
+@media (max-width: 860px) {
+  .embodiment .scene { height: clamp(300px, 80vw, 400px); margin-top: 8px; }
 }
 
 @media (max-width: 860px) {
