@@ -134,6 +134,17 @@ class TestNothingPrivateIsCarried:
             "backend/artifacts.db",
             "backend/projects.db",
             "backend/egress-policy.json",
+            # The rest of what the backend writes into `data_dir()`, which in
+            # a checkout is `backend/` itself. Found 13 September 2026 by
+            # listing the tree: the key store was gitignored and matched the
+            # allow-list's own `*.json` include, one build from publishing
+            # the maintainer's provider keys to every stranger.
+            "backend/cloud-connections.json",
+            "backend/settings.json",
+            "backend/letterhead.json",
+            "backend/mcp-servers.json",
+            "backend/paired-clients.db",
+            "backend/api-secret",
             "backend/generated/invoices-q3.xlsx",
             "backend/venv/Lib/site-packages/torch/__init__.py",
             "backend/.venv/Scripts/python.exe",
@@ -158,6 +169,51 @@ class TestNothingPrivateIsCarried:
         assert "backend" not in includes, (
             "electron-builder.yml includes the whole backend directory again — "
             "every database and generated document under it ships by default"
+        )
+
+
+class TestNothingThisMachineWroteIsCarried:
+    """The rule behind the named list: a file git does not track never ships.
+
+    Every file above was found after it existed, and each one is a store the
+    backend writes beside its own source because `data_dir()` is `backend/`
+    in a checkout. A file the backend wrote is never in git; a file in git
+    went through a diff. So the tracked set is the set that may ship, and
+    `scripts/check-installer-payload.mjs` refuses the build on the same rule
+    with the real matcher. This is the suite's copy of it.
+    """
+
+    def test_every_carried_backend_file_is_tracked_by_git(self, patterns):
+        import subprocess
+
+        includes, excludes = patterns
+        try:
+            out = subprocess.run(
+                ["git", "ls-files", "-z", "--", "backend"],
+                cwd=REPO_ROOT, capture_output=True, text=True, check=True,
+            ).stdout
+        except (OSError, subprocess.CalledProcessError):
+            pytest.skip("git cannot list the tree here")
+        tracked = {p for p in out.split(chr(0)) if p}
+        assert tracked, "git listed nothing under backend/"
+
+        include_forms = {i for i in includes if i.startswith("backend/")}
+        untracked_but_carried: list[str] = []
+        for root, dirs, files in os.walk(REPO_ROOT / "backend"):
+            rel_root = Path(root).relative_to(REPO_ROOT)
+            dirs[:] = [d for d in dirs if d not in NOT_OURS and not is_excluded(str(rel_root / d), excludes)]
+            for name in files:
+                rel = str(rel_root / name).replace(os.sep, "/")
+                carried = any(
+                    fnmatch.fnmatch(rel, form)
+                    for pattern in include_forms
+                    for form in {pattern, pattern.replace("/**/", "/")}
+                )
+                if carried and not is_excluded(rel, excludes) and rel not in tracked:
+                    untracked_but_carried.append(rel)
+        assert not untracked_but_carried, (
+            "these would ship and git does not track them — the backend wrote "
+            f"them on this machine: {untracked_but_carried}"
         )
 
 

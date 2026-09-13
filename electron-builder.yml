@@ -69,6 +69,20 @@ files:
   - "!backend/*.sqlite3"
   - "!backend/**/*.sqlite3"
   - "!backend/egress-policy.json"
+  # Every other file the backend *writes* into its data directory. In a
+  # checkout `core/paths.data_dir()` is `backend/` itself, so each store's
+  # file sits beside the source and matches the `*.json` include above.
+  # Found 13 September 2026 by auditing the tree rather than the config:
+  # `cloud-connections.json` — the user's provider keys, in plaintext — was
+  # gitignored and matched by the allow-list, and would have shipped in the
+  # first installer to every stranger who ran it. Listed by name here, and
+  # `scripts/check-installer-payload.mjs` enforces the general rule behind
+  # the list: nothing under backend/ that git does not track may ship.
+  - "!backend/cloud-connections.json"   # provider keys
+  - "!backend/settings.json"            # assistant name, manner, routing
+  - "!backend/letterhead.json"          # the user's business name and logo
+  - "!backend/mcp-servers.json"         # the user's tool servers and grants
+  - "!backend/api-secret"               # the development credential at rest
   - "!backend/generated"   # the output directory — the user's own documents
   - "!backend/tests"
   - "!backend/**/tests"

@@ -244,6 +244,12 @@ Logo_Image/_preview.png
 backend/cloud-connections.json
 cloud-connections.json
 
+# The rest of the data directory, which in a checkout is backend/ itself.
+# The letterhead is the user's business name; mcp-servers.json is their tool
+# servers and the grants they gave each one. Neither is source.
+backend/letterhead.json
+backend/mcp-servers.json
+
 # Isolated venv for third-party MCP servers. Deliberately not the backend
 # venv: these pull the official MCP SDK, and the installer must not.
 .mcp-venv/
