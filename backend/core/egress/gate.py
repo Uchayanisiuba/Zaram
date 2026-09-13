@@ -194,10 +194,19 @@ class SearchReadGrant:
 
     #: Exact URLs, as they will be requested.
     urls: frozenset[str]
+    #: What the log says the permission rested on. Search results and a page
+    #: the person named travel on the same capability with different
+    #: consent behind them, and the log should name which — "from a search
+    #: you enabled" on a page somebody typed into their message is wrong in
+    #: the one place that must not be.
+    because: str = "reading a page from a search you enabled"
 
     @staticmethod
-    def of(urls: Any) -> "SearchReadGrant":
-        return SearchReadGrant(frozenset(str(u) for u in urls if u))
+    def of(urls: Any, *, because: str | None = None) -> "SearchReadGrant":
+        found = frozenset(str(u) for u in urls if u)
+        if because:
+            return SearchReadGrant(found, because)
+        return SearchReadGrant(found)
 
     def permits(self, request: EgressRequest) -> bool:
         if request.method.upper() != "GET" or request.body:
@@ -297,7 +306,7 @@ class EgressGate:
             and not self._policy.has_rule(host)
             and grant.permits(req)
         ):
-            self._record(req, "allowed", "reading a page from a search you enabled")
+            self._record(req, "allowed", grant.because)
             return req
 
         if decision.mode is Mode.DENY:
@@ -380,10 +389,14 @@ class EgressGate:
         timeout: float = 10.0,
         source: str = "unknown",
         data_class: DataClass = DataClass.PROMPT,
+        grant: "SearchReadGrant | None" = None,
     ) -> bytes:
         """Check, log, and send. Returns the response body.
 
         The synchronous path, used by every urllib and requests call site.
+        ``grant`` is the same capability `gated_session` takes — exact URLs
+        that may be read past default-deny — and is what lets the `read_page`
+        tool fetch a page the person named in their own message.
         """
         body_text: str | None = None
         if body is not None:
@@ -392,7 +405,8 @@ class EgressGate:
         # Same reasoning as `stream_lines`: the confirmation may have rewritten
         # the body, and what is sent has to be what was logged and agreed to.
         approved = self.check(
-            url, method=method, body=body_text, source=source, data_class=data_class
+            url, method=method, body=body_text, source=source, data_class=data_class,
+            grant=grant,
         )
         edited = approved is not None and approved.body != body_text
 

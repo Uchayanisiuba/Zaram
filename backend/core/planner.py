@@ -1051,6 +1051,16 @@ class IntentRouter:
         return mapping.get(intent, "reasoning.generate")
 
 
+def _names_a_page(prompt: str) -> bool:
+    """Whether the person wrote an address into their message."""
+    try:
+        from packs.web.active import urls_in
+
+        return bool(urls_in(prompt))
+    except Exception:  # noqa: BLE001 - the planner must not fail on a helper
+        return False
+
+
 class IntentPlanner:
     """Analyzes intent and builds an ExecutionPlan.
 
@@ -1187,6 +1197,29 @@ class IntentPlanner:
                     # match none of them.
                     capability_id="document.generate",
                     input_data={"prompt": prompt, "answer": ""},
+                    depends_on=[0],
+                ),
+            ]
+        elif (
+            _names_a_page(prompt)
+            and not has_images
+            and classification.intent_type not in (IntentType.IMAGE, IntentType.DOCUMENT, IntentType.SPEECH)
+        ):
+            # A message that names a page is a request to read it, and
+            # `read_page` is a tool — so the tool plan, and ahead of search:
+            # "bbc.com, what is on the front page" wants the page opened, not
+            # searched for. Without this arm the address was answered from
+            # the model's weights, or with an honest "I cannot reach it".
+            # A drawing, a document or speech keep their own plans.
+            plan_steps = [
+                ExecutionStep(
+                    capability_id="mcp.list_tools",
+                    input_data={"query": prompt},
+                    depends_on=[],
+                ),
+                ExecutionStep(
+                    capability_id="reasoning.generate",
+                    input_data={"prompt": prompt},
                     depends_on=[0],
                 ),
             ]

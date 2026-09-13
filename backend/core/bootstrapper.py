@@ -506,6 +506,14 @@ class KernelBootstrapper:
             ),
         )
 
+        # The web pack: `read_page`, for a page the person names. Read-only
+        # by construction — it fetches and extracts, and the gate decides —
+        # so it needs no write mode and no grant beyond the one the tool
+        # builds per URL. See `packs/web/__init__.py` for the consent rule.
+        from packs.web import SERVER_ID as WEB_SERVER, WebTools
+
+        self.mcp_runtime.register_builtin(ServerConfig(server_id=WEB_SERVER), WebTools())
+
         # **Registering it is not reaching it, and that distinction is the
         # whole reason this line exists.** The runtime was registered here for
         # a fortnight while `planner.py` contained no occurrence of "mcp", so

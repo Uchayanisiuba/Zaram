@@ -1789,6 +1789,11 @@ async def chat(request: ChatRequest):
         # generator actually runs in, which is the one the tools are called
         # from.
         _open_code_project(request.project_id)
+        # The addresses in the person's own message, for `read_page`'s grant.
+        # From `request.text` and never from the composed prompt: a revision
+        # carries an earlier reply, and an address the *model* wrote there
+        # is not one the person named.
+        _name_urls(request.text)
 
         answer: list[str] = []
         async for chunk in chat_router.route(
@@ -5323,6 +5328,18 @@ class PasteBody(BaseModel):
     text: str
     name: str = ""
     project_id: str | None = None
+
+
+def _name_urls(text: str) -> None:
+    """Record the addresses the person typed, for this request only. Rule 7j:
+    a destination they named is one they consented to, and `packs/web`
+    reads it past default-deny on that basis alone."""
+    try:
+        from packs.web import set_named_urls
+
+        set_named_urls(text or "")
+    except Exception:  # noqa: BLE001 - never fail a reply over this
+        logging.getLogger(__name__).debug("could not record named urls", exc_info=True)
 
 
 def _open_code_project(project_id: str | None) -> None:

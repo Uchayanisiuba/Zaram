@@ -117,10 +117,20 @@ TabbyAPI serving `Qwen3.8-27B-exl3-2.20bpw` on 1234 and Ollama holding
   knew Biscuit, from the Spine, cited. The mechanism was never the gap;
   the timeouts were, since a reply that dies is never recorded and the
   next question has no memory of it.
-* **Not built, designed in one line:** `read_page` — fetch a URL through
-  the gate (per-host ask/allow, logged), extract the main text, offer it
-  in the loop beside search. Deterministic, a day. JavaScript-heavy pages
-  are a browser MCP server, attachable today.
+* **`read_page` built and seen (through the API) — `packs/web`.** A
+  built-in server beside the code pack; one tool. Consent is rule 7j
+  exactly: an address the person typed travels on a `SearchReadGrant` of
+  that URL past default-deny — the same capability search results use,
+  with the log line naming which (*"reading a page you named in your
+  message"*); an address the model produces gets no grant and meets the
+  per-host policy, and a refusal comes back as the tool's answer. Fetch is
+  the gate's own synchronous path (which gained a `grant` parameter);
+  extraction is `deep_read.extract_text`. A message that names a page
+  takes the tool plan ahead of search. On the 27B: *"example.com — what is
+  this page for"* → `web/read_page` → correct, 33 s; iana.org → correct
+  with the RFCs, 36 s; both in the egress log. JavaScript-only pages
+  say so ("no readable text — it may need a browser"), and that is the
+  browser-MCP case. `tests/test_a_named_page_can_be_read.py`.
 * **Not building, by rule:** using Claude Code's subscription login as
   Zaram's Claude credential — the consumer-app route by another name.
   The legitimate arrangement is the one built: Claude Code holds
