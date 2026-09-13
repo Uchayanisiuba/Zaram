@@ -37,6 +37,8 @@ class EventType(str, Enum):
     DONE = "done"
     STEP_START = "step_start"
     STEP_COMPLETE = "step_complete"
+    #: The model's checklist for this task, whole, each time it changes.
+    PLAN = "plan"
     PLAN_START = "plan_start"
     PLAN_COMPLETE = "plan_complete"
     RETRY = "retry"
@@ -387,6 +389,8 @@ class StreamEvent:
         output: str = "",
         diff: str = "",
         commit: str = "",
+        image: str = "",
+        app_url: str = "",
     ) -> StreamEvent:
         """One tool call, and what the gate said about it.
 
@@ -419,7 +423,24 @@ class StreamEvent:
                 # for everything else.
                 "diff": diff,
                 "commit": commit,
+                # A screenshot the call produced (a file name under the
+                # project's screens folder) and the URL an app started on.
+                "image": image,
+                "app_url": app_url,
             },
+            correlation_id=correlation_id,
+        )
+
+    @staticmethod
+    def plan(items: list, correlation_id: str = "", *, awaiting_go: bool = False) -> StreamEvent:
+        """The checklist, whole. Sent each time the model rewrites it, so the
+        card under the reply is the record and never a diff of one.
+
+        `awaiting_go` rides with it when the loop has paused before its first
+        mutative call so the person can read the plan first."""
+        return StreamEvent(
+            type=EventType.PLAN,
+            data={"items": list(items), "awaiting_go": awaiting_go},
             correlation_id=correlation_id,
         )
 

@@ -184,6 +184,10 @@ export type ChatEvent =
    *  it is never rendered as the model speaking, and from `error` because
    *  nothing failed in this exchange. `action` names where to go about it. */
   | { type: 'notice'; content: string; kind: string; action: string; servers?: string[]; model?: string }
+  /** The model's checklist for this task, whole, each time it changes.
+   *  `awaitingGo` means the loop paused before its first change so the
+   *  person can read it first. */
+  | { type: 'plan'; items: { text: string; status: string; reason?: string }[]; awaitingGo: boolean }
   /** One tool the model asked for, and what the gate said about it.
    *
    *  **Emitted since the tool loop shipped and rendered nowhere until now.**
@@ -215,6 +219,11 @@ export type ChatEvent =
       diff: string;
       /** The commit a write made, or `''`. What `Revert` reverses. */
       commit: string;
+      /** A screenshot `look_at_app` took — a file name in the project's
+       *  screens folder — or `''`. */
+      image: string;
+      /** The URL an app was started on, or `''`. */
+      appUrl: string;
     }
   /** What the reply is waiting for, sent *before* generation so the orb can
    *  say why rather than going quiet and letting the user guess.
@@ -300,6 +309,9 @@ export interface ChatRequest {
    *  parked: it does not survive a restart, and the notice that offers it
    *  says so rather than implying a durability it does not have. */
   continueTask?: boolean;
+  /** The person pressed Go on the plan the task paused to show them. Only
+   *  meaningful with `continueTask`. */
+  approvePlan?: boolean;
   /** Which unfinished task to pick up, or omitted for the obvious one.
    *
    *  Named when the user chose it from the list in Project; omitted when they
@@ -365,6 +377,7 @@ export async function* streamChat(
         conversation_id: req.conversationId ?? '',
         continue_task: req.continueTask ?? false,
         plan_id: req.planId ?? '',
+        approve_plan: req.approvePlan ?? false,
       }),
       signal,
     });
@@ -681,6 +694,19 @@ function parseLine(line: string): ChatEvent | null {
       };
     }
 
+    case 'plan': {
+      const raw = Array.isArray(data.items) ? (data.items as unknown[]) : [];
+      const items = raw
+        .filter((x): x is Record<string, unknown> => typeof x === 'object' && x !== null)
+        .map((x) => ({
+          text: String(x.text ?? ''),
+          status: String(x.status ?? 'todo'),
+          ...(typeof x.reason === 'string' && x.reason ? { reason: x.reason } : {}),
+        }))
+        .filter((x) => x.text);
+      return { type: 'plan', items, awaitingGo: data.awaiting_go === true };
+    }
+
     case 'tool_call':
       return {
         type: 'tool_call',
@@ -692,6 +718,8 @@ function parseLine(line: string): ChatEvent | null {
         output: typeof data.output === 'string' ? data.output : '',
         diff: typeof data.diff === 'string' ? data.diff : '',
         commit: typeof data.commit === 'string' ? data.commit : '',
+        image: typeof data.image === 'string' ? data.image : '',
+        appUrl: typeof data.app_url === 'string' ? data.app_url : '',
       };
 
     case 'status':

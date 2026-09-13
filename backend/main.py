@@ -1048,6 +1048,10 @@ class ChatRequest(BaseModel):
     #: session, then from this project — which is what makes a task left on
     #: Tuesday findable on Thursday, in a session that shares no id with it.
     plan_id: str = ""
+    #: The person pressed Go on the plan the task paused to show them. Only
+    #: meaningful with `continue_task`; recorded on the task so the resumed
+    #: loop does not pause again for the same plan.
+    approve_plan: bool = False
 
 
 def _domain_scope(domain_ids: list[str]) -> tuple[frozenset[str] | None, str]:
@@ -1670,6 +1674,7 @@ async def chat(request: ChatRequest):
             images=images or None,
             resume=request.continue_task,
             plan_id=request.plan_id,
+            approve_plan=request.approve_plan,
         ):
             _collect_answer(chunk, answer)
             yield chunk
@@ -3416,6 +3421,10 @@ def _plan_json(plan) -> Dict[str, Any]:
         "model": plan.model,
         "stopped_because": plan.stopped_because,
         "steps": [{"server": step.server, "tool": step.tool} for step in plan.steps],
+        # The checklist, whole — this is what Project renders on the row.
+        "items": [item.to_json() for item in plan.items],
+        "approved": plan.approved,
+        "finished": plan.finished,
         "created_at": plan.created_at,
         "updated_at": plan.updated_at,
     }
@@ -3530,6 +3539,67 @@ async def revert_change(project_id: str, body: RevertRequest):
     return result
 
 
+@app.get("/projects/{project_id}/screens/{name}")
+async def project_screen(project_id: str, name: str):
+    """A screenshot `look_at_app` took, for the card under the reply."""
+    from pathlib import Path as _Path
+
+    from fastapi.responses import FileResponse
+    from packs.code.apps import screens_dir_for
+
+    try:
+        project = project_records.get(project_id)
+    except UnknownProject:
+        raise HTTPException(status_code=404, detail=f"No project called {project_id!r}.")
+    if not project.root:
+        raise HTTPException(status_code=404, detail="This project has no repository folder.")
+    safe = _Path(name).name
+    if not safe.endswith(".png") or safe != name:
+        raise HTTPException(status_code=404, detail="No such screenshot.")
+    path = screens_dir_for(_Path(project.root), None) / safe
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="No such screenshot.")
+    return FileResponse(str(path), media_type="image/png")
+
+
+@app.get("/projects/{project_id}/app")
+async def project_app(project_id: str):
+    """Whether the project's app is running, for the card and for Project."""
+    from pathlib import Path as _Path
+
+    try:
+        project = project_records.get(project_id)
+    except UnknownProject:
+        raise HTTPException(status_code=404, detail=f"No project called {project_id!r}.")
+    tools = _code_tools()
+    if tools is None or tools._app is None or not project.root:
+        return {"running": False, "available": []}
+    return tools._app.status(_Path(project.root))
+
+
+@app.post("/projects/{project_id}/app/stop")
+async def stop_project_app(project_id: str):
+    """The person stops the app Zaram started. Mutative, by a person."""
+    from pathlib import Path as _Path
+
+    try:
+        project = project_records.get(project_id)
+    except UnknownProject:
+        raise HTTPException(status_code=404, detail=f"No project called {project_id!r}.")
+    tools = _code_tools()
+    if tools is None or tools._app is None or not project.root:
+        return {"stopped": False}
+    return tools._app.call("stop_app", {}, _Path(project.root))
+
+
+def _code_tools():
+    """The code pack's server object, as the runtime holds it, or ``None``."""
+    runtime = getattr(kernel, "mcp_runtime", None)
+    if runtime is None:
+        return None
+    return runtime._builtin_server("code")
+
+
 @app.get("/plans")
 async def list_plans(project_id: str = "", limit: int = 20):
     """Unfinished tasks, most recently touched first.
@@ -3550,8 +3620,12 @@ async def list_plans(project_id: str = "", limit: int = 20):
     plans = plan_records.unfinished(
         project_id=project_id or None, limit=max(1, min(limit, 100))
     )
+    # Finished tasks keep their checklist — what was done on Tuesday, readable
+    # on Thursday. Listed beside the waiting ones, for the same window.
+    finished = plan_records.finished_for(project_id or "", limit=max(1, min(limit, 100)))
     return {
         "plans": [_plan_json(plan) for plan in plans],
+        "finished": [_plan_json(plan) for plan in finished],
         "kept_for_days": UNFINISHED_TTL_SECONDS // 86400,
     }
 

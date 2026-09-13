@@ -191,7 +191,10 @@ class TestNothingHereCanWrite:
         path gives by having no delete."""
         names = {tool.name for tool in tools.list_tools()}
 
-        assert names == {"list_files", "read_lines", "search_code"}
+        # `plan` joined the reads on 13 September: it writes the model's own
+        # checklist to request state and touches no file, which is why it
+        # lives in this module rather than in `writes.py`.
+        assert names == {"plan", "list_files", "read_lines", "search_code"}
 
     def test_an_unknown_tool_is_refused(self, tools):
         assert "no tool called" in tools.call_tool("write_file", {"path": "x"})["error"]

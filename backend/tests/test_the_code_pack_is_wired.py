@@ -299,3 +299,32 @@ async def test_the_booted_planner_knows_the_attached_servers():
         assert callable(router._tool_vocabulary)
     finally:
         await kernel.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_every_tool_the_pack_ships_is_offered_from_the_real_boot(tmp_path):
+    """The whole list, by name, against `boot()`.
+
+    13 September: `find_symbol` and `read_library_docs` shipped with a
+    measured test that built `CodeTools` by hand, and were never passed to the
+    one `CodeTools` the bootstrapper builds. The interface said "7 attached
+    tools" where nine existed and nobody counted. This counts.
+    """
+    from core.bootstrapper import KernelBootstrapper
+
+    kernel = KernelBootstrapper()
+    await kernel.boot()
+    try:
+        set_active_root(str(tmp_path))
+        listed = await kernel.mcp_runtime.execute("mcp.list_tools", {"query": "everything"})
+        names = {tool["name"] for tool in listed["tools"] if tool["server"] == SERVER_ID}
+    finally:
+        set_active_root(None)
+        await kernel.shutdown()
+
+    assert names >= {
+        "plan", "list_files", "read_lines", "search_code",
+        "write_file", "edit_file", "run_command",
+        "find_symbol", "read_library_docs",
+        "start_app", "stop_app", "get_app_status", "read_app_log", "look_at_app",
+    }, sorted(names)

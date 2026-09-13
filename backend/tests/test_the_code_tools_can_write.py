@@ -197,7 +197,8 @@ class TestTheWriterIsInjectedNotBuiltIn:
         names = {tool.name for tool in tools.list_tools()}
         assert "write_file" not in names and "edit_file" not in names
         assert "no tool called" in tools.call_tool("write_file", {"path": "a", "content": "b"})["error"]
-        assert tools.granted_tools() == set()
+        # `plan` is always granted; nothing that writes a file is.
+        assert tools.granted_tools() == {"plan"}
 
     def test_with_a_writer_both_tools_are_listed(self, tools):
         names = {tool.name for tool in tools.list_tools()}

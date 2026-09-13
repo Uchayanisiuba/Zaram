@@ -465,15 +465,24 @@ class KernelBootstrapper:
         # with that reason, which is the honest state on most requests.
         from packs.code import (
             SERVER_ID as CODE_SERVER,
+            AppTools,
             CodeRunner,
+            AppTools,
             CodeTools,
             CodeWriter,
+            LibraryTools,
             active_root,
             runs_granted,
             writes_granted,
         )
         from runtimes.mcp.config import ServerConfig, WriteMode
 
+        # **Every part of the pack is named here, and a test lists the tools
+        # this produces against the real boot.** On 13 September the library
+        # tools shipped with a measured test and were never registered here;
+        # the interface said "7 attached tools" where there should have been
+        # nine, and it was read past. `test_the_code_pack_is_wired.py` now
+        # asserts the full tool list from `boot()`.
         self.mcp_runtime.register_builtin(
             ServerConfig(server_id=CODE_SERVER, writes=WriteMode.HOST_UNDO),
             CodeTools(
@@ -482,6 +491,18 @@ class KernelBootstrapper:
                 writes_granted=writes_granted,
                 runner=CodeRunner(),
                 runs_granted=runs_granted,
+                library=LibraryTools(),
+                # The app can be looked at only with a local vision model —
+                # `read_image_locally` answers None otherwise, and the tool
+                # says so. Looked up late: the models runtime exists by now
+                # and the lambda runs later still.
+                app=AppTools(
+                    describe_image=lambda path, question: (
+                        self.models_runtime.read_image_locally(path, question)
+                        if getattr(self, "models_runtime", None) is not None
+                        else None
+                    ),
+                ),
             ),
         )
 

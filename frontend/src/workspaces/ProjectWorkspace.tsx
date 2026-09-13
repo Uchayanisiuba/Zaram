@@ -32,6 +32,7 @@ import {
   ChevronDown,
   CornerUpLeft,
   Upload,
+  CheckCircle2,
   PlayCircle,
 } from 'lucide-react';
 import {
@@ -98,6 +99,7 @@ function UnfinishedSection({
   onOpenConversation?: () => void;
 }) {
   const [tasks, setTasks] = useState<UnfinishedTask[]>([]);
+  const [finished, setFinished] = useState<UnfinishedTask[]>([]);
   const [keptDays, setKeptDays] = useState(7);
   const send = useChatStore((s) => s.send);
   const setProject = useChatStore((s) => s.setProject);
@@ -106,12 +108,14 @@ function UnfinishedSection({
     try {
       const answer = await listUnfinished(projectId);
       setTasks(answer.plans);
+      setFinished(answer.finished ?? []);
       setKeptDays(answer.kept_for_days);
     } catch {
       // A list that cannot be read is not worth an error banner on a surface
       // whose main job is something else. It renders as nothing waiting, which
       // is what the user sees anyway when nothing is.
       setTasks([]);
+      setFinished([]);
     }
   }, [projectId]);
 
@@ -138,9 +142,14 @@ function UnfinishedSection({
     [load],
   );
 
-  if (!tasks.length) return null;
+  if (!tasks.length && !finished.length) return null;
+
+  if (!tasks.length) {
+    return <FinishedTasks tasks={finished} keptDays={keptDays} />;
+  }
 
   return (
+    <>
     <section
       className="mb-5 rounded-xl px-4 py-4"
       style={{ background: 'var(--color-glass)', border: '1px solid rgba(255,255,255,.08)' }}
@@ -170,6 +179,7 @@ function UnfinishedSection({
               {task.steps.length ? ` · ${task.steps.map((s) => s.tool).join(', ')}` : ''}
               {task.stopped_because ? ` · ${task.stopped_because}` : ''}
             </p>
+            <TaskChecklist items={task.items} />
             <div className="mt-2 flex items-center gap-3">
               <button
                 type="button"
@@ -191,6 +201,83 @@ function UnfinishedSection({
                 Discard
               </button>
             </div>
+          </li>
+        ))}
+      </ul>
+    </section>
+    {finished.length > 0 && <FinishedTasks tasks={finished} keptDays={keptDays} />}
+    </>
+  );
+}
+
+/**
+ * The checklist on a task's row — what was done, what was skipped and why.
+ *
+ * Rendered from the record, the same list `PlanCard` shows under the reply,
+ * so "what did Zaram do to this project on Tuesday" is answerable here on
+ * Thursday rather than from scrollback. `docs/AGENT-UX.md`.
+ */
+function TaskChecklist({ items }: { items: UnfinishedTask['items'] }) {
+  if (!items?.length) return null;
+  const glyph: Record<string, string> = { done: '✓', doing: '›', todo: '·', skipped: '–' };
+  return (
+    <ol className="mt-1.5 flex flex-col gap-0.5" data-testid="task-checklist">
+      {items.map((item, i) => (
+        <li key={i} className="text-[10.5px] leading-snug flex gap-1.5" data-status={item.status}>
+          <span
+            style={{
+              color: item.status === 'done' ? 'var(--color-green, #4ade80)' : 'var(--color-text-faint)',
+              fontFamily: 'var(--font-mono)',
+            }}
+            aria-label={item.status}
+          >
+            {glyph[item.status] ?? '·'}
+          </span>
+          <span
+            style={{
+              color: item.status === 'done' ? 'var(--color-text-faint)' : 'var(--color-text-muted)',
+              textDecoration: item.status === 'skipped' ? 'line-through' : 'none',
+            }}
+          >
+            {item.text}
+          </span>
+          {item.reason && <span style={{ color: 'var(--color-text-faint)' }}>— {item.reason}</span>}
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+/**
+ * Tasks that finished and kept their checklist. No summary is generated —
+ * the ticked list is the record of what happened, and a generated summary
+ * could be wrong about it.
+ */
+function FinishedTasks({ tasks, keptDays }: { tasks: UnfinishedTask[]; keptDays: number }) {
+  return (
+    <section
+      className="mb-5 rounded-xl px-4 py-4"
+      style={{ background: 'var(--color-glass)', border: '1px solid rgba(255,255,255,.08)' }}
+      data-testid="finished-tasks"
+    >
+      <h2 className="flex items-center gap-2 text-xs font-semibold">
+        <CheckCircle2 size={13} aria-hidden style={{ color: 'var(--color-green, #4ade80)' }} />
+        {tasks.length === 1 ? 'One task finished' : `${tasks.length} tasks finished`}
+      </h2>
+      <p className="mt-1.5 max-w-xl text-[11px] leading-relaxed" style={{ color: 'var(--color-text-muted)' }}>
+        What Zaram did, as it ticked it off. Kept for {keptDays} days; the files it read are not.
+      </p>
+      <ul className="mt-3 flex flex-col gap-2">
+        {tasks.map((task) => (
+          <li
+            key={task.id}
+            className="rounded-lg px-3 py-2.5"
+            style={{ background: 'rgba(0,0,0,.16)', border: '1px solid rgba(255,255,255,.06)' }}
+          >
+            <p className="text-xs" style={{ color: 'var(--color-text)' }}>
+              {task.question}
+            </p>
+            <TaskChecklist items={task.items} />
           </li>
         ))}
       </ul>

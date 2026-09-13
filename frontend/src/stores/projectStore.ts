@@ -118,6 +118,8 @@ interface ProjectStore {
    *  `null` on success or the backend's own sentence on refusal — "that commit
    *  is not one Zaram made", "your local changes would be overwritten". */
   revertCommit: (id: string, commit: string) => Promise<string | null>;
+  /** Stop the app Zaram started in a project. True when something stopped. */
+  stopApp: (id: string) => Promise<boolean>;
   adopt: (id: string, name: string, type: ProjectType) => Promise<void>;
   remove: (id: string, contents: DeleteContents) => Promise<void>;
 }
@@ -270,6 +272,17 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
       return null;
     } catch {
       return 'That change could not be reverted.';
+    }
+  },
+
+  stopApp: async (id) => {
+    try {
+      const res = await fetch(`${API}/projects/${encodeURIComponent(id)}/app/stop`, { method: 'POST' });
+      if (!res.ok) return false;
+      const body = (await res.json()) as { stopped?: boolean };
+      return body.stopped === true;
+    } catch {
+      return false;
     }
   },
 

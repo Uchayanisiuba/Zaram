@@ -31,6 +31,7 @@ import {
 } from '@/services/attachmentsClient';
 import NoticeCard from '@/components/chat/NoticeCard';
 import ToolCalls from '@/components/chat/ToolCalls';
+import PlanCard from '@/components/chat/PlanCard';
 import FirstRunPanel from '@/components/firstrun/FirstRunPanel';
 import { useReadiness, setupToOffer } from '@/hooks/useReadiness';
 import { stripCitationMarkers } from '@/lib/markers';
@@ -126,6 +127,7 @@ export default function ChatSurface({ navigate }: Props) {
   const streamingArtifacts = useChatStore((s) => s.streamingArtifacts);
   const streamingNotices = useChatStore((s) => s.streamingNotices);
   const streamingToolCalls = useChatStore((s) => s.streamingToolCalls);
+  const streamingPlan = useChatStore((s) => s.streamingPlan);
   const streamingImageProgress = useChatStore((s) => s.streamingImageProgress);
   const streamingAnsweredBy = useChatStore((s) => s.streamingAnsweredBy);
   const isStreaming = useChatStore((s) => s.isStreaming);
@@ -192,6 +194,12 @@ export default function ChatSurface({ navigate }: Props) {
    *  ignores the text when this flag is set. */
   const continueTask = useCallback(() => {
     void send('Continue', { continueTask: true });
+  }, [send]);
+
+  /** Go on a plan the task paused to show. The same resume as Continue, with
+   *  the approval recorded on the task so it does not pause again. */
+  const goPlan = useCallback(() => {
+    void send('Go', { continueTask: true, approvePlan: true });
   }, [send]);
 
   /** Ask the last question again with the cloud model the offer named.
@@ -1027,6 +1035,9 @@ export default function ChatSurface({ navigate }: Props) {
                   {/* Above the notices, below the answer: the working reads as
                       what produced the reply rather than as an afterthought
                       about it. */}
+                  {msg.plan ? (
+                    <PlanCard items={msg.plan.items} awaitingGo={msg.plan.awaitingGo} onGo={goPlan} />
+                  ) : null}
                   {msg.toolCalls?.length ? <ToolCalls calls={msg.toolCalls} /> : null}
                   {msg.notices?.map((notice, i) => (
                     <NoticeCard
@@ -1126,6 +1137,9 @@ export default function ChatSurface({ navigate }: Props) {
                       `[TOOL_CALL]` arrives split across tokens, so without it
                       the surface shows nothing at all for the seconds the model
                       spends reading. */}
+                  {streamingPlan ? (
+                    <PlanCard items={streamingPlan.items} awaitingGo={streamingPlan.awaitingGo} />
+                  ) : null}
                   {streamingToolCalls.length > 0 && <ToolCalls calls={streamingToolCalls} active />}
                   {streamingNotices.map((notice, i) => (
                     <NoticeCard

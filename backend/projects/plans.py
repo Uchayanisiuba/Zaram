@@ -75,9 +75,49 @@ class PlanStep:
     result: Any
 
 
+#: The statuses a checklist item may carry. `skipped` needs a reason — a
+#: decision rejected is only useful if the resumed task can read why.
+ITEM_STATUSES = ("todo", "doing", "done", "skipped")
+
+
+@dataclass(frozen=True)
+class PlanItem:
+    """One line of the checklist the model wrote for itself.
+
+    `docs/AGENT-UX.md`: the plan is a checklist, written by the model through
+    the `plan` tool, rendered by Zaram from this record rather than typed as
+    prose — so an item is `done` because the record says so, and a resumed
+    task reads `skipped` with its reason rather than re-taking a decision the
+    person already refused.
+    """
+
+    text: str
+    status: str = "todo"
+    reason: str = ""
+
+    def to_json(self) -> dict:
+        out = {"text": self.text, "status": self.status}
+        if self.reason:
+            out["reason"] = self.reason
+        return out
+
+    @classmethod
+    def from_json(cls, raw: Any) -> Optional["PlanItem"]:
+        if not isinstance(raw, dict):
+            return None
+        text = str(raw.get("text") or "").strip()
+        if not text:
+            return None
+        status = str(raw.get("status") or "todo").strip().lower()
+        if status not in ITEM_STATUSES:
+            status = "todo"
+        return cls(text=text[:300], status=status, reason=str(raw.get("reason") or "").strip()[:300])
+
+
 @dataclass(frozen=True)
 class Plan:
-    """A task that stopped with work left.
+    """A task that stopped with work left — or, since 13 September, one that
+    finished and keeps its checklist for the record.
 
     `project_id` is empty when no project was open, which is a real answer and
     not a missing one — the same distinction rule 7i draws for a fact's scope.
@@ -94,6 +134,19 @@ class Plan:
     stopped_because: str = ""
     created_at: float = field(default_factory=time.time)
     updated_at: float = field(default_factory=time.time)
+    #: The checklist. Empty for a task the model never planned.
+    items: List[PlanItem] = field(default_factory=list)
+    #: Whether the person pressed Go on this plan. A long plan with writes in
+    #: it pauses before its first mutative call until this is true.
+    approved: bool = False
+    #: A finished task keeps its checklist and drops its steps — the steps
+    #: hold file contents, which are the liability; the ticked list is the
+    #: record of what was done, which is the asset.
+    finished: bool = False
+
+    @property
+    def done_count(self) -> int:
+        return sum(1 for i in self.items if i.status == "done")
 
 
 class PlanRecords:
@@ -131,10 +184,23 @@ class PlanRecords:
                     model           TEXT NOT NULL DEFAULT '',
                     stopped_because TEXT NOT NULL DEFAULT '',
                     created_at      REAL NOT NULL,
-                    updated_at      REAL NOT NULL
+                    updated_at      REAL NOT NULL,
+                    items           TEXT NOT NULL DEFAULT '[]',
+                    approved        INTEGER NOT NULL DEFAULT 0,
+                    finished        INTEGER NOT NULL DEFAULT 0
                 )
                 """
             )
+            # Added after the table shipped; `CREATE TABLE IF NOT EXISTS` is
+            # silent about a table that exists and differs.
+            columns = {row["name"] for row in conn.execute("PRAGMA table_info(plans)").fetchall()}
+            for name, ddl in (
+                ("items", "TEXT NOT NULL DEFAULT '[]'"),
+                ("approved", "INTEGER NOT NULL DEFAULT 0"),
+                ("finished", "INTEGER NOT NULL DEFAULT 0"),
+            ):
+                if name not in columns:
+                    conn.execute(f"ALTER TABLE plans ADD COLUMN {name} {ddl}")
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS plan_steps (
@@ -169,10 +235,10 @@ class PlanRecords:
         is a different question and has to stay askable — the same care
         `only_ids` needs between "unrestricted" and "a domain holding nothing".
         """
-        query = "SELECT * FROM plans"
+        query = "SELECT * FROM plans WHERE finished = 0"
         params: list = []
         if project_id is not None:
-            query += " WHERE project_id = ?"
+            query += " AND project_id = ?"
             params.append(project_id)
         query += " ORDER BY updated_at DESC LIMIT ?"
         params.append(max(1, limit))
@@ -194,7 +260,7 @@ class PlanRecords:
         with self._connect() as conn:
             if session_id:
                 row = conn.execute(
-                    "SELECT * FROM plans WHERE session_id = ? "
+                    "SELECT * FROM plans WHERE finished = 0 AND session_id = ? "
                     "ORDER BY updated_at DESC LIMIT 1",
                     (session_id,),
                 ).fetchone()
@@ -202,7 +268,7 @@ class PlanRecords:
                     return self._hydrate(conn, row)
             if project_id:
                 row = conn.execute(
-                    "SELECT * FROM plans WHERE project_id = ? "
+                    "SELECT * FROM plans WHERE finished = 0 AND project_id = ? "
                     "ORDER BY updated_at DESC LIMIT 1",
                     (project_id,),
                 ).fetchone()
@@ -229,20 +295,25 @@ class PlanRecords:
             stopped_because=plan.stopped_because,
             created_at=plan.created_at,
             updated_at=time.time(),
+            items=list(plan.items),
+            approved=plan.approved,
+            finished=plan.finished,
         )
         with self._lock, self._connect() as conn:
             conn.execute(
                 "INSERT INTO plans (id, question, project_id, session_id, model, "
-                "stopped_because, created_at, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
+                "stopped_because, created_at, updated_at, items, approved, finished) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
                 "ON CONFLICT(id) DO UPDATE SET question=excluded.question, "
                 "project_id=excluded.project_id, session_id=excluded.session_id, "
                 "model=excluded.model, stopped_because=excluded.stopped_because, "
-                "updated_at=excluded.updated_at",
+                "updated_at=excluded.updated_at, items=excluded.items, "
+                "approved=excluded.approved, finished=excluded.finished",
                 (
                     stored.id, stored.question, stored.project_id, stored.session_id,
                     stored.model, stored.stopped_because, stored.created_at,
-                    stored.updated_at,
+                    stored.updated_at, _dumps([i.to_json() for i in stored.items]),
+                    1 if stored.approved else 0, 1 if stored.finished else 0,
                 ),
             )
             conn.execute("DELETE FROM plan_steps WHERE plan_id = ?", (stored.id,))
@@ -263,6 +334,50 @@ class PlanRecords:
             )
         self.prune()
         return stored
+
+    def finish(self, plan_id: str) -> bool:
+        """Mark a task done: keep the checklist, drop the steps.
+
+        The steps hold tool results — file contents — and `CLAUDE.md` is
+        explicit that those are a liability to keep. The checklist is what a
+        person opens Project to see on Thursday: what was done on Tuesday.
+        A task that was never planned has nothing to keep and is deleted.
+        """
+        with self._lock, self._connect() as conn:
+            row = conn.execute("SELECT items FROM plans WHERE id = ?", (plan_id,)).fetchone()
+            if row is None:
+                return False
+            if not (_loads(row["items"]) or []):
+                conn.execute("DELETE FROM plans WHERE id = ?", (plan_id,))
+                return True
+            conn.execute("DELETE FROM plan_steps WHERE plan_id = ?", (plan_id,))
+            conn.execute(
+                "UPDATE plans SET finished = 1, stopped_because = '', updated_at = ? WHERE id = ?",
+                (time.time(), plan_id),
+            )
+        return True
+
+    def approve(self, plan_id: str) -> bool:
+        """The person pressed Go."""
+        with self._lock, self._connect() as conn:
+            changed = conn.execute(
+                "UPDATE plans SET approved = 1, updated_at = ? WHERE id = ?", (time.time(), plan_id)
+            ).rowcount
+        return bool(changed)
+
+    def finished_for(self, project_id: str = "", *, limit: int = 20) -> List[Plan]:
+        """Finished tasks, most recent first — the ticked lists Project shows."""
+        with self._lock, self._connect() as conn:
+            if project_id:
+                rows = conn.execute(
+                    "SELECT * FROM plans WHERE finished = 1 AND project_id = ? ORDER BY updated_at DESC LIMIT ?",
+                    (project_id, limit),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM plans WHERE finished = 1 ORDER BY updated_at DESC LIMIT ?", (limit,)
+                ).fetchall()
+            return [self._hydrate(conn, row) for row in rows]
 
     def delete(self, plan_id: str) -> bool:
         """Forget a task. True when there was one.
@@ -320,6 +435,9 @@ class PlanRecords:
             stopped_because=row["stopped_because"],
             created_at=row["created_at"],
             updated_at=row["updated_at"],
+            items=[i for i in (PlanItem.from_json(r) for r in (_loads(row["items"]) or [])) if i],
+            approved=bool(row["approved"]),
+            finished=bool(row["finished"]),
         )
 
 

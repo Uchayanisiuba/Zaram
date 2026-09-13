@@ -525,6 +525,39 @@ describe('the model\'s working survives the transport', () => {
     });
   });
 
+  it('sends Go as an approved continue', async () => {
+    let sent: Record<string, unknown> = {};
+    mockFetch((_url: string, init?: RequestInit) => {
+      sent = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+      return streamingResponse([done()]);
+    });
+
+    await collect(streamChat({ text: 'Go', continueTask: true, approvePlan: true }));
+
+    expect(sent.continue_task).toBe(true);
+    expect(sent.approve_plan).toBe(true);
+  });
+
+  it('carries the checklist through whole, with the Go flag', async () => {
+    const items = [
+      { text: 'Read the failing test', status: 'done' },
+      { text: 'Run the tests', status: 'todo' },
+    ];
+    mockFetch(() =>
+      streamingResponse([
+        line({ type: 'plan', data: { items, awaiting_go: true } }),
+        line({ type: 'plan', data: { items: [{ status: 'done' }, 'x', { text: 'ok' }] } }),
+        done(),
+      ]),
+    );
+
+    const events = await collect(streamChat({ text: 'fix it' }));
+
+    expect(events[0]).toEqual({ type: 'plan', items, awaitingGo: true });
+    // Items without text and unknown shapes are dropped, not rendered.
+    expect(events[1]).toEqual({ type: 'plan', items: [{ text: 'ok', status: 'todo' }], awaitingGo: false });
+  });
+
   it('carries a refusal, with the reason that would permit it', async () => {
     mockFetch(() =>
       streamingResponse([

@@ -125,6 +125,9 @@ export default function NoticeCard({ notice, onOpen, onEnableSearch, onContinue,
   const { Icon, color } = tone;
   const offersContinue = notice.action === 'continue' && Boolean(onContinue);
   const offersCloud = notice.action === 'cloud' && Boolean(notice.model) && Boolean(onTryCloud);
+  // `go` is offered by the plan card's own button, above; the notice carries
+  // the sentence and nothing else, so one press exists rather than two.
+  const isGo = notice.action === 'go';
 
   // **Rule 7h, which this card was one click short of.** "Offer at the moment
   // of doubt; never make the user choose in advance" — and the search notice
@@ -225,7 +228,7 @@ export default function NoticeCard({ notice, onOpen, onEnableSearch, onContinue,
           </button>
         )}
 
-        {!offersSearch && !offersContinue && !offersCloud && destination && onOpen && (
+        {!offersSearch && !offersContinue && !offersCloud && !isGo && destination && onOpen && (
           <button
             onClick={() => onOpen(destination.node)}
             className="mt-1.5 text-[11px] flex items-center gap-1"

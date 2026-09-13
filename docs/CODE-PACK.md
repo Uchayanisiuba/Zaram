@@ -657,7 +657,37 @@ taken and rejected* on `PlanRecords` (slice 7), and the project-scoped
 exchange facts the engine already stores. Knowledge derived from the repo
 stays derived; knowledge decided in conversation gets remembered.
 
-### 7 — next: the plan is a checklist
+### 7 — the plan is a checklist. Built 13 September; seen on screen up to Go.
+
+`docs/AGENT-UX.md` is the design; `docs/MILESTONES.md`'s 13 September
+handoff is the status in detail. In short: the `plan` tool whose result is
+the record; `PlanRecords.items/approved/finished`; `StreamEvent.plan`;
+`PlanCard` never folded; the checklist on Project's task rows and a finished
+section; pause-for-Go before the first mutative call on a plan of four or
+more items; Go remembered on the task. Seen: the list ticking live, the
+model adding a step it discovered, the pause, and the resume committing.
+`tests/test_the_plan_is_a_checklist.py`.
+
+### 8 — run it and look at it. Built 13 September; not yet seen on screen.
+
+`packs/code/apps.py`: `start_app`, `stop_app`, `get_app_status`,
+`read_app_log`, `look_at_app`. A managed process the person can stop; a
+headless screenshot with their own Chrome or Edge of a loopback URL only;
+read by a local vision model when one is installed and honest when none is.
+`AppCard` shows the URL with Stop and the picture.
+`tests/test_the_app_can_run_and_be_looked_at.py`, including a real
+screenshot.
+
+### 9 — the eval set. Written 13 September; not yet run.
+
+`tests/test_eval_bounded_coding_tasks.py`, eight bounded tasks through the
+real loop with mechanical checkers. Run with `-m measure` on the TabbyAPI
+27B and the Ollama 14B and record the numbers here.
+
+### 10 — next: pairing, then the Spine as an MCP server
+
+Designed in `docs/AGENT-UX.md`; `core/pairing.py` has no caller and must
+get one before the server, or the memory layer ships with the door open.
 
 `docs/AGENT-UX.md`, written tonight, is the study and the decision: a `plan`
 tool, the checklist on `PlanRecords`, a card under the reply that ticks as

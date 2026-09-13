@@ -30,12 +30,18 @@ export interface UnfinishedTask {
   /** What the user was told about why it stopped, in those words. */
   stopped_because: string;
   steps: PlanStep[];
+  /** The checklist, whole. Empty for a task the model never planned. */
+  items: { text: string; status: string; reason?: string }[];
+  approved: boolean;
+  finished: boolean;
   created_at: number;
   updated_at: number;
 }
 
 export interface UnfinishedTasks {
   plans: UnfinishedTask[];
+  /** Finished tasks that kept their checklist — what was done, on the row. */
+  finished: UnfinishedTask[];
   /** How long Zaram keeps one. Read from the backend rather than repeated here,
    *  so the number shown to the user is the number the store enforces. */
   kept_for_days: number;

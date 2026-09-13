@@ -189,6 +189,37 @@ class ModelsRuntime(Runtime):
         if self._service is not None:
             self.reload_engine()
 
+    def read_image_locally(self, png_path: str, question: str) -> Optional[str]:
+        """Describe a picture with a **local** vision model, or ``None``.
+
+        Built for the code pack's `look_at_app`, whose screenshot is of the
+        page the person is building — their data, possibly. A cloud vision
+        model is deliberately not used here even when connected: sending the
+        page to look at its layout is the trade this product refuses by
+        default, and the person can attach the picture to a question
+        themselves, where the egress gate asks. ``None`` means no local model
+        can see, and the caller says so with the size of the fix.
+        """
+        import base64
+
+        manager = self._provider_manager
+        if manager is None or self._service is None:
+            return None
+        try:
+            model = manager.select_model_for_task(requires_vision=True)
+        except Exception:  # noqa: BLE001
+            return None
+        if model is None or model.locality is not CapabilityLocality.LOCAL:
+            return None
+        try:
+            with open(png_path, "rb") as handle:
+                encoded = base64.b64encode(handle.read()).decode("ascii")
+            text = "".join(self._service.generate_response(question, "", model.id, images=[encoded]))
+        except Exception:  # noqa: BLE001
+            logger.exception("Could not read the screenshot with %s", model.id)
+            return None
+        return text.strip() or None
+
     async def warm_local_model(self) -> bool:
         """Load the local model in the background, shortly after boot.
 

@@ -22,7 +22,141 @@ publishing step over rather than finding another route. `CLAUDE.md`,
 
 *The latest work is first. Earlier sessions follow below.*
 
-### 13 September, latest — the installed libraries are the documentation
+### 13 September, latest — slices 7 and 8 built; 9 written; 10 designed. HANDOFF.
+
+**Read this block first. It is the handoff for the next session.** The
+session was interrupted by the maintainer mid-verification; everything below
+is committed, and the state of the on-screen run is recorded honestly.
+
+#### What shipped
+
+**Slice 7 — the plan is a checklist** (`docs/AGENT-UX.md` decision, built):
+
+* `plan` tool on the code server (`packs/code/tools.py`): the model writes
+  `items=[{text, status, reason}]`; statuses `todo/doing/done/skipped`; a
+  skipped step needs a reason; always granted on Zaram's own server only
+  (`granted_tools()` includes it; no policy-name change, so a stranger's
+  `plan_deploy` still asks). **The result is the record** — the engine reads
+  the checklist off the tool's own result. The first version was a
+  `ContextVar` written by the tool, which never reaches the engine because a
+  tool runs in `asyncio.to_thread`; the tests found it empty every time.
+* `PlanRecords` (`projects/plans.py`): `items`, `approved`, `finished`
+  columns with migration; `finish()` keeps the checklist and drops the steps
+  (steps hold file contents — the liability; the ticked list is the asset);
+  `approve()`; `finished_for()`; `unfinished()` and `latest_for()` exclude
+  finished rows.
+* Engine: `_checklists[session]`; `StreamEvent.plan(items, awaiting_go)`
+  emitted whole after every `plan` call; parked tasks carry items and
+  approval; `_finished()` keeps a planned task's checklist; `continue_task(
+  approve=True)` records Go. **Plan-before-act as an offer**: a plan of
+  `PLAN_REVIEW_ITEMS` (4) or more items pauses before the first mutative call
+  (`looks_read_only` decides) with a `go` notice; a short plan or a read-only
+  one never pauses. **A re-sent identical `plan` is a no-op**, not a stall —
+  the repeat guard used to end the task on it (seen on screen).
+* Transport: `ChatRequest.approve_plan` → `chat_router` → `continue_task`.
+* Frontend: `PlanCard` under the reply (never folded, live during the
+  reply, kept on the message), Go button when `awaitingGo`; `ChatSurface.
+  goPlan` sends `{continueTask, approvePlan}`; **`approve_plan` on the wire
+  was missing on the first pass** — the first Go on screen paused again —
+  fixed and pinned in `chatClient.test.ts`. Project shows the checklist on
+  every task row and a *"One task finished — what Zaram did, as it ticked it
+  off"* section; `/plans` returns `finished` beside `plans`.
+* **Seen on screen, in the real app**: the checklist ticking live while the
+  27B worked (it *added* a step it discovered — the reverted `add` bug);
+  the finished task with ticks in Project; the resumed task carrying its
+  checklist in; **the pause with Go and the notice**; Go → the loop
+  resuming and committing `6fe0257 zaram: Fix add to return a + b and add
+  subtract(a, b)` in the demo repo. The session was interrupted while that
+  resume was still running (README and test run were still to do).
+
+**Slice 8 — run it and look at it** (`packs/code/apps.py`, built, tested,
+NOT yet seen on screen):
+
+* `start_app(runner)` / `stop_app` / `get_app_status` / `read_app_log`: a
+  managed process per project — the `dev/start/serve/preview` scripts
+  `run_command` refuses, plus Django `runserver` — URL read off its output,
+  300-line ring log, `taskkill /T` on Windows, `atexit` stops everything.
+  Under the `runs` grant; status and log are read-only by name.
+* `look_at_app(url?, question?)`: headless screenshot with the person's own
+  Chrome or Edge (`find_browser`), **loopback URLs only** (anything else is
+  browsing, which has its own rules), saved under `data_dir()/screens/<hash
+  of root>/`, never in the repository. Read by a **local** vision model via
+  `ModelsRuntime.read_image_locally` — never a cloud one, even when one is
+  connected — and when none is installed the tool says so with the fix and
+  its size (`ollama pull qwen2.5vl:7b`, ~6 GB) and still hands the person
+  the picture. **No local vision model is installed on this machine**, so
+  the description path is tested with an injected reader only.
+* Routes: `GET /projects/{id}/screens/{name}`, `GET /projects/{id}/app`,
+  `POST /projects/{id}/app/stop`. `tool_call` events carry `image` and
+  `app_url`; `AppCard` renders the screenshot and the running-app line with
+  **Stop**. 11 tests, including a **real** headless screenshot of a real
+  local server with this machine's Chrome.
+
+**Two defects found by the tool count, both fixed:**
+
+* `LibraryTools` (slice 6b) had never been passed to the one `CodeTools`
+  the bootstrapper builds — the measured test built its own. The screen said
+  "7 attached tools" where nine existed. Wired, and
+  `test_the_code_pack_is_wired.py` now asserts **every tool by name from the
+  real boot**.
+* `McpRuntime.available_tools` applied `DEFAULT_TOOL_BUDGET` (8) to
+  everything, so with 14 pack tools six were cut per prompt by the ranker.
+  The budget now applies to strangers' servers only; Zaram's own pack is
+  curated to fit.
+
+**Slice 9 — the eval set** (`tests/test_eval_bounded_coding_tasks.py`,
+written, collects 8 tasks, **not yet run**): fix a failing test; add a
+function and its test; edit a file the question never names; new file in an
+empty repo; rename across two files; use an unknown library API; answer from
+code without changing it; refuse a destructive ask it has no tool for. Each
+builds a repo in `tmp_path`, drives the resident model through the real
+loop, and checks the repository mechanically. `-m measure`;
+`ZARAM_EVAL_ONLY=<name>` runs one. Prints `[eval] name: PASS/FAIL — Ns, N
+calls [tools]`. Record the first numbers in `docs/CODE-PACK.md` slice 9.
+
+**Slice 10 — pairing, then the Spine as an MCP server**: designed in
+`docs/AGENT-UX.md`, nothing built. Read `core/pairing.py` first (no caller).
+
+#### What to do next, in order
+
+1. **Finish watching slice 7's resume** (cheap): open the demo project
+   (`scratchpad/demo-app` of this session is gone with the scratchpad —
+   make a new one with `calc.py` returning `a - b` and `tests/test_calc.py`),
+   ask *"Plan first, then do it: add subtract, a test, a README, run the
+   tests"*, watch the pause, press Go, watch it finish and appear ticked in
+   Project. The dev-browser recipe is in the memory file and in
+   `docs/RUNNING.md`.
+2. **See slice 8 on screen**: a project with a `dev` script (a Vite app),
+   *"start the app and look at it"* → the running-app line with Stop, then
+   the screenshot card. Then pull a local vision model and watch the
+   description arrive.
+3. **Run slice 9** on the TabbyAPI 27B and the Ollama 14B; record the pass
+   rates and times in `docs/CODE-PACK.md` under a new "9 — measured" entry.
+   Expect the `refuses_what_it_cannot_do_honestly` checker to need tuning.
+4. **Slice 10**: pairing (`core/pairing.py` gets a caller: a token issued
+   in Settings, named per client, revocable, every call logged as egress to
+   that client) → then a stdio MCP server exposing `recall`, `remember`,
+   `correct`, project-scoped, with provenance.
+5. The locality-per-step column (AGENT-UX "the one column nobody else has").
+
+#### Known rough edges, deliberately left
+
+* The `plan` tool description asks the model to send the whole list each
+  time; the 27B does, the 14B sometimes sends a partial list. A partial list
+  replaces the whole — consider merging by text.
+* "Warming up" shows on the orb during a long *resume* generation; it is
+  generating, not warming.
+* `NoticeCard` renders the `go` notice as a sentence only; the button is on
+  `PlanCard`. Fine, but if the plan card ever folds, the button goes with it.
+* `Project` still lists a finished task's items but has no way to discard
+  one; `DELETE /plans/{id}` works for it.
+
+Test counts at handoff, Ollama and TabbyAPI both up: 367 passed across the
+touched backend suites (34 write, 23 run, 11 app, 11 checklist, 13 library,
+8 offer …); 296+ frontend; typecheck clean; the one lint error is the
+pre-existing `HistoryPanel.tsx` rule-not-found.
+
+### 13 September — the installed libraries are the documentation
 
 The maintainer's question — *how do we solve hallucination without the user
 downloading docs for every new environment* — answered structurally in

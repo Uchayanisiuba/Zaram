@@ -7,6 +7,7 @@ including why this is a pack rather than a seventh node.
 """
 
 from .active import active_root, runs_granted, set_active_root, writes_granted
+from .apps import AppTools
 from .libraries import LibraryTools
 from .runners import CodeRunner
 from .tools import SERVER_ID, CodeTools, OutsideTheProject
@@ -14,6 +15,7 @@ from .writes import CodeWriter
 
 __all__ = [
     "SERVER_ID",
+    "AppTools",
     "CodeTools",
     "CodeRunner",
     "CodeWriter",

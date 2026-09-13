@@ -214,6 +214,16 @@ class ExecutionEngine:
         #: still there"*. This exists so a task that stops twice updates one row
         #: rather than offering the user the same job at two different stages.
         self._plan_ids: OrderedDict[str, str] = OrderedDict()
+        #: Sessions whose current plan the person has pressed Go on. Cleared
+        #: when a new question starts, because Go was for *that* plan.
+        self._approved: set[str] = set()
+        #: session_id → the model's checklist, read off the `plan` tool's own
+        #: result. **Not a ContextVar and not a channel into the pack**: the
+        #: first version was, and a tool runs in `asyncio.to_thread`, so what
+        #: it set in a copied context never reached the engine — measured by
+        #: the checklist arriving empty in every test. The tool's result is
+        #: the same list, deterministic, and crosses no thread.
+        self._checklists: dict[str, list] = {}
         #: session_id → the project that session's questions belong to (7i).
         #:
         #: Recorded per request so a task stopped in a project is filed under
@@ -329,6 +339,30 @@ class ExecutionEngine:
     def set_code_project_open(self, probe: Any | None) -> None:
         """Forwarded to the planner, like the vocabulary and for the same reason."""
         self._planner.set_code_project_open(probe)
+
+    def _plan_items(self, session_id: str) -> list:
+        return list(self._checklists.get(session_id) or [])
+
+    def _seed_plan(self, session_id: str, items: list) -> None:
+        if items:
+            self._checklists[session_id] = list(items)
+        else:
+            self._checklists.pop(session_id, None)
+
+    #: A plan with at least this many items, whose next call would change
+    #: something, pauses for Go the first time. Fewer steps run straight
+    #: through — rule 7h, an offer at the moment of doubt, never a mode.
+    PLAN_REVIEW_ITEMS = 4
+
+    def _plan_wants_go(self, session_id: str, tool_name: str) -> bool:
+        """Whether this call should wait for the person to read the plan."""
+        from runtimes.mcp.policy import looks_read_only
+
+        if tool_name == "plan" or looks_read_only(tool_name):
+            return False
+        if session_id in self._approved:
+            return False
+        return len(self._plan_items(session_id)) >= self.PLAN_REVIEW_ITEMS
 
     def set_notice_source(self, source: Any | None) -> None:
         """Provide a callable returning a one-off notice, or None.
@@ -531,6 +565,11 @@ class ExecutionEngine:
         # diverting to `vision.analyze`, whose input key is singular and which
         # this engine never fills. See `IntentPlanner.create_plan`.
         plan = self._planner.create_plan(prompt, has_images=bool(images))
+        # A new question is a new plan; Go was for the last one. And the
+        # request's checklist starts empty — the ContextVar is per request,
+        # but a resumed task's items are seeded explicitly, never inherited.
+        self._approved.discard(session_id)
+        self._seed_plan(session_id, [])
         plan = self._drop_unavailable_steps(plan)
         plan.state = PlanState.RUNNING
         logger.debug("Engine: plan created with %d steps", len(plan.steps))
@@ -1247,8 +1286,9 @@ class ExecutionEngine:
             call = parse_call(text)
             if call is None:
                 # Nothing more wanted: the answer, minus any half-written
-                # marker. The task finished, so nothing is left to continue.
-                self._finished(session_id)
+                # marker. The task finished, so nothing is left to continue —
+                # except its checklist, which Project keeps.
+                self._finished(session_id, original_prompt, turns, model)
                 answer = strip_calls(text)
                 spoken.append(answer)
                 yield answer
@@ -1265,6 +1305,46 @@ class ExecutionEngine:
                 spoken.append(answer)
                 yield answer
                 return
+
+            if self._plan_wants_go(session_id, call.tool):
+                # **Plan before act, as an offer.** The model wrote a plan of
+                # some length and now wants to change something. The person
+                # reads the plan first; Go is their consent for *this* plan,
+                # given once. A short plan, or one that only reads, never
+                # pauses — `docs/AGENT-UX.md`.
+                yield StreamEvent.plan(self._plan_items(session_id), awaiting_go=True)
+                yield from self._close_the_loop(
+                    original_prompt, turns, model, system_prompt, spoken, session_id,
+                    reason=(
+                        "The plan is ready for you to read before anything changes. "
+                        "Press Go to let it run, or tell Zaram what to change."
+                    ),
+                    offer="go",
+                )
+                return
+
+            if call.tool == "plan" and call.server == "code" and any(call.same_as(t.call) for t in turns):
+                # **A re-sent plan is a no-op, not a stall.** Seen on 13
+                # September: the model wrote its checklist, then wrote the
+                # identical checklist again before its first edit, and the
+                # repeat guard ended the task with "asked for `plan` again".
+                # Nothing is run and no round is spent; the model is told the
+                # plan stands and to take its first step.
+                turns.append(ToolTurn(call=call, result={
+                    "note": "the plan is unchanged; carry on with the first step that is not done",
+                }))
+                text = "".join(self._dispatcher.execute_step(
+                    ExecutionStep(
+                        capability_id="reasoning.generate",
+                        input_data={
+                            "prompt": result_prompt(original_prompt, turns, may_call_again=True),
+                            **({"tools": native_tools} if native_tools else {}),
+                        },
+                        depends_on=[],
+                    ),
+                    model, system_prompt,
+                ))
+                continue
 
             if call.is_repeat_without_progress(turns):
                 # **A verbatim repeat is not progress — unless something
@@ -1351,11 +1431,22 @@ class ExecutionEngine:
                     output=output_excerpt(payload),
                     diff=str(change.get("diff") or ""),
                     commit=str(change.get("commit") or ""),
+                    image=str(change.get("image") or ""),
+                    app_url=str(change.get("url") or "") if call.tool in ("start_app", "get_app_status") else "",
                 )
 
             turns.append(ToolTurn(call=call, result=payload))
             rounds += 1
             made += 1
+
+            if call.tool == "plan" and call.server == "code" and result.get("success"):
+                # Whole, every time: the card is the record, never a diff of
+                # one. Read off the tool's result, and only from Zaram's own
+                # server — a stranger's tool called `plan` is just a tool.
+                items = payload.get("items") if isinstance(payload, dict) else None
+                if isinstance(items, list):
+                    self._seed_plan(session_id, items)
+                    yield StreamEvent.plan(self._plan_items(session_id))
 
             # Read after the first generation, never before: `/api/ps` reports
             # the window of a *resident* model, and nothing is resident until
@@ -1484,8 +1575,12 @@ class ExecutionEngine:
         session_id: str,
         *,
         reason: str,
+        offer: str = "continue",
     ):
         """Answer from what was gathered, say why it stopped, offer to continue.
+
+        `offer` is the notice's action: `continue` for a task that ran out of
+        window, `go` for one waiting on the person to read its plan.
 
         The answer comes first and the notice is a separate event, because the
         two are different kinds of thing: one is the model's reply and one is
@@ -1519,15 +1614,18 @@ class ExecutionEngine:
         # A task that ran out of windows without finishing is the
         # silent-degradation case `CLAUDE.md` names, so it says so, and the
         # offer to pick it up is what makes the stop survivable.
-        yield StreamEvent.notice(
-            f"{reason} Continue to pick it up — Zaram keeps what it found for "
-            "seven days.",
-            kind="tool_loop",
-            action="continue",
-        )
-        offer = self._stuck_offer(turns, model)
-        if offer is not None:
-            yield offer
+        if offer == "go":
+            yield StreamEvent.notice(reason, kind="plan", action="go")
+        else:
+            yield StreamEvent.notice(
+                f"{reason} Continue to pick it up — Zaram keeps what it found for "
+                "seven days.",
+                kind="tool_loop",
+                action="continue",
+            )
+        stuck = self._stuck_offer(turns, model)
+        if stuck is not None:
+            yield stuck
 
     #: How many failed runs of the project's commands, in one reply, before
     #: the cloud model is offered for the step. Two, because one failure is
@@ -1648,7 +1746,7 @@ class ExecutionEngine:
         """
         if self._plans is None:
             return
-        from projects.plans import Plan, PlanStep
+        from projects.plans import Plan, PlanItem, PlanStep
 
         try:
             existing = self._plan_ids.get(session_id, "")
@@ -1669,6 +1767,8 @@ class ExecutionEngine:
                     session_id=session_id,
                     model=model or "",
                     stopped_because=reason,
+                    items=[PlanItem.from_json(i) for i in self._plan_items(session_id) if PlanItem.from_json(i)],
+                    approved=session_id in self._approved,
                 )
             )
             self._plan_ids[session_id] = stored.id
@@ -1679,7 +1779,13 @@ class ExecutionEngine:
             # fail. The user still gets the answer built from what was read.
             logger.exception("Could not store the unfinished task")
 
-    def _finished(self, session_id: str) -> None:
+    def _finished(
+        self,
+        session_id: str,
+        question: str = "",
+        turns: list[ToolTurn] | None = None,
+        model: str | None = None,
+    ) -> None:
         """Forget the task for this session. It answered; nothing is left to do.
 
         Deletion on completion is what keeps this store small by construction
@@ -1688,11 +1794,26 @@ class ExecutionEngine:
         asset.
         """
         plan_id = self._plan_ids.pop(session_id, "")
-        if plan_id and self._plans is not None:
+        items = self._plan_items(session_id)
+        if self._plans is not None:
             try:
-                self._plans.delete(plan_id)
+                if items:
+                    # A task that was planned keeps its ticked list on the
+                    # project's row; its steps — file contents — go. Written
+                    # down once more so the final ticks are the ones kept,
+                    # then finished. A task never planned is deleted as before.
+                    if plan_id:
+                        self._plan_ids[session_id] = plan_id
+                    self._park(question or "", turns or [], model, session_id, "")
+                    plan_id = self._plan_ids.pop(session_id, "")
+                    if plan_id:
+                        self._plans.finish(plan_id)
+                elif plan_id:
+                    self._plans.delete(plan_id)
             except Exception:
                 logger.exception("Could not clear the finished task")
+        self._approved.discard(session_id)
+        self._checklists.pop(session_id, None)
 
     def set_plan_records(self, records: Any | None) -> None:
         """Provide the store for unfinished tasks. Injected, never imported.
@@ -1710,8 +1831,13 @@ class ExecutionEngine:
         system_prompt: str = "",
         plan_id: str = "",
         project_id: str | None = None,
+        approve: bool = False,
     ) -> Iterator[Any]:
         """Resume a stopped task, with a fresh window and a rebuilt context.
+
+        `approve` is the person's Go on the plan the task paused to show them:
+        recorded on the task and on the session, so the resumed loop runs its
+        mutative calls without pausing again for the same plan.
 
         The user's *Continue*. It re-enters the loop with the steps already
         completed — what was found, not what was said — so the model picks up
@@ -1779,6 +1905,19 @@ class ExecutionEngine:
         scope = pending.project_id or (project_id or "")
         if scope:
             self._project_ids[session_id] = scope
+        # The checklist travels with the task, and Go is remembered on it.
+        self._seed_plan(session_id, [i.to_json() for i in pending.items])
+        if approve or pending.approved:
+            self._approved.add(session_id)
+            if approve and self._plans is not None:
+                try:
+                    self._plans.approve(pending.id)
+                except Exception:  # noqa: BLE001
+                    logger.exception("Could not record Go on the task")
+        else:
+            self._approved.discard(session_id)
+        if pending.items:
+            yield StreamEvent.plan([i.to_json() for i in pending.items])
 
         # `_context_for` re-lists the tools and leaves their wire shape here;
         # cleared first so a resume that finds none does not inherit last

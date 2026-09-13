@@ -51,6 +51,8 @@ export interface ChatMessage {
    *  them, with the gate's verdict on each. Usually empty — most replies call
    *  nothing, and that is the ordinary case rather than a missing one. */
   toolCalls?: ChatToolCall[];
+  /** The checklist the model kept for this reply, whole, as it last stood. */
+  plan?: ChatPlan;
   timestamp: number;
   /** Which model answered this, and where it ran.
    *
@@ -93,6 +95,19 @@ export interface ChatNotice {
   model?: string;
 }
 
+/** One line of the model's checklist. See `PlanCard`. */
+export interface ChatPlanItem {
+  text: string;
+  status: string;
+  reason?: string;
+}
+
+/** The checklist as last sent, and whether it is waiting on Go. */
+export interface ChatPlan {
+  items: ChatPlanItem[];
+  awaitingGo: boolean;
+}
+
 /** One tool the model asked for, and the gate's verdict on it.
  *
  *  Kept on the message rather than only in the stream, because the working is
@@ -114,6 +129,10 @@ export interface ChatToolCall {
    *  `ChangeCard` that is never folded, with the commit it can revert. */
   diff?: string;
   commit?: string;
+  /** A screenshot the call produced, and the URL an app started on. Rendered
+   *  by `AppCard`, never folded. */
+  image?: string;
+  appUrl?: string;
 }
 
 interface ChatState {
@@ -134,6 +153,8 @@ interface ChatState {
    *  generation is buffered — the marker cannot be recognised mid-token — so
    *  these are the only thing on screen while the model reads. */
   streamingToolCalls: ChatToolCall[];
+  /** The checklist as it stands while the reply is in flight. */
+  streamingPlan: ChatPlan | null;
   /** How far through drawing a picture the machine is, or `null`.
    *
    *  Held rather than accumulated: only the latest matters, and keeping the
@@ -258,6 +279,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   streamingArtifacts: [],
   streamingNotices: [],
   streamingToolCalls: [],
+  streamingPlan: null,
   streamingImageProgress: null,
   streamingAnsweredBy: null,
   turnUsage: { added: 0, reclaimed: 0, limit: null, measured: false },
@@ -348,6 +370,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const artifacts: Artifact[] = [];
     const notices: ChatNotice[] = [];
     const toolCalls: ChatToolCall[] = [];
+    let plan: ChatPlan | null = null;
     const seen = new Set<string>();
     let replyError: string | undefined;
     let answeredBy: ChatAttribution | null = null;
@@ -520,6 +543,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
             break;
           }
 
+          case 'plan': {
+            plan = { items: event.items, awaitingGo: event.awaitingGo };
+            set({ streamingPlan: plan });
+            break;
+          }
+
           case 'tool_call': {
             // The model's working, as it happens. These arrive *before* the
             // answer on a tool-using reply — the generation is buffered, so for
@@ -534,6 +563,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
               output: event.output,
               ...(event.diff ? { diff: event.diff } : {}),
               ...(event.commit ? { commit: event.commit } : {}),
+              ...(event.image ? { image: event.image } : {}),
+              ...(event.appUrl ? { appUrl: event.appUrl } : {}),
             });
             set({ streamingToolCalls: [...toolCalls] });
             break;
@@ -633,6 +664,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 artifacts,
                 notices,
                 toolCalls: toolCalls.length ? toolCalls : undefined,
+                plan: plan ?? undefined,
                 timestamp: Date.now(),
                 answeredBy,
                 reasoning: reasoning_ || undefined,
@@ -646,6 +678,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       streamingArtifacts: [],
       streamingNotices: [],
   streamingToolCalls: [],
+  streamingPlan: null,
       streamingImageProgress: null,
       streamingAnsweredBy: null,
       isStreaming: false,
@@ -686,6 +719,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       streamingSources: [],
       streamingNotices: [],
   streamingToolCalls: [],
+  streamingPlan: null,
       streamingImageProgress: null,
       streamingAnsweredBy: null,
     });
@@ -702,6 +736,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       streamingArtifacts: [],
       streamingNotices: [],
   streamingToolCalls: [],
+  streamingPlan: null,
       streamingImageProgress: null,
       streamingAnsweredBy: null,
       isStreaming: false,
@@ -763,6 +798,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         streamingArtifacts: [],
         streamingNotices: [],
   streamingToolCalls: [],
+  streamingPlan: null,
         streamingImageProgress: null,
         streamingAnsweredBy: null,
         isStreaming: false,

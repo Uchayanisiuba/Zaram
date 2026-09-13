@@ -46,6 +46,7 @@ import { AnimatePresence } from 'framer-motion';
 import { Check, ChevronRight, CircleAlert, Clock } from 'lucide-react';
 import type { ChatToolCall } from '../../stores/chatStore';
 import ActivityPanel from './ActivityPanel';
+import AppCard from './AppCard';
 import ChangeCard from './ChangeCard';
 import StepOutput from './StepOutput';
 
@@ -78,6 +79,12 @@ const PHRASES: Record<string, (n: number) => string> = {
   write_file: (n) => (n === 1 ? 'wrote a file' : `wrote ${n} files`),
   edit_file: (n) => (n === 1 ? 'edited a file' : `edited ${n} files`),
   run_command: (n) => (n === 1 ? 'ran a command' : `ran ${n} commands`),
+  find_symbol: (n) => (n === 1 ? 'looked up a symbol' : `looked up ${n} symbols`),
+  read_library_docs: (n) => (n === 1 ? 'read library docs' : `read library docs ${n}×`),
+  plan: (n) => (n === 1 ? 'planned' : `planned ${n}×`),
+  start_app: () => 'started the app',
+  stop_app: () => 'stopped the app',
+  look_at_app: (n) => (n === 1 ? 'looked at the app' : `looked at the app ${n}×`),
 };
 
 /** "Searched code, read 3 files" — distinct actions, in the order first used. */
@@ -173,6 +180,8 @@ export default function ToolCalls({
   const notable = calls.filter((c) => c.verdict !== 'allow');
   // And every change to a file, likewise never folded — see `ChangeCard`.
   const changes = calls.filter((c) => c.verdict === 'allow' && Boolean(c.diff));
+  // A started app and what Zaram saw of it — see `AppCard`.
+  const apps = calls.filter((c) => c.verdict === 'allow' && (Boolean(c.image) || Boolean(c.appUrl)));
   const expanded = open || active;
 
   return (
@@ -223,6 +232,9 @@ export default function ToolCalls({
 
       {changes.map((call, i) => (
         <ChangeCard key={`c/${call.commit || i}`} call={call} />
+      ))}
+      {apps.map((call, i) => (
+        <AppCard key={`a/${call.image || call.appUrl || i}`} call={call} />
       ))}
 
       {/* Never folded. See the note at the top of the file. */}

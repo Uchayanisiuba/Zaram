@@ -43,7 +43,8 @@ from typing import Any, Callable, Dict, List, Optional
 from ingest.service import SKIP_DIRS
 from runtimes.mcp.client import ToolDescriptor
 
-from . import libraries, repo_map, runners, writes
+from . import apps, libraries, repo_map, runners, writes
+from .apps import AppTools
 from .libraries import LibraryTools
 from .runners import RUN_COMMAND, CodeRunner
 from .writes import TOOL_NAMES, CodeWriter
@@ -52,6 +53,12 @@ from .writes import TOOL_NAMES, CodeWriter
 #: enough for ~60 files with their definitions, small enough to leave the
 #: window for the reads that follow. See `repo_map.py` for what it buys.
 MAP_TOKENS = 1200
+
+#: The checklist tool. See `docs/AGENT-UX.md`: the plan is a checklist the
+#: model writes for itself, rendered by Zaram from the record, kept on the
+#: task's row in Project. It changes no file and needs no grant.
+PLAN = "plan"
+MAX_PLAN_ITEMS = 20
 
 logger = logging.getLogger(__name__)
 
@@ -94,6 +101,7 @@ class CodeTools:
         runner: Optional["CodeRunner"] = None,
         runs_granted: Callable[[], bool] = lambda: False,
         library: Optional["LibraryTools"] = None,
+        app: Optional["AppTools"] = None,
     ) -> None:
         self._root_for = root_for
         #: `None` means this instance cannot write, structurally. See `writes.py`.
@@ -107,11 +115,14 @@ class CodeTools:
         #: Lookups into the project's installed dependencies. Read-only, no
         #: grant: nothing here changes anything. See `libraries.py`.
         self._library = library
+        #: Running the app and looking at it. Under the same grant as running
+        #: its commands — a dev server is a command that does not exit.
+        self._app = app
 
     def how_to_permit(self, tool_name: str) -> str:
         """Appended to a `CONFIRM` reason by the runtime, so the sentence a
         person reads names the control that would allow the call."""
-        if tool_name == RUN_COMMAND:
+        if tool_name == RUN_COMMAND or tool_name in apps.TOOL_NAMES:
             return runners.HOW_TO_PERMIT
         return writes.HOW_TO_PERMIT
 
@@ -144,11 +155,17 @@ class CodeTools:
         for file edits the destination is the folder — and it is read here,
         per request, from the same place the root comes from.
         """
-        granted: set = set()
+        # `plan` is always permitted: the model writing its own intentions
+        # down is the one kind of writing that cannot need undo. Declared here
+        # by Zaram's own server rather than by a name pattern in the policy,
+        # so a stranger's `plan_deploy` still asks.
+        granted: set = {PLAN}
         if self._writer is not None and self._writes_granted():
             granted |= set(TOOL_NAMES)
         if self._runner is not None and self._runs_granted():
             granted.add(RUN_COMMAND)
+        if self._app is not None and self._runs_granted():
+            granted |= {apps.START_APP, apps.STOP_APP, apps.LOOK_AT_APP}
         return granted
 
     # -- the McpServer interface, so the runtime needs no special case --
@@ -169,10 +186,41 @@ class CodeTools:
             tools.append(self._runner.descriptor(SERVER_ID, self._root_for()))
         if self._library is not None:
             tools.extend(self._library.descriptors(SERVER_ID))
+        if self._app is not None:
+            tools.extend(self._app.descriptors(SERVER_ID, self._root_for()))
         return tools
 
     def _read_tools(self) -> List[ToolDescriptor]:
         return [
+            ToolDescriptor(
+                server_id=SERVER_ID,
+                name=PLAN,
+                description=(
+                    "Write or update your checklist for this task before and while you work: "
+                    "the steps you intend to take, each with a status. Send the whole list each "
+                    "time. Mark a step done when its tool call has returned, and skipped with a "
+                    "reason when you decide against it. For a task with more than a couple of "
+                    "steps, write the plan first."
+                ),
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "items": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "text": {"type": "string", "description": "One step, in a few words."},
+                                    "status": {"type": "string", "enum": ["todo", "doing", "done", "skipped"]},
+                                    "reason": {"type": "string", "description": "Why it was skipped."},
+                                },
+                                "required": ["text"],
+                            },
+                        }
+                    },
+                    "required": ["items"],
+                },
+            ),
             ToolDescriptor(
                 server_id=SERVER_ID,
                 name="list_files",
@@ -255,6 +303,11 @@ class CodeTools:
                 )
             }
 
+        if name == PLAN:
+            # Before the root check: a plan is about the task, not the folder,
+            # and a project without a repository can still be planned for.
+            return self._plan(arguments.get("items"))
+
         root = self._root_for()
         if root is None:
             return {
@@ -292,6 +345,8 @@ class CodeTools:
                 return self._runner.call(arguments, root)
             if self._library is not None and name in libraries.TOOL_NAMES:
                 return self._library.call(name, arguments, root)
+            if self._app is not None and name in apps.TOOL_NAMES:
+                return self._app.call(name, arguments, root)
         except OutsideTheProject as refusal:
             # Reported, not raised. The engine turns an exception into a failed
             # call; this is a refusal with a reason, which is a different thing
@@ -319,6 +374,26 @@ class CodeTools:
                 properties = (descriptor.input_schema or {}).get("properties") or {}
                 return set(properties)
         return None
+
+    # -------------------------------------------------------------- the plan
+
+    def _plan(self, raw: Any) -> Dict[str, Any]:
+        from projects.plans import PlanItem
+
+        if not isinstance(raw, list):
+            return {"error": "items must be a list of {text, status, reason}"}
+        items = [i for i in (PlanItem.from_json(r) for r in raw[:MAX_PLAN_ITEMS]) if i]
+        if not items:
+            return {"error": "the list had no items with text"}
+        skipped_without_reason = [i.text for i in items if i.status == "skipped" and not i.reason]
+        if skipped_without_reason:
+            return {"error": f"a skipped step needs a reason: {skipped_without_reason[0]!r}"}
+        # The result *is* the record: the engine reads the checklist off it.
+        # Nothing is kept here — a tool runs on another thread, and request
+        # state written there does not come back.
+        as_json = [i.to_json() for i in items]
+        done = sum(1 for i in items if i.status == "done")
+        return {"items": as_json, "done": done, "total": len(items)}
 
     # ----------------------------------------------------------- the sandbox
 

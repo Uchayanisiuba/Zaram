@@ -256,7 +256,18 @@ class McpRuntime:
             except Exception as exc:  # noqa: BLE001
                 logger.warning("could not list tools on %s: %s", cfg.server_id, exc)
 
-        shortlisted = self._rank(query, found, self._budget) if self._rank else found[: self._budget]
+        # **The budget is for strangers' servers, not Zaram's own.** It exists
+        # so a server with two hundred tools cannot fill a local model's
+        # window; the pack Zaram ships is curated to fit, and every one of its
+        # tools is a step of the loop — dropping `write_file` because the
+        # ranker judged `look_at_app` closer to the question breaks the task
+        # rather than trimming the prompt. Found on 13 September when the
+        # pack reached fourteen tools and the interface said "7 attached".
+        ours = [t for t in found if t.server_id in self._builtin]
+        theirs = [t for t in found if t.server_id not in self._builtin]
+        shortlisted = ours + (
+            self._rank(query, theirs, self._budget) if self._rank else theirs[: self._budget]
+        )
 
         described = []
         for tool in shortlisted:
