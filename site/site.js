@@ -9,7 +9,12 @@ const CONFIG = {
   //         the bottom of the page as "notify me".
   // Flip this ONLY after you have installed the .exe on a machine that is not
   // your development machine. See site/README.md.
-  releaseLive: true,
+  //
+  // Or leave it false and set `releaseAt`: the page switches itself over at
+  // that moment, in the visitor's clock, and switches while open if it is
+  // open at the time. `releaseLive: true` overrides the date either way.
+  releaseLive: false,
+  releaseAt: "2026-09-21T09:00:00+01:00",
 
   // ── THE BUILD ─────────────────────────────────────────────────────────────
   // electron-builder.yml names the artifact Zaram-${version}-${arch}.exe, so the
@@ -72,7 +77,16 @@ function downloadUrl() {
   return `https://github.com/${repo}/releases/download/v${version}/Zaram-${version}-x64.exe`;
 }
 
+/** Whether the download is the call to action right now: the switch, or
+ *  the date having passed. */
+function isLive() {
+  if (CONFIG.releaseLive) return true;
+  const at = CONFIG.releaseAt ? Date.parse(CONFIG.releaseAt) : NaN;
+  return Number.isFinite(at) && Date.now() >= at;
+}
+
 function applyConfig() {
+  const live = isLive();
   $all('[data-role="version"]').forEach(el => { el.textContent = CONFIG.version; });
   $all('[data-role="size"]').forEach(el => { el.textContent = String(CONFIG.sizeMb); });
   $all('[data-role="form-host"]').forEach(el => { el.textContent = CONFIG.formHost; });
@@ -82,7 +96,7 @@ function applyConfig() {
   // A version number is meaningless until there is a file carrying it, so before
   // the build exists the badge states the timing instead.
   $all('[data-role="eyebrow"]').forEach(el => {
-    el.textContent = CONFIG.releaseLive
+    el.textContent = live
       ? `Alpha · Windows · v${CONFIG.version} · opens ${CONFIG.alphaOpens}`
       : `Alpha · Windows · ${CONFIG.firstBuild}`;
   });
@@ -92,21 +106,33 @@ function applyConfig() {
   const download = document.querySelector('[data-role="download"]');
   const closing  = document.querySelector('.closing');
 
-  if (waitlist) waitlist.hidden = CONFIG.releaseLive;
-  if (download) download.hidden = !CONFIG.releaseLive;
+  if (waitlist) waitlist.hidden = live;
+  if (download) download.hidden = !live;
   // While there is nothing to download, one signup form is enough; once there is,
   // the closing "notify me" block earns its place again. Set both ways, so the
   // switch is symmetrical and flipping it back is not a one-way door.
-  if (closing) closing.hidden = !CONFIG.releaseLive;
+  if (closing) closing.hidden = !live;
 
   const block   = document.querySelector('[data-role="checksum-block"]');
   const pending = document.querySelector('[data-role="checksum-pending"]');
   const digest  = document.querySelector('[data-role="sha256"]');
-  if (CONFIG.sha256 && block && digest) {
+  if (live && CONFIG.sha256 && block && digest) {
     digest.textContent = CONFIG.sha256;
     block.hidden = false;
     if (pending) pending.hidden = true;
+  } else {
+    if (block) block.hidden = true;
+    if (pending) pending.hidden = false;
   }
+}
+
+/** If the page is open when the moment comes, switch it over in place. */
+function armRelease() {
+  if (isLive() || !CONFIG.releaseAt) return;
+  const wait = Date.parse(CONFIG.releaseAt) - Date.now();
+  if (!Number.isFinite(wait)) return;
+  // setTimeout saturates past ~24.8 days; re-arm in steps.
+  window.setTimeout(() => { applyConfig(); armRelease(); }, Math.min(wait, 2147483647));
 }
 
 function statusFor(form) {
@@ -176,7 +202,7 @@ async function submitSignup(event) {
     form.reset();
     say(
       status,
-      CONFIG.releaseLive
+      isLive()
         ? "Done — you'll hear about the next build."
         : "You're in. I'll email you when the first build is ready.",
       "ok",
@@ -322,6 +348,7 @@ function armDemo() {
 }
 
 applyConfig();
+armRelease();
 $all('[data-role="signup"]').forEach(form => form.addEventListener("submit", submitSignup));
 armDemo();
 
