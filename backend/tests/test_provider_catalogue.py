@@ -193,6 +193,25 @@ class TestWhatTheUserIsTold:
             elif entry.key_url:
                 assert entry.key_url.startswith("https://"), entry.id
 
+    def test_the_free_tiers_a_person_is_walked_to_come_with_the_walk(self):
+        """`CLAUDE.md`, the acquisition story: *"a first-run path that says
+        'add a free Gemini key — your prompts train Google, and Zaram will
+        tell you every time one goes'"*. The key URL is where; `key_steps` is
+        how — which button, what the key looks like — for the two free routes
+        the first run leads with. Steps describe somebody else's website, so
+        each is a sentence a person acts on, the last one says what happens
+        when the key is used, and none names a model file."""
+        walked = {e.id: e for e in PROVIDERS if e.key_steps}
+        assert {"nvidia_nim", "openrouter"} <= set(walked), sorted(walked)
+        for entry in walked.values():
+            assert entry.has_free_tier, entry.id
+            assert 3 <= len(entry.key_steps) <= 6, entry.id
+            for step in entry.key_steps:
+                assert step.strip().endswith("."), (entry.id, step)
+                assert not any(step.lower().endswith(ext) for ext in (".gguf", ".safetensors", ".bin"))
+            assert "Zaram" in entry.key_steps[-1], entry.id  # the last step is what Zaram does with it
+            assert entry.to_dict()["key_steps"] == list(entry.key_steps)
+
     def test_ids_are_unique(self):
         ids = [entry.id for entry in PROVIDERS]
         assert len(ids) == len(set(ids))

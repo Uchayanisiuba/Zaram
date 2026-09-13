@@ -1385,6 +1385,20 @@ export default function SettingsWorkspace() {
                 </p>
               )}
 
+              {/* The walk to a key, where the catalogue has one written — the
+                  same steps first run shows. The page is opened by the person
+                  from the link below the form; nothing here fetches it. */}
+              {selected && selected.available && selected.keySteps.length > 0 && (
+                <ol
+                  className="list-decimal pl-4 flex flex-col gap-1 text-[11px] leading-relaxed text-slate-400"
+                  data-testid="cloud-key-walkthrough"
+                >
+                  {selected.keySteps.map((step, i) => (
+                    <li key={i}>{step}</li>
+                  ))}
+                </ol>
+              )}
+
               {(needsUrl || (selected && !selected.available)) && (
                 <input
                   aria-label="API address"

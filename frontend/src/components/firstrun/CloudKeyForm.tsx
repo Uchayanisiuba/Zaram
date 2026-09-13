@@ -35,6 +35,14 @@
  * manifest that reads no files and opens no sockets, and connecting stores
  * configuration. The whole screen is loopback, which is what lets it run
  * before the user has consented to anything.
+ *
+ * **The walk to the key is shown, not linked — 13 September 2026.** For the
+ * free routes the first run leads with (NVIDIA NIM, OpenRouter) the
+ * catalogue carries `keySteps`: where to sign in, which button, what the key
+ * looks like, and what Zaram does with the first question. A link to a
+ * dashboard assumes the person has seen one; most of the people this screen
+ * is for have not. The steps are somebody else's website and are dated by
+ * the manifest, and the last one is always the disclosure.
  */
 import { useEffect, useMemo, useState } from 'react';
 
@@ -201,7 +209,11 @@ export default function CloudKeyForm({ onConnected }: CloudKeyFormProps) {
         </p>
       )}
 
-      {chosen?.keyUrl && <KeyLink url={chosen.keyUrl} />}
+      {chosen && chosen.keySteps.length > 0 ? (
+        <KeyWalkthrough steps={chosen.keySteps} url={chosen.keyUrl} />
+      ) : (
+        chosen?.keyUrl && <KeyLink url={chosen.keyUrl} />
+      )}
 
       <label className="flex flex-col gap-1.5">
         <span className="text-[10px] uppercase tracking-wider" style={labelStyle}>
@@ -247,6 +259,49 @@ export default function CloudKeyForm({ onConnected }: CloudKeyFormProps) {
       {/* "Save", not "Connect" or "Verify". The button says exactly what
           happens, and what happens is that a value is written to disk. */}
       <Muted>Nothing is sent anywhere when you save this.</Muted>
+    </div>
+  );
+}
+
+/**
+ * The steps to a key, numbered, with the page opened from the first one.
+ *
+ * Rule 7g is untouched: nothing is fetched. The person's own browser goes to
+ * the provider, the way it would have from the bare link — this only tells
+ * them what they will find there.
+ */
+function KeyWalkthrough({ steps, url }: { steps: string[]; url: string }) {
+  const [opened, setOpened] = useState(false);
+  return (
+    <div
+      className="rounded-lg border px-3 py-2.5"
+      style={{ borderColor: 'rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.02)' }}
+      data-testid="cloud-key-walkthrough"
+    >
+      <p className="text-[10px] uppercase tracking-wider mb-1.5" style={labelStyle}>
+        Getting a key — no card, a few minutes
+      </p>
+      <ol className="flex flex-col gap-1.5 pl-4 list-decimal">
+        {steps.map((step, i) => (
+          <li key={i} className="text-xs leading-relaxed" style={{ color: 'var(--color-text-muted)' }}>
+            {step}
+            {i === 0 && url && (
+              <>
+                {' '}
+                <button
+                  type="button"
+                  onClick={() => setOpened(openInBrowser(url))}
+                  className="underline underline-offset-2"
+                  style={{ color: 'var(--color-cyan-light)', cursor: 'pointer' }}
+                  data-testid="cloud-key-open"
+                >
+                  {opened ? 'Opened in your browser' : 'Open it'}
+                </button>
+              </>
+            )}
+          </li>
+        ))}
+      </ol>
     </div>
   );
 }

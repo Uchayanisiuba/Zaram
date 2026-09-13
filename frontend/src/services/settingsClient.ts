@@ -100,6 +100,9 @@ export interface CatalogueProvider {
   /** Whether a person can get answers here without paying — for a router,
    *  "some models". The model list settles which. */
   hasFreeTier: boolean;
+  /** How to get a key, step by step, in the person's own browser. Empty when
+   *  the key page is enough. Somebody else's website, dated by the manifest. */
+  keySteps: string[];
 }
 
 export interface ProviderCatalogue {
@@ -128,6 +131,7 @@ export async function fetchProviderCatalogue(): Promise<ProviderCatalogue> {
       auth: String(p.auth ?? ''),
       pricing: String(p.pricing ?? 'unknown'),
       hasFreeTier: p.has_free_tier === true,
+      keySteps: Array.isArray(p.key_steps) ? p.key_steps.map(String) : [],
     })),
   };
 }

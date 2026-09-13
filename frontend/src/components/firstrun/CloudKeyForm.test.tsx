@@ -8,7 +8,7 @@
  * because their terms are bad.
  */
 import { describe, it, expect, afterEach, vi, beforeEach } from 'vitest';
-import { render, screen, cleanup, waitFor } from '@testing-library/react';
+import { render, screen, within, cleanup, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import CloudKeyForm from './CloudKeyForm';
@@ -25,6 +25,22 @@ const catalogue = {
       keyUrl: 'https://openrouter.ai/keys',
       compatibility: 'openai',
       auth: 'bearer',
+      keySteps: [
+        'Open openrouter.ai/keys and sign in.',
+        'Press Create key.',
+        'Paste it below; Zaram will tell you every time a prompt goes.',
+      ],
+    },
+    {
+      id: 'deepseek',
+      displayName: 'DeepSeek',
+      baseUrl: 'https://api.deepseek.com/v1',
+      available: true,
+      note: 'Paid. Prompts are kept.',
+      keyUrl: 'https://platform.deepseek.com/api_keys',
+      compatibility: 'openai',
+      auth: 'bearer',
+      keySteps: [],
     },
     {
       id: 'lm_studio',
@@ -102,6 +118,29 @@ describe('choosing a provider', () => {
     expect(await screen.findByTestId('cloud-key-note')).toHaveTextContent(
       /logged by the provider and may be trained on/,
     );
+  });
+
+  it('walks the person to a free key, step by step, and opens nothing itself', async () => {
+    // A link to a dashboard assumes the person has seen one. The steps say
+    // where to sign in, which button, and what Zaram does with the first
+    // question — and the page is opened by them, from the first step, never
+    // fetched (rule 7g).
+    await choose('openrouter');
+
+    const walk = await screen.findByTestId('cloud-key-walkthrough');
+    const steps = within(walk).getAllByRole('listitem');
+    expect(steps).toHaveLength(3);
+    expect(steps[0]).toHaveTextContent(/Open openrouter\.ai\/keys/);
+    expect(steps[2]).toHaveTextContent(/Zaram will tell you every time/);
+    expect(within(walk).getByTestId('cloud-key-open')).toHaveTextContent('Open it');
+  });
+
+  it('falls back to the bare key page where no walk is written', async () => {
+    await choose('deepseek');
+
+    expect(screen.queryByTestId('cloud-key-walkthrough')).not.toBeInTheDocument();
+    expect(screen.getByText(/Don't have one\?/)).toBeInTheDocument();
+    expect(screen.getByText('https://platform.deepseek.com/api_keys')).toBeInTheDocument();
   });
 
   it('does not hide a provider because its terms are bad', async () => {

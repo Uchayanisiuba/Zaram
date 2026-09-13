@@ -227,6 +227,12 @@ class ProviderEntry:
     #: What it costs to ask. See `Pricing` for why this is a field and not a
     #: sentence in `note`.
     pricing: Pricing = Pricing.UNKNOWN
+    #: How to get a key, as steps a person follows in their own browser —
+    #: where to sign in, which button, what the key looks like. Empty means
+    #: "the key page is enough". These describe somebody else's website and
+    #: go stale the way `key_url` does; the date on the manifest covers them
+    #: too, and a step must never name a model file.
+    key_steps: Tuple[str, ...] = ()
 
     @property
     def available(self) -> bool:
@@ -256,6 +262,7 @@ class ProviderEntry:
             "endpoint_env": self.endpoint_env,
             "pricing": self.pricing.value,
             "has_free_tier": self.has_free_tier,
+            "key_steps": list(self.key_steps),
         }
 
 
@@ -267,6 +274,7 @@ def _openai_compatible(
     *,
     note: str = "",
     pricing: Pricing = Pricing.UNKNOWN,
+    key_steps: Tuple[str, ...] = (),
 ) -> ProviderEntry:
     """An entry for a service reachable through the existing engine.
 
@@ -291,6 +299,7 @@ def _openai_compatible(
         key_env=GENERIC_KEY_ENV,
         endpoint_env=GENERIC_ENDPOINT_ENV,
         pricing=pricing,
+        key_steps=key_steps,
     )
 
 
@@ -373,6 +382,13 @@ PROVIDERS: Tuple[ProviderEntry, ...] = (
         # Priced per model; the listing says which are free and Zaram marks
         # each one — see `ModelInfo.is_free`.
         pricing=Pricing.PER_MODEL,
+        # Read from openrouter.ai on 13 September 2026.
+        key_steps=(
+            "Open openrouter.ai/keys and sign in — an email or a GitHub account is enough; no card.",
+            "Press Create key, give it any name, and leave the credit limit empty.",
+            "Copy the key. It is shown once.",
+            "Paste it below. Models marked :free cost nothing; Zaram labels each one, and will tell you every time a prompt goes.",
+        ),
     ),
     _openai_compatible(
         "deepseek",
@@ -482,6 +498,13 @@ PROVIDERS: Tuple[ProviderEntry, ...] = (
             "you every time one goes."
         ),
         pricing=Pricing.FREE_TIER,
+        # Read from build.nvidia.com on 13 September 2026.
+        key_steps=(
+            "Open build.nvidia.com and sign in — an email is enough; no card.",
+            "Pick any model on the page — a Nemotron is a good first one — and press Get API Key beside the code sample.",
+            "Copy the key. It begins nvapi- and expires after six months.",
+            "Paste it below, then ask one question: Zaram shows exactly what leaves before it goes, and asks once for this provider.",
+        ),
     ),
     _openai_compatible(
         "sambanova",
