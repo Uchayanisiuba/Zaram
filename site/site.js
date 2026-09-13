@@ -376,6 +376,8 @@ function armScene() {
   }
 
   const stars = armStars(scene.querySelector('[data-role="stars"]'));
+  const face = armFace(scene.querySelector('[data-role="avatar-face"]'), scene.querySelector('[data-role="avatar-img"]'));
+  const stage = scene.querySelector('[data-role="orb-stage"]');
 
   function tick() {
     raf = 0;
@@ -385,10 +387,93 @@ function armScene() {
     scene.style.setProperty("--my", my.toFixed(4));
     scene.style.setProperty("--sy", sy.toFixed(1));
     if (stars) stars(mx, my);
+    if (face) face(mx, my, !!(stage && stage.classList.contains("is-working")));
     if (visible && !document.hidden) raf = requestAnimationFrame(tick);
   }
   document.addEventListener("visibilitychange", () => { if (!document.hidden && visible && !raf) tick(); });
   tick();
+}
+
+/** The character's face, drawn live on the visor.
+ *
+ *  The product's face is a dot-matrix display driven by texture cells; this
+ *  is the same face in the same grid, drawn on a canvas over a render whose
+ *  visor is blank. It does three things the still cannot: the eyes look
+ *  toward the pointer (attention, not drift — the head already leans the
+ *  same way), it blinks now and then, and while the demo is working the eyes
+ *  become the thinking pattern the app uses. The rest face is the flat line,
+ *  as in the product: a mascot may smile on the site, but this is the
+ *  embodiment and it reports state.
+ *
+ *  Geometry is measured from the render (900×981): two 8×10 dot blocks and
+ *  a 13-dot line, 12 px pitch, on a head turned a few degrees so the right
+ *  eye sits a little lower. Returns the per-frame draw, or null. */
+function armFace(canvas, img) {
+  if (!canvas || !img) return null;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+
+  // Swap in the blank-visor render; if it fails to load, keep the still.
+  const blank = new Image();
+  blank.decoding = "async";
+  blank.onload = () => { img.src = "img/avatar-blank.webp"; canvas.hidden = false; };
+  blank.src = "img/avatar-blank.webp";
+
+  const PITCH = 12, R = 4.6;
+  const LEFT = { x: 316, y: 249 };      // top-left dot centres
+  const RIGHT = { x: 522, y: 260 };
+  const MOUTH = { x: 385, y: 461, n: 13 };
+  const COLS = 8, ROWS = 10;
+  const COLOUR = "196,205,255";
+
+  let blinkAt = performance.now() + 2600 + Math.random() * 3000;
+  let blinking = 0;                    // 0 open … 1 shut
+  let t0 = performance.now();
+
+  function dot(x, y, a, r = R) {
+    ctx.fillStyle = `rgba(${COLOUR},${a})`;
+    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+  }
+
+  /** One eye: a rounded block of dots, shifted toward the gaze, its rows
+   *  collapsing toward the middle on a blink. */
+  function eye(origin, gx, gy, shut, now, thinking) {
+    const dx = Math.round(gx * 1.6), dy = Math.round(gy * 1.2);   // in dots
+    const open = Math.max(1, Math.round(ROWS * (1 - shut)));
+    const top = Math.floor((ROWS - open) / 2);
+    for (let c = 0; c < COLS; c++) {
+      for (let r = 0; r < ROWS; r++) {
+        // rounded corners: skip the four corner dots
+        const corner = (c === 0 || c === COLS - 1) && (r === 0 || r === ROWS - 1);
+        if (corner) continue;
+        if (r < top || r >= top + open) continue;
+        let a = 0.92;
+        if (thinking) {
+          // a soft wave travelling across the block, the app's "working" face
+          const phase = (now - t0) / 380 - c * 0.55 - r * 0.12;
+          a = 0.28 + 0.62 * (0.5 + 0.5 * Math.sin(phase));
+        }
+        dot(origin.x + (c + dx) * PITCH, origin.y + (r + dy) * PITCH, a);
+      }
+    }
+  }
+
+  return function draw(mx, my, thinking) {
+    const now = performance.now();
+    if (now > blinkAt) {
+      const k = (now - blinkAt) / 140;               // 140 ms down, 140 up
+      blinking = k < 1 ? k : k < 2 ? 2 - k : 0;
+      if (k >= 2) { blinkAt = now + 2600 + Math.random() * 4200; blinking = 0; }
+    }
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.shadowColor = `rgba(${COLOUR},0.55)`; ctx.shadowBlur = 6;
+    eye(LEFT, mx, my, blinking, now, thinking);
+    eye(RIGHT, mx, my, blinking, now, thinking);
+    // the mouth: the flat line at rest; a slightly wider one while thinking
+    const n = thinking ? MOUTH.n - 2 : MOUTH.n;
+    const x0 = MOUTH.x + ((MOUTH.n - n) / 2) * PITCH;
+    for (let i = 0; i < n; i++) dot(x0 + i * PITCH, MOUTH.y, 0.85, R - 0.6);
+  };
 }
 
 /** A field of slow points with depth, on a canvas. About a hundred and
