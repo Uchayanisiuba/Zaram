@@ -12,7 +12,7 @@
  * no tool. The screenshot is served from Zaram's own data directory by name;
  * nothing in the URL is the model's.
  */
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ExternalLink, Square } from 'lucide-react';
 import type { ChatToolCall } from '../../stores/chatStore';
 import { useChatStore } from '../../stores/chatStore';
@@ -27,6 +27,32 @@ export default function AppCard({ call }: { call: ChatToolCall }) {
 
   const image = call.image ? call.image.replace(/\\/g, '/').split('/').pop() : '';
   const src = projectId && image ? `${API}/projects/${encodeURIComponent(projectId)}/screens/${encodeURIComponent(image)}` : '';
+  // **Fetched, never `<img src>` straight to the API.** Every request to the
+  // backend must carry the API credential, and it is installed on `fetch` —
+  // an image element cannot send a header, so the direct form answered 401
+  // and the card showed its own alt text. Seen on screen, 13 September, the
+  // first time a real screenshot reached the card. Read with the credential,
+  // shown as an object URL, released when the card goes.
+  const [blob, setBlob] = useState<string>('');
+  const [failed, setFailed] = useState<string>('');
+  useEffect(() => {
+    if (!src) return undefined;
+    let url = '';
+    const controller = new AbortController();
+    fetch(src, { signal: controller.signal })
+      .then(async (response) => {
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        url = URL.createObjectURL(await response.blob());
+        setBlob(url);
+      })
+      .catch((error: Error) => {
+        if (error.name !== 'AbortError') setFailed(error.message);
+      });
+    return () => {
+      controller.abort();
+      if (url) URL.revokeObjectURL(url);
+    };
+  }, [src]);
 
   async function stop() {
     if (!projectId) return;
@@ -76,12 +102,18 @@ export default function AppCard({ call }: { call: ChatToolCall }) {
           <p className="mb-1 text-[10px]" style={{ color: 'var(--color-text-faint)' }}>
             what Zaram saw{call.target ? ` at ${call.target}` : ''}
           </p>
-          <img
-            src={src}
-            alt="Screenshot of the running app"
-            style={{ maxWidth: '100%', borderRadius: 6, border: '1px solid var(--color-border-subtle)' }}
-            data-testid="app-screenshot"
-          />
+          {blob ? (
+            <img
+              src={blob}
+              alt="Screenshot of the running app"
+              style={{ maxWidth: '100%', borderRadius: 6, border: '1px solid var(--color-border-subtle)' }}
+              data-testid="app-screenshot"
+            />
+          ) : (
+            <p className="text-[11px]" style={{ color: 'var(--color-text-muted)' }} data-testid="app-screenshot-state">
+              {failed ? `The screenshot could not be loaded (${failed}).` : 'Loading the screenshot…'}
+            </p>
+          )}
         </div>
       )}
     </div>

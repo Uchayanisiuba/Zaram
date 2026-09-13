@@ -18,11 +18,125 @@ publishing step over rather than finding another route. `CLAUDE.md`,
 
 ---
 
-## Current state — 12 September 2026
+## Current state — 13 September 2026
 
 *The latest work is first. Earlier sessions follow below.*
 
-### 13 September, latest — slices 7 and 8 built; 9 written; 10 designed. HANDOFF.
+### 13 September, latest — 8 seen, 9 measured, 10 built and seen; four defects found by watching. HANDOFF.
+
+**Read this block first.** Everything below is committed. Measured with
+TabbyAPI serving `Qwen3.8-27B-exl3-2.20bpw` on 1234 and Ollama holding
+`qwen3-14b-16k` and `bge-m3` — the 27B answered everything on screen.
+
+#### Done this session, in the handoff's order
+
+1. **Slice 8 seen on screen** (`docs/CODE-PACK.md` 8): *"Start the app and
+   look at it"* → `list_files`, `start_app`, the running-app line with
+   **Stop**, `look_at_app`, the screenshot card, and a description by the
+   27B that named the seeded 502 and a real charset bug in the demo page.
+   The 27B *is* the local vision model — see below.
+2. **Slice 9 measured** (`docs/CODE-PACK.md` 9): **6 of 8 on the 27B,
+   10:36.** Both failures are the model answering in prose after one read
+   instead of acting. The Ollama 14B is not yet run — it needs the card,
+   which Tabby holds.
+3. **Slice 10 built and seen** (`docs/CODE-PACK.md` 10): `core/pairing.py`
+   has its caller — `core/paired_clients.py`, the `/pairing/*` routes,
+   `POST /memory/recall`, the middleware accepting a paired credential on
+   the memory routes only and logging every call as egress to
+   `client:<name>`; Settings → *Other assistants* with a one-minute code,
+   the list, and Revoke; `zaram_mcp.py`, the stdio MCP server with
+   `recall`/`remember`/`correct`/`projects`, driven end to end through
+   Zaram's own MCP client in `tests/test_the_spine_is_an_mcp_server.py`.
+   Seen: the code issued, redeemed as *Claude Code* and *Cline*, rows
+   appearing, surviving a restart. **Not yet seen: a real Claude Code
+   session holding it.** That is a paste of the printed block away and is
+   the first thing to watch next.
+4. **Two of the maintainer's asks landed the same day.** *Everything works
+   with Tabby*: the OpenAI-compatible discoverer now reads `use_vision`
+   from `/v1/model` beside the window, so a Tabby vision model is one; and
+   a side task — reading a screenshot — prefers the model already in use,
+   then its server, then anywhere else (`select_model_for_task(near=…)`),
+   a preference after the gates and never a server name. *A file sent with
+   a question sits on the question*: chips move into the user's message on
+   send, the composer clears, and the ids keep travelling with follow-ups
+   so scope is unchanged — seen with `lease.txt`, clause 4 then clause 5.
+
+#### Four defects found only by watching, all fixed and pinned
+
+* *"look at it"* → `vision.analyze` → refused for no attachment, on the one
+  kind of project whose tool takes the picture. Vision intents with nothing
+  attached now take the tool plan when a coding project is open.
+* The screenshot card showed its alt text: `<img src>` cannot carry the API
+  credential, 401. `AppCard` fetches with the credential and shows a blob.
+* *"14 attached tools are available"* wore the amber warning triangle —
+  `kind: "tools"` never keyed to a tone in `NoticeCard`.
+* One pairing token in sixty-four began with `-`; argparse read it as an
+  option. Tokens are re-minted until they begin with a letter or digit.
+
+**Suites, and the environment they ran in.** Frontend: 726/726. Backend,
+full, with TabbyAPI serving the 27B and Ollama up: **3673 passed, 11
+failed, 45 skipped, 31 minutes** — and the 31 minutes is itself a finding.
+`measure`-marked tests skipped themselves only when *no* model answered,
+so with Tabby up the eval set ran inside the ordinary suite, and the 27B
+failed at 11:30 a task it had passed at 08:00 with no tool call at all.
+`conftest.py` now makes `measure` opt-in (`-m measure`), which every such
+file already claimed in its docstring. Of the 11: the chokepoint scan
+caught `zaram_mcp.py` opening its own connections (it now refuses any
+non-loopback URL and is listed as local-only on that basis); four in
+`test_forgetting_is_said_out_loud` were a stub that missed
+`ExecutionEngine._budget_for` (bound at import — now resolved at call
+time) and `CapabilityRouter.try_resolve` raising on a `None` registry
+against its own docstring; one was my note naming a model filename, which
+`test_no_second_entrance_to_inference` forbids; and five
+(`test_prompt_prefix_is_stable_between_turns` ×3,
+`test_residency_sees_every_server` ×2) **passed alone** — they read the
+real servers and ran while the eval had them busy. 180/180 across every
+file touched or failed this session, run last. The full suite was not
+re-run after the fixes.
+
+**And one thing seen twice and not explained:** the dev backend started
+with `nohup … &` from a Bash call died silently mid tool-loop, twice, and
+Vite with it the second time. Running it as a tracked background task
+(`run_in_background`) it survived a full loop. Recorded, not understood.
+
+#### What to do next, in order
+
+1. **Attach `zaram_mcp` to a real Claude Code** (paste the block `pair`
+   prints into `.mcp.json`), ask it something the Spine knows, and watch
+   the entry land in Activity as `client:Claude Code`.
+2. **Follow-ups that change an earlier answer — the maintainer's ask,
+   13 September.** What exists: *Edit* on a question (resend from that
+   point), *Ask again* on a reply (regenerate), *Continue* on a stopped
+   task, and per-message model override. What industry converged on and
+   this lacks: **a follow-up under a specific reply that regenerates *that*
+   reply with the correction applied** — Cursor's "fix this", ChatGPT's
+   edit-and-branch, Claude Code's "no, do X instead" — and, where the reply
+   changed files, **the correction re-runs the loop against the same task
+   so the files change too** (`continue_task` with the correction as the
+   next instruction, the checklist carried in, Revert still on the old
+   commits). Design first in `docs/AGENT-UX.md`; the pieces (`PlanRecords`,
+   `continue_task`, `ChangeCard` Revert) already exist. Same for local and
+   cloud — it is a loop property, not a model one.
+3. **MCP for vision, browsing and files — the maintainer's question.** The
+   honest answer, to be written into `docs/AGENT-UX.md`: *browsing* yes,
+   attach a browser MCP server rather than build one, and it goes through
+   the same gate and egress log as any stranger's server; *file context* is
+   already the code pack's own tools and should stay first-party, because
+   the sandbox, the undo and the "generation may never destroy a file" rule
+   are Zaram's to prove; *vision* is a capability of the **model**, not a
+   tool — an MCP server can take a picture (`look_at_app` is one) but only a
+   model can read it, and which model may is the consent-and-locality
+   decision `select_model_for_task` makes. Lean on MCP for reach; keep the
+   gate, the log and the file custody first-party.
+4. **Run slice 9 on the Ollama 14B** with Tabby stopped; record beside the
+   27B. Then try the briefing line *"a task that asks for a change is not
+   done until a file has changed"* and re-run the two failures.
+5. Reduce the 27B's thinking on tool turns: its template defaults
+   `reasoning_effort` to `xhigh`, and one screenshot read took three minutes
+   of thought. A per-request effort on tool-loop turns is the lever.
+6. The locality-per-step column (AGENT-UX "the one column nobody else has").
+
+### 13 September, earlier — slices 7 and 8 built; 9 written; 10 designed.
 
 **Read this block first. It is the handoff for the next session.** The
 session was interrupted by the maintainer mid-verification; everything below

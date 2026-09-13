@@ -132,6 +132,13 @@ class DeviceRegistry:
         """
         moment = now if now is not None else time.time()
         token = secrets.token_urlsafe(_TOKEN_BYTES)
+        # Never leading with `-` or `_`. A token is pasted into a command line
+        # (`python -m zaram_mcp pair <token>`) and one in sixty-four began with
+        # a dash, which argparse read as an option — seen on screen, 13
+        # September 2026, on the second code ever issued. Re-minting costs
+        # nothing and keeps every token a plain argument.
+        while token[0] in "-_":
+            token = secrets.token_urlsafe(_TOKEN_BYTES)
         self._pending[_hash(token)] = _PendingToken(
             token_hash=_hash(token),
             created_at=moment,

@@ -37,6 +37,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import LetterheadSection from '../components/settings/LetterheadSection';
 import ToolsSection from '../components/settings/ToolsSection';
+import PairingSection from '../components/settings/PairingSection';
 import {
   Volume2,
   Shield,
@@ -57,6 +58,7 @@ import {
   Settings as SettingsIcon,
   UserRound,
   Wrench,
+  Link2,
 } from 'lucide-react';
 import SurfaceHeader from '../components/common/SurfaceHeader';
 import AdvancedModelField from '../components/settings/AdvancedModelField';
@@ -1527,6 +1529,18 @@ export default function SettingsWorkspace() {
           icon={<Wrench size={14} style={{ color: 'var(--color-indigo-light)' }} />}
         >
           <ToolsSection Row={Row} />
+        </Section>
+
+        {/* --------------------------------------------------- Other assistants */}
+        {/* The Spine as an MCP server — docs/AGENT-UX.md slice 10. Tools point
+            at the world; this points the other way, at the assistants a
+            person already uses, and lets them hold Zaram's memory. Same
+            section shape, same rule: no menu item. */}
+        <Section
+          title="Other assistants"
+          icon={<Link2 size={14} style={{ color: 'var(--color-indigo-light)' }} />}
+        >
+          <PairingSection Row={Row} />
         </Section>
 
         {/* ----------------------------------------------------- Character */}

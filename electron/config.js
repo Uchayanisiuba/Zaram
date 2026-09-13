@@ -99,6 +99,7 @@ function createConfig(options) {
         '/memory',
         '/models',
         '/obligations',
+        '/pairing',
         '/personalities',
         '/projects',
         '/plans',

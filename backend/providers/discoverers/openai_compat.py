@@ -12,6 +12,7 @@ OpenAI wire format, and it never hardcodes a model name.
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass
 import json
 import logging
 import re
@@ -94,6 +95,15 @@ def _says_nothing_is_loaded(exc: "urllib.error.HTTPError") -> bool:
     return bool(_NOTHING_LOADED.search(body))
 
 
+@dataclass(frozen=True)
+class _Loaded:
+    """One `/v1/model` answer: the loaded model, or nothing known."""
+
+    id: Optional[str] = None
+    window: Optional[int] = None
+    vision: bool = False
+
+
 class OpenAICompatibleAdapter:
     """Discovers models from any OpenAI-compatible ``/v1/models`` endpoint."""
 
@@ -145,10 +155,10 @@ class OpenAICompatibleAdapter:
         # A cloud provider is skipped outright. It has no `/v1/model`, the
         # answer is known in advance, and asking would put a network call on
         # the discovery path for nothing.
-        loaded_id, loaded_window = (
-            (None, None)
+        loaded = (
+            _Loaded()
             if self.kind is ProviderKind.CLOUD_API
-            else await asyncio.to_thread(self._loaded_window, timeout)
+            else await asyncio.to_thread(self._loaded, timeout)
         )
 
         models: List[ModelInfo] = []
@@ -157,42 +167,60 @@ class OpenAICompatibleAdapter:
             if not model_id:
                 continue
             model = self._to_model(model_id, entry)
-            if loaded_window and model_id == loaded_id:
-                model.context_length = loaded_window
+            if model_id == loaded.id:
+                if loaded.window:
+                    model.context_length = loaded.window
+                # The same probe says whether the loaded model can see. Until
+                # it did, `supports_vision` was set by the Ollama discoverer
+                # only, so a vision model served here — the maintainer's own
+                # 27B, loaded with `use_vision: true` — could never be picked
+                # to read a screenshot, and `look_at_app` reported that no
+                # local model could see while one was answering every chat.
+                if loaded.vision:
+                    model.supports_vision = True
+                    model.capabilities = {*model.capabilities, "vision"}
             models.append(model)
         return models
 
-    def _loaded_window(self, timeout: float) -> tuple[Optional[str], Optional[int]]:
-        """The loaded model's id and the window it was loaded with.
+    def _loaded(self, timeout: float) -> "_Loaded":
+        """What the server has *loaded*: its id, its window, and whether it
+        can see. Everything unknown for every failure, and never a partial
+        guess.
 
-        ``(None, None)`` for every failure, and never a partial guess. This is
-        an enrichment: a server that will not say costs a model with no window
-        recorded, which ranks it as unknown rather than as small. Never raises,
-        for the same reason `resident_models` beside it does not — discovery
-        must not fail because one optional field could not be read.
+        This is an enrichment: a server that will not say costs a model with
+        no window recorded, which ranks it as unknown rather than as small,
+        and no vision flag, which keeps it out of the vision shortlist
+        rather than putting a text model in it. Never raises, for the same
+        reason `resident_models` beside it does not — discovery must not fail
+        because one optional field could not be read.
 
-        The window lives under `parameters`, which is where TabbyAPI puts the
-        load settings; `max_seq_len` is its name for what Ollama calls
-        `num_ctx`. Read positively rather than by scanning for anything
-        integer-shaped: a cache size sits in the same object.
+        The fields live under `parameters`, which is where TabbyAPI puts the
+        load settings: `max_seq_len` is its name for what Ollama calls
+        `num_ctx`, and `use_vision` is whether the vision tower was loaded.
+        Read positively rather than by scanning for anything integer-shaped:
+        a cache size sits in the same object.
         """
         try:
             payload = self._get("/v1/model", timeout=timeout)
         except Exception as exc:
-            logger.debug("%s window probe failed: %s", self.provider_id, exc)
-            return None, None
+            logger.debug("%s loaded-model probe failed: %s", self.provider_id, exc)
+            return _Loaded()
         if not isinstance(payload, dict):
-            return None, None
+            return _Loaded()
         model_id = payload.get("id")
         parameters = payload.get("parameters")
         if not model_id or not isinstance(parameters, dict):
-            return None, None
+            return _Loaded()
         window = parameters.get("max_seq_len")
         if not isinstance(window, int) or window <= 0:
             # Zero or absent is unknown, never a window of nothing -- the false
             # zero this codebase has already paid for on `vram_bytes`.
-            return str(model_id), None
-        return str(model_id), window
+            window = None
+        return _Loaded(
+            id=str(model_id),
+            window=window,
+            vision=parameters.get("use_vision") is True,
+        )
 
     async def health(self) -> Dict[str, Any]:
         try:

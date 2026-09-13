@@ -1206,7 +1206,7 @@ class IntentPlanner:
         elif classification.intent_type is IntentType.TOOL or (
             self._coding_project_is_open()
             and classification.intent_type
-            in (IntentType.CODE, IntentType.CONVERSATION, IntentType.FILESYSTEM)
+            in (IntentType.CODE, IntentType.CONVERSATION, IntentType.FILESYSTEM, IntentType.VISION)
             and not has_images
         ):
             # Same shape as the search pair above: gather, then answer with
@@ -1216,9 +1216,18 @@ class IntentPlanner:
             # The second arm is the code pack being reachable by a person: with
             # a coding project open, a question about the code, a file, or
             # nothing in particular is answered with the repository's tools
-            # offered. Image, vision, speech, document and search intents keep
-            # their own plans — a request to draw is not about the code because
-            # a repository happens to be open. See `set_code_project_open`.
+            # offered. Image, speech, document and search intents keep their
+            # own plans — a request to draw is not about the code because a
+            # repository happens to be open. See `set_code_project_open`.
+            #
+            # **Vision is in the list, and only with nothing attached.** Seen
+            # on screen, 13 September 2026: *"start the app and look at it"*
+            # matched "look", became `vision.analyze`, and the dispatcher
+            # refused it — "there is no image attached" — on a project whose
+            # `look_at_app` tool is the thing that takes the picture. With no
+            # attachment the picture can only come from a tool, so the tool
+            # plan is the one reading that can answer; an attached image still
+            # takes the generation path above, which carries it to the model.
             #
             # It degrades well by construction, which is what makes it safe to
             # route here on keywords as noisy as "run" and "execute". With no

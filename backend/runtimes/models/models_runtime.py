@@ -206,7 +206,14 @@ class ModelsRuntime(Runtime):
         if manager is None or self._service is None:
             return None
         try:
-            model = manager.select_model_for_task(requires_vision=True)
+            # The model already answering first, then its server, then any
+            # other local model that can see — `near` in the manager says
+            # why. On the maintainer's machine the chat model on TabbyAPI can
+            # see, and a screenshot read by Ollama instead would load a
+            # second model onto a card that holds one.
+            model = manager.select_model_for_task(
+                requires_vision=True, near=self._selected_model
+            )
         except Exception:  # noqa: BLE001
             return None
         if model is None or model.locality is not CapabilityLocality.LOCAL:

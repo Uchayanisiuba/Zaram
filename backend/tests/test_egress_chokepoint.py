@@ -46,6 +46,13 @@ LOCAL_ONLY = {
     # than trusting its own default -- an exemption written here has to be a
     # fact about the code, not an intention.
     "core/context_budget.py": "Ollama /api/ps on localhost:11434, loopback enforced",
+    # The Spine as an MCP server: a *client* of the Zaram on this machine,
+    # run as a separate process by Claude Code or Cline, with no gate of its
+    # own. `require_loopback` refuses any base URL whose host is not
+    # loopback, so the only bytes it can move are between two processes on
+    # one machine -- and the backend logs every one of those calls as egress
+    # to the paired client. Written down here as a fact about the code.
+    "zaram_mcp.py": "Zaram's own API on 127.0.0.1:8420, loopback enforced",
 }
 
 #: Directories that are not shipped product code.

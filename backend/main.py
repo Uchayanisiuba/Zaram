@@ -86,6 +86,33 @@ from core.api_secret import (  # noqa: E402
     ensure_resolved as _resolve_api_secret,
     matches as _secret_matches,
 )
+import re  # noqa: E402
+from core.paired_clients import PairedClients, PairingError, TOKEN_TTL_SECONDS  # noqa: E402
+
+#: The clients this machine has paired — Claude Code, Cline, a script — each
+#: holding a credential the person issued in Settings and can revoke there.
+#: `core/pairing.py` had the rules and no caller; this is the caller.
+paired_clients = PairedClients()
+
+#: What a paired client may reach, and nothing else. The Spine as a service:
+#: recall, remember, correct, and the project list needed to scope them.
+#: Everything else — the egress log, the policy, the settings, `/health` with
+#: its description of the setup — stays the owner's interface's alone. A
+#: paired client is a *named* client of the memory, not a second owner.
+PAIRED_CLIENT_ROUTES: tuple[tuple[str, "re.Pattern[str]"], ...] = tuple(
+    (method, re.compile(pattern))
+    for method, pattern in (
+        ("POST", r"^/memory/recall$"),
+        ("POST", r"^/memory$"),
+        ("POST", r"^/memory/[^/]+/correct$"),
+        ("GET", r"^/memory/[^/]+$"),
+        ("GET", r"^/projects$"),
+    )
+)
+
+
+def _paired_client_may(method: str, path: str) -> bool:
+    return any(m == method and p.match(path) for m, p in PAIRED_CLIENT_ROUTES)
 
 # At import, not on first use. `matches()` never resolves the credential for a
 # request that carries none, so a backend that only ever sees unauthenticated
@@ -139,24 +166,96 @@ class RequireApiSecret:
                 presented = value.decode("latin-1")
                 break
 
-        if not _secret_matches(presented):
-            body = (
-                b'{"detail":"Zaram\'s API requires the credential this machine\'s '
-                b'Zaram was started with. Loopback is a network boundary, not an '
-                b'identity one."}'
-            )
-            await send({
-                "type": "http.response.start",
-                "status": 401,
-                "headers": [
-                    (b"content-type", b"application/json"),
-                    (b"content-length", str(len(body)).encode()),
-                ],
-            })
-            await send({"type": "http.response.body", "body": body})
-            return
+        method = scope.get("method", "")
+        path = scope.get("path", "")
 
-        await self.app(scope, receive, send)
+        # **The one door with no credential behind it: redeeming a pairing
+        # token.** A client arriving to pair holds nothing yet but the token
+        # the person just issued in Settings — single-use, a minute long,
+        # checked by the route. Requiring the API secret here would mean the
+        # only thing that can pair is the thing that already has the secret.
+        if method == "POST" and path == "/pairing/redeem":
+            return await self.app(scope, receive, send)
+
+        if _secret_matches(presented):
+            return await self.app(scope, receive, send)
+
+        # **A paired client.** Its credential came from `core/pairing.py` —
+        # hashed at rest, constant-time compared, revocable in Settings — and
+        # it opens the memory routes only. Not the egress log, not the policy,
+        # not `/health`: a named client of the Spine, never a second owner.
+        client = paired_clients.verify(presented) if presented else None
+        if client is not None:
+            if not _paired_client_may(method, path):
+                return await _refuse(
+                    send, 403,
+                    f"{client.name} is paired for memory — recall, remember and "
+                    f"correct — and may not reach {method} {path}.",
+                )
+            scope.setdefault("state", {})["paired_client"] = client
+            # Rule 3. Facts handed to another process have left this one, so
+            # every call is an egress entry addressed to that client, with the
+            # bytes of the *response* counted — that is what left. Logged by
+            # wrapping `send`, never by buffering it: `/chat` streams and this
+            # must never hold a body.
+            sent = 0
+
+            async def counting_send(message):
+                nonlocal sent
+                if message["type"] == "http.response.body":
+                    sent += len(message.get("body") or b"")
+                    if not message.get("more_body", False):
+                        _log_client_egress(client, method, path, sent)
+                await send(message)
+
+            return await self.app(scope, receive, counting_send)
+
+        return await _refuse(
+            send, 401,
+            "Zaram's API requires the credential this machine's Zaram was "
+            "started with, or one issued to a paired client in Settings. "
+            "Loopback is a network boundary, not an identity one.",
+        )
+
+
+async def _refuse(send, status: int, detail: str) -> None:
+    body = json.dumps({"detail": detail}).encode("utf-8")
+    await send({
+        "type": "http.response.start",
+        "status": status,
+        "headers": [
+            (b"content-type", b"application/json"),
+            (b"content-length", str(len(body)).encode()),
+        ],
+    })
+    await send({"type": "http.response.body", "body": body})
+
+
+def _log_client_egress(client, method: str, path: str, response_bytes: int) -> None:
+    """One egress entry per call from a paired client.
+
+    `host` is `client:<name>` so the log reads *what left, to whom* in the
+    same column it uses for a cloud provider, and the Settings row for that
+    client can be built from the same log rather than a second count.
+    """
+    try:
+        from core.egress import get_gate
+        from core.egress.log import KIND_CLIENT
+
+        get_gate().log.append(
+            host=f"client:{client.name}",
+            method=method,
+            url=path,
+            body=None,
+            decision="allowed",
+            reason=f"paired client {client.name!r} ({client.id})",
+            source="pairing",
+            kind=KIND_CLIENT,
+            byte_count=response_bytes,
+            meta={"client_id": client.id, "response_bytes": response_bytes},
+        )
+    except Exception:  # noqa: BLE001 - the log must never take the request down
+        logging.getLogger(__name__).exception("could not log a paired client's call")
 
 
 app.add_middleware(RequireApiSecret)
@@ -2889,6 +2988,142 @@ async def decide_egress_pending(confirmation_id: str, decision: EgressDecision):
         "approved": decision.approved,
         "edited": decision.approved and decision.body is not None,
     }
+
+
+# --------------------------------------------------------------------------- #
+# The Spine as a service — recall for a paired client, and pairing itself.
+#
+# `docs/AGENT-UX.md` slice 10: *be the memory they attach*. Claude Code, Cline
+# and Kilo each keep their own memory and none of them is the user's; Zaram's
+# is, and the way to make it theirs everywhere is to let those clients call it.
+# `zaram_mcp.py` is the stdio server they attach; these are the routes it
+# speaks to, opened to a paired client by `RequireApiSecret` and to nobody
+# else without the owner's credential.
+# --------------------------------------------------------------------------- #
+
+
+class MemoryRecall(BaseModel):
+    """A question a client wants the Spine's answer to."""
+
+    query: str
+    #: Rule 7i: this project plus global, or every scope when absent.
+    project_id: str | None = None
+    limit: int = 6
+
+
+@app.post("/memory/recall")
+async def recall_memory(body: MemoryRecall):
+    """What the Spine knows that bears on a question, with provenance.
+
+    **The same recall the engine runs, not a second one.** Same retriever,
+    same floor (`ExecutionEngine.MIN_RECALL_SCORE`, a cosine) applied to
+    `relevance` and never to the ranking blend, same cut. A client reading
+    this gets exactly the facts Zaram itself would have been given for the
+    question — which is the claim: one memory, whichever model is asking.
+
+    Rule 2: every fact carries its provenance — `source`, `origin` and its id,
+    which is what `correct` takes. A client that cites nothing has the same
+    bug a reply that cites nothing has, and this hands it what it needs not
+    to.
+    """
+    if not kernel.memory_runtime:
+        raise HTTPException(status_code=503, detail="Memory runtime not available")
+    query = (body.query or "").strip()
+    if not query:
+        raise HTTPException(status_code=400, detail="There was nothing to recall for.")
+    limit = max(1, min(int(body.limit or 6), 25))
+
+    from core.execution_engine import ExecutionEngine, _relevance_of
+
+    scope = _scope_for_project(body.project_id)
+    results = await kernel.memory_runtime.retrieve(
+        query=query,
+        max_results=ExecutionEngine.RECALL_CANDIDATES,
+        scope=scope,
+    )
+    floor = ExecutionEngine.MIN_RECALL_SCORE
+    kept = sorted(
+        (r for r in results if _relevance_of(r) >= floor),
+        key=_relevance_of,
+        reverse=True,
+    )[:limit]
+
+    def fact(result):
+        record = result.record
+        return {
+            "id": record.id,
+            "content": record.content,
+            "relevance": round(_relevance_of(result), 4),
+            "scope": getattr(record, "scope", None),
+            "origin": getattr(getattr(record, "origin", None), "value", None),
+            "source": getattr(record, "source", None),
+            "created_at": getattr(record, "created_at", None),
+        }
+
+    return {
+        "query": query,
+        "scope": scope,
+        "threshold": floor,
+        "candidates": len(results),
+        "facts": [fact(r) for r in kept],
+    }
+
+
+class PairingRedeem(BaseModel):
+    token: str
+    name: str = ""
+
+
+@app.post("/pairing/token")
+async def issue_pairing_token():
+    """A one-time code for a new client, shown once in Settings.
+
+    Single-use and a minute long — `core/pairing.py` says why each. The
+    person pastes it into the client's `pair` command; the client redeems it
+    below and holds the credential from then on.
+    """
+    return {
+        "token": paired_clients.issue_token(),
+        "expires_in": TOKEN_TTL_SECONDS,
+        "command": "python -m zaram_mcp pair <token> --name \"Claude Code\"",
+    }
+
+
+@app.post("/pairing/redeem")
+async def redeem_pairing_token(body: PairingRedeem):
+    """The token becomes a named client and its credential — returned once.
+
+    The only route the credential middleware lets through unauthenticated,
+    because the caller has nothing yet but this token. Nothing here can
+    return the credential a second time: only its hash is kept.
+    """
+    try:
+        client, credential = paired_clients.redeem(body.token, name=body.name)
+    except PairingError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {
+        **client.to_dict(),
+        "credential": credential,
+        "note": (
+            "Keep this credential where the client stores its own settings. "
+            "Zaram cannot show it again; revoke it in Settings and pair again "
+            "if it is lost."
+        ),
+    }
+
+
+@app.get("/pairing/clients")
+async def list_paired_clients():
+    """Every client ever paired, revoked ones included and marked."""
+    return {"clients": [c.to_dict() for c in paired_clients.clients()]}
+
+
+@app.delete("/pairing/clients/{client_id}")
+async def revoke_paired_client(client_id: str):
+    """Immediate. The next call from that client is refused."""
+    if not paired_clients.revoke(client_id):
+        raise HTTPException(status_code=404, detail="No active client with that id")
+    return {"revoked": client_id}
 
 
 @app.get("/memory/{record_id}")

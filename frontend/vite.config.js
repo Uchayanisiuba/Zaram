@@ -119,6 +119,7 @@ export default defineConfig(({ command }) => ({
       '/egress': { target: BACKEND, changeOrigin: true },
       '/artifacts': { target: BACKEND, changeOrigin: true },
       '/tools': { target: BACKEND, changeOrigin: true },
+      '/pairing': { target: BACKEND, changeOrigin: true },
       '/letterhead': { target: BACKEND, changeOrigin: true },
       '/projects': { target: BACKEND, changeOrigin: true },
       '/plans': { target: BACKEND, changeOrigin: true },

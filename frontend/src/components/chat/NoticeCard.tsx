@@ -69,6 +69,12 @@ const TONES: Record<string, { Icon: typeof AlertTriangle; color: string }> = {
   // spent its reading allowance, and an amber triangle over "here is what I
   // found so far" would train the warning away for the cases that need it.
   tool_loop: { Icon: Wrench, color: 'var(--color-text-muted, #94a3b8)' },
+  // "14 attached tools are available for this question" — the disclosure the
+  // engine makes before using somebody's attached servers. Information, not a
+  // caution; it rendered with the amber triangle for a week because the kind
+  // was sent and never keyed here, which is the third case the note above
+  // predicted. Asked about on screen, 13 September: "why the caution symbol".
+  tools: { Icon: Wrench, color: 'var(--color-text-muted, #94a3b8)' },
   // The conversation outgrew the model's window, so the earliest exchanges are
   // no longer in front of it. Neutral for the same reason `tool_loop` is:
   // nothing failed, a bounded window was reached, and an amber triangle would

@@ -1720,8 +1720,18 @@ class ExecutionEngine:
         return str(picked) if picked else None
 
     def _budget_for(self, model: str | None) -> ContextBudget:
-        """`budget_for`, against the model that will actually answer."""
-        return budget_for(self._effective_model(model))
+        """`budget_for`, against the model that will actually answer.
+
+        Resolved at call time, like the import inside
+        `_augment_with_conversation`, so a test that pins the window by
+        patching `core.context_budget.budget_for` pins it here too. Bound at
+        import, this reached the developer's real servers from four tests
+        that believed they had stubbed it — seven minutes and a `None`
+        registry, found 13 September.
+        """
+        from core.context_budget import budget_for as measure
+
+        return measure(self._effective_model(model))
 
     def _park(
         self,

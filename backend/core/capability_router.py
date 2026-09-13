@@ -104,10 +104,16 @@ class CapabilityRouter:
                 ) from exc
 
     def try_resolve(self, capability_id: str) -> Runtime | None:
-        """Attempt to resolve a capability, returning None on failure."""
+        """Attempt to resolve a capability, returning None on failure.
+
+        A router with no registry behind it is a failure to resolve, not a
+        crash: `ExecutionEngine._effective_model` asks this on every budget
+        and is built without a registry in a dozen tests. It raised
+        `AttributeError` there and the docstring above was not true.
+        """
         try:
             return self.resolve(capability_id)
-        except CapabilityResolutionError:
+        except (CapabilityResolutionError, AttributeError):
             return None
 
     def resolve_all(self, capability_ids: list[str]) -> dict[str, Runtime]:

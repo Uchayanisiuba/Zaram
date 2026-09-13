@@ -63,3 +63,28 @@ class TestTheProjectDecides:
 
         planner.set_code_project_open(boom)
         assert "mcp.list_tools" not in _ids(planner.create_plan(PLAIN[0]))
+
+
+class TestLookingAtTheAppIsATool:
+    """Seen on screen, 13 September 2026: "start the app and look at it" hit
+    the vision keywords, became `vision.analyze`, and was refused for having
+    no image attached — on the one kind of project whose `look_at_app` tool
+    is what takes the picture. With nothing attached, a tool is the only
+    place a picture can come from."""
+
+    LOOK = "Start the app and look at it. Tell me what is on the page and whether anything is wrong."
+
+    def test_open_it_reaches_the_tools(self):
+        planner = IntentPlanner()
+        planner.set_code_project_open(lambda: True)
+        assert _ids(planner.create_plan(self.LOOK)) == ["mcp.list_tools", "reasoning.generate"]
+
+    def test_closed_it_is_still_refused_as_a_picture_nobody_gave(self):
+        planner = IntentPlanner()
+        planner.set_code_project_open(lambda: False)
+        assert _ids(planner.create_plan(self.LOOK)) == ["vision.analyze"]
+
+    def test_an_attached_screenshot_still_goes_to_the_model_with_it(self):
+        planner = IntentPlanner()
+        planner.set_code_project_open(lambda: True)
+        assert _ids(planner.create_plan(self.LOOK, has_images=True)) == ["reasoning.generate"]

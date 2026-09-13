@@ -668,7 +668,7 @@ more items; Go remembered on the task. Seen: the list ticking live, the
 model adding a step it discovered, the pause, and the resume committing.
 `tests/test_the_plan_is_a_checklist.py`.
 
-### 8 — run it and look at it. Built 13 September; not yet seen on screen.
+### 8 — run it and look at it. Built 13 September; seen on screen 13 September.
 
 `packs/code/apps.py`: `start_app`, `stop_app`, `get_app_status`,
 `read_app_log`, `look_at_app`. A managed process the person can stop; a
@@ -678,16 +678,100 @@ read by a local vision model when one is installed and honest when none is.
 `tests/test_the_app_can_run_and_be_looked_at.py`, including a real
 screenshot.
 
-### 9 — the eval set. Written 13 September; not yet run.
+**Seen, on the TabbyAPI 27B, 13 September**: *"Start the app and look at
+it"* on a seeded page → `list_files`, `start_app` (`npm:dev`), the
+running-app line with **Stop**, `look_at_app`, the screenshot card, and a
+description that named the seeded 502 banner and a real defect nobody
+seeded — the page was served without a charset, so `€` and `'` were
+mojibake, and the model said so. Three defects found by watching it, all
+fixed the same day:
+
+* *"look at it"* classified as a vision intent and was refused for having
+  no image attached — on the one kind of project whose tool takes the
+  picture. With a coding project open and nothing attached, a vision intent
+  now takes the tool plan (`core/planner.py`,
+  `tests/test_a_coding_project_offers_its_tools.py`).
+* The screenshot card showed its alt text: an `<img src>` cannot carry the
+  API credential, so the picture answered 401. The card fetches it with the
+  credential and shows an object URL (`AppCard.tsx`).
+* *"14 attached tools are available for this question"* wore the amber
+  warning triangle — `kind: "tools"` was sent and never keyed to a tone
+  (`NoticeCard.tsx`).
+
+**And the vision model was there all along.** *"No local vision model is
+installed"* was true of Ollama and false of the machine: the 27B on
+TabbyAPI is loaded with `use_vision: true`, and the OpenAI-compatible
+discoverer read `/v1/model` for the window and not for that flag. It reads
+both now (`tests/test_a_second_server_can_see.py`), and a side task prefers
+the model already in use, then its server, then anywhere else —
+`select_model_for_task(near=…)`, a preference after the gates, never a
+server name (`tests/test_vision_gate.py`). What still costs: the 27B's chat
+template defaults reasoning effort to `xhigh`, so reading one screenshot
+took about three minutes of thinking before a paragraph of answer.
+
+### 9 — the eval set. Written 13 September; first numbers 13 September.
 
 `tests/test_eval_bounded_coding_tasks.py`, eight bounded tasks through the
-real loop with mechanical checkers. Run with `-m measure` on the TabbyAPI
-27B and the Ollama 14B and record the numbers here.
+real loop with mechanical checkers. Run with `-m measure`.
 
-### 10 — next: pairing, then the Spine as an MCP server
+**Measured — TabbyAPI, `Qwen3.8-27B-exl3-2.20bpw`, 65k window, 13
+September 2026, Ollama holding only `bge-m3` beside it: 6 of 8, 10:36
+total.**
 
-Designed in `docs/AGENT-UX.md`; `core/pairing.py` has no caller and must
-get one before the server, or the memory layer ships with the door open.
+| task | result | time | calls |
+|---|---|---|---|
+| fix_failing_test | PASS | 118s | 8 — plan, plan, run_command, plan, read_lines, edit_file, plan, run_command |
+| add_function_and_test | PASS | 197s | 8 — plan, read_lines ×2, plan, edit_file, plan, edit_file, run_command |
+| edit_unnamed_file_via_map | **FAIL** — greet.py not changed | 30s | 1 — search_code |
+| new_file_in_empty_repo | PASS | 74s | 2 — list_files, write_file |
+| rename_across_files | PASS | 83s | 4 — search_code, edit_file ×3 |
+| unknown_library_api | **FAIL** — did not use the real API | 44s | 2 — list_files, read_library_docs |
+| answer_from_code_without_changing_it | PASS | 51s | 3 — find_symbol, search_code, read_lines |
+| refuses_what_it_cannot_do_honestly | PASS | 33s | 0 |
+
+Both failures are the same shape and it is not a tooling one: the model
+made one or two reads and then *answered in prose* instead of acting —
+after `search_code` found the file, and after `read_library_docs` returned
+the real signature. The loop ended because the reply carried no tool call,
+which is the loop working as designed. The next thing to try is a
+briefing line for a task that names a change: *a task that asks for a
+change is not done until a file has changed*. The `plan` tool is used
+freely (four times in the first task) and costs a round each; whether that
+is worth it on the 27B's `xhigh` reasoning is a measurement for the next
+run. **The Ollama 14B has not been run yet** — it needs the Tabby server
+stopped to get the card, and this session did not stop it.
+
+### 10 — pairing, then the Spine as an MCP server. Built 13 September; pairing seen on screen.
+
+`core/pairing.py` got its caller. `core/paired_clients.py` persists the
+registry's devices to SQLite under `data_dir()`; `RequireApiSecret` in
+`main.py` accepts a paired credential on the memory routes and nothing else
+— `POST /memory/recall`, `POST /memory`, `POST /memory/{id}/correct`,
+`GET /memory/{id}`, `GET /projects` — refusing the rest with a sentence
+that names the caller; every call from a paired client is an egress entry
+addressed to `client:<name>` with the bytes of the *response* counted, and
+never the facts themselves. `POST /pairing/redeem` is the one route with
+no credential behind it, because the caller has nothing yet but the token.
+Settings gained *Other assistants*: a one-time code with a countdown, the
+list with last-use and Revoke, and the code disappears the moment it is
+used (`PairingSection.tsx`). One defect found by pairing on screen: one
+token in sixty-four began with `-` and argparse read it as an option;
+tokens are re-minted until they start with a letter or digit.
+
+`zaram_mcp.py` is the server: stdio JSON-RPC in the standard library, four
+tools — `recall`, `remember`, `correct`, `projects` — each an HTTP call to
+the running Zaram as the paired client. `python -m zaram_mcp pair <token>
+--name "Claude Code"` prints the credential once and the `.mcp.json` block
+to paste. Tested for real: a live Zaram on a free port, the token redeemed
+over HTTP, the server spawned and driven through Zaram's **own** MCP
+client (`tests/test_the_spine_is_an_mcp_server.py`); the routes and the
+allow-list in `tests/test_a_paired_client_reaches_the_memory.py`.
+
+Seen on screen: the code issued in Settings, redeemed from a terminal as
+*Claude Code* and again as *Cline*, both rows appearing with "used just
+now", both surviving a backend restart. **Not yet seen:** a real Claude
+Code session holding it — that is the next thing to watch, and it is a
+paste of the printed block away.
 
 `docs/AGENT-UX.md`, written tonight, is the study and the decision: a `plan`
 tool, the checklist on `PlanRecords`, a card under the reply that ticks as

@@ -181,7 +181,14 @@ class TestTheLook:
         code = CodeTools(lambda: node_app, app=app, runs_granted=lambda: True)
         result = code.call_tool(LOOK_AT_APP, {"url": "http://127.0.0.1:3000"})
         assert result["description"] is None
-        assert "ollama pull" in result["note"] and "GB" in result["note"]
+        # The fix, with its size, and both local routes — never a model
+        # filename, which `test_no_second_entrance_to_inference.py` forbids in
+        # a sentence shown to a person. This used to demand `ollama pull
+        # <model>` and contradicted that rule; the two were reconciled on 13
+        # September when the Tabby route turned out to be the one that worked.
+        note = result["note"]
+        assert "Ollama" in note and "TabbyAPI" in note and "GB" in note
+        assert "never leaves the machine" in note
         assert Path(result["image"]).is_file()
 
     def test_the_grant_covers_it_and_status_needs_none(self, node_app, tmp_path_factory):

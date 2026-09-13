@@ -62,6 +62,21 @@ LOG_LINES = 300
 URL_WAIT_SECONDS = 15.0
 #: How long a screenshot may take, including the page's own load.
 SCREENSHOT_SECONDS = 40
+
+#: Said when no *local* model can see. Both routes are named because both are
+#: real on the maintainer's machine: a vision model loaded in an
+#: OpenAI-compatible server (TabbyAPI with `use_vision: true`) is found by
+#: discovery, and so is one pulled into Ollama. Naming only the Ollama route
+#: told someone whose 27B could already see to download 6 GB. No model
+#: filename here — `tests/test_no_second_entrance_to_inference.py` forbids
+#: naming one in a sentence shown to a person, and it caught this constant.
+NO_LOCAL_VISION = (
+    "No local vision model is available, so Zaram cannot read the screenshot itself; "
+    "it is saved and shown to the person. Either load a vision-capable model in the "
+    "local server Zaram already uses (TabbyAPI: a model with `use_vision` on) or pull "
+    "one into Ollama (a 7B vision model is about 6 GB, one time). Either way the page "
+    "never leaves the machine."
+)
 SCREENSHOT_WIDTH = 1280
 SCREENSHOT_HEIGHT = 900
 
@@ -403,10 +418,7 @@ class AppTools:
         if self._describe is None:
             result["description"] = None
             result["note"] = (
-                "No local vision model is installed, so Zaram cannot read the screenshot itself; "
-                "it is saved and shown to the person. Installing one — for example "
-                "`ollama pull qwen2.5vl:7b` (about 6 GB, one time) — lets Zaram read pages here, "
-                "and the page never leaves the machine."
+                NO_LOCAL_VISION
             )
             return result
         try:
@@ -416,5 +428,5 @@ class AppTools:
             result["note"] = f"the vision model could not read it: {exc}"
         result["description"] = described
         if described is None and "note" not in result:
-            result["note"] = "No local vision model is available to read the screenshot; it is saved and shown to the person."
+            result["note"] = NO_LOCAL_VISION
         return result

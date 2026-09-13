@@ -68,6 +68,9 @@ GENESIS_HASH = "0" * 64
 #: Marks a row that records a retention prune rather than an outbound request.
 KIND_REQUEST = "request"
 KIND_RETENTION = "retention"
+#: A call from a paired client — see `core/paired_clients.py`. What left was
+#: the response, addressed to `client:<name>`.
+KIND_CLIENT = "client"
 
 
 def _canonical(payload: dict[str, Any]) -> str:
@@ -205,12 +208,22 @@ class EgressLog:
         source: str,
         meta: dict[str, Any] | None = None,
         kind: str = KIND_REQUEST,
+        byte_count: int | None = None,
     ) -> EgressEntry:
         """Record one outbound request. The only way to write to this log.
 
         Returns the stored entry, including its position in the hash chain.
+
+        `byte_count` is measured from the URL and body unless the caller
+        knows better. A paired client's call is the case: what leaves is
+        the *response* — the facts handed to another process — and the
+        request path says nothing about its size. The facts themselves are
+        not written here: the log would become a second copy of the Spine,
+        which is the retention liability `CLAUDE.md` names, so it records
+        how much left and to whom.
         """
-        byte_count = len(url.encode("utf-8")) + (len(body.encode("utf-8")) if body else 0)
+        if byte_count is None:
+            byte_count = len(url.encode("utf-8")) + (len(body.encode("utf-8")) if body else 0)
         with self._lock, self._connect() as conn:
             row = conn.execute(
                 "SELECT entry_hash FROM egress ORDER BY row DESC LIMIT 1"

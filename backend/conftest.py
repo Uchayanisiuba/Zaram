@@ -85,3 +85,33 @@ def _isolate_user_settings(tmp_path_factory):
     path = tmp_path_factory.mktemp("zaram-settings") / "settings.json"
     set_user_settings_path(str(path))
     yield
+
+
+def pytest_configure(config):
+    config.addinivalue_line(
+        "markers",
+        "measure: drives a real resident model; runs only when asked for with -m measure",
+    )
+
+
+def pytest_collection_modifyitems(config, items):
+    """`measure` is opt-in, not "whenever a model happens to be up".
+
+    Every file that wears the marker says "run with ``-m measure``" in its own
+    docstring, and until 13 September 2026 that was not what happened: the
+    tests skipped themselves only when no model answered, so on a machine
+    with TabbyAPI serving they ran inside the ordinary suite. The eval set
+    made that cost visible — eight model-driven tasks at minutes each, and a
+    27B that passed a task at 08:00 and failed the same task at 11:30 with no
+    tool call at all. A suite that takes a different amount of time and
+    reaches a different verdict depending on which server is up is not a
+    suite; it is a measurement dressed as one. `CLAUDE.md`: say which
+    environment you measured in — and keep the two apart.
+    """
+    expr = config.getoption("-m") or ""
+    if "measure" in expr:
+        return
+    skip = pytest.mark.skip(reason="a measurement; run with -m measure")
+    for item in items:
+        if "measure" in item.keywords:
+            item.add_marker(skip)

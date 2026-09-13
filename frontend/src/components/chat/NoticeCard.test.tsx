@@ -202,3 +202,20 @@ describe('the cloud offer', () => {
     expect(screen.queryByTestId('notice-try-cloud')).toBeNull();
   });
 });
+
+describe('the tools disclosure', () => {
+  // "14 attached tools are available for this question" is the engine saying
+  // whose servers it is about to use. It is information — and it wore the
+  // amber triangle for a week because `kind: 'tools'` was sent and never keyed
+  // to a tone. Asked about on screen, 13 September: "why the caution symbol".
+  it('is not a warning', () => {
+    render(
+      <NoticeCard
+        notice={notice({ kind: 'tools', action: '', content: '14 attached tools are available for this question.' })}
+      />,
+    );
+    const card = screen.getByTestId('chat-notice');
+    expect(card.getAttribute('data-kind')).toBe('tools');
+    expect(card.getAttribute('data-tone')).toBe('neutral');
+  });
+});

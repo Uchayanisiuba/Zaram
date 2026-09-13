@@ -290,11 +290,19 @@ time. **A status claim in this file is the one thing here that goes stale**;
 `docs/MILESTONES.md` is the authority on status and this file on the rules, and
 where the two disagree the code settles it.
 
-Two things it still does **not** do, and they are the honest remainder. The
+One thing it still does **not** do, and it is the honest remainder. The
 development file fallback under `data_dir()` is a secret at rest, readable by
 anything that can read the directory — weaker than the packaged path and
-documented as such in the module rather than glossed. And `core/pairing.py`,
-the credential a second *device* needs, still has no caller.
+documented as such in the module rather than glossed.
+
+**`core/pairing.py` has its caller — 13 September 2026.** This paragraph
+read *"still has no caller"* until then; `core/paired_clients.py` persists
+the registry, `RequireApiSecret` accepts a paired credential on the memory
+routes and nothing else, Settings issues and revokes, and `zaram_mcp.py` is
+the second client that holds one. Every call a paired client makes is an
+egress entry addressed to `client:<name>` — the same rule 3, applied to a
+process. `docs/CODE-PACK.md` slice 10 has the shape; the status lives in
+`docs/MILESTONES.md`, not here.
 
 **`X-Zaram-Client` is a label, not a credential.** It is sent by the interface
 and enforced nowhere. Never reason as though it were a check.

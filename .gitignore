@@ -80,6 +80,8 @@ backend/spine.db*
 # actually said to each other, which is the most personal thing in the product
 # after the egress log. Never committed.
 conversations.db
+paired-clients.db
+backend/paired-clients.db
 conversations.db-journal
 conversations.db-wal
 conversations.db-shm

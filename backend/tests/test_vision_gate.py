@@ -274,3 +274,67 @@ class TestResidencyDoesNotAnswerACapabilityQuestion:
 
         assert chosen is not None
         assert chosen.display_name == "small:7b"
+
+
+class TestASideTaskStaysWhereTheWorkIs:
+    """`near`: the model in use first, then its server, then anywhere else.
+
+    Asked for on 13 September 2026 by the maintainer, whose chat model on
+    TabbyAPI can see. Without this a screenshot went to whichever sighted
+    model ranked first — an Ollama pull on a card already holding the 27B —
+    when the model answering the conversation could have read it.
+    """
+
+    @staticmethod
+    def served(name: str, *, provider: str, endpoint: str, vision: bool, size=None) -> ModelInfo:
+        return ModelInfo(
+            id=f"{provider}:{name}",
+            display_name=name,
+            provider=provider,
+            category=ModelCategory.LLM,
+            size_bytes=size,
+            supports_vision=vision,
+            capabilities={"completion", "vision"} if vision else {"completion"},
+            locality=CapabilityLocality.LOCAL,
+            available=True,
+            data_policy=DataPolicy.NEVER_LEAVES_DEVICE,
+            endpoint=endpoint,
+        )
+
+    def test_the_model_in_use_reads_its_own_screenshot(self, manager):
+        tabby = "http://127.0.0.1:1234"
+        stock(
+            manager,
+            # Smaller, sighted, on Ollama: would win the plain ranking.
+            model("qwen2.5vl:7b", vision=True, size=6_000_000_000),
+            self.served("Qwen3.8-27B", provider="lm_studio", endpoint=tabby, vision=True),
+        )
+        assert manager.select_model_for_task(requires_vision=True).display_name == "qwen2.5vl:7b"
+        chosen = manager.select_model_for_task(requires_vision=True, near="lm_studio:Qwen3.8-27B")
+        assert chosen.display_name == "Qwen3.8-27B"
+
+    def test_then_its_server_then_the_rest(self, manager):
+        tabby = "http://127.0.0.1:1234"
+        stock(
+            manager,
+            model("qwen2.5vl:7b", vision=True, size=6_000_000_000),
+            self.served("text-27B", provider="lm_studio", endpoint=tabby, vision=False),
+            self.served("sighted-8B", provider="lm_studio", endpoint=tabby, vision=True),
+        )
+        # The model in use cannot see, so it is gated out; its neighbour on
+        # the same server is preferred over the Ollama model.
+        chosen = manager.select_model_for_task(requires_vision=True, near="lm_studio:text-27B")
+        assert chosen.display_name == "sighted-8B"
+
+    def test_it_is_a_preference_and_never_a_gate(self, manager):
+        stock(
+            manager,
+            model("qwen2.5vl:7b", vision=True, size=6_000_000_000),
+            self.served("text-27B", provider="lm_studio", endpoint="http://127.0.0.1:1234", vision=False),
+        )
+        # Nothing on the in-use server can see: the answer comes from elsewhere
+        # rather than not at all.
+        chosen = manager.select_model_for_task(requires_vision=True, near="lm_studio:text-27B")
+        assert chosen.display_name == "qwen2.5vl:7b"
+        # And an unknown `near` changes nothing.
+        assert manager.select_model_for_task(requires_vision=True, near="nobody:here").display_name == "qwen2.5vl:7b"

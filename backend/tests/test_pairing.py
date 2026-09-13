@@ -197,3 +197,11 @@ class TestListingAndHousekeeping:
         _, credential = registry.redeem(registry.issue_token(now=NOW), now=NOW)
         registry.purge_expired_tokens(now=NOW + 10_000)
         assert registry.verify(credential) is not None
+
+
+def test_a_token_is_always_a_plain_command_line_argument():
+    """One in sixty-four began with `-` and argparse read it as an option."""
+    registry = DeviceRegistry()
+    tokens = [registry.issue_token() for _ in range(500)]
+    assert all(t[0] not in "-_" for t in tokens)
+    assert len(set(tokens)) == 500

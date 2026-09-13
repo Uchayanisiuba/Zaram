@@ -136,3 +136,36 @@ describe('the wait, while a reply is on its way', () => {
     await sending;
   });
 });
+
+describe('a file sent with a question', () => {
+  // Raised by the maintainer, 13 September: after send the file should sit on
+  // the question it went with, not stay in the composer bar. The message is
+  // where the record lives; the ids still travel with the request.
+  it('is recorded on the user message and sent by id', async () => {
+    const { stream, release } = pausedStream([]);
+    streamChat.mockImplementation(() => stream());
+
+    const sending = useChatStore
+      .getState()
+      .send('what does clause 4 say?', { attachmentIds: ['att-1'] }, [
+        { id: 'att-1', name: 'lease.pdf', kind: 'document' },
+      ]);
+    const asked = [...useChatStore.getState().messages].reverse().find((m) => m.role === 'user');
+    expect(asked?.attachments).toEqual([{ id: 'att-1', name: 'lease.pdf', kind: 'document' }]);
+    expect(streamChat.mock.calls.at(-1)?.[0]).toMatchObject({ attachmentIds: ['att-1'] });
+
+    release();
+    await sending;
+  });
+
+  it('is absent, not empty, on a question sent without one', async () => {
+    const { stream, release } = pausedStream([]);
+    streamChat.mockImplementation(() => stream());
+    const sending = useChatStore.getState().send('and clause 5?');
+    const asked = [...useChatStore.getState().messages].reverse().find((m) => m.role === 'user');
+    expect(asked).toBeDefined();
+    expect('attachments' in (asked ?? {})).toBe(false);
+    release();
+    await sending;
+  });
+});

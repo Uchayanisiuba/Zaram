@@ -30,10 +30,24 @@ import { useSpeechStore } from '@/stores/speechStore';
  *  A loaded local model begins emitting well inside this; a cold one does not. */
 const WARMING_AFTER_MS = 2500;
 
+/** A file that went with a question, as the message shows it.
+ *
+ *  Name and kind only — the text was extracted on the backend and the id is
+ *  what a follow-up re-sends. The chip on the message is the record that the
+ *  file went *with this question*, which is where every other assistant
+ *  puts it and where a person looks for it. */
+export interface SentAttachment {
+  id: string;
+  name: string;
+  kind: string;
+}
+
 export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant';
   text: string;
+  /** Files sent with a question. On user messages only; usually empty. */
+  attachments?: SentAttachment[];
   /** Provenance for an assistant reply: what the answer was grounded in.
    *  Empty means the model answered from its own knowledge, which is a
    *  meaningful state and must not be confused with "sources not loaded". */
@@ -205,7 +219,7 @@ interface ChatState {
    *  selection is a control change later, not a protocol change. */
   domainIds: string[];
 
-  send: (text: string, opts?: Partial<ChatRequest>) => Promise<void>;
+  send: (text: string, opts?: Partial<ChatRequest>, attached?: SentAttachment[]) => Promise<void>;
   /** Change the active project. Survives across replies; cleared only by the
    *  user, never inferred from what was asked. */
   setProject: (projectId: string | null) => void;
@@ -310,7 +324,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
   },
 
-  send: async (text, opts = {}) => {
+  send: async (text, opts = {}, attached = []) => {
     const trimmed = text.trim();
     if (!trimmed || get().isStreaming) return;
 
@@ -324,6 +338,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           id: newId(),
           role: 'user',
           text: trimmed,
+          ...(attached.length > 0 ? { attachments: attached } : {}),
           sources: [],
           artifacts: [],
           notices: [],

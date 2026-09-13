@@ -12,7 +12,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence, type Variants } from 'framer-motion';
-import { ArrowDown, Download, Eye, Paperclip, Send, Square } from 'lucide-react';
+import { ArrowDown, Download, Eye, FileText, ImageIcon, Paperclip, Send, Square } from 'lucide-react';
 import ArtifactCard from '@/components/ArtifactCard';
 import ArtifactGrid from '@/components/ArtifactGrid';
 import ImageProgressCard from '@/components/ImageProgressCard';
@@ -229,6 +229,13 @@ export default function ChatSurface({ navigate }: Props) {
   // they are sent (rule 7d, one layer up).
   const sessionId = useChatStore((s) => s.sessionId);
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
+  // Files already sent with an earlier question this session. They leave the
+  // composer the moment they are sent — they belong to the message, and that
+  // is where the person looks for them — but the backend scopes attachments
+  // by session for a reason: "and what about clause 4" is the second
+  // question about the same document, not a reason to upload it again. So
+  // their ids keep travelling with every later question, underneath.
+  const sentAttachments = useRef<ChatAttachment[]>([]);
   const [refused, setRefused] = useState<RefusedAttachment[]>([]);
   const [kept, setKept] = useState<string[]>([]);
   const [attachBusy, setAttachBusy] = useState<string | null>(null);
@@ -599,17 +606,20 @@ export default function ChatSurface({ navigate }: Props) {
     const text = inputText.trim();
     if (!text || isStreaming) return;
     setInputText('');
-    const ids = attachments.map((a) => a.id);
-    // **The chips stay.** An attached file belongs to the conversation, not to
-    // one message: "and what about clause 4" is the second question about the
-    // same document, not a reason to upload it again. The backend scopes
-    // attachments by session for exactly that, so clearing them here would
-    // leave the files held and unreachable — the document silently out of
-    // scope while the user believes Zaram is still reading it.
-    //
-    // Refusals do go, because they explain a drop that has now been read.
+    // **The chips move into the message.** This used to keep them in the
+    // composer so a follow-up would still read the file — right about the
+    // scope, wrong about where to show it. Every other assistant puts the
+    // file on the question it went with, and a chip that stays in the bar
+    // reads as "still attached to what I am about to type" (raised by the
+    // maintainer, 13 September). The scope survives the move: the ids of
+    // everything sent this session still go with every later question.
+    const ids = [...sentAttachments.current, ...attachments].map((a) => a.id);
+    const attached = attachments.map((a) => ({ id: a.id, name: a.name, kind: a.kind }));
+    sentAttachments.current = [...sentAttachments.current, ...attachments];
+    setAttachments([]);
+    // Refusals go too, because they explain a drop that has now been read.
     setRefused([]);
-    void send(text, ids.length > 0 ? { attachmentIds: ids } : {});
+    void send(text, ids.length > 0 ? { attachmentIds: ids } : {}, attached);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -842,6 +852,29 @@ export default function ChatSurface({ navigate }: Props) {
                       have to pass the conclusion to reach the working. */}
                   {msg.role === 'assistant' && msg.reasoning && (
                     <ReasoningPanel text={msg.reasoning} streaming={false} />
+                  )}
+                  {msg.role === 'user' && msg.attachments && msg.attachments.length > 0 && (
+                    <div className="flex flex-wrap justify-end gap-1.5 mb-1.5" data-testid="sent-attachments">
+                      {msg.attachments.map((file) => (
+                        <span
+                          key={file.id}
+                          className="inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px]"
+                          style={{
+                            background: 'var(--color-glass)',
+                            border: '1px solid var(--color-border-subtle)',
+                            color: 'var(--color-text)',
+                          }}
+                          title={file.kind === 'image' ? 'Image sent with this question' : 'Document sent with this question'}
+                        >
+                          {file.kind === 'image' ? (
+                            <ImageIcon size={11} style={{ color: 'var(--color-violet)' }} />
+                          ) : (
+                            <FileText size={11} style={{ color: 'var(--color-cyan-light)' }} />
+                          )}
+                          <span className="truncate" style={{ maxWidth: '14rem' }}>{file.name}</span>
+                        </span>
+                      ))}
+                    </div>
                   )}
                   <div
                     className={

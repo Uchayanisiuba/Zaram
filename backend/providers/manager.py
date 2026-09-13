@@ -88,6 +88,23 @@ def _same_model(a: str, b: str) -> bool:
     return norm(a) == norm(b)
 
 
+
+def _distance_from(candidate: ModelInfo, in_use: Optional[ModelInfo]) -> int:
+    """0 for the model in use itself, 1 for one on the same server, 2 otherwise.
+
+    Flat (0 for everything) when nothing is in use, so the ordering falls
+    back to exactly what it was. "Same server" is the same endpoint when both
+    report one — two OpenAI-compatible servers under different provider ids
+    are still two servers — and the same provider otherwise.
+    """
+    if in_use is None:
+        return 0
+    if candidate.id == in_use.id:
+        return 0
+    if candidate.endpoint and in_use.endpoint:
+        return 1 if candidate.endpoint == in_use.endpoint else 2
+    return 1 if candidate.provider == in_use.provider else 2
+
 def _matches_resident(model_id: str, resident: Dict[str, Optional[int]]) -> bool:
     return any(_same_model(model_id, name) for name in resident)
 
@@ -712,8 +729,23 @@ class ProviderManager:
         requires_image_output: bool = False,
         specialisation: Optional[str] = None,
         category: ModelCategory = ModelCategory.LLM,
+        near: Optional[str] = None,
     ) -> Optional[ModelInfo]:
         """The same selection, with this request's own requirements applied.
+
+        ``near`` is the model already in use, when a side task — reading a
+        screenshot for the code pack, say — should stay where the work is.
+        Among the models that pass every gate, that model comes first if it
+        qualifies, then any model on the **same server**, then the rest.
+        Asked for by the maintainer on 13 September 2026, whose chat model
+        lives on TabbyAPI and can see: a vision request that went to Ollama
+        instead would load a second model onto a card that holds one, for a
+        picture the model already answering could have read. It is a server
+        preference, never a server name — whichever endpoint holds the model
+        in use is the one preferred, so it holds for LM Studio, llama.cpp or
+        a second Ollama the same way. A preference, applied after the gates:
+        it cannot promote a model that cannot see, and it cannot reach past
+        consent or residency to find one.
 
         Three arguments, and **they are deliberately different kinds of
         thing**:
@@ -863,13 +895,18 @@ class ProviderManager:
             logger.debug("Residency unavailable for ranking: %s", exc)
             resident = None
 
+        in_use = self.get_model(near) if near else None
+
         return sorted(
             candidates,
-            key=lambda m: self._rank_key(
-                m,
-                cloud_first=cloud_first,
-                specialisation=specialisation,
-                resident=resident,
+            key=lambda m: (
+                _distance_from(m, in_use),
+                self._rank_key(
+                    m,
+                    cloud_first=cloud_first,
+                    specialisation=specialisation,
+                    resident=resident,
+                ),
             ),
         )[0]
 
