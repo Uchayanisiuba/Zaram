@@ -185,8 +185,13 @@
       </div>
       <div class="layer avatar-layer" style="--d:.9">
         <div class="avatar-tilt" data-role="avatar">
+          <!-- The visor is blank in the image; the face is drawn on the
+               canvas over it, in the character's own dot grid, so it can
+               look where the pointer is, blink, and think when the demo
+               does. No script, no face: the plain render stands in. -->
           <img class="avatar-img" src="img/avatar.webp" width="900" height="981"
-               alt="" loading="eager" decoding="async">
+               alt="" loading="eager" decoding="async" data-role="avatar-img">
+          <canvas class="avatar-face" data-role="avatar-face" width="900" height="981" hidden></canvas>
         </div>
       </div>
     </div>
