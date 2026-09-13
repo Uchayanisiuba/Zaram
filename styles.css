@@ -90,7 +90,7 @@ strong { font-weight: 600; }
 .wordmark.small { font-size: 1rem; margin: 0 0 .3em; }
 /* The mark from the app itself — the glyph on its rounded tile — in place of
    the word. It is the same file the desktop icon is cut from. */
-.wordmark .logo { display: block; width: 34px; height: 34px; border-radius: 9px;
+.wordmark .logo { display: block; width: 54px; height: 54px; border-radius: 14px;
   box-shadow: 0 6px 18px -8px rgba(168,83,226,.55); transition: transform .2s ease; }
 .wordmark:hover .logo { transform: translateY(-1px) scale(1.04); }
 .nav nav { display: flex; gap: 26px; flex-wrap: wrap; }
