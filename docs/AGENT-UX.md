@@ -150,6 +150,40 @@ two sent.* That is the pitch in one card, and it costs one column.
 
 ---
 
+## The six moves, sequenced — 13 September
+
+The maintainer asked for the six moves from the 12 September review to be
+built. In the order that makes each one reachable, with what it costs:
+
+| # | move | status | slice |
+|---|---|---|---|
+| 4 | **installed libraries as the docs** — versions in the briefing, `find_symbol`, `read_library_docs`; the hallucination answer with no download | **built 13 Sep**, measured | 6b |
+| 5 | no approval fatigue — two checkboxes per project, git undo, Revert | **built**; the rule is *never add a per-call prompt back* | 4 |
+| — | the checklist (plan tool, card, Project row, Go/Edit) | designed above | 7 |
+| 3 | **run it and look at it** — the dev server as a managed process the person can see and stop; a screenshot read by a *local* vision model, so the page never leaves the machine | next after 7 | 8 |
+| 6 | **what left the machine, per step** — a locality column on the checklist and tool rows, read from the egress log | with 7 | 7 |
+| 2 | **local that actually works** — a fixed set of ~20 bounded tasks run against the resident 14B/27B, pass rate published; tonight's `-m measure` tests are the seed | after 8 | 9 |
+| 1 | **be the memory they attach** — Zaram's Spine as an MCP server (`recall`, `remember`, `correct`, project-scoped, with provenance) for Claude Code, Cline, Kilo | after 9; see below | 10 |
+
+**Why the MCP server is last and not first, though it is the biggest move.**
+It needs a credential that a second *client* on the same machine can hold.
+`CLAUDE.md`'s custody section is exact about the current state: the API
+secret is per-launch and IPC-only, and `core/pairing.py` — "the credential a
+second device needs" — has no caller. A stdio MCP server that read the
+development fallback file would work on a checkout and be a secret at rest on
+an install. So slice 10 is pairing first (a named client, a token the person
+issues in Settings and can revoke, every call logged as egress to *that
+client*), then the server, which is small. Building it the other way round
+would ship the memory layer with the door open, on the one feature whose
+pitch is custody.
+
+**Full agentic capability, with other tools.** The pack's tools are MCP
+tools on a built-in server, and the same loop runs a stranger's server through
+the same gate — that is already true. What tonight adds is that the loop can
+now *complete* a task: read, look up, write, run, see the failure, fix, run.
+The remaining gap between "agentic" and "Claude Code" is not a capability, it
+is 7 and 8: a plan the person can read, and a way to see the app running.
+
 ## Build order — slice 7 of the code pack
 
 1. `plan` tool on `CodeTools`, read-only by policy; the record on

@@ -237,7 +237,7 @@ class TestALocalModelFixesAFailingTest:
     the failure, change the file, run them again. Skipped without Ollama."""
 
     def test_run_fix_run(self, tmp_path, capsys):
-        from tests.test_the_model_can_drive_the_tools import OLLAMA, _generate, _model
+        from tests.test_the_model_can_drive_the_tools import _generate, _model, _server_of
         from tests.test_the_code_tools_can_write import git
         from core.tool_loop import ToolTurn, parse_call, result_prompt, strip_calls, tool_instructions
         from packs.code import CodeWriter
@@ -293,7 +293,7 @@ class TestALocalModelFixesAFailingTest:
             prompt = result_prompt(question, turns, may_call_again=True)
 
         with capsys.disabled():
-            print(f"\n[measure] {model} via {OLLAMA}")
+            print(f"\n[measure] {model} via {_server_of(model)}")
             for turn in turns:
                 print(f"[measure]   {turn.call.tool}({str(turn.call.arguments)[:90]}) -> {str(turn.result)[:110]}")
             print(f"[measure]   final: {final[:160]!r}")

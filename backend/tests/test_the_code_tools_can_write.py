@@ -321,7 +321,7 @@ class TestALocalModelCanChangeAFile:
     real commit. Skipped without Ollama; run with ``-m measure``."""
 
     def test_it_reads_then_edits_then_the_commit_exists(self, repo, capsys):
-        from tests.test_the_model_can_drive_the_tools import OLLAMA, _generate, _model
+        from tests.test_the_model_can_drive_the_tools import _generate, _model, _server_of
         from core.tool_loop import (
             ToolTurn,
             parse_call,
@@ -375,7 +375,7 @@ class TestALocalModelCanChangeAFile:
             prompt = result_prompt(question, turns, may_call_again=True)
 
         with capsys.disabled():
-            print(f"\n[measure] {model} via {OLLAMA}")
+            print(f"\n[measure] {model} via {_server_of(model)}")
             for turn in turns:
                 print(f"[measure]   {turn.call.tool}({turn.call.arguments}) -> {str(turn.result)[:120]}")
             print(f"[measure]   final: {final[:200]!r}")

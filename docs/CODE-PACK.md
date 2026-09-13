@@ -588,6 +588,75 @@ cannot place it — no offer on a guess.
 broken manager never failing a reply. Not yet watched on screen: it needs a
 local model to fail twice, and tonight's did not.
 
+### 6b — the installed libraries are the documentation. Built 13 September.
+
+**The maintainer's question:** *how do we solve hallucination without the
+user downloading docs for every new environment?* The answer is structural and
+it is the one nobody else is using: **the truth is already on the machine.**
+Every project has its dependencies installed, at the exact version it uses.
+`node_modules/<name>/package.json` says the version; `.d.ts`, `.pyi` and
+source say every signature; JSDoc and docstrings say what they mean; the
+README says how it is used. Kilo pipes docs in from Context7 (a cloud
+service); Cline asks the person to attach them. Zaram reads the installed
+package, deterministically, locally, with provenance to a file.
+
+`packs/code/libraries.py`, three things in order of how cheaply each stops a
+wrong API:
+
+1. **Versions in the briefing** — *"react 19.2.8, vite 6.3.5 …"* under the
+   repository map, "not installed" named as such. Most hallucinated APIs are
+   version drift, and a model told the version reaches for the right one.
+2. **`find_symbol(name, package?)`** — the real definition: signature, its
+   JSDoc or docstring, file and line. `.d.ts` before `.js`, `.pyi` before
+   `.py`, `@types/<name>` beside a JS-only package, Python from the project's
+   *own* interpreter's `site-packages` (the same `_python_for` the runners
+   use — never Zaram's venv).
+3. **`read_library_docs(package)`** — the README head with the version.
+
+Both tools are read-only by policy (`find`, `read`) and need no grant.
+Nothing enters the Spine: it is a lookup, not an index, and `ingest` keeps
+skipping `node_modules` and `venv` so the project's own index does not fill
+with someone else's library. Cargo and Go get versions from the lock file and
+no source lookup yet — "version known, definitions not" beats guessing at a
+registry path.
+
+**Bounded, and measured to need it.** Resolving Zaram's own backend (~200
+distributions, torch among them) took 9 s and an unqualified
+`find_symbol("Depends")` 69 s. The library table is now cached on a
+fingerprint of the manifests and install folders — rebuilt when they change,
+never on a clock (1.0 s first, 24 ms after) — and a lookup stops at 8 s or
+3,000 files and says *name the package to narrow it* (1.7 s).
+
+**The measured harness now asks TabbyAPI first — the maintainer's
+instruction, 13 September.** `_model()` in `test_the_model_can_drive_the_tools.py`
+takes whatever `127.0.0.1:1234/v1/models` is serving before falling back to
+Ollama, and `_generate` speaks to it through `OpenAICompatibleEngine`. The
+27B served there is the model Zaram's own routing picks on this machine, so
+every earlier measurement on the Ollama 14B was of a model the product does
+not use by default. Re-run on `Qwen3.8-27B-exl3-2.20bpw`: the library task
+went `read_library_docs` → `find_symbol` (to confirm the signature) →
+`write_file`, correct; run→fix→run passed; the edit task passed in 93 s.
+`ZARAM_MEASURE_MODEL` still pins either by name.
+
+**Measured, `qwen3-14b-16k` first and then the 27B.** A library that exists only in the test, with
+an API no model has seen — `forgeWidget(spec: { caption, cells? })`. Asked to
+make a widget captioned "alpha": `read_library_docs(widgets)` → `write_file`
+with `const { forgeWidget } = require('widgets')` and `caption: 'alpha'`.
+Correct, and only because it looked. Against Zaram's own repositories:
+`useEffect` from `@types/react/index.d.ts:2045` with its JSDoc, `FastAPI`
+from `applications.py:42` with its docstring.
+`tests/test_the_installed_libraries_are_the_documentation.py`.
+
+**And "save the knowledge for use across the project" — the honest version.**
+The library table is *derived* from the repository every time it changes,
+not remembered, because a remembered version goes stale the day a dependency
+is upgraded and a fact that was true on Tuesday is the hallucination the
+feature exists to stop. What *is* worth remembering across the project is
+what the model decided while working — which is the checklist's *decisions
+taken and rejected* on `PlanRecords` (slice 7), and the project-scoped
+exchange facts the engine already stores. Knowledge derived from the repo
+stays derived; knowledge decided in conversation gets remembered.
+
 ### 7 — next: the plan is a checklist
 
 `docs/AGENT-UX.md`, written tonight, is the study and the decision: a `plan`

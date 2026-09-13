@@ -43,7 +43,8 @@ from typing import Any, Callable, Dict, List, Optional
 from ingest.service import SKIP_DIRS
 from runtimes.mcp.client import ToolDescriptor
 
-from . import repo_map, runners, writes
+from . import libraries, repo_map, runners, writes
+from .libraries import LibraryTools
 from .runners import RUN_COMMAND, CodeRunner
 from .writes import TOOL_NAMES, CodeWriter
 
@@ -92,6 +93,7 @@ class CodeTools:
         writes_granted: Callable[[], bool] = lambda: False,
         runner: Optional["CodeRunner"] = None,
         runs_granted: Callable[[], bool] = lambda: False,
+        library: Optional["LibraryTools"] = None,
     ) -> None:
         self._root_for = root_for
         #: `None` means this instance cannot write, structurally. See `writes.py`.
@@ -102,6 +104,9 @@ class CodeTools:
         #: Same shape for running the project's commands. See `runners.py`.
         self._runner = runner
         self._runs_granted = runs_granted
+        #: Lookups into the project's installed dependencies. Read-only, no
+        #: grant: nothing here changes anything. See `libraries.py`.
+        self._library = library
 
     def how_to_permit(self, tool_name: str) -> str:
         """Appended to a `CONFIRM` reason by the runtime, so the sentence a
@@ -120,7 +125,12 @@ class CodeTools:
         if root is None:
             return ""
         try:
-            return repo_map.repo_map(root, query, budget_tokens=MAP_TOKENS)
+            text = repo_map.repo_map(root, query, budget_tokens=MAP_TOKENS)
+            if self._library is not None:
+                # The versions actually installed, under the map. The cheapest
+                # thing that stops a model writing against the wrong release.
+                text += libraries.briefing(root)
+            return text
         except Exception:  # noqa: BLE001 - a briefing must never fail a reply
             logger.exception("code pack: could not build the repository map")
             return ""
@@ -157,6 +167,8 @@ class CodeTools:
             # Named per project: the description lists the runners this
             # repository actually has, which is what the model chooses from.
             tools.append(self._runner.descriptor(SERVER_ID, self._root_for()))
+        if self._library is not None:
+            tools.extend(self._library.descriptors(SERVER_ID))
         return tools
 
     def _read_tools(self) -> List[ToolDescriptor]:
@@ -278,6 +290,8 @@ class CodeTools:
                 return result
             if self._runner is not None and name == RUN_COMMAND:
                 return self._runner.call(arguments, root)
+            if self._library is not None and name in libraries.TOOL_NAMES:
+                return self._library.call(name, arguments, root)
         except OutsideTheProject as refusal:
             # Reported, not raised. The engine turns an exception into a failed
             # call; this is a refusal with a reason, which is a different thing

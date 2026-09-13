@@ -48,10 +48,36 @@ from packs.code import CodeTools
 
 OLLAMA = "http://127.0.0.1:11434"
 
-#: The models this can be driven by, most capable first. Named rather than
-#: discovered, because "the first installed model" would silently measure
+#: The OpenAI-compatible server the maintainer runs their default model on —
+#: TabbyAPI / ExLlamaV3 on the port `openai_compat.DEFAULT_BASE_URL` names.
+#: **Asked first, by the maintainer's instruction on 13 September**: the 27B
+#: served there is the model Zaram's own routing picks on this machine, so a
+#: measurement taken on an Ollama 14B was measuring a model the product does
+#: not use by default. Ollama remains the fallback when nothing is served.
+TABBY = "http://127.0.0.1:1234"
+
+#: The Ollama models this can fall back to, most capable first. Named rather
+#: than discovered, because "the first installed model" would silently measure
 #: `bge-m3` — an embedder — and report that tool use is impossible.
 PREFERRED = ("qwen3-14b-16k", "qwen3-14b-8k", "gemma4-26b-32k")
+
+#: Models served by the OpenAI-compatible server right now, by id.
+_SERVED: dict[str, str] = {}
+
+
+def _served() -> set[str]:
+    """What TabbyAPI (or whatever is on 1234) is serving, or nothing."""
+    try:
+        listed = requests.get(f"{TABBY}/v1/models", timeout=2.0).json()
+    except Exception:
+        return set()
+    names = set()
+    for entry in listed.get("data") or []:
+        name = str(entry.get("id") or "")
+        if name:
+            names.add(name)
+            _SERVED[name] = TABBY
+    return names
 
 #: The system prompt, shaped like the one the engine composes: a short identity
 #: line and then the tools. Not `identity_preamble` itself — that pulls in user
@@ -84,10 +110,16 @@ def _installed() -> set[str]:
 
 
 def _model() -> Optional[str]:
+    """The model to measure with: TabbyAPI's if it is serving one, else the
+    best installed Ollama model, else ``None``. `ZARAM_MEASURE_MODEL` pins
+    one by name from either."""
     named = os.getenv("ZARAM_MEASURE_MODEL")
+    served = _served()
     installed = _installed()
     if named:
-        return named if named in installed else None
+        return named if named in served or named in installed else None
+    if served:
+        return sorted(served)[0]
     for candidate in PREFERRED:
         if candidate in installed:
             return candidate
@@ -138,8 +170,20 @@ def project(tmp_path):
     return tmp_path
 
 
+def _server_of(model: str) -> str:
+    """Which server a measured model answers from, for the printed line."""
+    return _SERVED.get(model, OLLAMA)
+
+
 def _generate(model: str, prompt: str, system: str) -> str:
-    """One buffered generation, the way a tool round is buffered."""
+    """One buffered generation, the way a tool round is buffered, on whichever
+    server serves ``model`` — the OpenAI-compatible one for a TabbyAPI model,
+    Ollama otherwise."""
+    if _SERVED.get(model) == TABBY:
+        from runtimes.models.engines.openai_compatible_engine import OpenAICompatibleEngine
+
+        engine = OpenAICompatibleEngine(base_url=TABBY, api_key="", default_model=model)
+        return "".join(engine.stream_response(prompt, system, model))
     from runtimes.models.engines.ollama_engine import OllamaEngine
 
     return "".join(OllamaEngine(base_url=OLLAMA).stream_response(prompt, system, model))

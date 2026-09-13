@@ -22,7 +22,35 @@ publishing step over rather than finding another route. `CLAUDE.md`,
 
 *The latest work is first. Earlier sessions follow below.*
 
-### 12 September, latest — the owed list is done, and the screen found three defects
+### 13 September, latest — the installed libraries are the documentation
+
+The maintainer's question — *how do we solve hallucination without the user
+downloading docs for every new environment* — answered structurally in
+`packs/code/libraries.py`: the project's dependencies are already installed
+at the exact version, and an installed package is documentation. Versions in
+the briefing; `find_symbol` returns the real signature, its JSDoc or
+docstring, file and line, from `node_modules` or the project's own venv;
+`read_library_docs` the README head. Read-only, no grant, nothing enters the
+Spine. Cached on a manifest fingerprint (1.0 s first, 24 ms after); lookups
+bounded at 8 s / 3,000 files after an unqualified one measured 69 s.
+
+**Measured:** `qwen3-14b-16k` given a library that exists only in the test,
+with `forgeWidget({caption})` — an API no model has seen — read the docs and
+used it correctly. `useEffect` and `FastAPI` resolved from Zaram's own
+installed packages with their real documentation. 13 tests without a model.
+
+`docs/AGENT-UX.md` now sequences the six moves from the 12 September review
+as slices 6b–10, with the reason the Spine-as-MCP-server comes last: it
+needs `core/pairing.py` to have a caller first, or it ships the memory layer
+with the door open. `docs/CODE-PACK.md` 6b records why derived knowledge
+stays derived and only decisions get remembered.
+
+Also: a duplicated-import slip in `packs/code/__init__.py` from an idempotent
+edit script, fixed; `.claude/settings.json` checked in with
+`includeCoAuthoredBy: false` and the `.gitignore` rule that was catching it
+anchored to the root.
+
+### 12 September — the owed list is done, and the screen found three defects
 
 Everything the previous entry owed, and a study. Per-slice detail in
 `docs/CODE-PACK.md` 4–6; the UX decision in `docs/AGENT-UX.md`.
