@@ -202,10 +202,10 @@ async function submitSignup(event) {
        because that is what the two things actually do.                       */
 
 const SCRIPT = [
-  { who: "You",   text: "Remember: the launch is 9 September in Accra." },
+  { who: "You",   text: "Remember: the launch is 9 September in Lagos." },
   { who: "Zaram", text: "Noted — I'll remember that.", think: 620 },
   { who: "You",   text: "When is the launch?", pause: 900 },
-  { who: "Zaram", text: "9 September, in Accra.", cite: "M1",
+  { who: "Zaram", text: "9 September, in Lagos.", cite: "M1",
     src: "<b>M1</b> Memory · you told me this", think: 780 },
 ];
 
