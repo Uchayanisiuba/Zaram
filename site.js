@@ -324,3 +324,147 @@ function armDemo() {
 applyConfig();
 $all('[data-role="signup"]').forEach(form => form.addEventListener("submit", submitSignup));
 armDemo();
+
+/* ---------------------------------------------------------------------------
+   Depth. The scene's layers follow the pointer and the scroll; the cards
+   lean toward the pointer; things below the fold rise as they arrive.
+
+   All of it is decoration, and it obeys the one rule the product itself
+   keeps: motion has a budget. Nothing here runs under
+   prefers-reduced-motion, nothing runs while the scene is off screen, the
+   whole thing is a handful of CSS variables set once per frame, and a page
+   without this script is the same page standing still.
+   ------------------------------------------------------------------------ */
+
+const MOTION_OK = !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+const FINE_POINTER = window.matchMedia("(hover: hover) and (pointer: fine)").matches;
+
+/** Where the pointer is, −1..1 either way, and how far the page has gone.
+    Eased toward the target so the layers glide rather than snap. */
+function armScene() {
+  const scene = document.querySelector('[data-role="scene"]');
+  if (!scene || !MOTION_OK) return;
+
+  const hero = scene.closest(".hero") || document.body;
+  let tx = 0, ty = 0, mx = 0, my = 0, sy = 0, visible = true, raf = 0;
+
+  if (FINE_POINTER) {
+    hero.addEventListener("pointermove", (e) => {
+      const r = scene.getBoundingClientRect();
+      tx = Math.max(-1, Math.min(1, ((e.clientX - r.left) / r.width - 0.5) * 2));
+      ty = Math.max(-1, Math.min(1, ((e.clientY - r.top) / r.height - 0.5) * 2));
+    }, { passive: true });
+    hero.addEventListener("pointerleave", () => { tx = 0; ty = 0; });
+  }
+  window.addEventListener("scroll", () => { sy = Math.min(window.scrollY, 1200); }, { passive: true });
+
+  if ("IntersectionObserver" in window) {
+    new IntersectionObserver((entries) => {
+      visible = entries.some((e) => e.isIntersecting);
+      if (visible && !raf) tick();
+    }, { rootMargin: "120px" }).observe(scene);
+  }
+
+  const stars = armStars(scene.querySelector('[data-role="stars"]'));
+
+  function tick() {
+    raf = 0;
+    mx += (tx - mx) * 0.07;
+    my += (ty - my) * 0.07;
+    scene.style.setProperty("--mx", mx.toFixed(4));
+    scene.style.setProperty("--my", my.toFixed(4));
+    scene.style.setProperty("--sy", sy.toFixed(1));
+    if (stars) stars(mx, my);
+    if (visible && !document.hidden) raf = requestAnimationFrame(tick);
+  }
+  document.addEventListener("visibilitychange", () => { if (!document.hidden && visible && !raf) tick(); });
+  tick();
+}
+
+/** A field of slow points with depth, on a canvas. About a hundred and
+    forty of them, drifting toward the viewer, shifted by the pointer so the
+    near ones move more than the far ones. Returns the per-frame draw. */
+function armStars(canvas) {
+  if (!canvas) return null;
+  const ctx = canvas.getContext("2d", { alpha: true });
+  if (!ctx) return null;
+
+  const N = 140;
+  const pts = [];
+  let w = 0, h = 0, dpr = 1;
+
+  function size() {
+    const r = canvas.getBoundingClientRect();
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    w = Math.max(1, Math.round(r.width)); h = Math.max(1, Math.round(r.height));
+    canvas.width = w * dpr; canvas.height = h * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  function seed(p) {
+    p.x = Math.random() * 2 - 1; p.y = Math.random() * 2 - 1;
+    p.z = Math.random() * 0.9 + 0.1;              // 0.1 far … 1 near
+    p.c = Math.random() < 0.72 ? "94,231,220" : "139,127,212";
+    return p;
+  }
+  size();
+  for (let i = 0; i < N; i++) pts.push(seed({}));
+  window.addEventListener("resize", size, { passive: true });
+
+  return function draw(mx, my) {
+    ctx.clearRect(0, 0, w, h);
+    const cx = w / 2, cy = h / 2;
+    for (const p of pts) {
+      p.z += 0.0011;                              // drift toward the viewer
+      if (p.z > 1.15) seed(p), (p.z = 0.1);
+      const k = 0.55 / p.z;                       // perspective
+      const x = cx + (p.x + mx * 0.08 * p.z) * cx * k;
+      const y = cy + (p.y + my * 0.06 * p.z) * cy * k;
+      if (x < -4 || x > w + 4 || y < -4 || y > h + 4) continue;
+      const a = Math.min(1, (p.z - 0.1) * 1.4) * 0.75;
+      const s = 0.6 + p.z * 1.6;
+      ctx.fillStyle = `rgba(${p.c},${a.toFixed(3)})`;
+      ctx.beginPath(); ctx.arc(x, y, s, 0, Math.PI * 2); ctx.fill();
+    }
+  };
+}
+
+/** Cards lean toward the pointer, a few degrees, and a glare follows it. */
+function armTilt() {
+  if (!MOTION_OK || !FINE_POINTER) return;
+  const cards = $all(".claims > div, .caps-grid > div, .who-row, main .panel:not(.demo)");
+  for (const el of cards) {
+    el.classList.add("tilt");
+    el.addEventListener("pointermove", (e) => {
+      const r = el.getBoundingClientRect();
+      const px = (e.clientX - r.left) / r.width, py = (e.clientY - r.top) / r.height;
+      const max = r.width > 700 ? 3 : 6;         // wide panels lean less
+      el.style.setProperty("--ry", `${((px - 0.5) * 2 * max).toFixed(2)}deg`);
+      el.style.setProperty("--rx", `${((0.5 - py) * 2 * max).toFixed(2)}deg`);
+      el.style.setProperty("--gx", `${(px * 100).toFixed(1)}%`);
+      el.style.setProperty("--gy", `${(py * 100).toFixed(1)}%`);
+      el.classList.add("is-live");
+    }, { passive: true });
+    el.addEventListener("pointerleave", () => {
+      el.style.setProperty("--rx", "0deg"); el.style.setProperty("--ry", "0deg");
+      el.classList.remove("is-live");
+    });
+  }
+}
+
+/** Below the fold, things arrive as they are reached. */
+function armReveal() {
+  if (!MOTION_OK || !("IntersectionObserver" in window)) return;
+  const targets = $all("main section:not(.hero) .feature-text, main section:not(.hero) .panel, .claims > div, .caps-grid > div, .who-row, .policy-list li, .honest-grid > div");
+  const io = new IntersectionObserver((entries) => {
+    for (const e of entries) if (e.isIntersecting) { e.target.classList.add("in"); io.unobserve(e.target); }
+  }, { threshold: 0.12, rootMargin: "0px 0px -6% 0px" });
+  targets.forEach((el, i) => {
+    el.classList.add("reveal");
+    el.style.transitionDelay = `${(i % 3) * 60}ms`;
+    io.observe(el);
+  });
+}
+
+armScene();
+armTilt();
+armReveal();

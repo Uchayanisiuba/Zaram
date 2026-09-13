@@ -14,13 +14,15 @@
 <meta name="twitter:card" content="summary_large_image">
 </head>
 <body>
+<script>document.documentElement.classList.add("js");</script>
 
 <header class="nav">
-  <a class="wordmark" href="#top">Zaram</a>
+  <a class="wordmark" href="#top" aria-label="Zaram"><img class="logo" src="img/zaram-icon.svg" width="34" height="34" alt="Zaram"></a>
   <nav>
     <a href="#see">What it does</a>
     <a href="#build">In the build</a>
     <a href="#honest">What it isn't</a>
+    <a href="#install">Install</a>
     <a href="https://github.com/Uchayanisiuba/Zaram">Source</a>
   </nav>
 </header>
@@ -108,15 +110,35 @@
       </p>
     </div>
 
-    <div class="hero-showcase">
-      <div class="orb-stage" data-role="orb-stage">
-        <img class="orb-img" src="img/orb.webp" width="800" height="800"
-             alt="Zaram's orb, the system-state indicator, inside its orbit rings."
-             loading="eager" decoding="async">
-        <span class="orb-track" aria-hidden="true"><i></i></span>
-        <p class="orb-state"><span class="dot"></span><span data-role="orb-state">Local only — nothing is sent out</span></p>
+    <!-- The scene: the orb and the character in depth. Layers move against
+         the pointer and the scroll by their `--d`; the character tilts a few
+         degrees. Every bit of it is decoration and is marked so, and all of it
+         stands still for anyone who asked for less motion. -->
+    <div class="scene" data-role="scene" aria-hidden="true">
+      <canvas class="stars" data-role="stars"></canvas>
+      <div class="floor" style="--d:.08"></div>
+      <div class="nebula n1" style="--d:.14"></div>
+      <div class="nebula n2" style="--d:.22"></div>
+      <div class="layer orb-layer" style="--d:.55">
+        <div class="orb-stage" data-role="orb-stage">
+          <span class="ring r1"></span>
+          <span class="ring r2"></span>
+          <img class="orb-img" src="img/orb.webp" width="800" height="800"
+               alt="" loading="eager" decoding="async">
+          <span class="orb-track" aria-hidden="true"><i></i></span>
+          <p class="orb-state"><span class="dot"></span><span data-role="orb-state">Local only — nothing is sent out</span></p>
+        </div>
       </div>
+      <div class="layer avatar-layer" style="--d:.9">
+        <div class="avatar-tilt" data-role="avatar">
+          <img class="avatar-img" src="img/avatar.webp" width="900" height="981"
+               alt="" loading="eager" decoding="async">
+        </div>
+      </div>
+    </div>
+    <p class="scene-caption">The orb is the default. The character is optional — and it reports what the system is doing, never who answered.</p>
 
+    <div class="hero-showcase">
       <!-- The final state is written here so that no-JS and reduced-motion
            visitors get the whole exchange immediately. The script clears it and
            replays it only when motion is welcome. -->
@@ -251,12 +273,18 @@
 
   <section class="feature feature-plain">
     <div class="feature-text wide">
-      <p class="kicker">Pictures</p>
+      <p class="kicker">Pictures, both ways</p>
       <h2>Show it a screenshot. It gets read here.</h2>
       <p>
         Paste with <kbd>Ctrl</kbd>+<kbd>V</kbd>, drag one in, or use the paperclip — a receipt,
-        a page of a contract, an error on screen. Pick a vision model running on your machine
-        and it's read where it sits, with nothing uploaded.
+        a page of a contract, an error on screen. A vision model running on your machine reads
+        it where it sits, with nothing uploaded — and Zaram reaches for the model already
+        answering you first, then its server, before it looks anywhere else.
+      </p>
+      <p>
+        It draws, too. Ask for a picture and it goes to a model that can make one — on your
+        own card if you have brought one, or to a provider you chose, with the request shown
+        before it leaves.
       </p>
       <p>
         Every other assistant has to send that photograph somewhere to answer you. Here it's a
@@ -264,6 +292,55 @@
         to send a cloud provider your text is <em>not</em> permission to send it your photos —
         that gets asked once on its own. And if no model you have can read images at all,
         Zaram says so rather than describing a picture it never saw.
+      </p>
+    </div>
+  </section>
+
+  <section class="feature feature-plain">
+    <div class="feature-text wide">
+      <p class="kicker">Other assistants</p>
+      <h2>Claude Code can read it. So can anything else you pair.</h2>
+      <p>
+        The memory isn't locked inside Zaram either. Pair another assistant with a
+        one-minute code from Settings and it gets four tools — <em>recall</em>,
+        <em>remember</em>, <em>correct</em>, <em>projects</em> — over the same protocol
+        every tool here speaks. Claude Code, Cline, an editor, a script: whatever it is,
+        it recalls what you taught Zaram and the answer carries the source.
+      </p>
+
+      <div class="panel">
+        <div class="panel-bar">
+          <span class="orb" aria-hidden="true"></span>
+          <span>Activity · a paired assistant</span>
+          <span class="spacer">every call is logged</span>
+        </div>
+        <div class="panel-body"><span class="line"><span class="dim">paired    </span><span class="cy">Claude Code</span> · from a code you issued · revocable in Settings</span><span class="line"><span class="dim">asked     </span>recall "what did we agree with Northwind on payment?"</span><span class="line"><span class="dim">answered  </span>2 facts · with their sources · <span class="ok">1,204 bytes</span></span><span class="line"><span class="dim">reaches   </span>the memory, and nothing else — no settings, no files, no keys</span><span class="line"><span class="dim">logged as </span><span class="vi">client:Claude Code</span> · in the same egress log as everything else</span></div>
+        <p class="panel-note">
+          A paired assistant is a process, and a process leaving with your facts is an
+          egress like any other. It holds a credential you can revoke, it can reach the
+          memory routes and nothing else, and every call it makes is a line in Activity
+          addressed to it by name.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section class="feature feature-plain">
+    <div class="feature-text wide">
+      <p class="kicker">Code</p>
+      <h2>A coding agent that is not a second product.</h2>
+      <p>
+        Open a folder as a coding project and the same conversation can read the files,
+        change them, run the app, look at it, and say what it saw. The change lands as a
+        commit, so <strong>the undo is git</strong> — Revert is on the card, not in a
+        dialog — and a task that stops early can be continued. Wrong in the reply? Press
+        <em>Revise</em>, say what's wrong, and the answer is regenerated with the
+        correction applied; where it changed files, the files change with it.
+      </p>
+      <p class="aside">
+        Measured, not promised: a 27B model on the maintainer's own machine drove the tools
+        through 6 of 8 tasks in the eval set. The two it missed, it answered in prose
+        instead of acting — and that is written down beside the number.
       </p>
     </div>
   </section>
@@ -547,11 +624,27 @@
       </div>
       <div>
         <h3>Documents out</h3>
-        <p>Generate .docx and .pdf from your own data, with the sources carried into the file rather than left behind in the chat.</p>
+        <p>Generate .docx, .xlsx, .pdf and charts from your own data, with the sources carried into the file rather than left behind in the chat.</p>
       </div>
       <div>
         <h3>Not only Ollama</h3>
-        <p>LM Studio, TabbyAPI and any OpenAI-compatible local server. The picker tells you where each model actually runs.</p>
+        <p>LM Studio, TabbyAPI, vLLM, llama.cpp — any OpenAI-compatible local server, vision included. The picker tells you where each model actually runs.</p>
+      </div>
+      <div>
+        <h3>Claude, directly</h3>
+        <p>Anthropic's API in its own wire format, beside OpenRouter, NVIDIA NIM, Groq, Gemini and the rest — each with its data policy stated before you pick it.</p>
+      </div>
+      <div>
+        <h3>Reads a page you name</h3>
+        <p>Type an address and Zaram opens it — that address, on your say-so — and answers from what is on it. A page the model invents gets no such pass.</p>
+      </div>
+      <div>
+        <h3>Tools you can see</h3>
+        <p>When a reply used tools, a card under it says which, and opens to show each call. Fourteen tools attached is not a notification; two used is.</p>
+      </div>
+      <div>
+        <h3>Everything exports</h3>
+        <p>The whole Spine, as JSONL and CSV in one zip. The memory is meant to outlive the provider, the order, and Zaram itself.</p>
       </div>
     </div>
   </section>
@@ -565,14 +658,14 @@
           <li>An early alpha, on <strong>Windows only</strong>. No macOS or Linux build exists yet.</li>
           <li><strong>Source-available</strong> — you can read every line on GitHub. That is not the same as open source; see the licence.</li>
           <li>Free to use, with no account, no sign-in and no cap.</li>
-          <li>Best with <a href="https://ollama.com">Ollama</a> and one local model pulled. It also works with a cloud key alone.</li>
+          <li>Best with <a href="https://ollama.com">Ollama</a> or TabbyAPI and one local model. It also works with a cloud key alone.</li>
+          <li>Built with no build step, no telemetry and no account — and this page makes no request to anyone but the form host, when you press the button.</li>
         </ul>
       </div>
       <div>
         <h3>It is not</h3>
         <ul>
           <li>Finished. Expect rough edges, and expect to lose data between alpha builds.</li>
-          <li>Able to <em>make</em> pictures. It reads them; it does not draw them.</li>
           <li>A calendar, an accounting system, or a system of record.</li>
           <li>A source of medical, legal or financial advice — it is built to refuse rather than guess.</li>
           <li>Free of cost to <em>run</em>: a local model needs a GPU with headroom, or patience.</li>

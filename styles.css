@@ -88,6 +88,11 @@ strong { font-weight: 600; }
   color: var(--text); text-decoration: none;
 }
 .wordmark.small { font-size: 1rem; margin: 0 0 .3em; }
+/* The mark from the app itself — the glyph on its rounded tile — in place of
+   the word. It is the same file the desktop icon is cut from. */
+.wordmark .logo { display: block; width: 34px; height: 34px; border-radius: 9px;
+  box-shadow: 0 6px 18px -8px rgba(168,83,226,.55); transition: transform .2s ease; }
+.wordmark:hover .logo { transform: translateY(-1px) scale(1.04); }
 .nav nav { display: flex; gap: 26px; flex-wrap: wrap; }
 .nav nav a { color: var(--text-2); font-size: .93rem; }
 .nav nav a:hover { color: var(--text); text-decoration: none; }
@@ -210,7 +215,7 @@ strong { font-weight: 600; }
 }
 .hero-shot img { box-shadow: 0 40px 90px -30px rgba(0,0,0,.9); }
 .hero-caption {
-  margin: 18px auto 0; max-width: 1000px; text-align: right;
+  margin: 18px auto 0; max-width: 680px; text-align: center;
   font-size: .84rem; color: var(--text-3);
 }
 @media (max-width: 860px) { .hero-caption { text-align: center; } }
@@ -321,7 +326,7 @@ kbd {
 
 /* Orb beside the answer it produced — the composition the original screenshot
    had, rebuilt from the half of it that carries no stale example data. */
-.hero-showcase {
+.hero-showcase-old {
   display: grid;
   grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr);
   gap: 36px;
@@ -565,4 +570,223 @@ footer nav a:hover { color: var(--text); }
   .signup { flex-direction: column; }
   .signup button { width: 100%; }
   .alpha-card { padding: 24px 20px; border-radius: 14px; }
+}
+
+/* ==========================================================================
+   The scene — the orb and the character in depth
+   --------------------------------------------------------------------------
+   Layers carry a depth `--d` (0 far, 1 near) and are moved against two
+   things the script measures: where the pointer is (`--mx`, `--my`, −1..1)
+   and how far the page has scrolled (`--sy`, px). Nothing here is state —
+   the orb still reports only "working" through the class the demo sets —
+   and every animation stops under `prefers-reduced-motion`, leaving the
+   same composition standing still. Without the script the variables are 0
+   and the layers sit where they were laid out. */
+
+/* The floor and the star field run past the edges on purpose; the page must not. */
+.hero { overflow-x: clip; }
+
+.scene {
+  --mx: 0; --my: 0; --sy: 0;
+  position: relative;
+  height: clamp(380px, 52vw, 560px);
+  max-width: 1040px;
+  margin: 48px auto 0;
+  perspective: 1100px;
+  transform-style: preserve-3d;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.scene .layer,
+.scene .nebula,
+.scene .floor {
+  position: absolute;
+  will-change: transform;
+  transform: translate3d(
+    calc(var(--mx) * var(--d) * -34px),
+    calc(var(--my) * var(--d) * -22px + var(--sy) * var(--d) * -0.22px),
+    0
+  );
+}
+
+/* A perspective floor, drawn as a grid and laid flat with one rotation. The
+   mask fades it out toward the horizon so it reads as distance, not as a
+   spreadsheet. */
+.scene .floor {
+  left: -20%; right: -20%; bottom: 2%;
+  height: 56%;
+  background:
+    linear-gradient(rgba(94,231,220,.10) 1px, transparent 1px) 0 0 / 100% 44px,
+    linear-gradient(90deg, rgba(94,231,220,.10) 1px, transparent 1px) 0 0 / 44px 100%;
+  transform: translate3d(calc(var(--mx) * -10px), calc(var(--sy) * -0.04px), 0)
+             perspective(700px) rotateX(72deg);
+  transform-origin: 50% 100%;
+  -webkit-mask-image: linear-gradient(to top, rgba(0,0,0,.9) 0%, rgba(0,0,0,.35) 45%, transparent 90%);
+          mask-image: linear-gradient(to top, rgba(0,0,0,.9) 0%, rgba(0,0,0,.35) 45%, transparent 90%);
+  animation: floor-drift 9s linear infinite;
+}
+@keyframes floor-drift { to { background-position: 0 44px, 0 0; } }
+
+.scene .stars {
+  position: absolute; inset: -10% -6% 4%;
+  width: 112%; height: 106%;
+  opacity: .9;
+}
+
+.scene .nebula {
+  width: 46%; aspect-ratio: 1; border-radius: 50%;
+  filter: blur(40px);
+  opacity: .55;
+}
+.scene .n1 { left: 6%; top: 4%;
+  background: radial-gradient(circle at 40% 40%, rgba(139,127,212,.42), transparent 66%); }
+.scene .n2 { right: 2%; bottom: -6%; width: 54%;
+  background: radial-gradient(circle at 55% 55%, rgba(94,231,220,.20), transparent 66%); }
+
+/* The orb, left of centre and a little back. */
+.scene .orb-layer {
+  left: 4%; top: 6%;
+  width: min(46%, 400px);
+}
+.scene .orb-stage { transform-style: preserve-3d; }
+.scene .orb-img { width: 100%; }
+
+/* Two rings on real tilts, so the sphere sits inside an orbit rather than
+   behind a circle. Each turns in its own plane. */
+.scene .ring {
+  position: absolute; left: 50%; top: 50%;
+  width: 138%; aspect-ratio: 1;
+  margin: -69% 0 0 -69%;
+  border-radius: 50%;
+  border: 1px solid rgba(139,127,212,.28);
+  box-shadow: 0 0 24px -8px rgba(139,127,212,.5) inset;
+  transform-style: preserve-3d;
+  pointer-events: none;
+}
+.scene .ring::after {
+  content: ""; position: absolute; top: -3px; left: 50%;
+  width: 6px; height: 6px; margin-left: -3px; border-radius: 50%;
+  background: var(--accent-2); box-shadow: 0 0 10px var(--accent-2);
+}
+.scene .r1 { transform: rotateX(72deg) rotateZ(0deg); animation: ring-a 22s linear infinite; }
+.scene .r2 { width: 118%; margin: -59% 0 0 -59%;
+  border-color: rgba(94,231,220,.22);
+  transform: rotateX(64deg) rotateY(-30deg) rotateZ(0deg); animation: ring-b 15s linear infinite reverse; }
+.scene .r2::after { background: var(--accent); box-shadow: 0 0 10px var(--accent); }
+@keyframes ring-a { to { transform: rotateX(72deg) rotateZ(360deg); } }
+@keyframes ring-b { to { transform: rotateX(64deg) rotateY(-30deg) rotateZ(360deg); } }
+.scene .orb-stage.is-working .ring { border-color: rgba(94,231,220,.38); }
+.scene .orb-stage.is-working .r1 { animation-duration: 6s; }
+.scene .orb-stage.is-working .r2 { animation-duration: 4s; }
+.scene .orb-state { justify-content: center; pointer-events: auto; }
+
+/* The character, right of centre and nearest the viewer. It tilts toward
+   the pointer by a few degrees — attention, not drift — and floats on a
+   slow breath. The glow beneath it is indigo, the product's own accent,
+   which is nobody's state; violet would say "cloud" on a page that has
+   just defined it. */
+.scene .avatar-layer {
+  right: 2%; bottom: -2%;
+  width: min(44%, 380px);
+}
+.scene .avatar-tilt {
+  transform-style: preserve-3d;
+  transform: rotateY(calc(var(--mx) * 10deg)) rotateX(calc(var(--my) * -7deg));
+  transition: transform .18s ease-out;
+}
+.scene .avatar-img {
+  display: block; width: 100%; height: auto;
+  -webkit-mask-image: linear-gradient(to bottom, #000 84%, transparent 100%);
+          mask-image: linear-gradient(to bottom, #000 84%, transparent 100%);
+  filter: drop-shadow(0 30px 40px rgba(0,0,0,.65)) drop-shadow(0 0 48px rgba(129,140,248,.28));
+  animation: hover 6.5s ease-in-out infinite;
+  transform: translateZ(40px);
+}
+@keyframes hover {
+  0%, 100% { transform: translateZ(40px) translateY(0); }
+  50%      { transform: translateZ(40px) translateY(-10px); }
+}
+.scene .avatar-layer::after {
+  content: ""; position: absolute; left: 14%; right: 14%; bottom: -3%;
+  height: 12%;
+  border-radius: 50%;
+  background: radial-gradient(ellipse at center, rgba(129,140,248,.35), transparent 70%);
+  filter: blur(8px);
+  animation: shadow-breathe 6.5s ease-in-out infinite;
+}
+@keyframes shadow-breathe {
+  0%, 100% { transform: scale(1); opacity: .9; }
+  50%      { transform: scale(.92); opacity: .6; }
+}
+
+.scene-caption {
+  text-align: center; color: var(--text-3); font-size: .86rem;
+  max-width: 60ch; margin: 18px auto 0;
+}
+
+/* The demo panel now sits under the scene, centred, as one column. */
+.hero-showcase {
+  display: block; max-width: 680px; margin: 34px auto 0;
+}
+
+@media (max-width: 860px) {
+  .scene { height: clamp(330px, 92vw, 440px); margin-top: 32px; }
+  .scene .orb-layer { left: 0; top: 4%; width: 48%; }
+  .scene .avatar-layer { right: 0; bottom: 0; width: 50%; }
+  .scene .nebula { filter: blur(28px); }
+}
+@media (max-width: 560px) {
+  /* No room beside the character for the label; the demo panel underneath
+     carries the same state in words. */
+  .scene .orb-state { display: none; }
+}
+
+/* ---------- depth on the cards ----------
+   A card leans toward the pointer and a glare crosses it. Small angles:
+   the point is that the page has depth, not that it performs. */
+
+.tilt {
+  --rx: 0deg; --ry: 0deg; --gx: 50%; --gy: 50%;
+  position: relative;
+  transform: perspective(900px) rotateX(var(--rx)) rotateY(var(--ry));
+  transition: transform .25s ease-out, border-color .25s ease, box-shadow .25s ease;
+  transform-style: preserve-3d;
+}
+.tilt::after {
+  content: ""; position: absolute; inset: 0; border-radius: inherit;
+  background: radial-gradient(240px circle at var(--gx) var(--gy), rgba(255,255,255,.07), transparent 60%);
+  opacity: 0; transition: opacity .25s ease; pointer-events: none;
+}
+.tilt.is-live::after { opacity: 1; }
+.claims > div.tilt, .caps-grid > div.tilt {
+  padding: 18px 20px; margin: -18px -20px;
+  border-radius: var(--r); border: 1px solid transparent;
+}
+.claims > div.tilt.is-live, .caps-grid > div.tilt.is-live {
+  border-color: var(--line); background: rgba(18,20,25,.6);
+  box-shadow: 0 30px 60px -30px rgba(0,0,0,.8);
+}
+.panel.tilt.is-live { box-shadow: 0 40px 80px -40px rgba(94,231,220,.18), 0 30px 60px -30px rgba(0,0,0,.8); }
+
+/* ---------- arriving ----------
+   Things below the fold rise and settle as they come into view. Scoped to
+   `.js` so a page without the script is a complete page, not a blank one. */
+.js .reveal {
+  opacity: 0;
+  transform: perspective(900px) translateY(22px) rotateX(5deg);
+  transform-origin: 50% 100%;
+  transition: opacity .7s ease, transform .8s cubic-bezier(.2,.7,.2,1);
+}
+.js .reveal.in { opacity: 1; transform: none; }
+.js .reveal.tilt.in { transform: perspective(900px) rotateX(var(--rx)) rotateY(var(--ry)); }
+
+@media (prefers-reduced-motion: reduce) {
+  .scene .floor, .scene .ring, .scene .avatar-img, .scene .avatar-layer::after { animation: none; }
+  .scene .layer, .scene .nebula, .scene .floor, .scene .avatar-tilt, .tilt { transform: none !important; transition: none; }
+  .scene .floor { transform: perspective(700px) rotateX(72deg) !important; }
+  .scene .r1 { transform: rotateX(72deg) !important; }
+  .scene .r2 { transform: rotateX(64deg) rotateY(-30deg) !important; }
+  .js .reveal { opacity: 1; transform: none; transition: none; }
+  .tilt::after { display: none; }
 }
