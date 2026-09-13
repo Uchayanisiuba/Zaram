@@ -40,7 +40,10 @@ Three obstacles are represented here, and they are genuinely different things:
 
 * **A different wire format.** Anthropic's API is ``/v1/messages`` with an
   ``x-api-key`` header, not ``/v1/chat/completions`` with a bearer token. It
-  needs an adapter that does not exist.
+  needed an adapter, and since 13 September 2026 it has one —
+  `runtimes/models/engines/anthropic_engine.py` — so the entry below is
+  available. The obstacle is kept in this list because the *shape* of it is
+  what the next native provider will present too.
 * **A base URL our normalisation cannot express.** Gemini's OpenAI-compatible
   root ends in ``/openai``, and its chat path hangs directly off that. Both
   halves of Zaram's cloud path assume ``<root>/v1/...`` — the engine appends
@@ -314,12 +317,19 @@ PROVIDERS: Tuple[ProviderEntry, ...] = (
         compatibility=Compatibility.NATIVE,
         auth=AuthStyle.X_API_KEY,
         key_url="https://console.anthropic.com/settings/keys",
-        support=Support.UNAVAILABLE,
+        # Available since 13 September 2026: `AnthropicEngine` speaks
+        # `/v1/messages` and `AnthropicAdapter` reads `/v1/models`, both
+        # through the gate. This entry read "cannot call Claude directly yet"
+        # for as long as the catalogue existed; `_speaks_messages_api` in
+        # `cloud_config.py` is what reads NATIVE here and picks the pair.
+        support=Support.AVAILABLE,
+        pricing=Pricing.PAID,
         note=(
-            "Zaram cannot call Claude directly yet — it uses a different request "
-            "format from the one Zaram speaks. An OpenAI-compatible route is "
-            "documented by Anthropic but has not been confirmed here, so it is "
-            "not offered. OpenRouter reaches Claude today."
+            "Anthropic's own API, paid per token on your key. Prompts leave "
+            "this machine for api.anthropic.com and every one is logged. What "
+            "Anthropic keeps is set by your account's terms, which Zaram does "
+            "not infer — so Claude is offered by name and never routed to on "
+            "its own."
         ),
     ),
     ProviderEntry(

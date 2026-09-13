@@ -180,8 +180,16 @@ class TestResidency:
             "ollama:big-general": "does not fit alongside the embedding model"
         }
 
-    def test_the_embedding_model_is_charged_against_the_budget(self, manager):
+    def test_the_embedding_model_is_charged_against_the_budget(self, manager, monkeypatch):
         """Recall runs on every exchange, so the embedder is a permanent tenant.
+
+        **When it is on the card.** Since `cfa08c2` the embedder goes to the
+        CPU on cards under 16 GB (`embed_on_gpu`), so on the 12 GB profile
+        this test pins nothing was being charged and the assertion failed
+        for a reason unrelated to the arithmetic it measures. The device is
+        pinned here so the question stays "is a resident embedder charged"
+        rather than "is the embedder resident on this size of card", which
+        `runtimes/memory` tests answer.
 
         Same card, same chat model — the only difference is whether an embedding
         model is also resident. It has to change the answer, or the budget is
@@ -194,6 +202,7 @@ class TestResidency:
         selected for this request". The budget still has to answer differently
         with the embedder present, which is what this measures.
         """
+        monkeypatch.setenv("ZARAM_EMBED_DEVICE", "gpu")
         chat = _local("ollama:general", size=8 * GB)
 
         alone = _with_vram(ProviderManager(), 12 * GB)

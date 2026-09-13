@@ -58,29 +58,39 @@ from runtimes.models.engines.openai_compatible_engine import (
 FAKE_KEY = "not-a-real-key"
 
 
-def _engine_endpoint(base_url: str) -> str:
-    """Where the shipped engine would send a chat request for this root."""
+def _engine_endpoint(base_url: str, compatibility: Compatibility = Compatibility.OPENAI) -> str:
+    """Where the shipped engine for this wire format would send a chat request."""
+    if compatibility is Compatibility.NATIVE:
+        from runtimes.models.engines.anthropic_engine import AnthropicEngine
+
+        return AnthropicEngine(base_url=base_url, api_key=FAKE_KEY).endpoint
     return OpenAICompatibleEngine(
         base_url=base_url, api_key=FAKE_KEY, default_model=""
     ).endpoint
 
 
-def _discovery_url(base_url: str) -> str:
-    """Where the shipped discoverer would ask for the model list."""
+def _discovery_url(base_url: str, compatibility: Compatibility = Compatibility.OPENAI) -> str:
+    """Where the shipped discoverer for this wire format would ask for the model list."""
+    if compatibility is Compatibility.NATIVE:
+        from providers.discoverers.anthropic import AnthropicAdapter
+
+        return f"{AnthropicAdapter(base_url=base_url).base_url}/v1/models"
     return f"{OpenAICompatibleAdapter(base_url=base_url).base_url}/v1/models"
 
 
 def _reachable(entry: ProviderEntry) -> bool:
-    """Whether Zaram's own normalisation lands on the provider's real endpoint.
+    """Whether Zaram's own code lands on the provider's real endpoint.
 
-    This is the whole grading criterion for an OpenAI-compatible service, and
-    it is deliberately computed rather than stored: a stored answer would drift
-    away from the code the first time the normalisation changed, which is the
-    change most likely to break the catalogue.
+    This is the whole grading criterion, and it is deliberately computed
+    rather than stored: a stored answer would drift away from the code the
+    first time the normalisation changed, which is the change most likely to
+    break the catalogue. Two wire formats are shipped — OpenAI's, and since
+    13 September 2026 Anthropic's — and each is graded by its own engine.
+    `UNVERIFIED` has no engine to grade it and is never reachable from here.
     """
-    if entry.compatibility is not Compatibility.OPENAI:
+    if entry.compatibility not in (Compatibility.OPENAI, Compatibility.NATIVE):
         return False
-    return _engine_endpoint(entry.base_url) == entry.chat_endpoint
+    return _engine_endpoint(entry.base_url, entry.compatibility) == entry.chat_endpoint
 
 
 class TestTheGradeIsEarned:
@@ -92,7 +102,7 @@ class TestTheGradeIsEarned:
         shipped `OpenAICompatibleEngine`, so this fails if `_normalise` ever
         changes shape under an entry."""
         for entry in list_providers(available_only=True):
-            assert _reachable(entry), f"{entry.id}: {_engine_endpoint(entry.base_url)}"
+            assert _reachable(entry), f"{entry.id}: {_engine_endpoint(entry.base_url, entry.compatibility)}"
 
     def test_every_available_entry_is_also_discoverable(self):
         """Chat and discovery must agree about where the provider lives.
@@ -103,8 +113,8 @@ class TestTheGradeIsEarned:
         saying why. A catalogue that only checked the chat URL would let an
         entry reintroduce exactly that."""
         for entry in list_providers(available_only=True):
-            expected = entry.chat_endpoint.replace("/chat/completions", "/models")
-            assert _discovery_url(entry.base_url) == expected, entry.id
+            expected = entry.chat_endpoint.replace("/chat/completions", "/models").replace("/messages", "/models")
+            assert _discovery_url(entry.base_url, entry.compatibility) == expected, entry.id
 
     def test_an_unreachable_entry_is_never_marked_available(self):
         """The converse, and the reason the label means anything."""
@@ -134,20 +144,24 @@ class TestTheGradeIsEarned:
         assert _engine_endpoint(gemini.base_url) != gemini.chat_endpoint
         assert _engine_endpoint(gemini.base_url).endswith("/openai/v1/chat/completions")
 
-    def test_anthropic_is_native_and_not_offered(self):
+    def test_anthropic_is_native_and_offered_by_its_own_engine(self):
         """Claude is not an OpenAI-compatible endpoint with a different host.
-        It is a different request shape behind a different auth header, and
-        nothing in this repo speaks it."""
+        It is a different request shape behind a different auth header. This
+        read "and nothing in this repo speaks it" until 13 September 2026;
+        `AnthropicEngine` speaks it now, and the grade is earned by that
+        engine landing on the catalogue's endpoint — never by the flag."""
         anthropic = get("anthropic")
         assert anthropic is not None
         assert anthropic.compatibility is Compatibility.NATIVE
         assert anthropic.auth is AuthStyle.X_API_KEY
-        assert anthropic.support is Support.UNAVAILABLE
+        assert anthropic.support is Support.AVAILABLE
         assert not anthropic.chat_endpoint.endswith("/chat/completions")
+        assert _reachable(anthropic)
 
-    def test_unconfirmed_and_native_providers_are_never_available(self):
+    def test_unconfirmed_providers_are_never_available(self):
+        """No engine can be pointed at a root nobody here has confirmed."""
         for entry in PROVIDERS:
-            if entry.compatibility in (Compatibility.NATIVE, Compatibility.UNVERIFIED):
+            if entry.compatibility is Compatibility.UNVERIFIED:
                 assert entry.support is Support.UNAVAILABLE, entry.id
 
 

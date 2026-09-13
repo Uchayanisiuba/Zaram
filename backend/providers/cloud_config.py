@@ -79,6 +79,7 @@ from urllib.parse import urlparse
 from . import catalogue
 from .catalogue import Compatibility, GENERIC_ENDPOINT_ENV, GENERIC_KEY_ENV
 from .contracts import ProviderKind
+from .discoverers.anthropic import AnthropicAdapter
 from .discoverers.openai_compat import OpenAICompatibleAdapter
 
 logger = logging.getLogger(__name__)
@@ -472,8 +473,14 @@ def _register_adapter(connection: CloudConnection) -> None:
     except Exception:  # pragma: no cover
         logger.debug("no previous adapter for %s", connection.provider_id, exc_info=True)
 
-    registry.register_model_provider(
-        OpenAICompatibleAdapter(
+    if _speaks_messages_api(connection.provider_id):
+        adapter: Any = AnthropicAdapter(
+            provider_id=connection.provider_id,
+            base_url=connection.base_url,
+            api_key=connection.api_key or None,
+        )
+    else:
+        adapter = OpenAICompatibleAdapter(
             provider_id=connection.provider_id,
             base_url=connection.base_url,
             kind=(
@@ -483,8 +490,21 @@ def _register_adapter(connection: CloudConnection) -> None:
             ),
             api_key=connection.api_key or None,
         )
-    )
+    registry.register_model_provider(adapter)
     _forget_scan()
+
+
+def _speaks_messages_api(provider_id: str) -> bool:
+    """Whether this connection is Anthropic's wire format rather than OpenAI's.
+
+    Decided by the catalogue entry — `Compatibility.NATIVE` — and never by
+    the hostname, so a person who points the Anthropic entry at a proxy of
+    their own still gets the engine that speaks it. Everything else, named
+    or pasted, is OpenAI-compatible, which is what "paste the API address"
+    has always meant.
+    """
+    entry = catalogue.get(provider_id)
+    return entry is not None and entry.compatibility is Compatibility.NATIVE
 
 
 def _forget_scan() -> None:
@@ -532,6 +552,15 @@ def _engine_for(connection: CloudConnection) -> Any:
     key changes, and a stale entry there would send the user's prompt with a
     credential they had already revoked.
     """
+    if _speaks_messages_api(connection.provider_id):
+        from runtimes.models.engines.anthropic_engine import AnthropicEngine
+
+        return AnthropicEngine(
+            base_url=connection.base_url,
+            api_key=connection.api_key,
+            default_model="",
+        )
+
     from runtimes.models.engines.openai_compatible_engine import OpenAICompatibleEngine
 
     return OpenAICompatibleEngine(

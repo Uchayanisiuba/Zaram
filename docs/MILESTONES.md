@@ -61,6 +61,37 @@ TabbyAPI serving `Qwen3.8-27B-exl3-2.20bpw` on 1234 and Ollama holding
    send, the composer clears, and the ids keep travelling with follow-ups
    so scope is unchanged — seen with `lease.txt`, clause 4 then clause 5.
 
+#### Later the same day: Claude directly, and the MCP test blocked on a login
+
+* **Claude (Anthropic) is reachable directly.** `runtimes/models/engines/
+  anthropic_engine.py` speaks `/v1/messages` — system prompt as a top-level
+  field, images and tool calls as typed content blocks, the named-event
+  stream parsed back into text, `<think>` tags and the tool-call marker —
+  and `providers/discoverers/anthropic.py` reads `/v1/models`. Both are
+  raw HTTP through `EgressGate`, because the chokepoint scan forbids a
+  module (an SDK included) opening its own connection. `cloud_config`
+  picks the pair by the catalogue's `Compatibility.NATIVE`, never by
+  hostname; the catalogue entry is `AVAILABLE` and
+  `test_provider_catalogue.py` now grades a native entry by *its own*
+  engine landing on the endpoint, the same earned-not-stored discipline it
+  had for OpenAI's. Seen: the picker offers "Claude (Anthropic)" with only
+  a key field. **Not exercised against the live API** — that needs the
+  maintainer's key, pasted in Settings. Deliberately not sent: a
+  `thinking` block (omitted is the one form every current model accepts;
+  the reasoning panel stays empty on this path — noted in the engine's
+  docstring). `tests/test_claude_is_reachable_directly.py`, 14 tests.
+* **Attaching `zaram_mcp` to a real Claude Code is paired and configured
+  and blocked on `claude login`** — the CLI here (2.1.220) answered *OAuth
+  session expired*. The `.mcp.json` block is written in the session
+  scratchpad; the credential was never printed. Rerun after login:
+  `claude -p "…" --mcp-config <file> --strict-mcp-config --allowedTools
+  mcp__zaram__recall`.
+* `providers/tests/test_default_model_selection.py` had one failure on the
+  committed tree that `pytest tests` never runs (it lives outside `tests/`):
+  the 12 GB profile it pins puts the embedder on the CPU since `cfa08c2`,
+  so nothing was charged. The test now pins the embedder to the GPU, which
+  is the question it was asking.
+
 #### Four defects found only by watching, all fixed and pinned
 
 * *"look at it"* → `vision.analyze` → refused for no attachment, on the one

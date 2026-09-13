@@ -201,3 +201,62 @@ Acceptance, seen not passed: ask for a three-file change; watch the plan
 appear with Go; press it; watch items tick as commits land; open Project and
 see the ticked list on the task's row; revert one commit from its card and
 watch the item un-tick.
+
+## Revise — a correction that regenerates the reply it points at. 13 September
+
+The maintainer's ask, in their words: *"users can select a follow-up prompt
+and it would effect changes and corrections to previous responses,
+regenerating the previous response with the update and/or editing the
+needed file"* — for local and cloud alike, and matching what the industry
+settled on.
+
+**What the industry settled on.** Three shapes, and every product has at
+least two. ChatGPT and Claude.ai: *edit the question* and regenerate from
+there, with the old version kept as a branch. Cursor: *"fix this"* under a
+specific output, the correction applied to that output. Claude Code and
+Cline: a plain next turn — *"no, use net 30"* — which works because the
+transcript is in the model's context, and when the reply changed files the
+loop changes the files again. Zaram already has the first (*Edit*, *Ask
+again*) and, without naming it, the third: the conversation share puts the
+previous reply in front of the model on every turn, and on a coding project
+the tools are offered. What is missing is the second, and it is precision
+rather than capability:
+
+* **which reply** — a correction typed under the *third* answer back is
+  about that answer, and a plain turn cannot say so;
+* **regenerate in full** — a correction is not a new question, and the
+  model should produce the corrected answer to the *original* question
+  rather than a paragraph about the correction;
+* **and the files** — where the earlier reply changed the project, the
+  correction is made in the project too, through the same loop, with the
+  earlier commits still on their cards and still revertable.
+
+**The shape.** *Revise* under any finished reply. Pressing it arms the
+composer: a chip above the input says which reply is being revised, with
+the question it answered, and ✕ to disarm. The person types the correction
+and sends. The request carries `revise: {question, reply}` beside the text;
+the backend composes one prompt — the question, the earlier answer, the
+correction, and the instruction to answer the original question in full
+and to make the correction in the files where the earlier answer changed
+them — and sends it down the *ordinary* plan path, so recall runs again
+(rule 4: a fact corrected in between changes the revision), the tools are
+offered on a coding project, and every byte is gated and logged as it
+would be for any question. The transcript shows the correction as the
+person's turn with a *revising* label naming the reply, and the new answer
+as an ordinary reply beneath. Nothing is replaced in place and nothing
+branches: the earlier reply stays, its cards stay, its commits stay
+revertable. That is a deliberate narrowing of the ChatGPT shape — a
+product whose pitch is custody does not make an answer disappear.
+
+**Same for local and cloud.** It is a property of the loop and the prompt,
+not of the model; the per-message model override composes with it
+unchanged.
+
+**Rule 7d.** The earlier reply is session state and is passed explicitly
+in the request, never re-read from a store. The revision is one exchange
+like any other on the way in to memory.
+
+Acceptance, seen not passed: ask on a coding project for a function and a
+test; press Revise under the reply; type *"it should also accept
+negatives"*; watch the tools run, a new commit land, the old change card
+keep its Revert, and the new reply answer the original question in full.
