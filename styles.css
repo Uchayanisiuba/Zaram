@@ -745,10 +745,18 @@ main { overflow-x: clip; }
    them, as one collection on the page's centre line. */
 .embodiment { display: block; text-align: center; }
 .embodiment .feature-text { max-width: 60ch; margin: 0 auto; }
-.embodiment .feature-text p { text-align: left; }
-.embodiment .scene { height: clamp(300px, 36vw, 400px); width: min(100%, 720px); margin: 36px auto 0; }
-.embodiment .scene .orb-layer { left: 0; top: 4%; width: 48%; }
-.embodiment .scene .avatar-layer { right: 0; bottom: -4%; width: 46%; }
+/* Two short columns, one per thing, and the scene beneath puts each thing
+   under its own words: orb under the left column, character under the right,
+   tops level. */
+.embodiment .pair {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 40px;
+  max-width: 760px; margin: 28px auto 0; text-align: left;
+}
+.embodiment .pair h3 { font-size: 1rem; margin: 0 0 .35em; color: var(--text); }
+.embodiment .pair p { margin: 0; color: var(--text-2); font-size: .96rem; }
+.embodiment .scene { height: clamp(220px, 28vw, 300px); width: min(100%, 760px); margin: 28px auto 0; }
+.embodiment .scene .orb-layer { left: 25%; top: 4%; width: 30%; margin-left: -15%; }
+.embodiment .scene .avatar-layer { left: 75%; top: 4%; bottom: auto; width: 27%; margin-left: -13.5%; }
 .embodiment .scene .floor { display: none; }
 .embodiment .scene::before {
   content: ""; position: absolute; inset: -6% -4%;
@@ -759,7 +767,10 @@ main { overflow-x: clip; }
 .embodiment .scene .stars { inset: 0; width: 100%; height: 100%; }
 .embodiment .scene .orb-state { white-space: nowrap; font-size: .78rem; }
 @media (max-width: 860px) {
-  .embodiment .scene { height: clamp(280px, 70vw, 380px); margin-top: 24px; }
+  .embodiment .pair { grid-template-columns: 1fr; gap: 18px; }
+  .embodiment .scene { height: clamp(200px, 48vw, 300px); margin-top: 24px; }
+  .embodiment .scene .orb-layer { width: 38%; margin-left: -19%; }
+  .embodiment .scene .avatar-layer { width: 34%; margin-left: -17%; }
 }
 
 @media (max-width: 860px) {
