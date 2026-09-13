@@ -92,6 +92,40 @@ TabbyAPI serving `Qwen3.8-27B-exl3-2.20bpw` on 1234 and Ollama holding
   so nothing was charged. The test now pins the embedder to the GPU, which
   is the question it was asking.
 
+#### Later still: Revise built, the tools card, and the cause of "stopped before writing an answer"
+
+* **Revise** (`docs/AGENT-UX.md`, *Revise*): `ChatRequest.revise`,
+  `core/revise.py`, the ordinary plan path; *Revise* under a reply arms the
+  composer with a chip, the correction lands labelled with what it revises.
+  Backend and wire tested; the button seen in the action row; **the chip
+  and a revised reply not yet seen on screen** — the maintainer was using
+  the pane and three page-opened popups blocked scripting. Acceptance is
+  in AGENT-UX.
+* **The tools notification is about tools used.** "14 attached tools are
+  available" is withheld (the event stays; the orb reads `servers` off
+  it); the tool-call summary became the card — words, wrench, arrow.
+* **"The model stopped before writing an answer", four times in one
+  afternoon, was a two-minute cloud timeout on a local 27B** pre-filling a
+  60K prompt, landing inside the thinking block. `LOCAL_TIMEOUT` (15 min)
+  on the local OpenAI-compatible path; an error mid-thought closes the
+  block and names the timeout. `tests/test_a_slow_local_model_is_not_a_gone_one.py`.
+* **Continuity measured, because the maintainer asked for it to feel like
+  ChatGPT.** Through the API on the 27B: same session, "my cat is
+  Biscuit" → "what is my cat called" → *Biscuit* (10 s + 6 s); **a new
+  session with the same `conversation_id`** — what a reload is — *"Your
+  cat is called Biscuit and she is three"* (10 s); a brand-new chat also
+  knew Biscuit, from the Spine, cited. The mechanism was never the gap;
+  the timeouts were, since a reply that dies is never recorded and the
+  next question has no memory of it.
+* **Not built, designed in one line:** `read_page` — fetch a URL through
+  the gate (per-host ask/allow, logged), extract the main text, offer it
+  in the loop beside search. Deterministic, a day. JavaScript-heavy pages
+  are a browser MCP server, attachable today.
+* **Not building, by rule:** using Claude Code's subscription login as
+  Zaram's Claude credential — the consumer-app route by another name.
+  The legitimate arrangement is the one built: Claude Code holds
+  `zaram_mcp`; Claude inside Zaram is OpenRouter or API credit.
+
 #### Four defects found only by watching, all fixed and pinned
 
 * *"look at it"* → `vision.analyze` → refused for no attachment, on the one
