@@ -345,7 +345,7 @@ function armScene() {
   const scene = document.querySelector('[data-role="scene"]');
   if (!scene || !MOTION_OK) return;
 
-  const hero = scene.closest(".hero") || document.body;
+  const hero = scene.closest(".embodiment, .hero") || document.body;
   let tx = 0, ty = 0, mx = 0, my = 0, sy = 0, visible = true, raf = 0;
 
   if (FINE_POINTER) {
@@ -356,7 +356,17 @@ function armScene() {
     }, { passive: true });
     hero.addEventListener("pointerleave", () => { tx = 0; ty = 0; });
   }
-  window.addEventListener("scroll", () => { sy = Math.min(window.scrollY, 1200); }, { passive: true });
+  // Scroll is measured as where the scene sits relative to the middle of the
+  // viewport, not as the page's scroll offset: the layers shift as the scene
+  // passes through view and are back in place when it is centred, wherever
+  // on the page it lives.
+  const measure = () => {
+    const r = scene.getBoundingClientRect();
+    sy = Math.max(-600, Math.min(600, (r.top + r.height / 2) - window.innerHeight / 2));
+  };
+  window.addEventListener("scroll", measure, { passive: true });
+  window.addEventListener("resize", measure, { passive: true });
+  measure();
 
   if ("IntersectionObserver" in window) {
     new IntersectionObserver((entries) => {

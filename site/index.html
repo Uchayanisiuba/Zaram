@@ -110,34 +110,6 @@
       </p>
     </div>
 
-    <!-- The scene: the orb and the character in depth. Layers move against
-         the pointer and the scroll by their `--d`; the character tilts a few
-         degrees. Every bit of it is decoration and is marked so, and all of it
-         stands still for anyone who asked for less motion. -->
-    <div class="scene" data-role="scene" aria-hidden="true">
-      <canvas class="stars" data-role="stars"></canvas>
-      <div class="floor" style="--d:.08"></div>
-      <div class="nebula n1" style="--d:.14"></div>
-      <div class="nebula n2" style="--d:.22"></div>
-      <div class="layer orb-layer" style="--d:.55">
-        <div class="orb-stage" data-role="orb-stage">
-          <span class="ring r1"></span>
-          <span class="ring r2"></span>
-          <img class="orb-img" src="img/orb.webp" width="800" height="800"
-               alt="" loading="eager" decoding="async">
-          <span class="orb-track" aria-hidden="true"><i></i></span>
-          <p class="orb-state"><span class="dot"></span><span data-role="orb-state">Local only — nothing is sent out</span></p>
-        </div>
-      </div>
-      <div class="layer avatar-layer" style="--d:.9">
-        <div class="avatar-tilt" data-role="avatar">
-          <img class="avatar-img" src="img/avatar.webp" width="900" height="981"
-               alt="" loading="eager" decoding="async">
-        </div>
-      </div>
-    </div>
-    <p class="scene-caption">The orb is the default. The character is optional — and it reports what the system is doing, never who answered.</p>
-
     <div class="hero-showcase">
       <!-- The final state is written here so that no-JS and reduced-motion
            visitors get the whole exchange immediately. The script clears it and
@@ -175,6 +147,48 @@
     <div>
       <h3>You decide what leaves</h3>
       <p>Cloud models are welcome here — it's your key and your call. Nothing goes to a destination you haven't named, you say yes once per destination and kind of data, and every byte that went is in the log.</p>
+    </div>
+  </section>
+
+  <section class="feature embodiment" id="face">
+    <div class="feature-text">
+      <p class="kicker">The orb, and the character</p>
+      <h2>One tells you what the system is doing. The other is yours.</h2>
+      <p>
+        <strong>The orb</strong> is a status light, not a mascot: at rest, working, or
+        swapping a model — and beside it, in words, whether the answer stayed local.
+      </p>
+      <p>
+        <strong>The character</strong> is optional and yours — a name, a manner, a voice,
+        or your own VRM. It speaks replies as they're written and shows the same states,
+        never which model answered. Ask what it is and it tells you the truth.
+      </p>
+    </div>
+    <!-- The scene: the orb and the character in depth. Layers move against
+         the pointer and the scroll by their `--d`; the character tilts a few
+         degrees. Every bit of it is decoration and is marked so, and all of it
+         stands still for anyone who asked for less motion. -->
+    <div class="scene" data-role="scene" aria-hidden="true">
+      <canvas class="stars" data-role="stars"></canvas>
+      <div class="floor" style="--d:.08"></div>
+      <div class="nebula n1" style="--d:.14"></div>
+      <div class="nebula n2" style="--d:.22"></div>
+      <div class="layer orb-layer" style="--d:.55">
+        <div class="orb-stage" data-role="orb-stage">
+          <span class="ring r1"></span>
+          <span class="ring r2"></span>
+          <img class="orb-img" src="img/orb.webp" width="800" height="800"
+               alt="" loading="eager" decoding="async">
+          <span class="orb-track" aria-hidden="true"><i></i></span>
+          <p class="orb-state"><span class="dot"></span><span data-role="orb-state">Local only — nothing is sent out</span></p>
+        </div>
+      </div>
+      <div class="layer avatar-layer" style="--d:.9">
+        <div class="avatar-tilt" data-role="avatar">
+          <img class="avatar-img" src="img/avatar.webp" width="900" height="981"
+               alt="" loading="eager" decoding="async">
+        </div>
+      </div>
     </div>
   </section>
 
