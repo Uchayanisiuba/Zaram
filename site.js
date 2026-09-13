@@ -9,7 +9,7 @@ const CONFIG = {
   //         the bottom of the page as "notify me".
   // Flip this ONLY after you have installed the .exe on a machine that is not
   // your development machine. See site/README.md.
-  releaseLive: false,
+  releaseLive: true,
 
   // ── THE BUILD ─────────────────────────────────────────────────────────────
   // electron-builder.yml names the artifact Zaram-${version}-${arch}.exe, so the
@@ -18,17 +18,23 @@ const CONFIG = {
   // sizeMb is MiB, matching what Windows Explorer shows the user — not decimal MB.
   // scripts/release-checksum.mjs prints the correct number for the built file.
   version: "0.1.0",
-  sizeMb:  178,
+  sizeMb:  198,
   repo:    "Uchayanisiuba/Zaram",
 
   // Shown in the badge and echoed in the signup copy while releaseLive is false.
   // Keep it vague enough to be true: a date you miss is the first thing an alpha
   // tester learns about how reliable you are.
-  firstBuild: "first builds in early September",
+  firstBuild: "first build 21 September",
+
+  // The day the alpha opens. Shown beside the badge and in the download
+  // note either way: before the switch it is when the build goes out, after
+  // it is when the alpha programme — the feedback loop, the "what went
+  // wrong" emails — starts for the people who install it.
+  alphaOpens: "21 September",
 
   // Paste the SHA-256 from the release page. Leave empty and the page says the
   // checksum is still pending, rather than showing a blank box.
-  sha256: "",
+  sha256: "59e68a9802a0c4401db76771b7270f3c0b47dc30d6158dffed1e1ab7f9b056b0",
 
   // ── THE WAITLIST ──────────────────────────────────────────────────────────
   // Paste the endpoint from whichever form host you signed up with, and name it
@@ -77,9 +83,10 @@ function applyConfig() {
   // the build exists the badge states the timing instead.
   $all('[data-role="eyebrow"]').forEach(el => {
     el.textContent = CONFIG.releaseLive
-      ? `Alpha · Windows · v${CONFIG.version}`
+      ? `Alpha · Windows · v${CONFIG.version} · opens ${CONFIG.alphaOpens}`
       : `Alpha · Windows · ${CONFIG.firstBuild}`;
   });
+  $all('[data-role="alpha-date"]').forEach(el => { el.textContent = CONFIG.alphaOpens; });
 
   const waitlist = document.querySelector('[data-role="waitlist"]');
   const download = document.querySelector('[data-role="download"]');
