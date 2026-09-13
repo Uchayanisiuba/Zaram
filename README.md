@@ -118,14 +118,21 @@ evidence of June it is the only part anybody owned at all.
 - **Generated documents** — .docx, .xlsx, .pdf, .md, .csv, charts — with preview.
 - **Speech both directions**, local and optional, keeping pace with the text rather than
   waiting for the reply to finish.
-- **An installer**: `Zaram-0.1.0-x64.exe`, 186 MB, plus a portable build.
+- **An installer**: `Zaram-0.1.0-x64.exe`, 198 MB, plus a portable build — published
+  as the [v0.1.0 pre-release](https://github.com/Uchayanisiuba/Zaram/releases/tag/v0.1.0),
+  with the SHA-256 beside it. Unsigned; SmartScreen will warn.
+- **Image generation**, routed to a model that can draw — one you brought, on your own
+  card, or a provider you chose — with the request shown before it leaves.
+- **The Spine as an MCP server.** Pair Claude Code, Cline or any MCP client from Settings
+  and it gets `recall`, `remember`, `correct` and `projects`; every call is logged as
+  egress to `client:<name>`.
+- **A coding project**: read, change, run and look at an app from the conversation, with
+  git as the undo and *Revise* to correct a reply and the files it changed.
 - **Export.** Everything Zaram holds, as JSONL and CSV in one .zip.
 
 What is not built:
 
-- **Image generation.** Zaram reads pictures; nothing routes a request for one. That
-  needs a way to say "this reply should be a picture", which does not exist — building
-  the gate before the request would be scoring a decision nobody can make yet.
+- **A macOS or Linux build.** Windows only, for now.
 - **The installer has not been run on a machine that has never seen this repo.** Until
   that happens, treat "a stranger can install this" as unproven. It is the actual
   blocker, and no amount of further capability substitutes for it.
