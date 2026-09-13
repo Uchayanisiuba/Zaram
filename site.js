@@ -402,7 +402,7 @@ function armScene() {
  *  toward the pointer (attention, not drift — the head already leans the
  *  same way), it blinks now and then, and while the demo is working the eyes
  *  become the thinking pattern the app uses. On the site it is the mascot,
- *  so it mostly smiles — eyes and mouth — and drops to the product's rest
+ *  so it mostly smiles — the mouth; the eyes stay — and drops to the rest
  *  face for a few seconds now and then, switching behind a blink so the
  *  change is never a jump.
  *
@@ -439,21 +439,6 @@ function armFace(canvas, img) {
   function dot(x, y, a, r = R) {
     ctx.fillStyle = `rgba(${COLOUR},${a})`;
     ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
-  }
-
-  /** A smiling eye: an arch two dots thick, the shape the render carries
-   *  as its own smile cell, shifted toward the gaze like the block is. */
-  function eyeSmile(origin, gx, gy, shut) {
-    const dx = Math.round(gx * 1.6), dy = Math.round(gy * 1.2) + 3;
-    const arch = [7, 6, 5, 4, 4, 5, 6, 7];
-    const lift = Math.round(shut * 3);              // a blink lowers the arch
-    for (let c = 0; c < COLS; c++) {
-      for (let k = 0; k < 2; k++) {
-        const r = arch[c] + k + lift;
-        if (r >= ROWS) continue;
-        dot(origin.x + (c + dx) * PITCH, origin.y + (r + dy) * PITCH, 0.92);
-      }
-    }
   }
 
   /** One eye: a rounded block of dots, shifted toward the gaze, its rows
@@ -497,17 +482,17 @@ function armFace(canvas, img) {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.shadowColor = `rgba(${COLOUR},0.55)`; ctx.shadowBlur = 6;
     const smiling = mode === "smile" && !thinking;
+    // The eyes stay the block whichever the mouth is doing; only the mouth
+    // carries the smile.
+    eye(LEFT, mx, my, blinking, now, thinking);
+    eye(RIGHT, mx, my, blinking, now, thinking);
     if (smiling) {
-      eyeSmile(LEFT, mx, my, blinking);
-      eyeSmile(RIGHT, mx, my, blinking);
       // the mouth: an arc, ends up, thirteen dots
       for (let i = 0; i < MOUTH.n; i++) {
         const u = (i - (MOUTH.n - 1) / 2) / ((MOUTH.n - 1) / 2);   // −1 … 1
         dot(MOUTH.x + i * PITCH, MOUTH.y - 9 + (1 - u * u) * 22, 0.88, R - 0.4);
       }
     } else {
-      eye(LEFT, mx, my, blinking, now, thinking);
-      eye(RIGHT, mx, my, blinking, now, thinking);
       // the flat line at rest; a slightly narrower one while thinking
       const n = thinking ? MOUTH.n - 2 : MOUTH.n;
       const x0 = MOUTH.x + ((MOUTH.n - n) / 2) * PITCH;
