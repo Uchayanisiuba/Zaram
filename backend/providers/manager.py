@@ -873,6 +873,30 @@ class ProviderManager:
             ),
         )[0]
 
+    def best_cloud_model(self, specialisation: Optional[str] = None) -> Optional[ModelInfo]:
+        """The cloud model Zaram would *offer* when the local one is stuck.
+
+        Not a route — an offer, which the person accepts or ignores, so
+        `prefer_local` does not empty it: that setting governs what Zaram
+        picks on its own, and a button is not Zaram picking. Consent still
+        does: only `selectable_by_default` models, so a tier that trains on
+        input is never the thing offered. Residency is irrelevant to a model
+        that runs elsewhere and is not applied.
+        """
+        remote = [
+            m
+            for m in self.list_models(category=ModelCategory.LLM, available_only=True)
+            if m.selectable_by_default and m.locality is not CapabilityLocality.LOCAL
+        ]
+        if not remote:
+            return None
+        return sorted(
+            remote,
+            key=lambda m: self._rank_key(
+                m, cloud_first=True, specialisation=specialisation, resident=None
+            ),
+        )[0]
+
     def _auto_candidates(
         self,
         category: ModelCategory,

@@ -3435,6 +3435,12 @@ def _project_json(project) -> Dict[str, Any]:
         # state the tools refuse in, and the state worth rendering as an
         # unfinished setup rather than as nothing.
         "root": project.root,
+        # Whether Zaram may change files under `root`. Off by default; the
+        # control that turns it on sits beside the folder in Project, because
+        # a remembered consent has to be visible where it can be withdrawn.
+        "writes": project.writes,
+        # And whether it may run the project's detected commands. Same rules.
+        "runs": project.runs,
     }
 
 
@@ -3464,6 +3470,64 @@ class ProjectUpdateRequest(BaseModel):
     #: operation and not a no-op: it is how somebody takes the folder away
     #: without deleting the project and everything scoped to it.
     root: str | None = None
+    #: Allow or withdraw file edits in the folder. The code pack's grant, per
+    #: project rather than per server — see `Project.writes`.
+    writes: bool | None = None
+    #: Allow or withdraw running the project's detected commands — tests,
+    #: builds, linters. See `Project.runs` and `packs/code/runners.py`.
+    runs: bool | None = None
+
+
+@app.get("/projects/{project_id}/runners")
+async def project_runners(project_id: str):
+    """What Zaram would be allowed to run in this project, detected from its
+    files — shown beside the grant so a person knows what they are allowing.
+    Nothing here runs anything."""
+    from pathlib import Path as _Path
+
+    from packs.code.runners import detect, long_running_scripts
+
+    try:
+        project = project_records.get(project_id)
+    except UnknownProject:
+        raise HTTPException(status_code=404, detail=f"No project called {project_id!r}.")
+    root = _Path(project.root) if project.root else None
+    if root is None or not root.is_dir():
+        return {"runners": [], "excluded": []}
+    return {
+        "runners": [r.to_json() for r in detect(root)],
+        # Named so the absence is visible rather than silent.
+        "excluded": long_running_scripts(root),
+    }
+
+
+class RevertRequest(BaseModel):
+    commit: str
+
+
+@app.post("/projects/{project_id}/revert")
+async def revert_change(project_id: str, body: RevertRequest):
+    """Reverse one commit Zaram made in this project's repository.
+
+    A person pressed *Revert* on the card that showed the change. Mutative,
+    by a person, the way the artifact trash is — never reachable from a tool
+    the model calls — and refused for any commit Zaram did not make.
+    """
+    from pathlib import Path as _Path
+
+    from packs.code import CodeWriter
+
+    try:
+        project = project_records.get(project_id)
+    except UnknownProject:
+        raise HTTPException(status_code=404, detail=f"No project called {project_id!r}.")
+    root = _Path(project.root) if project.root else None
+    if root is None or not root.is_dir():
+        raise HTTPException(status_code=400, detail="This project has no repository folder.")
+    result = CodeWriter().revert(root, body.commit)
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
 
 
 @app.get("/plans")
@@ -3735,6 +3799,10 @@ async def update_project(project_id: str, body: ProjectUpdateRequest):
             project = project_records.set_note(project_id, body.note)
         if body.root is not None:
             project = project_records.set_root(project_id, _checked_root(body.root))
+        if body.writes is not None:
+            project = project_records.set_writes(project_id, body.writes)
+        if body.runs is not None:
+            project = project_records.set_runs(project_id, body.runs)
     except UnknownProject:
         raise HTTPException(status_code=404, detail=f"No project called {project_id!r}.")
     except ValueError as exc:
@@ -4951,7 +5019,9 @@ def _open_code_project(project_id: str | None) -> None:
         return
 
     set_active_root(
-        project.root if project.type is ProjectType.CODING and project.root else None
+        project.root if project.type is ProjectType.CODING and project.root else None,
+        writes=project.writes,
+        runs=project.runs,
     )
 
 

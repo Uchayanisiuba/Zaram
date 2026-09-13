@@ -6,6 +6,12 @@ inspection tier and nothing else**: list, read, search. No write exists in this
 module — not gated, not disabled, absent — which is the same structural
 guarantee the artifact write path gives by having no delete.
 
+**Writing arrived on 12 September and the sentence above stayed true.** The
+write tools live in `writes.py` and are *injected*: a `CodeTools` built without
+a writer has no write tool, and this file still contains no write call, which
+the scan in `test_the_code_tools_are_reachable.py` keeps checking. The reader
+lends the writer its sandbox check so there is one definition of the edge.
+
 **It is an MCP server, not a new mechanism.** `CLAUDE.md`: *"MCP is the tool
 protocol. Never invent a plugin or shim format."* So this satisfies exactly the
 interface `McpServer` satisfies — `connect`, `list_tools`, `call_tool`,
@@ -36,6 +42,15 @@ from typing import Any, Callable, Dict, List, Optional
 
 from ingest.service import SKIP_DIRS
 from runtimes.mcp.client import ToolDescriptor
+
+from . import repo_map, runners, writes
+from .runners import RUN_COMMAND, CodeRunner
+from .writes import TOOL_NAMES, CodeWriter
+
+#: Tokens the repository map may take in the prompt. Sized for a 16K window:
+#: enough for ~60 files with their definitions, small enough to leave the
+#: window for the reads that follow. See `repo_map.py` for what it buys.
+MAP_TOKENS = 1200
 
 logger = logging.getLogger(__name__)
 
@@ -69,8 +84,62 @@ class CodeTools:
     "there is nothing here".
     """
 
-    def __init__(self, root_for: Callable[[], Optional[Path]]) -> None:
+    def __init__(
+        self,
+        root_for: Callable[[], Optional[Path]],
+        *,
+        writer: Optional["CodeWriter"] = None,
+        writes_granted: Callable[[], bool] = lambda: False,
+        runner: Optional["CodeRunner"] = None,
+        runs_granted: Callable[[], bool] = lambda: False,
+    ) -> None:
         self._root_for = root_for
+        #: `None` means this instance cannot write, structurally. See `writes.py`.
+        self._writer = writer
+        #: Whether the open project has allowed edits, asked per request like
+        #: the root is. Read by the runtime through `granted_tools`.
+        self._writes_granted = writes_granted
+        #: Same shape for running the project's commands. See `runners.py`.
+        self._runner = runner
+        self._runs_granted = runs_granted
+
+    def how_to_permit(self, tool_name: str) -> str:
+        """Appended to a `CONFIRM` reason by the runtime, so the sentence a
+        person reads names the control that would allow the call."""
+        if tool_name == RUN_COMMAND:
+            return runners.HOW_TO_PERMIT
+        return writes.HOW_TO_PERMIT
+
+    def briefing(self, query: str) -> str:
+        """What the model is told about the open project before it acts.
+
+        The repository map — files and their definitions, ranked against the
+        question. Empty with no project open, which is most requests.
+        """
+        root = self._root_for()
+        if root is None:
+            return ""
+        try:
+            return repo_map.repo_map(root, query, budget_tokens=MAP_TOKENS)
+        except Exception:  # noqa: BLE001 - a briefing must never fail a reply
+            logger.exception("code pack: could not build the repository map")
+            return ""
+
+    def granted_tools(self) -> set:
+        """Which of this server's tools the open project has allowed.
+
+        The policy's grants live in `mcp-servers.json`, which holds the servers
+        the *user* attached and never a built-in. So the code pack's grant is
+        per project folder — rule 7j's unit is destination and data class, and
+        for file edits the destination is the folder — and it is read here,
+        per request, from the same place the root comes from.
+        """
+        granted: set = set()
+        if self._writer is not None and self._writes_granted():
+            granted |= set(TOOL_NAMES)
+        if self._runner is not None and self._runs_granted():
+            granted.add(RUN_COMMAND)
+        return granted
 
     # -- the McpServer interface, so the runtime needs no special case --
 
@@ -81,6 +150,16 @@ class CodeTools:
         """Nothing to stop."""
 
     def list_tools(self) -> List[ToolDescriptor]:
+        tools = self._read_tools()
+        if self._writer is not None:
+            tools.extend(self._writer.descriptors(SERVER_ID))
+        if self._runner is not None:
+            # Named per project: the description lists the runners this
+            # repository actually has, which is what the model chooses from.
+            tools.append(self._runner.descriptor(SERVER_ID, self._root_for()))
+        return tools
+
+    def _read_tools(self) -> List[ToolDescriptor]:
         return [
             ToolDescriptor(
                 server_id=SERVER_ID,
@@ -189,6 +268,16 @@ class CodeTools:
                     str(arguments.get("query") or ""),
                     str(arguments.get("subpath") or ""),
                 )
+            if self._writer is not None and name in TOOL_NAMES:
+                # The gate has already run in the runtime. This is the sandbox
+                # and the write; the grant was decided before the call arrived.
+                result = self._writer.call(name, arguments, root, self._inside)
+                if "error" not in result:
+                    # So the next map shows the file that was just made.
+                    repo_map.forget(root)
+                return result
+            if self._runner is not None and name == RUN_COMMAND:
+                return self._runner.call(arguments, root)
         except OutsideTheProject as refusal:
             # Reported, not raised. The engine turns an exception into a failed
             # call; this is a refusal with a reason, which is a different thing
@@ -233,7 +322,7 @@ class CodeTools:
 
         if candidate != root and root not in candidate.parents:
             raise OutsideTheProject(
-                f"{relative!r} is outside the project folder, so it was not read"
+                f"{relative!r} is outside the project folder, so it was not touched"
             )
         return candidate
 

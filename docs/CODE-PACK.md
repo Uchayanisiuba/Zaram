@@ -299,20 +299,307 @@ no frontend file mentions, and has nothing to say about backend **events**
 nobody parses. Two tests in `chatClient.test.ts` are the instrument for that
 class.
 
-**4 — next: the repository is offered as a project.** When a folder added to
-Knowledge looks like a repository, offer to make it a coding project, with its
-`root` set. Offer at the moment of doubt, never a choice in advance (7h). This
-is what makes slice 3 reachable *by a user* rather than by a request that
-happens to name a coding project.
+## Slices 4–6 — the loop closes
 
-**5 — diffs as cards.** Reviewing a change before accepting it is the one thing
-none of the six nodes render today. It is a card in the conversation, the same
-pattern generated files already use — **not** an editor. Work deliberately
-gains no sub-apps for editing, and a code editor inside Zaram is that rejected
-idea under a new name.
+Rewritten 12 September 2026. The three "next" items this section used to hold
+— *the repository is offered as a project*, *diffs as cards*, *scoped writes* —
+were three unrelated sizes of work numbered as if they were a sequence, and the
+one that unblocks everything was listed last. They are folded in below, not
+dropped: the offer becomes part of slice 4's discoverability, the diff card is
+slice 4's review surface, and scoped writes *is* slice 4.
 
-**6 — scoped writes.** Per-project grant, branch per task, commit per step.
-Only after 4 has told us what the model can actually do.
+**The frame.** What builds Zaram is one loop run a few hundred times —
+**read → edit → run → read the failure → edit → test → commit** — with a plan
+carried across windows and a person approving the risky steps. Mapped onto
+what exists:
+
+| loop part | Zaram, 12 September |
+|---|---|
+| read the repository | **live** — `list_files`, `read_lines`, `search_code`, sandboxed |
+| edit a file | **slice 4** — this session |
+| run something | **slice 5** — nothing reaches a shell |
+| read what it printed, fix, repeat | **slice 6** — the loop's second half |
+| approve a risky step | **half-built** — `policy.decide` returns `CONFIRM`, the engine stops, and no button or grant exists for a server Zaram ships |
+| carry work across windows | **live** — hand-off at half the window, `PlanRecords` for seven days |
+| remember what was decided | **live** — the Spine, scoped `project:<id>`, with provenance |
+| commit | slice 4 — one commit per write |
+
+Nothing new is needed for *"build an app"*. It is this list, in this order,
+and the order is forced by the tier table: each slice needs something the one
+before it did not.
+
+**Where the ceiling is, said before anyone builds a habit on it.** `CLAUDE.md`
+records five jobs a local model does well, two adequately, and hard reasoning
+as not bridgeable locally. Building an app is mostly the seven, with the eighth
+showing up at the moments that matter — a design decision, a bug that is not
+where the error is. So the local 27B will do **bounded** tasks well: scaffold
+from a spec, add a feature to a small codebase, fix a failing test, write the
+tests for a module — tens of tool calls, one window or two. It will do
+multi-hour autonomous builds badly, and the failure is rule 9's: confident,
+plausible, wrong, at step 40 of 60, with the earlier steps built on it. With a
+cloud key it approximates Claude Code, rule 1 as written, and the product's
+claim stops being *the agent* and becomes *the agent whose memory outlives the
+provider and whose egress you can audit.* Difficulty is routed by reaction, not
+prediction — the local model runs, and when it stalls or fails the test twice,
+Zaram offers the cloud model for *that step*, with what would leave stated
+before it goes. Never a "use cloud for coding" switch.
+
+**Multiple apps is Projects plus residency, and residency is the honest
+limit.** One Project per app: its own root as the sandbox, its own facts, its
+own plan rows. On a 12 GB card one model is resident, so five projects on the
+local model run *sequentially* — the loop is fast between calls, so it feels
+concurrent, and it is not, and the card should say so rather than pretend.
+Five projects on a cloud key run in parallel, egress-logged per project. That
+per-project log is the thing no other agent manager has, and it exists because
+rule 3 was built first.
+
+### 4 — a file can change. Built 12 September.
+
+The mutative tier needs undo, confirm and sandbox, and for code all three are
+things to *use* rather than build.
+
+**The write lives in its own module, and the read module still contains no
+write.** `packs/code/writes.py` holds `write_file` and `edit_file`;
+`tools.py` is unchanged in what it can do and its no-write scan still passes,
+because the writer is *injected* — a `CodeTools` built without one has no
+write tool, not a disabled one. This is the artifact-trash pattern from
+`CLAUDE.md`: generation's own path stays unable to destroy, and the capability
+that can change things is a separate module reached only through a grant a
+person made.
+
+**Two tools, not one.** `write_file(path, content)` creates or replaces a whole
+file, which is how a new file is born and how a small one is rewritten.
+`edit_file(path, find, replace)` replaces one exact occurrence of `find` — it
+refuses if the text is absent, and refuses if it appears more than once, naming
+the count, because "replace the first" silently edits the wrong one. This is
+the search/replace shape every coding agent converged on, and `docs/AIDER.md`
+measured it producing well-formed edits on the 27B with no retries. Line-range
+editing was considered and not built: a model's line numbers drift the moment
+its first edit lands, and the second edit then goes to the wrong place with
+confidence.
+
+**Git is the undo, and a write that cannot be undone does not happen.** Every
+write is one commit, on the branch the folder is on, with the file's path and
+the model's optional `summary` in the message, and the result carries the sha
+and the sentence that reverses it. Three checks run *before* the file is
+touched, in the safe direction each time:
+
+* **The user's own uncommitted changes to that file refuse the write.**
+  Committing after would sweep their half-finished edit into Zaram's commit
+  and make the undo theirs to lose. The refusal says to commit or stash first.
+* **No git, or no identity, refuses.** `git var GIT_COMMITTER_IDENT` fails
+  when nobody has told git who they are; a write that lands and then cannot be
+  committed is a write with no undo, so the check runs first.
+* **A folder that is not a repository becomes one.** `git init` creates a
+  `.git` directory and destroys nothing, and a new app starts as an empty
+  folder — refusing here would make "build me an app" dead on arrival. The
+  result says it happened.
+
+**A branch per task is deferred, and this is a disagreement with the earlier
+line recorded rather than hidden.** Moving somebody's checkout onto
+`zaram/<task>` without asking changes where their *own* next commit lands, and
+an editor open on `main` that is quietly on another branch reads as broken.
+The unit is right — a branch is undo, audit and review in one — but it needs a
+*task* with a start and an end, and the only object that has one is the plan
+record. When a task begins as a plan, it can begin on a branch; until then a
+commit per write on the current branch is the honest version. Re-entry point:
+`PlanRecords` gaining a `branch` field.
+
+**The grant is per project folder, not per server.** `WriteMode` lives on a
+`ServerConfig` and `granted_tools` in `mcp-servers.json`, and the `code`
+server appears in neither — it is a built-in, and `ServerStore.grant` returns
+silently for a server it does not hold. So the confirm-once flow that exists
+for a stranger's server was **unreachable for Zaram's own**. Rule 7j's unit is
+*destination and data class*, and for file edits the destination is the folder:
+`Project.writes` is one column, set from Project beside the repository field,
+carried into the request by the same `ContextVar` as the root, and read by the
+runtime as the built-in's grant. The `code` server is registered `HOST_UNDO`,
+because git is the undo and the maintainer is the person who declared it.
+Ungranted, a write is `CONFIRM` and the engine stops with the sentence that
+says where to allow it; granted, it runs, and every call still goes through
+`policy.decide`.
+
+**What a person sees.** The Project row for a coding project gains one control
+under the folder: *Zaram may edit files here — each change is a git commit you
+can revert.* Off by default. The tool line under a reply shows `write_file`
+with its verdict, the path and the commit. Diffs as a card — the review surface
+the six nodes do not render — is still owed and belongs here, not in a slice
+of its own; it is a card in the conversation, never an editor.
+
+**The routing gap from 3d is closed — same day.** *"Add a dark mode
+toggle"* classified as conversation and *"search the code for X"* as
+`filesystem.search`, so nothing reached the tools unless the person named
+them. **The project decides that the tools are offered, not the phrasing**:
+`IntentPlanner.set_code_project_open` is injected at boot with
+`active_root() is not None`, and with a coding project open a code, filesystem
+or conversation intent plans `mcp.list_tools → reasoning.generate`. Image,
+vision, speech, document and search keep their own plans — a request to draw
+is not about the code because a repository is open — and an attached image
+still answers with the image. `tests/test_a_coding_project_offers_its_tools.py`.
+
+**The repository map — taken from Aider, same day.** `packs/code/repo_map.py`:
+every source file and the definitions in it, ranked by lexical overlap with
+the question (camelCase and snake_case split, the slice-2 lesson), trimmed to
+`MAP_TOKENS` (1,200) by dropping whole files and *saying how many*, cached
+per root for 30 s and forgotten on every write. No tree-sitter, no PageRank:
+`_DEFINITIONS` from the chunker finds the symbols, and rare-token overlap is
+the ranking `CLAUDE.md` already argues for. It reaches the prompt as a
+`briefing` on the `mcp.list_tools` payload — only built-ins may brief, and it
+is placed *before* the tool rules so the last instruction the model reads is
+still Zaram's. Measured: with the map, *"Make the greeting end with an
+exclamation mark"* — no file named — went `search_code(greeting, subpath=src)`
+→ `read_lines(src/greet.py)` → `edit_file` → commit `ce982d9`, decoy skipped,
+three rounds.
+
+**Still owed in this slice.** *The repository offered as a project* when a
+folder added to Knowledge looks like one (7h), and the diff card.
+
+**Measured, 12 September, `qwen3-14b-16k` resident on the 12 GB card.**
+Asked *"In app.py, make main() return 2 instead of 1. Read the file first,
+then change it."* with the five tools offered: `read_lines(app.py, 1, 400)`,
+then `edit_file(app.py, find="    return 1", replace="    return 2",
+summary="Change main() to return 2 instead of 1")` → commit `72b71c8`, tree
+clean, 34 s wall clock including the read. Two rounds, no invented argument
+names, and it filled the optional `summary` unprompted.
+`tests/test_the_code_tools_can_write.py -m measure` is the instrument; the
+other 29 tests in that file run without a model.
+
+**Acceptance — seen, on screen, 12 September, later the same evening.** In
+the real interface (Vite + backend with a shared dev secret, in the browser
+pane): a coding project pointed at a seeded repository; asked with nothing
+granted → the reply read *"`run_command` on `code` needs your say-so before it
+runs … Allow running the project's commands for this project in Project, then
+ask again"* and the model answered honestly that it had not run anything;
+both checkboxes ticked in Project (`writes: true, runs: true` confirmed over
+the API); asked again → *"Ran 2 commands, read a file, edited a file"*, the
+change card with `+1 −1`, the sha and **Revert**; pressed Revert → *reverted*,
+`git log` showing `Revert "zaram: Fix add()…"` and `calc.py` back to `a - b`.
+
+**The diff card exists** — `frontend/src/components/chat/ChangeCard.tsx`.
+Every write's result carries its unified diff (`DIFF_CAP` 6,000 chars) and its
+commit; the `tool_call` event carries both; the card is never folded, shows
+the counts, and its one button is `POST /projects/{id}/revert`, which
+`CodeWriter.revert` answers only for commits whose message starts `zaram: ` —
+a button that could revert the person's own history is a button waiting to be
+pressed by mistake. A revert that would overwrite the person's uncommitted
+edit is refused with git's own sentence and aborted cleanly.
+
+**Two defects only the screen could show, both fixed the same evening.**
+
+* `set_tool_vocabulary` and the new `set_code_project_open` were called in
+  `_register_runtimes` under `if self.execution_engine is not None` — and the
+  engine is built one step *later*, so the guard was false at every boot since
+  the vocabulary line was written. The routing fix passed on a bare planner
+  and did nothing in the app. Both now attach in `boot()` after the engine
+  exists, and `test_the_code_pack_is_wired.py` asserts both against the real
+  boot path.
+* `Qwen3.8-27B` on TabbyAPI, offered the native function specs, sometimes
+  writes its chat template's own call form as text —
+  `<tool_call><function=code__run_command><parameter=runner>pytest…` — which
+  rendered raw and ran nothing. `parse_call` now reads that form too
+  (`_XML_CALL_RE`), split back through `split_native_name`, and `strip_calls`
+  removes it. `tests/test_a_models_own_call_form_is_understood.py`.
+
+**And a third, on the notice under a finished task.** "Zaram's pick" is
+`model=None` all the way into the engine, and `budget_for(None)` is the 4,096
+fallback — so a task that had *finished*, tests passing, carried *"stopped at
+half of the 4,096 this model has"* with a Continue button, on a model with
+65,536. `ExecutionEngine._effective_model` now resolves the pick the way the
+transport does (the models runtime's own report) before anything is sized or
+placed; the same gap had been silencing the cloud offer.
+
+### 5 — something can run. Built 12 September.
+
+`packs/code/runners.py`. This is the dangerous one, dangerous in a way the
+file sandbox is not: a shell reaches the whole machine. So it is not a shell.
+**It is an allow-list of runners detected from the repository**, each a whole
+command, and the model chooses one by name: `package.json` scripts (`test`,
+`build`, `lint`, `typecheck`, …), `pytest` where a project looks like one,
+`make` targets, `cargo`, `go`. Nobody configures anything and "run the tests"
+works on day one — rule 7h.
+
+* **Arguments are argv, never a shell.** `; rm -rf /` is a filename that
+  does not exist. `..`, a flag on a non-test runner, more than eight
+  arguments, or anything outside a plain-name character class is refused
+  before a process starts.
+* **Scripts that do not exit are detected and refused by name** — `dev`,
+  `start`, `serve`, `watch` — because a timeout that kills a dev server
+  reports a failure that is not one. Running the app is a different feature
+  with a different shape, and it is not this tool.
+* **Bounded in every direction.** 180 s, then reported as `timed_out` rather
+  than raised; 12,000 characters kept as head *and tail*, because the tail is
+  where a test runner puts its summary; exit code reported plainly.
+* **The interpreter is probed, not trusted.** Measured on the maintainer's
+  machine: the first `python` on PATH was a launcher stub whose install had
+  been removed, answering `-m pytest` with exit 3 and *"the install path was
+  not found"*. Detection now offers `pytest` only under an interpreter that
+  starts and imports it — the project's own venv first, then `python`,
+  `python3`, `py -3` — and never Zaram's own.
+* **Same grant shape as writes, and a separate grant.** `Project.runs`,
+  a second checkbox under the folder in Project that *names the detected
+  runners* (`GET /projects/{id}/runners`) rather than asking for trust.
+  `run_command` is not `looks_read_only`, so ungranted it is `CONFIRM` with
+  *"Allow running the project's commands for this project in Project"*.
+
+**The repeat guard was wrong for this, and it was measured wrong.** The
+tool loop stopped on a verbatim repeated call because *"its result is
+already in the prompt"* — true for a read, and false for `run_command(pytest)`
+called before and after an edit, which is the entire point.
+`ToolCall.is_repeat_without_progress` now lets a repeat through when any call
+since the earlier one is not `looks_read_only`; two tests in
+`test_the_tool_loop_is_bounded.py` pin both directions.
+
+**Measured, `qwen3-14b-16k`, a seeded bug (`a - b` for `add`) and one test:**
+`run_command(pytest)` → 1 failed → `edit_file(calc.py, "return a - b" →
+"return a + b")` → commit → `run_command(pytest)` → 1 passed. Three rounds,
+no read needed — the traceback showed the line. 70 s wall clock including
+two pytest starts. `tests/test_the_code_tools_can_run.py -m measure`.
+
+`runtimes/tool/connectors` still holds a Terminal connector nothing wires. It
+is not this — a terminal is the shell this tool refuses to be — and it should
+be deleted rather than left as a second route.
+
+### 6 — the loop's second half. Built 12 September.
+
+The loop's half landed with 5: a failed run is the next round's input, and the
+repeat guard knows a run after an edit is progress. **The offer** is the rest,
+and it is the reaction `CLAUDE.md` describes in place of predicting difficulty.
+
+`ExecutionEngine._stuck_offer`: when a reply's `run_command` results include
+at least `STUCK_AFTER_FAILED_RUNS` (2) failures **and the last run still
+failed**, the answering model is positively local, and a cloud model is
+connected, one notice follows the answer — `kind: stuck, action: cloud`,
+carrying the model — that says how many times the tests failed, which model
+would be tried, and *what would leave*: the question, the repository map and
+the files Zaram read, to that provider. `NoticeCard` renders it as **Try this
+step with <model>**, and `ChatSurface.tryCloud` re-sends the last question
+with a per-message `model` override — the next question goes back to whatever
+routing was. Never a mode.
+
+`ProviderManager.best_cloud_model` picks the model to offer: remote,
+`selectable_by_default` only — a tier that trains on input is never the thing
+offered — ranked with `cloud_first`. `prefer_local` does **not** empty it,
+because that setting governs what Zaram picks on its own and a button the
+person presses is not that. Absent when the tests passed, when nothing remote
+is connected, when the model is already remote, and when `locality_of`
+cannot place it — no offer on a guess.
+
+`tests/test_the_cloud_offer_for_a_stuck_step.py`, both directions plus a
+broken manager never failing a reply. Not yet watched on screen: it needs a
+local model to fail twice, and tonight's did not.
+
+### 7 — next: the plan is a checklist
+
+`docs/AGENT-UX.md`, written tonight, is the study and the decision: a `plan`
+tool, the checklist on `PlanRecords`, a card under the reply that ticks as
+commits land, the same list on the task's row in Project, Go/Edit before the
+first mutative call on a long plan, and locality per item from the egress
+log. Build order is in that file.
+
+**Acceptance.** Two projects, two specs, both scaffolded, tested and committed
+while the steps are watched in Project — sequentially on the local model, and
+in parallel the moment a key is pasted, with the egress log saying which was
+which.
 
 ## The unknown that decides how good this feels
 

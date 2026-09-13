@@ -22,6 +22,122 @@ publishing step over rather than finding another route. `CLAUDE.md`,
 
 *The latest work is first. Earlier sessions follow below.*
 
+### 12 September, latest — the owed list is done, and the screen found three defects
+
+Everything the previous entry owed, and a study. Per-slice detail in
+`docs/CODE-PACK.md` 4–6; the UX decision in `docs/AGENT-UX.md`.
+
+* **Watched on screen, in the real interface** (Vite + backend with a shared
+  dev secret, in the browser pane — the 6 September dead end no longer holds):
+  refused with the sentence naming Project → both checkboxes ticked → asked
+  again → *Ran 2 commands, read a file, edited a file* → the diff card with
+  `+1 −1` and **Revert** → pressed → `git log` shows the revert and the file
+  is back. The whole slice-4 acceptance criterion, seen.
+* **The diff card** — `ChangeCard.tsx`, never folded; every write carries its
+  diff and commit; `POST /projects/{id}/revert` reverts Zaram's own commits
+  only, refuses cleanly when it would clobber the person's edit.
+* **The cloud offer for a stuck step** — two failed runs, still failing,
+  local model, cloud model connected → one notice with **Try this step with
+  <model>**, what would leave stated, re-asked with a per-message override.
+  `best_cloud_model` ignores `prefer_local` (a button is not Zaram choosing)
+  and honours consent (never a training tier).
+* **`runtimes/tool` deleted** — the whole package, not only the Terminal
+  connector: nothing outside it imported it, tests included.
+* **Three defects the tests had not caught and the screen did:**
+  the tool vocabulary and the open-project probe were wired in step 3 under a
+  guard step 4 made true — dead at every boot, now attached after the engine
+  exists and asserted against real boot; the 27B on TabbyAPI sometimes writes
+  Qwen's XML call form as text, now parsed and stripped; "Zaram's pick" was
+  `None` inside the engine, so a finished task was sized against the 4,096
+  fallback and told it had stopped — `_effective_model` resolves it first.
+* `docs/AGENT-UX.md`: ten patterns across Claude Code, Codex, Cursor,
+  Kilo/Cline/Roo, Windsurf, Aider, Devin, Copilot; where Zaram stands on each;
+  the decision that the plan is a checklist on `PlanRecords`, shown under the
+  reply and in Project, with Go/Edit as an offer rather than a mode; and the
+  one column nobody else can show — what left the machine per step.
+
+**Not reproduced:** the maintainer reports the conversation/avatar border
+snapping back after a drag. In the dev build, with both renderers, a
+synthesised pointer drag on the handle persists (`zaram.layout` updated,
+position held after release); the pane's own mouse delivers no pointer events
+to the handle, so a real-mouse release could not be tried here. Needs: which
+surface, dev or packaged, and whether the width survives a reopen.
+
+**Next:** slice 7 (the checklist), then watch the cloud offer fire on screen.
+
+### 12 September — the code pack is reachable, briefed, can run, and closes the loop
+
+Four more pieces the same evening, each measured with `qwen3-14b-16k`
+resident. Full account per slice in `docs/CODE-PACK.md`.
+
+* **Reachable by a person.** With a coding project open, an ordinary
+  question — code, filesystem or conversation intent — plans
+  `mcp.list_tools → reasoning.generate`. `IntentPlanner.set_code_project_open`,
+  injected at boot. Drawing, vision, speech, documents and search keep their
+  plans. Closes the 3d gap.
+* **The repository map** (`packs/code/repo_map.py`, from Aider without its
+  dependencies): files and definitions, ranked by token overlap with the
+  question, 1,200-token budget, honest about what it dropped, cached 30 s,
+  forgotten on write. Reaches the prompt as a `briefing` on the listing,
+  before the tool rules. Measured: an edit to a file the question never
+  named, decoy skipped, three rounds.
+* **`run_command`** (`packs/code/runners.py`): an allow-list detected from
+  the repo — npm scripts, pytest, make, cargo, go — argv never shell,
+  non-exiting scripts refused by name, 180 s, head+tail output cap,
+  interpreter probed because the first `python` on this PATH is a dead
+  launcher stub. `Project.runs` is a second checkbox in Project naming the
+  runners. Measured: run → fail → edit → run → pass, commit landed, 70 s.
+* **The repeat guard was wrong for runners** — it stopped the confirming
+  run after an edit. `ToolCall.is_repeat_without_progress` lets a repeat
+  through when a mutating call sits between; both directions tested.
+
+397 passed across the touched suites (code pack, MCP, loop, planner,
+projects, routes), Ollama up; 91 frontend tests; typecheck and lint clean.
+
+**Owed, in order:** the slice-6 offer (cloud for *this step* after two
+failures; `NoticeCard` gains a third action); the refusal sentence and both
+Project checkboxes watched driving a real chat on screen; the diff card;
+delete the Terminal connector in `runtimes/tool/connectors`.
+
+### 12 September — the code pack can change a file, with git as the undo
+
+Slice 4 of `docs/CODE-PACK.md`, which now also holds slices 5 (run) and 6
+(observe) with acceptance criteria, the loop table, the residency argument and
+where the local-model ceiling sits. What shipped:
+
+* `packs/code/writes.py` — `write_file` (whole file) and `edit_file` (one exact
+  passage, refused when absent or ambiguous with the count). **Injected** into
+  `CodeTools`; `tools.py` still contains no write and its scan still passes.
+* **Every write is a commit** on the current branch, `zaram: <summary>` or
+  `zaram: edit <path>`, and the result carries the sha and `git revert <sha>`.
+  Before the file is touched: no git or no identity refuses; the user's own
+  uncommitted changes to that file refuse; a folder that is not a repository
+  is `git init`ed and the result says so. A commit that fails after the write
+  is reported as *"written but could not be committed, so it has no undo"*,
+  never as success.
+* **The grant is per project.** `Project.writes` (column, migration,
+  `set_writes`, `PATCH /projects/{id}` with `writes`), carried into the request
+  by `set_active_root(root, writes=…)` beside the root, and read by
+  `McpRuntime._builtin_grants` — because `mcp-servers.json` never holds a
+  built-in, so the existing grant path could not reach Zaram's own server. The
+  `code` server is registered `HOST_UNDO`. Ungranted → `needs_confirmation`
+  with *"Allow file edits for this project in Project, then ask again."*
+  appended; granted → runs, still through `policy.decide`.
+* In Project, under a coding project's folder: *Zaram may edit files here —
+  each change is a git commit you can revert.* Off by default.
+* **Branch per task deferred**, recorded in `CODE-PACK.md` with its re-entry
+  point (`PlanRecords` gaining a `branch`): moving somebody's checkout without
+  asking changes where their own next commit lands.
+
+**Measured** with `qwen3-14b-16k` resident: read, then `edit_file` with the
+right arguments and an unprompted `summary`, commit `72b71c8`, tree clean,
+34 s. 30 tests in `test_the_code_tools_can_write.py` (29 without a model);
+194 passed across the code-pack, MCP and project suites, Ollama up.
+
+**Not yet watched on screen:** the refusal sentence under a reply and the
+Project toggle driving a real chat. The tools and the gate were exercised
+directly. That is the first thing to look at next session, then slice 5.
+
 ### 12 September, latest — image generation no longer asks the card for memory it does not have
 
 The freeze in the entry below is fixed, pinned by 25 tests, and measured on

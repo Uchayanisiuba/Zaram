@@ -26,10 +26,29 @@ logger = logging.getLogger(__name__)
 
 _ACTIVE_ROOT: ContextVar[Optional[str]] = ContextVar("zaram_code_project_root", default=None)
 
+#: Whether the open project has allowed file edits. Carried the same way as
+#: the root and for the same reason: it is a property of the request's project,
+#: and a global would let one window's grant permit another window's write.
+_WRITES_GRANTED: ContextVar[bool] = ContextVar("zaram_code_project_writes", default=False)
+_RUNS_GRANTED: ContextVar[bool] = ContextVar("zaram_code_project_runs", default=False)
 
-def set_active_root(root: Optional[str]) -> None:
-    """Name the folder the code tools may read for this request."""
+
+def set_active_root(root: Optional[str], *, writes: bool = False, runs: bool = False) -> None:
+    """Name the folder the code tools may read for this request, and whether
+    they may change it or run its commands. Clearing the root clears both."""
     _ACTIVE_ROOT.set(root or None)
+    _WRITES_GRANTED.set(bool(root) and bool(writes))
+    _RUNS_GRANTED.set(bool(root) and bool(runs))
+
+
+def writes_granted() -> bool:
+    """Whether the open project has allowed edits, for this request."""
+    return _WRITES_GRANTED.get() and active_root() is not None
+
+
+def runs_granted() -> bool:
+    """Whether the open project has allowed its commands to be run."""
+    return _RUNS_GRANTED.get() and active_root() is not None
 
 
 def active_root() -> Optional[Path]:

@@ -176,3 +176,29 @@ describe('the images runtime speaks in two registers', () => {
     expect(navigate).toHaveBeenCalledWith('settings');
   });
 });
+
+describe('the cloud offer', () => {
+  it('asks the step again with the named model', () => {
+    const onTryCloud = vi.fn();
+    render(
+      <NoticeCard
+        notice={notice({
+          kind: 'stuck',
+          action: 'cloud',
+          model: 'gpt-x',
+          content: 'The tests failed 2 times with qwen. gpt-x on openrouter may do better on this step.',
+        })}
+        onTryCloud={onTryCloud}
+      />,
+    );
+    const button = screen.getByTestId('notice-try-cloud');
+    expect(button.textContent).toContain('gpt-x');
+    fireEvent.click(button);
+    expect(onTryCloud).toHaveBeenCalledWith('gpt-x');
+  });
+
+  it('offers nothing without a model to offer', () => {
+    render(<NoticeCard notice={notice({ kind: 'stuck', action: 'cloud' })} onTryCloud={vi.fn()} />);
+    expect(screen.queryByTestId('notice-try-cloud')).toBeNull();
+  });
+});

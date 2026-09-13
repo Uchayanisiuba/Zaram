@@ -490,6 +490,59 @@ class TestSomethingStopsIt:
 
         assert len(mcp.calls) == 1
 
+    def test_a_repeat_after_a_change_is_progress_not_a_loop(self, a_generous_window):
+        """Measured 12 September: a model fixing a failing test ran
+        `run_command(pytest)` before and after its edit with identical
+        arguments. The second run is the confirmation, and the guard written
+        for reads was stopping the loop on it."""
+        run = {"server": "code", "name": "run_command", "description": "run", "input_schema": {}}
+        edit = {"server": "code", "name": "edit_file", "description": "edit", "input_schema": {}}
+        mcp = _McpDouble(
+            tools=[run, edit],
+            results=[
+                {"success": True, "result": {"ok": False, "output": "1 failed"}},
+                {"success": True, "result": {"commit": "abc"}},
+                {"success": True, "result": {"ok": True, "output": "1 passed"}},
+            ],
+        )
+        engine, _ = _engine(
+            [
+                _call("run_command", runner="pytest"),
+                _call("edit_file", path="calc.py", find="-", replace="+"),
+                _call("run_command", runner="pytest"),
+                "Fixed, and the tests pass.",
+            ],
+            mcp,
+        )
+
+        list(engine.execute("use the code tools to fix the failing test"))
+
+        assert [c["tool"] for c in mcp.calls] == ["run_command", "edit_file", "run_command"]
+
+    def test_a_repeat_after_only_reads_still_stops_it(self, a_generous_window):
+        run = {"server": "code", "name": "run_command", "description": "run", "input_schema": {}}
+        mcp = _McpDouble(
+            tools=[run, _READ],
+            results=[
+                {"success": True, "result": {"ok": False}},
+                {"success": True, "result": {"lines": []}},
+                {"success": True, "result": {"ok": False}},
+            ],
+        )
+        engine, _ = _engine(
+            [
+                _call("run_command", runner="pytest"),
+                _call("read_lines", path="calc.py"),
+                _call("run_command", runner="pytest"),
+                "Still failing.",
+            ],
+            mcp,
+        )
+
+        list(engine.execute("use the code tools to fix the failing test"))
+
+        assert [c["tool"] for c in mcp.calls] == ["run_command", "read_lines"]
+
     def test_the_round_ceiling_bounds_a_window_and_the_carry_ons_bound_the_task(
         self, a_generous_window
     ):

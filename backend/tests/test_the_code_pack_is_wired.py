@@ -258,3 +258,44 @@ class TestAUserCanPointItAtARepository:
         listed = client.get("/projects").json()
 
         assert listed["projects"][0]["root"] == str(repo.resolve())
+
+
+@pytest.mark.asyncio
+async def test_the_booted_planner_offers_the_tools_inside_a_coding_project(tmp_path):
+    """The routing fix, against the real boot path — because on 12 September
+    it was tested on a bare `IntentPlanner` and then watched *not* fire in the
+    running app. Registering is not reaching, one layer up."""
+    from core.bootstrapper import KernelBootstrapper
+
+    kernel = KernelBootstrapper()
+    await kernel.boot()
+    try:
+        planner = kernel.execution_engine._planner
+        prompt = "The tests are failing. Run them, fix the bug, and run them again to confirm."
+
+        set_active_root(str(tmp_path))
+        inside = [s.capability_id for s in planner.create_plan(prompt).steps]
+        set_active_root(None)
+        outside = [s.capability_id for s in planner.create_plan(prompt).steps]
+
+        assert inside == ["mcp.list_tools", "reasoning.generate"], inside
+        assert "mcp.list_tools" not in outside
+    finally:
+        await kernel.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_the_booted_planner_knows_the_attached_servers():
+    """`set_tool_vocabulary` was called in step 3 under a guard that step 4
+    made true — dead at every boot since the day it was written. Asserted
+    against the real boot so the guard cannot move back."""
+    from core.bootstrapper import KernelBootstrapper
+
+    kernel = KernelBootstrapper()
+    await kernel.boot()
+    try:
+        router = kernel.execution_engine._planner._router
+        assert router._tool_vocabulary is not None
+        assert callable(router._tool_vocabulary)
+    finally:
+        await kernel.shutdown()

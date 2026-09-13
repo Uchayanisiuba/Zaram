@@ -46,6 +46,7 @@ import { AnimatePresence } from 'framer-motion';
 import { Check, ChevronRight, CircleAlert, Clock } from 'lucide-react';
 import type { ChatToolCall } from '../../stores/chatStore';
 import ActivityPanel from './ActivityPanel';
+import ChangeCard from './ChangeCard';
 import StepOutput from './StepOutput';
 
 /** How each verdict reads. The gate's word, not the model's.
@@ -63,17 +64,20 @@ const UNKNOWN = { Icon: CircleAlert, color: 'var(--color-amber, #d97706)', label
 
 /** What each tool reads as in a summary line.
  *
- *  Only the tools that exist. **There is no "wrote" or "patched" here and that
- *  is not an omission**: the code pack ships `list_files`, `read_lines` and
- *  `search_code`, and `CLAUDE.md` keeps every mutative tool out of scope until
- *  v1 ships. A verb for an action the product cannot take would be a label
- *  waiting for a feature, and the first person to read it would believe Zaram
- *  had edited their repository. Anything unrecognised falls back to its own
+ *  Only the tools that exist. Until 12 September that meant the three reads,
+ *  and the note here said a verb for writing would be a label waiting for a
+ *  feature. The feature landed — `write_file`, `edit_file` and `run_command`
+ *  in the code pack — so the verbs exist now, and a change additionally gets
+ *  its own unfolded card (`ChangeCard`) because a summary line is not where a
+ *  reader can judge a diff. Anything unrecognised still falls back to its own
  *  name, which is honest and ages correctly when a tool is added. */
 const PHRASES: Record<string, (n: number) => string> = {
   search_code: (n) => (n === 1 ? 'searched code' : `searched code ${n}×`),
   read_lines: (n) => (n === 1 ? 'read a file' : `read ${n} files`),
   list_files: (n) => (n === 1 ? 'listed files' : `listed files ${n}×`),
+  write_file: (n) => (n === 1 ? 'wrote a file' : `wrote ${n} files`),
+  edit_file: (n) => (n === 1 ? 'edited a file' : `edited ${n} files`),
+  run_command: (n) => (n === 1 ? 'ran a command' : `ran ${n} commands`),
 };
 
 /** "Searched code, read 3 files" — distinct actions, in the order first used. */
@@ -167,6 +171,8 @@ export default function ToolCalls({
   const ran = calls.filter((c) => c.verdict === 'allow');
   // Everything the gate did not simply allow, kept out of the fold entirely.
   const notable = calls.filter((c) => c.verdict !== 'allow');
+  // And every change to a file, likewise never folded — see `ChangeCard`.
+  const changes = calls.filter((c) => c.verdict === 'allow' && Boolean(c.diff));
   const expanded = open || active;
 
   return (
@@ -214,6 +220,10 @@ export default function ToolCalls({
           <ActivityPanel calls={calls} onClose={() => setOpen(false)} />
         )}
       </AnimatePresence>
+
+      {changes.map((call, i) => (
+        <ChangeCard key={`c/${call.commit || i}`} call={call} />
+      ))}
 
       {/* Never folded. See the note at the top of the file. */}
       {notable.length > 0 && (

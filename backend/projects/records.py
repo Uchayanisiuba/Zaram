@@ -73,6 +73,20 @@ class Project:
     #: it and refuse anything that lands outside. It is stored here rather than
     #: taken from a request because a root the model can name is not a sandbox.
     root: str = ""
+    #: Whether Zaram may change files under `root`. **Off by default**, and the
+    #: unit of rule 7j's confirm-once for the code pack: consent is per
+    #: destination and data class, and for file edits the destination is this
+    #: folder. It is a column here rather than a grant in `mcp-servers.json`
+    #: because that file holds the servers the user attached and the code
+    #: server is a built-in it never lists. Set from Project, carried into a
+    #: request beside the root, and read by the runtime as the grant.
+    writes: bool = False
+    #: Whether Zaram may run the project's own commands — the runners
+    #: `packs/code/runners.py` detects, never a shell. Same shape and same
+    #: reasons as `writes`; a separate grant because building and testing is a
+    #: different thing to consent to than editing, and rule 7j's unit is the
+    #: data class.
+    runs: bool = False
 
     @property
     def scope(self) -> str:
@@ -138,7 +152,9 @@ class ProjectRecords:
                     type       TEXT NOT NULL DEFAULT 'general',
                     created_at REAL NOT NULL,
                     note       TEXT NOT NULL DEFAULT '',
-                    root       TEXT NOT NULL DEFAULT ''
+                    root       TEXT NOT NULL DEFAULT '',
+                    writes     INTEGER NOT NULL DEFAULT 0,
+                    runs       INTEGER NOT NULL DEFAULT 0
                 )
                 """
             )
@@ -154,6 +170,14 @@ class ProjectRecords:
             if "root" not in columns:
                 conn.execute(
                     "ALTER TABLE projects ADD COLUMN root TEXT NOT NULL DEFAULT ''"
+                )
+            if "writes" not in columns:
+                conn.execute(
+                    "ALTER TABLE projects ADD COLUMN writes INTEGER NOT NULL DEFAULT 0"
+                )
+            if "runs" not in columns:
+                conn.execute(
+                    "ALTER TABLE projects ADD COLUMN runs INTEGER NOT NULL DEFAULT 0"
                 )
 
     # ------------------------------------------------------------------ read
@@ -305,6 +329,33 @@ class ProjectRecords:
             raise UnknownProject(project_id)
         return self.get(project_id)
 
+    def set_writes(self, project_id: str, allowed: bool) -> Project:
+        """Allow, or withdraw, file edits in a project's folder.
+
+        Withdrawing is a real operation, and it is the whole reason the grant
+        is a column a person can see: rule 7j's remembered consent is only
+        acceptable because it is visible in one place and revocable there.
+        """
+        with self._lock, self._connect() as conn:
+            changed = conn.execute(
+                "UPDATE projects SET writes = ? WHERE id = ?", (1 if allowed else 0, project_id)
+            ).rowcount
+        if not changed:
+            raise UnknownProject(project_id)
+        logger.info("Project %s: file edits %s", project_id, "allowed" if allowed else "withdrawn")
+        return self.get(project_id)
+
+    def set_runs(self, project_id: str, allowed: bool) -> Project:
+        """Allow, or withdraw, running the project's detected commands."""
+        with self._lock, self._connect() as conn:
+            changed = conn.execute(
+                "UPDATE projects SET runs = ? WHERE id = ?", (1 if allowed else 0, project_id)
+            ).rowcount
+        if not changed:
+            raise UnknownProject(project_id)
+        logger.info("Project %s: running commands %s", project_id, "allowed" if allowed else "withdrawn")
+        return self.get(project_id)
+
     def set_note(self, project_id: str, note: str) -> Project:
         with self._lock, self._connect() as conn:
             changed = conn.execute(
@@ -349,6 +400,8 @@ def _from_row(row: sqlite3.Row) -> Project:
         # Tolerant of a row written before the column existed, for the same
         # reason the type is: an older database must open, not raise.
         root=row["root"] if "root" in row.keys() else "",
+        writes=bool(row["writes"]) if "writes" in row.keys() else False,
+        runs=bool(row["runs"]) if "runs" in row.keys() else False,
     )
 
 

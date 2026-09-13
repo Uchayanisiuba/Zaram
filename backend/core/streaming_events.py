@@ -385,6 +385,8 @@ class StreamEvent:
         correlation_id: str = "",
         target: str = "",
         output: str = "",
+        diff: str = "",
+        commit: str = "",
     ) -> StreamEvent:
         """One tool call, and what the gate said about it.
 
@@ -412,6 +414,11 @@ class StreamEvent:
                 # The head of what came back, for the step's output pane.
                 # Empty for a call that did not run. See `output_excerpt`.
                 "output": output,
+                # A write's unified diff and the commit it made, for the card
+                # that shows the change and the button that reverts it. Empty
+                # for everything else.
+                "diff": diff,
+                "commit": commit,
             },
             correlation_id=correlation_id,
         )
@@ -437,6 +444,7 @@ class StreamEvent:
         action: str = "",
         correlation_id: str = "",
         servers: list[str] | None = None,
+        **extra: Any,
     ) -> StreamEvent:
         """Something the user should know, alongside the answer.
 
@@ -454,6 +462,11 @@ class StreamEvent:
         data: dict[str, Any] = {"content": content, "kind": kind, "action": action}
         if servers:
             data["servers"] = list(servers)
+        # What an action needs to be pressable — the `cloud` offer carries the
+        # model it would ask. Scalars only, so nothing structured rides here.
+        for key, value in extra.items():
+            if isinstance(value, (str, int, float, bool)):
+                data[key] = value
         return StreamEvent(
             type=EventType.NOTICE,
             data=data,

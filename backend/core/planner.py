@@ -1069,6 +1069,39 @@ class IntentPlanner:
             semantic_router=semantic_router,
             tool_vocabulary=tool_vocabulary,
         )
+        #: Whether a coding project is open for the request in flight. See
+        #: `set_code_project_open`; `None` means nobody told the planner, which
+        #: reads as "no".
+        self._code_project_open: Any | None = None
+
+    def set_code_project_open(self, probe: Any | None) -> None:
+        """Tell the planner how to ask whether a coding project is open.
+
+        **The project decides that the tools are offered, not the phrasing.**
+        Measured 6 September: "search the code for X" classified as
+        `filesystem.search` and "add a feature" as conversation, so the code
+        pack was reachable only by people who already knew to say "use the
+        code tools". A person who opened a coding project and asked a question
+        has said what the question is about, and Claude Code, Codex and Aider
+        all offer their tools on every turn for the same reason. Offering
+        costs one `mcp.list_tools` step, which is budgeted and ranked; not
+        offering costs the answer.
+
+        A callable rather than a flag because the open project is request
+        state, carried by a `ContextVar`, and a snapshot would be another
+        window's project. Injected rather than imported: `core` must not
+        depend on `packs`.
+        """
+        self._code_project_open = probe
+
+    def _coding_project_is_open(self) -> bool:
+        if self._code_project_open is None:
+            return False
+        try:
+            return bool(self._code_project_open())
+        except Exception:  # noqa: BLE001 - routing must never fail a request
+            logger.exception("Could not tell whether a coding project is open")
+            return False
 
     def set_tool_vocabulary(self, vocabulary: Any | None) -> None:
         """Tell the router which servers are attached.
@@ -1170,10 +1203,22 @@ class IntentPlanner:
                     depends_on=[0],
                 ),
             ]
-        elif classification.intent_type is IntentType.TOOL:
+        elif classification.intent_type is IntentType.TOOL or (
+            self._coding_project_is_open()
+            and classification.intent_type
+            in (IntentType.CODE, IntentType.CONVERSATION, IntentType.FILESYSTEM)
+            and not has_images
+        ):
             # Same shape as the search pair above: gather, then answer with
             # what was gathered. The list step is what puts the user's attached
             # servers in front of the model at all.
+            #
+            # The second arm is the code pack being reachable by a person: with
+            # a coding project open, a question about the code, a file, or
+            # nothing in particular is answered with the repository's tools
+            # offered. Image, vision, speech, document and search intents keep
+            # their own plans — a request to draw is not about the code because
+            # a repository happens to be open. See `set_code_project_open`.
             #
             # It degrades well by construction, which is what makes it safe to
             # route here on keywords as noisy as "run" and "execute". With no

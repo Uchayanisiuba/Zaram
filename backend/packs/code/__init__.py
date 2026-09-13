@@ -1,4 +1,4 @@
-"""The code pack — reading a repository.
+"""The code pack — reading a repository, and since 12 September changing one.
 
 Parsers live in `ingest/parsers/code.py` because ingestion owns resolution by
 suffix; the tools live here, and `active.py` holds the one piece of
@@ -6,13 +6,22 @@ request-scoped state they need. `docs/CODE-PACK.md` records the decisions,
 including why this is a pack rather than a seventh node.
 """
 
-from .active import active_root, set_active_root
+from .active import active_root, runs_granted, set_active_root, writes_granted
 from .tools import SERVER_ID, CodeTools, OutsideTheProject
+from .runners import CodeRunner
+from .runners import CodeRunner
+from .writes import CodeWriter
 
 __all__ = [
     "SERVER_ID",
     "CodeTools",
+    "CodeRunner",
+    "CodeRunner",
+    "CodeWriter",
     "OutsideTheProject",
     "active_root",
+    "runs_granted",
+    "runs_granted",
     "set_active_root",
+    "writes_granted",
 ]

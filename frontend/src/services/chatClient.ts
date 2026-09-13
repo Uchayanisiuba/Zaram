@@ -183,7 +183,7 @@ export type ChatEvent =
    *  first case is a file ingest could not read. Kept separate from `token` so
    *  it is never rendered as the model speaking, and from `error` because
    *  nothing failed in this exchange. `action` names where to go about it. */
-  | { type: 'notice'; content: string; kind: string; action: string; servers?: string[] }
+  | { type: 'notice'; content: string; kind: string; action: string; servers?: string[]; model?: string }
   /** One tool the model asked for, and what the gate said about it.
    *
    *  **Emitted since the tool loop shipped and rendered nowhere until now.**
@@ -211,6 +211,10 @@ export type ChatEvent =
       /** The head of what came back, bounded by the backend, or `''`. Text,
        *  never markup — it is a file's contents or a search hit. */
       output: string;
+      /** A write's unified diff, bounded by the backend, or `''`. */
+      diff: string;
+      /** The commit a write made, or `''`. What `Revert` reverses. */
+      commit: string;
     }
   /** What the reply is waiting for, sent *before* generation so the orb can
    *  say why rather than going quiet and letting the user guess.
@@ -663,12 +667,17 @@ function parseLine(line: string): ChatEvent | null {
       const servers = Array.isArray(data.servers)
         ? (data.servers as unknown[]).filter((x): x is string => typeof x === 'string')
         : undefined;
+      // `model` rides on the "cloud" offer: which model the button would
+      // ask. A string or nothing; it is sent back as the per-message
+      // override and rendered nowhere as markup.
+      const model = typeof data.model === 'string' && data.model ? data.model : undefined;
       return {
         type: 'notice',
         content,
         kind: String(data.kind ?? ''),
         action: String(data.action ?? ''),
         ...(servers && servers.length > 0 ? { servers } : {}),
+        ...(model ? { model } : {}),
       };
     }
 
@@ -681,6 +690,8 @@ function parseLine(line: string): ChatEvent | null {
         reason: String(data.reason ?? ''),
         target: String(data.target ?? ''),
         output: typeof data.output === 'string' ? data.output : '',
+        diff: typeof data.diff === 'string' ? data.diff : '',
+        commit: typeof data.commit === 'string' ? data.commit : '',
       };
 
     case 'status':

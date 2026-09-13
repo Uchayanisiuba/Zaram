@@ -712,6 +712,7 @@ function ProjectRow({ project, onDelete }: { project: Project; onDelete: () => v
       </div>
 
       {project.type === 'coding' && <RepositoryRow project={project} />}
+      {project.type === 'coding' && project.root && <EditsRow project={project} />}
 
       {open && <ProjectContents project={project} />}
     </li>
@@ -805,6 +806,88 @@ function RepositoryRow({ project }: { project: Project }) {
           </button>
         )}
       </div>
+    </div>
+  );
+}
+
+/**
+ * Whether Zaram may change files in the folder above. **Off by default.**
+ *
+ * This is the code pack's confirm-once, and it is per project rather than per
+ * server because rule 7j's unit is destination and data class: for a file edit
+ * the destination is this folder. It sits on the row, under the folder it
+ * governs, because a remembered consent is only acceptable when it is visible
+ * in the one place it can be withdrawn. Only rendered once a folder is set —
+ * there is nothing to permit edits *to* before then.
+ *
+ * The sentence says what a grant actually costs: each change is a git commit,
+ * which is the undo. A control that said "allow edits" and nothing else would
+ * be asking for trust rather than describing a mechanism.
+ */
+function EditsRow({ project }: { project: Project }) {
+  const setWrites = useProjectStore((s) => s.setWrites);
+  const setRuns = useProjectStore((s) => s.setRuns);
+  const fetchRunners = useProjectStore((s) => s.fetchRunners);
+  const [busy, setBusy] = useState(false);
+  const [runners, setRunners] = useState<string[] | null>(null);
+
+  // What "run its commands" would actually run, read once per row so the
+  // sentence beside the box names them rather than asking for trust.
+  useEffect(() => {
+    let cancelled = false;
+    void fetchRunners(project.id).then((names) => {
+      if (!cancelled) setRunners(names);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [fetchRunners, project.id, project.root]);
+
+  const toggleWrites = useCallback(async () => {
+    if (busy) return;
+    setBusy(true);
+    await setWrites(project.id, !project.writes);
+    setBusy(false);
+  }, [busy, project.id, project.writes, setWrites]);
+
+  const toggleRuns = useCallback(async () => {
+    if (busy) return;
+    setBusy(true);
+    await setRuns(project.id, !project.runs);
+    setBusy(false);
+  }, [busy, project.id, project.runs, setRuns]);
+
+  const runnerList =
+    runners === null ? '…' : runners.length ? runners.join(', ') : 'none detected';
+
+  return (
+    <div className="mt-1.5 flex flex-col gap-1 pl-7 text-[10px]">
+      <label className="flex cursor-pointer items-center gap-2">
+        <input
+          type="checkbox"
+          checked={project.writes}
+          disabled={busy}
+          onChange={() => void toggleWrites()}
+          data-testid="edits-allowed"
+          aria-label={`Zaram may edit files in ${project.name}`}
+        />
+        <span style={{ color: project.writes ? 'var(--color-text-muted)' : 'var(--color-text-faint)' }}>
+          Zaram may edit files here — each change is a git commit you can revert
+        </span>
+      </label>
+      <label className="flex cursor-pointer items-center gap-2">
+        <input
+          type="checkbox"
+          checked={project.runs}
+          disabled={busy}
+          onChange={() => void toggleRuns()}
+          data-testid="runs-allowed"
+          aria-label={`Zaram may run commands in ${project.name}`}
+        />
+        <span style={{ color: project.runs ? 'var(--color-text-muted)' : 'var(--color-text-faint)' }}>
+          Zaram may run this project&apos;s commands — {runnerList}
+        </span>
+      </label>
     </div>
   );
 }

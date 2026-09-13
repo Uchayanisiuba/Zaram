@@ -89,6 +89,8 @@ export interface ChatNotice {
   action: string;
   /** On the "tools" notice: which servers were offered for this reply. */
   servers?: string[];
+  /** On the "cloud" offer: the model to ask this step again with. */
+  model?: string;
 }
 
 /** One tool the model asked for, and the gate's verdict on it.
@@ -108,6 +110,10 @@ export interface ChatToolCall {
   /** The head of what the tool returned, or `''` when it did not run.
    *  Bounded by the backend; rendered as text in a pane of its own. */
   output?: string;
+  /** A write's unified diff, when the call changed a file. Rendered as a
+   *  `ChangeCard` that is never folded, with the commit it can revert. */
+  diff?: string;
+  commit?: string;
 }
 
 interface ChatState {
@@ -508,6 +514,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
               kind: event.kind,
               action: event.action,
               ...(event.servers ? { servers: event.servers } : {}),
+              ...(event.model ? { model: event.model } : {}),
             });
             set({ streamingNotices: [...notices] });
             break;
@@ -525,6 +532,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
               reason: event.reason,
               target: event.target,
               output: event.output,
+              ...(event.diff ? { diff: event.diff } : {}),
+              ...(event.commit ? { commit: event.commit } : {}),
             });
             set({ streamingToolCalls: [...toolCalls] });
             break;

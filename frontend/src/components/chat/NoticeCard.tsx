@@ -109,13 +109,22 @@ interface Props {
    *  which it does when a tool loop stopped with work left — never on a loop
    *  that finished, because there would be nothing to continue. */
   onContinue?: () => void;
+  /** Ask the same question again with the named cloud model — the offer the
+   *  backend makes when the project's tests failed twice on the local one.
+   *
+   *  `CLAUDE.md`: difficulty is routed by reaction, not prediction, and the
+   *  reaction is *one offer under the reply, for this step, never a mode*.
+   *  The card's own sentence says what leaves; pressing it is the rule-7j
+   *  decision, and the egress gate and log still run on the way out. */
+  onTryCloud?: (model: string) => void;
 }
 
-export default function NoticeCard({ notice, onOpen, onEnableSearch, onContinue }: Props) {
+export default function NoticeCard({ notice, onOpen, onEnableSearch, onContinue, onTryCloud }: Props) {
   const destination = DESTINATIONS[notice.action];
   const tone = toneFor(notice);
   const { Icon, color } = tone;
   const offersContinue = notice.action === 'continue' && Boolean(onContinue);
+  const offersCloud = notice.action === 'cloud' && Boolean(notice.model) && Boolean(onTryCloud);
 
   // **Rule 7h, which this card was one click short of.** "Offer at the moment
   // of doubt; never make the user choose in advance" — and the search notice
@@ -204,7 +213,19 @@ export default function NoticeCard({ notice, onOpen, onEnableSearch, onContinue 
           </button>
         )}
 
-        {!offersSearch && !offersContinue && destination && onOpen && (
+        {offersCloud && (
+          <button
+            onClick={() => onTryCloud?.(notice.model as string)}
+            className="mt-1.5 text-[11px] flex items-center gap-1"
+            style={{ color: 'var(--color-cyan-light)' }}
+            data-testid="notice-try-cloud"
+          >
+            Try this step with {notice.model}
+            <ArrowRight size={10} />
+          </button>
+        )}
+
+        {!offersSearch && !offersContinue && !offersCloud && destination && onOpen && (
           <button
             onClick={() => onOpen(destination.node)}
             className="mt-1.5 text-[11px] flex items-center gap-1"

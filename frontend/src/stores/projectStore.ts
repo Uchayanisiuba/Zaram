@@ -38,6 +38,15 @@ export interface Project {
    *  pointed at a repository yet — which is a real state and the one worth
    *  rendering, because in it every tool call refuses. */
   root: string;
+  /** Whether Zaram may change files under `root`. Off by default. Each edit
+   *  is a git commit the user can revert, which is what makes a remembered
+   *  grant acceptable — and it lives on the row so it is visible where it can
+   *  be withdrawn. */
+  writes: boolean;
+  /** Whether Zaram may run the project's own detected commands — tests,
+   *  builds, linters — never a shell. Off by default, separate from `writes`
+   *  because it is a different thing to consent to. */
+  runs: boolean;
   /** How many generated files are assigned to it. */
   artifacts: number;
   /** How many facts are scoped to it, or **-1 when the Spine could not say**.
@@ -96,6 +105,19 @@ interface ProjectStore {
    *  to it. The backend refuses a path that is not a folder and says so, which
    *  is why this surfaces `error` like the rest of the store. */
   setRoot: (id: string, root: string) => Promise<void>;
+  /** Allow or withdraw file edits in a coding project's folder. The code
+   *  pack's confirm-once, per project rather than per server. */
+  setWrites: (id: string, writes: boolean) => Promise<void>;
+  /** Allow or withdraw running the project's detected commands. */
+  setRuns: (id: string, runs: boolean) => Promise<void>;
+  /** The names of the commands `setRuns` would allow, detected from the
+   *  repository — so the control can say what it grants. Empty on any failure;
+   *  this is a label, never a gate. */
+  fetchRunners: (id: string) => Promise<string[]>;
+  /** Reverse one commit Zaram made in the project's repository. Resolves to
+   *  `null` on success or the backend's own sentence on refusal — "that commit
+   *  is not one Zaram made", "your local changes would be overwritten". */
+  revertCommit: (id: string, commit: string) => Promise<string | null>;
   adopt: (id: string, name: string, type: ProjectType) => Promise<void>;
   remove: (id: string, contents: DeleteContents) => Promise<void>;
 }
@@ -196,6 +218,59 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
       return;
     }
     await get().load();
+  },
+
+  setWrites: async (id, writes) => {
+    set({ error: null });
+    const res = await fetch(`${API}/projects/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ writes }),
+    });
+    if (!res.ok) {
+      set({ error: await readError(res, 'That could not be changed.') });
+      return;
+    }
+    await get().load();
+  },
+
+  setRuns: async (id, runs) => {
+    set({ error: null });
+    const res = await fetch(`${API}/projects/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ runs }),
+    });
+    if (!res.ok) {
+      set({ error: await readError(res, 'That could not be changed.') });
+      return;
+    }
+    await get().load();
+  },
+
+  fetchRunners: async (id) => {
+    try {
+      const res = await fetch(`${API}/projects/${encodeURIComponent(id)}/runners`);
+      if (!res.ok) return [];
+      const body = (await res.json()) as { runners?: { name: string }[] };
+      return (body.runners ?? []).map((r) => r.name);
+    } catch {
+      return [];
+    }
+  },
+
+  revertCommit: async (id, commit) => {
+    try {
+      const res = await fetch(`${API}/projects/${encodeURIComponent(id)}/revert`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ commit }),
+      });
+      if (!res.ok) return await readError(res, 'That change could not be reverted.');
+      return null;
+    } catch {
+      return 'That change could not be reverted.';
+    }
   },
 
   setType: async (id, type) => {

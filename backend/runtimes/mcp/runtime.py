@@ -42,7 +42,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from typing import Any, Callable, Dict, List, Optional, Sequence
+from typing import Set, Any, Callable, Dict, List, Optional, Sequence
 
 from core.contracts import Capability, CapabilityLocality, RuntimeMetadata, RuntimeState
 from core.untrusted import Provenance, scan
@@ -281,7 +281,12 @@ class McpRuntime:
 
     async def execute(self, capability_id: str, input_data: Dict[str, Any]) -> Dict[str, Any]:
         if capability_id == LIST_TOOLS:
-            return {"success": True, "tools": await self.available_tools(input_data.get("query") or "")}
+            query = str(input_data.get("query") or "")
+            return {
+                "success": True,
+                "tools": await self.available_tools(query),
+                "briefing": self._briefing(query),
+            }
         if capability_id != CALL:
             return {"success": False, "error": f"unknown capability {capability_id}"}
 
@@ -299,7 +304,7 @@ class McpRuntime:
         decision = decide(
             tool_name=tool_name,
             mode=cfg.writes,
-            granted_tools=cfg.granted_tools,
+            granted_tools=cfg.granted_tools | self._builtin_grants(server_id),
             annotations=input_data.get("annotations"),
         )
 
@@ -309,12 +314,21 @@ class McpRuntime:
         if decision.verdict is Verdict.CONFIRM and not confirmed:
             # Returned rather than asked. This runtime has no user; the surface
             # that does gets the question and comes back with `confirmed`.
+            reason = decision.reason
+            hint = getattr(self._builtin_server(server_id), "how_to_permit", "")
+            if callable(hint):
+                try:
+                    hint = hint(tool_name)
+                except Exception:  # noqa: BLE001 - a hint must never fail a verdict
+                    hint = ""
+            if hint:
+                reason = f"{reason} {hint}"
             return {
                 "success": False,
                 "needs_confirmation": True,
                 "server": server_id,
                 "tool": tool_name,
-                "reason": decision.reason,
+                "reason": reason,
             }
 
         server = await self._connect(cfg)
@@ -334,6 +348,57 @@ class McpRuntime:
             # something Zaram said.
             "provenance": Provenance.TOOL_OUTPUT.value,
         }
+
+    def _builtin_server(self, server_id: str) -> Any:
+        """The in-process object behind a server Zaram ships, or ``None``.
+
+        Only built-ins: a stranger's server is a subprocess behind `McpClient`
+        and is never asked anything about permission.
+        """
+        if server_id not in self._builtin:
+            return None
+        return self._connections.get(server_id)
+
+    def _briefing(self, query: str) -> str:
+        """What Zaram's own servers want said before the tools are listed.
+
+        Today that is the code pack's repository map. Only built-ins are asked:
+        a stranger's server does not get to write into the system prompt, and
+        even a built-in's briefing is placed *before* the tool rules so the
+        last instruction the model reads is still Zaram's.
+        """
+        parts: List[str] = []
+        for server_id in self._builtin:
+            report = getattr(self._connections.get(server_id), "briefing", None)
+            if not callable(report):
+                continue
+            try:
+                text = report(query)
+            except Exception:  # noqa: BLE001 - a briefing must never fail a listing
+                logger.exception("built-in %s could not brief", server_id)
+                continue
+            if text:
+                parts.append(str(text))
+        return "".join(parts)
+
+    def _builtin_grants(self, server_id: str) -> Set[str]:
+        """Tools a built-in reports as granted for the request in flight.
+
+        `granted_tools` in `mcp-servers.json` holds consent for the servers the
+        user attached; a built-in is never in that file, so its grant has to
+        come from somewhere else — for the code pack, from the open project.
+        Asked of the server object because it is Zaram's own code, not a
+        stranger's, and it *narrows nothing*: the policy still runs, and a
+        destructive tool still confirms however this answers.
+        """
+        server = self._builtin_server(server_id)
+        report = getattr(server, "granted_tools", None)
+        if not callable(report):
+            return set()
+        try:
+            return {str(name) for name in report()}
+        except Exception:  # noqa: BLE001 - a grant lookup must fail closed
+            return set()
 
     def server_names(self) -> List[str]:
         """What the user called the servers they attached.

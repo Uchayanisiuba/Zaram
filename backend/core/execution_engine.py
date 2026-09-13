@@ -37,7 +37,7 @@ from typing import Any
 
 from core.async_bridge import run_sync
 from core.capability_router import CapabilityRouter
-from core.context_budget import budget_for, estimate_tokens
+from core.context_budget import ContextBudget, budget_for, estimate_tokens
 from core.contracts import (
     ExecutionPlan,
     ExecutionStep,
@@ -325,6 +325,10 @@ class ExecutionEngine:
         callable and why it is attached after construction.
         """
         self._planner.set_tool_vocabulary(vocabulary)
+
+    def set_code_project_open(self, probe: Any | None) -> None:
+        """Forwarded to the planner, like the vocabulary and for the same reason."""
+        self._planner.set_code_project_open(probe)
 
     def set_notice_source(self, source: Any | None) -> None:
         """Provide a callable returning a one-off notice, or None.
@@ -807,6 +811,10 @@ class ExecutionEngine:
                 elif step.capability_id == "mcp.list_tools":
                     offered_tools = self._parse_tool_list(step_output)
                     if offered_tools:
+                        # The briefing first, the rules last: a repository map
+                        # is text the user's project supplied, and the tool
+                        # rules are the instruction that must be read after it.
+                        system_prompt += self._parse_briefing(step_output)
                         system_prompt += tool_instructions(offered_tools)
                         native_specs = native_tool_specs(offered_tools)
                         # Said out loud, because `CLAUDE.md` requires disabled
@@ -1149,6 +1157,18 @@ class ExecutionEngine:
         tools = parsed.get("tools")
         return [t for t in tools if isinstance(t, dict)] if isinstance(tools, list) else []
 
+    def _parse_briefing(self, step_output: str) -> str:
+        """The `briefing` a tool listing carried, or nothing. See
+        `McpRuntime._briefing`."""
+        try:
+            parsed = json.loads(step_output)
+        except (ValueError, TypeError):
+            return ""
+        if not isinstance(parsed, dict) or not parsed.get("success"):
+            return ""
+        briefing = parsed.get("briefing")
+        return briefing if isinstance(briefing, str) else ""
+
     def _run_tool_loop(
         self,
         *,
@@ -1232,6 +1252,9 @@ class ExecutionEngine:
                 answer = strip_calls(text)
                 spoken.append(answer)
                 yield answer
+                offer = self._stuck_offer(turns, model)
+                if offer is not None:
+                    yield offer
                 return
 
             runtime = self._router.try_resolve(MCP_CALL)
@@ -1243,12 +1266,14 @@ class ExecutionEngine:
                 yield answer
                 return
 
-            if any(call.same_as(turn.call) for turn in turns):
-                # **A verbatim repeat is not progress.** Its result is already
-                # in the prompt, so running it again spends the window to say
-                # the same thing — and a token budget cannot catch it when the
-                # tool returns almost nothing, which is exactly what an empty
-                # search does.
+            if call.is_repeat_without_progress(turns):
+                # **A verbatim repeat is not progress — unless something
+                # changed in between.** A second identical read returns what
+                # is already in the prompt, and a token budget cannot catch it
+                # when the tool returns almost nothing, which is exactly what
+                # an empty search does. A second identical *run* after an edit
+                # is the confirmation, and `is_repeat_without_progress` tells
+                # the two apart.
                 yield from self._close_the_loop(
                     original_prompt, turns, model, system_prompt, spoken, session_id,
                     reason=(
@@ -1315,10 +1340,17 @@ class ExecutionEngine:
                 payload: Any = {"error": error}
             else:
                 payload = result.get("result")
+                # A write carries its diff and commit; the card shows the
+                # change and can revert it. Read off the payload rather than
+                # the tool name so a stranger's server that returns a `diff`
+                # gets a diff pane too.
+                change = payload if isinstance(payload, dict) else {}
                 yield StreamEvent.tool_call(
                     call.server, call.tool, "allow", "ran",
                     target=call_target(call.tool, call.arguments),
                     output=output_excerpt(payload),
+                    diff=str(change.get("diff") or ""),
+                    commit=str(change.get("commit") or ""),
                 )
 
             turns.append(ToolTurn(call=call, result=payload))
@@ -1330,7 +1362,7 @@ class ExecutionEngine:
             # something has been asked. Measured — asking first returned the
             # 4,096 fallback for a model loaded with 16,384.
             if budget is None:
-                budget = budget_for(model)
+                budget = self._budget_for(model)
 
             # **The size of the request, not a count of what went into it.**
             # This is the number the model has to fit and the number a metered
@@ -1493,6 +1525,105 @@ class ExecutionEngine:
             kind="tool_loop",
             action="continue",
         )
+        offer = self._stuck_offer(turns, model)
+        if offer is not None:
+            yield offer
+
+    #: How many failed runs of the project's commands, in one reply, before
+    #: the cloud model is offered for the step. Two, because one failure is
+    #: the ordinary first half of the loop and the second is the model's own
+    #: fix not working — the moment `CLAUDE.md` names.
+    STUCK_AFTER_FAILED_RUNS = 2
+
+    def _stuck_offer(self, turns: list[ToolTurn], model: str | None) -> StreamEvent | None:
+        """The reaction `CLAUDE.md` describes in place of predicting difficulty.
+
+        *"This is too hard for the local model" is not decidable in advance,
+        so Zaram does not predict it — it reacts to it with an offer under the
+        reply.* The signal is the project's own tests: run twice or more in
+        this reply and still failing at the end. Then, and only then, the best
+        cloud model the user has connected is offered **for this step** — one
+        button, what would leave stated on it, never a mode. Absent when the
+        answering model is already remote, when nothing remote is connected,
+        or when the run in fact passed.
+
+        Local, not a guess: `locality_of` answers `None` for a model it cannot
+        place, and no offer is made on `None` — offering cloud to someone who
+        may already be on it is noise, and noise under a reply is the thing a
+        daily driver cannot afford.
+        """
+        runs = [
+            t for t in turns
+            if t.call.tool == "run_command" and isinstance(t.result, dict) and "ok" in t.result
+        ]
+        failed = [t for t in runs if t.result.get("ok") is False]
+        if len(failed) < self.STUCK_AFTER_FAILED_RUNS or runs[-1].result.get("ok") is not False:
+            return None
+
+        manager = getattr(self, "_provider_manager", None)
+        if manager is None:
+            return None
+        try:
+            here = self._models_runtime_locality(model)
+            if here != "local":
+                return None
+            candidate = manager.best_cloud_model(specialisation="code")
+        except Exception:  # noqa: BLE001 - an offer must never fail a reply
+            logger.exception("Could not compose the cloud offer")
+            return None
+        if candidate is None:
+            return None
+
+        answered_by = self._effective_model(model) or "the local model"
+        return StreamEvent.notice(
+            f"The tests failed {len(failed)} times with {answered_by}. "
+            f"{candidate.display_name} on {candidate.provider} may do better on this step. "
+            "Trying it sends your question, the repository map and the files Zaram read "
+            f"to {candidate.provider}.",
+            kind="stuck",
+            action="cloud",
+            model=candidate.id,
+            provider=candidate.provider,
+        )
+
+    def _models_runtime_locality(self, model: str | None) -> str | None:
+        """``"local"``, ``"cloud"`` or ``None`` — `ModelsRuntime.locality_of`
+        through the router, so the two questions stay two answers."""
+        runtime = self._router.try_resolve("reasoning.generate") if self._router else None
+        probe = getattr(runtime, "locality_of", None)
+        if not callable(probe):
+            return None
+        return probe(self._effective_model(model))
+
+    def _effective_model(self, model: str | None) -> str | None:
+        """The model that will actually answer: the one named, or the models
+        runtime's own pick when nobody named one.
+
+        ``None`` is a real value on the way in — "Zaram's pick" — and the
+        transport resolves it to a name for the `answering` event. The engine
+        was not doing the same, so every budget sized against Zaram's pick was
+        `budget_for(None)`: the 4,096 fallback on a model with 65,536. **Seen
+        on screen, 12 September**: a task that had finished — tests passing —
+        carried a notice saying it had stopped at *"half of the 4,096 this
+        model has"* with a Continue button. The same gap made `locality_of`
+        answer ``None`` and silenced the cloud offer. One resolution, the same
+        one the transport makes, read from the runtime's own health report.
+        """
+        if model:
+            return model
+        runtime = self._router.try_resolve("reasoning.generate") if self._router else None
+        report = getattr(runtime, "health_check", None)
+        if not callable(report):
+            return None
+        try:
+            picked = report().get("model")
+        except Exception:  # noqa: BLE001 - a lookup must not fail a reply
+            return None
+        return str(picked) if picked else None
+
+    def _budget_for(self, model: str | None) -> ContextBudget:
+        """`budget_for`, against the model that will actually answer."""
+        return budget_for(self._effective_model(model))
 
     def _park(
         self,
@@ -1754,7 +1885,7 @@ class ExecutionEngine:
         # would trigger it again on the very next call, and the task would spend
         # its life handing over instead of working. The gap is the room the next
         # window has to do something in.
-        room = budget_for(model).carry_tokens
+        room = self._budget_for(model).carry_tokens
         kept: list[ToolTurn] = []
         for turn in reversed(turns):
             cost = estimate_tokens(render_result(turn.result))
@@ -2357,7 +2488,7 @@ class ExecutionEngine:
         # number chosen against a window we can now read: on a small context it
         # keeps two or three exchanges exactly as before, and on a large one it
         # keeps as many as genuinely fit.
-        budget = budget_for(model)
+        budget = self._budget_for(model)
 
         # **The conversation gets what is left, not a fixed slice.**
         #

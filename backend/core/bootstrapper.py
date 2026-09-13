@@ -129,6 +129,19 @@ class KernelBootstrapper:
         if providers is not None:
             self.execution_engine.set_provider_manager(providers.manager)
 
+        # Routing vocabulary and the open-project probe, attached here because
+        # the engine does not exist in step 3 where the MCP runtime is built —
+        # see the note beside `register_builtin`. The vocabulary makes
+        # "blender" a word that means *tool request* on a machine with Blender
+        # attached; the probe makes an ordinary question inside a coding
+        # project plan the repository's tools (`docs/CODE-PACK.md`, 3d).
+        mcp = getattr(self, "mcp_runtime", None)
+        if mcp is not None:
+            self.execution_engine.set_tool_vocabulary(mcp.server_names)
+        from packs.code import active_root
+
+        self.execution_engine.set_code_project_open(lambda: active_root() is not None)
+
         self.booted = True
         print("[Bootstrapper] Kernel Ready.")
 
@@ -439,20 +452,37 @@ class KernelBootstrapper:
         # exactly as it reaches a stranger's server. In process, because a
         # server Zaram ships needs no isolation from Zaram.
         #
-        # **Read-only, and structurally so.** `packs/code/tools.py` contains no
-        # write, so `WriteMode.READ_ONLY` here is a statement of what the module
-        # is rather than a restraint applied to it.
+        # **`HOST_UNDO`, because git is the undo — declared here by the
+        # maintainer, which is who `policy.py` says declares it.** The reads are
+        # permitted under any mode; the writes in `packs/code/writes.py` are
+        # `CONFIRM` until the open project has granted them, and the grant is
+        # `Project.writes`, read per request through `writes_granted` the same
+        # way the root is. `tools.py` itself still contains no write.
         #
         # The root comes from the open project through `active_root`, never
         # from a tool argument: a folder the model can name is not a sandbox.
         # With no coding project open it answers None and every tool refuses
         # with that reason, which is the honest state on most requests.
-        from packs.code import SERVER_ID as CODE_SERVER, CodeTools, active_root
+        from packs.code import (
+            SERVER_ID as CODE_SERVER,
+            CodeRunner,
+            CodeTools,
+            CodeWriter,
+            active_root,
+            runs_granted,
+            writes_granted,
+        )
         from runtimes.mcp.config import ServerConfig, WriteMode
 
         self.mcp_runtime.register_builtin(
-            ServerConfig(server_id=CODE_SERVER, writes=WriteMode.READ_ONLY),
-            CodeTools(active_root),
+            ServerConfig(server_id=CODE_SERVER, writes=WriteMode.HOST_UNDO),
+            CodeTools(
+                active_root,
+                writer=CodeWriter(),
+                writes_granted=writes_granted,
+                runner=CodeRunner(),
+                runs_granted=runs_granted,
+            ),
         )
 
         # **Registering it is not reaching it, and that distinction is the
@@ -468,8 +498,15 @@ class KernelBootstrapper:
         # callable rather than a list: servers are attached and detached while
         # Zaram runs, and a snapshot taken at boot would be wrong by the time
         # anybody used it.
-        if self.execution_engine is not None:
-            self.execution_engine.set_tool_vocabulary(self.mcp_runtime.server_names)
+        #
+        # **This used to be wired here, under `if self.execution_engine is not
+        # None`, and that condition was false at every boot** — runtimes are
+        # registered in step 3 and the engine is built in step 4, so the call
+        # was dead code with a comment explaining why it mattered. Found on
+        # 12 September when the routing probe beside it was watched *not*
+        # fire in the running app after passing on a bare planner. Both are
+        # attached in `boot()` now, after the engine exists, and
+        # `test_the_code_pack_is_wired.py` asserts it against the real boot.
 
         # An invoice is a table of line items, not paragraphs, so the documents
         # runtime needs a way to read an answer into fields. It is handed a

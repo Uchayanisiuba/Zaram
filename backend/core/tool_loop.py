@@ -96,6 +96,32 @@ _CALL_RE = re.compile(
     re.DOTALL,
 )
 
+#: The second way a model asks for a tool, and it was **watched on screen
+#: before it was read about**. 12 September 2026, `Qwen3.8-27B` on TabbyAPI,
+#: offered the native function specs: instead of the marker it wrote its own
+#: chat template's call form as text —
+#:
+#:     <tool_call>
+#:     <function=code__run_command>
+#:     <parameter=runner>
+#:     pytest
+#:     </parameter>
+#:     </function>
+#:     </tool_call>
+#:
+#: — which rendered raw in the reply and ran nothing. The same model used the
+#: marker a minute earlier on the same question, so this is not a model that
+#: cannot follow the prompt; it is one whose template sometimes wins. The
+#: function name is the native one (`server__tool`), split back the way the
+#: native channel splits it. Values are whole-line text, stripped; numbers
+#: and booleans are read as JSON when they parse, because a schema said
+#: ``integer`` and ``"400"`` is not one.
+_XML_CALL_RE = re.compile(
+    r"<tool_call>\s*<function=([^>\s]+)>(.*?)</function>\s*</tool_call>",
+    re.DOTALL,
+)
+_XML_PARAM_RE = re.compile(r"<parameter=([^>\s]+)>(.*?)</parameter>", re.DOTALL)
+
 
 @dataclass(frozen=True)
 class ToolCall:
@@ -104,6 +130,31 @@ class ToolCall:
     server: str
     tool: str
     arguments: dict[str, Any]
+
+    def is_repeat_without_progress(self, turns: Sequence["ToolTurn"]) -> bool:
+        """Whether this call was already made *and nothing has changed since*.
+
+        The verbatim-repeat guard was written for reads: a second identical
+        `search_code` returns what is already in the prompt. It was wrong for
+        the loop's second half, and measured wrong on 12 September — a model
+        fixing a failing test called `run_command(pytest)` before and after
+        the edit with identical arguments, and the second call is the whole
+        point. So a repeat only stops the loop when every call since the
+        earlier one *looks read-only*; a write, an edit or a run in between
+        means the world may have changed and asking again is progress.
+
+        `looks_read_only` is the policy's conservative classifier — anything
+        it does not recognise counts as mutating — which is the safe direction
+        here too: an unrecognised tool between the two calls permits the
+        repeat rather than forbidding it.
+        """
+        from runtimes.mcp.policy import looks_read_only
+
+        earlier = [i for i, turn in enumerate(turns) if self.same_as(turn.call)]
+        if not earlier:
+            return False
+        since = turns[earlier[-1] + 1 :]
+        return all(looks_read_only(turn.call.tool) for turn in since)
 
     def same_as(self, other: "ToolCall") -> bool:
         """Whether this asks for exactly what ``other`` asked for.
@@ -160,7 +211,7 @@ def call_target(tool: str, arguments: Any) -> str:
 
     # Named in preference order rather than taking whatever comes first: a dict
     # has no order worth trusting, and the useful key differs by tool.
-    for key in ("path", "file", "query", "pattern", "directory"):
+    for key in ("path", "file", "query", "pattern", "directory", "runner"):
         value = arguments.get(key)
         if isinstance(value, str) and value.strip():
             target = value.strip()
@@ -231,7 +282,7 @@ def parse_call(text: str) -> ToolCall | None:
     """
     match = _CALL_RE.search(text or "")
     if not match:
-        return None
+        return _parse_xml_call(text or "")
     try:
         payload = json.loads(match.group(1))
     except json.JSONDecodeError:
@@ -253,14 +304,37 @@ def parse_call(text: str) -> ToolCall | None:
     )
 
 
+def _parse_xml_call(text: str) -> ToolCall | None:
+    """The Qwen-template call form, or ``None``. See `_XML_CALL_RE`."""
+    match = _XML_CALL_RE.search(text)
+    if not match:
+        return None
+    split = split_native_name(match.group(1).strip())
+    if split is None:
+        return None
+    server, tool = split
+    arguments: dict[str, Any] = {}
+    for key, raw in _XML_PARAM_RE.findall(match.group(2)):
+        value: Any = raw.strip()
+        try:
+            parsed = json.loads(value)
+            if isinstance(parsed, (int, float, bool, list, dict)):
+                value = parsed
+        except (ValueError, TypeError):
+            pass
+        arguments[key.strip()] = value
+    return ToolCall(server=server, tool=tool, arguments=arguments)
+
+
 def strip_calls(text: str) -> str:
     """Text with the call markers removed, for anything a person reads or hears.
 
     The same job `core.reasoning` does for ``<think>`` and the citation stripper
     does for ``[M1]``, and it exists for the same measured reason: a marker is
     grounding, not language. It reaches neither a reader nor a synthesiser.
+    Both call forms go, for the same reason.
     """
-    return _CALL_RE.sub("", text or "").strip()
+    return _XML_CALL_RE.sub("", _CALL_RE.sub("", text or "")).strip()
 
 
 def _argument_line(schema: Any) -> str:

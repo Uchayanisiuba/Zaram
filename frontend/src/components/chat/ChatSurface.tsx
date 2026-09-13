@@ -194,6 +194,21 @@ export default function ChatSurface({ navigate }: Props) {
     void send('Continue', { continueTask: true });
   }, [send]);
 
+  /** Ask the last question again with the cloud model the offer named.
+   *
+   *  A per-message override, not a preference change: the next question goes
+   *  back to whatever the routing was. The tools run again from scratch on
+   *  the cloud model — reads, runs, edits — and every byte of it is logged. */
+  const tryCloud = useCallback(
+    (model: string) => {
+      const lastAsked = [...useChatStore.getState().messages]
+        .reverse()
+        .find((message) => message.role === 'user');
+      if (lastAsked) void send(lastAsked.text, { model });
+    },
+    [send],
+  );
+
   // The typewriter used to live here, and every reveal frame re-rendered
   // this whole surface. It now lives in `StreamingReply`, which is the one
   // thing it draws — see that file for the measurement. Markers are still
@@ -1020,6 +1035,7 @@ export default function ChatSurface({ navigate }: Props) {
                       onOpen={navigate}
                       onEnableSearch={enableSearchAndRetry}
                       onContinue={continueTask}
+                      onTryCloud={tryCloud}
                     />
                   ))}
                   {msg.error && (
@@ -1118,6 +1134,7 @@ export default function ChatSurface({ navigate }: Props) {
                       onOpen={navigate}
                       onEnableSearch={enableSearchAndRetry}
                       onContinue={continueTask}
+                      onTryCloud={tryCloud}
                     />
                   ))}
                 </div>
