@@ -741,8 +741,12 @@ main { overflow-x: clip; }
 
 /* The scene lives in its own section further down, smaller, beside the
    words that say what the two things are for. */
-.embodiment { grid-template-columns: 1.05fr 1fr; align-items: center; }
-.embodiment .scene { height: clamp(320px, 34vw, 430px); margin: 0; max-width: none; }
+/* Words first, centred; then the orb and the character side by side under
+   them, as one collection on the page's centre line. */
+.embodiment { display: block; text-align: center; }
+.embodiment .feature-text { max-width: 60ch; margin: 0 auto; }
+.embodiment .feature-text p { text-align: left; }
+.embodiment .scene { height: clamp(300px, 36vw, 400px); width: min(100%, 720px); margin: 36px auto 0; }
 .embodiment .scene .orb-layer { left: 0; top: 4%; width: 48%; }
 .embodiment .scene .avatar-layer { right: 0; bottom: -4%; width: 46%; }
 .embodiment .scene .floor { display: none; }
@@ -755,7 +759,7 @@ main { overflow-x: clip; }
 .embodiment .scene .stars { inset: 0; width: 100%; height: 100%; }
 .embodiment .scene .orb-state { white-space: nowrap; font-size: .78rem; }
 @media (max-width: 860px) {
-  .embodiment .scene { height: clamp(300px, 80vw, 400px); margin-top: 8px; }
+  .embodiment .scene { height: clamp(280px, 70vw, 380px); margin-top: 24px; }
 }
 
 @media (max-width: 860px) {
