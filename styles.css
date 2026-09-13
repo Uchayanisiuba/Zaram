@@ -790,3 +790,5 @@ footer nav a:hover { color: var(--text); }
   .js .reveal { opacity: 1; transform: none; transition: none; }
   .tilt::after { display: none; }
 }
+
+.caps .who-lede { margin-bottom: 28px; }
