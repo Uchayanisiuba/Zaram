@@ -229,6 +229,11 @@ export default function ChatSurface({ navigate }: Props) {
   // they are sent (rule 7d, one layer up).
   const sessionId = useChatStore((s) => s.sessionId);
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
+  // **Revise**: the reply the next message corrects, or null. Set by the
+  // Revise action under a reply, shown as a chip above the composer, cleared
+  // on send or by its own dismiss. Working state, like the attachments: it
+  // is about the message being composed, not the conversation.
+  const [revising, setRevising] = useState<{ question: string; reply: string } | null>(null);
   // Files already sent with an earlier question this session. They leave the
   // composer the moment they are sent — they belong to the message, and that
   // is where the person looks for them — but the backend scopes attachments
@@ -619,8 +624,31 @@ export default function ChatSurface({ navigate }: Props) {
     setAttachments([]);
     // Refusals go too, because they explain a drop that has now been read.
     setRefused([]);
-    void send(text, ids.length > 0 ? { attachmentIds: ids } : {}, attached);
+    // A correction goes with the reply it points at; the chip comes down
+    // with the send, because the next message is a fresh one.
+    const revise = revising;
+    setRevising(null);
+    void send(
+      text,
+      {
+        ...(ids.length > 0 ? { attachmentIds: ids } : {}),
+        ...(revise ? { revise } : {}),
+      },
+      attached,
+    );
   };
+
+  /** Arm the composer to correct one reply. The question it answered is the
+   *  nearest user message above it; the reply travels as typed, markers and
+   *  all stripped, since the model never needs its own citation tags back. */
+  const reviseReply = useCallback((index: number) => {
+    const all = useChatStore.getState().messages;
+    const reply = all[index];
+    if (!reply || reply.role !== 'assistant') return;
+    const asked = all.slice(0, index).reverse().find((m) => m.role === 'user');
+    setRevising({ question: asked?.text ?? '', reply: stripMarkers(reply.text) });
+    inputRef.current?.focus();
+  }, []);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -853,6 +881,20 @@ export default function ChatSurface({ navigate }: Props) {
                   {msg.role === 'assistant' && msg.reasoning && (
                     <ReasoningPanel text={msg.reasoning} streaming={false} />
                   )}
+                  {msg.role === 'user' && msg.revises && (
+                    <p
+                      className="text-[10px] mb-1"
+                      style={{ color: 'var(--color-text-muted)', textAlign: 'right' }}
+                      data-testid="revises-label"
+                      title={msg.revises.question}
+                    >
+                      Revising the reply to “
+                      {msg.revises.question.length > 60
+                        ? `${msg.revises.question.slice(0, 60)}…`
+                        : msg.revises.question}
+                      ”
+                    </p>
+                  )}
                   {msg.role === 'user' && msg.attachments && msg.attachments.length > 0 && (
                     <div className="flex flex-wrap justify-end gap-1.5 mb-1.5" data-testid="sent-attachments">
                       {msg.attachments.map((file) => (
@@ -942,6 +984,11 @@ export default function ChatSurface({ navigate }: Props) {
                             setInputText(msg.text);
                             inputRef.current?.focus();
                           }
+                        : undefined
+                    }
+                    onRevise={
+                      msg.role === 'assistant' && !isStreaming && !msg.error
+                        ? () => reviseReply(msgIndex)
                         : undefined
                     }
                     // Keep this on purpose — an override on top of the capture
@@ -1234,6 +1281,28 @@ export default function ChatSurface({ navigate }: Props) {
         <TokenUsageBar />
         {/* What is in scope for the next message, above the box you type it
             in. Below the composer would put the evidence after the question. */}
+        {revising && (
+          <div
+            className="flex items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 mb-2 text-[11px]"
+            style={{ background: 'var(--color-glass)', border: '1px solid var(--color-border-subtle)' }}
+            data-testid="revising-chip"
+          >
+            <span className="truncate" style={{ color: 'var(--color-text)' }}>
+              Revising the reply to “
+              {revising.question.length > 70 ? `${revising.question.slice(0, 70)}…` : revising.question}
+              ” — say what should change.
+            </span>
+            <button
+              type="button"
+              className="text-[11px] px-1.5 py-0.5 rounded shrink-0"
+              style={{ color: 'var(--color-text-muted)' }}
+              onClick={() => setRevising(null)}
+              aria-label="Stop revising"
+            >
+              ✕
+            </button>
+          </div>
+        )}
         <AttachmentChips
           attachments={attachments}
           refused={refused}
@@ -1291,7 +1360,9 @@ export default function ChatSurface({ navigate }: Props) {
             placeholder={
               micStatus === 'recording'
                 ? 'Listening on this machine…'
-                : 'Ask Zaram anything…'
+                : revising
+                  ? 'What should change?'
+                  : 'Ask Zaram anything…'
             }
             aria-label="Message Zaram"
             disabled={isStreaming}

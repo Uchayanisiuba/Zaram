@@ -312,6 +312,13 @@ export interface ChatRequest {
   /** The person pressed Go on the plan the task paused to show them. Only
    *  meaningful with `continueTask`. */
   approvePlan?: boolean;
+  /** **Revise**: `text` is a correction to an earlier reply, and this is
+   *  that reply with the question it answered. The backend composes one
+   *  prompt from the three and sends it down the ordinary path — recall,
+   *  tools, the gate — so a revision is one exchange like any other. The
+   *  reply travels here rather than being re-read from a store (rule 7d).
+   *  `docs/AGENT-UX.md`, *Revise*. */
+  revise?: { question: string; reply: string };
   /** Which unfinished task to pick up, or omitted for the obvious one.
    *
    *  Named when the user chose it from the list in Project; omitted when they
@@ -378,6 +385,7 @@ export async function* streamChat(
         continue_task: req.continueTask ?? false,
         plan_id: req.planId ?? '',
         approve_plan: req.approvePlan ?? false,
+        ...(req.revise ? { revise: { question: req.revise.question, reply: req.revise.reply } } : {}),
       }),
       signal,
     });

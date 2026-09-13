@@ -69,12 +69,6 @@ const TONES: Record<string, { Icon: typeof AlertTriangle; color: string }> = {
   // spent its reading allowance, and an amber triangle over "here is what I
   // found so far" would train the warning away for the cases that need it.
   tool_loop: { Icon: Wrench, color: 'var(--color-text-muted, #94a3b8)' },
-  // "14 attached tools are available for this question" — the disclosure the
-  // engine makes before using somebody's attached servers. Information, not a
-  // caution; it rendered with the amber triangle for a week because the kind
-  // was sent and never keyed here, which is the third case the note above
-  // predicted. Asked about on screen, 13 September: "why the caution symbol".
-  tools: { Icon: Wrench, color: 'var(--color-text-muted, #94a3b8)' },
   // The conversation outgrew the model's window, so the earliest exchanges are
   // no longer in front of it. Neutral for the same reason `tool_loop` is:
   // nothing failed, a bounded window was reached, and an amber triangle would
@@ -126,6 +120,16 @@ interface Props {
 }
 
 export default function NoticeCard({ notice, onOpen, onEnableSearch, onContinue, onTryCloud }: Props) {
+  // **"14 attached tools are available for this question" is not shown.**
+  // Available means offered — the definitions were put in front of the
+  // model — not called, and a person reading it asked whether all fourteen
+  // ran (13 September). The disclosure the line existed for is already made
+  // better by the tool-call rows: each call, as it happens, with its server
+  // named. That is what every comparable product shows and nothing else.
+  // The event still arrives, because `orbActivity` reads its `servers` to
+  // report *coding* before the first token; only the card is withheld.
+  if (notice.kind === 'tools') return null;
+
   const destination = DESTINATIONS[notice.action];
   const tone = toneFor(notice);
   const { Icon, color } = tone;

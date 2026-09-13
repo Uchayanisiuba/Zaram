@@ -1080,6 +1080,13 @@ def _locality_of_model(model: str | None) -> str | None:
         return None
 
 
+class RevisionBody(BaseModel):
+    """The earlier reply a correction points at. See `ChatRequest.revise`."""
+
+    question: str
+    reply: str
+
+
 class ChatRequest(BaseModel):
     text: str
     #: Empty means "no preference expressed by this request", which is not the
@@ -1151,6 +1158,13 @@ class ChatRequest(BaseModel):
     #: meaningful with `continue_task`; recorded on the task so the resumed
     #: loop does not pause again for the same plan.
     approve_plan: bool = False
+    #: **Revise**: `text` is a correction to an earlier reply, and this is
+    #: that reply with the question it answered. Composed into one prompt by
+    #: `core.revise.revision_prompt` and sent down the ordinary plan path —
+    #: recall, tools, the gate — so a revision is one exchange like any other.
+    #: The reply travels here, in the request, and is never re-read from a
+    #: store (rule 7d). `docs/AGENT-UX.md`, *Revise*.
+    revise: RevisionBody | None = None
 
 
 def _domain_scope(domain_ids: list[str]) -> tuple[frozenset[str] | None, str]:
@@ -1664,6 +1678,13 @@ async def chat(request: ChatRequest):
     # The Kernel owns planning, search, grounding, and response generation.
     # The API layer passes the raw prompt through without independent search.
     final_prompt = request.text
+    if request.revise is not None:
+        from core.revise import Revision, revision_prompt
+
+        final_prompt = revision_prompt(
+            Revision(question=request.revise.question, reply=request.revise.reply),
+            request.text,
+        )
 
     # Files attached to this message, composed against the model's budget.
     #
@@ -1691,7 +1712,11 @@ async def chat(request: ChatRequest):
         budget_chars=_budget.document_chars,
     )
     if composition.block:
-        final_prompt = f"{composition.block}\n\n{request.text}"
+        # Prefixed to whatever `final_prompt` already is - a revision's
+        # composed prompt included - rather than to `request.text`, which
+        # would have silently dropped the revision the moment a file was
+        # also attached.
+        final_prompt = f"{composition.block}\n\n{final_prompt}"
 
     # Who is answering, said before the first token rather than after the last.
     #

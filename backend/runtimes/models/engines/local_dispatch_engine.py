@@ -38,7 +38,7 @@ import logging
 from typing import Any, Callable, Dict, Iterator, Optional
 
 from .base_engine import LLMEngine, forward_stream
-from .openai_compatible_engine import LOCAL_SAMPLING, OpenAICompatibleEngine
+from .openai_compatible_engine import LOCAL_SAMPLING, LOCAL_TIMEOUT, OpenAICompatibleEngine
 
 logger = logging.getLogger(__name__)
 
@@ -126,6 +126,8 @@ class LocalDispatchEngine(LLMEngine):
         # unconstrained. Cloud engines are built elsewhere and deliberately do
         # not get this: a provider's default is part of what the user chose
         # when they connected it. See `LOCAL_SAMPLING`.
+        # And a local wait, not a cloud one: see `LOCAL_TIMEOUT` for the
+        # afternoon the default cut a 27B off mid-prefill four times.
         engine = OpenAICompatibleEngine(
             base_url=endpoint,
             api_key="",
@@ -133,6 +135,7 @@ class LocalDispatchEngine(LLMEngine):
             gate=self._gate,
             source="chat",
             sampling=LOCAL_SAMPLING,
+            timeout=LOCAL_TIMEOUT,
         )
         self._engines[endpoint] = engine
         return engine

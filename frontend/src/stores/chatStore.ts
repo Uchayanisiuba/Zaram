@@ -48,6 +48,11 @@ export interface ChatMessage {
   text: string;
   /** Files sent with a question. On user messages only; usually empty. */
   attachments?: SentAttachment[];
+  /** Set when this question was a correction to an earlier reply — the
+   *  question that reply answered, so the transcript can say which. The
+   *  earlier reply stays where it was, cards and all: nothing is replaced
+   *  in place and nothing branches. `docs/AGENT-UX.md`, *Revise*. */
+  revises?: { question: string };
   /** Provenance for an assistant reply: what the answer was grounded in.
    *  Empty means the model answered from its own knowledge, which is a
    *  meaningful state and must not be confused with "sources not loaded". */
@@ -339,6 +344,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           role: 'user',
           text: trimmed,
           ...(attached.length > 0 ? { attachments: attached } : {}),
+          ...(opts.revise ? { revises: { question: opts.revise.question } } : {}),
           sources: [],
           artifacts: [],
           notices: [],

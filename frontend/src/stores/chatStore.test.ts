@@ -152,7 +152,7 @@ describe('a file sent with a question', () => {
       ]);
     const asked = [...useChatStore.getState().messages].reverse().find((m) => m.role === 'user');
     expect(asked?.attachments).toEqual([{ id: 'att-1', name: 'lease.pdf', kind: 'document' }]);
-    expect(streamChat.mock.calls.at(-1)?.[0]).toMatchObject({ attachmentIds: ['att-1'] });
+    expect(streamChat.mock.calls[streamChat.mock.calls.length - 1]?.[0]).toMatchObject({ attachmentIds: ['att-1'] });
 
     release();
     await sending;

@@ -204,18 +204,18 @@ describe('the cloud offer', () => {
 });
 
 describe('the tools disclosure', () => {
-  // "14 attached tools are available for this question" is the engine saying
-  // whose servers it is about to use. It is information — and it wore the
-  // amber triangle for a week because `kind: 'tools'` was sent and never keyed
-  // to a tone. Asked about on screen, 13 September: "why the caution symbol".
-  it('is not a warning', () => {
-    render(
+  // "14 attached tools are available for this question" — available means
+  // offered, not called, and a person reading it asked whether all fourteen
+  // ran. The tool-call rows already disclose each call as it happens with
+  // its server named, so the card is withheld; the event still carries
+  // `servers` for the orb.
+  it('is not rendered as a card', () => {
+    const { container } = render(
       <NoticeCard
         notice={notice({ kind: 'tools', action: '', content: '14 attached tools are available for this question.' })}
       />,
     );
-    const card = screen.getByTestId('chat-notice');
-    expect(card.getAttribute('data-kind')).toBe('tools');
-    expect(card.getAttribute('data-tone')).toBe('neutral');
+    expect(container.querySelector('[data-testid="chat-notice"]')).toBeNull();
+    expect(container.textContent).toBe('');
   });
 });

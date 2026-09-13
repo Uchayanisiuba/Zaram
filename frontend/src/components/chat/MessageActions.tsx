@@ -31,7 +31,7 @@
  * honest description of what happens, and it is what the label says.
  */
 import { useState } from 'react';
-import { Copy, Check, RotateCcw, Pencil } from 'lucide-react';
+import { Copy, Check, RotateCcw, Pencil, Undo2 } from 'lucide-react';
 import { stripCitationMarkers } from '@/lib/markers';
 import RememberAction from './RememberAction';
 
@@ -68,6 +68,7 @@ export default function MessageActions({
   text,
   onRetry,
   onEdit,
+  onRevise,
   remember,
   retryLabel = 'Ask again',
   align = 'left',
@@ -91,6 +92,13 @@ export default function MessageActions({
    * The transcript remains a record of what was actually asked.
    */
   onEdit?: () => void;
+  /**
+   * Correct *this* reply. Arms the composer so the next message is read as a
+   * correction to this answer and regenerates it in full - and, where it
+   * changed files, changes the files. The reply stays; the revision lands
+   * beneath it. On assistant messages only. `docs/AGENT-UX.md`, *Revise*.
+   */
+  onRevise?: () => void;
   /**
    * Let this message be kept in the Spine on purpose.
    *
@@ -148,6 +156,13 @@ export default function MessageActions({
         <ActionButton label="Edit and send again" onClick={onEdit}>
           <Pencil size={11} />
           <span>Edit</span>
+        </ActionButton>
+      )}
+
+      {onRevise && (
+        <ActionButton label="Revise this reply with a correction" onClick={onRevise}>
+          <Undo2 size={11} />
+          <span>Revise</span>
         </ActionButton>
       )}
 

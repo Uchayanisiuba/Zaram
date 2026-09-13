@@ -538,6 +538,29 @@ describe('the model\'s working survives the transport', () => {
     expect(sent.approve_plan).toBe(true);
   });
 
+  it('sends a revision as the correction plus the reply it points at', async () => {
+    // Revise, docs/AGENT-UX.md: the wire carries which reply, the backend
+    // composes the prompt. Absent on an ordinary question — not an empty
+    // object — so the backend's None means "not a revision".
+    let sent: Record<string, unknown> = {};
+    mockFetch((_url: string, init?: RequestInit) => {
+      sent = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+      return streamingResponse([done()]);
+    });
+
+    await collect(
+      streamChat({
+        text: 'it should also accept negatives',
+        revise: { question: 'add subtract', reply: 'added subtract(a, b)' },
+      }),
+    );
+    expect(sent.text).toBe('it should also accept negatives');
+    expect(sent.revise).toEqual({ question: 'add subtract', reply: 'added subtract(a, b)' });
+
+    await collect(streamChat({ text: 'plain question' }));
+    expect('revise' in sent).toBe(false);
+  });
+
   it('carries the checklist through whole, with the Go flag', async () => {
     const items = [
       { text: 'Read the failing test', status: 'done' },

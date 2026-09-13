@@ -43,7 +43,7 @@
  */
 import { useState } from 'react';
 import { AnimatePresence } from 'framer-motion';
-import { Check, ChevronRight, CircleAlert, Clock } from 'lucide-react';
+import { Check, ChevronRight, CircleAlert, Clock, Wrench } from 'lucide-react';
 import type { ChatToolCall } from '../../stores/chatStore';
 import ActivityPanel from './ActivityPanel';
 import AppCard from './AppCard';
@@ -186,27 +186,44 @@ export default function ToolCalls({
 
   return (
     <div className="mt-2" data-testid="tool-calls">
+      {/* **The tools notification.** The card that used to sit under a reply
+          said "14 attached tools are available" — offered, not used — and a
+          person reading it asked whether all fourteen ran (13 September).
+          What they asked for instead is this: a card about the tools that
+          *were* used, in words, with an arrow that opens to each call. Same
+          shape as `NoticeCard` so it reads as the one place tool activity
+          lives; the words come from `summarise`, because "read two files,
+          ran the tests" says more than a count. */}
       {ran.length > 0 && (
         <button
           type="button"
           onClick={() => (active ? setOpen((v) => !v) : setOpen(true))}
           aria-expanded={expanded}
-          className="flex items-center gap-1 text-[10px] leading-snug"
-          style={{ color: 'var(--color-text-muted)' }}
+          className="w-full rounded-lg px-3 py-2 flex items-center gap-2.5 text-left text-[11px] leading-snug"
+          style={{
+            border: '1px solid var(--color-border-subtle)',
+            background: 'var(--color-glass)',
+            color: 'var(--color-text-muted)',
+          }}
           data-testid="tool-summary"
         >
+          <Wrench size={12} className="shrink-0" style={{ color: 'var(--color-text-muted)' }} aria-hidden />
+          <span className="flex-1 min-w-0 truncate">
+            <span style={{ color: 'var(--color-text)' }}>{active ? 'Using tools' : 'Used tools'}</span>
+            {' — '}
+            {summarise(ran)}
+            {active && (
+              <span style={{ color: 'var(--color-text-faint)' }} aria-hidden>
+                {' …'}
+              </span>
+            )}
+          </span>
           <ChevronRight
-            size={11}
+            size={12}
             className="shrink-0 transition-transform"
             style={{ transform: expanded ? 'rotate(90deg)' : 'none' }}
             aria-hidden
           />
-          <span>{summarise(ran)}</span>
-          {active && (
-            <span style={{ color: 'var(--color-text-faint)' }} aria-hidden>
-              …
-            </span>
-          )}
         </button>
       )}
 

@@ -81,6 +81,7 @@ import json
 import logging
 import os
 import re
+import socket
 import urllib.error
 from urllib.parse import urlparse
 from collections.abc import Iterator
@@ -98,6 +99,16 @@ logger = logging.getLogger(__name__)
 #: because a cold cloud model behind a queue can take a while to start, and a
 #: timeout mid-answer is worse than a slow one.
 DEFAULT_TIMEOUT = 120.0
+#: The same wait for a **local** server, and it is not the same number. A
+#: 27B at 2.2 bits pre-filling a 60,000-token prompt — history, tools, recall,
+#: which is what a long conversation on a 65K window sends — emits nothing
+#: for longer than two minutes on a 12 GB card, and did: `TimeoutError:
+#: timed out` four times in one afternoon, 13 September 2026, each surfacing
+#: as "the model stopped before writing an answer". A cloud queue that is
+#: silent for two minutes is gone; a local model that is silent for two
+#: minutes is working. Fifteen minutes is past any prefill this card can do
+#: and short enough that a genuinely wedged server is still reported.
+LOCAL_TIMEOUT = 900.0
 
 #: A quoted string in a Jinja chat template — `'...'` or `"..."`.
 #:
@@ -642,6 +653,7 @@ class OpenAICompatibleEngine(LLMEngine):
             yield ERROR_PREFIX + str(unreadable)
             return
         payload = json.dumps(body)
+        thinking = False
 
         gate = self._gate if self._gate is not None else get_gate()
         try:
@@ -676,18 +688,45 @@ class OpenAICompatibleEngine(LLMEngine):
             )
             # Asked before the stream is read, and cached, so it costs one
             # request per engine rather than one per reply.
-            yield from self._tokens(lines, self._template_opens_thinking())
+            #
+            # **Whether the stream is inside a thinking block is tracked
+            # here, so a failure mid-thought can close the block before it
+            # is reported.** The tags are yielded whole by `_tokens`. Without
+            # this, a timeout that fired while the model was still thinking
+            # put the error text *inside* the block, `ReasoningSplitter`
+            # filed it as thought, and the person was told "the model
+            # stopped before writing an answer" — which named the symptom
+            # and hid the cause, four times in one afternoon.
+            for token in self._tokens(lines, self._template_opens_thinking()):
+                if token == OPEN_TAG:
+                    thinking = True
+                elif token == CLOSE_TAG:
+                    thinking = False
+                yield token
         except EgressDenied as denied:
             # `stream_lines` checks inside the generator, so a denial can also
             # surface here rather than above — a generator body does not run
             # until it is iterated.
             logger.info("cloud generation refused: %s", denied)
+            if thinking:
+                yield CLOSE_TAG
             yield ERROR_PREFIX + str(denied)
         except urllib.error.HTTPError as http_error:
+            if thinking:
+                yield CLOSE_TAG
             yield ERROR_PREFIX + self._explain(http_error)
         except Exception as exc:
-            logger.warning("cloud request failed: %s: %s", type(exc).__name__, exc)
-            yield ERROR_PREFIX + f"Could not reach {self.base_url}: {exc}"
+            logger.warning("request to %s failed: %s: %s", self.base_url, type(exc).__name__, exc)
+            if thinking:
+                yield CLOSE_TAG
+            if isinstance(exc, (TimeoutError, socket.timeout)) or "timed out" in str(exc):
+                yield ERROR_PREFIX + (
+                    f"{self.base_url} sent nothing for {int(self._timeout)} seconds and Zaram "
+                    "stopped waiting. A large prompt on a slow model can take that long to "
+                    "start; ask again, or with a shorter conversation."
+                )
+            else:
+                yield ERROR_PREFIX + f"Could not reach {self.base_url}: {exc}"
 
     @staticmethod
     def _explain(error: Any) -> str:
