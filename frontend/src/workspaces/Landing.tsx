@@ -348,6 +348,7 @@ export default function Landing({ onNavigate, onOrbTap }: LandingProps) {
   // both are placed by this one formula. The label now shows at rest as well,
   // so the slot's bottom is always its block.
   const setCaptionSlot = useLayoutStore((s) => s.setCaptionSlot)
+  const setCaptionHost = useLayoutStore((s) => s.setCaptionHost)
   useEffect(() => {
     setCaptionSlot({ top: captionTop, bottom: captionTop + CAPTION_BLOCK })
     return () => setCaptionSlot(null)
@@ -741,7 +742,18 @@ export default function Landing({ onNavigate, onOrbTap }: LandingProps) {
           exit={{ opacity: 0 }}
           transition={isResizing ? { duration: 0 } : { duration: reduced ? 0.15 : 0.35, delay: reduced ? 0 : 0.1 }}
         >
-          <OrbStatusLabel dimmed={panelsOpen} compact working={working} />
+          {/* The instrument the orb sits on. One capsule in the surface
+              material — its rim is lit from the orb and in the orb's state
+              colour, so it visibly comes on while a reply is in flight — with
+              the status on the first row and, on the second, whichever line
+              `LandingHint` decides is true: the way in, the returning line, or
+              how to talk. Two rows in one drawn object rather than three grey
+              lines and a mono row floating under the ring, which is what the
+              maintainer saw on 14 September and called bland. */}
+          <div className="surface surface-raised orb-caption">
+            <OrbStatusLabel dimmed={panelsOpen} compact working={working} />
+            <div ref={setCaptionHost} className="orb-caption-row" />
+          </div>
       </motion.div>
 
 

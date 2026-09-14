@@ -87,9 +87,18 @@ interface LayoutState {
    * how they came to overlap on 14 September 2026. Not persisted.
    */
   captionSlot: { top: number; bottom: number } | null;
+  /**
+   * The element inside the orb's caption capsule that the second row renders
+   * into — the working line's neighbour: the hint, the returning line or the
+   * voice hint, whichever `LandingHint` decides is true. Published by the
+   * landing as a ref so both rows live in one capsule, drawn once, sized by
+   * its contents. Not persisted.
+   */
+  captionHost: HTMLElement | null;
 
   setChatFraction: (f: number, context?: 'landing' | 'workspace') => void;
   setCaptionSlot: (slot: { top: number; bottom: number } | null) => void;
+  setCaptionHost: (el: HTMLElement | null) => void;
   setRailWidth: (px: number) => void;
   setResizing: (v: boolean) => void;
   resetChat: (context?: 'landing' | 'workspace') => void;
@@ -104,6 +113,7 @@ export const useLayoutStore = create<LayoutState>()(
       railWidth: RAIL_DEFAULT,
       isResizing: false,
       captionSlot: null,
+      captionHost: null,
 
       setChatFraction: (f, context = 'landing') =>
         set(
@@ -113,6 +123,7 @@ export const useLayoutStore = create<LayoutState>()(
         ),
       setRailWidth: (px) => set({ railWidth: clamp(px, RAIL_MIN, RAIL_MAX) }),
       setCaptionSlot: (slot) => set({ captionSlot: slot }),
+      setCaptionHost: (el) => set({ captionHost: el }),
       setResizing: (v) => set({ isResizing: v }),
       resetChat: (context = 'landing') =>
         set(

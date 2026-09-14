@@ -78,7 +78,7 @@ export function sinceWord(sinceAt: number, now: number): string {
   return `${then.getDate()} ${MONTHS[then.getMonth()]}`;
 }
 
-const TITLE_MAX = 36;
+const TITLE_MAX = 28;
 const shorten = (t: string) => (t.length > TITLE_MAX ? `${t.slice(0, TITLE_MAX - 1).trimEnd()}…` : t);
 
 /** The line, as segments. Empty when there is nothing remembered. */

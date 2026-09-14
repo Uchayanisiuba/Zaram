@@ -37,32 +37,41 @@ export default function ReturningLine({ onNavigate }: { onNavigate: (id: Workspa
 
   return (
     <p
-      className="t-mono flex items-center gap-2 flex-wrap justify-center"
+      className="t-mono flex items-center gap-1.5 flex-wrap justify-center"
       data-testid="returning-line"
       style={{ pointerEvents: 'auto', margin: 0 }}
     >
-      {segments.map((segment, i) => (
-        <span key={segment.key} className="flex items-center gap-2">
-          {i > 0 && <span aria-hidden style={{ color: 'var(--color-text-faint)' }}>·</span>}
-          <button
-            type="button"
-            onClick={() => go(segment)}
-            className="rounded-sm hover:underline underline-offset-4 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-cyan)]"
-            style={{ color: 'inherit', background: 'none', border: 0, padding: 0, font: 'inherit', cursor: 'pointer' }}
-            data-testid={`returning-${segment.key}`}
-          >
-            {segment.text}
-          </button>
-        </span>
+      {/* Each segment is a chip rather than a run of text with dots between:
+          chips wrap without a separator stranded at a line's start, and each
+          reads as the object it opens. */}
+      {segments.map((segment) => (
+        <button
+          key={segment.key}
+          type="button"
+          onClick={() => go(segment)}
+          className="rounded-md px-2 py-0.5 transition-colors hover:text-[var(--color-text)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-cyan)]"
+          style={{
+            color: 'inherit',
+            background: 'rgba(255, 255, 255, 0.035)',
+            border: '1px solid rgba(255, 255, 255, 0.06)',
+            font: 'inherit',
+            cursor: 'pointer',
+          }}
+          data-testid={`returning-${segment.key}`}
+        >
+          {segment.text}
+        </button>
       ))}
+      {/* Dismiss, in the capsule's corner: `.surface` is positioned, so this
+          sits on the capsule rather than in the row of chips. */}
       <button
         type="button"
         onClick={dismiss}
         aria-label="Dismiss"
-        className="ml-1 rounded-sm opacity-60 hover:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-cyan)]"
-        style={{ color: 'inherit', background: 'none', border: 0, padding: 2, cursor: 'pointer' }}
+        className="absolute rounded-sm opacity-50 hover:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-cyan)]"
+        style={{ top: 6, right: 8, color: 'inherit', background: 'none', border: 0, padding: 2, cursor: 'pointer' }}
       >
-        <X size={12} aria-hidden />
+        <X size={11} aria-hidden />
       </button>
     </p>
   );

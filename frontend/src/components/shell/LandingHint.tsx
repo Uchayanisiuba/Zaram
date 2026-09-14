@@ -51,6 +51,7 @@
  * the polling.
  */
 import { useEffect } from 'react';
+import { createPortal } from 'react-dom';
 
 import { useSystemStore } from '@/stores/systemStore';
 import { useChatModeStore } from '@/stores/chatModeStore';
@@ -137,6 +138,10 @@ export default function LandingHint({ isLanding, onNavigate }: LandingHintProps)
   // The slot under the orb, from the landing's own arithmetic: the line goes
   // beneath the status label when that is showing, and in its place when not.
   const captionSlot = useLayoutStore((s) => s.captionSlot);
+  // The capsule's second row, when the landing has drawn one. The line then
+  // renders inside it, sized by the capsule, and none of the placement below
+  // applies — the capsule is already where the orb's caption is.
+  const captionHost = useLayoutStore((s) => s.captionHost);
   const { shiftX } = orbGeometry({
     viewportWidth,
     chatFraction,
@@ -147,6 +152,33 @@ export default function LandingHint({ isLanding, onNavigate }: LandingHintProps)
 
   // Never on Work, Memory, Knowledge, Activity or Settings.
   if (!isLanding) return null;
+
+  const line = chatOpen ? (
+    <VoiceHint />
+  ) : hasReturning ? (
+    <ReturningLine onNavigate={(id) => onNavigate?.(id)} />
+  ) : hasOpenedChat ? null : (
+    <span
+      style={{
+        // An instruction to a person: the display face, readable at a
+        // glance, in the muted text tone rather than a hard-coded grey.
+        font: '400 15px/1.3 var(--font-display, var(--font-sans, system-ui, sans-serif))',
+        color: 'var(--color-text-muted)',
+        letterSpacing: '0.02em',
+        userSelect: 'none',
+        // Arcade attract loop, slowed to a breath. Suppressed under reduced
+        // motion, where the line sits at its bright end — the instruction
+        // still reads, it just stops moving.
+        opacity: reduced ? 0.78 : undefined,
+        animation: reduced ? undefined : 'attract-blink 4.2s ease-in-out infinite',
+      }}
+    >
+      {renderer === 'avatar' ? 'Click Avatar to Chat' : 'Click Orb to Chat'}
+    </span>
+  );
+
+  if (captionHost) return line ? createPortal(line, captionHost) : null;
+
   // A hint that would land below the window is not shown, rather than
   // shown on top of something else. On a short window the ring alone
   // fills the height and there is genuinely no room for a second row.
@@ -188,29 +220,7 @@ export default function LandingHint({ isLanding, onNavigate }: LandingHintProps)
           instructed, or a second line appearing somewhere else on screen.
           `VoiceHint` decides for itself whether it has anything to say, and
           renders nothing when Zaram cannot listen. */}
-      {chatOpen ? (
-        <VoiceHint />
-      ) : hasReturning ? (
-        <ReturningLine onNavigate={(id) => onNavigate?.(id)} />
-      ) : hasOpenedChat ? null : (
-        <span
-          style={{
-            // An instruction to a person: the display face, readable at a
-            // glance, in the muted text tone rather than a hard-coded grey.
-            font: '400 15px/1.3 var(--font-display, var(--font-sans, system-ui, sans-serif))',
-            color: 'var(--color-text-muted)',
-            letterSpacing: '0.02em',
-            userSelect: 'none',
-            // Arcade attract loop, slowed to a breath. Suppressed under reduced
-            // motion, where the line sits at its bright end — the instruction
-            // still reads, it just stops moving.
-            opacity: reduced ? 0.78 : undefined,
-            animation: reduced ? undefined : 'attract-blink 4.2s ease-in-out infinite',
-          }}
-        >
-          {renderer === 'avatar' ? 'Click Avatar to Chat' : 'Click Orb to Chat'}
-        </span>
-      )}
+      {line}
     </footer>
   );
 }

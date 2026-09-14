@@ -49,7 +49,9 @@ export default function OrbStatusLabel({
 
   return (
     <motion.div
-      className="flex flex-col items-center gap-1 select-none pointer-events-none"
+      // Compact is the capsule under the orb: one row, the state and its
+      // sentence side by side, wrapping only when the sentence is long.
+      className={`flex ${compact ? 'flex-row flex-wrap justify-center items-baseline gap-x-3 gap-y-0.5' : 'flex-col items-center gap-1'} select-none pointer-events-none`}
       // Announce changes: a status that updates silently is no use to a screen
       // reader, and this is the product's central claim.
       role="status"
@@ -91,7 +93,7 @@ export default function OrbStatusLabel({
         </span>
       ) : (
         <span
-          className={`${compact ? 'text-xs max-w-[15rem]' : 'text-xs max-w-[16rem]'} text-slate-500 text-center leading-snug`}
+          className={`${compact ? 'text-xs max-w-[26rem]' : 'text-xs max-w-[16rem]'} text-slate-500 text-center leading-snug`}
         >
           {detail}
         </span>
