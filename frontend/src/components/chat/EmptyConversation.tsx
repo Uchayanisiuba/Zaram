@@ -12,6 +12,7 @@ import { useEffect, useState } from 'react';
 import { fetchObligations, countObligations, type ObligationCounts } from '@/services/obligationsClient';
 import { fetchSources, type IngestSource } from '@/services/ingestClient';
 import type { Project } from '@/stores/projectStore';
+import { useSystemStore } from '@/stores/systemStore';
 import { groundedPrompts, type GroundedPrompt } from './groundedPrompts';
 
 const API = import.meta.env.VITE_ZARAM_API ?? '';
@@ -33,8 +34,14 @@ const settled = async <T,>(p: Promise<T>): Promise<T | null> => {
 
 export default function EmptyConversation({ onPick }: { onPick: (prompt: string) => void }) {
   // `undefined` until read: the fallback must not flash before the prompts.
-  const [prompts, setPrompts] = useState<GroundedPrompt[] | undefined>(undefined);
+  // `null` when nothing could be read at all — an engine that is down is not
+  // a Knowledge that is empty, and saying "nothing is indexed" off a failed
+  // fetch would be a measured zero invented from an absent measurement.
+  const [prompts, setPrompts] = useState<GroundedPrompt[] | null | undefined>(undefined);
 
+  // Read again when the engine comes back: a list read while it was down is
+  // `null`, and the prompts should appear the moment they can be measured.
+  const backendOnline = useSystemStore((s) => s.backendOnline);
   useEffect(() => {
     let live = true;
     void (async () => {
@@ -44,18 +51,22 @@ export default function EmptyConversation({ onPick }: { onPick: (prompt: string)
         settled(fetchProjects()),
       ]);
       if (!live) return;
+      if (listing === null && sources === null && projects === null) {
+        setPrompts(null);
+        return;
+      }
       const obligations: ObligationCounts | null = listing ? countObligations(listing) : null;
       setPrompts(groundedPrompts({ obligations, sources: sources as IngestSource[] | null, projects }));
     })();
     return () => {
       live = false;
     };
-  }, []);
+  }, [backendOnline]);
 
   return (
     <div className="flex flex-col gap-3" data-testid="empty-conversation">
       <p className="t-kicker">Ask Zaram something</p>
-      {prompts === undefined ? null : prompts.length === 0 ? (
+      {prompts == null ? null : prompts.length === 0 ? (
         <p className="t-body" style={{ color: 'var(--color-text-muted)' }}>
           Nothing is indexed yet, so there is nothing to suggest. Point Knowledge at a
           folder and the prompts here will be about what is in it.

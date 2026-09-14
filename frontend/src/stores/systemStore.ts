@@ -103,6 +103,10 @@ export interface ImageAvailability {
 
 interface SystemState {
   backendOnline: boolean;
+  /** True once /health has answered or refused at least once. Until then
+   *  `backendOnline: false` means "not asked yet", and a notice that the
+   *  engine is down would be a claim made before the measurement. */
+  polled: boolean;
   /** Null until the first successful poll — distinct from "known offline". */
   routing: RoutingState | null;
   speech: SpeechAvailability;
@@ -159,6 +163,7 @@ interface SystemState {
 
 export const useSystemStore = create<SystemState>((set, get) => ({
   backendOnline: false,
+  polled: false,
   routing: null,
   speech: null,
   images: null,
@@ -196,7 +201,7 @@ export const useSystemStore = create<SystemState>((set, get) => ({
     try {
       const res = await fetch(`${API_BASE}/health`);
       if (!res.ok) {
-        set({ backendOnline: false });
+        set({ backendOnline: false, polled: true });
         return;
       }
       const data = await res.json();
@@ -214,6 +219,7 @@ export const useSystemStore = create<SystemState>((set, get) => ({
       const img = data?.images;
       set({
         backendOnline: data?.kernel === 'online',
+        polled: true,
         speech: connector?.available ? 'available' : 'not-installed',
         images: img
           ? {
@@ -243,7 +249,7 @@ export const useSystemStore = create<SystemState>((set, get) => ({
     } catch {
       // Unreachable is a real state and must be shown, not hidden behind the
       // last known good value.
-      set({ backendOnline: false });
+      set({ backendOnline: false, polled: true });
     }
   },
 

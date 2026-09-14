@@ -48,6 +48,7 @@ import { AnsweredBy } from './AnsweredBy';
 import SpeakButton from './SpeakButton';
 import ReasoningPanel from './ReasoningPanel';
 import EmptyConversation from './EmptyConversation';
+import EngineDown from './EngineDown';
 import MessageBody from './MessageBody';
 import StreamingReply from './StreamingReply';
 import CitationPanel from './CitationPanel';
@@ -255,6 +256,11 @@ export default function ChatSurface({ navigate }: Props) {
 
   const setOrbActivity = useOrbStore((s) => s.setActivity);
   const setActivity = useSystemStore((s) => s.setActivity);
+  // One sentence for a stopped engine, in place of the fragments each control
+  // would otherwise write about itself — see `EngineDown`.
+  const backendOnline = useSystemStore((s) => s.backendOnline);
+  const polled = useSystemStore((s) => s.polled);
+  const engineDown = polled && !backendOnline;
 
   // On a working surface the conversation is an assistant beside your work and
   // takes less width than on the landing, where it is the main event. Each
@@ -825,6 +831,7 @@ export default function ChatSurface({ navigate }: Props) {
         onPointerDown={releaseFollow}
       >
         <div className="flex flex-col gap-4 p-6 reading-column">
+          {engineDown && <EngineDown />}
           {isEmpty ? (
             <EmptyConversation
               onPick={(prompt) => {
@@ -1442,7 +1449,7 @@ export default function ChatSurface({ navigate }: Props) {
         {/* Voice input's state, in words. A disabled button with a tooltip is
             invisible to a keyboard or touch user, and "why is this greyed out"
             is exactly the question a silent control leaves unanswered. */}
-        {(micError || micUnavailable || speechError) && (
+        {(micError || (micUnavailable && !engineDown) || speechError) && (
           <p
             className="mt-2 px-1 text-xs leading-relaxed"
             style={{
@@ -1472,6 +1479,7 @@ export default function ChatSurface({ navigate }: Props) {
             and a question sits inside both at once. The domain picker removes
             itself when no domains exist, so this is one control until the user
             has made a reason for the second. */}
+        {!engineDown && (
         <div className="mt-2 px-1 flex items-center gap-3 flex-wrap">
           <ProjectScopePicker />
           <DomainScopePicker />
@@ -1481,6 +1489,7 @@ export default function ChatSurface({ navigate }: Props) {
               and a context switch for a decision that costs one. */}
           <RoutingControl />
         </div>
+        )}
         </div>
       </motion.div>
         </>
