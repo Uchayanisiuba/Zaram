@@ -1731,7 +1731,10 @@ class ExecutionEngine:
         """
         from core.context_budget import budget_for as measure
 
-        return measure(self._effective_model(model))
+        # The provider manager is what knows a cloud model's window; without
+        # it a cloud model is sized at Ollama's default, which is the bug
+        # `cloud_context_length` records.
+        return measure(self._effective_model(model), catalog=getattr(self, "_provider_manager", None))
 
     def _park(
         self,

@@ -1730,7 +1730,9 @@ async def chat(request: ChatRequest):
     # Unknown still falls back to the constant rather than to a guess. A model
     # that is not resident has no loaded context, and inventing one for it is
     # the false-zero bug in different clothes.
-    _budget = budget_for(model)
+    _budget = budget_for(
+        model, catalog=getattr(getattr(kernel, "providers_runtime", None), "manager", None)
+    )
     composition = compose_attachments(
         attached,
         request.text,

@@ -391,7 +391,35 @@ class OpenAICompatibleAdapter:
             data_policy=self._data_policy,
             specialisation=specialisation_from_name(name),
             metadata={"owned_by": owned_by, "raw_id": model_id},
+            context_length=_declared_window(entry),
         )
+
+
+def _declared_window(entry: Dict[str, Any]) -> Optional[int]:
+    """The window the listing itself declares, or ``None``.
+
+    The spec carries no such field, so this reads the spellings providers
+    actually use — OpenRouter's `context_length` (also under `top_provider`),
+    Groq's `context_window`, vLLM's `max_model_len`. A cloud model with none
+    of them is sized by `providers.windows`; a local one by what it loaded
+    with, which this figure must never stand in for.
+    """
+    top = entry.get("top_provider")
+    candidates = [
+        entry.get("context_length"),
+        entry.get("context_window"),
+        entry.get("max_model_len"),
+        entry.get("max_context_length"),
+        top.get("context_length") if isinstance(top, dict) else None,
+    ]
+    for value in candidates:
+        if isinstance(value, bool):
+            continue
+        if isinstance(value, int) and value > 0:
+            return value
+        if isinstance(value, str) and value.isdigit() and int(value) > 0:
+            return int(value)
+    return None
 
 
 class LMStudioAdapter(OpenAICompatibleAdapter):

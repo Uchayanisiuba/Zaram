@@ -36,7 +36,7 @@ from __future__ import annotations
 import logging
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import Any, Optional
 
 import requests
 
@@ -457,15 +457,96 @@ class ContextBudget:
         return sum(estimate_tokens(t) for t in texts) <= self.input_tokens
 
 
+def cloud_context_length(model: Optional[str], catalog: Any) -> Optional[int]:
+    """The window of a *cloud* model, or ``None`` for a local one or an
+    unknown one.
+
+    Asked of the provider catalogue, which is the only thing that knows where
+    a model runs. Two readings: what the provider's listing declared
+    (`ModelInfo.context_length`, recorded by the discoverer), then the dated
+    floor in `providers.windows`. A local model answers ``None`` here so the
+    loopback readings in `budget_for` keep sizing it — Ollama's declared
+    maximum is the wrong number, and this must not become a route to it.
+    """
+    if not model or catalog is None:
+        return None
+    info = _catalogued(model, catalog)
+    if info is None or not _is_cloud(info):
+        return None
+    declared = getattr(info, "context_length", None)
+    if isinstance(declared, int) and declared > 0:
+        return declared
+    from providers.windows import known_window
+
+    return known_window(getattr(info, "id", None) or model)
+
+
+def is_cloud_model(model: Optional[str], catalog: Any) -> bool:
+    """Whether the catalogue places ``model`` off this machine. ``False`` when
+    it cannot say — the loopback readings then run, and find nothing."""
+    if not model or catalog is None:
+        return False
+    info = _catalogued(model, catalog)
+    return info is not None and _is_cloud(info)
+
+
+def _catalogued(model: str, catalog: Any):
+    get = getattr(catalog, "get_model", None)
+    info = get(model) if callable(get) else None
+    if info is None:
+        resolve = getattr(catalog, "_resolve_model", None)
+        info = resolve(model) if callable(resolve) else None
+    return info
+
+
+def _is_cloud(info: Any) -> bool:
+    locality = getattr(info, "locality", None)
+    value = getattr(locality, "value", locality)
+    return str(value).lower() in {"cloud", "hybrid"}
+
+
 def budget_for(
-    model: Optional[str], *, base_url: str = "http://127.0.0.1:11434"
+    model: Optional[str],
+    *,
+    base_url: str = "http://127.0.0.1:11434",
+    catalog: Any = None,
 ) -> ContextBudget:
     """The budget for a request answered by ``model``.
 
     Measured where it can be, assumed where it cannot, and the result says
     which. This is the one function callers should reach for; the parts above
     are exposed for tests and for callers that genuinely want the raw figure.
+
+    ``catalog`` is the provider manager, when the caller has one. It is what
+    tells a cloud model apart from a local one, and for a cloud model it is
+    the *only* reading — see `cloud_context_length`. Without it every model
+    is sized as though it ran here, which for a cloud model means the
+    fallback: the failure this argument was added to end.
     """
+    # **A cloud model is sized by what its provider says, never by Ollama's
+    # default.** Measured 14 September 2026 on `nvidia_nim:z-ai/glm-5.3-flash`:
+    # the three loopback readings below cannot see a model that runs
+    # elsewhere, so it fell through to 4,096 and a 128K model was shown one
+    # exchange of the conversation. The loopback probes are skipped for it
+    # too — they would only find nothing, on a request that is about to wait
+    # on the network anyway.
+    if is_cloud_model(model, catalog):
+        from providers.windows import CLOUD_FALLBACK_CONTEXT_TOKENS
+
+        known = cloud_context_length(model, catalog)
+        if known is not None:
+            return ContextBudget(
+                total_tokens=known,
+                measured=True,
+                reply_reserve_tokens=int(known * REPLY_RESERVE_FRACTION),
+                source="declared",
+            )
+        return ContextBudget(
+            total_tokens=CLOUD_FALLBACK_CONTEXT_TOKENS,
+            measured=False,
+            reply_reserve_tokens=int(CLOUD_FALLBACK_CONTEXT_TOKENS * REPLY_RESERVE_FRACTION),
+            source="assumed-cloud",
+        )
     # **Four readings, most specific first, and the second one is why this
     # function stopped lying between turns.**
     #
