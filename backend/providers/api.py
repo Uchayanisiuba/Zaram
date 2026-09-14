@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import json
 import logging
+from urllib.parse import urlparse
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Header, HTTPException
@@ -393,7 +394,7 @@ async def cloud_connect(
     """
     _require_browser_origin(x_zaram_client)
     try:
-        return await cloud_config.connect(
+        status = await cloud_config.connect(
             provider_id=request.provider_id,
             base_url=request.base_url,
             api_key=request.api_key,
@@ -404,6 +405,46 @@ async def cloud_connect(
         # "Zaram cannot speak to this provider at all", which are different
         # problems with different fixes.
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    _consent_to_the_host_just_connected(status, request.provider_id, request.base_url)
+    return status
+
+
+def _consent_to_the_host_just_connected(
+    status: dict, provider_id: Optional[str], base_url: Optional[str]
+) -> None:
+    """Rule 7j, as written: *"connecting a cloud provider — choosing it,
+    pasting a key for it, pressing Connect — is rule 5's explicit per-item
+    decision about that provider's host."*
+
+    Until 14 September 2026 nothing did this. A key pasted on first run
+    stored fine, and the first question was refused by the per-host policy —
+    correctly, by default-deny — with the remedy an amber line in Settings
+    that the first-run screen never shows. The maintainer's report was the
+    one the rule predicts: *"I copy the key and it doesn't work."*
+
+    Only for the connection just made, only the ``prompt`` class (an image
+    is its own consent, asked once on its own), and only where the person
+    has said nothing about the host yet — a host they deliberately denied
+    stays denied, because a key is not a louder opinion than a rule. A
+    loopback server needs no rule and gets none.
+    """
+    from core.egress import DataClass, Mode, get_gate
+
+    wanted = provider_id or (urlparse((base_url or "").strip()).hostname or "custom")
+    connection = next(
+        (c for c in status.get("connections", []) if c.get("provider_id") == wanted), None
+    )
+    host = (urlparse(str(connection.get("base_url", ""))).hostname or "").lower() if connection else ""
+    if not host or host in {"127.0.0.1", "localhost", "::1"}:
+        return
+    try:
+        policy = get_gate().policy
+        if policy.has_rule(host, DataClass.PROMPT):
+            return
+        policy.set(host, Mode.ALLOW, DataClass.PROMPT)
+        logger.info("connected %s: %s may now receive prompts (rule 7j)", wanted, host)
+    except Exception as exc:  # noqa: BLE001 - the key is stored; the rule is the courtesy
+        logger.warning("could not record consent for %s: %s", host, exc)
 
 
 @router.delete("/cloud")

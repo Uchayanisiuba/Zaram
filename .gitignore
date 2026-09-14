@@ -272,3 +272,9 @@ backend/tests/_flux_sample.png
 # The rule stays: it is one download from existing again, and the cost of the
 # line is nothing against the cost of committing it by accident.
 /avatar-source/animations/Typing.fbx
+
+# The plan store — queued tasks, their checklists and decisions. User data,
+# beside the other databases; it was committed once by accident.
+backend/plans.db
+backend/plans.db-wal
+backend/plans.db-shm
