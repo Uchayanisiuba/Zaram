@@ -112,22 +112,26 @@ function loadDesktopRuntime() {
       path.join(resourcesPath, 'app.asar.unpacked', 'desktop', 'dist', 'src', 'runtime', 'bootstrap'),
       path.join(process.resourcesPath, 'desktop', 'dist', 'src', 'runtime', 'bootstrap'),
     ];
+    // Every failure is kept, because "not found" was hiding a module that
+    // *was* found and threw on load — a warning that names no cause is a
+    // warning nobody can act on, and this one had been in the log of every
+    // packaged launch.
+    const failures = [];
     for (const p of desktopPaths) {
       try {
         const mod = require(p);
         if (mod && mod.bootstrapPresence) {
           const backendUrl = config.backend.baseUrl
-          console.log('[Electron] Loading desktop runtime from:', p)
-          console.log('[Electron] Passing backendUrl:', backendUrl)
           desktopRuntime = mod.bootstrapPresence({ backendUrl })
           logger.info('Desktop runtime loaded', { path: p, backendUrl });
           return true;
         }
+        failures.push({ path: p, error: 'module has no bootstrapPresence' });
       } catch (e) {
-        // try next path
+        failures.push({ path: p, error: String(e && e.message ? e.message : e).slice(0, 200) });
       }
     }
-    logger.warn('Desktop runtime not found at expected paths');
+    logger.warn('Desktop runtime not found at expected paths', { failures });
     return false;
   } catch (error) {
     logger.warn('Failed to load desktop runtime', { error: error.message });
@@ -177,10 +181,24 @@ function cleanup() {
 
 async function bootstrap() {
   // Build config + logger now that `app` is ready.
+  //
+  // **`appPath` is the application, `resourcesPath` is the folder beside it,
+  // and they were the same variable until 14 September 2026.** A packaged
+  // build passed `process.resourcesPath` as both, so the config looked for
+  // `frontend/dist` and `backend/` directly under `resources/` — where the
+  // installer never puts them: the interface lives inside `app.asar` and the
+  // backend in `app.asar.unpacked`, both under `app.getAppPath()`. Seen on
+  // the first cold install of the built product: a black window reading
+  // "Frontend not built", and a backend that only started because the
+  // launcher's last-resort root, `process.cwd()`, happened to be the
+  // checkout. On a tester's machine it would have started nothing.
+  //
+  // `test/packagedBackend.test.js` had been handing the launcher the right
+  // `appPath` all along, and passing; this is the wiring it did not see.
   const resourcesPath = app.isPackaged ? process.resourcesPath : app.getAppPath();
   config = createConfig({
     isDev,
-    appPath: resourcesPath,
+    appPath: app.getAppPath(),
     userDataPath: app.getPath('userData'),
     resourcesPath,
     backendPort: Number(process.env.ZARAM_BACKEND_PORT) || 8420,

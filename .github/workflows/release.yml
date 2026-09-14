@@ -1,0 +1,174 @@
+# Release — build the installer, publish it, switch the site on, tell the testers.
+#
+# Runs when a version tag is pushed:
+#
+#     git tag v0.1.0-alpha.1 && git push origin v0.1.0-alpha.1
+#
+# Everything below runs under the maintainer's account, from the maintainer's
+# push: the workflow is the maintainer's hands, not a second author. The
+# release, the site commit and the email all carry the name on the tag.
+#
+# What it does, in order, and what stops it:
+#   1. Builds the frontend, the desktop layer and the bundled Python runtime,
+#      then the installer, through the same `npm run build` a person would run —
+#      including `check:release`, so a runtime missing a dependency or a route
+#      missing from the packaged proxy list fails the build here rather than on
+#      a tester's machine.
+#   2. Computes the SHA-256 of the installer and publishes the installer, the
+#      portable build and the checksum as a GitHub Release (a pre-release for
+#      any tag with a suffix such as `-alpha`).
+#   3. Writes the version, size and checksum into `site/site.js`, sets
+#      `releaseLive: true`, commits that to `main`, and publishes `site/` to
+#      `gh-pages` — after the upload, so the page never links a file that is
+#      not there.
+#   4. Emails the tester list through Buttondown, if `BUTTONDOWN_API_KEY` is
+#      set as a repository secret. Without it, step 4 is skipped and says so;
+#      nothing else waits on it.
+#
+# Signing: the alpha ships unsigned, on purpose, and `check:signing` only
+# demands a certificate under ZARAM_RELEASE=1, which this workflow does not
+# set. When there is a certificate, add ZARAM_SIGN_SUBJECT and the cert
+# secrets and set ZARAM_RELEASE=1 on the build step.
+
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-and-publish:
+    runs-on: windows-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            frontend/package-lock.json
+            desktop/package-lock.json
+
+      - name: Install (root, frontend, desktop)
+        shell: bash
+        run: |
+          npm ci
+          (cd frontend && npm ci)
+          (cd desktop && npm ci)
+
+      - name: Bundled Python runtime
+        shell: bash
+        run: npm run build:runtime
+
+      - name: Build the installer
+        shell: bash
+        run: npm run build
+
+      - name: Name the artefacts and checksum
+        id: art
+        shell: bash
+        run: |
+          set -euo pipefail
+          installer=$(ls dist-electron/Zaram-*-x64.exe | grep -v Portable | head -n 1)
+          portable=$(ls dist-electron/Zaram-Portable-*-x64.exe | head -n 1 || true)
+          sha=$(sha256sum "$installer" | cut -d' ' -f1)
+          printf '%s  %s\n' "$sha" "$(basename "$installer")" > dist-electron/SHA256SUMS.txt
+          if [ -n "$portable" ]; then
+            printf '%s  %s\n' "$(sha256sum "$portable" | cut -d' ' -f1)" "$(basename "$portable")" >> dist-electron/SHA256SUMS.txt
+          fi
+          size=$(( $(stat -c %s "$installer") / 1048576 ))
+          echo "installer=$installer" >> "$GITHUB_OUTPUT"
+          echo "portable=$portable" >> "$GITHUB_OUTPUT"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "size=$size" >> "$GITHUB_OUTPUT"
+          echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          case "${GITHUB_REF_NAME}" in *-*) echo "prerelease=true" >> "$GITHUB_OUTPUT" ;; *) echo "prerelease=false" >> "$GITHUB_OUTPUT" ;; esac
+          cat dist-electron/SHA256SUMS.txt
+
+      - name: Publish the release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.art.outputs.tag }}
+          name: Zaram ${{ steps.art.outputs.tag }}
+          prerelease: ${{ steps.art.outputs.prerelease }}
+          generate_release_notes: true
+          body: |
+            **Windows, x64. Unsigned alpha** — Windows will warn before it runs; that is expected for a build with no certificate. Check the SHA-256 below against `SHA256SUMS.txt` if you want to be sure of what you downloaded.
+
+            `${{ steps.art.outputs.sha }}`  ·  ${{ steps.art.outputs.size }} MiB
+
+            Local is free: a model on this machine costs nothing per question, and nothing you say to it leaves this device or is trained on. Cloud keys are optional. Problems: Settings → Help → Report a problem copies what a maintainer needs; paste it into an issue here or a reply to the tester email.
+          files: |
+            ${{ steps.art.outputs.installer }}
+            ${{ steps.art.outputs.portable }}
+            dist-electron/SHA256SUMS.txt
+
+      - name: Switch the site on and publish it
+        shell: bash
+        env:
+          INSTALLER: ${{ steps.art.outputs.installer }}
+        run: |
+          set -euo pipefail
+          git config user.name "${{ github.actor }}"
+          git config user.email "${{ github.actor }}@users.noreply.github.com"
+          node scripts/site-release.mjs "$INSTALLER"
+          git add site/site.js
+          if git diff --cached --quiet; then
+            echo "site/site.js already current"
+          else
+            git commit -m "site: download on for ${GITHUB_REF_NAME}"
+            git push origin HEAD:main
+          fi
+          # The site is the `site/` folder, published as its own history.
+          git branch -D site-only 2>/dev/null || true
+          git subtree split --prefix site -b site-only
+          git push --force origin site-only:gh-pages
+
+
+      - name: Tell the testers (Buttondown)
+        if: ${{ secrets.BUTTONDOWN_API_KEY != '' }}
+        shell: bash
+        env:
+          BUTTONDOWN_API_KEY: ${{ secrets.BUTTONDOWN_API_KEY }}
+          TAG: ${{ steps.art.outputs.tag }}
+          SHA: ${{ steps.art.outputs.sha }}
+          SIZE: ${{ steps.art.outputs.size }}
+        run: |
+          set -euo pipefail
+          url="https://github.com/${GITHUB_REPOSITORY}/releases/tag/${TAG}"
+          {
+            echo "Zaram ${TAG} is up: ${url}"
+            echo
+            echo "Windows, x64, ${SIZE} MiB. It is unsigned, so Windows will warn before it runs; the SHA-256 is ${SHA} if you want to check the file."
+            echo
+            echo "Local is free: a model on your own machine costs nothing per question, and nothing you say to it leaves your device or is trained on. Cloud keys are optional."
+            echo
+            echo "If something goes wrong: Settings, then Help, then Report a problem copies what I need. Paste it into a reply to this email, with what you expected and what happened instead."
+            echo
+            echo "Uche"
+          } > body.txt
+          node -e 'const fs=require("fs"); console.log(JSON.stringify({subject: process.argv[1], body: fs.readFileSync("body.txt","utf8"), status: "about_to_send"}))' "Zaram ${TAG} is ready to download" > payload.json
+          curl --fail --silent --show-error -X POST "https://api.buttondown.com/v1/emails" -H "Authorization: Token ${BUTTONDOWN_API_KEY}" -H "Content-Type: application/json" --data @payload.json > /dev/null
+          rm -f body.txt payload.json
+          echo "tester email queued through Buttondown"
+
+      - name: Tester email skipped
+        if: ${{ secrets.BUTTONDOWN_API_KEY == '' }}
+        shell: bash
+        run: echo "BUTTONDOWN_API_KEY is not set as a repository secret; the release is published and the site is on, but no email went out."

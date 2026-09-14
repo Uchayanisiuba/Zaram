@@ -155,3 +155,21 @@ test('the ambient surface starts during bootstrap', { skip: CANNOT_RUN }, async 
       'over whatever the user is working in.',
   );
 });
+
+// ---------------------------------------------------------------------------
+// The wiring `packagedBackend.test.js` cannot see: what main.js actually hands
+// createConfig. That test gives the launcher `resources/app.asar` as appPath and
+// passes; main.js was giving it `resources`, and the built product opened on a
+// black window. Asserted at source because main.js only runs inside Electron.
+const { test: wiringTest } = require('node:test');
+const wiringAssert = require('node:assert/strict');
+const wiringFs = require('node:fs');
+const wiringPath = require('node:path');
+
+wiringTest('main.js hands createConfig the application path, not the resources folder', () => {
+  const src = wiringFs.readFileSync(wiringPath.join(__dirname, '..', 'electron', 'main.js'), 'utf-8');
+  const block = src.slice(src.indexOf('config = createConfig({'), src.indexOf('});', src.indexOf('config = createConfig({')));
+  wiringAssert.match(block, /appPath:\s*app\.getAppPath\(\)/, 'appPath must be app.getAppPath() — inside app.asar when packaged');
+  wiringAssert.match(block, /resourcesPath,?\s*$/m, 'resourcesPath is still passed, for the bundled runtime beside the asar');
+  wiringAssert.doesNotMatch(block, /appPath:\s*resourcesPath/, 'the 14 September regression: resources/ has no frontend/dist and no backend/');
+});
