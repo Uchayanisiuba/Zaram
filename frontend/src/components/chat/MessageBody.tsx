@@ -70,7 +70,7 @@ function Fence({ children }: { children?: ReactNode }) {
 
 function MessageBodyImpl({ text, streaming = false }: { text: string; streaming?: boolean }) {
   return (
-    <div className="zaram-md text-sm leading-relaxed">
+    <div className="zaram-md t-body">
       <ReactMarkdown
         remarkPlugins={REMARK}
         /**

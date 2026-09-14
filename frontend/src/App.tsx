@@ -192,7 +192,7 @@ export default function App() {
           Mounted unconditionally even though it renders nothing on most
           surfaces: it owns the /health poll, which Settings and the orb both
           read. Hooks run regardless of what the render returns. */}
-      <LandingHint isLanding={isLanding} />
+      <LandingHint isLanding={isLanding} onNavigate={navigate} />
 
       {/* Command palette overlay */}
       {commandOpen && <CommandPalette onClose={() => setCommandOpen(false)} onNavigate={(id) => navigate(id as WorkspaceId)} />}

@@ -36,7 +36,7 @@
 
   --text-caption: 0.75rem;   /* 12px — caption mono, uppercase. Was 11px; nothing meant to be read sits under 12. */
   --text-label:   0.75rem;   /* 12px */
-  --text-body:    0.875rem;  /* 14px */
+  --text-body:    0.9375rem; /* 15px — the reading size; a reply is read, a label is glanced at */
   --text-h4:      1rem;      /* 16px */
   --text-h3:      1.125rem;  /* 18px */
   --text-h2:      1.25rem;   /* 20px */
@@ -395,6 +395,20 @@ body {
   font-family: var(--font-mono);
   font-size: var(--text-label);
   color: var(--color-text-muted-light);
+}
+
+/* ─── The reading column ──────────────────────────────────────────
+   A reply is read like a page, so it gets a measure like one. The
+   conversation panel is a fraction of the window and on a wide monitor
+   that is 110 characters a line; the column inside it is capped at
+   roughly 80, centred, and the composer sits on the same column so the
+   question and the answer share a left edge. The divider still sets the
+   panel; this sets what is read. */
+:root { --reading-measure: 40rem; }
+.reading-column {
+  width: 100%;
+  max-width: var(--reading-measure);
+  margin-inline: auto;
 }
 
 /* ─── Surfaces, lit by the orb ────────────────────────────────────

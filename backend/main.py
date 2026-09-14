@@ -2055,8 +2055,16 @@ async def memory_traffic():
 
 
 @app.get("/memory/stats")
-async def memory_stats():
-    """Counts for the Memory surface. Every number is measured, none estimated."""
+async def memory_stats(since: float | None = None):
+    """Counts for the Memory surface. Every number is measured, none estimated.
+
+    ``since`` — an epoch second — adds ``new_since``: how many facts entered
+    after that moment. It is what the landing's returning line is built on
+    (UI-SPEC 6h, *"14 new facts from 3 sources"*), and it is counted here from
+    the records already loaded rather than by the interface pulling the whole
+    Spine to count them itself. Absent, the field is absent: a count nobody
+    asked for would read as a claim about a moment nobody named.
+    """
     if not kernel.memory_runtime:
         raise HTTPException(status_code=503, detail="Memory runtime not available")
 
@@ -2066,7 +2074,7 @@ async def memory_stats():
     sessions = {r.session_id for r in records if r.session_id}
     newest = max((r.created_at for r in records), default=None)
 
-    return {
+    out: Dict[str, Any] = {
         "total_records": stats.total_records,
         "by_type": dict(stats.by_type or {}),
         "sessions": len(sessions),
@@ -2077,6 +2085,9 @@ async def memory_stats():
         # never read as a measured zero on a privacy claim.
         "bytes_left_device_today": _egress_bytes_today(),
     }
+    if since is not None:
+        out["new_since"] = sum(1 for r in records if r.created_at > since)
+    return out
 
 
 def _egress_bytes_today() -> int | None:

@@ -89,6 +89,10 @@ export interface MemoryStats {
   /** Null until the egress log exists. Null is not zero: an absent measurement
    *  must never be displayed as a measured zero. */
   bytes_left_device_today: number | null;
+  /** Facts that entered after the `since` moment asked for. Present only
+   *  when one was asked for — the landing's returning line names a moment;
+   *  the Memory surface does not. */
+  new_since?: number;
 }
 
 export async function fetchMemoryList(
@@ -110,10 +114,16 @@ export async function fetchMemoryList(
   return (await res.json()) as MemoryListing;
 }
 
-export async function fetchMemoryStats(signal?: AbortSignal): Promise<MemoryStats> {
+export async function fetchMemoryStats(
+  signal?: AbortSignal,
+  opts: { since?: number } = {},
+): Promise<MemoryStats> {
+  const params = new URLSearchParams();
+  if (opts.since != null) params.set('since', String(opts.since));
+  const query = params.toString();
   let res: Response;
   try {
-    res = await fetch(`${API_BASE}/memory/stats`, { signal });
+    res = await fetch(`${API_BASE}/memory/stats${query ? `?${query}` : ''}`, { signal });
   } catch {
     throw new Error('Could not reach the Zaram backend.');
   }

@@ -10,6 +10,8 @@ import { useEmbodimentStore } from '@/stores/embodimentStore'
 import { useChatModeStore } from '@/stores/chatModeStore'
 import { useLayoutStore, orbGeometry } from '@/stores/layoutStore'
 import { useSourceStore } from '@/stores/sourceStore'
+import { useChatStore } from '@/stores/chatStore'
+import { workingLine } from '@/lib/workingLine'
 import { useIsReducedMotion } from '@/hooks/useReducedMotion'
 import { useViewport } from '@/hooks/useViewport'
 
@@ -177,11 +179,18 @@ export default function Landing({ onNavigate, onOrbTap }: LandingProps) {
    *  the window edge, which measured exactly that way at 1040px before this
    *  existed: `captionBottom` 1040 in a 1040px window. */
   const CAPTION_FOOT = 18
+  /** The row under the caption block: the first-launch instruction, the
+   *  returning line, or the voice hint -- one of them, in `LandingHint`.
+   *  Reserved here since 14 September 2026, when the status label began to
+   *  show at rest: with the label always in the block, a reserve sized for
+   *  the block alone left the row no room on any window, and `LandingHint`'s
+   *  own rule -- never shown over something else -- hid it every time. */
+  const HINT_ROW = 40
   /** Derived, not chosen. The room below the ring is exactly the gap, the block
-   *  that sits in it, and the margin under that -- three numbers that used to
-   *  disagree, so the reserve protected a caption of one size while the
-   *  placement drew one of another. */
-  const BOTTOM_RESERVE = RING_GAP + CAPTION_BLOCK + CAPTION_FOOT
+   *  that sits in it, the row under that, and the margin under both -- numbers
+   *  that used to disagree, so the reserve protected a caption of one size
+   *  while the placement drew one of another. */
+  const BOTTOM_RESERVE = RING_GAP + CAPTION_BLOCK + HINT_ROW + CAPTION_FOOT
   const DESIGN_DIAMETER = ORBIT_RADIUS * 2 + 110
 
   /**
@@ -331,18 +340,30 @@ export default function Landing({ onNavigate, onOrbTap }: LandingProps) {
   const ringBottomFromCentre = (ring2Size / 2) * fitScale
   const captionTop = Math.min(
     viewportHeight / 2 + orbitOffsetY + ringBottomFromCentre + RING_GAP,
-    // Never off the bottom. Two lines of note plus its own breathing room.
-    viewportHeight - CAPTION_BLOCK - CAPTION_FOOT,
+    // Never off the bottom: the block, the row under it, and breathing room.
+    viewportHeight - CAPTION_BLOCK - HINT_ROW - CAPTION_FOOT,
   )
 
   // Published for the line that sits under the caption — `LandingHint` — so
-  // both are placed by this one formula. The slot's bottom is the label's
-  // block when the label is showing, and the top itself when it is not.
+  // both are placed by this one formula. The label now shows at rest as well,
+  // so the slot's bottom is always its block.
   const setCaptionSlot = useLayoutStore((s) => s.setCaptionSlot)
   useEffect(() => {
-    setCaptionSlot({ top: captionTop, bottom: captionTop + (chat ? CAPTION_BLOCK : 0) })
+    setCaptionSlot({ top: captionTop, bottom: captionTop + CAPTION_BLOCK })
     return () => setCaptionSlot(null)
-  }, [captionTop, chat, setCaptionSlot, CAPTION_BLOCK])
+  }, [captionTop, setCaptionSlot, CAPTION_BLOCK])
+
+  // What the orb is on while a reply is in flight, for the label's detail
+  // line. Selected as one string so the landing re-renders on a change of
+  // wording, not on every token.
+  const working = useChatStore((s) =>
+    workingLine({
+      isStreaming: s.isStreaming,
+      streamingSources: s.streamingSources,
+      streamingToolCalls: s.streamingToolCalls,
+      streamingImageProgress: s.streamingImageProgress,
+    }),
+  )
 
   const orbShift = { scale: zoom, x: shiftX, y: 0 }
   // orbGeometry divides by the container scale for use *inside* the scaled
@@ -675,16 +696,24 @@ export default function Landing({ onNavigate, onOrbTap }: LandingProps) {
         })}
       </div>
 
-      {/* Status, in words. Only while the conversation is open: at rest the
-          landing is meant to be quiet, and there is nothing to report until you
-          are about to ask something.
+      {/* Status, in words — at rest as well as with the conversation open.
+
+          This was gated on `chat`, on the grounds that the landing is meant to
+          be quiet at rest. CLAUDE.md had recorded the cost of that as a known
+          gap: *"that label renders only while the conversation is open, so at
+          rest nothing reports locality"*. Locality is the product's central
+          claim, and the front door was the one place it went unsaid. Quiet is
+          two short lines under the ring, not silence.
+
+          While a reply is in flight the detail line is what the orb is on —
+          `workingLine` — so the orb's half of the window is specific during
+          the seconds it matters.
 
           Rendered outside the scale(1.4) orbital wrapper on purpose — inside it
           every offset is multiplied, which is what put the text within the ring
           radius. Anchored low instead, well clear of both rings. */}
-      {chat && (
-        <motion.div
-          className="absolute left-1/2 z-20"
+      <motion.div
+        className="absolute left-1/2 z-20"
           /**
            * `captionTop`, not a percentage -- corrected 10 September 2026.
            *
@@ -712,9 +741,8 @@ export default function Landing({ onNavigate, onOrbTap }: LandingProps) {
           exit={{ opacity: 0 }}
           transition={isResizing ? { duration: 0 } : { duration: reduced ? 0.15 : 0.35, delay: reduced ? 0 : 0.1 }}
         >
-          <OrbStatusLabel dimmed={panelsOpen} compact />
-        </motion.div>
-      )}
+          <OrbStatusLabel dimmed={panelsOpen} compact working={working} />
+      </motion.div>
 
 
     </div>

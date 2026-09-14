@@ -823,7 +823,7 @@ export default function ChatSurface({ navigate }: Props) {
         onTouchStart={releaseFollow}
         onPointerDown={releaseFollow}
       >
-        <div className="flex flex-col gap-4 p-6">
+        <div className="flex flex-col gap-4 p-6 reading-column">
           {isEmpty ? (
             <p
               className="text-xs uppercase text-slate-500"
@@ -921,8 +921,8 @@ export default function ChatSurface({ navigate }: Props) {
                   <div
                     className={
                       msg.role === 'user'
-                        ? 'text-sm leading-relaxed whitespace-pre-wrap surface'
-                        : 'text-sm leading-relaxed'
+                        ? 't-body whitespace-pre-wrap surface'
+                        : 't-body'
                     }
                     style={{
                       color:
@@ -1272,6 +1272,7 @@ export default function ChatSurface({ navigate }: Props) {
         {/* What the last exchange cost, above the box you type the next one
             in -- the same reason the attachment chips are here. A cost shown
             below the composer is read after the decision it should inform. */}
+        <div className="reading-column">
         <TokenUsageBar />
         {/* What is in scope for the next message, above the box you type it
             in. Below the composer would put the evidence after the question. */}
@@ -1478,6 +1479,7 @@ export default function ChatSurface({ navigate }: Props) {
               rather than in Settings because the alternative was six actions
               and a context switch for a decision that costs one. */}
           <RoutingControl />
+        </div>
         </div>
       </motion.div>
         </>

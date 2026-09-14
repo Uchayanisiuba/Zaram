@@ -25,9 +25,15 @@ export default function OrbStatusLabel({
   dimmed = false,
   /** Smaller, for use beneath the orb where it must not compete with it. */
   compact = false,
+  /** What the orb is on right now — `workingLine` — shown in place of the
+   *  generic detail while a reply is in flight. A system-reported value, so
+   *  it is set in the mono (UI-SPEC). Null means there is nothing specific
+   *  to say and the sentence from `describeSystem` stands. */
+  working = null,
 }: {
   dimmed?: boolean;
   compact?: boolean;
+  working?: string | null;
 }) {
   const reduced = useIsReducedMotion();
   const backendOnline = useSystemStore((s) => s.backendOnline);
@@ -75,11 +81,21 @@ export default function OrbStatusLabel({
           {label}
         </span>
       </span>
-      <span
-        className={`${compact ? 'text-xs max-w-[15rem]' : 'text-xs max-w-[16rem]'} text-slate-500 text-center leading-snug`}
-      >
-        {detail}
-      </span>
+      {working && tone === 'busy' ? (
+        <span
+          className={`${compact ? 'max-w-[18rem]' : 'max-w-[20rem]'} t-mono text-center leading-snug truncate`}
+          data-testid="orb-working"
+          title={working}
+        >
+          {working}
+        </span>
+      ) : (
+        <span
+          className={`${compact ? 'text-xs max-w-[15rem]' : 'text-xs max-w-[16rem]'} text-slate-500 text-center leading-snug`}
+        >
+          {detail}
+        </span>
+      )}
     </motion.div>
   );
 }

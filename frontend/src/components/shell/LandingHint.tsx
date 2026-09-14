@@ -17,6 +17,12 @@
  * same place carries the one that is true now: `VoiceHint`, "Press Shift Space
  * to talk". It never appears on Work, Memory, Knowledge, Activity or Settings.
  *
+ * **A third tenant, 14 September 2026: the returning state.** Once there is
+ * something remembered, the slot at rest carries `ReturningLine` — what
+ * Zaram knows today, measured, in one line (UI-SPEC 6h) — ahead of the
+ * instruction, which by then has been followed. Still one slot, still one
+ * line, and still nothing on any other surface.
+ *
  * **One slot rather than two lines, decided 7 September 2026.** The voice hint
  * lived briefly on the landing beside this one, and briefly inside the
  * conversation's transcript, and both were wrong for the same reason: an
@@ -50,6 +56,9 @@ import { useSystemStore } from '@/stores/systemStore';
 import { useChatModeStore } from '@/stores/chatModeStore';
 import { useEmbodimentStore } from '@/stores/embodimentStore';
 import VoiceHint from '@/components/chat/VoiceHint';
+import ReturningLine from '@/components/shell/ReturningLine';
+import { useReturningStore, returningSegments } from '@/stores/returningStore';
+import type { WorkspaceId } from '@/runtime/shortcuts/registry';
 import { useIsReducedMotion } from '@/hooks/useReducedMotion';
 import { useViewport } from '@/hooks/useViewport';
 import { orbGeometry, useLayoutStore } from '@/stores/layoutStore';
@@ -58,12 +67,26 @@ interface LandingHintProps {
   /** Whether the landing is the current surface. Passed in rather than read
    *  from a store because the shell owns which workspace is open. */
   isLanding: boolean;
+  /** Where a segment of the returning line goes. The shell owns navigation. */
+  onNavigate?: (id: WorkspaceId) => void;
 }
 
-export default function LandingHint({ isLanding }: LandingHintProps) {
+export default function LandingHint({ isLanding, onNavigate }: LandingHintProps) {
   const reduced = useIsReducedMotion();
   const chatOpen = useChatModeStore((s) => s.chatView === 'chat');
   const hasOpenedChat = useChatModeStore((s) => s.hasOpenedChat);
+
+  // The returning line is read each time the landing comes to rest, so the
+  // numbers are true after a conversation; the moment they count from is
+  // fixed once per launch inside the store.
+  const loadReturning = useReturningStore((s) => s.load);
+  const returning = useReturningStore((s) => s.returning);
+  const returningDismissed = useReturningStore((s) => s.dismissed);
+  useEffect(() => {
+    if (isLanding && !chatOpen) void loadReturning();
+  }, [isLanding, chatOpen, loadReturning]);
+  const hasReturning =
+    !returningDismissed && returning !== null && returningSegments(returning).length > 0;
 
   // Kept above the early return: this is the only component mounted on every
   // surface, so it owns the poll, and an effect placed after a conditional
@@ -167,6 +190,8 @@ export default function LandingHint({ isLanding }: LandingHintProps) {
           renders nothing when Zaram cannot listen. */}
       {chatOpen ? (
         <VoiceHint />
+      ) : hasReturning ? (
+        <ReturningLine onNavigate={(id) => onNavigate?.(id)} />
       ) : hasOpenedChat ? null : (
         <span
           style={{
