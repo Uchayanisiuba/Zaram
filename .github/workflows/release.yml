@@ -17,10 +17,12 @@
 #   2. Computes the SHA-256 of the installer and publishes the installer, the
 #      portable build and the checksum as a GitHub Release (a pre-release for
 #      any tag with a suffix such as `-alpha`).
-#   3. Writes the version, size and checksum into `site/site.js`, sets
-#      `releaseLive: true`, commits that to `main`, and publishes `site/` to
-#      `gh-pages` — after the upload, so the page never links a file that is
-#      not there.
+#   3. Writes the version, size and checksum into `site/site.js`, commits
+#      that to `main`, and publishes `site/` to `gh-pages` — after the upload,
+#      so the page never links a file that is not there. The page switches
+#      from sign-up to download by itself on `releaseAt`; until then the
+#      link works for anyone who has it, which is how a few people get it
+#      first. Tag with `-public` in the name to flip the page at once.
 #   4. Emails the tester list through Buttondown, if `BUTTONDOWN_API_KEY` is
 #      set as a repository secret. Without it, step 4 is skipped and says so;
 #      nothing else waits on it.
@@ -127,7 +129,7 @@ jobs:
           set -euo pipefail
           git config user.name "${{ github.actor }}"
           git config user.email "${{ github.actor }}@users.noreply.github.com"
-          node scripts/site-release.mjs "$INSTALLER"
+          case "${GITHUB_REF_NAME}" in *public*) node scripts/site-release.mjs "$INSTALLER" --live "--tag=${GITHUB_REF_NAME}" ;; *) node scripts/site-release.mjs "$INSTALLER" "--tag=${GITHUB_REF_NAME}" ;; esac
           git add site/site.js
           if git diff --cached --quiet; then
             echo "site/site.js already current"
