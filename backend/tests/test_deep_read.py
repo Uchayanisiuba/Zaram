@@ -135,3 +135,39 @@ class TestPolicy:
 
         assert _looks_readable("file:///C:/Zaram/backend/spine.db") is False
         assert _looks_readable("data:text/html,<h1>hi</h1>") is False
+
+
+class TestTheArticleComesFirst:
+    """`trafilatura` is ahead of the walk, and the fuller reading wins.
+
+    A page with a long navigation list and one paragraph of article: the
+    walk keeps every `<li>` over 40 characters, so the nav arrives as
+    content; the extractor drops it. Asserted by looking for the nav text
+    in the result, which is the failure a reader would notice.
+    """
+
+    def test_navigation_is_left_out_when_the_extractor_reads_the_article(self):
+        from runtimes.internet.deep_read import extract_text
+
+        nav = "".join(
+            f"<li><a href='/s/{i}'>Section {i}: a long navigation label that says nothing about the page</a></li>"
+            for i in range(40)
+        )
+        article = (
+            "<p>The Osun state election was won by the incumbent after a recount that "
+            "took three days and was observed by both parties, with the margin "
+            "narrowing to under two thousand votes by the final tally.</p>"
+        ) * 4
+        html = f"<html><body><nav><ul>{nav}</ul></nav><main><article>{article}</article></main></body></html>"
+
+        text = extract_text(html)
+
+        assert "Osun state election" in text
+        assert "navigation label" not in text
+
+    def test_the_walk_still_answers_when_the_extractor_reads_nothing(self, monkeypatch):
+        from runtimes.internet import deep_read
+
+        monkeypatch.setattr(deep_read, "_article", lambda html: "")
+        html = "<html><body><p>" + "A paragraph long enough to keep, repeated for length. " * 3 + "</p></body></html>"
+        assert "paragraph long enough" in deep_read.extract_text(html)

@@ -111,17 +111,23 @@ def extract_text(html: str, *, max_chars: int = MAX_CHARS) -> str:
     """
     if not html or not html.strip():
         return ""
-
+    # The article first, from a real extractor. `trafilatura` (Apache-2.0
+    # since 2.0; it was GPL before, so never pin below) scores blocks by
+    # density and boilerplate, which is the thing the walk below deliberately
+    # did not do when the dependency question was open. Its failure mode is
+    # returning nothing on an odd page, so the walk stays as the fallback
+    # and the longer of the two wins — the same "only ever an improvement"
+    # rule `_read_one` applies to the snippet.
+    article = _article(html)
     try:
         from lxml import html as lxml_html
     except ImportError:  # pragma: no cover - lxml is a declared dependency
         logger.warning("lxml unavailable; deep read is disabled")
-        return ""
-
+        return article[:max_chars]
     try:
         tree = lxml_html.fromstring(html)
     except Exception:
-        return ""
+        return article[:max_chars]
 
     for element in tree.iter(*_NOISE):
         parent = element.getparent()
@@ -144,7 +150,30 @@ def extract_text(html: str, *, max_chars: int = MAX_CHARS) -> str:
         if total >= max_chars:
             break
 
-    return "\n".join(pieces)[:max_chars]
+    walked = "\n".join(pieces)
+    # The article when it is the fuller reading; the walk when the extractor
+    # under-read the page. Length is the only signal available without a
+    # model, and it errs toward more text, which is the right way round.
+    return (article if len(article) >= len(walked) else walked)[:max_chars]
+
+
+def _article(html: str) -> str:
+    """What `trafilatura` takes to be the page's own text, or ``""``."""
+    try:
+        import trafilatura
+    except ImportError:  # pragma: no cover - declared, but the walk still works without it
+        return ""
+    try:
+        text = trafilatura.extract(
+            html,
+            include_comments=False,
+            include_tables=True,
+            include_links=False,
+            favor_recall=True,
+        )
+    except Exception:  # noqa: BLE001 - an extractor that throws on one page costs that page nothing
+        return ""
+    return (text or "").strip()
 
 
 async def _read_one(session: Any, result: Any) -> None:
