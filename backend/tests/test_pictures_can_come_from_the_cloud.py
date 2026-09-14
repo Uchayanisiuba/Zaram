@@ -107,16 +107,25 @@ class TestNoKeyNoProvider:
 
 
 class TestAPictureIsItsOwnConsent:
-    def test_a_connected_host_still_refuses_pictures_until_allowed(self, gate, connections):
+    def test_a_permitted_hosts_first_picture_is_a_question_not_a_refusal(self, gate, connections):
+        """Rule 7j, both halves: the picture is its own consent, asked once
+        on the request itself, then remembered. Availability says yes —
+        the gate asks at send time — and nothing has been granted yet."""
         policy, _ = gate
         connections("nvidia_nim", "https://integrate.api.nvidia.com/v1")
-        # What connecting grants: prompts to the chat host, nothing else.
         policy.set("ai.api.nvidia.com", Mode.ALLOW, DataClass.PROMPT)
+
+        assert NimImages().availability().ok
+        assert policy.decide("ai.api.nvidia.com", DataClass.IMAGE).mode is Mode.ASK
+        assert not policy.has_rule("ai.api.nvidia.com", DataClass.IMAGE)
+
+    def test_a_host_nobody_permitted_still_refuses_pictures(self, gate, connections):
+        policy, _ = gate
+        connections("nvidia_nim", "https://integrate.api.nvidia.com/v1")
 
         a = NimImages().availability()
 
         assert not a.ok
-        assert "image" in a.reason.lower()
         assert "Allow images to ai.api.nvidia.com" in a.remedy
 
     def test_allowed_once_it_draws_and_is_logged_as_an_image(self, gate, connections, monkeypatch):

@@ -410,6 +410,18 @@ class RoutedImageProvider:
             return None
         return getattr(self._local, "vram_needed_bytes", None)
 
+    def instead_of_the_card(self) -> Optional[CloudImageProvider]:
+        """Who draws when local was picked and the card turned out to be
+        full: the first cloud provider that can, or ``None``.
+
+        The runtime's preflight refuses a local load that would not fit,
+        and until 14 September that refusal was the end of the request —
+        three notices on screen, naming who held the card and where to go
+        in Settings, while a provider the user had connected sat unused.
+        A full card is a reason to draw elsewhere, not a reason to stop.
+        """
+        return self._first_cloud()
+
     @property
     def loaded(self) -> bool:
         return bool(getattr(self._local, "loaded", False))

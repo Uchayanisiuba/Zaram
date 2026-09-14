@@ -205,4 +205,9 @@ class PendingConfirmations:
             "byte_count": request.byte_count,
             "source": request.source,
             "created_at": pending.created_at,
+            # Rule 7j's second dimension, and whether a yes is kept. The
+            # dialog states both: a consent wider than this one request has
+            # to be visible on the request.
+            "data_class": getattr(getattr(request, "data_class", None), "value", "prompt"),
+            "remember": bool(getattr(request, "remember", False)),
         }

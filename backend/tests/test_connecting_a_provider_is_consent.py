@@ -72,6 +72,16 @@ class TestPastingAKeyIsTheDecision:
         assert policy.has_rule("openrouter.ai", DataClass.PROMPT)
         assert not policy.has_rule("openrouter.ai", DataClass.IMAGE)
 
+    def test_the_providers_picture_host_is_permitted_with_its_chat_host(self, client):
+        """One provider, one key, one set of terms: NVIDIA draws at a second
+        hostname, and the person who connected NVIDIA has consented to
+        NVIDIA. Prompts only — the first picture is still asked."""
+        c, policy = client
+        _connect(c, provider_id="nvidia_nim", api_key="nvapi-not-a-real-key")
+        assert policy.rules()["ai.api.nvidia.com"] == Mode.ALLOW.value
+        assert not policy.has_rule("ai.api.nvidia.com", DataClass.IMAGE)
+        assert policy.decide("ai.api.nvidia.com", DataClass.IMAGE).mode is Mode.ASK
+
     def test_a_host_the_person_denied_stays_denied(self, client):
         c, policy = client
         policy.set("api.groq.com", Mode.DENY, DataClass.PROMPT)

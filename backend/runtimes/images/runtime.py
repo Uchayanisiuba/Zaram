@@ -324,9 +324,25 @@ class ImagesRuntime(Runtime):
         try:
             # The card, before the load. This is the whole fix — see the
             # module docstring for the afternoon it cost.
-            refused = await self._make_room(say)
+            # Who draws if the card turns out to be full and cannot be
+            # freed: a connected cloud provider, when there is one. Decided
+            # before the preflight so the refusal knows whether to speak.
+            elsewhere = getattr(self._provider, "instead_of_the_card", None)
+            fallback = elsewhere() if callable(elsewhere) else None
+            refused = await self._make_room(say, quiet=fallback is not None)
+            draw_with = self._provider
             if refused is not None:
-                return refused
+                # The card is full and cannot be freed. A connected cloud
+                # provider draws this one instead, and that is said in one
+                # line rather than the refusal's three — the person asked
+                # for a picture, not for a report on their graphics card.
+                if fallback is None:
+                    return refused
+                say(
+                    f"The graphics card is full, so {fallback.name} is drawing this one.",
+                    action="",
+                )
+                draw_with = fallback
 
             try:
                 # Off the event loop. Sampling holds the GIL in short bursts
@@ -334,7 +350,7 @@ class ImagesRuntime(Runtime):
                 # every other request in the backend, including the stream
                 # carrying its own progress events.
                 drawn: List[GeneratedImage] = await asyncio.to_thread(
-                    self._provider.generate, request, on_progress
+                    draw_with.generate, request, on_progress
                 )
             except Exception as error:
                 logger.exception("Image generation failed")
@@ -391,7 +407,7 @@ class ImagesRuntime(Runtime):
 
     # ------------------------------------------------------------- the card
 
-    async def _make_room(self, say) -> Optional[Dict[str, Any]]:
+    async def _make_room(self, say, *, quiet: bool = False) -> Optional[Dict[str, Any]]:
         """Read the card, free it if Zaram can, and refuse if it cannot.
 
         Returns ``None`` when the load may go ahead and a refusal result
@@ -499,7 +515,9 @@ class ImagesRuntime(Runtime):
             held_by=holders,
         )
         logger.info("Images: refused to load — %s", error)
-        said = say(f"{error} {remedy}", action="settings")
+        # `quiet`: the caller will draw elsewhere and say so itself; the
+        # refusal is then a log line, not a notice.
+        said = False if quiet else say(f"{error} {remedy}", action="settings")
         return {
             "success": False,
             "error": error,

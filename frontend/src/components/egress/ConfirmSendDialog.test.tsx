@@ -64,6 +64,8 @@ function pending(overrides: Partial<PendingEgress> = {}): PendingEgress {
     byteCount: requestBody.length,
     source: 'chat',
     createdAt: 1_754_900_000,
+    dataClass: 'prompt',
+    remember: false,
     ...overrides,
   };
 }
@@ -207,5 +209,24 @@ describe('a request the dialog cannot read', () => {
 
     await userEvent.click(screen.getByRole('button', { name: /^send$/i }));
     await waitFor(() => expect(decide).toHaveBeenCalledWith('abc123', true, undefined));
+  });
+});
+
+describe('a yes that will be remembered says so', () => {
+  it('names the class, the host, and where to change it', async () => {
+    mount(pending({ host: 'ai.api.nvidia.com', dataClass: 'image', remember: true, source: 'images' }));
+
+    await screen.findByRole('dialog');
+    expect(screen.getByText(/sending pictures to ai\.api\.nvidia\.com is a separate decision/i)).toBeInTheDocument();
+    expect(screen.getByText(/zaram remembers it for ai\.api\.nvidia\.com/i)).toBeInTheDocument();
+    expect(screen.getByText(/activity → destinations/i)).toBeInTheDocument();
+  });
+
+  it('a host set to ask by name is not told it will be remembered', async () => {
+    mount(pending({ remember: false }));
+
+    await screen.findByRole('dialog');
+    expect(screen.queryByText(/remembers it/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/this host is set to ask/i)).toBeInTheDocument();
   });
 });

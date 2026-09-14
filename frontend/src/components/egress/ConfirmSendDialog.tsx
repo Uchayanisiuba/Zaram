@@ -50,6 +50,13 @@ import { readRecalledFacts, withoutRecalledFacts } from './recalledFacts';
  *  empty list the rest of the time. */
 const POLL_MS = 1000;
 
+/** "image" → "pictures", "spine" → "remembered facts", anything else as-is. */
+function plural(dataClass: string): string {
+  if (dataClass === 'image') return 'pictures';
+  if (dataClass === 'spine') return 'remembered facts';
+  return `${dataClass}s`;
+}
+
 interface ConfirmSendDialogProps {
   /** Overrides the poll, for tests and for a future push channel. */
   source?: () => Promise<PendingEgress[]>;
@@ -196,8 +203,10 @@ export default function ConfirmSendDialog({
           Send this to {waiting.host}?
         </h2>
         <p style={{ margin: '0 0 18px', color: '#9CA3AF' }}>
-          {describeSource(waiting.source)} This host is set to ask, so nothing has left
-          your machine yet.
+          {describeSource(waiting.source)}{' '}
+          {waiting.remember
+            ? `Sending ${plural(waiting.dataClass)} to ${waiting.host} is a separate decision from chatting with it. Say yes once and Zaram remembers it for ${waiting.host}; change it any time under Activity → Destinations. Nothing has left your machine yet.`
+            : 'This host is set to ask, so nothing has left your machine yet.'}
         </p>
 
         {facts.length > 0 && (

@@ -480,6 +480,15 @@ def _consent_to_the_host_just_connected(
     has said nothing about the host yet — a host they deliberately denied
     stays denied, because a key is not a louder opinion than a rule. A
     loopback server needs no rule and gets none.
+
+    **Every host the provider answers from, not only the chat one — 14
+    September 2026.** NVIDIA answers chat at `integrate.api.nvidia.com` and
+    draws at `ai.api.nvidia.com`; the person connected *NVIDIA*, with one
+    key under one set of terms, and cannot be expected to know that a
+    picture goes to a second hostname. Left unpermitted, the first picture
+    was refused by default-deny with a remedy naming a host they had never
+    heard of. The picture endpoint is permitted for prompts like the chat
+    one, and the picture itself is still its own question, asked once.
     """
     from core.egress import DataClass, Mode, get_gate
 
@@ -490,14 +499,25 @@ def _consent_to_the_host_just_connected(
     host = (urlparse(str(connection.get("base_url", ""))).hostname or "").lower() if connection else ""
     if not host or host in {"127.0.0.1", "localhost", "::1"}:
         return
+    for each in [host, *_other_hosts_of(wanted)]:
+        try:
+            policy = get_gate().policy
+            if policy.has_rule(each, DataClass.PROMPT):
+                continue
+            policy.set(each, Mode.ALLOW, DataClass.PROMPT)
+            logger.info("connected %s: %s may now receive prompts (rule 7j)", wanted, each)
+        except Exception as exc:  # noqa: BLE001 - the key is stored; the rule is the courtesy
+            logger.warning("could not record consent for %s: %s", each, exc)
+
+
+def _other_hosts_of(provider_id: str) -> List[str]:
+    """The hosts this provider answers pictures from, beyond its chat host."""
     try:
-        policy = get_gate().policy
-        if policy.has_rule(host, DataClass.PROMPT):
-            return
-        policy.set(host, Mode.ALLOW, DataClass.PROMPT)
-        logger.info("connected %s: %s may now receive prompts (rule 7j)", wanted, host)
-    except Exception as exc:  # noqa: BLE001 - the key is stored; the rule is the courtesy
-        logger.warning("could not record consent for %s: %s", host, exc)
+        from imaging.cloud import CLOUD_PROVIDERS
+
+        return sorted({p.host for p in CLOUD_PROVIDERS if p.provider_id == provider_id and p.host})
+    except Exception:  # noqa: BLE001 - no imaging module, no extra hosts
+        return []
 
 
 @router.delete("/cloud")

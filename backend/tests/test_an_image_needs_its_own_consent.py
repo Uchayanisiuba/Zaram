@@ -29,6 +29,7 @@ import json
 import pytest
 
 from core.egress import DataClass, EgressGate, EgressLog, EgressPolicy, Mode
+from core.egress.gate import EgressRequest
 from core.egress.policy import DEFAULT_DECISION
 from runtimes.models.engines.openai_compatible_engine import OpenAICompatibleEngine
 
@@ -62,20 +63,43 @@ class TestABroaderConsentNeverImpliesANarrowerOne:
         assert policy.decide(HOST).mode is Mode.ALLOW
 
     def test_allowing_a_host_does_not_allow_images(self, policy):
-        """The sentence rule 7j actually contains."""
+        """The sentence rule 7j actually contains — and the rest of it.
+
+        *"Confirm once per destination and data class, then remember."* A
+        permitted host's first picture is a question, not a refusal: nothing
+        leaves until the person says yes on the request itself, and the yes
+        is kept. Until 14 September this was `DENY` with a trip to Activity →
+        Destinations, and on screen it was three notices for one picture.
+        """
         policy.set(HOST, Mode.ALLOW)
 
-        assert policy.decide(HOST, DataClass.IMAGE).mode is Mode.DENY
+        decision = policy.decide(HOST, DataClass.IMAGE)
+        assert decision.mode is Mode.ASK
+        assert decision.mode is not Mode.ALLOW
+        assert decision.remember is True
 
     def test_allowing_a_host_does_not_allow_spine_facts(self, policy):
         """`CLAUDE.md` keeps a hard stop here and it needs somewhere to live.
 
         *"The first time facts recalled from the Spine go to a destination that
-        has not had them before."* A class is what makes that expressible.
+        has not had them before."* A class is what makes that expressible —
+        and "the first time" is what makes it a question that is remembered.
         """
         policy.set(HOST, Mode.ALLOW)
 
-        assert policy.decide(HOST, DataClass.SPINE).mode is Mode.DENY
+        decision = policy.decide(HOST, DataClass.SPINE)
+        assert decision.mode is Mode.ASK
+        assert decision.remember is True
+
+    def test_a_host_set_to_ask_by_name_is_asked_every_time(self, policy):
+        """Remembering is for the decision nobody has made, never for the one
+        the user made deliberately."""
+        policy.set(HOST, Mode.ASK)
+
+        assert policy.decide(HOST).remember is False
+        assert policy.decide(HOST, DataClass.IMAGE).remember is True  # the class is still undecided
+        policy.set(HOST, Mode.ASK, DataClass.IMAGE)
+        assert policy.decide(HOST, DataClass.IMAGE).remember is False
 
     def test_the_refusal_says_which_decision_is_missing(self, policy):
         """Not a bare default-deny.
@@ -136,6 +160,7 @@ class TestABroaderConsentNeverImpliesANarrowerOne:
         decision = policy.decide(HOST, DataClass.IMAGE)
         assert decision.mode is Mode.DENY
         assert "blocked" in decision.reason
+        assert decision.remember is False
 
     def test_a_class_grant_still_widens_a_permitted_host(self, policy):
         """The asymmetry points one way only.
@@ -202,7 +227,7 @@ class TestARuleAboutAHostIsNotAnOpinionAboutEveryCargo:
         policy.forget(HOST, DataClass.IMAGE)
 
         assert policy.decide(HOST).mode is Mode.ALLOW
-        assert policy.decide(HOST, DataClass.IMAGE).mode is Mode.DENY
+        assert policy.decide(HOST, DataClass.IMAGE).mode is not Mode.ALLOW
 
 
 class TestExistingPolicyFilesKeepMeaningWhatTheyMeant:
@@ -220,7 +245,7 @@ class TestExistingPolicyFilesKeepMeaningWhatTheyMeant:
         loaded = EgressPolicy(str(path))
 
         assert loaded.decide(HOST).mode is Mode.ALLOW
-        assert loaded.decide(HOST, DataClass.IMAGE).mode is Mode.DENY
+        assert loaded.decide(HOST, DataClass.IMAGE).mode is not Mode.ALLOW
 
     def test_class_rules_survive_a_restart(self, tmp_path):
         path = str(tmp_path / "policy.json")
@@ -304,7 +329,11 @@ def no_socket(monkeypatch):
 
 
 class TestThePictureDoesNotLeaveWithoutItsOwnGrant:
-    def test_an_image_to_a_chat_approved_host_is_refused(self, engine, gate, no_socket):
+    def test_an_image_to_a_chat_approved_host_is_asked_and_unanswered_does_not_leave(
+        self, engine, gate, no_socket
+    ):
+        """No confirm hook is attached here, so the question has nobody to
+        reach — and silence is a no."""
         gate.policy.set(HOST, Mode.ALLOW)
 
         out = "".join(engine.stream_response("what is this", "", None, [PIXEL]))
@@ -314,7 +343,7 @@ class TestThePictureDoesNotLeaveWithoutItsOwnGrant:
         # apart — see `no_socket`.
         assert no_socket == [], "the picture reached the transport"
         assert out.startswith("[ERROR]")
-        assert "image" in out, f"the refusal did not say what was missing: {out!r}"
+        assert gate.policy.has_rule(HOST, DataClass.IMAGE) is False, "a no must not be remembered as a yes"
 
     def test_the_refusal_is_recorded(self, engine, gate, no_socket):
         """Rule 3 does not pause because rule 5 said no.
@@ -329,8 +358,75 @@ class TestThePictureDoesNotLeaveWithoutItsOwnGrant:
 
         entries = gate.log.entries()
         assert len(entries) == 1
-        assert entries[0].decision == "denied"
-        assert "image" in entries[0].reason
+        assert entries[0].decision == "cancelled"
+
+    def test_a_yes_to_the_first_picture_is_remembered(self, engine, gate, monkeypatch):
+        """Confirm once, then remember. The second picture is not asked."""
+        gate.policy.set(HOST, Mode.ALLOW)
+        asked: list[EgressRequest] = []
+
+        def say_yes(request: EgressRequest) -> bool:
+            asked.append(request)
+            return True
+
+        gate.set_confirm(say_yes)
+        sent: list[str] = []
+
+        class _Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_):
+                return False
+
+            def __iter__(self):
+                return iter([b'data: {"choices":[{"delta":{"content":"a cat"}}]}\n', b"data: [DONE]\n"])
+
+        def fake_urlopen(request, **kwargs):
+            sent.append(getattr(request, "full_url", str(request)))
+            return _Response()
+
+        monkeypatch.setattr("core.egress.gate.urllib.request.urlopen", fake_urlopen)
+
+        first = "".join(engine.stream_response("what is this", "", None, [PIXEL]))
+        second = "".join(engine.stream_response("and this", "", None, [PIXEL]))
+
+        assert "a cat" in first and "a cat" in second
+        assert len(sent) == 2
+        assert len(asked) == 1, "the second picture was asked about again"
+        assert asked[0].remember is True, "the dialog was not told the yes would be kept"
+        assert gate.policy.decide(HOST, DataClass.IMAGE).mode is Mode.ALLOW
+        reasons = [e.reason for e in gate.log.entries()]
+        assert any("from now on" in r for r in reasons), reasons
+
+    def test_a_host_the_user_set_to_ask_is_not_remembered(self, engine, gate, monkeypatch):
+        gate.policy.set(HOST, Mode.ASK)
+        asked: list[EgressRequest] = []
+
+        def say_yes(request: EgressRequest) -> bool:
+            asked.append(request)
+            return True
+
+        gate.set_confirm(say_yes)
+
+        class _Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_):
+                return False
+
+            def __iter__(self):
+                return iter([b'data: {"choices":[{"delta":{"content":"ok"}}]}\n', b"data: [DONE]\n"])
+
+        monkeypatch.setattr("core.egress.gate.urllib.request.urlopen", lambda request, **kwargs: _Response())
+
+        list(engine.stream_response("hello", "", None, None))
+        list(engine.stream_response("again", "", None, None))
+
+        assert len(asked) == 2
+        assert all(r.remember is False for r in asked)
+        assert gate.policy.decide(HOST).mode is Mode.ASK
 
     def test_granting_the_class_lets_the_picture_through(self, engine, gate, monkeypatch):
         """The other half. A guard that refuses everything is not consent."""
@@ -493,7 +589,7 @@ class TestTheRefusalHasARemedy:
         http.put("/egress/policy", json={"host": HOST, "mode": "allow"})
 
         assert gate.policy.decide(HOST).mode is Mode.ALLOW
-        assert gate.policy.decide(HOST, DataClass.IMAGE).mode is Mode.DENY
+        assert gate.policy.decide(HOST, DataClass.IMAGE).mode is not Mode.ALLOW
 
     def test_an_unknown_class_is_refused_rather_than_defaulted(self, client):
         """Silently treating it as `prompt` would grant chat to a caller that

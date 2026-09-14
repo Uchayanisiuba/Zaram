@@ -106,6 +106,12 @@ class Decision:
     #: Plain-language reason, shown to the user and written to the log. The
     #: contract asks for routing decisions in plain language; this is that.
     reason: str
+    #: `ASK` with this set: the user's yes is to be kept as a standing rule for
+    #: this host and class — "confirm once, then remember" — rather than asked
+    #: again next time. Only the first request of a class to a host the user
+    #: already permitted sets it; a host they set to ASK by name is asked
+    #: every time, because that is what they asked for.
+    remember: bool = False
 
 
 #: What an unknown host gets. Named rather than inlined so the default is
@@ -130,17 +136,28 @@ KILL_SWITCH_DECISION = Decision(
 def _needs_own_grant(host: str, data_class: "DataClass") -> Decision:
     """A host the user approved, for a class they have not approved for it.
 
-    The wording matters more than usual. "Blocked" would be wrong — nobody
-    blocked anything — and a bare default-deny reason would send the user
-    looking for a rule that does not exist. This says which permission is
-    missing and implies the shape of the fix, because the user *has* already
-    made a decision about this destination and is entitled to know that the
-    refusal is about the cargo rather than the address.
+    **Asked, not refused — changed 14 September 2026.** This returned `DENY`
+    with a remedy that sent the user to Activity → Destinations, and on
+    screen that was three stacked notices and a trip through the menus to
+    draw one picture on a provider they had already connected. Rule 7j says
+    what the decision is: *"confirm once per destination and data class,
+    then remember"*, and *"offer at the moment of doubt; never make the user
+    choose in advance"* (7h) says when. So the first picture to a permitted
+    host is a question, asked on the request itself with the literal text in
+    front of them, and the answer is kept — `EgressGate` writes the class
+    rule when they say yes. Nothing leaves before that answer; the gate parks
+    the thread, exactly as it does for a host set to ASK.
+
+    The wording still names the class. "Blocked" would be wrong — nobody
+    blocked anything — and the user *has* already decided about this
+    destination, so they are told that the question is about the cargo
+    rather than the address.
     """
     return Decision(
-        Mode.DENY,
-        f"you allowed requests to {host}, but not {data_class.value} — "
-        f"that is a separate decision and has not been made",
+        Mode.ASK,
+        f"you allowed requests to {host}; sending {data_class.value}s there is "
+        f"a separate decision — confirm this one and Zaram will remember it",
+        remember=True,
     )
 
 

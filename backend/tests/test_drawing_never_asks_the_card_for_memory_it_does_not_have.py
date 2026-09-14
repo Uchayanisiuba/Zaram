@@ -473,3 +473,80 @@ class TestHealthSaysWhatTheCardNeeds:
         health = asyncio.run(runtime.health_check())
         assert health["last_preflight"]["fits"] is False
         assert "Qwen3.8-27B-exl3-2.20bpw" in health["last_preflight"]["held_by"]
+
+
+# ================================================ a full card draws elsewhere
+
+
+class _Routed(_Flux):
+    """Shaped like `RoutedImageProvider` with a connected cloud provider
+    behind the local one: the runtime asks it who draws instead."""
+
+    def __init__(self, cloud) -> None:
+        super().__init__()
+        self._cloud = cloud
+
+    def instead_of_the_card(self):
+        return self._cloud
+
+
+class _Cloud:
+    name = "NVIDIA NIM"
+
+    def __init__(self) -> None:
+        self.drew = 0
+
+    def generate(self, request, on_progress=None):
+        self.drew += 1
+        return [GeneratedImage(png=PIXEL, width=1, height=1, seed=3)]
+
+
+class TestAFullCardDrawsElsewhere:
+    """Seen on screen 14 September 2026: three notices for one picture — the
+    unload announcement, then the refusal naming TabbyAPI, then a remedy
+    pointing at Settings — while a connected NVIDIA key sat unused. A full
+    card is a reason to draw elsewhere, not a reason to stop."""
+
+    @pytest.fixture
+    def held(self):
+        cloud = _Cloud()
+        flux = _Routed(cloud)
+        card = _Card(
+            free=1 * GB,
+            resident={"Qwen3.8-27B-exl3-2.20bpw": None},
+            outcome={"Qwen3.8-27B-exl3-2.20bpw": "not released: TabbyAPI has no unload route"},
+            free_after_release=1 * GB,
+            flux=flux,
+        )
+        return flux, cloud, card
+
+    def test_the_cloud_provider_draws_and_nothing_loads_here(self, service, held):
+        flux, cloud, card = held
+        result, _ = _run(ImagesRuntime(service, flux, card=card))
+
+        assert result["success"] is True
+        assert cloud.drew == 1
+        assert "load" not in flux.events and "draw" not in flux.events
+
+    def test_one_line_says_so_and_the_refusal_is_not_spoken(self, service, held):
+        flux, cloud, card = held
+        _, said = _run(ImagesRuntime(service, flux, card=card))
+
+        contents = [n["content"] for n in said]
+        assert any("NVIDIA NIM is drawing this one" in c for c in contents), contents
+        assert not any(n["action"] == "settings" for n in said), "the refusal was said as well"
+        assert not any("cannot unload" in c for c in contents), contents
+
+    def test_without_a_cloud_provider_the_refusal_stands(self, service):
+        flux = _Routed(None)
+        card = _Card(
+            free=1 * GB,
+            resident={"Qwen3.8-27B-exl3-2.20bpw": None},
+            outcome={"Qwen3.8-27B-exl3-2.20bpw": "not released: TabbyAPI has no unload route"},
+            free_after_release=1 * GB,
+            flux=flux,
+        )
+        result, said = _run(ImagesRuntime(service, flux, card=card))
+
+        assert result["success"] is False
+        assert any(n["action"] == "settings" for n in said)

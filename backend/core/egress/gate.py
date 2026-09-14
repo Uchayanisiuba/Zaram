@@ -130,6 +130,11 @@ class EgressRequest:
     #: tamper-evident log that confidently attributes a decision to a user who
     #: never saw the question is worse than one that admits it does not know.
     refusal_reason: str | None = None
+    #: Set by the gate when a yes to this request will be kept as a standing
+    #: rule for its host and class, so the dialog can say so before the
+    #: person answers. A consent whose scope is wider than the request in
+    #: front of them has to be stated on the request.
+    remember: bool = False
 
     @property
     def literal_text(self) -> str:
@@ -318,6 +323,13 @@ class EgressGate:
             )
 
         if decision.mode is Mode.ASK:
+            # A class the user has not decided for a host they have: the
+            # answer is remembered (rule 7j, "confirm once ... then
+            # remember"). A host the user set to ASK *by name* is asked every
+            # time, which is what they asked for, and is told apart by the
+            # rule existing.
+            remember = bool(getattr(decision, "remember", False))
+            req.remember = remember
             if not self._confirm(req):
                 entry = self._record(
                     req,
@@ -329,6 +341,16 @@ class EgressGate:
                     host=host,
                     entry_id=entry.id,
                 )
+            if remember:
+                self._policy.set(host, Mode.ALLOW, data_class)
+                # Logged before the send, never after.
+                self._record(
+                    req,
+                    "allowed",
+                    f"you confirmed the first {data_class.value} to {host}; "
+                    f"{data_class.value}s there are allowed from now on",
+                )
+                return req
             # Logged before the send, never after.
             self._record(req, "allowed", "you confirmed this request")
             return req

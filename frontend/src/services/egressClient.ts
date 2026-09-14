@@ -210,6 +210,12 @@ export interface PendingEgress {
   source: string;
   /** Unix seconds, for ordering when more than one is waiting. */
   createdAt: number;
+  /** Rule 7j's second dimension: what kind of thing is leaving. */
+  dataClass: string;
+  /** A yes is kept as a standing rule for this host and class — the first
+   *  picture to a provider the user already connected. Stated on the request,
+   *  because a consent wider than the request has to be visible on it. */
+  remember: boolean;
 }
 
 export async function fetchPendingEgress(): Promise<PendingEgress[]> {
@@ -224,6 +230,8 @@ export async function fetchPendingEgress(): Promise<PendingEgress[]> {
     byteCount: Number(p.byte_count ?? 0),
     source: String(p.source ?? 'unknown'),
     createdAt: Number(p.created_at ?? 0),
+    dataClass: String(p.data_class ?? 'prompt'),
+    remember: Boolean(p.remember),
   }));
 }
 
