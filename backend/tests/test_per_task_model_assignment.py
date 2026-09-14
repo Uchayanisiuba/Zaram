@@ -149,11 +149,17 @@ class TestTheStore:
         from core.planner import INTENT_SPECIALISATION, IntentType
         from core.user_settings import TaskSlot
 
-        assert {s.value for s in TaskSlot} == {"code", "vision"}
-        # `CODE`'s value is the specialisation string, not a second spelling of
-        # it. One table decides what a coding question asks for; a slot keyed
-        # differently would be assignable and never consulted.
+        assert {s.value for s in TaskSlot} == {"code", "vision", "document"}
+        # A slot's value is the specialisation string, not a second spelling
+        # of it. One table decides what a coding or a document question asks
+        # for; a slot keyed differently would be assignable and never
+        # consulted. `document` joined on 14 September 2026 the day the
+        # router began to distinguish it — the same rule, one more row.
         assert INTENT_SPECIALISATION[IntentType.CODE] == TaskSlot.CODE.value
+        assert INTENT_SPECIALISATION[IntentType.DOCUMENT] == TaskSlot.DOCUMENT.value
+        # And nothing else: every specialisation the router emits has a slot,
+        # and every slot but vision (a gate, not a specialisation) is emitted.
+        assert set(INTENT_SPECIALISATION.values()) == {s.value for s in TaskSlot} - {"vision"}
 
 
 # ------------------------------------------------------------- the precedence
@@ -551,7 +557,7 @@ class TestTheEndpointPayload:
         from main import _routing_payload
 
         payload = _routing_payload()
-        assert payload["task_slots"] == ["code", "vision"]
+        assert payload["task_slots"] == ["code", "vision", "document"]
         assert payload["task_models"] == {}
 
         settings.set_task_model("code", "coder")

@@ -548,6 +548,55 @@ def _title_from(prompt: str, body: str) -> str:
 
 
 def _blocks(body: str, claims: List[Claim], title: str = "") -> List[object]:
+    """The answer as document blocks, with claims anchored where they appear.
+
+    **Markdown is kept, not stripped — 14 September 2026.** The brief now
+    asks for headings, lists and tables, and `artifacts.markdown_blocks` is
+    the adapter the API path has used since it was built. The paragraph
+    path below is the fallback for an answer with no markup at all, where
+    it behaves exactly as before.
+
+    A claim whose excerpt is a whole paragraph becomes that claim, so the
+    citation lands on the sentence it belongs to. Matching on the text
+    without its inline tags, because a model that bolds a client's name
+    has not changed the fact.
+    """
+    if _has_markup(body):
+        from artifacts.markdown_blocks import blocks_from_markdown
+        from artifacts.contracts import RichText
+
+        by_excerpt = {c.excerpt.strip(): c for c in claims if c.excerpt.strip()}
+        out: List[object] = []
+        for block in blocks_from_markdown(body, title=title):
+            if isinstance(block, RichText) and by_excerpt:
+                bare = _bare_text(block.html)
+                if bare in by_excerpt:
+                    out.append(by_excerpt[bare])
+                    continue
+            out.append(block)
+        if out:
+            return out
+    return _paragraph_blocks(body, claims, title)
+
+
+#: Markdown the brief asks for and a model writes: a heading, a list item, a
+#: table row, or emphasis. A body with none of these is plain prose and is
+#: split on blank lines as it always was.
+_MARKUP = re.compile(r"^\s{0,3}(#{1,6}\s|[-*+]\s|\d+[.)]\s|\|)|\*\*|`", re.MULTILINE)
+
+
+def _has_markup(body: str) -> bool:
+    return bool(_MARKUP.search(body or ""))
+
+
+def _bare_text(html: str) -> str:
+    """Inline HTML as the text it shows, for matching against an excerpt."""
+    import html as html_module
+
+    return html_module.unescape(re.sub(r"<[^>]+>", "", html)).strip()
+
+
+def _paragraph_blocks(body: str, claims: List[Claim], title: str = "") -> List[object]:
     """Split prose into paragraphs, substituting claims where they appear.
 
     A claim whose excerpt appears verbatim in the answer becomes the anchored

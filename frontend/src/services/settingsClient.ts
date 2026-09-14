@@ -365,7 +365,7 @@ export type RoutingPreference = 'prefer_local' | 'auto' | 'prefer_cloud';
  *  the user could set and that would then govern nothing. The type is written
  *  out for the copy below to key off, and an unrecognised slot renders no row
  *  rather than an untitled one. */
-export type TaskSlot = 'code' | 'vision';
+export type TaskSlot = 'code' | 'vision' | 'document';
 
 export interface RoutingSettings {
   routingPreference: RoutingPreference;

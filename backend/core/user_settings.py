@@ -97,14 +97,21 @@ class TaskSlot(str, Enum):
     over a decision the system does not take is worse than no control, because
     the user believes they have configured something.
 
-    So there are exactly two, and each one is an argument the selection call
-    already takes:
+    So there are exactly three, and each one is an argument the selection
+    call already takes:
 
     * ``CODE`` is ``specialisation="code"``. Its value is deliberately the
       string `INTENT_SPECIALISATION` maps `IntentType.CODE` to — one table
       decides what a coding question is, and a second spelling here is how the
       slot would come to be assigned and never consulted.
     * ``VISION`` is ``requires_vision=True``.
+    * ``DOCUMENT`` is ``specialisation="document"``, added 14 September 2026
+      when `INTENT_SPECIALISATION` gained `IntentType.DOCUMENT`. The
+      "long documents" row the paragraph above refused is still refused —
+      nothing classifies length — but *a document request* is classified,
+      it is the one job where the strongest model is worth the wait, and
+      the maintainer asked for documents to be better. The slot exists
+      because the router consults it, which is the only reason a slot may.
 
     **Chat is not a slot, and that is the point.** ``default_model`` above
     already *is* the model for a request with no task, which is what chat is.
@@ -121,6 +128,8 @@ class TaskSlot(str, Enum):
     CODE = "code"
     #: A question about a picture — attached, or described in the wording.
     VISION = "vision"
+    #: "Write that up as a proposal." Matches `INTENT_SPECIALISATION`'s value.
+    DOCUMENT = "document"
 
 
 class RoutingPreference(str, Enum):

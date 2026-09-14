@@ -24,7 +24,7 @@ be worse than none, because the router would try it and fail on every
 message of that kind.
 
 **It is dated, per provider, and scales by adding an entry.** The same
-three slots for every provider; OpenRouter and Groq are entries, not code.
+four slots for every provider; OpenRouter and Groq are entries, not code.
 Candidate names are what the provider published on the date written here,
 and the date travels to the interface so a stale list is visible as stale.
 """
@@ -57,6 +57,9 @@ class Pairing:
     code: Tuple[Pick, ...]
     #: `TaskSlot.VISION`.
     vision: Tuple[Pick, ...]
+    #: `TaskSlot.DOCUMENT` — the strongest writer with a long window, since a
+    #: proposal is the one job worth waiting for the best model on.
+    document: Tuple[Pick, ...] = ()
 
 
 PAIRINGS: Dict[str, Pairing] = {
@@ -78,6 +81,11 @@ PAIRINGS: Dict[str, Pairing] = {
             Pick("nvidia/llama-3.1-nemotron-nano-vl-8b-v1", "small and quick for receipts and screens"),
             Pick("meta/llama-3.2-11b-vision-instruct", "a lighter reader"),
         ),
+        document=(
+            Pick("moonshotai/kimi-k2-instruct", "writes long, structured documents well; holds the whole conversation"),
+            Pick("deepseek-ai/deepseek-v3.1", "a strong writer with a long window"),
+            Pick("meta/llama-3.3-70b-instruct", "a strong general writer"),
+        ),
     ),
     "openrouter": Pairing(
         provider_id="openrouter",
@@ -96,6 +104,11 @@ PAIRINGS: Dict[str, Pairing] = {
             Pick("google/gemma-3-27b-it:free", "sees images; quick"),
             Pick("meta-llama/llama-3.2-11b-vision-instruct:free", "a lighter reader"),
         ),
+        document=(
+            Pick("moonshotai/kimi-k2:free", "writes long, structured documents well"),
+            Pick("deepseek/deepseek-chat-v3-0324:free", "a strong writer with a long window"),
+            Pick("meta-llama/llama-3.3-70b-instruct:free", "a strong general writer"),
+        ),
     ),
     "groq": Pairing(
         provider_id="groq",
@@ -112,11 +125,15 @@ PAIRINGS: Dict[str, Pairing] = {
             Pick("meta-llama/llama-4-scout-17b-16e-instruct", "sees images; fast"),
             Pick("meta-llama/llama-4-maverick-17b-128e-instruct", "sees images; larger"),
         ),
+        document=(
+            Pick("moonshotai/kimi-k2-instruct", "writes long, structured documents well"),
+            Pick("llama-3.3-70b-versatile", "a strong general writer"),
+        ),
     ),
 }
 
 #: The slots, in the order the interface shows them.
-SLOTS: Tuple[str, ...] = ("chat", "code", "vision")
+SLOTS: Tuple[str, ...] = ("chat", "code", "vision", "document")
 
 
 def _seen(model: str, seen: Iterable[str]) -> Optional[str]:
@@ -169,6 +186,8 @@ def apply(settings, picks: Dict[str, Dict[str, str]]) -> Dict[str, Optional[str]
         settings.set_task_model(TaskSlot.CODE, picks["code"]["model"])
     if "vision" in picks:
         settings.set_task_model(TaskSlot.VISION, picks["vision"]["model"])
+    if "document" in picks:
+        settings.set_task_model(TaskSlot.DOCUMENT, picks["document"]["model"])
     return {
         "chat": settings.default_model,
         **{slot.value: model for slot, model in ((s, settings.task_models.get(s.value)) for s in TaskSlot)},

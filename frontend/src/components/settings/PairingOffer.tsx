@@ -22,6 +22,7 @@ const SLOT_LABEL: Record<string, string> = {
   chat: 'Chat and everything else',
   code: 'Coding chains',
   vision: 'Reading pictures',
+  document: 'Writing documents',
 };
 
 export default function PairingOffer({

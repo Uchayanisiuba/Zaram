@@ -45,6 +45,14 @@ export const TASK_SLOT_COPY: Record<string, TaskSlotCopy> = {
       'cannot see is not a worse answer about a screenshot, it is not an answer — so the choice ' +
       'is not offered rather than being offered and warned about.',
   },
+  document: {
+    label: 'Writing documents',
+    unassigned: 'whichever model answers',
+    detail:
+      'When you ask for a proposal, a report, a letter or anything else that becomes a file, ' +
+      'this model writes it. A long, structured piece of writing is the one job worth waiting ' +
+      'for your strongest model on — a large cloud model, or the best one on this machine.',
+  },
 };
 
 /**

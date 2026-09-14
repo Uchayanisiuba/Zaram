@@ -58,7 +58,7 @@ class TestApplyingWritesThePickerFields:
         assert settings.task_models[TaskSlot.CODE.value] == "coder"
         # A slot the offer did not name is untouched.
         assert settings.task_models[TaskSlot.VISION.value] == "keep-me"
-        assert out == {"chat": "fast-one", "code": "coder", "vision": "keep-me"}
+        assert out == {"chat": "fast-one", "code": "coder", "vision": "keep-me", "document": None}
 
 
 class TestTheShapeScales:

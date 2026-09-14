@@ -235,20 +235,17 @@ def _document_body_prompt(request: str) -> str:
     operating protocol, and that text became the file. The request is an
     instruction to Zaram; the model needs the instruction Zaram derives from it.
 
-    Deliberately not a persona or a template. The model already has the
-    conversation and whatever recall injected; this only says what shape the
-    output must take and what must not be in it. A preamble like "Here is your
-    proposal:" is not a formatting nuisance — it becomes the document's first
-    paragraph and, through `_title_from`, its filename.
+    **The instruction is the brief for the kind of document asked for —
+    14 September 2026.** This used to ask for plain paragraphs whatever the
+    request named, so a proposal, a memo and a statement of work came back
+    as the same flat prose; `artifacts.briefs` names the sections each kind
+    is made of and asks for them as markdown, which the documents runtime
+    now keeps rather than strips. Not a persona: it says what shape the
+    output takes and what must not be in it, and rule 9 is written into it.
     """
-    return (
-        f"The user asked: {request}\n\n"
-        "Write the document itself, based on what we have discussed. "
-        "Output only the body text, as plain paragraphs separated by blank "
-        "lines. Do not add a preamble, do not explain what you are about to "
-        "write, and do not describe yourself. Start with the document's title "
-        "on its own line."
-    )
+    from artifacts.briefs import instruction
+
+    return instruction(request)
 
 
 class IntentType(Enum):
@@ -292,6 +289,13 @@ class IntentType(Enum):
 #: they end up as one number.
 INTENT_SPECIALISATION: dict[IntentType, str] = {
     IntentType.CODE: "code",
+    #: "Write that up as a proposal." A long, structured piece of writing is
+    #: the one job where the strongest model the user has is worth waiting
+    #: for, and the one a small local model does least well — so it is a
+    #: distinction the router makes, and `TaskSlot.DOCUMENT` is its control.
+    #: No model is *named* for documents the way coders are, so with nothing
+    #: assigned the ranking prefers a general model with the largest window.
+    IntentType.DOCUMENT: "document",
 }
 
 
