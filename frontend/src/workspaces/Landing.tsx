@@ -115,7 +115,7 @@ const DEPTH_FADE = 0.5
 const ORBIT_STEP_DEG = 0.2
 /** The orbital system is rendered inside this scale, so any transform applied
  *  within it is multiplied by the same factor. See orbGeometry(). */
-const CONTAINER_SCALE = 1.4
+const CONTAINER_SCALE = 1.6
 
 export default function Landing({ onNavigate, onOrbTap }: LandingProps) {
   const [_, setHovered] = useState<string | null>(null)
@@ -269,7 +269,14 @@ export default function Landing({ onNavigate, onOrbTap }: LandingProps) {
    * nobody can see -- where the alternative was a 23px lift, which was seen
    * immediately.
    */
-  const availableHeight = viewportHeight - 2 * BOTTOM_RESERVE
+  // The band the wheel may fill: the top margin to the caption. This was
+  // `vh - 2 * BOTTOM_RESERVE`, the reserve paid at both ends so the wheel sat
+  // at true centre by construction — and 78px of height went unused on every
+  // screen, which on a high-DPI Electron window (fewer CSS pixels) is the
+  // difference the maintainer saw between the app and a browser tab, 14
+  // September 2026. The wheel now takes the band and is centred in it, which
+  // lifts it by half the difference between the two reserves.
+  const availableHeight = viewportHeight - TOP_RESERVE - BOTTOM_RESERVE
   const fitScale = Math.max(
     0.62,
     Math.min(CONTAINER_SCALE, availableHeight / DESIGN_HEIGHT, viewportWidth / DESIGN_DIAMETER),
@@ -294,10 +301,9 @@ export default function Landing({ onNavigate, onOrbTap }: LandingProps) {
   const ringDiameter = DESIGN_HEIGHT * fitScale
   const lowestCentre = viewportHeight - BOTTOM_RESERVE - ringDiameter / 2
   const highestCentre = TOP_RESERVE + ringDiameter / 2
-  const orbitCentreY = Math.min(
-    Math.max(viewportHeight / 2, highestCentre),
-    lowestCentre,
-  )
+  // Centred in the band, clamped to it.
+  const bandCentre = TOP_RESERVE + availableHeight / 2
+  const orbitCentreY = Math.min(Math.max(bandCentre, highestCentre), lowestCentre)
   const orbitOffsetY = orbitCentreY - viewportHeight / 2
 
   const { shiftX, zoom } = orbGeometry({
