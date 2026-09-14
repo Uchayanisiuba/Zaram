@@ -37,6 +37,9 @@ export interface TrackRingProps {
   reduced?: boolean;
   /** Class for the line element — the landing uses it for the proximity opacity. */
   lineClassName?: string;
+  /** Draw only the near or the far half, so a ring can pass in front of a
+   *  character and behind it: two halves on two layers. */
+  half?: 'front' | 'back';
   lineOpacity?: number;
 }
 
@@ -51,11 +54,16 @@ export default function TrackRing({
   reduced = false,
   lineClassName = '',
   lineOpacity,
+  half,
 }: TrackRingProps) {
+  // The clip is in the ring's own frame, before the tilt, so "the lower
+  // half" is exactly the near half once the tilt is applied.
+  const clip =
+    half === 'front' ? 'inset(50% 0 0 0)' : half === 'back' ? 'inset(0 0 50% 0)' : undefined;
   return (
     <div
       className="absolute rounded-full pointer-events-none"
-      style={{ width: size, height: size, transform: `scaleY(${RING_TILT})` }}
+      style={{ width: size, height: size, transform: `scaleY(${RING_TILT})`, clipPath: clip }}
       aria-hidden
     >
       <motion.div

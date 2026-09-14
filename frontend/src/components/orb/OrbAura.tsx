@@ -28,6 +28,7 @@ import { useOrbStore } from '@/stores';
 
 import OrbitalParticles from './OrbitalParticles';
 import TrackRing from './TrackRing';
+import { useChatModeStore } from '@/stores/chatModeStore';
 import { ringColours } from './LivingOrb';
 
 export default function OrbAura({
@@ -85,6 +86,7 @@ export default function OrbAura({
   const ring1 = Math.round(px * 0.82);
   const ring2 = Math.round(px * 0.80);
   const outerGlowOffset = Math.round(px * 0.22);
+  const chatOpen = useChatModeStore((s) => s.chatView === 'chat');
 
   // Below the character. See the note above — this is the whole reason the
   // layer exists as a wrapper rather than a fragment.
@@ -98,12 +100,63 @@ export default function OrbAura({
         transition: 'opacity 0.35s ease',
       }}
     >
+      {/* The orb's own ambient glow, at the orb's own size and colour, so
+          the two pages are lit alike — the avatar page had none and read
+          darker and bluer than the orb's. */}
+      <div
+        className="absolute rounded-full pointer-events-none"
+        style={{
+          inset: 0,
+          background: `radial-gradient(circle, ${colours.glow} 0%, ${colours.glow2} 22%, transparent 36%)`,
+          filter: 'blur(18px)',
+          opacity: 0.45,
+          transition: 'background 0.45s ease',
+        }}
+      />
       {/* The same rings the orb draws for itself, in the landing's plane,
-          with lights running them. Colour is the state channel and changes;
-          the rings never rotate — the lights do. */}
+          with lights running them, and only while the landing is at rest.
+          Drawn in two halves: the back half here, under the character, and
+          the front half in `OrbAuraFront` above it — so the ring passes
+          behind the head and in front of the body, which is what makes it an
+          orbit around a thing rather than a circle drawn near it. */}
+      {!chatOpen && (
+        <>
+          <TrackRing size={ring1 + outerGlowOffset} colour={colours.ring1} half="back" reduced={reduced} />
+          <TrackRing size={ring2} colour={colours.ring2} half="back" reduced={reduced} />
+        </>
+      )}
+
+      <div className="absolute inset-0">
+        {motes && <OrbitalParticles />}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The front halves of the aura's rings, mounted *above* the character so the
+ * near side of each orbit passes in front of its body. The lights ride these
+ * halves, since a light behind the character would be a light nobody sees.
+ */
+export function OrbAuraFront({ px, dimmed = false }: { px: number; dimmed?: boolean }) {
+  const reduced = useIsReducedMotion();
+  const state = useOrbStore((s) => s.orbState);
+  const colours = ringColours(state);
+  const chatOpen = useChatModeStore((s) => s.chatView === 'chat');
+  const ring1 = Math.round(px * 0.82);
+  const ring2 = Math.round(px * 0.80);
+  const outerGlowOffset = Math.round(px * 0.22);
+  if (chatOpen) return null;
+  return (
+    <div
+      aria-hidden
+      className="absolute inset-0 flex items-center justify-center pointer-events-none"
+      style={{ zIndex: 2, opacity: dimmed ? 0.25 : 1, transition: 'opacity 0.35s ease' }}
+    >
       <TrackRing
         size={ring1 + outerGlowOffset}
         colour={colours.ring1}
+        half="front"
         messengers={1}
         dir={-1}
         seconds={9}
@@ -113,16 +166,13 @@ export default function OrbAura({
       <TrackRing
         size={ring2}
         colour={colours.ring2}
+        half="front"
         messengers={1}
         dir={1}
         seconds={6}
         messengerColour="#c084fc"
         reduced={reduced}
       />
-
-      <div className="absolute inset-0">
-        {motes && <OrbitalParticles />}
-      </div>
     </div>
   );
 }

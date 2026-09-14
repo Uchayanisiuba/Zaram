@@ -15,6 +15,7 @@ import globeImage from '@/assets/living-orb-globe.png';
 import { frames, loop } from './stillness';
 import OrbitalParticles from './OrbitalParticles';
 import TrackRing from './TrackRing';
+import { useChatModeStore } from '@/stores/chatModeStore';
 
 
 // The waveform bar constants are gone with the bars they drove. Their being a
@@ -214,6 +215,9 @@ const LivingOrb = ({
   // particles on a 40px orb read as noise.
   const showParticles = px >= 180 && motes;
   const showRings = px >= 120;
+  // The rings belong to the landing at rest; beside an open conversation
+  // they are furniture, and the maintainer asked for them gone there.
+  const chatOpen = useChatModeStore((s) => s.chatView === 'chat');
 
   // Deepen or soften the breath without altering its timing. The per-state
   // values are deviations from 1, so only the distance from 1 is scaled.
@@ -233,17 +237,20 @@ const LivingOrb = ({
       className={`relative flex items-center justify-center shrink-0 ${className}`}
       style={{ width: px, height: px }}
     >
-      {/* Outer ambient glow � amplified when emphasis is active */}
+      {/* Outer ambient glow. Halved in radius and intensity on 14 September
+          2026 — it reached the wheel and washed the rings out — so the
+          gradient ends at 35% of the box rather than 70%, emphasis no longer
+          brightens it, and it rests at half opacity. */}
       <motion.div
         className="absolute rounded-full pointer-events-none"
         style={{
-          inset: -outerGlowOffset,
-          background: `radial-gradient(circle, ${cfg.glowColor} 0%, ${cfg.glowColor2} 45%, transparent 70%)`,
-          filter: `blur(24px)${emphasis ? ' brightness(1.8)' : ''}`,
+          inset: 0,
+          background: `radial-gradient(circle, ${cfg.glowColor} 0%, ${cfg.glowColor2} 22%, transparent 36%)`,
+          filter: 'blur(18px)',
         }}
         animate={{
           scale: frames(scaleKeyframes, reduced),
-          opacity: frames(state === 'idle' ? [0.7, 1, 0.7] : [0.8, 1, 0.8], reduced),
+          opacity: frames(state === 'idle' ? [0.35, 0.5, 0.35] : [0.4, 0.55, 0.4], reduced),
         }}
         transition={loop(STATE_PULSE[state].pulseSeconds, reduced)}
       />
@@ -273,7 +280,7 @@ const LivingOrb = ({
       {/* Energy rings — in the landing's plane, static, with a light or two
           running each (`TrackRing`). The ring reports state by colour and
           never turns; the lights are what moves. */}
-      {showRings && (
+      {showRings && !chatOpen && (
         <TrackRing
           size={ring1 + outerGlowOffset}
           colour={cfg.ring1Color}
@@ -284,7 +291,7 @@ const LivingOrb = ({
           reduced={reduced}
         />
       )}
-      {showRings && (
+      {showRings && !chatOpen && (
         <TrackRing
           size={ring2}
           colour={cfg.ring2Color}
@@ -353,11 +360,16 @@ const LivingOrb = ({
         )}
       </AnimatePresence>
 
-      {/* Core globe image � drop-shadow amplified when emphasis is active */}
-      <motion.img
-        src={globeImage}
-        alt="Living Intelligence Orb"
-        className="relative z-10 object-contain pointer-events-none select-none"
+      {/* The pearl, with the iridescence over it.
+          The globe image is still the pearl; what moves are two conic bands
+          of cyan, rose and violet screened over it and turning opposite ways,
+          masked to the sphere's own footprint — the pearl fills the central
+          42.4% of the image (alpha spans 295–729 of 1024), so the bands are
+          inset 28.8% of the box. Their pace is `SHEEN_SECONDS[state]`; a
+          limb shade keeps the sphere reading as a solid. Composited
+          transforms only. Reduced motion holds the bands still. */}
+      <motion.div
+        className="relative z-10 pointer-events-none select-none"
         style={{
           width: corePx + 40,
           height: corePx + 40,
@@ -366,7 +378,8 @@ const LivingOrb = ({
           // be brightness-amplified 1.4× in the one state whose whole point is
           // that it is dim.
           filter: `${cfg.filter}${state === 'swapping' ? '' : orbBrightness}`,
-        }}
+          '--sheen-seconds': `${SHEEN_SECONDS[state]}s`,
+        } as React.CSSProperties}
         animate={{
           scale: frames(scaleKeyframes, reduced),
           // The globe fades toward half-present rather than holding steady:
@@ -376,7 +389,17 @@ const LivingOrb = ({
           opacity: state === 'swapping' ? frames([0.85, 0.5, 0.85], reduced) : 1,
         }}
         transition={loop(STATE_PULSE[state].pulseSeconds, reduced)}
-      />
+      >
+        <img
+          src={globeImage}
+          alt="Living Intelligence Orb"
+          className="absolute inset-0 w-full h-full object-contain"
+          draggable={false}
+        />
+        <div className="orb-sheen orb-sheen-a" data-still={reduced || undefined} />
+        <div className="orb-sheen orb-sheen-b" data-still={reduced || undefined} />
+        <div className="orb-limb" />
+      </motion.div>
 
       {/* Inner pulse dot. Shown by rendered diameter rather than preset name:
           it is a fixed size, so on a small orb it reads as a bright blob. */}
@@ -437,9 +460,21 @@ const LivingOrb = ({
  * out two strings, not a mutable record with the glow, the filter and the
  * pulse timings in it. Everything else about the orb's look stays the orb's.
  */
-export function ringColours(state: OrbState): { ring1: string; ring2: string } {
+export function ringColours(state: OrbState): { ring1: string; ring2: string; glow: string; glow2: string } {
   const cfg = STATE_CONFIG[state] ?? STATE_CONFIG.idle;
-  return { ring1: cfg.ring1Color, ring2: cfg.ring2Color };
+  return { ring1: cfg.ring1Color, ring2: cfg.ring2Color, glow: cfg.glowColor, glow2: cfg.glowColor2 };
 }
+
+/** How long the iridescence takes to turn once, per state. Slow at rest,
+ *  quick while working; the sheen is the one thing on the pearl that moves,
+ *  and its pace is the state. */
+export const SHEEN_SECONDS: Record<OrbState, number> = {
+  idle: 26,
+  thinking: 5,
+  coding: 6,
+  speaking: 7,
+  listening: 9,
+  swapping: 14,
+};
 
 export default LivingOrb;

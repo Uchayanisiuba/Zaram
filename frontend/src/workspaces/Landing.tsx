@@ -5,7 +5,7 @@ import { ORB_BEHAVIOUR } from '../components/orb/LivingOrb'
 import Embodiment from '@/components/embodiment/Embodiment'
 import ZaramMark from '@/components/brand/ZaramMark'
 import OrbStatusLabel from '../components/orb/OrbStatusLabel'
-import OrbAura from '../components/orb/OrbAura'
+import OrbAura, { OrbAuraFront } from '../components/orb/OrbAura'
 import TrackRing, { RING_TILT } from '../components/orb/TrackRing'
 import { useEmbodimentStore } from '@/stores/embodimentStore'
 import { useChatModeStore } from '@/stores/chatModeStore'
@@ -570,23 +570,43 @@ export default function Landing({ onNavigate, onOrbTap }: LandingProps) {
               scale: orbShift.scale * (panelsOpen ? 0.96 : 1),
             }}
             transition={chat || isResizing ? orbTransition : { duration: 0.4 }}
-            whileTap={{ scale: zoom * 0.9 }}
-            data-testid="orb-tap"
-            role="button"
-            tabIndex={panelsOpen ? -1 : 0}
-            aria-label="Talk to Zaram"
-            style={{ cursor: panelsOpen ? 'default' : 'pointer' }}
-            onClick={panelsOpen ? undefined : onOrbTap}
-            onKeyDown={(e) => {
-              // The orb was a clickable div, so it could not be reached or
-              // activated from the keyboard at all.
-              if (panelsOpen) return
-              if (e.key === 'Enter' || e.key === ' ') {
-                e.preventDefault()
-                onOrbTap?.()
-              }
-            }}
+            // The visuals take no pointer events. The box is 320px square and
+            // the far nodes pass through its upper half, so a box that was
+            // itself the click target swallowed every click on a node behind
+            // the orb (14 September). The target is the round button below,
+            // sized to the pearl, or to the character's body.
+            style={{ pointerEvents: 'none' }}
           >
+            {/* The thing you click: a round target between the far nodes
+                (z 5) and the near ones (z 20), so a node in front still wins
+                and a node behind is reachable around the sphere. Rounded
+                elements hit-test by their shape, so this is a circle for the
+                orb and a tall capsule for the character. */}
+            <div
+              data-testid="orb-tap"
+              role="button"
+              tabIndex={panelsOpen ? -1 : 0}
+              aria-label="Talk to Zaram"
+              className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2"
+              style={{
+                zIndex: 15,
+                pointerEvents: panelsOpen ? 'none' : 'auto',
+                cursor: panelsOpen ? 'default' : 'pointer',
+                width: renderer === 'avatar' ? ORB_SIZE * 0.5 : ORB_SIZE * 0.5,
+                height: renderer === 'avatar' ? ORB_SIZE * 0.72 : ORB_SIZE * 0.5,
+                borderRadius: renderer === 'avatar' ? '45% / 32%' : '50%',
+              }}
+              onClick={panelsOpen ? undefined : onOrbTap}
+              onKeyDown={(e) => {
+                // The orb was a clickable div, so it could not be reached or
+                // activated from the keyboard at all.
+                if (panelsOpen) return
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault()
+                  onOrbTap?.()
+                }
+              }}
+            />
             <div style={{ width: ORB_SIZE, height: ORB_SIZE, position: 'relative' }}>
               {/* The aura, for the avatar.
                *
@@ -630,6 +650,8 @@ export default function Landing({ onNavigate, onOrbTap }: LandingProps) {
               >
               <Embodiment key={renderer} px={ORB_SIZE} {...ORB_BEHAVIOUR} motes={false} />
               </div>
+              {/* The near halves of the character's rings, over it. */}
+              {renderer === 'avatar' && <OrbAuraFront px={ORB_SIZE} dimmed={panelsOpen} />}
             </div>
           </motion.div>
 

@@ -469,12 +469,25 @@ body {
           mask-composite: exclude;
   pointer-events: none;
   transition: background 0.5s ease;
+  /* The rim breathes on the orb's own period — 8s at rest, quicker while a
+     reply is in flight — so the material is lit by a light that is alive.
+     Opacity only: compositor work, nothing laid out. */
+  animation: rim-breath var(--rim-breath, 8s) ease-in-out infinite;
 }
+:root[data-orb-state="working"],
+:root[data-orb-state="listening"],
+:root[data-orb-state="speaking"] { --rim-breath: 2.4s; }
+@keyframes rim-breath { 0%, 100% { opacity: 0.72; } 50% { opacity: 1; } }
+/* A surface a reply just landed in flares once and settles. */
+.surface-arrive::before {
+  animation: rim-arrive 1.4s ease-out 1, rim-breath var(--rim-breath, 8s) ease-in-out infinite 1.4s;
+}
+@keyframes rim-arrive { 0% { opacity: 1; filter: brightness(2.2); } 100% { opacity: 0.72; filter: brightness(1); } }
 /* A step up: the composer, a dialog, a section that holds others. */
 .surface-raised { --surface-fill: rgba(255, 255, 255, 0.055); }
 
 @media (prefers-reduced-motion: reduce) {
-  .surface, .surface::before { transition: none; }
+  .surface, .surface::before { transition: none; animation: none; }
 }
 
 /* ─── The transcript's budget ─────────────────────────────────────
@@ -507,6 +520,49 @@ body {
 .role-ok  { color: var(--color-emerald); }
 .role-vi  { color: var(--color-violet); }
 .role-warn { color: var(--color-amber); }
+
+/* ─── The pearl's iridescence ─────────────────────────────────────
+   Two conic bands turning opposite ways over the globe image, masked to
+   the sphere's footprint, screened so they light the pearl rather than
+   paint it. `--sheen-seconds` is set per state by LivingOrb. */
+@property --sheen-a { syntax: '<angle>'; inherits: false; initial-value: 0deg; }
+@property --sheen-b { syntax: '<angle>'; inherits: false; initial-value: 180deg; }
+.orb-sheen {
+  position: absolute;
+  inset: 28.8%;
+  border-radius: 50%;
+  mix-blend-mode: screen;
+  pointer-events: none;
+}
+.orb-sheen-a {
+  --sheen-a: 0deg;
+  opacity: 0.5;
+  background: conic-gradient(from var(--sheen-a) at 50% 50%,
+    transparent 0deg, rgba(34,211,238,.55) 60deg, rgba(244,114,182,.45) 130deg,
+    transparent 200deg, rgba(168,85,247,.5) 270deg, rgba(34,211,238,.45) 330deg, transparent 360deg);
+  -webkit-mask: radial-gradient(circle closest-side, #000 0 82%, transparent 100%);
+          mask: radial-gradient(circle closest-side, #000 0 82%, transparent 100%);
+  animation: sheen-a var(--sheen-seconds, 26s) linear infinite;
+}
+.orb-sheen-b {
+  --sheen-b: 180deg;
+  opacity: 0.32;
+  background: conic-gradient(from var(--sheen-b) at 50% 50%,
+    transparent 0deg, rgba(255,255,255,.35) 40deg, transparent 90deg, rgba(129,140,248,.35) 200deg, transparent 260deg);
+  -webkit-mask: radial-gradient(circle closest-side, transparent 0 55%, #000 75%, transparent 100%);
+          mask: radial-gradient(circle closest-side, transparent 0 55%, #000 75%, transparent 100%);
+  animation: sheen-b calc(var(--sheen-seconds, 26s) * 1.7) linear infinite;
+}
+.orb-sheen[data-still] { animation: none; }
+@keyframes sheen-a { to { --sheen-a: 360deg; } }
+@keyframes sheen-b { to { --sheen-b: 540deg; } }
+.orb-limb {
+  position: absolute;
+  inset: 28.8%;
+  border-radius: 50%;
+  box-shadow: inset -10px -14px 28px rgba(20, 14, 60, 0.4), inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+  pointer-events: none;
+}
 
 /* ─── The tracks ──────────────────────────────────────────────────
    The rings come up as the pointer nears the orb. `--orb-near` is set on
