@@ -82,14 +82,28 @@ const ORBIT_RADIUS = 240
  * rings and the fit arithmetic, so none of them can disagree.
  */
 const TILT = 0.58
-/** The inner orbitals: narrower than the wheel and leaning steeply either
- *  way, which with the wheel's horizontal makes the three-ring atom. A shallow
- *  lean on the wheel's own aspect read as two fat ellipses, not orbitals. */
-const ORBITAL_LEAN = 62
-const ORBITAL_ASPECT = 0.36
-/** The orbitals' long axis, a little inside the wheel so they cross the
- *  nodes' track rather than reaching past it. */
-const ORBITAL_SIZE = ORBIT_RADIUS * 2 - 20
+/**
+ * The rings, 14 September 2026: **three concentric tracks in one plane**, the
+ * outer one the wheel the six nodes ride at exactly `ORBIT_RADIUS`, the two
+ * inside it bands of the same plane — Saturn, not an atom. Two leaning
+ * orbitals were tried first and read as objects on the z axis, because
+ * everything else on the landing is one tilted plane; and the nodes orbited
+ * at 240 while the tracks were drawn at 270 and 295, so they never sat on a
+ * ring at all. Radii as fractions of the wheel's.
+ */
+const TRACKS = [1, 0.74, 0.5] as const
+/**
+ * The messengers: a few points of light running along the tracks, as if
+ * carrying something from one node to the next. They replace the scattered
+ * motes on the landing — fewer particles, and every one of them on a path.
+ * Count, direction and period per track, outer first. Composited rotations;
+ * reduced motion stills them.
+ */
+const MESSENGERS = [
+  { count: 3, dir: 1, seconds: 18, colour: '#22d3ee' },
+  { count: 2, dir: -1, seconds: 12, colour: '#c084fc' },
+  { count: 1, dir: 1, seconds: 8, colour: '#818cf8' },
+] as const
 /** How much smaller and fainter the far side of the wheel is. */
 const DEPTH_SCALE = 0.25
 const DEPTH_FADE = 0.5
@@ -294,6 +308,35 @@ export default function Landing({ onNavigate, onOrbTap }: LandingProps) {
   // --- Orbital rAF: gated to 'landing' so the orbit FREEZES during chat.
   // Continuity refs ensure the loop resumes from the frozen angle (no jump to 0).
   const [orbitAngle, setOrbitAngle] = useState(0)
+
+  /**
+   * How near the pointer is to the orb, 0 far to 1 on it, as a CSS variable
+   * on the landing root. The rings read it (`.orb-track`) and come up as the
+   * pointer approaches. Chosen over a highlight that tracked the pointer on
+   * the orb itself — the maintainer disliked being reflected — and over the
+   * orb moving at all: the orb reports state and does not perform, so what
+   * responds is the atmosphere around it. One rAF per pointer event, one
+   * variable written; nothing re-renders.
+   */
+  const rootRef = useRef<HTMLDivElement>(null)
+  const orbBoxRef = useRef<HTMLDivElement>(null)
+  const nearRaf = useRef(0)
+  const onPointerNear = (event: React.PointerEvent) => {
+    if (nearRaf.current) return
+    const { clientX, clientY } = event
+    nearRaf.current = requestAnimationFrame(() => {
+      nearRaf.current = 0
+      const box = orbBoxRef.current?.getBoundingClientRect()
+      const root = rootRef.current
+      if (!box || !root) return
+      const cx = box.left + box.width / 2
+      const cy = box.top + box.height / 2
+      const reach = ORBIT_RADIUS * fitScale
+      const d = Math.hypot(clientX - cx, clientY - cy)
+      const near = Math.max(0, Math.min(1, 1 - (d - box.width * 0.35) / reach))
+      root.style.setProperty('--orb-near', near.toFixed(3))
+    })
+  }
   const rafRef = useRef<number>(0)
   const startRef = useRef<number>(0)
   const offsetRef = useRef<number>(0)
@@ -345,7 +388,7 @@ export default function Landing({ onNavigate, onOrbTap }: LandingProps) {
     return () => window.removeEventListener('keydown', onKey)
   }, [chat, closeChat])
 
-  const ring2Size = ORBIT_RADIUS * 2 + 110
+  const wheelSize = ORBIT_RADIUS * 2
 
   /**
    * Where the low caption slot sits — the status label and the first-run hint.
@@ -365,7 +408,7 @@ export default function Landing({ onNavigate, onOrbTap }: LandingProps) {
    */
   // The wheel's lowest point: the front of the outer ellipse, plus the label
   // under the front node.
-  const ringBottomFromCentre = ((ring2Size / 2) * TILT + 60) * fitScale
+  const ringBottomFromCentre = ((wheelSize / 2) * TILT + 60) * fitScale
   const captionTop = Math.min(
     viewportHeight / 2 + orbitOffsetY + ringBottomFromCentre + RING_GAP,
     // Never off the bottom: the block, the row under it, and breathing room.
@@ -408,11 +451,14 @@ export default function Landing({ onNavigate, onOrbTap }: LandingProps) {
 
   return (
     <div
+      ref={rootRef}
       className="h-screen overflow-hidden text-slate-100 flex items-center justify-center w-full flex-1"
       // Gradient and grid now come from .zaram-backdrop on the app shell, so
       // the landing and the workspaces share one ground instead of the landing
       // painting its own.
       style={{ fontFamily: 'var(--font-display), var(--font-sans), sans-serif' }}
+      onPointerMove={onPointerNear}
+      onPointerLeave={() => rootRef.current?.style.setProperty('--orb-near', '0')}
     >
       {/* The mark, in the corner it occupies on every other surface.
 
@@ -473,68 +519,59 @@ export default function Landing({ onNavigate, onOrbTap }: LandingProps) {
           transformOrigin: 'center center',
         }}
       >
-        {/* The atom. The outer track is the wheel the six nodes ride, seen
-            from the same tilt. Inside it, two orbitals cross at ±ORBITAL_LEAN
-            — the same ellipse turned either way — each carrying two electrons
-            that run along it. Asked for 14 September 2026 in place of two
-            concentric tracks in one orientation: "like a neutron". Every
-            transform here is a composited rotation; nothing is laid out per
-            frame. Reduced motion stills the electrons and keeps the rings. */}
-        {[-ORBITAL_LEAN, ORBITAL_LEAN].map((lean, i) => (
-          <motion.div
-            key={lean}
-            className="absolute rounded-full pointer-events-none"
-            style={{
-              width: ORBITAL_SIZE, height: ORBITAL_SIZE,
-              left: '50%', top: '50%',
-              x: -(ORBITAL_SIZE / 2), y: -(ORBITAL_SIZE / 2),
-              scaleY: ORBITAL_ASPECT,
-              rotate: lean,
-              border: '1px solid rgba(255,255,255,0.09)',
-            }}
-            initial={false}
-            animate={chat ? { opacity: 0, scale: reduced ? 1 : 1.15 } : { opacity: 1, scale: 1 }}
-            transition={{ duration: reduced ? 0.2 : 0.4, delay: 0.02 * i }}
-          >
-            {/* Two electrons, opposite each other, turning in the ring's own
-                frame — the ring's tilt and lean make the path an ellipse on
-                screen without the electron knowing. */}
+        {/* The tracks. Every one in the same plane as the nodes, seen from
+            the same tilt; the outer is the wheel itself. `.orb-track` reads
+            `--orb-near`, which the pointer handler below sets from its
+            distance to the orb, so the rings come up as the pointer
+            approaches — the landing noticing you without the orb looking at
+            you. Messengers turn in each ring's own frame, so the tilt makes
+            their path the ellipse without their knowing. */}
+        {TRACKS.map((fraction, i) => {
+          const size = ORBIT_RADIUS * 2 * fraction
+          const m = MESSENGERS[i]
+          return (
             <motion.div
-              className="absolute inset-0"
-              animate={reduced ? undefined : { rotate: i === 0 ? 360 : -360 }}
-              transition={{ duration: i === 0 ? 14 : 18, ease: 'linear', repeat: Infinity }}
+              key={fraction}
+              className="absolute rounded-full pointer-events-none"
+              style={{
+                width: size, height: size,
+                left: '50%', top: '50%',
+                x: -(size / 2), y: -(size / 2),
+                scaleY: TILT,
+              }}
+              initial={false}
+              animate={chat ? { opacity: 0, scale: reduced ? 1 : 1.15 } : { opacity: 1, scale: 1 }}
+              transition={{ duration: reduced ? 0.2 : 0.4, delay: 0.03 * i }}
             >
-              {[0, 180].map((phase) => (
-                <span
-                  key={phase}
-                  className="absolute rounded-full"
-                  style={{
-                    width: 5, height: 5,
-                    left: '50%', top: 0,
-                    transform: `translate(-50%, -50%) rotate(${phase}deg)`,
-                    transformOrigin: `50% ${ORBITAL_SIZE / 2}px`,
-                    background: i === 0 ? '#22d3ee' : '#c084fc',
-                    boxShadow: `0 0 6px ${i === 0 ? '#22d3ee' : '#c084fc'}`,
-                  }}
-                />
-              ))}
+              {/* The line on its own element: framer owns this box's opacity
+                  for the dissolve, and the proximity opacity must not fight it. */}
+              <div
+                className="orb-track absolute inset-0 rounded-full"
+                style={{ border: `1px solid rgba(255,255,255,${[0.11, 0.07, 0.05][i]})` }}
+              />
+              <motion.div
+                className="absolute inset-0"
+                animate={reduced ? undefined : { rotate: 360 * m.dir }}
+                transition={{ duration: m.seconds, ease: 'linear', repeat: Infinity }}
+              >
+                {Array.from({ length: m.count }, (_, k) => (
+                  <span
+                    key={k}
+                    className="absolute rounded-full"
+                    style={{
+                      width: 5, height: 5,
+                      left: '50%', top: 0,
+                      transform: `translate(-50%, -50%) rotate(${(360 / m.count) * k}deg)`,
+                      transformOrigin: `50% ${size / 2}px`,
+                      background: m.colour,
+                      boxShadow: `0 0 8px ${m.colour}, 0 0 2px #fff`,
+                    }}
+                  />
+                ))}
+              </motion.div>
             </motion.div>
-          </motion.div>
-        ))}
-        <motion.div
-          className="absolute rounded-full pointer-events-none"
-          style={{
-            width: ring2Size, height: ring2Size,
-            left: '50%', top: '50%',
-            x: -(ring2Size / 2), y: -(ring2Size / 2),
-            // The wheel's track, seen from the same tilt as the nodes on it.
-            scaleY: TILT,
-            border: '1px solid rgba(255,255,255,0.03)',
-          }}
-          initial={false}
-          animate={chat ? { opacity: 0, scale: reduced ? 1 : 1.15 } : { opacity: 1, scale: 1 }}
-          transition={{ duration: reduced ? 0.2 : 0.4, delay: 0.04 }}
-        />
+          )
+        })}
 
         {/* Central Living Orb — zooms + glides into the open space beside the chat. */}
         <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-10 flex flex-col items-center">
@@ -584,15 +621,15 @@ export default function Landing({ onNavigate, onOrbTap }: LandingProps) {
                * and rendering both would double every ring and every mote.
                */}
               {renderer === 'avatar' && (
-                <OrbAura px={ORB_SIZE} dimmed={panelsOpen} />
+                <OrbAura px={ORB_SIZE} dimmed={panelsOpen} motes={false} />
               )}
 
               {/* Above the aura, always. The avatar is a WebGL canvas in
                   normal flow, so without a stacking context of its own a
                   particle could paint across the face — and a mote crossing
                   the visor reads as something the face is doing. */}
-              <div style={{ position: 'relative', zIndex: 1 }}>
-              <Embodiment key={renderer} px={ORB_SIZE} {...ORB_BEHAVIOUR} />
+              <div ref={orbBoxRef} style={{ position: 'relative', zIndex: 1 }}>
+              <Embodiment key={renderer} px={ORB_SIZE} {...ORB_BEHAVIOUR} motes={false} />
               </div>
             </div>
           </motion.div>

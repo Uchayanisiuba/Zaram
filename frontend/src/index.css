@@ -508,6 +508,14 @@ body {
 .role-vi  { color: var(--color-violet); }
 .role-warn { color: var(--color-amber); }
 
+/* ─── The tracks ──────────────────────────────────────────────────
+   The rings come up as the pointer nears the orb. `--orb-near` is set on
+   the landing root by its pointer handler, 0 far to 1 on the orb. */
+.orb-track {
+  opacity: calc(0.65 + 0.35 * var(--orb-near, 0));
+  transition: opacity 0.4s ease;
+}
+
 /* ─── The orb's caption ───────────────────────────────────────────
    The instrument under the orb: status on the first row, the one true
    line on the second. Drawn in the surface material so it is lit by the

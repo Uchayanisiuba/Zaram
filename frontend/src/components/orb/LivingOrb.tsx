@@ -59,6 +59,9 @@ interface LivingOrbProps {
   /** Multiplies how far the orb breathes. 1 keeps the per-state default; 1.4
    *  makes the same motion 40% deeper without changing its rhythm. */
   pulseAmplitude?: number;
+  /** The drifting motes. Off on the landing, where the ring messengers are
+   *  the particles; on everywhere else the orb is large enough to carry them. */
+  motes?: boolean;
   /** Exact diameter in pixels, overriding the size preset.
    *  The presets are fixed (xs 80 … xl 560), so an orb placed in a container of
    *  another size overflowed it. Everything inside derives from this number, so
@@ -179,6 +182,7 @@ const LivingOrb = ({
   px: pxOverride,
   coreDotScale = 1,
   pulseAmplitude = 1,
+  motes = true,
 }: LivingOrbProps) => {
   const { orbState } = useOrbStore();
   const state = orbState as OrbState;
@@ -207,7 +211,7 @@ const LivingOrb = ({
   // Derived from the rendered diameter, not the preset name: with an explicit
   // px the preset says nothing about how big the orb actually is, and full-size
   // particles on a 40px orb read as noise.
-  const showParticles = px >= 180;
+  const showParticles = px >= 180 && motes;
   const showRings = px >= 120;
 
   // Deepen or soften the breath without altering its timing. The per-state

@@ -37,8 +37,11 @@ export default function OrbAura({
   /** Dimmed while a source panel is in front of the orb, matching what the
    *  character itself does. */
   dimmed = false,
+  /** The drifting motes; off on the landing, which has the ring messengers. */
+  motes = true,
 }: {
   px: number;
+  motes?: boolean;
   dimmed?: boolean;
 }) {
   const reduced = useIsReducedMotion();
@@ -120,7 +123,7 @@ export default function OrbAura({
       />
 
       <div className="absolute inset-0">
-        <OrbitalParticles />
+        {motes && <OrbitalParticles />}
       </div>
     </div>
   );
