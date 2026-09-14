@@ -25,6 +25,7 @@ const catalogue = {
       keyUrl: 'https://openrouter.ai/keys',
       compatibility: 'openai',
       auth: 'bearer',
+      hasFreeTier: true,
       keySteps: [
         'Open openrouter.ai/keys and sign in.',
         'Press Create key.',
@@ -118,6 +119,15 @@ describe('choosing a provider', () => {
     expect(await screen.findByTestId('cloud-key-note')).toHaveTextContent(
       /logged by the provider and may be trained on/,
     );
+  });
+
+  it('says, in the same breath as the free tier, that local is free and stays here', async () => {
+    // Every free tier is paid for in prompts; the other free option is the
+    // model on this machine, and it must be named beside it — 14 September.
+    await choose('openrouter');
+    const note = await screen.findByTestId('cloud-key-note');
+    expect(note).toHaveTextContent(/Local is free too/);
+    expect(note).toHaveTextContent(/leaves this device or is trained on/);
   });
 
   it('walks the person to a free key, step by step, and opens nothing itself', async () => {

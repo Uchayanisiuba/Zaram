@@ -42,6 +42,7 @@
  * exist".
  */
 import { useState } from 'react';
+import { LOCAL_IS_FREE } from '@/lib/freeTier';
 
 import type { DiscoveredModel } from '@/services/settingsClient';
 
@@ -77,7 +78,7 @@ export function describeDataPolicy(policy: string | null): string {
         'The prompt still leaves this device, and Activity records what went.';
     case 'logged_and_trained_on':
       return 'The provider logs prompts and may train on them. Zaram will tell you ' +
-        'every time one goes.';
+        'every time one goes. ' + LOCAL_IS_FREE;
     default:
       return 'Terms unknown. Zaram will not route here on its own — choosing it ' +
         'is your decision, and Activity records what went.';

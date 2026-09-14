@@ -195,11 +195,14 @@ describe('the cloud offer', () => {
     expect(button.textContent).toContain('gpt-x');
     fireEvent.click(button);
     expect(onTryCloud).toHaveBeenCalledWith('gpt-x');
+    // The offer to leave says, in the same breath, what staying costs: nothing.
+    expect(screen.getByTestId('notice-local-free')).toHaveTextContent(/Local is free too/);
   });
 
   it('offers nothing without a model to offer', () => {
     render(<NoticeCard notice={notice({ kind: 'stuck', action: 'cloud' })} onTryCloud={vi.fn()} />);
     expect(screen.queryByTestId('notice-try-cloud')).toBeNull();
+    expect(screen.queryByTestId('notice-local-free')).toBeNull();
   });
 });
 

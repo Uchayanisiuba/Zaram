@@ -35,6 +35,7 @@
  * action, and it says that it is a network call before it makes one.
  */
 import { useCallback, useEffect, useState } from 'react';
+import { LOCAL_IS_FREE } from '@/lib/freeTier';
 import LetterheadSection from '../components/settings/LetterheadSection';
 import ToolsSection from '../components/settings/ToolsSection';
 import PairingSection from '../components/settings/PairingSection';
@@ -1389,6 +1390,16 @@ export default function SettingsWorkspace() {
               {/* The walk to a key, where the catalogue has one written — the
                   same steps first run shows. The page is opened by the person
                   from the link below the form; nothing here fetches it. */}
+              {/* Every free tier is said with both halves of the deal:
+                  its price in prompts, and that local is free and stays here.
+                  See `lib/freeTier`. */}
+              {selected && selected.hasFreeTier && (
+                <p className="text-xs leading-relaxed" style={{ color: 'var(--color-text-muted)' }} data-testid="free-tier-note">
+                  {selected.note}{' '}
+                  <span style={{ color: 'var(--color-emerald)' }}>{LOCAL_IS_FREE}</span>
+                </p>
+              )}
+
               {selected && selected.available && selected.keySteps.length > 0 && (
                 <ol
                   className="list-decimal pl-4 flex flex-col gap-1 text-xs leading-relaxed text-slate-400"

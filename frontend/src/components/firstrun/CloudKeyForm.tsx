@@ -53,6 +53,7 @@ import {
   type ProviderCatalogue,
 } from '@/services/settingsClient';
 import { pastedKey } from '@/lib/pastedKey';
+import { LOCAL_IS_FREE } from '@/lib/freeTier';
 
 interface CloudKeyFormProps {
   /** Called after a provider is configured, so readiness can be asked again. */
@@ -210,6 +211,13 @@ export default function CloudKeyForm({ onConnected }: CloudKeyFormProps) {
           data-testid="cloud-key-note"
         >
           {chosen.note}
+          {/* The other half of the deal, in the same breath — see `freeTier`. */}
+          {chosen.hasFreeTier && (
+            <>
+              <br />
+              <span style={{ color: 'var(--color-emerald)' }}>{LOCAL_IS_FREE}</span>
+            </>
+          )}
         </p>
       )}
 

@@ -21,6 +21,7 @@
  * away, and the amber one has real work to do.
  */
 import { useState } from 'react';
+import { LOCAL_IS_FREE } from '@/lib/freeTier';
 import {
   AlertTriangle,
   ArrowRight,
@@ -232,6 +233,13 @@ export default function NoticeCard({ notice, onOpen, onEnableSearch, onContinue,
             Try this step with {notice.model}
             <ArrowRight size={10} />
           </button>
+        )}
+        {/* The offer to leave the machine says, in the same breath, what
+            staying costs: nothing. See `lib/freeTier`. */}
+        {offersCloud && (
+          <p className="mt-1 text-xs leading-relaxed" style={{ color: 'var(--color-text-faint)' }} data-testid="notice-local-free">
+            {LOCAL_IS_FREE}
+          </p>
         )}
 
         {!offersSearch && !offersContinue && !offersCloud && !isGo && destination && onOpen && (
