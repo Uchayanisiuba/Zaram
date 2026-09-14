@@ -550,3 +550,24 @@ class TestAFullCardDrawsElsewhere:
 
         assert result["success"] is False
         assert any(n["action"] == "settings" for n in said)
+
+    def test_a_releasable_chat_model_is_left_warm_when_the_cloud_can_draw(self, service):
+        """Evicting the chat model to draw one picture costs its reload twice;
+        with a cloud provider connected the card is not touched."""
+        cloud = _Cloud()
+        flux = _Routed(cloud)
+        card = _Card(
+            free=1 * GB,
+            resident={"qwen3-14b-16k:latest": 10 * GB},
+            outcome={"qwen3-14b-16k:latest": "released"},
+            free_after_release=11 * GB,
+            flux=flux,
+        )
+        result, said = _run(ImagesRuntime(service, flux, card=card))
+
+        assert result["success"] is True
+        assert cloud.drew == 1
+        assert "release" not in card.events, "the chat model was unloaded for a picture the cloud drew"
+        assert "load" not in flux.events
+        assert not any("unloads" in n["content"] for n in said), said
+        assert sum("NVIDIA NIM is drawing" in n["content"] for n in said) == 1

@@ -2370,6 +2370,42 @@ async def set_web_search_setting(update: WebSearchUpdate):
     return await web_search_setting()
 
 
+@app.get("/diagnostics/report")
+async def diagnostics_report():
+    """The problem report a person copies and sends themselves.
+
+    Built by `core.report`; nothing here sends it anywhere. No conversation
+    text, no document names, no facts, no keys — see the module for what
+    is in it and why.
+    """
+    from core.report import build_report
+
+    manager = getattr(getattr(kernel, "providers_runtime", None), "manager", None)
+    try:
+        from core.user_settings import get_user_settings
+
+        settings = get_user_settings()
+    except Exception:
+        settings = None
+    try:
+        from providers.cloud_config import status as cloud_status
+
+        connections = cloud_status().get("connections", [])
+    except Exception:
+        connections = []
+    try:
+        from core.egress import get_gate
+
+        entries = get_gate().log.entries(limit=12)
+    except Exception:
+        entries = []
+    try:
+        images = await image_setting()
+    except Exception:
+        images = None
+    return {"text": build_report(manager=manager, settings=settings, connections=connections, egress_entries=entries, images=images)}
+
+
 @app.get("/images/setting")
 async def image_setting():
     """Where pictures are drawn first, and what can draw at all right now."""

@@ -42,6 +42,7 @@ import PairingOffer from '@/components/settings/PairingOffer';
 const PAIRED = new Set(['nvidia_nim', 'openrouter', 'groq']);
 import LetterheadSection from '../components/settings/LetterheadSection';
 import ToolsSection from '../components/settings/ToolsSection';
+import ReportSection from '../components/settings/ReportSection';
 import PairingSection from '../components/settings/PairingSection';
 import {
   Volume2,
@@ -64,6 +65,7 @@ import {
   UserRound,
   Wrench,
   Link2,
+  LifeBuoy,
 } from 'lucide-react';
 import SurfaceHeader from '../components/common/SurfaceHeader';
 import AdvancedModelField from '../components/settings/AdvancedModelField';
@@ -1864,6 +1866,10 @@ export default function SettingsWorkspace() {
               onChange={setRenderer}
             />
           </Row>
+        </Section>
+
+        <Section title="Help" icon={<LifeBuoy size={14} style={{ color: 'var(--color-indigo-light)' }} />}>
+          <ReportSection Row={Row} />
         </Section>
 
         <p className="text-xs text-slate-500 leading-relaxed px-1">

@@ -408,6 +408,9 @@ class ImagesRuntime(Runtime):
     # ------------------------------------------------------------- the card
 
     async def _make_room(self, say, *, quiet: bool = False) -> Optional[Dict[str, Any]]:
+        # ``quiet``: the caller has somewhere else to draw, so a card that
+        # cannot take the load is reported back rather than emptied or
+        # complained about.
         """Read the card, free it if Zaram can, and refuse if it cannot.
 
         Returns ``None`` when the load may go ahead and a refusal result
@@ -440,6 +443,18 @@ class ImagesRuntime(Runtime):
         if free >= needed:
             self._note_preflight(free_bytes=free, needed_bytes=needed, fits=True)
             return None
+
+        # **A card that would have to be emptied is not emptied when a cloud
+        # provider can draw — 14 September 2026.** Evicting the chat model
+        # costs its reload (106 s measured for the maintainer's 26B) twice:
+        # once to draw, once to answer the next question. With NVIDIA one
+        # request away that is the wrong trade for one picture, so the
+        # caller's fallback draws instead and the chat model stays warm.
+        # Nothing is announced here; the caller says its one line.
+        if quiet:
+            self._note_preflight(free_bytes=free, needed_bytes=needed, fits=False, released={})
+            logger.info("Images: the card is full; drawing elsewhere rather than unloading")
+            return {"success": False, "error": "the card is full", "unavailable": True, "said": False}
 
         # Short. Say what is about to happen, then make it happen. An empty
         # residency map means Zaram's servers hold nothing and a release
