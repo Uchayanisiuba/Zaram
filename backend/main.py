@@ -1493,6 +1493,29 @@ async def health():
     }
 
 
+def _can_draw_state() -> bool | None:
+    """Whether anything here can draw a picture, for the identity block.
+    ``None`` when unreadable, and then nothing is claimed either way."""
+    try:
+        runtime = getattr(kernel, "images_runtime", None)
+        if runtime is None:
+            return False
+        return bool(runtime.availability().ok)
+    except Exception:
+        return None
+
+
+def _attached_tool_servers() -> list[str]:
+    """The tool servers the person attached, by the names they gave them.
+    Configured rather than connected — read on the way to every reply, so it
+    must not start anybody's subprocess."""
+    try:
+        runtime = getattr(kernel, "mcp_runtime", None)
+        return list(runtime.server_names()) if runtime is not None else []
+    except Exception:
+        return []
+
+
 def _web_search_state() -> bool | None:
     """Whether search is on, for the identity block. ``None`` when unreadable.
 
@@ -1697,6 +1720,8 @@ async def chat(request: ChatRequest):
             manner=_manner,
             today=_today,
             web_search=_web_search_state(),
+            can_draw=_can_draw_state(),
+            tool_servers=_attached_tool_servers(),
         ),
         persona_prompt,
     )
@@ -6154,6 +6179,9 @@ async def voice_transcribe(request: Request, language: str | None = None):
         # Sent rather than duplicated in the frontend, so the wording tracks the
         # measurement that justifies it.
         "confirmation_notice": CONFIRMATION_NOTICE if figures else None,
+        # `no_speech` when the silence filter left nothing to transcribe, so
+        # push-to-talk can say nothing was heard instead of pasting nothing.
+        "reason": transcript.metadata.get("reason"),
     }
 
 

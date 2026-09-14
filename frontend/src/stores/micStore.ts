@@ -297,7 +297,9 @@ async function transcribe(
       text?: string;
       needs_confirmation?: boolean;
       confirmation_notice?: string | null;
+      reason?: string | null;
     } = await res.json();
+    lastReason = body.reason ?? null;
     set({
       error: null,
       figureNotice: body.needs_confirmation
@@ -310,6 +312,14 @@ async function transcribe(
     return '';
   }
 }
+
+/** Why the last transcript was empty, when the backend said. `no_speech` is
+ *  the silence filter finding nothing to transcribe — said on push-to-talk,
+ *  where a person pressed and released and is waiting for words; never in
+ *  latched mode, where a quiet stretch is the ordinary case. */
+let lastReason: string | null = null;
+
+export const NOTHING_HEARD = 'Nothing was heard. Try again, a little closer to the microphone.';
 
 export const useMicStore = create<MicStore>((set, get) => ({
   status: 'idle',
@@ -395,6 +405,7 @@ export const useMicStore = create<MicStore>((set, get) => ({
 
     const text = await transcribe(blob, type, set);
     set({ status: 'idle', mode: 'push', level: 0, hearingVoice: false });
+    if (!text && lastReason === 'no_speech') set({ error: NOTHING_HEARD });
     return text;
   },
 

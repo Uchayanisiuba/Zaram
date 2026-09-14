@@ -74,10 +74,14 @@ class _FakeSegment:
 
 
 class _FakeInfo:
-    def __init__(self, language: Optional[str], duration: float) -> None:
+    def __init__(
+        self, language: Optional[str], duration: float, duration_after_vad: Optional[float] = None
+    ) -> None:
         self.language = language
         self.language_probability = 0.99 if language else None
         self.duration = duration
+        if duration_after_vad is not None:
+            self.duration_after_vad = duration_after_vad
 
 
 class _FakeModel:
@@ -540,3 +544,55 @@ class TestLifecycle:
         await recogniser.initialize()
 
         assert factory.offline_attempts == 1
+
+
+class TestSilenceIsNamed:
+    """The VAD (Silero's, bundled with faster-whisper, on since the mic
+    shipped) trims the quiet and refuses a recording with no speech. What it
+    left used to be an empty string indistinguishable from an utterance the
+    model made nothing of, so push-to-talk could not say *nothing was heard*.
+    Recorded as the silero-vad deferral's re-entry on 14 September 2026: the
+    trimming was already there; the naming was not."""
+
+    async def test_a_recording_the_filter_emptied_says_no_speech(
+        self, faster_whisper_installed, monkeypatch
+    ):
+        monkeypatch.setattr(whisper_module, "get_gate", lambda: _ExplodingGate())
+        model = _FakeModel(segments=[], info=_FakeInfo(None, 3.1, duration_after_vad=0.0))
+        recogniser = _recogniser(_Factory(cached=True, model=model))
+        await recogniser.initialize()
+
+        transcript = await recogniser.transcribe(b"audio")
+
+        assert transcript.text == ""
+        assert transcript.metadata["reason"] == "no_speech"
+        assert transcript.metadata["speech_s"] == 0.0
+        assert transcript.duration_s == 3.1
+
+    async def test_speech_the_model_transcribed_carries_no_reason(
+        self, faster_whisper_installed, monkeypatch
+    ):
+        monkeypatch.setattr(whisper_module, "get_gate", lambda: _ExplodingGate())
+        model = _FakeModel(info=_FakeInfo("en", 2.5, duration_after_vad=1.9))
+        recogniser = _recogniser(_Factory(cached=True, model=model))
+        await recogniser.initialize()
+
+        transcript = await recogniser.transcribe(b"audio")
+
+        assert transcript.text
+        assert "reason" not in transcript.metadata
+        assert transcript.metadata["speech_s"] == 1.9
+
+    async def test_with_the_filter_off_an_empty_result_is_not_called_silence(
+        self, faster_whisper_installed, monkeypatch
+    ):
+        """Without the VAD nothing measured the quiet, so nothing may claim it."""
+        monkeypatch.setattr(whisper_module, "get_gate", lambda: _ExplodingGate())
+        model = _FakeModel(segments=[], info=_FakeInfo(None, 1.0))
+        recogniser = _recogniser(_Factory(cached=True, model=model), vad_filter=False)
+        await recogniser.initialize()
+
+        transcript = await recogniser.transcribe(b"audio")
+
+        assert transcript.text == ""
+        assert "reason" not in transcript.metadata

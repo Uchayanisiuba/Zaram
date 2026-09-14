@@ -340,18 +340,36 @@ class WhisperRecogniser(SpeechRecogniser):
 
         detected = getattr(info, "language", None)
         probability = getattr(info, "language_probability", None)
+        text = " ".join(s.text for s in segments if s.text).strip()
+
+        # **Silence is named, not returned as an empty string.** The VAD
+        # (`vad_filter`, Silero's, bundled with faster-whisper) trims the
+        # leading and trailing quiet and refuses a recording with no speech
+        # in it, which is what stops Whisper inventing "Thank you." into the
+        # composer. What it left was indistinguishable from a real utterance
+        # the model made nothing of — both were ``""`` — so the interface
+        # could not say *nothing was heard* rather than showing an empty box.
+        # `duration_after_vad` is the seconds of speech the filter kept.
+        speech_s = getattr(info, "duration_after_vad", None)
+        metadata: Dict[str, Any] = {
+            "model": self.config.model_size,
+            "language_probability": probability,
+        }
+        if isinstance(speech_s, (int, float)):
+            metadata["speech_s"] = float(speech_s)
+        if not text and self.config.vad_filter and (
+            not segments or (isinstance(speech_s, (int, float)) and speech_s <= 0)
+        ):
+            metadata["reason"] = "no_speech"
 
         return Transcript(
-            text=" ".join(s.text for s in segments if s.text).strip(),
+            text=text,
             segments=segments,
             # Never defaulted to "en". The engine says or it does not, and a
             # guessed language is a wrong value rendered confidently.
             language=language or detected or None,
             duration_s=float(getattr(info, "duration", 0.0) or 0.0),
-            metadata={
-                "model": self.config.model_size,
-                "language_probability": probability,
-            },
+            metadata=metadata,
         )
 
     def is_available(self) -> bool:
