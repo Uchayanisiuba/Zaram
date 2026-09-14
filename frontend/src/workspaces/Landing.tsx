@@ -72,6 +72,19 @@ interface LandingProps {
 
 const ORB_SIZE = 320
 const ORBIT_RADIUS = 240
+/**
+ * The ring is a wheel seen from slightly above, turning about the vertical
+ * axis — asked for 14 September 2026 in place of the flat circle. This is
+ * the cosine of the viewing tilt: a node's depth `z` on the wheel lands on
+ * screen at `z * TILT` below centre, so the track is an ellipse this tall.
+ * A node at the back is smaller, dimmer and under the orb; at the front it
+ * is full size and over it. One number, used by the nodes, both track
+ * rings and the fit arithmetic, so none of them can disagree.
+ */
+const TILT = 0.58
+/** How much smaller and fainter the far side of the wheel is. */
+const DEPTH_SCALE = 0.25
+const DEPTH_FADE = 0.5
 /** How far the orbit turns between React renders. 0.2° at 240px
  *  of radius is under a pixel of travel — see the tick in the orbit effect. */
 const ORBIT_STEP_DEG = 0.2
@@ -195,6 +208,9 @@ export default function Landing({ onNavigate, onOrbTap }: LandingProps) {
    *  while the placement drew one of another. */
   const BOTTOM_RESERVE = RING_GAP + CAPTION_BLOCK + HINT_ROW + CAPTION_FOOT
   const DESIGN_DIAMETER = ORBIT_RADIUS * 2 + 110
+  /** The wheel's height on screen: the ellipse, plus the front node's label
+   *  hanging below it and the back node's tile standing above. */
+  const DESIGN_HEIGHT = DESIGN_DIAMETER * TILT + 120
 
   /**
    * The scale the orbital system **fits in**, not the one it was designed at.
@@ -231,7 +247,7 @@ export default function Landing({ onNavigate, onOrbTap }: LandingProps) {
   const availableHeight = viewportHeight - 2 * BOTTOM_RESERVE
   const fitScale = Math.max(
     0.62,
-    Math.min(CONTAINER_SCALE, availableHeight / DESIGN_DIAMETER, viewportWidth / DESIGN_DIAMETER),
+    Math.min(CONTAINER_SCALE, availableHeight / DESIGN_HEIGHT, viewportWidth / DESIGN_DIAMETER),
   )
 
   /**
@@ -250,7 +266,7 @@ export default function Landing({ onNavigate, onOrbTap }: LandingProps) {
    * to apply everywhere. One expression covers both instead of a constant that
    * is correct in one case.
    */
-  const ringDiameter = DESIGN_DIAMETER * fitScale
+  const ringDiameter = DESIGN_HEIGHT * fitScale
   const lowestCentre = viewportHeight - BOTTOM_RESERVE - ringDiameter / 2
   const highestCentre = TOP_RESERVE + ringDiameter / 2
   const orbitCentreY = Math.min(
@@ -340,7 +356,9 @@ export default function Landing({ onNavigate, onOrbTap }: LandingProps) {
    * 826px and there is genuinely nowhere below it. Saying so in the arithmetic
    * beats a percentage that is right on one monitor.
    */
-  const ringBottomFromCentre = (ring2Size / 2) * fitScale
+  // The wheel's lowest point: the front of the outer ellipse, plus the label
+  // under the front node.
+  const ringBottomFromCentre = ((ring2Size / 2) * TILT + 60) * fitScale
   const captionTop = Math.min(
     viewportHeight / 2 + orbitOffsetY + ringBottomFromCentre + RING_GAP,
     // Never off the bottom: the block, the row under it, and breathing room.
@@ -455,6 +473,8 @@ export default function Landing({ onNavigate, onOrbTap }: LandingProps) {
             width: ring1Size, height: ring1Size,
             left: '50%', top: '50%',
             x: -(ring1Size / 2), y: -(ring1Size / 2),
+            // The track seen from the same tilt as the nodes on it.
+            scaleY: TILT,
             border: '1px solid rgba(255,255,255,0.04)',
           }}
           initial={false}
@@ -467,6 +487,7 @@ export default function Landing({ onNavigate, onOrbTap }: LandingProps) {
             width: ring2Size, height: ring2Size,
             left: '50%', top: '50%',
             x: -(ring2Size / 2), y: -(ring2Size / 2),
+            scaleY: TILT,
             border: '1px solid rgba(255,255,255,0.025)',
           }}
           initial={false}
@@ -542,7 +563,14 @@ export default function Landing({ onNavigate, onOrbTap }: LandingProps) {
         {ORBITAL_NODES.map((node) => {
           const animatedRad = ((node.angle - 90 + orbitAngle) * Math.PI) / 180
           const restX = Math.cos(animatedRad) * ORBIT_RADIUS
-          const restY = Math.sin(animatedRad) * ORBIT_RADIUS
+          // Depth on the wheel: +R at the front (bottom of screen), -R at the
+          // back. Screen y is the tilted projection; size and opacity follow
+          // depth so the far side reads as far.
+          const restZ = Math.sin(animatedRad) * ORBIT_RADIUS
+          const restY = restZ * TILT
+          const depth = (restZ + ORBIT_RADIUS) / (2 * ORBIT_RADIUS)
+          const depthScale = 1 - DEPTH_SCALE * (1 - depth)
+          const depthOpacity = 1 - DEPTH_FADE * (1 - depth)
 
           // Drift compensation, and only for the node in hand. Its slot keeps
           // advancing with the rest of the orbit, so without this the node
@@ -552,14 +580,14 @@ export default function Landing({ onNavigate, onOrbTap }: LandingProps) {
           const heldRad = ((node.angle - 90 + dragFromAngle.current) * Math.PI) / 180
           const held = dragging === node.id
           const driftX = held ? Math.cos(heldRad) * ORBIT_RADIUS - restX : 0
-          const driftY = held ? Math.sin(heldRad) * ORBIT_RADIUS - restY : 0
+          const driftY = held ? Math.sin(heldRad) * ORBIT_RADIUS * TILT - restY : 0
           // Dispersal target: push ~0.8 * ORBIT_RADIUS further along the same angle.
           const dx = Math.cos(animatedRad) * ORBIT_RADIUS * 0.8
-          const dy = Math.sin(animatedRad) * ORBIT_RADIUS * 0.8
+          const dy = Math.sin(animatedRad) * ORBIT_RADIUS * 0.8 * TILT
 
           const dispersed = chat
             ? reduced ? { opacity: 0 } : { opacity: 0, scale: 0.4, x: dx, y: dy }
-            : reduced ? { opacity: 1 } : { opacity: 1, scale: 1, x: 0, y: 0 }
+            : reduced ? { opacity: depthOpacity } : { opacity: depthOpacity, scale: depthScale, x: 0, y: 0 }
           // Leaving is snappier than returning. A dispersal that eases out feels
           // like lag on a click; arriving back can afford to settle.
           const childTransition = reduced
@@ -577,8 +605,10 @@ export default function Landing({ onNavigate, onOrbTap }: LandingProps) {
                 transform: `translate(-50%, -50%) translate(${restX}px, ${restY}px)`,
                 pointerEvents: chat ? 'none' : 'auto',
                 // Lifted while held, so a node dragged across the ring passes
-                // over its siblings instead of sliding beneath them.
-                zIndex: dragging === node.id ? 40 : 20,
+                // over its siblings instead of sliding beneath them. Otherwise
+                // the front half of the wheel sits over the orb (z-10) and the
+                // back half under it, which is what makes it a wheel.
+                zIndex: dragging === node.id ? 40 : restZ >= 0 ? 20 : 5,
               }}
             >
               <motion.div
