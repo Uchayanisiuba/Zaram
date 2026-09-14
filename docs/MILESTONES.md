@@ -22,9 +22,108 @@ publishing step over rather than finding another route. `CLAUDE.md`,
 
 *The latest work is first. Earlier sessions follow below.*
 
-### 14 September — the daily-driver base, pictures from the cloud, one key paired to each job, and the landing redrawn. HANDOFF.
+### 14 September, later — fewer notices, a cloud model sized by its provider, documents written to a brief. HANDOFF.
 
-**Read this block first.** Everything below is committed and pushed
+**Read this block first.** Everything below is committed and pushed. The
+earlier 14 September block follows it and is still current for what it
+lists.
+
+#### What the maintainer saw, and what changed
+
+Two screenshots, both of one reply on `nvidia_nim:z-ai/glm-5.3-flash`:
+*"none of the earlier conversation fits … on a model with a 4,096-token
+window"*, then three stacked notices for one picture — the unload
+announcement, a refusal naming TabbyAPI, a remedy pointing at Settings.
+The words were *"there seems to be a lot of popups … can we make Zaram
+work seamlessly"*. Four fixes, each pinned by a test:
+
+1. **A cloud model is sized by its provider, never by Ollama's default.**
+   `budget_for` had three readings and all three were loopback probes, so
+   every cloud model fell to 4,096. Now: what the listing declared
+   (`ModelInfo.context_length`, read by the OpenAI-compatible discoverer
+   from `context_length` / `context_window` / `max_model_len`), then a
+   dated floor by model name (`providers/windows.py`, every figure a
+   lower bound), then 8,192 labelled `assumed-cloud`. The engine and the
+   chat route pass the provider manager as `catalog`; a local model is
+   untouched. `tests/test_a_cloud_model_is_sized_by_its_provider.py`.
+2. **The first picture to a connected provider is one question,
+   remembered.** `_needs_own_grant` returned `DENY` with a trip to
+   Activity → Destinations; it returns `ASK` with `remember=True`, the
+   gate writes the class rule on a yes, and the dialog says so before the
+   person answers (`data_class`, `remember` on `/egress/pending`). A host
+   the user set to ASK by name is still asked every time. Connecting a
+   provider now permits every host it answers from — NVIDIA draws at
+   `ai.api.nvidia.com`, not `integrate.` — prompts only.
+3. **A full card draws on the cloud provider instead of stopping.**
+   `RoutedImageProvider.instead_of_the_card()`; the runtime says one line
+   and the refusal becomes a log entry. Without a cloud provider the
+   refusal stands as before.
+4. **Silence is named.** The VAD was already on (`vad_filter=True`,
+   Silero v6 bundled with faster-whisper — the earlier deferral note
+   below was wrong about that); what was missing was the answer.
+   `metadata.reason == "no_speech"` when the filter left nothing, and
+   push-to-talk says *nothing was heard* instead of pasting nothing.
+
+#### Documents — "should be better", built
+
+* **A brief per kind** — `artifacts/briefs.py`: proposal, statement of
+  work, report, memo, brief, meeting notes, plan, letter, cover letter,
+  email, summary, press release, article. The instruction names the
+  sections as `##` headings and carries rule 9 in as many words (leave a
+  section out; `[to confirm]` for a missing fact). Longest matching
+  phrase wins, so "a brief summary" is a summary.
+* **The structure the model writes reaches the file.** The chat path
+  stripped markdown to paragraphs while the API path kept it; `_blocks`
+  now goes through `blocks_from_markdown` with claims anchored on the
+  bare text of a paragraph. Plain prose still splits as before.
+* **`TaskSlot.DOCUMENT`** — the router distinguishes a document request
+  (`INTENT_SPECIALISATION[DOCUMENT] = "document"`), so the slot is real by
+  the `TaskSlot` docstring's own test. The pairing offer fills it (kimi-k2,
+  deepseek-v3.1, llama-3.3-70b on NIM; the `:free` equivalents on
+  OpenRouter; Groq's two). Copy in `taskSlots.ts` and `PairingOffer`.
+
+#### Also
+
+* **Zaram says what it does** — `_WHAT_ZARAM_IS` widened to the true set
+  (documents of every shape, invoices, CVs, charts, decks, pictures read
+  on this machine, commitments surfaced), plus `_reach_line` for the two
+  facts that depend on the machine — whether anything can draw, and which
+  tool servers are attached — said only when known, before the manner.
+  The maintainer's words: *"Zaram does a whole lot more and should address
+  itself as such."*
+* **A translation is asked for as a translation** — `IntentType.TRANSLATE`
+  with exemplars, `_translation_prompt` asking for the translation alone,
+  measured on bge-m3: three phrasings route to it and document / code /
+  vision keep theirs.
+
+#### Deferred, and the reason changed
+
+* **`argos-translate` / Opus-MT through CTranslate2** — still not built,
+  and no longer for lack of an intent. A per-pair package is ~100 MB,
+  fetched through the gate with a consent dialog, to be faster than a
+  model that is already resident and now receives a proper instruction.
+  On the day the maintainer asked for fewer dialogs, that is the wrong
+  trade. Re-entry unchanged if a user asks for it: `zaram[translate]` =
+  `ctranslate2 + sentencepiece` (no stanza, no torch), argospm packages
+  unzipped under the data dir, a `translate.text` capability the
+  `translate` intent routes to when the pair is installed.
+* **`silero-vad`** — closed; see 4 above.
+
+#### For the maintainer
+
+* The three `.fbx` files in `avatar-source/animations/` (*Breathing
+  Idle*, *Idle 03*, *Sad Idle*) are Mixamo exports on `mixamorig:` — idle
+  variants, not typing; `Typing_01.fbx` is already `coding_a`. Mixamo's
+  terms restrict redistributing the source files, which is why the
+  earlier Mixamo clip was never committed. Left untracked.
+* Verify in Electron: a long conversation on GLM no longer shows the
+  window notice; the first picture on NIM asks once and the second does
+  not; a proposal comes back with headings; push-to-talk on silence says
+  nothing was heard; Settings → Advanced has a *Writing documents* row.
+
+### 14 September — the daily-driver base, pictures from the cloud, one key paired to each job, and the landing redrawn.
+
+Everything below is committed and pushed
 (`main` at `f5eb01d`). Verified in the browser pane against a dev backend
 until the packaged app took port 8420 mid-session; after that by test and
 type-check, which is why the last few visual items are flagged *seen in
