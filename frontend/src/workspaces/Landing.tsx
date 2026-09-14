@@ -82,6 +82,8 @@ const ORBIT_RADIUS = 240
  * rings and the fit arithmetic, so none of them can disagree.
  */
 const TILT = 0.58
+/** How far either inner orbital leans from the wheel's axis, in degrees. */
+const ORBITAL_LEAN = 34
 /** How much smaller and fainter the far side of the wheel is. */
 const DEPTH_SCALE = 0.25
 const DEPTH_FADE = 0.5
@@ -466,29 +468,63 @@ export default function Landing({ onNavigate, onOrbTap }: LandingProps) {
           transformOrigin: 'center center',
         }}
       >
-        {/* Orbit track rings — dissolve / restore (centering via framer offset, never inline transform). */}
-        <motion.div
-          className="absolute rounded-full pointer-events-none"
-          style={{
-            width: ring1Size, height: ring1Size,
-            left: '50%', top: '50%',
-            x: -(ring1Size / 2), y: -(ring1Size / 2),
-            // The track seen from the same tilt as the nodes on it.
-            scaleY: TILT,
-            border: '1px solid rgba(255,255,255,0.04)',
-          }}
-          initial={false}
-          animate={chat ? { opacity: 0, scale: reduced ? 1 : 1.15 } : { opacity: 1, scale: 1 }}
-          transition={{ duration: reduced ? 0.2 : 0.4 }}
-        />
+        {/* The atom. The outer track is the wheel the six nodes ride, seen
+            from the same tilt. Inside it, two orbitals cross at ±ORBITAL_LEAN
+            — the same ellipse turned either way — each carrying two electrons
+            that run along it. Asked for 14 September 2026 in place of two
+            concentric tracks in one orientation: "like a neutron". Every
+            transform here is a composited rotation; nothing is laid out per
+            frame. Reduced motion stills the electrons and keeps the rings. */}
+        {[-ORBITAL_LEAN, ORBITAL_LEAN].map((lean, i) => (
+          <motion.div
+            key={lean}
+            className="absolute rounded-full pointer-events-none"
+            style={{
+              width: ring1Size, height: ring1Size,
+              left: '50%', top: '50%',
+              x: -(ring1Size / 2), y: -(ring1Size / 2),
+              scaleY: TILT,
+              rotate: lean,
+              border: '1px solid rgba(255,255,255,0.075)',
+            }}
+            initial={false}
+            animate={chat ? { opacity: 0, scale: reduced ? 1 : 1.15 } : { opacity: 1, scale: 1 }}
+            transition={{ duration: reduced ? 0.2 : 0.4, delay: 0.02 * i }}
+          >
+            {/* Two electrons, opposite each other, turning in the ring's own
+                frame — the ring's tilt and lean make the path an ellipse on
+                screen without the electron knowing. */}
+            <motion.div
+              className="absolute inset-0"
+              animate={reduced ? undefined : { rotate: i === 0 ? 360 : -360 }}
+              transition={{ duration: i === 0 ? 14 : 18, ease: 'linear', repeat: Infinity }}
+            >
+              {[0, 180].map((phase) => (
+                <span
+                  key={phase}
+                  className="absolute rounded-full"
+                  style={{
+                    width: 5, height: 5,
+                    left: '50%', top: 0,
+                    transform: `translate(-50%, -50%) rotate(${phase}deg)`,
+                    transformOrigin: `50% ${ring1Size / 2}px`,
+                    background: i === 0 ? '#22d3ee' : '#c084fc',
+                    boxShadow: `0 0 6px ${i === 0 ? '#22d3ee' : '#c084fc'}`,
+                  }}
+                />
+              ))}
+            </motion.div>
+          </motion.div>
+        ))}
         <motion.div
           className="absolute rounded-full pointer-events-none"
           style={{
             width: ring2Size, height: ring2Size,
             left: '50%', top: '50%',
             x: -(ring2Size / 2), y: -(ring2Size / 2),
+            // The wheel's track, seen from the same tilt as the nodes on it.
             scaleY: TILT,
-            border: '1px solid rgba(255,255,255,0.025)',
+            border: '1px solid rgba(255,255,255,0.03)',
           }}
           initial={false}
           animate={chat ? { opacity: 0, scale: reduced ? 1 : 1.15 } : { opacity: 1, scale: 1 }}
