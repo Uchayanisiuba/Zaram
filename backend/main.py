@@ -420,12 +420,24 @@ async def startup_event():
 
     asyncio.create_task(_warm())
 
+    # Knowledge folders are watched from here on: a file that changes is
+    # re-read, one that appears is read, one that goes is marked gone. See
+    # `ingest/watcher.py`. A task, not a thread — it awaits the notifier and
+    # runs each re-read off the loop itself.
+    global source_watcher
+    from ingest.watcher import SourceWatcher
+
+    source_watcher = SourceWatcher(ingest_service)
+    asyncio.create_task(source_watcher.run())
+
     print("[Startup] Chat Router initialized. Kernel Online.")
 
 
 @app.on_event("shutdown")
 async def shutdown_event():
     print("[Shutdown] Powering down Zaram Kernel...")
+    if source_watcher is not None:
+        source_watcher.stop()
 
     # First, and before anything that awaits. A thread parked inside the egress
     # gate is waiting on an event only a browser can set, and a browser that is
@@ -5066,6 +5078,8 @@ obligation_records = ObligationRecords(obligations_db_path())
 ingest_service = IngestService(
     IngestRecords(ingest_db_path()), obligations=obligation_records
 )
+#: The folder watcher, started at boot. `None` until then, and in tests.
+source_watcher = None
 
 
 # --------------------------------------------------------------------------- #
