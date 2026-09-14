@@ -386,7 +386,7 @@ PROVIDERS: Tuple[ProviderEntry, ...] = (
         key_steps=(
             "Open openrouter.ai/keys and sign in — an email or a GitHub account is enough; no card.",
             "Press Create key, give it any name, and leave the credit limit empty.",
-            "Copy the key. It is shown once.",
+            "Copy the key itself. It is shown once; if you copied a code sample around it, paste that and Zaram will keep only the key.",
             "Paste it below. Models marked :free cost nothing; Zaram labels each one, and will tell you every time a prompt goes.",
         ),
     ),
@@ -408,6 +408,13 @@ PROVIDERS: Tuple[ProviderEntry, ...] = (
             "your prompts may be logged."
         ),
         pricing=Pricing.FREE_TIER,
+        # Read from console.groq.com on 14 September 2026.
+        key_steps=(
+            "Open console.groq.com/keys and sign in — an email or a Google account; no card.",
+            "Press Create API Key and give it any name.",
+            "Copy the key itself from the dialog; it is shown once. If you copied the code sample beside it, paste that and Zaram will keep only the key.",
+            "Paste it below, then ask one question: Zaram shows exactly what leaves before it goes, and asks once for this provider.",
+        ),
     ),
     _openai_compatible(
         "mistral",
@@ -501,8 +508,8 @@ PROVIDERS: Tuple[ProviderEntry, ...] = (
         # Read from build.nvidia.com on 13 September 2026.
         key_steps=(
             "Open build.nvidia.com and sign in — an email is enough; no card.",
-            "Pick any model on the page — a Nemotron is a good first one — and press Get API Key beside the code sample.",
-            "Copy the key. It begins nvapi- and expires after six months.",
+            "Pick any model on the page — a Nemotron is a good first one — and press Generate API Key beside the code sample.",
+            "Copy the key itself from the box that appears — it begins nvapi- and expires after six months. The Copy button on the code sample copies the whole snippet; if that is what you got, paste it anyway and Zaram will keep only the key.",
             "Paste it below, then ask one question: Zaram shows exactly what leaves before it goes, and asks once for this provider.",
         ),
     ),

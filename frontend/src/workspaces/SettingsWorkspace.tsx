@@ -105,6 +105,7 @@ import {
   type RoutingSettings,
   type WebSearchStatus,
 } from '@/services/settingsClient';
+import { pastedKey } from '@/lib/pastedKey';
 
 // --------------------------------------------------------------- primitives
 
@@ -526,6 +527,7 @@ export default function SettingsWorkspace() {
   // into the wrong service.
   const [chosenProvider, setChosenProvider] = useState<string>('');
   const [apiKey, setApiKey] = useState('');
+  const [keyExtracted, setKeyExtracted] = useState(false);
   const [customUrl, setCustomUrl] = useState('');
 
   useEffect(() => startPolling(), [startPolling]);
@@ -1427,8 +1429,20 @@ export default function SettingsWorkspace() {
                     color: 'var(--color-text)',
                   }}
                   value={apiKey}
-                  onChange={(event) => setApiKey(event.target.value)}
+                  onChange={(event) => {
+                    // A provider's Copy button often copies a whole code
+                    // sample with the key inside it. Keep the key, say so.
+                    const read = pastedKey(event.target.value);
+                    setApiKey(read.key);
+                    setKeyExtracted(read.extracted);
+                  }}
                 />
+              )}
+              {keyExtracted && apiKey && (
+                <p className="text-[11px] leading-relaxed text-slate-400" data-testid="cloud-key-extracted">
+                  That was a code sample; Zaram kept the key out of it. Check it ends the way the
+                  provider showed it.
+                </p>
               )}
 
               <div className="flex items-center gap-2 flex-wrap">

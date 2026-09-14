@@ -52,6 +52,7 @@ import {
   type CatalogueProvider,
   type ProviderCatalogue,
 } from '@/services/settingsClient';
+import { pastedKey } from '@/lib/pastedKey';
 
 interface CloudKeyFormProps {
   /** Called after a provider is configured, so readiness can be asked again. */
@@ -94,6 +95,9 @@ export default function CloudKeyForm({ onConnected }: CloudKeyFormProps) {
   const [phase, setPhase] = useState<Phase>({ name: 'loading' });
   const [providerId, setProviderId] = useState('');
   const [apiKey, setApiKey] = useState('');
+  /** Set when the key was lifted out of a code sample the person pasted,
+   *  so the field can say what it kept. */
+  const [extracted, setExtracted] = useState(false);
 
   useEffect(() => {
     let live = true;
@@ -223,7 +227,11 @@ export default function CloudKeyForm({ onConnected }: CloudKeyFormProps) {
           type="password"
           value={apiKey}
           onChange={(e) => {
-            setApiKey(e.target.value);
+            // The provider's Copy button often copies a whole code sample
+            // with the key inside it. Keep the key, say so. `lib/pastedKey`.
+            const read = pastedKey(e.target.value);
+            setApiKey(read.key);
+            setExtracted(read.extracted);
             if (phase.name === 'failed') setPhase({ name: 'ready' });
           }}
           placeholder="Paste it here"
@@ -233,6 +241,13 @@ export default function CloudKeyForm({ onConnected }: CloudKeyFormProps) {
           style={fieldStyle}
         />
       </label>
+
+      {extracted && apiKey && (
+        <p className="text-xs leading-relaxed" style={{ color: 'var(--color-text-muted)' }} data-testid="cloud-key-extracted">
+          That was a code sample; Zaram kept the key out of it. Check it ends the way the
+          provider showed it.
+        </p>
+      )}
 
       {phase.name === 'failed' && (
         <p className="text-xs leading-relaxed" style={{ color: '#fca5a5' }} role="alert">

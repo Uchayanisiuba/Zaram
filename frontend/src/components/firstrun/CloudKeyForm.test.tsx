@@ -135,6 +135,25 @@ describe('choosing a provider', () => {
     expect(within(walk).getByTestId('cloud-key-open')).toHaveTextContent('Open it');
   });
 
+  it('keeps the key out of a pasted code sample, and says so', async () => {
+    // build.nvidia.com's Copy button copies the whole Python snippet, and
+    // that is what got pasted on 14 September 2026 — "it doesn't work".
+    const user = await choose('openrouter');
+    const field = screen.getByPlaceholderText('Paste it here');
+    await user.click(field);
+    await user.paste(
+      [
+        'client = OpenAI(',
+        '  base_url = "https://integrate.api.nvidia.com/v1",',
+        '  api_key = "nvapi-abcDEF123_ghi-JKL456mno789PQRstu012VWXyz"',
+        ')',
+      ].join('\n'),
+    );
+
+    expect(field).toHaveValue('nvapi-abcDEF123_ghi-JKL456mno789PQRstu012VWXyz');
+    expect(screen.getByTestId('cloud-key-extracted')).toHaveTextContent(/kept the key out of it/);
+  });
+
   it('falls back to the bare key page where no walk is written', async () => {
     await choose('deepseek');
 
