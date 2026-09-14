@@ -25,7 +25,7 @@ describe('the returning line', () => {
       '14 new facts since Friday',
       '3 projects',
       'last: the Abuja fit-out',
-      '0 bytes left today',
+      '0 bytes out today',
     ]);
     expect(segments.map((s) => s.target)).toEqual(['memory', 'project', 'resume', 'activity']);
     expect(segments[2].conversationId).toBe('c1');
@@ -44,11 +44,11 @@ describe('the returning line', () => {
   it('omits a segment whose measurement failed, never rendering it as zero', () => {
     // The egress log unreachable is not "0 bytes left". A privacy claim made
     // from an absent measurement is the one false thing this line must not say.
-    expect(texts({ ...full, bytesToday: null })).not.toContain('0 bytes left today');
+    expect(texts({ ...full, bytesToday: null })).not.toContain('0 bytes out today');
     expect(texts({ ...full, projects: null })).toEqual([
       '14 new facts since Friday',
       'last: the Abuja fit-out',
-      '0 bytes left today',
+      '0 bytes out today',
     ]);
   });
 
@@ -57,7 +57,8 @@ describe('the returning line', () => {
   });
 
   it('says a measured nothing plainly', () => {
-    expect(texts({ ...full, newFacts: 0 })[0]).toBe('nothing new since Friday');
+    expect(texts({ ...full, newFacts: 0 })[0]).toBe('no new facts since Friday');
+    expect(texts({ ...full, sinceAt: NOW - 600, newFacts: 0 })[0]).toBe('no new facts');
   });
 
   it('shortens a long conversation title rather than letting the line wrap into a paragraph', () => {

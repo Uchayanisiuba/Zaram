@@ -91,7 +91,11 @@ export default function OrbStatusLabel({
         >
           {working}
         </span>
-      ) : (
+      ) : compact && tone === 'local' ? null : (
+        // In the capsule the sentence appears only when it explains something
+        // the label cannot — offline, warming, a switch, cloud used. At rest
+        // and local, "Local only" is the whole of it, and the sentence under
+        // it was the same claim again in more words.
         <span
           className={`${compact ? 'text-xs max-w-[26rem]' : 'text-xs max-w-[16rem]'} text-slate-500 text-center leading-snug`}
         >

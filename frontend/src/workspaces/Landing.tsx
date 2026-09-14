@@ -665,23 +665,17 @@ export default function Landing({ onNavigate, onOrbTap }: LandingProps) {
                   whileHover={{ scale: 1.18 }}
                   whileTap={{ scale: 0.94 }}
                 >
-                  <motion.div
-                    className="w-14 h-14 rounded-2xl flex items-center justify-center"
-                    style={{
-                      background: 'rgba(255,255,255,0.05)',
-                      border: `1px solid ${node.color}35`,
-                      backdropFilter: 'blur(10px)',
-                      boxShadow: `0 4px 24px rgba(0,0,0,0.3)`,
-                    }}
-                    whileHover={{
-                      background: `${node.color}18`,
-                      borderColor: `${node.color}70`,
-                      boxShadow: `0 0 24px ${node.color}50, 0 4px 24px rgba(0,0,0,0.3)`,
-                    }}
-                    transition={{ duration: 0.2 }}
+                  {/* The same material as every card: lit from the orb, the
+                      rim taking the node's own colour under the pointer
+                      (`.orb-node` in index.css). No backdrop blur — six
+                      blurred tiles on a rotating ring beside a resident model
+                      was the one expensive effect on the landing. */}
+                  <div
+                    className="orb-node surface w-14 h-14 rounded-2xl flex items-center justify-center"
+                    style={{ '--node-color': node.color } as React.CSSProperties}
                   >
                     {node.icon}
-                  </motion.div>
+                  </div>
                   <span
                     className="text-slate-400 whitespace-nowrap select-none"
                     style={{ fontSize: '12px', letterSpacing: '0.03em' }}

@@ -78,7 +78,7 @@ export function sinceWord(sinceAt: number, now: number): string {
   return `${then.getDate()} ${MONTHS[then.getMonth()]}`;
 }
 
-const TITLE_MAX = 28;
+const TITLE_MAX = 24;
 const shorten = (t: string) => (t.length > TITLE_MAX ? `${t.slice(0, TITLE_MAX - 1).trimEnd()}…` : t);
 
 /** The line, as segments. Empty when there is nothing remembered. */
@@ -88,14 +88,16 @@ export function returningSegments(r: Returning, now = Date.now() / 1000): Segmen
 
   const out: Segment[] = [];
   if (r.sinceAt !== null && r.newFacts !== null) {
+    // "since earlier today" says nothing a person needs; a day does.
     const when = sinceWord(r.sinceAt, now);
+    const since = when === 'earlier today' ? '' : ` since ${when}`;
     out.push({
       key: 'facts',
       target: 'memory',
       text:
         r.newFacts === 0
-          ? `nothing new since ${when}`
-          : `${r.newFacts} new ${r.newFacts === 1 ? 'fact' : 'facts'} since ${when}`,
+          ? `no new facts${since}`
+          : `${r.newFacts} new ${r.newFacts === 1 ? 'fact' : 'facts'}${since}`,
     });
   } else if (r.totalFacts !== null && r.totalFacts > 0) {
     out.push({
@@ -118,7 +120,7 @@ export function returningSegments(r: Returning, now = Date.now() / 1000): Segmen
     out.push({
       key: 'bytes',
       target: 'activity',
-      text: r.bytesToday === 0 ? '0 bytes left today' : `${bytes(r.bytesToday)} left today`,
+      text: r.bytesToday === 0 ? '0 bytes out today' : `${bytes(r.bytesToday)} out today`,
     });
   }
   return out;

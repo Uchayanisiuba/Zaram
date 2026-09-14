@@ -49,7 +49,7 @@ export default function ReturningLine({ onNavigate }: { onNavigate: (id: Workspa
           key={segment.key}
           type="button"
           onClick={() => go(segment)}
-          className="rounded-md px-2 py-0.5 transition-colors hover:text-[var(--color-text)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-cyan)]"
+          className="rounded-md px-1.5 py-px transition-colors hover:text-[var(--color-text)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-cyan)]"
           style={{
             color: 'inherit',
             background: 'rgba(255, 255, 255, 0.035)',

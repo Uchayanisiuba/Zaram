@@ -485,20 +485,35 @@ body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 6px;
-  padding: 10px 18px 9px;
-  border-radius: 16px;
-  min-width: 18rem;
-  max-width: 44rem;
+  gap: 4px;
+  padding: 7px 14px 6px;
+  border-radius: 14px;
+  /* Shrink-wraps its rows. Positioned from the window's centre line, so
+     without this its available width is only the right half. */
+  width: max-content;
+  max-width: min(44rem, calc(100vw - 2rem));
 }
 .orb-caption-row {
   display: flex;
   align-items: center;
   justify-content: center;
-  min-height: 22px;
+  min-height: 20px;
   pointer-events: auto;
 }
 .orb-caption-row:empty { display: none; }
+
+/* The six nodes: the surface material, and the node's own colour on the
+   rim and in a soft glow while the pointer is over it. */
+.orb-node {
+  --surface-fill: rgba(255, 255, 255, 0.045);
+  transition: box-shadow 0.2s ease;
+}
+.orb-node:hover {
+  --surface-rim: color-mix(in srgb, var(--node-color) 60%, transparent);
+  --surface-rim-far: color-mix(in srgb, var(--node-color) 18%, transparent);
+  --surface-glow: 0 0 26px -6px color-mix(in srgb, var(--node-color) 55%, transparent);
+  --surface-fill: color-mix(in srgb, var(--node-color) 10%, transparent);
+}
 
 /* ─── Glass Utility ──────────────────────────────────────────────── */
 
