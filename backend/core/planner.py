@@ -226,6 +226,31 @@ def web_search_enabled() -> bool:
         return False
 
 
+def _translation_prompt(request: str) -> str:
+    """Turn "translate this into French" into a request for the translation.
+
+    Left as the user's words, a model answers *around* a translation: it
+    explains its choices, offers alternatives, and prefaces the result with
+    "Here is the translation:" — which the person then has to trim before
+    pasting it anywhere. The request is an instruction to Zaram; the model
+    needs the instruction Zaram derives from it, exactly as for a document.
+
+    The referential case is left to the engine, which carries the recent
+    exchange: "translate that" refers to something above, and the model can
+    see it. Rule 9 still applies — a language the person did not name is
+    asked for, never guessed.
+    """
+    return (
+        f"The user asked: {request.strip()}\n\n"
+        "Translate what they asked for into the language they named — the text "
+        "in their message if they gave one, or what they are referring to from "
+        "earlier in the conversation. Output only the translation, keeping the "
+        "original's paragraphs, lists and emphasis. No preamble, no notes, no "
+        "alternatives. If they did not say which language, ask which, in one "
+        "line, and translate nothing yet."
+    )
+
+
 def _document_body_prompt(request: str) -> str:
     """Turn "write that up as a proposal" into an instruction that writes it.
 
@@ -271,6 +296,20 @@ class IntentType(Enum):
     #: like an ordinary question — this intent exists to select a *model*, not
     #: a capability, which is the one thing no other intent here does.
     CODE = "code"
+    #: "Translate this into French." Answered by `reasoning.generate` with an
+    #: instruction that asks for the translation and nothing else — the one
+    #: of the five daily jobs a local model does well that a bare prompt does
+    #: worst, because a model asked to translate explains, hedges and
+    #: annotates unless told not to. `_translation_prompt` is the whole
+    #: difference. No specialisation and no slot: nothing routes on it, and a
+    #: slot nothing consults is the control `TaskSlot` refuses to grow.
+    #:
+    #: A dedicated local translator (Opus-MT through CTranslate2, ~100 MB per
+    #: language pair, fetched through the gate) stays deferred, and the
+    #: reason is recorded in `docs/MILESTONES.md`: a per-pair download and a
+    #: consent dialog buy speed over a model that is already resident, on a
+    #: product whose maintainer asked for fewer dialogs the same day.
+    TRANSLATE = "translate"
     UNKNOWN = "unknown"
 
 
@@ -887,6 +926,9 @@ class IntentRouter:
         #: answered by generating text; what differs is which model generates
         #: it, and that is decided by `INTENT_SPECIALISATION`, not here.
         "code": ["reasoning.generate"],
+        #: Same capability again; what differs is the instruction — see
+        #: `_translation_prompt`.
+        "translate": ["reasoning.generate"],
     }
 
     def _classify_semantically(self, prompt: str) -> IntentClassification | None:
@@ -1051,6 +1093,7 @@ class IntentRouter:
             IntentType.MULTI_STEP: "knowledge.search",
             IntentType.CODE: "reasoning.generate",
             IntentType.IMAGE: "image.generate",
+            IntentType.TRANSLATE: "reasoning.generate",
         }
         return mapping.get(intent, "reasoning.generate")
 
@@ -1282,6 +1325,18 @@ class IntentPlanner:
                     capability_id="reasoning.generate",
                     input_data={"prompt": prompt},
                     depends_on=[0],
+                ),
+            ]
+        elif classification.intent_type is IntentType.TRANSLATE and not has_images:
+            # One step, the ordinary capability, the derived instruction. A
+            # translation *of a picture's text* keeps the generic path: the
+            # picture has to reach the model, and the instruction assumes
+            # text it can already see.
+            plan_steps = [
+                ExecutionStep(
+                    capability_id="reasoning.generate",
+                    input_data={"prompt": _translation_prompt(prompt)},
+                    depends_on=[],
                 ),
             ]
         else:

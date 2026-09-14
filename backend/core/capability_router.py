@@ -44,6 +44,7 @@ class IntentBasedRouter:
         #: runtime is not registered, the honest outcome is a stated failure,
         #: not a chat reply where the user expected a file.
         "document": ["document.generate"],
+        "translate": ["reasoning.generate"],
     }
 
     @classmethod

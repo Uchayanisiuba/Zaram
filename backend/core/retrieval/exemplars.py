@@ -119,6 +119,19 @@ INTENT_EXEMPLARS: Dict[str, List[str]] = {
     #: ambiguous by the router's separation floor. Every phrasing below
     #: therefore carries something only a coding question carries: a stack
     #: trace, a function, a refactor, a language.
+    #: One of the five jobs a local model does well, and the one a bare
+    #: prompt serves worst: asked to translate, a model explains and hedges
+    #: unless the instruction asks for the translation alone. Every phrasing
+    #: names a language or the act, so it sits clear of `document` ("write
+    #: this up") and `conversation`.
+    "translate": [
+        "translate this into French",
+        "what is this in Spanish",
+        "put that reply in German for me",
+        "how do you say this in Yoruba",
+        "translate the paragraph below to English",
+        "give me the Portuguese version of this email",
+    ],
     "code": [
         "why does this function return None",
         "write a python script that renames these files",
