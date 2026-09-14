@@ -23,6 +23,11 @@ const CONFIG = {
   // sizeMb is MiB, matching what Windows Explorer shows the user — not decimal MB.
   // scripts/release-checksum.mjs prints the correct number for the built file.
   version: "0.1.0",
+  // The GitHub release the file was uploaded to. A pre-release tag carries a
+  // suffix the installer's filename does not (v0.1.0-alpha.1 holds
+  // Zaram-0.1.0-x64.exe), so the link is built from both. Written by
+  // scripts/site-release.mjs on release; empty means "v" + version.
+  releaseTag: "",
   sizeMb:  198,
   repo:    "Uchayanisiuba/Zaram",
 
@@ -74,7 +79,8 @@ const $all = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 /** The asset URL, assembled from the version so there is one field to change. */
 function downloadUrl() {
   const { repo, version } = CONFIG;
-  return `https://github.com/${repo}/releases/download/v${version}/Zaram-${version}-x64.exe`;
+  const tag = CONFIG.releaseTag || `v${version}`;
+  return `https://github.com/${repo}/releases/download/${tag}/Zaram-${version}-x64.exe`;
 }
 
 /** Whether the download is the call to action right now: the switch, or
