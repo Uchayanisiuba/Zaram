@@ -171,21 +171,24 @@ export default function Landing({ onNavigate, onOrbTap }: LandingProps) {
    * lives up there but the mark in the corner.
    */
   const TOP_RESERVE = 20
-  const RING_GAP = 28
-  /** The caption block's own height. Four short lines: the locality line plus
-   *  the sentence under it, which wraps to three at this measure. */
-  const CAPTION_BLOCK = 84
+  const RING_GAP = 16
+  /** The caption block's own height: the label row, plus the one-line
+   *  sentence that appears only when there is something to explain. It was
+   *  84 for a three-line sentence that no longer renders at rest, and the
+   *  ring was paying for it — the maintainer asked for the bar smaller and
+   *  lower and the ring larger, 14 September 2026. */
+  const CAPTION_BLOCK = 46
   /** Breathing room under the caption. Without it the block ends flush against
    *  the window edge, which measured exactly that way at 1040px before this
    *  existed: `captionBottom` 1040 in a 1040px window. */
-  const CAPTION_FOOT = 18
+  const CAPTION_FOOT = 10
   /** The row under the caption block: the first-launch instruction, the
    *  returning line, or the voice hint -- one of them, in `LandingHint`.
    *  Reserved here since 14 September 2026, when the status label began to
    *  show at rest: with the label always in the block, a reserve sized for
    *  the block alone left the row no room on any window, and `LandingHint`'s
    *  own rule -- never shown over something else -- hid it every time. */
-  const HINT_ROW = 40
+  const HINT_ROW = 26
   /** Derived, not chosen. The room below the ring is exactly the gap, the block
    *  that sits in it, the row under that, and the margin under both -- numbers
    *  that used to disagree, so the reserve protected a caption of one size

@@ -97,7 +97,8 @@ export default function OrbStatusLabel({
         // and local, "Local only" is the whole of it, and the sentence under
         // it was the same claim again in more words.
         <span
-          className={`${compact ? 'text-xs max-w-[26rem]' : 'text-xs max-w-[16rem]'} text-slate-500 text-center leading-snug`}
+          className={`${compact ? 'text-xs max-w-[30rem] truncate' : 'text-xs max-w-[16rem] text-center'} text-slate-500 leading-snug`}
+          title={compact ? detail : undefined}
         >
           {detail}
         </span>

@@ -516,9 +516,9 @@ body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
-  padding: 7px 14px 6px;
-  border-radius: 14px;
+  gap: 3px;
+  padding: 5px 11px 4px;
+  border-radius: 12px;
   /* Shrink-wraps its rows. Positioned from the window's centre line, so
      without this its available width is only the right half. */
   width: max-content;
@@ -528,7 +528,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  min-height: 20px;
+  min-height: 18px;
   pointer-events: auto;
 }
 .orb-caption-row:empty { display: none; }
