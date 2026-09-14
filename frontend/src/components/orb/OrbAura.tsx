@@ -104,7 +104,7 @@ export default function OrbAura({
       <TrackRing
         size={ring1 + outerGlowOffset}
         colour={colours.ring1}
-        messengers={2}
+        messengers={1}
         dir={-1}
         seconds={9}
         messengerColour="#22d3ee"

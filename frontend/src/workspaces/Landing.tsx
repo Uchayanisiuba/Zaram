@@ -84,15 +84,19 @@ const ORBIT_RADIUS = 240
  */
 const TILT = RING_TILT
 /**
- * The rings, 14 September 2026: **three concentric tracks in one plane**, the
- * outer one the wheel the six nodes ride at exactly `ORBIT_RADIUS`, the two
- * inside it bands of the same plane — Saturn, not an atom. Two leaning
+ * The rings, 14 September 2026: **concentric, in one plane**, the wheel the
+ * six nodes ride at exactly `ORBIT_RADIUS`, and inside it the two rings the
+ * embodiment keeps for itself (`LivingOrb`, `OrbAura`) — Saturn, not an
+ * atom. Two more tracks were drawn between them first, at 178 and 120, and
+ * sat almost on the embodiment's own rings at 166 and 114; three rings
+ * spaced apart read better than five crowded, and the maintainer asked for
+ * fewer. Two leaning
  * orbitals were tried first and read as objects on the z axis, because
  * everything else on the landing is one tilted plane; and the nodes orbited
  * at 240 while the tracks were drawn at 270 and 295, so they never sat on a
  * ring at all. Radii as fractions of the wheel's.
  */
-const TRACKS = [1, 0.74, 0.5] as const
+const TRACKS = [1] as const
 /**
  * The messengers: a few points of light running along the tracks, as if
  * carrying something from one node to the next. They replace the scattered
@@ -101,9 +105,7 @@ const TRACKS = [1, 0.74, 0.5] as const
  * reduced motion stills them.
  */
 const MESSENGERS = [
-  { count: 3, dir: 1, seconds: 18, colour: '#22d3ee' },
-  { count: 2, dir: -1, seconds: 12, colour: '#c084fc' },
-  { count: 1, dir: 1, seconds: 8, colour: '#818cf8' },
+  { count: 2, dir: 1, seconds: 18, colour: '#22d3ee' },
 ] as const
 /** How much smaller and fainter the far side of the wheel is. */
 const DEPTH_SCALE = 0.25
@@ -666,7 +668,7 @@ export default function Landing({ onNavigate, onOrbTap }: LandingProps) {
 
           const dispersed = chat
             ? reduced ? { opacity: 0 } : { opacity: 0, scale: 0.4, x: dx, y: dy }
-            : reduced ? { opacity: depthOpacity } : { opacity: depthOpacity, scale: depthScale, x: 0, y: 0 }
+            : reduced ? { opacity: 1 } : { opacity: 1, scale: 1, x: 0, y: 0 }
           // Leaving is snappier than returning. A dispersal that eases out feels
           // like lag on a click; arriving back can afford to settle.
           const childTransition = reduced
@@ -681,7 +683,13 @@ export default function Landing({ onNavigate, onOrbTap }: LandingProps) {
               className="absolute flex flex-col items-center gap-2"
               style={{
                 left: '50%', top: '50%',
-                transform: `translate(-50%, -50%) translate(${restX}px, ${restY}px)`,
+                // Depth is written here, with the position, every frame. It
+                // went through the dispersal spring first and lagged behind
+                // the orbit — a node arrived at the front still small, and
+                // faded at the wrong place — because a spring chasing a
+                // target that moves every frame never catches it.
+                transform: `translate(-50%, -50%) translate(${restX}px, ${restY}px) scale(${depthScale})`,
+                opacity: depthOpacity,
                 pointerEvents: chat ? 'none' : 'auto',
                 // Lifted while held, so a node dragged across the ring passes
                 // over its siblings instead of sliding beneath them. Otherwise

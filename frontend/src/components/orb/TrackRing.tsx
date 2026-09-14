@@ -68,7 +68,7 @@ export default function TrackRing({
           transition={{ duration: seconds, ease: 'linear', repeat: Infinity }}
         >
           {Array.from({ length: messengers }, (_, k) => (
-            <span
+            <motion.span
               key={k}
               className="absolute rounded-full"
               style={{
@@ -81,6 +81,22 @@ export default function TrackRing({
                 background: messengerColour,
                 boxShadow: `0 0 8px ${messengerColour}, 0 0 2px #fff`,
               }}
+              // Seen for part of a lap only, on a period that does not divide
+              // the lap, so where and when a light appears keeps shifting —
+              // a message now and then rather than traffic. Deterministic,
+              // and different for every light on every ring.
+              animate={reduced ? { opacity: 0.8 } : { opacity: [0, 0, 1, 1, 0, 0] }}
+              transition={
+                reduced
+                  ? undefined
+                  : {
+                      duration: seconds * (0.53 + 0.29 * k) + 1.7,
+                      times: [0, 0.55, 0.62, 0.8, 0.86, 1],
+                      ease: 'easeInOut',
+                      repeat: Infinity,
+                      delay: k * 2.3 + size / 90,
+                    }
+              }
             />
           ))}
         </motion.div>
