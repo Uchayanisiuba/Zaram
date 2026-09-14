@@ -47,6 +47,7 @@ import MessageActions from './MessageActions';
 import { AnsweredBy } from './AnsweredBy';
 import SpeakButton from './SpeakButton';
 import ReasoningPanel from './ReasoningPanel';
+import EmptyConversation from './EmptyConversation';
 import MessageBody from './MessageBody';
 import StreamingReply from './StreamingReply';
 import CitationPanel from './CitationPanel';
@@ -825,12 +826,12 @@ export default function ChatSurface({ navigate }: Props) {
       >
         <div className="flex flex-col gap-4 p-6 reading-column">
           {isEmpty ? (
-            <p
-              className="text-xs uppercase text-slate-500"
-              style={{ letterSpacing: '0.05em' }}
-            >
-              Ask Zaram something
-            </p>
+            <EmptyConversation
+              onPick={(prompt) => {
+                setInputText(prompt);
+                inputRef.current?.focus();
+              }}
+            />
           ) : (
             <>
               {messages.map((msg, msgIndex) => (
