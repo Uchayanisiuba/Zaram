@@ -284,7 +284,7 @@ const LivingOrb = ({
         <TrackRing
           size={ring1 + outerGlowOffset}
           colour={cfg.ring1Color}
-          messengers={1}
+          messengers={2}
           dir={-1}
           seconds={9}
           messengerColour="#22d3ee"
@@ -295,7 +295,7 @@ const LivingOrb = ({
         <TrackRing
           size={ring2}
           colour={cfg.ring2Color}
-          messengers={1}
+          messengers={2}
           dir={1}
           seconds={6}
           messengerColour="#c084fc"

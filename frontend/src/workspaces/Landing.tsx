@@ -105,7 +105,7 @@ const TRACKS = [1] as const
  * reduced motion stills them.
  */
 const MESSENGERS = [
-  { count: 2, dir: 1, seconds: 18, colours: ['#22d3ee', '#c084fc'] },
+  { count: 4, dir: 1, seconds: 18, colours: ['#22d3ee', '#c084fc'] },
 ] as const
 /** How much smaller and fainter the far side of the wheel is. */
 const DEPTH_SCALE = 0.25
