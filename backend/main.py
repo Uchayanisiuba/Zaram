@@ -5227,6 +5227,26 @@ async def list_obligations(scope: str = "", include_closed: bool = False):
     }
 
 
+@app.post("/obligations/calendar")
+async def export_obligations_calendar(scope: str = ""):
+    """Every open obligation as an `.ics` file in the output directory.
+
+    A file the person drops into the calendar they already keep — see
+    `obligations/calendar.py` for why a file and not a feed. Written through
+    the artifact store so it never overwrites and lands where every other
+    generated thing does.
+    """
+    from datetime import date
+
+    from obligations.calendar import to_ics
+
+    records = obligation_records.open_obligations(scope=scope)
+    data = to_ics(records)
+    filename = f"obligations-{date.today().isoformat()}.ics"
+    path = artifact_service.store.write_new(filename, data)
+    return {"path": str(path), "count": sum(1 for r in records if r.get("due"))}
+
+
 @app.get("/obligations/{obligation_id}")
 async def get_obligation(obligation_id: str):
     record = obligation_records.get(obligation_id)

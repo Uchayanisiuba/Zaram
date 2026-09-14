@@ -111,3 +111,34 @@ urllib3==2.7.0
 uvicorn==0.51.0
 yarl==1.24.2
 zipp==4.1.0
+
+# ---- The daily-driver base, 14 September 2026 ----------------------------
+# Eight small libraries for the jobs a person does every day, chosen from a
+# licence-checked list and added ~4 MB to the base between them. Each one is
+# behind a seam that already existed, so removing any of them and running
+# the suite is how its use is verified — never by `pip show`.
+#
+# Licences: icalendar BSD-2, bm25s MIT, trafilatura Apache-2.0 (v2; it was
+# GPL before 2.0 — never pin below), jusText BSD-2, courlan Apache-2.0,
+# htmldate Apache-2.0, dateparser BSD-3, tzlocal MIT, pytz MIT,
+# tld MPL-1.1/GPL-2/LGPL-2.1 (taken under MPL-1.1), watchfiles MIT,
+# winocr MIT, winrt-* MIT (Windows' own OCR; nothing downloaded).
+icalendar==7.3.0
+bm25s==0.3.11
+trafilatura==2.2.0
+jusText==3.0.2
+courlan==1.4.0
+htmldate==1.10.0
+dateparser==1.4.3
+tzlocal==5.4.4
+pytz==2026.3.post1
+tld==0.13.2
+watchfiles==1.2.0
+winocr==0.0.15; sys_platform == "win32"
+winrt-runtime==3.2.1; sys_platform == "win32"
+winrt-Windows.Foundation==3.2.1; sys_platform == "win32"
+winrt-Windows.Foundation.Collections==3.2.1; sys_platform == "win32"
+winrt-Windows.Globalization==3.2.1; sys_platform == "win32"
+winrt-Windows.Graphics.Imaging==3.2.1; sys_platform == "win32"
+winrt-Windows.Media.Ocr==3.2.1; sys_platform == "win32"
+winrt-Windows.Storage.Streams==3.2.1; sys_platform == "win32"

@@ -33,6 +33,7 @@
  * expensive kind of wrong, and this is where the user settles it.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import desktop from '@/desktop/desktop-bridge';
 import {
   AlertCircle,
   ArrowDownLeft,
@@ -57,6 +58,7 @@ import {
   dueLabel,
   daysUntil,
   fetchObligations,
+  exportObligationsCalendar,
   markObligationMet,
   type Obligation,
   type ObligationCorrection,
@@ -399,6 +401,8 @@ export default function Commitments({ onCounts }: CommitmentsProps) {
   const [editing, setEditing] = useState<string | null>(null);
   const [confirmDismiss, setConfirmDismiss] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // Where the last calendar export landed, so the person can find it.
+  const [exported, setExported] = useState<{ path: string; count: number } | null>(null);
 
   const load = useCallback(
     async (which: View) => {
@@ -484,6 +488,22 @@ export default function Commitments({ onCounts }: CommitmentsProps) {
           </button>
         ))}
         <div className="flex-1" />
+        {/* A file for the calendar they already keep. Zaram is not a
+            calendar (CLAUDE.md); it hands the dates over. */}
+        {view === 'open' && obligations.length > 0 && (
+          <button
+            onClick={() =>
+              void exportObligationsCalendar()
+                .then(setExported)
+                .catch((e) => setError(e instanceof Error ? e.message : 'Could not write the calendar file.'))
+            }
+            className="rounded-full px-3 py-1 text-xs transition-colors hover:bg-white/5"
+            style={{ border: '1px solid var(--color-border-subtle)', color: 'var(--color-text-muted)' }}
+            data-testid="export-calendar"
+          >
+            Export to calendar
+          </button>
+        )}
         <button
           onClick={() => void load(view)}
           aria-label="Refresh commitments"
@@ -492,6 +512,22 @@ export default function Commitments({ onCounts }: CommitmentsProps) {
           <RefreshCw size={13} className={loading ? 'animate-spin' : ''} />
         </button>
       </div>
+
+      {exported && (
+        <p className="t-mono mb-3" data-testid="export-calendar-done">
+          {exported.count} {exported.count === 1 ? 'obligation' : 'obligations'} written to{' '}
+          <button
+            type="button"
+            className="underline underline-offset-2"
+            style={{ color: 'inherit', background: 'none', border: 0, padding: 0, font: 'inherit', cursor: 'pointer' }}
+            onClick={() => void desktop.shell.showItemInFolder(exported.path)}
+            title={exported.path}
+          >
+            {exported.path.replace(/\\/g, '/').split('/').pop()}
+          </button>{' '}
+          — drop it into your calendar. Correct anything here, not there; the file is a copy.
+        </p>
+      )}
 
       {error && (
         <div

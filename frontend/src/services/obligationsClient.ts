@@ -205,6 +205,12 @@ export async function correctObligation(
 /** Say this was never an obligation. Stored, not deleted — otherwise the next
  *  ingest of the same document extracts the clause and asks again, which
  *  teaches the user that correcting Zaram does not stick. */
+/** Every open obligation as an `.ics` file in the output directory — a copy
+ *  for the calendar the person already keeps. Returns where it was written. */
+export async function exportObligationsCalendar(): Promise<{ path: string; count: number }> {
+  return json<{ path: string; count: number }>('/obligations/calendar', { method: 'POST' });
+}
+
 export async function dismissObligation(id: string): Promise<Obligation> {
   return json<Obligation>(`/obligations/${encodeURIComponent(id)}/dismiss`, {
     method: 'POST',
