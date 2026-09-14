@@ -467,6 +467,12 @@ def _register_adapter(connection: CloudConnection) -> None:
     if _providers_runtime is None:
         return
 
+    # A provider that only draws has no chat endpoint to discover models from;
+    # registering an adapter would probe an address that cannot answer.
+    entry = catalogue.get(connection.provider_id)
+    if entry is not None and entry.images_only:
+        return
+
     registry = _providers_runtime.registry
     try:
         registry.remove_model_provider(connection.provider_id)

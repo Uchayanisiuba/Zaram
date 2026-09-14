@@ -233,6 +233,10 @@ class ProviderEntry:
     #: go stale the way `key_url` does; the date on the manifest covers them
     #: too, and a step must never name a model file.
     key_steps: Tuple[str, ...] = ()
+    #: A provider that draws and does not chat. Its key is stored like any
+    #: other, but no chat adapter is registered for it and the engine grade
+    #: does not apply — there is no chat endpoint to reach.
+    images_only: bool = False
 
     @property
     def available(self) -> bool:
@@ -260,6 +264,7 @@ class ProviderEntry:
             "note": self.note,
             "key_env": self.key_env,
             "endpoint_env": self.endpoint_env,
+            "images_only": self.images_only,
             "pricing": self.pricing.value,
             "has_free_tier": self.has_free_tier,
             "key_steps": list(self.key_steps),
@@ -439,8 +444,37 @@ PROVIDERS: Tuple[ProviderEntry, ...] = (
         "Together AI",
         "https://api.together.xyz/v1",
         "https://api.together.xyz/settings/api-keys",
-        note="A small starting credit, then paid. Not a standing free tier.",
+        note=(
+            "A small starting credit, then paid. Not a standing free tier for "
+            "chat — but FLUX.1 schnell pictures are free here, and Zaram draws "
+            "with the same key."
+        ),
         pricing=Pricing.TRIAL,
+    ),
+    ProviderEntry(
+        id="fal",
+        display_name="fal.ai (pictures only)",
+        kind=ProviderKind.CLOUD_API,
+        base_url="https://fal.run",
+        chat_endpoint="",
+        compatibility=Compatibility.UNVERIFIED,
+        auth=AuthStyle.BEARER,
+        key_url="https://fal.ai/dashboard/keys",
+        support=Support.AVAILABLE,
+        note=(
+            "Draws pictures, does not chat. Paid per image — cents each, no "
+            "subscription — and fal's API terms exclude training on what you send. "
+            "Zaram logs every picture request."
+        ),
+        key_env=GENERIC_KEY_ENV,
+        endpoint_env=GENERIC_ENDPOINT_ENV,
+        pricing=Pricing.PAID,
+        key_steps=(
+            "Open fal.ai and sign in.",
+            "Open Keys and press Add key; copy it.",
+            "Paste it below. Zaram will ask once before the first picture leaves, then remember.",
+        ),
+        images_only=True,
     ),
     ProviderEntry(
         id="qwen",

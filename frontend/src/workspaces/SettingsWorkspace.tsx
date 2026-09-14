@@ -1367,11 +1367,13 @@ export default function SettingsWorkspace() {
                 {catalogue.map((provider) => (
                   <option key={provider.id} value={provider.id}>
                     {provider.displayName}
-                    {provider.pricing === 'free_tier'
-                      ? ' · free tier'
-                      : provider.pricing === 'per_model'
-                        ? ' · some models free'
-                        : ''}
+                    {provider.imagesOnly
+                      ? ' · pictures only'
+                      : provider.pricing === 'free_tier'
+                        ? ' · free tier'
+                        : provider.pricing === 'per_model'
+                          ? ' · some models free'
+                          : ''}
                     {provider.available ? '' : ' — not reachable yet'}
                   </option>
                 ))}

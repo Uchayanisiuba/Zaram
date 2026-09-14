@@ -420,8 +420,13 @@ class KernelBootstrapper:
         except Exception as error:  # noqa: BLE001
             print(f"[Bootstrapper] Images will load without a VRAM preflight ({error}).")
 
+        # Local first, then whichever cloud provider the user connected and
+        # allowed pictures to — see `imaging.cloud`. A machine with no card
+        # for Flux still has a person on it who wants a picture.
+        from imaging.cloud import RoutedImageProvider
+
         self.images_runtime = ImagesRuntime(
-            artifact_service, FluxProvider(), self.event_bus, card=card
+            artifact_service, RoutedImageProvider(FluxProvider()), self.event_bus, card=card
         )
         self.registry.register(self.images_runtime)
         await self.images_runtime.initialize()

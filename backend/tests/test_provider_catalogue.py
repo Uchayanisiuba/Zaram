@@ -93,6 +93,12 @@ def _reachable(entry: ProviderEntry) -> bool:
     return _engine_endpoint(entry.base_url, entry.compatibility) == entry.chat_endpoint
 
 
+def _chats(entry) -> bool:
+    """Whether the grade applies. A picture-only provider has no chat endpoint
+    to reach, so the engine's grade is not a claim it makes."""
+    return not entry.images_only
+
+
 class TestTheGradeIsEarned:
     def test_every_available_entry_is_reached_by_the_real_engine(self):
         """The claim "Zaram can call this" is checked against the caller.
@@ -102,6 +108,8 @@ class TestTheGradeIsEarned:
         shipped `OpenAICompatibleEngine`, so this fails if `_normalise` ever
         changes shape under an entry."""
         for entry in list_providers(available_only=True):
+            if not _chats(entry):
+                continue
             assert _reachable(entry), f"{entry.id}: {_engine_endpoint(entry.base_url, entry.compatibility)}"
 
     def test_every_available_entry_is_also_discoverable(self):
@@ -113,13 +121,15 @@ class TestTheGradeIsEarned:
         saying why. A catalogue that only checked the chat URL would let an
         entry reintroduce exactly that."""
         for entry in list_providers(available_only=True):
+            if not _chats(entry):
+                continue
             expected = entry.chat_endpoint.replace("/chat/completions", "/models").replace("/messages", "/models")
             assert _discovery_url(entry.base_url, entry.compatibility) == expected, entry.id
 
     def test_an_unreachable_entry_is_never_marked_available(self):
         """The converse, and the reason the label means anything."""
         for entry in PROVIDERS:
-            if not _reachable(entry):
+            if _chats(entry) and not _reachable(entry):
                 assert entry.support is Support.UNAVAILABLE, entry.id
 
     def test_the_catalogue_contains_something_of_both_kinds(self):
@@ -161,7 +171,7 @@ class TestTheGradeIsEarned:
     def test_unconfirmed_providers_are_never_available(self):
         """No engine can be pointed at a root nobody here has confirmed."""
         for entry in PROVIDERS:
-            if entry.compatibility is Compatibility.UNVERIFIED:
+            if _chats(entry) and entry.compatibility is Compatibility.UNVERIFIED:
                 assert entry.support is Support.UNAVAILABLE, entry.id
 
 
@@ -187,7 +197,8 @@ class TestWhatTheUserIsTold:
         """
         for entry in PROVIDERS:
             assert entry.id and entry.display_name and entry.base_url
-            assert entry.chat_endpoint
+            if _chats(entry):
+                assert entry.chat_endpoint
             if entry.auth is not AuthStyle.NONE:
                 assert entry.key_url.startswith("https://"), entry.id
             elif entry.key_url:
@@ -204,7 +215,9 @@ class TestWhatTheUserIsTold:
         walked = {e.id: e for e in PROVIDERS if e.key_steps}
         assert {"nvidia_nim", "openrouter"} <= set(walked), sorted(walked)
         for entry in walked.values():
-            assert entry.has_free_tier, entry.id
+            # The walk is for the free routes; a paid picture provider gets
+            # one too because its key page is just as foreign.
+            assert entry.has_free_tier or entry.images_only, entry.id
             assert 3 <= len(entry.key_steps) <= 6, entry.id
             for step in entry.key_steps:
                 assert step.strip().endswith("."), (entry.id, step)
@@ -256,7 +269,7 @@ class TestItNamesTheVariablesTheProductActuallyReads:
 
     @pytest.mark.parametrize(
         "entry",
-        [e for e in list_providers(available_only=True) if e.endpoint_env],
+        [e for e in list_providers(available_only=True) if e.endpoint_env and not e.images_only],
         ids=lambda e: e.id,
     )
     def test_configuring_an_entry_produces_an_engine_pointed_at_it(
