@@ -99,19 +99,20 @@ export default function TrackRing({
               // a message now and then rather than traffic. Deterministic,
               // and different for every light on every ring.
               //
-              // Retuned twice on 14 September at the maintainer's ask: twice
-              // as frequent, then each light alive twice as long. Both hold at
-              // once by keeping the period and *doubling the lights* (the
-              // callers' `messengers` counts) while the lit stretch grows
-              // from a third of the period to nearly two thirds — a light on
-              // more than it is off, and twice as many of them.
+              // Retuned three times on 14 September at the maintainer's ask:
+              // twice as frequent, then each light alive twice as long, then
+              // 30% less frequent. What holds now: twice the lights (the
+              // callers' `messengers` counts), each lit for the same seconds
+              // it was after the second change, on a period stretched by
+              // 1/0.7 — so the lit stretch is a smaller share of a longer
+              // wait, and the seconds it is on are unchanged.
               animate={reduced ? { opacity: 0.8 } : { opacity: [0, 0, 1, 1, 0, 0] }}
               transition={
                 reduced
                   ? undefined
                   : {
-                      duration: seconds * (0.53 + 0.29 * k) + 1.7,
-                      times: [0, 0.2, 0.28, 0.82, 0.9, 1],
+                      duration: (seconds * (0.53 + 0.29 * k) + 1.7) / 0.7,
+                      times: [0, 0.26, 0.316, 0.694, 0.75, 1],
                       ease: 'easeInOut',
                       repeat: Infinity,
                       delay: k * 2.3 + size / 90,
