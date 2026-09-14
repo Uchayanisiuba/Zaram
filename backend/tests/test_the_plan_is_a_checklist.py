@@ -147,7 +147,7 @@ class TestTheEngine:
         # the record, and finishing keeps the checklist without the steps.
         out2 = list(engine.continue_task(session_id="s1", plan_id=parked[0].id, approve=True))
 
-        assert [c["tool"] for c in mcp.calls] == ["plan", "edit_file"]
+        assert [c["tool"] for c in mcp.calls] == ["plan", "edit_file", "run_command"]  # the loop checks the change before "done"
         assert "Resumed and done." in "".join(i for i in out2 if isinstance(i, str))
         assert store.unfinished() == []
         kept = store.finished_for()
@@ -161,7 +161,7 @@ class TestTheEngine:
             [_ok(), _ok(commit="abc")],
         )
         list(engine.execute("use the code tools to change x"))
-        assert [c["tool"] for c in mcp.calls] == ["plan", "edit_file"]
+        assert [c["tool"] for c in mcp.calls] == ["plan", "edit_file", "run_command"]  # the loop checks the change before "done"
 
     def test_a_long_plan_that_only_reads_never_pauses(self, a_generous_window):  # noqa: F811
         four = [("a", "todo"), ("b", "todo"), ("c", "todo"), ("d", "todo")]
@@ -213,7 +213,7 @@ class TestARepeatedPlanIsNotAStall:
             [_ok(), _ok(commit="abc")],
         )
         out = list(engine.execute("use the code tools to change x"))
-        assert [c["tool"] for c in mcp.calls] == ["plan", "edit_file"]
+        assert [c["tool"] for c in mcp.calls] == ["plan", "edit_file", "run_command"]  # the loop checks the change before "done"
         assert "Done." in "".join(i for i in out if isinstance(i, str))
         assert not any(
             "asked for" in n.data.get("content", "") for n in _events(out, EventType.NOTICE)

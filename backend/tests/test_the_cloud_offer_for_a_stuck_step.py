@@ -150,7 +150,12 @@ class TestZaramsPickIsResolvedBeforeItIsSized:
             asked.append(model)
             return ContextBudget(total_tokens=65536, measured=True, reply_reserve_tokens=8192)
 
+        # Where the engine reads it (`_budget_for` imports from
+        # `core.context_budget` at call time) as well as the engine module.
+        import core.context_budget as context_budget
+
         monkeypatch.setattr(execution_engine, "budget_for", fake_budget)
+        monkeypatch.setattr(context_budget, "budget_for", fake_budget)
         engine = _stuck_engine(manager=_Manager())
         runtime = engine._router.try_resolve("reasoning.generate")
         runtime.health_check = lambda: {"state": "ready", "model": "qwen-picked"}
