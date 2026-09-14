@@ -19,7 +19,20 @@ For grant applications and investor conversations. The vision lives in
 > Zaram is the memory that stays put while the model changes. One knowledge base
 > on your machine; your local models and your cloud keys both recall from it, and
 > Zaram routes between them per question. You see what was recalled, you can
-> correct it, and every byte that leaves is logged.
+> correct it, and every byte that leaves is a decision you made — a switch per
+> destination and per kind of data, asked once and remembered, with the log one
+> click away. Local is free and private by construction; cloud is one key, and
+> Zaram tells you the deal each provider makes with your data.
+>
+> 2026 supplied the reason this stopped being a preference: the best model
+> available was switched off worldwide for eighteen days, and courts ordered
+> chat logs kept and produced. Memory that outlives the provider is the lesson
+> of the year, and it is the one thing a vendor cannot sell you.
+>
+> **For anyone who types on a computer — not a developer tool.** The base is
+> universal: a keystroke over any app, fast because the model is already here,
+> documents that come back shaped like documents, commitments surfaced before
+> they lapse. The verticals are packs, installed, never rented.
 >
 > **It never buys inference** — you bring the key or the model — so the cost of
 > goods is approximately zero and the free tier is uncapped permanently rather
