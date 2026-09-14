@@ -4,6 +4,16 @@
     <meta charset="UTF-8" />
     <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline';" />
     <title>Zaram</title>
+    <!--
+      The same orb the landing shows, breathing at the landing's own pace,
+      so launch reads as one object waking up rather than a purple ball
+      cutting to a pearl. Drawn in CSS — the sandbox forbids fetching the
+      globe — from the pearl's own palette: white light top-left, lavender
+      body, cyan and rose iridescence, deep indigo at the limb. No spinner:
+      the orb is the state indicator here as it is everywhere else, and a
+      spinner beside it would say the orb means nothing. And nothing violet
+      on its own — UI-SPEC gives that colour to cloud.
+    -->
     <style>
       :root { color-scheme: dark; }
       html, body {
@@ -16,36 +26,102 @@
         flex-direction: column;
         align-items: center;
         justify-content: center;
-        gap: 18px;
+        gap: 22px;
         user-select: none;
+        overflow: hidden;
+      }
+      .field {
+        position: relative;
+        width: 200px;
+        height: 200px;
+        display: grid;
+        place-items: center;
+      }
+      /* The soft aura behind, in the idle glow colours. */
+      .aura {
+        position: absolute;
+        inset: 0;
+        border-radius: 50%;
+        background:
+          radial-gradient(circle at 50% 50%, rgba(99,102,241,0.30) 0%, rgba(168,85,247,0.14) 38%, rgba(11,11,20,0) 68%);
+        animation: breathe 8s ease-in-out infinite;
       }
       .orb {
-        width: 84px;
-        height: 84px;
+        position: relative;
+        width: 96px;
+        height: 96px;
         border-radius: 50%;
-        background: radial-gradient(circle at 35% 30%, #9b6bff, #5b2bd6 60%, #2a1166);
-        box-shadow: 0 0 38px rgba(123, 70, 255, 0.65);
-        animation: pulse 1.8s ease-in-out infinite;
+        /* The pearl, in layers: rim shading, the two iridescent bands, and the
+           highlight. Order matters — the first listed paints on top. */
+        background:
+          radial-gradient(circle at 34% 28%, rgba(255,255,255,0.95) 0%, rgba(255,255,255,0.55) 9%, rgba(255,255,255,0) 30%),
+          radial-gradient(circle at 70% 72%, rgba(94,231,220,0.55) 0%, rgba(94,231,220,0) 34%),
+          radial-gradient(circle at 26% 74%, rgba(244,114,182,0.45) 0%, rgba(244,114,182,0) 36%),
+          radial-gradient(circle at 76% 30%, rgba(168,85,247,0.45) 0%, rgba(168,85,247,0) 38%),
+          radial-gradient(circle at 50% 50%, #c7c4f4 0%, #9d97e6 45%, #5b57b8 78%, #2a2466 100%);
+        box-shadow:
+          inset -10px -12px 24px rgba(20,14,60,0.55),
+          inset 6px 8px 18px rgba(255,255,255,0.28),
+          0 0 28px rgba(99,102,241,0.45),
+          0 0 64px rgba(99,102,241,0.22);
+        animation: breathe 8s ease-in-out infinite;
       }
-      @keyframes pulse {
-        0%, 100% { transform: scale(0.92); opacity: 0.85; }
-        50% { transform: scale(1.04); opacity: 1; }
+      /* Limb sheen: a thin bright arc on the lit side. */
+      .orb::after {
+        content: '';
+        position: absolute;
+        inset: 2px;
+        border-radius: 50%;
+        background: radial-gradient(circle at 30% 22%, rgba(255,255,255,0.35) 0%, rgba(255,255,255,0) 42%);
+        mix-blend-mode: screen;
       }
-      .title { font-size: 22px; letter-spacing: 4px; font-weight: 600; }
-      .sub { font-size: 13px; opacity: 0.7; }
-      .spinner {
-        width: 16px; height: 16px; border-radius: 50%;
-        border: 2px solid rgba(231, 231, 245, 0.25);
-        border-top-color: #9b6bff;
-        animation: spin 0.9s linear infinite;
+      @keyframes breathe {
+        0%, 100% { transform: scale(1); }
+        50% { transform: scale(1.03); }
       }
-      @keyframes spin { to { transform: rotate(360deg); } }
+      /* Eight particles, the landing's positions and colours, drifting. */
+      .p {
+        position: absolute;
+        border-radius: 50%;
+        opacity: 0.85;
+        animation: drift 6s ease-in-out infinite;
+      }
+      @keyframes drift {
+        0%, 100% { transform: translate(0, 0); opacity: 0.55; }
+        50% { transform: translate(3px, -5px); opacity: 0.95; }
+      }
+      .mark { width: 22px; height: 17px; opacity: 0.9; }
+      .sub { font-size: 13px; opacity: 0.6; letter-spacing: 0.02em; }
+      @media (prefers-reduced-motion: reduce) {
+        .orb, .aura, .p { animation: none; }
+      }
     </style>
   </head>
   <body>
-    <div class="orb"></div>
-    <div class="title">ZARAM</div>
-    <div class="spinner"></div>
-    <div class="sub">Starting desktop runtime&hellip;</div>
+    <div class="field" aria-hidden="true">
+      <div class="aura"></div>
+      <span class="p" style="top:10%;left:72%;width:5px;height:5px;background:#818cf8;animation-delay:0s"></span>
+      <span class="p" style="top:72%;left:8%;width:4px;height:4px;background:#22d3ee;animation-delay:.7s"></span>
+      <span class="p" style="top:28%;left:4%;width:5px;height:5px;background:#c084fc;animation-delay:1.2s"></span>
+      <span class="p" style="top:5%;left:38%;width:3px;height:3px;background:#818cf8;animation-delay:1.8s"></span>
+      <span class="p" style="top:84%;left:58%;width:4px;height:4px;background:#22d3ee;animation-delay:.4s"></span>
+      <span class="p" style="top:50%;left:93%;width:4px;height:4px;background:#c084fc;animation-delay:1.5s"></span>
+      <span class="p" style="top:18%;left:91%;width:3px;height:3px;background:#818cf8;animation-delay:1s"></span>
+      <span class="p" style="top:90%;left:26%;width:4px;height:4px;background:#22d3ee;animation-delay:2s"></span>
+      <div class="orb"></div>
+    </div>
+    <svg class="mark" viewBox="0 0 130.73 100" role="img" aria-label="Zaram">
+      <defs>
+        <linearGradient id="zaram" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stop-color="#A853E2" />
+          <stop offset="100%" stop-color="#4BADE6" />
+        </linearGradient>
+      </defs>
+      <g fill="url(#zaram)">
+        <polygon points="31.84,0.0 130.17,0.56 83.8,62.01 64.25,62.01 94.41,20.11 17.32,19.55" />
+        <polygon points="46.93,37.43 67.04,37.43 36.31,79.89 94.41,79.89 108.38,62.57 130.17,62.57 102.23,99.44 0.0,99.44" />
+      </g>
+    </svg>
+    <div class="sub">Starting&hellip;</div>
   </body>
 </html>
