@@ -18,9 +18,121 @@ publishing step over rather than finding another route. `CLAUDE.md`,
 
 ---
 
-## Current state — 13 September 2026
+## Current state — 14 September 2026
 
 *The latest work is first. Earlier sessions follow below.*
+
+### 14 September — the daily-driver base, pictures from the cloud, one key paired to each job, and the landing redrawn. HANDOFF.
+
+**Read this block first.** Everything below is committed and pushed
+(`main` at `f5eb01d`). Verified in the browser pane against a dev backend
+until the packaged app took port 8420 mid-session; after that by test and
+type-check, which is why the last few visual items are flagged *seen in
+Electron by the maintainer, not by the session*.
+
+#### Done this session
+
+1. **The interface pass** — the seven-point critique, all seven landed:
+   one type system (`.t-kicker/.t-heading/.t-lede/.t-body/.t-mono`, 12px
+   floor, 405 sizes swept); the *surface* material lit by the orb
+   (`.surface`, rim colour from `data-orb-state` on `<html>`, breathing
+   on the orb's period, `.surface-arrive` flare); the landing's returning
+   state (`returningStore`, `GET /memory/stats?since=`, one mono line of
+   chips under the orb — UI-SPEC 6h); the reading column (40rem, 15px);
+   the grounded empty state (`groundedPrompts`, quiet lines, invents
+   nothing); a stopped engine as one sentence (`EngineDown`, shown only
+   after `/health` has actually answered — `systemStore.polled`); the
+   trace style on `AnsweredBy` and `ActivityPanel`; `content-visibility`
+   on messages. The orb's caption is one capsule (`.orb-caption`, the
+   second row portaled through `layoutStore.captionHost`).
+2. **The landing redrawn.** The six nodes ride a wheel seen from above
+   (`TILT`, depth written on the transform — never through a spring, which
+   lagged); three concentric rings in one plane through one `TrackRing`
+   (the wheel, and the embodiment's two, which also stop showing beside an
+   open conversation); a few lights that come and go on periods that do
+   not divide the lap; the rings brighten as the pointer nears
+   (`--orb-near`); the click target is a round button between the far and
+   near nodes so a node behind the orb takes the click. The orb carries
+   the prototype's iridescence (`.orb-sheen`, pace per state in
+   `SHEEN_SECONDS`), glow halved, and the avatar's aura has the same glow
+   so the two pages read alike; the avatar's rings are drawn in halves so
+   the near side passes in front of the body. The splash is the mark.
+   **Removed on the maintainer's word:** the pointer-tracking highlight on
+   the orb, and the avatar's eye gaze (built with the two-position
+   screenshot CLAUDE.md asks for, then reverted — `5eb360e`).
+3. **Every free tier says the other half** — `lib/freeTier.ts`
+   `LOCAL_IS_FREE`, beside the provider's own disclosure in first run,
+   Settings, the picker, the stuck-step offer, and the site.
+4. **Pictures from the cloud with the user's own key** — `imaging/cloud.py`:
+   NVIDIA NIM and Together (free), fal.ai (paid, pictures-only catalogue
+   entry with `images_only`), behind the same `ImageProvider` seam as
+   Flux; `RoutedImageProvider` honours `ImageLocality` in user settings
+   (*On this machine first / In the cloud first*, the other as fallback —
+   the Images section in Settings, `GET/POST /images/setting`). A picture
+   is its own consent (rule 7j — refused before sending until images are
+   allowed to the host under Activity → Destinations, the fix named);
+   every request through the gate as `DataClass.IMAGE`. **The three
+   providers' request and response shapes are from knowledge, not a live
+   call: the first real picture through each is the check.**
+5. **One key, a model for each job** — `providers/pairing.py`: a dated
+   list per provider (NIM, OpenRouter, Groq) for chat, coding and
+   pictures; `GET /providers/cloud/{id}/pairing` recommends only models
+   the key actually returns; `POST` writes `default_model` and the task
+   slots. Offered after a key is saved (`PairingOffer`), never automatic.
+   The candidate names are as of the date on the list; a wrong one is
+   simply never picked, and the first *See picks* on the maintainer's key
+   is the check.
+6. **The daily-driver base, six of eight** (`requirements.txt`, ~4 MB,
+   licences listed there):
+   * `icalendar` — obligations to the calendar you already keep
+     (`obligations/calendar.py`, `POST /obligations/calendar`, the Export
+     button in Memory; a file in the output directory, not a feed).
+   * `trafilatura` — the article ahead of the walk in `deep_read`, the
+     fuller reading wins.
+   * `bm25s` — the lexical side of recall (`HybridMemoryIndex`), a rare
+     word finds its record; what leaves is still a similarity.
+   * `watchfiles` — Knowledge folders re-read on change
+     (`ingest/watcher.py`, started with the backend; real files, real
+     notifier in the test).
+   * `winocr` — the text in an attached picture read on this machine at
+     attach time (`attachments/ocr.py`, 37 ms measured); a model that
+     cannot see answers from the text and says so; a picture with no text
+     is still refused.
+   * The selection on the summon key (`electron/native/selection.js`):
+     one copy keystroke via Windows' own `SendKeys`, the clipboard read
+     once and put back, delivered to the ambient panel; asserted at source
+     beside the no-watcher test. No native module.
+
+#### Deferred, with the re-entry point named
+
+* **`silero-vad`** — not built. The mic already cuts utterances on an RMS
+  detector; what VAD adds is trimming silence before Whisper and refusing
+  to transcribe a blob with no speech (Whisper's "thank you for watching"
+  on silence). Re-entry: vendor `silero_vad.onnx` (2 MB, MIT) under
+  `backend/voice/models/`, run it by hand on `onnxruntime` — which the
+  mic extra already installs — in the transcription path only.
+* **`argos-translate`** — not built. Translation is chat today; a
+  dedicated local model is faster and a translate intent does not exist.
+  Re-entry: an optional extra `zaram[translate]`, a `translate` intent in
+  `core/planner.py`, per-pair models fetched through the gate on the first
+  ask (rule 7g; Opus-MT weights only — NLLB is non-commercial), offered at
+  the moment of doubt with the download size named.
+
+#### Seen by the maintainer, not by the session
+
+Because the packaged backend took 8420: the Images section's control, the
+pairing card, the calendar Export button, the quiet empty-state lines. Each
+is pinned by a test; none has been watched on screen by this session.
+
+#### Decided this session, for the documents
+
+* **Tiers** — `docs/PITCH.md`, "What is free and what is paid". Base
+  free and uncapped; packs as the paid line with a free-but-capped taste;
+  sync as an add-on, not the headline; referral the only cloud revenue.
+* **Rule 1 stands.** Reselling inference was argued through and declined;
+  the reasoning is in PITCH under the same heading.
+* **Video stays out**; an attached MCP server is the route if asked.
+
 
 ### 13 September, latest — 8 seen, 9 measured, 10 built and seen; four defects found by watching. HANDOFF.
 

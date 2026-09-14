@@ -378,3 +378,87 @@ product handles through keys and through the September residency work
 respectively. Put a number on it only from a sourced hardware survey, dated,
 and never from this file.
 
+
+## What is free and what is paid — added 14 September 2026
+
+Settled with the maintainer in one sitting, against three challenges worth
+recording: *most people use AI on one device, so is sync worth anything?*;
+*why not resell inference the way Cursor and Kilo do?*; and *give a lot away,
+keep it affordable, never make the user think.*
+
+**The principle is CLAUDE.md's: give personalisation away, charge for work
+done.** The base is the retention engine and the trust story, so it is free,
+uncapped, one person, one machine, forever: memory, recall, correction,
+Knowledge, projects, documents, obligations, the character, local models and
+the user's own cloud keys, pictures with their own key, and the writing help
+in any app — the last one deliberately free, because the free thing has to
+be *better* than the paid incumbent, and Grammarly-without-the-server is.
+
+**The paid line is the packs**, sold as installed work — never access —
+which is the only shape that does not violate rule 1 and does not add cost
+of goods:
+
+| Tier | What | Price to test |
+|---|---|---|
+| Free | The whole base, and a free-but-capped taste of every pack (the first meeting transcribed, the first three invoices, the first coding chain) | 0 |
+| Pro | Every pack as it ships — meetings, freelance business, coding with writes and undo, research, data — plus encrypted backup and restore | ~$8/mo, ~$70/yr |
+| Pro + devices | Encrypted sync across the user's own machines | +$3–4/mo |
+| Team (later) | Shared project memory, per seat — rule 7i makes project memory the shareable unit | later |
+| Referral | On provider keys created through Zaram | the only cloud revenue rule 1 allows |
+
+The cap is the sales moment and it follows rule 7h: the pack introduces
+itself the first time its job comes up — a recording dropped in, a receipt, a
+tool chain the local model cannot finish — with one sentence and one button,
+and the first use is free in full so the outcome is seen before it is bought.
+No pricing page in the app; a pack adds no screens, so there is nothing to
+lock.
+
+**Why not resell inference.** Rule 1 — *never buy inference* — is the
+business model, not a preference: every competing product pays 40–70% of
+revenue back out as tokens, and Zaram's cost of goods is ~zero, which is
+what makes an uncapped free tier permanent rather than promotional. The
+zero-effort setup people want from those products is had another way:
+OpenRouter's one-click OAuth key creation, the pairing offer that fills every
+job from one key, and referral revenue. Reselling would be reconsidered only
+with a month of usage data showing people prefer to pay for convenience over
+their own key — not from imagination.
+
+**What testers get.** The alpha free with everything on; Pro for life for
+the first fifty who file three real findings; a named channel back; a
+monthly note of what their reports changed. Never tokens or credits — rule 1
+forbids it, and it would teach the wrong thing about what Zaram is.
+
+**Two measurements decide the rest**: week-two return (usability) and which
+pack's offer gets pressed (revenue). Nothing gets a price until one pack does
+its job end to end without the maintainer in the room.
+
+## Discovered, not yet built — added 14 September 2026
+
+Recorded so they return as decisions rather than as new ideas. Each has a
+licence that fits and a seam that exists.
+
+| Job people pay for today | Project | Where it plugs in |
+|---|---|---|
+| Meeting notes into memory (Otter, ~$17/mo, audio uploaded) | `whisperX` (BSD-4), `pyannote.audio` (MIT; gated weights) | A **meetings pack**: transcription and speaker labels over the speech already shipped, obligations pulled out, filed under the project. Nobody else can do it without uploading the audio. First pack to build. |
+| Writing help in any app (Grammarly, $12–30/mo, keystrokes sent) | `LanguageTool` server (LGPL, separate process) + the summon key | The ambient surface, free: select, hotkey, corrected or rewritten locally |
+| Receipts and invoices read (the freelance pack) | `invoice2data` (MIT), `simple-html-invoice-template` (MIT), `py-moneyed` (BSD), `dateparser` (BSD, already in) | Receipt capture and extraction; invoices out that look like one someone would send |
+| Coding with undo (Cursor/Cline, $10–20/mo) | Cline's checkpoints (Apache 2.0) as the undo model; aider's repo map (Apache 2.0); `tree-sitter` (MIT) | The code pack's mutative tier; the repository stays on the machine |
+| "Ask my spreadsheet" | `DuckDB` (MIT) | SQL over CSV/XLSX in-process; the data vertical's daily-driver half |
+| Obligations from email | `imap-tools` (Apache 2.0) | Read-only, opt-in per account, into the obligation extractor |
+| A library you can cite from | `paper-qa` (Apache 2.0), `GROBID` (Apache 2.0, separate service), `citeproc-py` (BSD) | The research pack |
+| Fast translation (DeepL, $9/mo) | `argos-translate` / `CTranslate2` with Opus-MT (MIT) | A translate intent and an optional extra — see MILESTONES' deferrals |
+| Push-to-talk that ends cleanly | `silero-vad` (MIT, vendored ONNX) | Trim silence before Whisper; see MILESTONES' deferrals |
+
+Not usable, and why: Invoice Ninja, Crater, InvoiceShelf, Akaunting (AGPL or
+source-available, whole applications); `beancount`/`hledger` (GPL, and Zaram
+is records and drafts, not a system of record); nut.js in its current
+versions (commercial); NLLB weights (non-commercial). Video generation stays
+out — an order of magnitude more payload, no free tier worth naming, and an
+attached MCP server is the route if a user asks.
+
+Documents: there is no "document model" the way Flux is an image model — a
+document is HTML a language model wrote and WeasyPrint rendered, so quality
+is the model plus the template. The two changes that move it: a per-task
+assignment for documents (a large cloud model or the best local one), and
+templates with exemplars per document type so the model fills a skeleton
+rather than inventing one — which is the pack work above.
