@@ -184,7 +184,73 @@ class HybridMemoryIndex(MemoryIndex):
     def __init__(self, embedding_dim: int = 384):
         self._vector_index = VectorMemoryIndex(embedding_dim)
         self._keyword_index: dict[str, set[str]] = {}
+        # The lexical side is BM25 (`bm25s`, MIT) over the same tokens the
+        # set index holds — added 14 September 2026 for the failure CLAUDE.md
+        # names: "write that up as a proposal" retrieves nothing by
+        # similarity, while the rare tokens in it — a client, a reference
+        # number — are exactly what a lexical index finds and a dense
+        # embedding is worst at. Term overlap counted every matching token
+        # as one; BM25 weighs a token by how rare it is across the Spine and
+        # how much of a record it fills, which is the difference between
+        # "Abuja" mattering and "invoice" mattering.
+        #
+        # Built lazily and whole: bm25s indexes a corpus, not a stream, and
+        # the Spine is thousands of short records, so a rebuild on the next
+        # search after a change costs milliseconds. `_corpus` is the source
+        # of truth; the retriever is a cache of it.
+        self._corpus: dict[str, list[str]] = {}
+        self._bm25: Any = None
+        self._bm25_ids: list[str] = []
         self._indexed_at = 0.0
+
+    # ------------------------------------------------------------- lexical
+
+    def _bm25_invalidate(self) -> None:
+        self._bm25 = None
+
+    def _bm25_ready(self) -> bool:
+        """Build the BM25 index from the corpus if it has changed. False when
+        there is nothing to index, or bm25s is not importable."""
+        if self._bm25 is not None:
+            return True
+        if not self._corpus:
+            return False
+        try:
+            import bm25s
+        except ImportError:  # pragma: no cover - declared; the set index still answers
+            return False
+        ids = list(self._corpus)
+        retriever = bm25s.BM25()
+        retriever.index([self._corpus[rid] for rid in ids], show_progress=False)
+        self._bm25 = retriever
+        self._bm25_ids = ids
+        return True
+
+    def _bm25_scores(self, query_tokens: set[str]) -> dict[str, float]:
+        """BM25 score per record for the query's content tokens, normalised so
+        the best match is 1.0. Empty when nothing matches or nothing is built.
+
+        Normalised because what leaves `search` is a *similarity* and the
+        keyword-only entry is `KEYWORD_ONLY_SCORE * this` — a proportion of an
+        honest ceiling, never a raw BM25 magnitude that would be compared
+        against a floor measured as a cosine.
+        """
+        if not query_tokens or not self._bm25_ready():
+            return {}
+        k = min(len(self._bm25_ids), 50)
+        try:
+            docs, scores = self._bm25.retrieve([sorted(query_tokens)], k=k, show_progress=False)
+        except Exception:  # noqa: BLE001 - a lexical failure must not take recall down
+            return {}
+        out: dict[str, float] = {}
+        best = float(scores[0][0]) if len(scores) and len(scores[0]) else 0.0
+        if best <= 0:
+            return {}
+        for idx, score in zip(docs[0], scores[0]):
+            if float(score) <= 0:
+                continue
+            out[self._bm25_ids[int(idx)]] = float(score) / best
+        return out
 
     def _tokenize(self, text: str) -> set[str]:
         import re
@@ -208,29 +274,40 @@ class HybridMemoryIndex(MemoryIndex):
             tokens.add(tag.lower())
         for token in tokens:
             self._keyword_index.setdefault(token, set()).add(record.id)
+        self._corpus[record.id] = sorted(self._content_tokens(record.content) | {t.lower() for t in record.tags})
+        self._bm25_invalidate()
 
     async def remove(self, record_id: str) -> None:
         await self._vector_index.remove(record_id)
         for token_set in self._keyword_index.values():
             token_set.discard(record_id)
+        if self._corpus.pop(record_id, None) is not None:
+            self._bm25_invalidate()
 
     async def search(self, query: MemoryQuery) -> list[tuple[str, float]]:
         vector_results = await self._vector_index.search(query)
         vector_scores = {rid: score for rid, score in vector_results}
 
         query_tokens = self._content_tokens(query.query)
-        keyword_scores: dict[str, float] = {}
-        for token in query_tokens:
-            if token in self._keyword_index:
-                for rid in self._keyword_index[token]:
-                    keyword_scores[rid] = keyword_scores.get(rid, 0) + 1.0
+        # BM25 decides which records the lexical side puts forward, and how
+        # strongly, as a proportion of the best match. The overlap count it
+        # replaces treated every shared token as one, so a question with
+        # three common words matched most of the Spine equally.
+        keyword_scores = self._bm25_scores(query_tokens)
+        if not keyword_scores and query_tokens:
+            # No BM25 (nothing built, or not importable): the set index still
+            # answers, at the overlap ratio it always used.
+            counts: dict[str, float] = {}
+            for token in query_tokens:
+                for rid in self._keyword_index.get(token, ()):
+                    counts[rid] = counts.get(rid, 0) + 1.0
+            keyword_scores = {rid: min(c / len(query_tokens), 1.0) for rid, c in counts.items()}
 
         all_ids = set(vector_scores.keys()) | set(keyword_scores.keys())
         results = []
         for rid in all_ids:
             v_score = vector_scores.get(rid, 0.0)
-            k_score = keyword_scores.get(rid, 0.0)
-            ratio = min(k_score / len(query_tokens), 1.0) if query_tokens else 0.0
+            ratio = keyword_scores.get(rid, 0.0)
 
             # What this returns is **similarity**, and the citation floor is
             # calibrated against it — so keyword overlap must not inflate it.
@@ -254,12 +331,17 @@ class HybridMemoryIndex(MemoryIndex):
         await self._vector_index.rebuild(records)
         if records is not None:
             self._keyword_index.clear()
+            self._corpus.clear()
             for record in records:
                 tokens = self._tokenize(record.content)
                 for tag in record.tags:
                     tokens.add(tag.lower())
                 for token in tokens:
                     self._keyword_index.setdefault(token, set()).add(record.id)
+                self._corpus[record.id] = sorted(
+                    self._content_tokens(record.content) | {t.lower() for t in record.tags}
+                )
+            self._bm25_invalidate()
         self._indexed_at = time.time()
 
     async def health_check(self) -> dict[str, Any]:
