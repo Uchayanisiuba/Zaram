@@ -82,8 +82,14 @@ const ORBIT_RADIUS = 240
  * rings and the fit arithmetic, so none of them can disagree.
  */
 const TILT = 0.58
-/** How far either inner orbital leans from the wheel's axis, in degrees. */
-const ORBITAL_LEAN = 34
+/** The inner orbitals: narrower than the wheel and leaning steeply either
+ *  way, which with the wheel's horizontal makes the three-ring atom. A shallow
+ *  lean on the wheel's own aspect read as two fat ellipses, not orbitals. */
+const ORBITAL_LEAN = 62
+const ORBITAL_ASPECT = 0.36
+/** The orbitals' long axis, a little inside the wheel so they cross the
+ *  nodes' track rather than reaching past it. */
+const ORBITAL_SIZE = ORBIT_RADIUS * 2 - 20
 /** How much smaller and fainter the far side of the wheel is. */
 const DEPTH_SCALE = 0.25
 const DEPTH_FADE = 0.5
@@ -339,7 +345,6 @@ export default function Landing({ onNavigate, onOrbTap }: LandingProps) {
     return () => window.removeEventListener('keydown', onKey)
   }, [chat, closeChat])
 
-  const ring1Size = ORBIT_RADIUS * 2 + 60
   const ring2Size = ORBIT_RADIUS * 2 + 110
 
   /**
@@ -480,12 +485,12 @@ export default function Landing({ onNavigate, onOrbTap }: LandingProps) {
             key={lean}
             className="absolute rounded-full pointer-events-none"
             style={{
-              width: ring1Size, height: ring1Size,
+              width: ORBITAL_SIZE, height: ORBITAL_SIZE,
               left: '50%', top: '50%',
-              x: -(ring1Size / 2), y: -(ring1Size / 2),
-              scaleY: TILT,
+              x: -(ORBITAL_SIZE / 2), y: -(ORBITAL_SIZE / 2),
+              scaleY: ORBITAL_ASPECT,
               rotate: lean,
-              border: '1px solid rgba(255,255,255,0.075)',
+              border: '1px solid rgba(255,255,255,0.09)',
             }}
             initial={false}
             animate={chat ? { opacity: 0, scale: reduced ? 1 : 1.15 } : { opacity: 1, scale: 1 }}
@@ -507,7 +512,7 @@ export default function Landing({ onNavigate, onOrbTap }: LandingProps) {
                     width: 5, height: 5,
                     left: '50%', top: 0,
                     transform: `translate(-50%, -50%) rotate(${phase}deg)`,
-                    transformOrigin: `50% ${ring1Size / 2}px`,
+                    transformOrigin: `50% ${ORBITAL_SIZE / 2}px`,
                     background: i === 0 ? '#22d3ee' : '#c084fc',
                     boxShadow: `0 0 6px ${i === 0 ? '#22d3ee' : '#c084fc'}`,
                   }}
