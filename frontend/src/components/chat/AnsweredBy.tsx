@@ -125,8 +125,6 @@ export function AnsweredBy({
   const provider =
     attribution.locality === 'cloud' && attribution.provider ? attribution.provider : null;
 
-  const parts = [attribution.model, provider ? `via ${provider}` : null, locality].filter(Boolean);
-
   // An embedder cannot hold a conversation — Ollama answers `/api/generate`
   // for `bge-m3` with a 400 — and the model that just answered is not an
   // alternative to itself.
@@ -138,12 +136,18 @@ export function AnsweredBy({
     <div className="mt-1">
       <p
         data-testid="answered-by"
-        className="text-xs leading-snug"
-        style={{ color: attribution.locality === 'cloud' ? 'var(--color-amber, #d9a441)' : '#64748b' }}
+        className="trace leading-snug"
         title={why ? `Model: ${why}` : undefined}
       >
-        {parts.join(' · ')}
-        {why ? <span style={{ color: '#64748b' }}>{` · ${why}`}</span> : null}
+        {/* The site's trace roles, on the line the site is describing:
+            the model in the text tone, "on this machine" in ok, and a
+            request that left in violet — the cloud colour, and only there. */}
+        <span style={{ color: 'var(--color-text)' }}>{attribution.model}</span>
+        {provider ? <span className="role-vi">{` · via ${provider}`}</span> : null}
+        {locality ? (
+          <span className={attribution.locality === 'cloud' ? 'role-vi' : 'role-ok'}>{` · ${locality}`}</span>
+        ) : null}
+        {why ? <span className="role-dim">{` · ${why}`}</span> : null}
         {onAskAnother && !open && (
           <>
             {' · '}

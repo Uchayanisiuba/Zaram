@@ -23,7 +23,7 @@ import type { ChatToolCall } from '@/stores/chatStore';
 
 /** One verb per tool that exists. Unknown tools fall back to their own name,
  *  which is honest and ages correctly when a tool is added. */
-const DID: Record<string, string> = {
+export const DID: Record<string, string> = {
   search_code: 'searched',
   read_lines: 'read',
   list_files: 'listed',

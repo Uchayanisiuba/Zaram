@@ -768,10 +768,14 @@ export default function ChatSurface({ navigate }: Props) {
       />
 
       {/* Header */}
+      {/* No backdrop blur here or on the composer: both are siblings of the
+          scroll box, nothing ever passes behind them, so the blur sampled a
+          static background every frame for no visible result. The one blur
+          kept in this column is the scroll-to-bottom button, which does sit
+          over the list. */}
       <motion.div
         className="flex items-center gap-3 px-6 py-4 border-b border-white/5"
         variants={item}
-        style={{ backdropFilter: 'blur(20px) saturate(1.4)' }}
       >
         <motion.div
           className="w-2 h-2 rounded-full"
@@ -850,6 +854,11 @@ export default function ChatSurface({ navigate }: Props) {
                   // `RememberAction`, which walks up from its own button
                   // rather than being handed a ref per message.
                   data-message-id={msg.id}
+                  // Off-screen messages are skipped by layout and paint, so a
+                  // long conversation costs what is visible (item 7 of the
+                  // 14 September pass). Popovers here are portaled, so the
+                  // paint containment this implies clips nothing that matters.
+                  className="message"
                   // Who said it is now carried by *side* as well as by label and
                   // colour. Both speakers used to stack down the left edge,
                   // which made a long exchange read as one continuous document
@@ -1275,7 +1284,6 @@ export default function ChatSurface({ navigate }: Props) {
       <motion.div
         className="p-4 border-t border-white/5"
         variants={item}
-        style={{ backdropFilter: 'blur(20px) saturate(1.4)' }}
       >
         {/* What the last exchange cost, above the box you type the next one
             in -- the same reason the attachment chips are here. A cost shown

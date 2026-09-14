@@ -38,6 +38,7 @@ import { useChatModeStore } from '@/stores/chatModeStore';
 import { useViewport } from '@/hooks/useViewport';
 import type { ChatToolCall } from '@/stores/chatStore';
 import StepOutput from './StepOutput';
+import { DID } from '@/lib/workingLine';
 
 const VERDICTS: Record<string, { Icon: typeof Check; color: string; label: string }> = {
   allow: { Icon: Check, color: 'var(--color-text-faint)', label: 'ran' },
@@ -130,48 +131,42 @@ export default function ActivityPanel({
           </button>
         </div>
 
-        <ol className="flex-1 overflow-y-auto px-4 py-3">
+        {/* The site's trace, one call per line: a dim key column carrying the
+            verb, the target as the value, and the verdict in a role colour —
+            dim for ran, amber for anything that needs the person. */}
+        <ol className="trace flex-1 overflow-y-auto px-4 py-3">
           {calls.map((call, i) => {
             const { Icon, color, label } = VERDICTS[call.verdict] ?? UNKNOWN;
+            const verb = DID[call.tool] ?? `${call.server}/${call.tool}`;
             return (
               <li
                 key={`${call.server}/${call.tool}/${i}`}
-                className="flex items-start gap-2 py-1.5"
+                className="flex items-start gap-2 py-1"
                 data-verdict={call.verdict}
                 style={{ borderBottom: '1px solid var(--color-border-subtle)' }}
               >
-                <span
-                  className="w-5 shrink-0 pt-px text-right text-xs tabular-nums"
-                  style={{ color: 'var(--color-text-faint)' }}
-                >
-                  {i + 1}
-                </span>
-                <Icon size={12} className="mt-0.5 shrink-0" style={{ color }} aria-hidden />
+                <span className="w-5 shrink-0 text-right tabular-nums role-dim">{i + 1}</span>
+                <Icon size={12} className="mt-1 shrink-0" style={{ color }} aria-hidden />
                 <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-baseline gap-x-2 text-xs">
-                    <span
-                      style={{ fontFamily: 'var(--font-mono)', color: 'var(--color-text)' }}
-                    >
-                      {call.server}/{call.tool}
-                    </span>
+                  <div className="trace-line">
+                    <span className="trace-k" title={`${call.server}/${call.tool}`}>{verb}</span>
+                    {/* What it was aimed at. Rendered as text — it is written by
+                        the model, and `call_target` has already bounded it. */}
+                    {call.target ? (
+                      <span className="trace-v" style={{ color: 'var(--color-text)' }} data-testid="call-target">
+                        {call.target}
+                      </span>
+                    ) : (
+                      <span className="trace-v role-dim">{call.server}/{call.tool}</span>
+                    )}
                     {label && (
-                      <span style={{ color: 'var(--color-text-faint)' }}>{label}</span>
+                      <span className={call.verdict === 'allow' ? 'role-dim' : 'role-warn'}>· {label}</span>
                     )}
                   </div>
-                  {/* What it was aimed at. Rendered as text — it is written by
-                      the model, and `call_target` has already bounded it. */}
-                  {call.target && (
-                    <div
-                      className="mt-0.5 break-all text-xs"
-                      style={{ fontFamily: 'var(--font-mono)', color: 'var(--color-text-muted)' }}
-                      data-testid="call-target"
-                    >
-                      {call.target}
-                    </div>
-                  )}
                   {call.reason && call.verdict !== 'allow' && (
-                    <div className="mt-0.5 text-xs" style={{ color: 'var(--color-text-faint)' }}>
-                      {call.reason}
+                    <div className="trace-line">
+                      <span className="trace-k" />
+                      <span className="trace-v role-warn">{call.reason}</span>
                     </div>
                   )}
                   {/* What came back, in its own scrolling pane, so a run that

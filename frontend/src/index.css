@@ -477,6 +477,37 @@ body {
   .surface, .surface::before { transition: none; }
 }
 
+/* ─── The transcript's budget ─────────────────────────────────────
+   A message off screen is not laid out or painted until it scrolls in.
+   The intrinsic size is a guess at one short exchange, so the scrollbar
+   stays roughly honest before a message has been measured. */
+.message {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 96px;
+}
+
+/* ─── Traces ──────────────────────────────────────────────────────
+   The site's instrument panels, in the product they describe. A trace
+   is mono, one measured line at a time, a dim key column on the left,
+   and four roles for what a value means: dim for context, cyan for the
+   thing that mattered, ok for "stayed here" and violet for "left" —
+   violet being what docs/UI-SPEC.md assigns to cloud, and nothing else.
+   Values the system reports, never prose to a person. */
+.trace {
+  font-family: var(--font-mono);
+  font-size: var(--text-label);
+  line-height: 1.75;
+  color: var(--color-text-muted-light);
+}
+.trace-line { display: flex; gap: 0.75em; align-items: baseline; min-width: 0; }
+.trace-k { flex: 0 0 6.5em; color: var(--color-text-faint); white-space: nowrap; }
+.trace-v { min-width: 0; overflow-wrap: anywhere; }
+.role-dim { color: var(--color-text-faint); }
+.role-cy  { color: var(--color-cyan-light); }
+.role-ok  { color: var(--color-emerald); }
+.role-vi  { color: var(--color-violet); }
+.role-warn { color: var(--color-amber); }
+
 /* ─── The orb's caption ───────────────────────────────────────────
    The instrument under the orb: status on the first row, the one true
    line on the second. Drawn in the surface material so it is lit by the
