@@ -566,7 +566,14 @@ export default function Landing({ onNavigate, onOrbTap }: LandingProps) {
         })}
 
         {/* Central Living Orb — zooms + glides into the open space beside the chat. */}
-        <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-10 flex flex-col items-center">
+        {/* `pointer-events-none` on this box as well as the one inside it.
+            Measured 14 September with `elementFromPoint` over every node:
+            the inner wrapper already let clicks through, but this outer
+            320px box did not, and it sits at z-10 — above the far nodes at
+            z 5 — so Memory and Knowledge were unclickable whenever the wheel
+            carried them across its upper half. The tap target below opts
+            back in with `pointerEvents: auto`; nothing else here may. */}
+        <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-10 flex flex-col items-center pointer-events-none">
           <motion.div
             initial={{ opacity: 0, scale: 0.9 }}
             animate={{
