@@ -639,7 +639,30 @@ interface FacePanel {
   island: UvIsland
   /** Cell currently applied, so a frame that changes nothing costs nothing. */
   applied: number
+  /** The applied cell's own offset, which the gaze is added to each frame. */
+  base: THREE.Vector2
 }
+
+/**
+ * How far the eyes may look, as a fraction of the atlas.
+ *
+ * **Gaze is back, 14 September 2026, and it is a slide of the LED block, not
+ * a bone.** The 11 August attempt drove the VRM's `lookAt` rig and was removed
+ * because nothing visibly moved. This face is a sprite: the eye pattern sits
+ * in its atlas cell with at least 25px of empty margin on every side
+ * (measured on `eyes_atlas_4x4_alpha.png`: the `open` cell's pattern spans
+ * x33–223, y81–159 of 256), so the sampled window can shift by up to 22px in
+ * any direction and still show only that cell's own pixels — the block moves
+ * toward the pointer, the way a dot-matrix face looks at something.
+ *
+ * Only while idle. A face that is thinking, listening or speaking belongs to
+ * the state (the rule at the top of this file), and following the pointer
+ * mid-reply would put attention where the work is not. Eased toward centre
+ * when a state begins and toward the pointer when idle returns, never snapped.
+ */
+const GAZE_PX = 24
+const GAZE_UV = GAZE_PX / 1024
+const ZERO2 = new THREE.Vector2(0, 0)
 
 interface RobotAvatarProps {
   px?: number
@@ -829,8 +852,21 @@ export default function RobotAvatar({ px = 320, src = '/avatars/zaram-robo.glb' 
       if (!map) return
       map.repeat.copy(repeat)
       map.offset.copy(offset)
+      panel.base.copy(offset)
       panel.applied = index
     }
+
+    // Where the pointer is, relative to the character, in [-1, 1] on each
+    // axis; and where the eyes currently are, which follows it with a lag.
+    const gazeTarget = new THREE.Vector2(0, 0)
+    const gaze = new THREE.Vector2(0, 0)
+    const onPointerMove = (event: PointerEvent) => {
+      const r = mount.getBoundingClientRect()
+      const x = (event.clientX - (r.left + r.width / 2)) / (r.width / 2)
+      const y = (event.clientY - (r.top + r.height / 2)) / (r.height / 2)
+      gazeTarget.set(THREE.MathUtils.clamp(x, -1, 1), THREE.MathUtils.clamp(y, -1, 1))
+    }
+    window.addEventListener('pointermove', onPointerMove, { passive: true })
 
     const adoptAtlas = (panel: FacePanel, url: string) => {
       new THREE.TextureLoader().load(url, (tex) => {
@@ -903,7 +939,7 @@ export default function RobotAvatar({ px = 320, src = '/avatars/zaram-robo.glb' 
         }
       }
 
-      const panel: FacePanel = { material, island, applied: -1 }
+      const panel: FacePanel = { material, island, applied: -1, base: new THREE.Vector2() }
       adoptAtlas(panel, atlas)
       return panel
     }
@@ -1589,6 +1625,19 @@ export default function RobotAvatar({ px = 320, src = '/avatars/zaram-robo.glb' 
       )
       showCell(eyes, eyeCell)
 
+      // The eyes look toward the pointer while idle, and return to centre the
+      // moment the face belongs to a state. The window slides the opposite
+      // way to the pointer, because moving the sampled region left shows the
+      // pattern further right.
+      if (eyes?.material.map) {
+        const want = s === 'idle' ? gazeTarget : ZERO2
+        gaze.lerp(want, 1 - Math.exp(-dt * 7))
+        eyes.material.map.offset.set(
+          eyes.base.x - gaze.x * GAZE_UV,
+          eyes.base.y - gaze.y * GAZE_UV,
+        )
+      }
+
       // **The mouth follows the eyes rather than moving with them.**
       //
       // A face whose halves change on the same frame reads as a panel being
@@ -1657,6 +1706,7 @@ export default function RobotAvatar({ px = 320, src = '/avatars/zaram-robo.glb' 
     return () => {
       disposed = true
       cancelAnimationFrame(raf)
+      window.removeEventListener('pointermove', onPointerMove)
       mixer?.stopAllAction()
       root?.traverse((o) => {
         const m = o as THREE.Mesh
