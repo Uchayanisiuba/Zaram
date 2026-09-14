@@ -78,6 +78,11 @@ class Attachment:
     data: str = ""
     #: Pages, where the format has them. 0 where it does not — not a guess.
     pages: int = 0
+    #: For an image: the text read out of it on this machine at attach time
+    #: (`attachments/ocr.py`), or `""` when there was none or nothing here
+    #: could read it. Kept apart from `text` so a picture is never sized or
+    #: excerpted as a document; `compose` adds it as the picture's own text.
+    ocr_text: str = ""
     created_at: float = field(default_factory=time.time)
 
     @property

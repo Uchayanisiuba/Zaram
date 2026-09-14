@@ -214,6 +214,11 @@ class AttachmentStore:
         path = self._root / f"{identifier}{suffix}"
         path.write_bytes(data)
 
+        # The text in the picture, read here, now, by the operating system's
+        # own engine where there is one — see `ocr.py`. Empty when there is
+        # none, which is what it was before; never a placeholder.
+        from .ocr import read_text
+
         attachment = Attachment(
             id=identifier,
             session_id=session_id,
@@ -225,6 +230,7 @@ class AttachmentStore:
             kind=AttachmentKind.IMAGE.value,
             # Ollama wants raw base64 with no data-URI prefix.
             data=base64.b64encode(data).decode("ascii"),
+            ocr_text=read_text(path),
         )
 
         with self._lock:

@@ -99,6 +99,9 @@ class Mode:
     NONE = "none"
     #: An image. Never excerpted: a picture is looked at or it is not.
     IMAGE = "image"
+    #: An image whose text was read on this machine and sent as text —
+    #: because nothing here could look at the picture itself.
+    IMAGE_TEXT = "image_text"
 
 
 @dataclass
@@ -144,7 +147,16 @@ class Composition:
                 # Named rather than counted. "Looked at" is the honest verb:
                 # the model was shown the picture, and what it made of it is
                 # in the answer rather than in this line.
-                parts.append(f"Looked at {read.name}.")
+                parts.append(
+                    f"Looked at {read.name}, and read its text on this machine."
+                    if read.chars_used
+                    else f"Looked at {read.name}."
+                )
+            elif read.mode == Mode.IMAGE_TEXT:
+                parts.append(
+                    f"Read the text in {read.name} on this machine; no model here can "
+                    "look at the picture itself."
+                )
             elif read.mode == Mode.FULL:
                 parts.append(f"Read {read.name} in full.")
             else:
@@ -250,14 +262,27 @@ def _select(passages: Sequence[str], question: str, budget: int) -> List[int]:
     return sorted(chosen)
 
 
-def _picture_read(item: Attachment) -> DocumentRead:
-    """An image's line in the account. It was looked at, whole or not at all."""
+def _picture_read(item: Attachment, *, seen: bool) -> DocumentRead:
+    """An image's line in the account. Looked at, whole or not at all — and
+    when it carried text read here, that too."""
+    text = getattr(item, "ocr_text", "") or ""
     return DocumentRead(
         name=item.name,
-        mode=Mode.IMAGE,
-        chars_used=0,
-        chars_total=0,
+        mode=Mode.IMAGE if seen else Mode.IMAGE_TEXT,
+        chars_used=len(text),
+        chars_total=len(text),
     )
+
+
+def _picture_text_sections(pictures: Sequence[Attachment]) -> List[str]:
+    """The text read out of each picture, as its own named section. Cited as
+    the picture's, so a figure the model reads off it has a source."""
+    out: List[str] = []
+    for p in pictures:
+        text = (getattr(p, "ocr_text", "") or "").strip()
+        if text:
+            out.append(f"--- text read from {p.name} (on this machine) ---\n{text}")
+    return out
 
 
 def compose(
@@ -265,6 +290,8 @@ def compose(
     question: str,
     missing: Sequence[str] = (),
     budget_chars: int = BUDGET_CHARS,
+    *,
+    pictures_seen: bool = True,
 ) -> Composition:
     """Build the document block for one request, and the account of it.
 
@@ -281,12 +308,24 @@ def compose(
     # of it, and excerpting one is not a coherent operation.
     pictures = [a for a in attachments if a.kind == AttachmentKind.IMAGE.value]
     documents = [a for a in attachments if a.kind != AttachmentKind.IMAGE.value]
-
+    # `pictures_seen` is whether a model that can look at them is answering.
+    # Either way the text read out of a picture on this machine travels as
+    # its own section: beside the picture for a model that sees, in place of
+    # it for one that cannot.
+    picture_sections = _picture_text_sections(pictures)
     if not documents:
+        block = ""
+        if picture_sections:
+            block = (
+                "=== TEXT READ FROM PICTURES ATTACHED TO THIS MESSAGE ===\n"
+                "Read on this machine by its own text recogniser; cite it as the picture's.\n\n"
+                + "\n\n".join(picture_sections)
+                + "\n" + "=" * 38
+            )
         return Composition(
-            block="",
+            block=block,
             mode=Mode.NONE,
-            reads=[_picture_read(p) for p in pictures],
+            reads=[_picture_read(p, seen=pictures_seen) for p in pictures],
             missing=list(missing),
         )
 
@@ -350,7 +389,7 @@ def compose(
         "The user attached these to this message. They are not from memory and "
         f"not from the web. Where a passage is separated by {GAP}, text between "
         "the passages was not included.\n\n"
-        + "\n\n".join(sections)
+        + "\n\n".join(sections + picture_sections)
         + "\n"
         # Only when something actually has a shape to copy. An instruction
         # about following a structure, under a file that has none, is an
@@ -360,5 +399,5 @@ def compose(
     )
 
     mode = Mode.EXCERPT if Mode.EXCERPT in modes else Mode.FULL
-    reads.extend(_picture_read(p) for p in pictures)
+    reads.extend(_picture_read(p, seen=pictures_seen) for p in pictures)
     return Composition(block=block, mode=mode, reads=reads, missing=list(missing))

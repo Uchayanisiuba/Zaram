@@ -1605,12 +1605,26 @@ async def chat(request: ChatRequest):
     # cannot see" is actionable; "nothing installed here can see" is a
     # different problem with a different fix, and collapsing them into one
     # message leaves the user unable to tell which they have.
+    # Whether the pictures will be looked at, or only their text read.
+    # `attachments/ocr.py` reads the text out of every attached image on this
+    # machine at attach time. When nothing here can see and every picture
+    # carried text, the answer comes from that text — said so in the account
+    # under the reply — rather than refused. A picture with no text is still
+    # refused, because answering about it would be answering blind.
+    pictures_seen = True
     if images:
         refusal = await _vision_refusal(model)
         if refusal:
-            return StreamingResponse(
-                _stream_error(refusal), media_type="text/event-stream"
-            )
+            pictured = [a for a in attached if a.kind == "image"]
+            if pictured and all((getattr(a, "ocr_text", "") or "").strip() for a in pictured):
+                pictures_seen = False
+                images = []
+                choice = _resolve_model(request.model, request.text, has_images=False)
+                model = choice.model
+            else:
+                return StreamingResponse(
+                    _stream_error(refusal), media_type="text/event-stream"
+                )
 
     # A name nobody can place is refused here rather than dispatched, because
     # the dispatcher's fallback would answer for Ollama about a model the user
@@ -1722,6 +1736,7 @@ async def chat(request: ChatRequest):
         request.text,
         missing=missing_attachments,
         budget_chars=_budget.document_chars,
+        pictures_seen=pictures_seen,
     )
     if composition.block:
         # Prefixed to whatever `final_prompt` already is - a revision's
