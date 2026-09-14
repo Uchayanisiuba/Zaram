@@ -283,13 +283,16 @@ def a_generous_window(monkeypatch):
     from core import execution_engine
     from core.context_budget import ContextBudget
 
-    monkeypatch.setattr(
-        execution_engine,
-        "budget_for",
-        lambda model=None, **kw: ContextBudget(
-            total_tokens=32768, measured=True, reply_reserve_tokens=8192
-        ),
+    # Patched where the engine reads it — `_budget_for` imports from
+    # `core.context_budget` at call time (13 September), so a patch on the
+    # engine module alone pins nothing, and this fixture had been a no-op.
+    import core.context_budget as context_budget
+
+    pinned = lambda model=None, **kw: ContextBudget(  # noqa: E731
+        total_tokens=32768, measured=True, reply_reserve_tokens=8192
     )
+    monkeypatch.setattr(execution_engine, "budget_for", pinned)
+    monkeypatch.setattr(context_budget, "budget_for", pinned)
 
 
 #: A result large enough that a couple of them cross the handoff line, and small
@@ -308,13 +311,13 @@ def a_tiny_window(monkeypatch):
     from core import execution_engine
     from core.context_budget import ContextBudget
 
-    monkeypatch.setattr(
-        execution_engine,
-        "budget_for",
-        lambda model=None, **kw: ContextBudget(
-            total_tokens=600, measured=True, reply_reserve_tokens=150
-        ),
+    import core.context_budget as context_budget
+
+    pinned = lambda model=None, **kw: ContextBudget(  # noqa: E731
+        total_tokens=600, measured=True, reply_reserve_tokens=150
     )
+    monkeypatch.setattr(execution_engine, "budget_for", pinned)
+    monkeypatch.setattr(context_budget, "budget_for", pinned)
 
 
 class TestItCanSequenceTwoCalls:
@@ -517,7 +520,11 @@ class TestSomethingStopsIt:
 
         list(engine.execute("use the code tools to fix the failing test"))
 
-        assert [c["tool"] for c in mcp.calls] == ["run_command", "edit_file", "run_command"]
+        # The fourth call is the loop's own: a write happened this reply, so
+        # the project's check runs once before "done" (14 September). Here it
+        # passes — the double answers `ok` — and is silent.
+        assert [c["tool"] for c in mcp.calls] == ["run_command", "edit_file", "run_command", "run_command"]
+        assert mcp.calls[-1]["arguments"] == {"runner": "check"}
 
     def test_a_repeat_after_only_reads_still_stops_it(self, a_generous_window):
         run = {"server": "code", "name": "run_command", "description": "run", "input_schema": {}}
@@ -776,3 +783,84 @@ class TestTheButtonReachesTheLoop:
         assert engine.continued == [("s1", "a-model")]
         assert engine.executed == [], "a continuation must not ask a new question"
         assert any("picked it up" in frame for frame in frames)
+
+
+class TestTheProjectChecksTheChangeBeforeDone:
+    """A change the model calls finished is one the type checker has not
+    seen. With a write in the reply and a check in the project, the loop runs
+    `check` before finishing: a pass is silent, a failure is one more turn
+    with the places named, the fix is checked once more, and a "done" after
+    two failures is accepted — the person is needed, not a third lap."""
+
+    _EDIT = {"server": "code", "name": "edit_file", "description": "edit", "input_schema": {}}
+    _RUN = {"server": "code", "name": "run_command", "description": "run", "input_schema": {}}
+
+    def test_a_failed_check_earns_one_more_turn_and_no_more(self, a_generous_window):
+        mcp = _McpDouble(
+            tools=[self._EDIT, self._RUN],
+            results=[
+                {"success": True, "result": {"commit": "abc"}},
+                # The loop's own check, failing, with where.
+                {"success": True, "result": {
+                    "runner": "npm:typecheck", "ok": False, "exit_code": 2,
+                    "output": "src/a.ts(3,5): error TS2322",
+                    "locations": [{"file": "src/a.ts", "line": 3, "column": 5}],
+                }},
+                {"success": True, "result": {"commit": "def"}},
+                # The fix, checked once more and still failing: accepted, not a third lap.
+                {"success": True, "result": {"runner": "npm:typecheck", "ok": False, "output": "still"}},
+                # A third edit would not be checked again; nothing more is consumed.
+            ],
+        )
+        engine, model = _engine(
+            [
+                _call("edit_file", path="src/a.ts", find="x", replace="y"),
+                "Done.",
+                _call("edit_file", path="src/a.ts", find="y", replace="z"),
+                "Done again.",
+                "I could not satisfy the type checker; the remaining error is in a.ts line 3.",
+            ],
+            mcp,
+        )
+
+        out = list(engine.execute("use the code tools to rename x to z"))
+
+        tools = [c["tool"] for c in mcp.calls]
+        assert tools == ["edit_file", "run_command", "edit_file", "run_command"]
+        assert mcp.calls[1]["arguments"] == {"runner": "check"}
+        assert mcp.calls[3]["arguments"] == {"runner": "check"}
+        assert "could not satisfy" in _text(out)
+        assert "Done." not in _text(out) and "Done again." not in _text(out)
+        # The model was told why it got another turn, with the place named.
+        told = [p for p in model.service.prompts if "did not pass" in p]
+        assert len(told) >= 2 and "src/a.ts" in told[0]
+
+    def test_nothing_written_means_nothing_checked(self, a_generous_window):
+        mcp = _McpDouble(tools=[_SEARCH], results=[{"success": True, "result": {"matches": []}}])
+        engine, _ = _engine([_call("search_code", query="x"), "Nothing to change."], mcp)
+        list(engine.execute("use the code tools to tell me what x returns"))
+        assert [c["tool"] for c in mcp.calls] == ["search_code"]
+
+    def test_a_refused_or_unconfirmed_check_is_skipped_in_silence(self, a_generous_window):
+        mcp = _McpDouble(
+            tools=[self._EDIT, self._RUN],
+            results=[
+                {"success": True, "result": {"commit": "abc"}},
+                {"success": False, "needs_confirmation": True, "reason": "runs are not allowed here yet"},
+            ],
+        )
+        engine, _ = _engine([_call("edit_file", path="a.py", find="x", replace="y"), "Done."], mcp)
+        out = list(engine.execute("use the code tools to change x"))
+        assert "Done." in _text(out)
+        assert not any("say-so" in s for s in out if isinstance(s, str))
+
+    def test_a_project_with_no_check_finishes_as_before(self, a_generous_window):
+        mcp = _McpDouble(
+            tools=[self._EDIT, self._RUN],
+            results=[
+                {"success": True, "result": {"commit": "abc"}},
+                {"success": False, "error": "no check runner"},
+            ],
+        )
+        engine, _ = _engine([_call("edit_file", path="a.py", find="x", replace="y"), "Done."], mcp)
+        assert "Done." in _text(list(engine.execute("use the code tools to change x")))

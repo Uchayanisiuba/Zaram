@@ -94,13 +94,29 @@ class Runner:
     #: Whether extra arguments may begin with `-`. True for test runners,
     #: where `-k name` and `-x` are the whole point; false for a build.
     flags: bool = False
+    #: A *check*: something that reads the whole project and says whether it
+    #: holds together — a type checker, a linter, a build. The loop runs the
+    #: first of these once before it calls a change done, so "done" is a
+    #: verdict the project gave and not the model's. See `CHECK_ALIAS`.
+    check: bool = False
 
     def to_json(self) -> Dict[str, Any]:
         return {
             "name": self.name,
             "command": " ".join(self.argv),
             "description": self.description,
+            "check": self.check,
         }
+
+
+#: A runner name the model (and the loop) may use for "whichever check this
+#: project has": resolved to the first `check` runner detected.
+CHECK_ALIAS = "check"
+
+#: Scripts that are checks by name. `build` is one too — a build that fails
+#: is the earliest signal a change broke something — and is listed among the
+#: offered scripts already.
+_CHECK_SCRIPTS = ("typecheck", "lint", "check", "build")
 
 
 #: Interpreters that were checked, so a `detect` on every tool listing does
@@ -181,7 +197,21 @@ def detect(root: Path) -> List[Runner]:
                         argv=(npm, "run", name, "--silent"),
                         description=f"npm run {name} — `{str(scripts[name])[:80]}`",
                         flags=name in ("test", "e2e"),
+                        check=name in _CHECK_SCRIPTS,
                     ))
+        # A TypeScript project with no typecheck script still has `tsc`, and
+        # the desktop layer was already running it for a diagnostics list
+        # nothing read. Offered here, where the model can act on it.
+        if (root / "tsconfig.json").is_file() and not any(r.name == "npm:typecheck" for r in runners):
+            tsc = root / "node_modules" / "typescript" / "bin" / "tsc"
+            node = shutil.which("node")
+            if tsc.is_file() and node:
+                runners.append(Runner(
+                    name="tsc",
+                    argv=(node, str(tsc), "--noEmit", "-p", "."),
+                    description="tsc --noEmit — the project's own TypeScript, type errors only",
+                    check=True,
+                ))
 
     python = _python_for(root)
     if python and _looks_like_pytest(root):
@@ -190,6 +220,13 @@ def detect(root: Path) -> List[Runner]:
             argv=(*python, "-m", "pytest", "-q", "-p", "no:cacheprovider"),
             description="pytest, from the project's own interpreter. Extra arguments such as `-k name` or a test path are allowed.",
             flags=True,
+        ))
+    if python and _configured_ruff(root) and _can_run_module(python, "ruff"):
+        runners.append(Runner(
+            name="ruff",
+            argv=(*python, "-m", "ruff", "check", "."),
+            description="ruff check — the project's own linter, as it configured it",
+            check=True,
         ))
 
     makefile = root / "Makefile"
@@ -204,16 +241,68 @@ def detect(root: Path) -> List[Runner]:
                     name=f"make:{target}",
                     argv=("make", target),
                     description=f"make {target}",
+                    check=target in _CHECK_SCRIPTS,
                 ))
 
     if (root / "Cargo.toml").is_file() and shutil.which("cargo"):
         runners.append(Runner("cargo:test", ("cargo", "test", "-q"), "cargo test", flags=True))
-        runners.append(Runner("cargo:build", ("cargo", "build", "-q"), "cargo build"))
+        runners.append(Runner("cargo:build", ("cargo", "build", "-q"), "cargo build", check=True))
     if (root / "go.mod").is_file() and shutil.which("go"):
         runners.append(Runner("go:test", ("go", "test", "./..."), "go test ./...", flags=True))
-        runners.append(Runner("go:build", ("go", "build", "./..."), "go build ./..."))
+        runners.append(Runner("go:build", ("go", "build", "./..."), "go build ./...", check=True))
 
     return runners
+
+
+def check_runner(root: Path) -> Optional[Runner]:
+    """The one check the loop runs before calling a change done, or ``None``.
+
+    A type checker beats a linter beats a build: the type checker is the
+    cheapest run with the most to say about a change, and a build is the
+    slowest and says only whether it compiled."""
+    checks = [r for r in detect(root) if r.check]
+    if not checks:
+        return None
+    return sorted(checks, key=lambda r: _CHECK_ORDER.get(_check_kind(r.name), 99))[0]
+
+
+#: Preference among checks, by kind of check.
+_CHECK_ORDER = {"typecheck": 0, "tsc": 0, "lint": 1, "ruff": 1, "check": 2, "build": 3}
+
+
+def _check_kind(name: str) -> str:
+    return name.split(":", 1)[-1] if ":" in name else name
+
+
+def _configured_ruff(root: Path) -> bool:
+    if (root / "ruff.toml").is_file() or (root / ".ruff.toml").is_file():
+        return True
+    pyproject = root / "pyproject.toml"
+    try:
+        return pyproject.is_file() and "[tool.ruff" in pyproject.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+
+
+_MODULE_PROBES: Dict[str, bool] = {}
+
+
+def _can_run_module(python: Sequence[str], module: str) -> bool:
+    """Whether ``python -m module --version`` works; cached per interpreter."""
+    key = f"{python[0]}::{module}"
+    if key in _MODULE_PROBES:
+        return _MODULE_PROBES[key]
+    try:
+        done = subprocess.run(
+            [*python, "-m", module, "--version"],
+            capture_output=True, text=True, timeout=20,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        ok = done.returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        ok = False
+    _MODULE_PROBES[key] = ok
+    return ok
 
 
 def _looks_like_pytest(root: Path) -> bool:
@@ -258,8 +347,9 @@ class CodeRunner:
             name=RUN_COMMAND,
             description=(
                 f"Run one of the project's own commands and see its output. Available runners: {listed}. "
-                "Use it to run the tests after a change. Commands that do not exit, like a dev server, "
-                "cannot be run here."
+                "Use it to run the tests after a change; `check` runs the project's type checker, "
+                "linter or build, whichever it has. A failed run names where it failed and shows the "
+                "code there. Commands that do not exit, like a dev server, cannot be run here."
             ),
             input_schema={
                 "type": "object",
@@ -282,6 +372,10 @@ class CodeRunner:
 
         runners = {r.name: r for r in detect(root)}
         runner = runners.get(wanted)
+        if runner is None and wanted == CHECK_ALIAS:
+            runner = check_runner(root)
+            if runner is None:
+                return {"error": "this project has no check runner — no typecheck, lint or build was detected"}
         if runner is None:
             long = long_running_scripts(root)
             if wanted.removeprefix("npm:") in long:
@@ -319,13 +413,26 @@ class CodeRunner:
 
         output = _cap((done.stdout or "") + (done.stderr or ""))
         logger.info("code pack: ran %s in %s -> exit %s", runner.name, root, done.returncode)
-        return {
+        result: Dict[str, Any] = {
             "runner": runner.name,
             "command": " ".join(argv),
             "exit_code": done.returncode,
             "ok": done.returncode == 0,
             "output": output,
         }
+        if done.returncode != 0:
+            # Where it failed, and the code there — so the model's next move
+            # is a fix, not a request to see the file the runner already
+            # named. Parsed from the *uncapped* output: the tail is where a
+            # runner puts the frame that matters, and the cap keeps it.
+            from . import locations as loc
+
+            raw_output = (done.stdout or "") + (done.stderr or "")
+            places = loc.locations_in(raw_output, root)
+            if places:
+                result["locations"] = [p.to_json() for p in places]
+                result["excerpts"] = [e.to_json() for e in loc.excerpts_for(places, root)]
+        return result
 
 
 def _text(value: Any) -> str:

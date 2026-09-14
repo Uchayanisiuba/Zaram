@@ -159,6 +159,15 @@ def _relevance_of(result: Any) -> float:
     return float(relevance or 0.0)
 
 
+def _is_check_runner(runner: str, result: dict) -> bool:
+    """Whether a `run_command` turn ran a check. The runner's own result says
+    its name; the names that count are the ones `packs.code.runners` marks."""
+    name = str(result.get("runner") or runner)
+    return name in {"tsc", "ruff", "cargo:build", "go:build"} or name.split(":", 1)[-1] in {
+        "typecheck", "lint", "check", "build"
+    }
+
+
 class ExecutionEngine:
     """The operational core of Zaram. Orchestrates the lifecycle of a user request.
 
@@ -1282,9 +1291,46 @@ class ExecutionEngine:
         budget = None
         text = buffered
 
+        #: How many times the project's own check has been run this reply
+        #: and failed. Two is the ceiling: one to find out, one to confirm the
+        #: fix; a "done" after that is accepted, because a model that cannot
+        #: satisfy the checker in two laps needs the person, not a third.
+        checks_failed = 0
+
         while True:
             call = parse_call(text)
             if call is None:
+                # **Before "done": the project's own check, once.** A change
+                # the model calls finished is a change the type checker or
+                # linter has not seen, and "done" was the model's word for it.
+                # Run only when something was written this reply, only when
+                # the project has a check, only if the person granted runs
+                # (a refusal or a pending confirmation is skipped in silence —
+                # this is not the moment to ask), and only once. A pass is
+                # silent; a failure is one more turn with the places named.
+                if checks_failed < self.MAX_CHECKS_BEFORE_DONE and self._wrote_since_last_check(turns):
+                    verdict = self._check_before_done(turns)
+                    if verdict is not None:
+                        failed_call, failed_result = verdict
+                        yield StreamEvent.tool_call(
+                            failed_call.server, failed_call.tool, "allow", "ran",
+                            target=call_target(failed_call.tool, failed_call.arguments),
+                            output=output_excerpt(failed_result),
+                        )
+                        turns.append(ToolTurn(call=failed_call, result=failed_result))
+                        checks_failed += 1
+                        text = "".join(self._dispatcher.execute_step(
+                            ExecutionStep(
+                                capability_id="reasoning.generate",
+                                input_data={
+                                    "prompt": result_prompt(original_prompt, turns, may_call_again=True),
+                                    **({"tools": native_tools} if native_tools else {}),
+                                },
+                                depends_on=[],
+                            ),
+                            model, system_prompt,
+                        ))
+                        continue
                 # Nothing more wanted: the answer, minus any half-written
                 # marker. The task finished, so nothing is left to continue —
                 # except its checklist, which Project keeps.
@@ -1632,6 +1678,59 @@ class ExecutionEngine:
     #: the ordinary first half of the loop and the second is the model's own
     #: fix not working — the moment `CLAUDE.md` names.
     STUCK_AFTER_FAILED_RUNS = 2
+    #: Checks the loop runs on its own before "done", per reply. See the loop.
+    MAX_CHECKS_BEFORE_DONE = 2
+
+    @staticmethod
+    def _wrote_since_last_check(turns: list[ToolTurn]) -> bool:
+        """Whether a file was written or edited on Zaram's own code server
+        after the last run of a check runner in this reply."""
+        wrote = False
+        for turn in turns:
+            call = turn.call
+            if call.server != "code":
+                continue
+            if call.tool in ("write_file", "edit_file"):
+                wrote = True
+            elif call.tool == "run_command":
+                runner = str((call.arguments or {}).get("runner") or "")
+                result = turn.result if isinstance(turn.result, dict) else {}
+                if runner == "check" or _is_check_runner(runner, result):
+                    wrote = False
+        return wrote
+
+    def _check_before_done(self, turns: list[ToolTurn]) -> tuple[ToolCall, Any] | None:
+        """Run the project's check through the same path the model's own
+        calls take, so the grant is honoured. Returns the call and its result
+        when the check *failed*; ``None`` when it passed, was refused, would
+        need a confirmation, or the project has no check."""
+        runtime = self._router.try_resolve(MCP_CALL) if self._router else None
+        if runtime is None:
+            return None
+        call = ToolCall(server="code", tool="run_command", arguments={"runner": "check"})
+        try:
+            result = run_sync(runtime.execute(MCP_CALL, {
+                "server": call.server, "tool": call.tool, "arguments": call.arguments,
+            }))
+        except Exception:  # noqa: BLE001 - a check that cannot run is not a failure of the change
+            logger.debug("check before done: could not run", exc_info=True)
+            return None
+        if not isinstance(result, dict) or result.get("refused") or result.get("needs_confirmation"):
+            return None
+        payload = result.get("result") if result.get("success") else None
+        if not isinstance(payload, dict) or "ok" not in payload:
+            # No check runner, or an error about the request itself. Not the
+            # project's verdict on the change, so not held against it.
+            return None
+        if payload.get("ok"):
+            logger.info("check before done: %s passed", payload.get("runner"))
+            return None
+        payload = dict(payload)
+        payload["note"] = (
+            f"Zaram ran the project's own check ({payload.get('runner')}) before finishing, "
+            "and it did not pass. Fix what it names, or say what you could not."
+        )
+        return call, payload
 
     def _stuck_offer(self, turns: list[ToolTurn], model: str | None) -> StreamEvent | None:
         """The reaction `CLAUDE.md` describes in place of predicting difficulty.
