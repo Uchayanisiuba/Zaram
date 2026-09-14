@@ -36,7 +36,7 @@ split `vram_bytes` makes by returning `None` rather than `0`.
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Optional, Sequence
 
 __all__ = ["LOCAL", "CLOUD", "identity_preamble", "compose_system_prompt"]
 
@@ -56,12 +56,18 @@ _WHAT_ZARAM_IS = (
     "answering. The model can change; what the person knows does not.\n"
     "\n"
     "In this conversation you can: answer from what was recalled and name the "
-    "document or fact each claim came from; read files and images the person "
-    "attaches to a message; make a document, spreadsheet, chart or slide deck "
-    "from what has just been said, which arrives as a file card in the "
-    "conversation; and say which model answered and whether it ran on "
-    "this machine or somewhere else. Zaram chooses that model for each "
-    "question, from the ones installed here and any the person has connected.\n"
+    "document or fact each claim came from; read the files the person attaches "
+    "— documents, spreadsheets, and pictures, whose text is read on this "
+    "machine; write a document from what has been discussed — a proposal, a "
+    "report, a letter, a memo, a statement of work, anything with a shape — and "
+    "make a spreadsheet, an invoice, a CV, a chart from figures, or a slide "
+    "deck, each arriving as a file card in the conversation; keep the "
+    "commitments found in what was read — payment terms, deadlines, "
+    "deliverables — which Zaram surfaces before they lapse; and say which "
+    "model answered and whether it ran on this machine or somewhere else. "
+    "Zaram chooses that model for each question, from the ones installed here "
+    "and any the person has connected, and remembers across all of them: "
+    "what one model is told, the next can recall.\n"
     "\n"
     "The person does these in the interface, not by asking you, and you cannot "
     "start any of them: adding folders and files to Knowledge, correcting or "
@@ -331,6 +337,45 @@ def _manner_line(manner: str) -> Optional[str]:
     )
 
 
+def _reach_line(can_draw: Optional[bool], tool_servers: Sequence[str]) -> Optional[str]:
+    """What else this machine can do right now, as supplied facts.
+
+    **Asked what it could do, 14 September 2026, Zaram listed memory and
+    documents and stopped** — the maintainer's words were *"Zaram does a
+    whole lot more and should address itself as such."* The paragraph above
+    now carries everything that is always true; this line carries the two
+    things that depend on the machine, and it says them only when the caller
+    knows. Drawing needs Flux here or an image provider with a key, and the
+    tools are whichever servers the person attached: both are facts the
+    weights cannot see, so a model asked about them answers from its
+    training, which is the failure `_search_line` records for search.
+
+    ``None`` and an empty list say nothing at all. A guess in either
+    direction is a claim about the person's own setup.
+    """
+    lines = []
+    if can_draw is True:
+        lines.append(
+            "Zaram can draw a picture when asked for one; it arrives as a card "
+            "in the conversation."
+        )
+    elif can_draw is False:
+        lines.append(
+            "Nothing here can draw a picture yet. If asked for one, say so — "
+            "a key for an image provider under Settings, or Flux installed on "
+            "this machine, would change that — rather than describing a "
+            "picture in words."
+        )
+    names = [str(n).strip() for n in tool_servers if str(n).strip()]
+    if names:
+        lines.append(
+            "These tools are attached and can be used inside the conversation, "
+            "each confirming with the person before it changes or sends "
+            f"anything: {', '.join(names)}."
+        )
+    return " ".join(lines) if lines else None
+
+
 def _search_line(enabled: Optional[bool]) -> Optional[str]:
     """Whether web search is on, as a supplied fact rather than a guess.
 
@@ -371,6 +416,8 @@ def identity_preamble(
     manner: str = "",
     today: str = "",
     web_search: Optional[bool] = None,
+    can_draw: Optional[bool] = None,
+    tool_servers: Sequence[str] = (),
 ) -> str:
     """The identity block that goes in front of everything else.
 
@@ -397,6 +444,12 @@ def identity_preamble(
     an edit that reverses it fails rather than quietly removing the protection.
     """
     parts = [_WHAT_ZARAM_IS]
+
+    # What is reachable on *this* machine right now, said only when known —
+    # the same class of fact as the search switch, for the same reason.
+    reach = _reach_line(can_draw, tool_servers)
+    if reach:
+        parts.append(reach)
 
     called = _called_line(assistant_name)
     if called:

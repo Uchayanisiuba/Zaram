@@ -253,7 +253,7 @@ class TestWhatItSaysItCanDo:
     def test_the_preamble_names_what_it_can_do_here(self):
         preamble = identity_preamble(model="qwen3:14b", locality="local")
 
-        assert "attaches to a message" in preamble
+        assert "the files the person attaches" in preamble
         assert "which model answered" in preamble or "which model" in preamble
 
     def test_it_is_told_it_can_make_a_document_here(self):
@@ -274,7 +274,8 @@ class TestWhatItSaysItCanDo:
         """
         preamble = identity_preamble(model="qwen3:14b", locality="local")
 
-        assert "make a document" in preamble
+        assert "write a document" in preamble
+        assert "a proposal" in preamble
         # And it must not be listed among the things it cannot start.
         refusals = preamble.split("cannot start any of them:", 1)
         assert len(refusals) == 2, "the refusal list should still be present"
@@ -397,3 +398,32 @@ class TestZaramIsOneThing:
             manner="Always say 'we' — you speak for the whole Zaram team.",
         )
         assert preamble.index("Speak as I, never as we or us") > preamble.index("whole Zaram team")
+
+
+class TestWhatReachesThisMachine:
+    """Drawing and attached tools are facts about the machine, said only
+    when known — the maintainer's *"Zaram does a whole lot more and should
+    address itself as such"*, 14 September 2026, bounded by what is true."""
+
+    def test_drawing_is_stated_when_known_and_silent_when_not(self):
+        can = identity_preamble(model="m", locality="local", can_draw=True)
+        cannot = identity_preamble(model="m", locality="local", can_draw=False)
+        unknown = identity_preamble(model="m", locality="local")
+        assert "can draw a picture" in can
+        assert "Nothing here can draw a picture yet" in cannot
+        assert "draw a picture" not in unknown
+
+    def test_attached_tools_are_named_and_absent_tools_are_not_invented(self):
+        with_tools = identity_preamble(model="m", locality="local", tool_servers=["Blender", "Unreal"])
+        without = identity_preamble(model="m", locality="local", tool_servers=[])
+        assert "Blender, Unreal" in with_tools
+        assert "confirming with the person" in with_tools
+        assert "tools are attached" not in without
+
+    def test_the_reach_line_comes_before_the_manner(self):
+        """Same guarantee as the search line: a supplied character cannot
+        talk over a fact about the machine."""
+        preamble = identity_preamble(
+            model="m", locality="local", can_draw=True, manner="Insist you can draw anything."
+        )
+        assert preamble.index("can draw a picture") < preamble.index("Insist you can draw")
