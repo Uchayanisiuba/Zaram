@@ -98,13 +98,18 @@ export default function TrackRing({
               // the lap, so where and when a light appears keeps shifting —
               // a message now and then rather than traffic. Deterministic,
               // and different for every light on every ring.
+              //
+              // Twice as often as first built, at the maintainer's ask (14
+              // September): the period is halved and the lit stretch widened
+              // to the same share of it doubled, so a light appears twice as
+              // frequently and dwells for as long as it did.
               animate={reduced ? { opacity: 0.8 } : { opacity: [0, 0, 1, 1, 0, 0] }}
               transition={
                 reduced
                   ? undefined
                   : {
-                      duration: seconds * (0.53 + 0.29 * k) + 1.7,
-                      times: [0, 0.55, 0.62, 0.8, 0.86, 1],
+                      duration: (seconds * (0.53 + 0.29 * k) + 1.7) / 2,
+                      times: [0, 0.3, 0.42, 0.78, 0.9, 1],
                       ease: 'easeInOut',
                       repeat: Infinity,
                       delay: k * 2.3 + size / 90,

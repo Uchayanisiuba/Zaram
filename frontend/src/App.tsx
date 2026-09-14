@@ -18,6 +18,7 @@ import TopNav from './components/TopNav';
 import LeftRail from './components/LeftRail';
 import ChatSurface from './components/chat/ChatSurface';
 import HistoryPanel from './components/chat/HistoryPanel';
+import { useDueSoon } from './hooks/useDueSoon';
 import SourcePanelLayer from './components/chat/SourcePanelLayer';
 import CommandPalette from './components/CommandPalette';
 import LandingHint from './components/shell/LandingHint';
@@ -48,6 +49,10 @@ export default function App() {
   const platform = detectPlatform();
 
   const isLanding = workspace === 'landing';
+
+  // What falls due this week, said once through the desktop's notification
+  // service — the one time Zaram speaks first. See `lib/dueSoon.ts`.
+  useDueSoon();
 
   // Where the orb is and what it is doing, for the stylesheet: every
   // `.surface` takes its rim light from the orb's side and its tone from the
