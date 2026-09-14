@@ -6,7 +6,7 @@ import Embodiment from '@/components/embodiment/Embodiment'
 import ZaramMark from '@/components/brand/ZaramMark'
 import OrbStatusLabel from '../components/orb/OrbStatusLabel'
 import OrbAura from '../components/orb/OrbAura'
-import { RING_TILT } from '../components/orb/TrackRing'
+import TrackRing, { RING_TILT } from '../components/orb/TrackRing'
 import { useEmbodimentStore } from '@/stores/embodimentStore'
 import { useChatModeStore } from '@/stores/chatModeStore'
 import { useLayoutStore, orbGeometry } from '@/stores/layoutStore'
@@ -105,7 +105,7 @@ const TRACKS = [1] as const
  * reduced motion stills them.
  */
 const MESSENGERS = [
-  { count: 2, dir: 1, seconds: 18, colour: '#22d3ee' },
+  { count: 2, dir: 1, seconds: 18, colours: ['#22d3ee', '#c084fc'] },
 ] as const
 /** How much smaller and fainter the far side of the wheel is. */
 const DEPTH_SCALE = 0.25
@@ -535,43 +535,26 @@ export default function Landing({ onNavigate, onOrbTap }: LandingProps) {
           return (
             <motion.div
               key={fraction}
-              className="absolute rounded-full pointer-events-none"
-              style={{
-                width: size, height: size,
-                left: '50%', top: '50%',
-                x: -(size / 2), y: -(size / 2),
-                scaleY: TILT,
-              }}
+              className="absolute pointer-events-none flex items-center justify-center"
+              style={{ width: size, height: size, left: '50%', top: '50%', x: -(size / 2), y: -(size / 2) }}
               initial={false}
               animate={chat ? { opacity: 0, scale: reduced ? 1 : 1.15 } : { opacity: 1, scale: 1 }}
               transition={{ duration: reduced ? 0.2 : 0.4, delay: 0.03 * i }}
             >
-              {/* The line on its own element: framer owns this box's opacity
-                  for the dissolve, and the proximity opacity must not fight it. */}
-              <div
-                className="orb-track absolute inset-0 rounded-full"
-                style={{ border: `1px solid rgba(255,255,255,${[0.11, 0.07, 0.05][i]})` }}
+              {/* The same ring the embodiment draws for itself, so its lights
+                  come and go on the same terms. `.orb-track` on the line reads
+                  `--orb-near`, which the pointer handler sets from its
+                  distance to the orb. */}
+              <TrackRing
+                size={size}
+                colour={`rgba(255,255,255,${[0.11, 0.07, 0.05][i]})`}
+                messengers={m.count}
+                dir={m.dir}
+                seconds={m.seconds}
+                messengerColours={[...m.colours]}
+                reduced={reduced}
+                lineClassName="orb-track"
               />
-              <motion.div
-                className="absolute inset-0"
-                animate={reduced ? undefined : { rotate: 360 * m.dir }}
-                transition={{ duration: m.seconds, ease: 'linear', repeat: Infinity }}
-              >
-                {Array.from({ length: m.count }, (_, k) => (
-                  <span
-                    key={k}
-                    className="absolute rounded-full"
-                    style={{
-                      width: 5, height: 5,
-                      left: '50%', top: 0,
-                      transform: `translate(-50%, -50%) rotate(${(360 / m.count) * k}deg)`,
-                      transformOrigin: `50% ${size / 2}px`,
-                      background: m.colour,
-                      boxShadow: `0 0 8px ${m.colour}, 0 0 2px #fff`,
-                    }}
-                  />
-                ))}
-              </motion.div>
             </motion.div>
           )
         })}
@@ -631,7 +614,20 @@ export default function Landing({ onNavigate, onOrbTap }: LandingProps) {
                   normal flow, so without a stacking context of its own a
                   particle could paint across the face — and a mote crossing
                   the visor reads as something the face is doing. */}
-              <div ref={orbBoxRef} style={{ position: 'relative', zIndex: 1 }}>
+              {/* The character sits inside the wheel rather than filling it:
+                  at the orb's size its chest carried the front node and its
+                  own rings disappeared into the silhouette (14 September).
+                  Scaled down and kept at the centre, like the orb, so the
+                  rings are seen around it. */}
+              <div
+                ref={orbBoxRef}
+                style={{
+                  position: 'relative',
+                  zIndex: 1,
+                  transform: renderer === 'avatar' ? 'scale(0.78)' : undefined,
+                  transformOrigin: 'center center',
+                }}
+              >
               <Embodiment key={renderer} px={ORB_SIZE} {...ORB_BEHAVIOUR} motes={false} />
               </div>
             </div>

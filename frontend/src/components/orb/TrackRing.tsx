@@ -32,6 +32,8 @@ export interface TrackRingProps {
   dir?: 1 | -1;
   seconds?: number;
   messengerColour?: string;
+  /** One colour per light, cycling; overrides `messengerColour` when given. */
+  messengerColours?: string[];
   reduced?: boolean;
   /** Class for the line element — the landing uses it for the proximity opacity. */
   lineClassName?: string;
@@ -45,6 +47,7 @@ export default function TrackRing({
   dir = 1,
   seconds = 12,
   messengerColour = '#22d3ee',
+  messengerColours,
   reduced = false,
   lineClassName = '',
   lineOpacity,
@@ -67,7 +70,9 @@ export default function TrackRing({
           animate={reduced ? undefined : { rotate: 360 * dir }}
           transition={{ duration: seconds, ease: 'linear', repeat: Infinity }}
         >
-          {Array.from({ length: messengers }, (_, k) => (
+          {Array.from({ length: messengers }, (_, k) => {
+            const tint = messengerColours?.[k % messengerColours.length] ?? messengerColour
+            return (
             <motion.span
               key={k}
               className="absolute rounded-full"
@@ -78,8 +83,8 @@ export default function TrackRing({
                 top: 0,
                 transform: `translate(-50%, -50%) rotate(${(360 / messengers) * k}deg)`,
                 transformOrigin: `50% ${size / 2}px`,
-                background: messengerColour,
-                boxShadow: `0 0 8px ${messengerColour}, 0 0 2px #fff`,
+                background: tint,
+                boxShadow: `0 0 8px ${tint}, 0 0 2px #fff`,
               }}
               // Seen for part of a lap only, on a period that does not divide
               // the lap, so where and when a light appears keeps shifting —
@@ -98,7 +103,8 @@ export default function TrackRing({
                     }
               }
             />
-          ))}
+            )
+          })}
         </motion.div>
       )}
     </div>
