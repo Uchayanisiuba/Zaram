@@ -67,22 +67,31 @@ export default function EmptyConversation({ onPick }: { onPick: (prompt: string)
     <div className="flex flex-col gap-3" data-testid="empty-conversation">
       <p className="t-kicker">Ask Zaram something</p>
       {prompts == null ? null : prompts.length === 0 ? (
-        <p className="t-body" style={{ color: 'var(--color-text-muted)' }}>
-          Nothing is indexed yet, so there is nothing to suggest. Point Knowledge at a
-          folder and the prompts here will be about what is in it.
+        <p className="text-xs" style={{ margin: 0, color: 'var(--color-text-faint)' }}>
+          Nothing is indexed yet. Point Knowledge at a folder and the suggestions here will be about it.
         </p>
       ) : (
-        <ul className="flex flex-col gap-2" aria-label="Things worth asking">
+        /* Suggestive, not a card: a quiet line per prompt, in the faint tone,
+           brightening under the pointer. The maintainer saw the boxed version
+           and called it too visible (14 September) — a suggestion is something
+           to take or leave, and a box asks to be dealt with. */
+        <ul className="flex flex-col gap-1.5" aria-label="Things worth asking">
           {prompts.map((p) => (
             <li key={p.prompt}>
               <button
                 type="button"
                 onClick={() => onPick(p.prompt)}
-                className="w-full text-left rounded-xl px-4 py-3 surface transition-colors hover:bg-white/[0.03]"
+                className="group text-left text-sm leading-snug transition-colors"
+                style={{ color: 'var(--color-text-faint)', background: 'none', border: 0, padding: 0, cursor: 'pointer' }}
                 data-testid="grounded-prompt"
               >
-                <span className="t-body block">{p.prompt}</span>
-                <span className="t-mono block mt-1">{p.reason}</span>
+                <span className="group-hover:text-[var(--color-text-muted-light)] transition-colors">
+                  <span aria-hidden style={{ opacity: 0.6 }}>›  </span>
+                  {p.prompt}
+                </span>
+                <span className="t-mono ml-2" style={{ color: 'var(--color-text-faint)', opacity: 0.8 }}>
+                  {p.reason}
+                </span>
               </button>
             </li>
           ))}
