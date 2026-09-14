@@ -118,13 +118,16 @@ def a_tiny_window(monkeypatch):
     from core import execution_engine
     from core.context_budget import ContextBudget
 
-    monkeypatch.setattr(
-        execution_engine,
-        "budget_for",
-        lambda model=None, **kw: ContextBudget(
-            total_tokens=600, measured=True, reply_reserve_tokens=150
-        ),
+    # Patched where the engine reads it as well — `_budget_for` imports from
+    # `core.context_budget` at call time (13 September), so the patch on the
+    # engine module alone pinned nothing and this file had been failing.
+    import core.context_budget as context_budget
+
+    pinned = lambda model=None, **kw: ContextBudget(  # noqa: E731
+        total_tokens=600, measured=True, reply_reserve_tokens=150
     )
+    monkeypatch.setattr(execution_engine, "budget_for", pinned)
+    monkeypatch.setattr(context_budget, "budget_for", pinned)
 
 
 def _stop_a_task(store, a_tiny_window, *, locality="local", project_id="northwind"):

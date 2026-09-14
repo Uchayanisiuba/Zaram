@@ -120,7 +120,8 @@ export default function HistoryPanel() {
   // has moved to the top.
   useEffect(() => {
     if (open) void load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // Deliberately keyed on the conversation alone: `open` and `load` are
+    // read, not depended on — a peek must not refetch the list.
   }, [currentId]);
 
   const clearTimers = () => {

@@ -43,21 +43,75 @@ MAX_CHARS = 6000
 MIN_CHARS = 8
 
 
+#: How long a picture may take to read before it is given up on.
+TIMEOUT_SECONDS = 20
+
+
 def read_text(path: Path | str) -> str:
     """The text in the image at ``path``, or ``""`` when there is none or no
-    engine can read it here. Never raises."""
+    engine can read it here. Never raises — and never crashes the engine.
+
+    **Read in a child process, deliberately.** The Windows engine is native
+    code reached through WinRT, and on 14 September 2026 it took the whole
+    backend down with an access violation from inside the test suite — a
+    fault no ``except`` can catch, on the one path a person uses several
+    times a day. In isolation the same call is fine; under a process that
+    has threads and an event loop already, it is not always, and the
+    reason is not worth a tester's afternoon. So the engine runs in a
+    process of its own: a crash there costs one picture's text and a log
+    line. Measured cost, interpreter start included: well under a second,
+    against a ~40 ms in-process read. Reliability wins on this path.
+    """
+    try:
+        text = _in_a_child_process(Path(path))
+    except Exception:  # noqa: BLE001 - a picture that cannot be read is a picture with no text
+        logger.debug("OCR failed for %s", path, exc_info=True)
+        return ""
+    return _clean(text)
+
+
+def _clean(text: str) -> str:
+    text = " ".join(line.strip() for line in text.splitlines() if line.strip()) if text else ""
+    if len(text) < MIN_CHARS:
+        return ""
+    return text[:MAX_CHARS]
+
+
+def _in_a_child_process(path: Path) -> str:
+    import json
+    import subprocess
+
+    done = subprocess.run(
+        [sys.executable, "-m", "attachments.ocr", str(path)],
+        cwd=str(Path(__file__).resolve().parent.parent),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=TIMEOUT_SECONDS,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    if done.returncode != 0:
+        logger.info("OCR child exited %s for %s: %s", done.returncode, path, (done.stderr or "").strip()[-200:])
+        return ""
+    try:
+        return str(json.loads(done.stdout or "{}").get("text") or "")
+    except ValueError:
+        return ""
+
+
+def read_text_here(path: Path | str) -> str:
+    """The same read, in this process. What the child runs; also what a
+    caller that has its own isolation may use."""
     try:
         if sys.platform == "win32":
             text = _windows(Path(path))
         else:
             text = _rapidocr(Path(path))
-    except Exception:  # noqa: BLE001 - a picture that cannot be read is a picture with no text
+    except Exception:  # noqa: BLE001
         logger.debug("OCR failed for %s", path, exc_info=True)
         return ""
-    text = " ".join(line.strip() for line in text.splitlines() if line.strip()) if text else ""
-    if len(text) < MIN_CHARS:
-        return ""
-    return text[:MAX_CHARS]
+    return _clean(text)
 
 
 def _windows(path: Path) -> str:
@@ -85,3 +139,10 @@ def _rapidocr(path: Path) -> str:
     if not result:
         return ""
     return "\n".join(str(item[1]) for item in result if len(item) > 1)
+
+
+if __name__ == "__main__":  # the child: one path in, one JSON line out
+    import json as _json
+
+    _target = sys.argv[1] if len(sys.argv) > 1 else ""
+    print(_json.dumps({"text": read_text_here(_target) if _target else ""}))

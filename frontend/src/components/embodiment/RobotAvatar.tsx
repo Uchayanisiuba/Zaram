@@ -789,7 +789,7 @@ export default function RobotAvatar({ px = 320, src = '/avatars/zaram-robo.glb' 
     const parseManager = new THREE.LoadingManager()
     parseManager.setURLModifier((url) => {
       if (url.startsWith('data:') || url.startsWith('blob:')) return url
-      // eslint-disable-next-line no-console
+       
       console.warn(`[embodiment] refused an external avatar resource: ${url}`)
       return 'data:application/octet-stream;base64,'
     })
@@ -1215,7 +1215,7 @@ export default function RobotAvatar({ px = 320, src = '/avatars/zaram-robo.glb' 
             const verdict = inspectAvatar(data)
             if (!verdict.ok) {
               failed.push(entry.file)
-              // eslint-disable-next-line no-console
+               
               console.warn(`[embodiment] refused ${url}: ${verdict.reason}`, verdict.external)
               continue
             }
@@ -1234,7 +1234,7 @@ export default function RobotAvatar({ px = 320, src = '/avatars/zaram-robo.glb' 
               (gltf.animations.length === 1 ? gltf.animations[0] : undefined)
             if (!clip) {
               failed.push(entry.file)
-              // eslint-disable-next-line no-console
+               
               console.warn(
                 `[embodiment] ${entry.file} has no animation named "${name}": ` +
                   `${gltf.animations.map((a) => a.name).join(', ') || 'none'}`,
@@ -1389,7 +1389,7 @@ export default function RobotAvatar({ px = 320, src = '/avatars/zaram-robo.glb' 
       // Printed for the reason the VRM path prints its expression list: a clip
       // that did not survive export, or a face panel whose material was
       // renamed, is otherwise indistinguishable from a bug in this file.
-      // eslint-disable-next-line no-console
+       
       console.info(
         `[embodiment] ${src}\n` +
           `  face panels: eyes=${eyes ? 'found' : 'MISSING'} mouth=${mouth ? 'found' : 'MISSING'}\n` +
@@ -1446,7 +1446,7 @@ export default function RobotAvatar({ px = 320, src = '/avatars/zaram-robo.glb' 
         if (!verdict.ok) {
           setStatus('failed')
           setReason(verdict.reason)
-          // eslint-disable-next-line no-console
+           
           console.warn(`[embodiment] refused ${src}: ${verdict.reason}`, verdict.external)
           return
         }

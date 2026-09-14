@@ -147,6 +147,9 @@ export default defineConfig(({ command }) => ({
       // failing since. Read the guard's output rather than adding a
       // prefix here from memory — it names both lists.
       '/obligations': { target: BACKEND, changeOrigin: true },
+      '/diagnostics': { target: BACKEND, changeOrigin: true },
+      '/extras': { target: BACKEND, changeOrigin: true },
+      '/images': { target: BACKEND, changeOrigin: true },
     },
   },
 }));

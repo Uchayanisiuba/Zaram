@@ -72,4 +72,62 @@ if (absent.length > 0) {
   ]);
 }
 
-console.log('check:runtime — bundled runtime present, with backend dependencies.');
+// **Every pin in requirements.txt, not three sentinels.** The sentinels
+// passed on 14 September 2026 while five packages added that day — bm25s,
+// trafilatura, watchfiles, icalendar, winocr — were absent from the runtime:
+// the venv had them, the installer would not, and the first recall would
+// have raised ImportError on a tester's machine. The runtime's own
+// interpreter answers, with markers evaluated for the platform it runs on.
+import { spawnSync } from 'node:child_process';
+
+const python = process.platform === 'win32'
+  ? path.join(RUNTIME, 'python.exe')
+  : path.join(RUNTIME, 'bin', 'python3');
+const probe = [
+  'import sys',
+  'from importlib import metadata',
+  'from packaging.requirements import Requirement',
+  'missing = []',
+  'for raw in open(sys.argv[1], encoding="utf-8"):',
+  '    line = raw.split("#", 1)[0].strip()',
+  '    if not line or line.startswith("-"):',
+  '        continue',
+  '    try:',
+  '        req = Requirement(line)',
+  '    except Exception:',
+  '        continue',
+  '    if req.marker is not None and not req.marker.evaluate():',
+  '        continue',
+  '    try:',
+  '        have = metadata.version(req.name)',
+  '    except metadata.PackageNotFoundError:',
+  '        missing.append(f"{req.name} (not installed)")',
+  '        continue',
+  '    if req.specifier and not req.specifier.contains(have, prereleases=True):',
+  '        missing.append(f"{req.name} (have {have}, want {req.specifier})")',
+  'print(chr(10).join(missing))',
+].join(String.fromCharCode(10));
+const result = spawnSync(python, ['-c', probe, path.join(ROOT, 'backend', 'requirements.txt')], {
+  encoding: 'utf-8',
+});
+const NL = String.fromCharCode(10);
+if (result.status !== 0) {
+  fail([
+    '  The runtime could not check its own dependencies:',
+    `  ${(result.stderr || '').trim().split(NL).slice(-1)[0]}`,
+    '',
+    '  Rebuild it: npm run build:runtime',
+  ]);
+}
+const unmet = (result.stdout || '').trim().split(NL).filter(Boolean);
+if (unmet.length > 0) {
+  fail([
+    '  The runtime is behind backend/requirements.txt:',
+    ...unmet.map((line) => `    ${line}`),
+    '',
+    '  The venv has these and the installer would not; the first import',
+    '  would fail on a tester\'s machine. Rebuild it: npm run build:runtime',
+  ]);
+}
+
+console.log('check:runtime — bundled runtime present, every pin in requirements.txt met.');
