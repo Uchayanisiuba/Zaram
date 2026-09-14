@@ -193,7 +193,7 @@ class TestLocalFirst:
         connections("nvidia_nim", "https://integrate.api.nvidia.com/v1")
         policy.set("ai.api.nvidia.com", Mode.ALLOW, DataClass.IMAGE)
         local = _Local(ok=True)
-        router = RoutedImageProvider(local)
+        router = RoutedImageProvider(local, prefer=lambda: "local")
         router.generate(ImageRequest(prompt="x"))
         assert local.drew == 1
         assert router.vram_needed_bytes == 12_000_000_000
@@ -203,17 +203,52 @@ class TestLocalFirst:
         connections("nvidia_nim", "https://integrate.api.nvidia.com/v1")
         policy.set("ai.api.nvidia.com", Mode.ALLOW, DataClass.IMAGE)
         monkeypatch.setattr("urllib.request.urlopen", _Wire({"image": PNG_B64}))
-        router = RoutedImageProvider(_Local(ok=False))
+        router = RoutedImageProvider(_Local(ok=False), prefer=lambda: "local")
         assert router.availability().ok
         assert "NVIDIA" in router.name
         # A cloud provider holds no card; nothing must be preflighted for it.
         assert router.vram_needed_bytes is None
         assert router.generate(ImageRequest(prompt="x"))[0].width == 16
 
+    def test_the_person_may_put_cloud_first_and_local_is_then_the_fallback(self, gate, connections, monkeypatch):
+        # Cloud first: Flux is never loaded while a cloud provider can draw —
+        # the card stays with the chat model. Flip it and local draws again.
+        policy, _ = gate
+        connections("nvidia_nim", "https://integrate.api.nvidia.com/v1")
+        policy.set("ai.api.nvidia.com", Mode.ALLOW, DataClass.IMAGE)
+        monkeypatch.setattr("urllib.request.urlopen", _Wire({"image": PNG_B64}))
+        local = _Local(ok=True)
+        prefer = {"where": "cloud"}
+        router = RoutedImageProvider(local, prefer=lambda: prefer["where"])
+
+        router.generate(ImageRequest(prompt="x"))
+        assert local.drew == 0
+        assert router.vram_needed_bytes is None
+
+        prefer["where"] = "local"
+        router.generate(ImageRequest(prompt="x"))
+        assert local.drew == 1
+
+    def test_cloud_first_still_falls_back_to_local_when_no_cloud_can_draw(self, gate, connections):
+        local = _Local(ok=True)
+        router = RoutedImageProvider(local, prefer=lambda: "cloud")
+        router.generate(ImageRequest(prompt="x"))
+        assert local.drew == 1
+
+    def test_the_preference_is_stored_and_read_back(self, tmp_path):
+        from core.user_settings import ImageLocality, UserSettings
+
+        settings = UserSettings(str(tmp_path / "settings.json"))
+        assert settings.image_locality is ImageLocality.LOCAL
+        settings.set_image_locality("cloud")
+        assert UserSettings(str(tmp_path / "settings.json")).image_locality is ImageLocality.CLOUD
+        with pytest.raises(ValueError):
+            settings.set_image_locality("somewhere")
+
     def test_nothing_can_draw_says_both_remedies(self, gate, connections):
         policy, _ = gate
         connections("nvidia_nim", "https://integrate.api.nvidia.com/v1")
-        a = RoutedImageProvider(_Local(ok=False)).availability()
+        a = RoutedImageProvider(_Local(ok=False), prefer=lambda: "local").availability()
         assert not a.ok
         assert "install Flux" in a.remedy
         assert "Allow images to ai.api.nvidia.com" in a.remedy

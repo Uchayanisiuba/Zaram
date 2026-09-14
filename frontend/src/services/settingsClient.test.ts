@@ -14,6 +14,8 @@ import {
   fetchProviderCatalogue,
   setKillSwitch,
   fetchRoutingSettings,
+  fetchImageSetting,
+  setImageLocality,
   updateRoutingSettings,
 } from './settingsClient';
 
@@ -211,5 +213,31 @@ describe('routing updates leave untouched fields alone', () => {
     );
 
     expect((await fetchRoutingSettings()).taskModels).toEqual({});
+  });
+});
+
+describe('where pictures are drawn first', () => {
+  it('reads the preference and who can draw, and never invents a drawer', async () => {
+    fetchMock.mockResolvedValue(
+      json({
+        prefer: 'cloud',
+        local_ok: false,
+        cloud: [{ id: 'nvidia_nim', name: 'flux-schnell · NVIDIA NIM', ok: false, reason: 'no key', remedy: 'add one' }],
+        answers: null,
+      }),
+    );
+    const setting = await fetchImageSetting();
+    expect(setting.prefer).toBe('cloud');
+    expect(setting.localOk).toBe(false);
+    expect(setting.cloud[0]).toMatchObject({ id: 'nvidia_nim', ok: false, remedy: 'add one' });
+    expect(setting.answers).toBeNull();
+  });
+
+  it('sends the choice as the one field the backend reads', async () => {
+    fetchMock.mockResolvedValue(json({ prefer: 'local', local_ok: true, cloud: [], answers: 'flux-schnell' }));
+    const setting = await setImageLocality('local');
+    expect(lastCall().url).toContain('/images/setting');
+    expect(lastCall().body).toEqual({ prefer: 'local' });
+    expect(setting.answers).toBe('flux-schnell');
   });
 });

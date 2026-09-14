@@ -298,8 +298,18 @@ class FalImages(CloudImageProvider):
         return out
 
 
-#: Every cloud provider, in the order they are tried after local.
+#: Every cloud provider, in the order they are tried.
 CLOUD_PROVIDERS: List[CloudImageProvider] = [NimImages(), TogetherImages(), FalImages()]
+
+
+def _stored_image_locality() -> str:
+    """The user's choice from Settings, or local when it cannot be read."""
+    try:
+        from core.user_settings import get_user_settings
+
+        return get_user_settings().image_locality.value
+    except Exception:  # noqa: BLE001 - a settings file that cannot be read is local
+        return "local"
 
 
 class RoutedImageProvider:
@@ -314,21 +324,43 @@ class RoutedImageProvider:
     Attributes the runtime reads off a provider (`vram_needed_bytes`, `loaded`,
     `unload`) are delegated to the *local* one only, because a cloud provider
     holds no card and must not be preflighted as if it did.
+
+    **Which one goes first is the user's** — `ImageLocality` in Settings.
+    Local by default; set to cloud, Flux is never loaded and the card stays
+    with the chat model, and local is only reached for when no cloud provider
+    can draw. Either way the other is the fallback and the record names who
+    answered.
     """
 
-    def __init__(self, local: Any, cloud: Optional[List[CloudImageProvider]] = None) -> None:
+    def __init__(
+        self,
+        local: Any,
+        cloud: Optional[List[CloudImageProvider]] = None,
+        prefer: Optional[Callable[[], str]] = None,
+    ) -> None:
         self._local = local
         self._cloud = list(CLOUD_PROVIDERS if cloud is None else cloud)
+        # Where to try first — read fresh on every pick, so a change in
+        # Settings takes effect on the next picture without a restart.
+        # Defaults to the user's stored preference; tests hand in their own.
+        self._prefer = prefer or _stored_image_locality
 
-    # The provider that will draw the next picture, decided fresh each time —
-    # a key can be added between two requests.
-    def _pick(self) -> Any:
-        if self._local is not None and self._local.availability().ok:
-            return self._local
+    def _first_cloud(self) -> Optional[CloudImageProvider]:
         for provider in self._cloud:
             if provider.availability().ok:
                 return provider
         return None
+
+    def _local_ok(self) -> bool:
+        return self._local is not None and self._local.availability().ok
+
+    # The provider that will draw the next picture, decided fresh each time —
+    # a key can be added, or the preference flipped, between two requests.
+    # The preferred one first; the other is the fallback, always.
+    def _pick(self) -> Any:
+        if self._prefer() == "cloud":
+            return self._first_cloud() or (self._local if self._local_ok() else None)
+        return self._local if self._local_ok() else self._first_cloud()
 
     @property
     def name(self) -> str:

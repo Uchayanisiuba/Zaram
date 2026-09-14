@@ -2316,6 +2316,50 @@ async def set_web_search_setting(update: WebSearchUpdate):
     return await web_search_setting()
 
 
+@app.get("/images/setting")
+async def image_setting():
+    """Where pictures are drawn first, and what can draw at all right now."""
+    from core.user_settings import get_user_settings
+
+    settings = get_user_settings()
+    runtime = getattr(kernel, "images_runtime", None)
+    provider = getattr(runtime, "_provider", None) if runtime else None
+    cloud = []
+    local_ok = False
+    if provider is not None:
+        local = getattr(provider, "_local", None)
+        local_ok = bool(local is not None and local.availability().ok)
+        for p in getattr(provider, "_cloud", []) or []:
+            a = p.availability()
+            cloud.append({"id": p.provider_id, "name": p.name, "ok": a.ok, "reason": a.reason, "remedy": a.remedy})
+    return {
+        "prefer": settings.image_locality.value,
+        "local_ok": local_ok,
+        "cloud": cloud,
+        "answers": provider.describe() if provider is not None and provider.availability().ok else None,
+    }
+
+
+class ImageSettingUpdate(BaseModel):
+    prefer: str
+
+
+@app.post("/images/setting")
+async def set_image_setting(update: ImageSettingUpdate):
+    """Choose local or cloud first. Not a permission: a cloud provider still
+    needs its key and its image grant."""
+    from core.user_settings import ImageLocality, get_user_settings
+
+    try:
+        get_user_settings().set_image_locality(update.prefer)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=f"prefer must be one of: {', '.join(p.value for p in ImageLocality)}",
+        )
+    return await image_setting()
+
+
 @app.get("/character")
 async def get_character():
     """What this person calls it, how they want it to write, which voice speaks.

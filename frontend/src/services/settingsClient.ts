@@ -502,6 +502,47 @@ export async function setSearchScope(scope: SearchScope): Promise<WebSearchStatu
   );
 }
 
+// ------------------------------------------------------------------ images
+
+export type ImageLocality = 'local' | 'cloud';
+
+export interface ImageSetting {
+  /** Where a picture is drawn first. The other is always the fallback. */
+  prefer: ImageLocality;
+  /** Whether the model on this machine can draw right now. */
+  localOk: boolean;
+  /** Every cloud provider that could draw, with why it cannot when it cannot. */
+  cloud: Array<{ id: string; name: string; ok: boolean; reason: string; remedy: string }>;
+  /** Who would answer the next picture, or null when nothing can. */
+  answers: string | null;
+}
+
+function toImageSetting(raw: Record<string, unknown>): ImageSetting {
+  const cloud = Array.isArray(raw.cloud) ? (raw.cloud as Array<Record<string, unknown>>) : [];
+  return {
+    prefer: raw.prefer === 'cloud' ? 'cloud' : 'local',
+    localOk: raw.local_ok === true,
+    cloud: cloud.map((c) => ({
+      id: String(c.id ?? ''),
+      name: String(c.name ?? ''),
+      ok: c.ok === true,
+      reason: String(c.reason ?? ''),
+      remedy: String(c.remedy ?? ''),
+    })),
+    answers: typeof raw.answers === 'string' ? raw.answers : null,
+  };
+}
+
+export async function fetchImageSetting(): Promise<ImageSetting> {
+  return toImageSetting((await get('/images/setting')) as Record<string, unknown>);
+}
+
+/** Choose local or cloud first. Not a permission — a cloud provider still
+ *  needs its key and its image grant, and the answer says which can draw. */
+export async function setImageLocality(prefer: ImageLocality): Promise<ImageSetting> {
+  return toImageSetting((await send('/images/setting', 'POST', { prefer })) as Record<string, unknown>);
+}
+
 // ------------------------------------------------------------- kill switch
 
 export async function fetchKillSwitch(): Promise<boolean> {

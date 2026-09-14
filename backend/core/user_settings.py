@@ -143,6 +143,24 @@ class RoutingPreference(str, Enum):
     PREFER_CLOUD = "prefer_cloud"
 
 
+class ImageLocality(Enum):
+    """Where pictures are drawn first — the one the user chose.
+
+    Two values and no third, because there are only two places a picture can
+    be drawn and the setting is which to *try first*: the other is always the
+    fallback, and the runtime says which one answered. ``LOCAL`` loads Flux
+    onto the card; ``CLOUD`` never does, which is the whole reason the
+    maintainer asked for it on 14 September 2026 — a picture now and then
+    should not cost the VRAM the chat model is sitting in.
+
+    Not a permission. A cloud provider still needs its key and its image
+    grant; this cannot send a picture anywhere the user has not allowed.
+    """
+
+    LOCAL = "local"
+    CLOUD = "cloud"
+
+
 class UserSettings:
     """The persisted settings, read and written under a lock."""
 
@@ -168,7 +186,20 @@ class UserSettings:
         self._assistant_name = ""
         self._manner = ""
         self._voice = ""
+        # Local first, as everything is: CLAUDE.md's "local is the fallback
+        # for everything" is also its default. The person flips it.
+        self._image_locality = ImageLocality.LOCAL
         self._load()
+
+    @property
+    def image_locality(self) -> ImageLocality:
+        return self._image_locality
+
+    def set_image_locality(self, value: "ImageLocality | str") -> ImageLocality:
+        with self._lock:
+            self._image_locality = ImageLocality(value)
+            self._save()
+        return self._image_locality
 
     # ------------------------------------------------------------------ read
 
@@ -307,6 +338,7 @@ class UserSettings:
             "assistant_name": self._assistant_name,
             "manner": self._manner,
             "voice": self._voice,
+            "image_locality": self._image_locality.value,
         }
 
     # ----------------------------------------------------------------- write
@@ -430,6 +462,10 @@ class UserSettings:
         value = raw.get("routing_preference")
         if value in {p.value for p in RoutingPreference}:
             self._routing = RoutingPreference(value)
+
+        where = raw.get("image_locality")
+        if where in {p.value for p in ImageLocality}:
+            self._image_locality = ImageLocality(where)
         # Anything else is left at the default rather than raising: a
         # preference file written by a newer version must not stop an older one
         # from starting.

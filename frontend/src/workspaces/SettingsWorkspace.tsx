@@ -90,6 +90,9 @@ import {
   fetchProviderCatalogue,
   fetchRoutingSettings,
   fetchWebSearch,
+  fetchImageSetting,
+  setImageLocality,
+  type ImageSetting,
   forgetEgressPolicyForHost,
   setEgressPolicyForHost,
   setKillSwitch,
@@ -507,6 +510,7 @@ export default function SettingsWorkspace() {
   const [policy, setPolicy] = useState<EgressPolicy | null>(null);
   const [models, setModels] = useState<DiscoveredModel[] | null>(null);
   const [search, setSearch] = useState<WebSearchStatus | null>(null);
+  const [imageSetting, setImageSettingState] = useState<ImageSetting | null>(null);
   const [exportManifest, setExportManifest] = useState<ExportManifest | null>(null);
   const [exported, setExported] = useState<string | null>(null);
 
@@ -551,7 +555,7 @@ export default function SettingsWorkspace() {
   const loadLocalState = useCallback(async () => {
     setError(null);
 
-    const [cat, cloudStatus, routingState, kill, egressPolicy, webSearch, manifest] =
+    const [cat, cloudStatus, routingState, kill, egressPolicy, webSearch, manifest, imagesRead] =
       await Promise.allSettled([
         fetchProviderCatalogue(),
         fetchCloudStatus(),
@@ -562,6 +566,7 @@ export default function SettingsWorkspace() {
         // Counting what an export would hold is a local read, not a network
         // call, so rule 7g does not apply and it can run on mount.
         fetchExportManifest(),
+        fetchImageSetting(),
       ]);
 
     if (cat.status === 'fulfilled') {
@@ -574,6 +579,7 @@ export default function SettingsWorkspace() {
     if (egressPolicy.status === 'fulfilled') setPolicy(egressPolicy.value);
     if (webSearch.status === 'fulfilled') setSearch(webSearch.value);
     if (manifest.status === 'fulfilled') setExportManifest(manifest.value);
+    if (imagesRead.status === 'fulfilled') setImageSettingState(imagesRead.value);
 
     // Named, and only the ones that actually failed. "Something went wrong"
     // over a screen that is now half-populated is worse than either a working
@@ -1515,27 +1521,61 @@ export default function SettingsWorkspace() {
           title="Images"
           icon={<ImageIcon size={14} style={{ color: 'var(--color-indigo-light)' }} />}
         >
+          {/* Where a picture is drawn first. One control, two places, and the
+              other is always the fallback — so choosing the cloud means Flux
+              is never loaded and the card stays with the chat model, which is
+              what the maintainer asked for (14 September 2026); choosing this
+              machine means a picture never leaves unless nothing here can
+              draw. Not a permission: a cloud provider still needs its key
+              and its image grant, and the rows beneath say which can. */}
           <Row
-            label="Image generation"
+            label="Draw pictures"
             value={
-              images === null ? 'unknown' : images.canDraw ? 'ready' : 'not installed'
+              imageSetting === null
+                ? 'unknown'
+                : imageSetting.answers
+                  ? imageSetting.answers
+                  : 'nothing can draw yet'
             }
-            state={images === null ? 'neutral' : images.canDraw ? 'good' : 'absent'}
+            state={imageSetting === null ? 'neutral' : imageSetting.answers ? 'good' : 'absent'}
             detail={
-              images === null
-                ? 'Waiting for the backend to report.'
-                : images.canDraw
-                  ? `${images.provider} is on this machine and nothing is sent anywhere to use it. ` +
-                    'Ask for a picture in the conversation — there is no button, because ' +
-                    'tools are actions inside the conversation rather than menu items. ' +
-                    'The model loads on the first request, which takes a little under a ' +
-                    'minute; after that it stays resident until something else needs the room.'
-                  : // The backend's own words. It is the thing that knows which
-                    // of three absences it is looking at — no torch, no
-                    // diffusers, or no checkpoint — and each has a different
-                    // fix and a different download size. Composing a sentence
-                    // here would be guessing at which one.
-                    [images.reason, images.remedy].filter(Boolean).join('\n\n')
+              <div className="flex flex-col gap-2">
+                {imageSetting && (
+                  <Segmented<'local' | 'cloud'>
+                    options={[
+                      { value: 'local', label: 'On this machine first' },
+                      { value: 'cloud', label: 'In the cloud first' },
+                    ]}
+                    value={imageSetting.prefer}
+                    disabled={busy === 'image-locality'}
+                    onChange={(next) =>
+                      void run('image-locality', async () => setImageSettingState(await setImageLocality(next)))
+                    }
+                  />
+                )}
+                <span className="text-xs text-slate-500 leading-relaxed">
+                  {imageSetting?.prefer === 'cloud'
+                    ? 'A connected provider draws and the model on this machine is never loaded, so the graphics card stays with your chat model. If no provider can draw, this machine is tried.'
+                    : 'The model on this machine draws and nothing is sent anywhere. If it cannot — no card, no weights — a connected provider is tried instead.'}
+                  {' '}Ask for a picture in the conversation; there is no button.
+                </span>
+                {/* What can draw, each with why it cannot when it cannot — the
+                    backend's own words, since it knows which absence it is. */}
+                <ul className="text-xs leading-relaxed flex flex-col gap-1" data-testid="image-drawers">
+                  <li style={{ color: imageSetting?.localOk ? 'var(--color-emerald)' : 'var(--color-text-muted)' }}>
+                    {images === null
+                      ? 'This machine: waiting for the backend to report.'
+                      : images.canDraw
+                        ? `This machine: ${images.provider} — nothing is sent to use it.`
+                        : `This machine: ${[images.reason, images.remedy].filter(Boolean).join(' ')}`}
+                  </li>
+                  {(imageSetting?.cloud ?? []).map((c) => (
+                    <li key={c.id} style={{ color: c.ok ? 'var(--color-emerald)' : 'var(--color-text-muted)' }}>
+                      {c.name}: {c.ok ? 'ready' : [c.reason, c.remedy].filter(Boolean).join(' ')}
+                    </li>
+                  ))}
+                </ul>
+              </div>
             }
           />
         </Section>
