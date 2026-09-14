@@ -43,6 +43,7 @@ const PAIRED = new Set(['nvidia_nim', 'openrouter', 'groq']);
 import LetterheadSection from '../components/settings/LetterheadSection';
 import ToolsSection from '../components/settings/ToolsSection';
 import ReportSection from '../components/settings/ReportSection';
+import PacksSection, { PackOffer } from '../components/settings/PacksSection';
 import PairingSection from '../components/settings/PairingSection';
 import {
   Volume2,
@@ -1512,12 +1513,19 @@ export default function SettingsWorkspace() {
                 ? 'Waiting for the backend to report.'
                 : speech === 'available'
                   ? 'Kokoro is installed and runs on the CPU, so it does not compete with the local model for VRAM. Replies are spoken when the avatar is showing — one decision, made by choosing a face.'
-                  : 'Voice ships as an optional extra because it pulls roughly 830 MB — torch, ' +
-                    'transformers and the spaCy stack. Chat is unaffected. To enable it:\n\n' +
-                    '    pip install -r backend/requirements-voice.txt\n' +
-                    '    python -m spacy download en_core_web_sm'
+                  : 'Speaking is an optional pack — get it under Packs below, or the moment you choose ' +
+                    'the avatar. Chat is unaffected without it.'
             }
           />
+        </Section>
+
+        {/* --------------------------------------------------------- Packs */}
+        {/* The optional extras, one button each, installed into Zaram's own
+            runtime. These were pip commands until 14 September 2026, which a
+            packaged install cannot run. Nothing here is asked on the first
+            run; the same offer appears where a pack is needed. */}
+        <Section title="Packs" icon={<Download size={14} style={{ color: 'var(--color-indigo-light)' }} />}>
+          <PacksSection Row={Row} />
         </Section>
 
         {/* -------------------------------------------------------- Images */}
@@ -1857,14 +1865,22 @@ export default function SettingsWorkspace() {
               'Choosing it also turns on spoken replies.'
             }
           >
-            <Segmented<'orb' | 'avatar'>
-              options={[
-                { value: 'orb', label: 'Orb' },
-                { value: 'avatar', label: 'Avatar' },
-              ]}
-              value={renderer}
-              onChange={setRenderer}
-            />
+            <div className="flex flex-col items-end">
+              <Segmented<'orb' | 'avatar'>
+                options={[
+                  { value: 'orb', label: 'Orb' },
+                  { value: 'avatar', label: 'Avatar' },
+                ]}
+                value={renderer}
+                onChange={setRenderer}
+              />
+              {/* The moment of doubt: the face was just chosen and it cannot
+                  speak yet. Offered here, once, with the cost; the avatar
+                  works silently until then. Nothing was asked at install. */}
+              {renderer === 'avatar' && speech !== 'available' && (
+                <PackOffer id="voice" lead="The avatar can speak its replies with the Speaking pack." />
+              )}
+            </div>
           </Row>
         </Section>
 

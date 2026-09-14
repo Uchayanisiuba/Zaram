@@ -67,6 +67,7 @@ import {
 } from '@/stores/layoutStore';
 import { useChatModeStore } from '@/stores/chatModeStore';
 import { useMicStore } from '@/stores/micStore';
+import { PackOffer } from '@/components/settings/PacksSection';
 import { useSpeechStore } from '@/stores/speechStore';
 import { codingActivity, offeredServers } from '@/lib/orbActivity';
 import ResizeHandle from '@/components/common/ResizeHandle';
@@ -1466,6 +1467,14 @@ export default function ChatSurface({ navigate }: Props) {
           >
             {micError ?? speechError ?? micUnavailable}
           </p>
+        )}
+        {/* The moment of doubt for the mic pack: the reason above names the
+            extra, and the button to get it sits right under the sentence
+            rather than inside a command the person cannot run. */}
+        {!micError && !speechError && micUnavailable && !engineDown && /mic extra|mic pack|faster-whisper/i.test(micUnavailable) && (
+          <div className="px-1">
+            <PackOffer id="mic" lead="Listening is a pack, got once." />
+          </div>
         )}
         {/* Amber, not red, and on its own line: nothing failed. The transcript
             arrived; one part of it is not trustworthy. Rendered separately from

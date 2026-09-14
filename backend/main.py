@@ -2370,6 +2370,40 @@ async def set_web_search_setting(update: WebSearchUpdate):
     return await web_search_setting()
 
 
+@app.get("/extras")
+async def list_extras():
+    """The optional packs: what each turns on, what it costs, whether it is here."""
+    from extras import catalogue
+
+    return {"extras": catalogue()}
+
+
+@app.post("/extras/{extra_id}/install")
+async def install_extra(extra_id: str):
+    """Get a pack, streaming the installer's own lines. NDJSON, like `/pull`.
+
+    Pressing the button is the consent; the download is recorded before the
+    first byte (see `extras.install`). Refused without the egress log for the
+    same reason a model pull is.
+    """
+    from core.egress import get_gate
+    from extras import EXTRAS, install
+
+    extra = EXTRAS.get(extra_id)
+    if extra is None:
+        raise HTTPException(status_code=404, detail=f"no pack called {extra_id!r}")
+    try:
+        log = get_gate().log
+    except Exception:
+        raise HTTPException(status_code=503, detail="the egress log is not ready")
+
+    def _stream():
+        for event in install(extra, log=log):
+            yield json.dumps(event) + "\n"
+
+    return StreamingResponse(_stream(), media_type="application/x-ndjson")
+
+
 @app.get("/diagnostics/report")
 async def diagnostics_report():
     """The problem report a person copies and sends themselves.
