@@ -39,7 +39,7 @@ export default function ReasoningPanel({
         type="button"
         onClick={() => setOverride(!open)}
         aria-expanded={open}
-        className="flex items-center gap-1 text-[10px] uppercase tracking-wider"
+        className="flex items-center gap-1 text-xs uppercase tracking-wider"
         style={{
           color: 'var(--color-text-muted)',
           fontFamily: 'var(--font-display)',

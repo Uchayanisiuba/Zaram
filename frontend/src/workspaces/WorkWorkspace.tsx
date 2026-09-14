@@ -366,7 +366,7 @@ export default function WorkWorkspace({ onOpenConversation }: WorkWorkspaceProps
         <div className="px-8 pb-3">
           {error && (
             <div
-              className="mt-3 flex items-start gap-2 rounded-lg px-3 py-2 text-[11px] leading-relaxed"
+              className="mt-3 flex items-start gap-2 rounded-lg px-3 py-2 text-xs leading-relaxed"
               style={{
                 border: '1px solid var(--color-border-subtle)',
                 background: 'var(--color-glass)',
@@ -467,7 +467,7 @@ export default function WorkWorkspace({ onOpenConversation }: WorkWorkspaceProps
                       // I looking at" and scrolling past it in a long listing
                       // takes that answer away at exactly the moment it is
                       // being used.
-                      className="sticky top-0 z-10 mb-2 flex items-baseline gap-2 py-1 text-[11px] uppercase tracking-wider"
+                      className="sticky top-0 z-10 mb-2 flex items-baseline gap-2 py-1 text-xs uppercase tracking-wider"
                       style={{
                         fontFamily: 'var(--font-display)',
                         color: 'var(--color-text-muted)',
@@ -557,7 +557,7 @@ export default function WorkWorkspace({ onOpenConversation }: WorkWorkspaceProps
 function ColumnHeader() {
   return (
     <div
-      className="grid items-center gap-3 px-4 pb-1.5 text-[10px] uppercase tracking-wider"
+      className="grid items-center gap-3 px-4 pb-1.5 text-xs uppercase tracking-wider"
       style={{
         gridTemplateColumns: ROW_GRID,
         fontFamily: 'var(--font-display)',
@@ -633,7 +633,7 @@ function Row({
               in the panel. It is the reason this surface is not a file
               browser. */}
           <span
-            className="mt-0.5 flex items-center gap-1.5 text-[11px] truncate"
+            className="mt-0.5 flex items-center gap-1.5 text-xs truncate"
             style={{ color: 'var(--color-text-secondary)' }}
           >
             <MessageSquare size={10} className="shrink-0" />
@@ -644,21 +644,21 @@ function Row({
         </span>
 
         <span
-          className="hidden lg:block truncate text-[11px]"
+          className="hidden lg:block truncate text-xs"
           style={{ fontFamily: 'var(--font-mono)', color: 'var(--color-text-muted)' }}
         >
           {projectLabel(a.project_id)}
         </span>
 
         <span
-          className="truncate text-[11px]"
+          className="truncate text-xs"
           style={{ fontFamily: 'var(--font-mono)', color: 'var(--color-text-secondary)' }}
         >
           {relative(a.created_at)}
         </span>
 
         <span
-          className="hidden lg:block text-right text-[11px]"
+          className="hidden lg:block text-right text-xs"
           style={{ fontFamily: 'var(--font-mono)', color: 'var(--color-text-faint)' }}
         >
           {bytes(a.size_bytes)}
@@ -722,11 +722,11 @@ function Thumbnail({
         )}
       </span>
       <span className="block px-2.5 py-2">
-        <span className="block truncate text-[11px]" style={{ color: 'var(--color-text)' }}>
+        <span className="block truncate text-xs" style={{ color: 'var(--color-text)' }}>
           {artifact.filename}
         </span>
         <span
-          className="block truncate text-[10px]"
+          className="block truncate text-xs"
           style={{ fontFamily: 'var(--font-mono)', color: 'var(--color-text-secondary)' }}
         >
           {relative(artifact.created_at)}
@@ -740,7 +740,7 @@ function LoadingState() {
   return (
     <div className="flex items-center justify-center py-20">
       <span
-        className="text-[11px]"
+        className="text-xs"
         style={{ fontFamily: 'var(--font-mono)', color: 'var(--color-text-faint)' }}
       >
         Reading what you have made…
@@ -793,7 +793,7 @@ function EmptyState({ filtered, onClear }: { filtered: boolean; onClear: () => v
           </button>
         ) : (
           <p
-            className="mt-5 text-[11px] leading-relaxed"
+            className="mt-5 text-xs leading-relaxed"
             style={{ fontFamily: 'var(--font-mono)', color: 'var(--color-text-faint)' }}
           >
             Ask a question in the conversation, then say
@@ -875,7 +875,7 @@ function DetailPanel({
             {artifact.filename}
           </div>
           <div
-            className="mt-1 text-[11px]"
+            className="mt-1 text-xs"
             style={{ fontFamily: 'var(--font-mono)', color: 'var(--color-text-muted)' }}
           >
             {projectLabel(artifact.project_id)} · {relative(artifact.created_at)} ·{' '}
@@ -921,7 +921,7 @@ function DetailPanel({
                 />
               ) : (
                 <span
-                  className="text-[11px]"
+                  className="text-xs"
                   style={{ fontFamily: 'var(--font-mono)', color: 'var(--color-text-faint)' }}
                 >
                   {picture.error ?? 'Loading preview…'}
@@ -929,7 +929,7 @@ function DetailPanel({
               )}
             </div>
           ) : previewError ? (
-            <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
+            <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
               {previewError}
             </p>
           ) : full ? (
@@ -946,7 +946,7 @@ function DetailPanel({
             />
           ) : (
             <div
-              className="rounded-lg px-4 py-6 text-[11px]"
+              className="rounded-lg px-4 py-6 text-xs"
               style={{
                 background: 'var(--color-surface)',
                 border: '1px solid var(--color-border-subtle)',
@@ -968,7 +968,7 @@ function DetailPanel({
               {claims.map((c) => (
                 <li
                   key={c.id}
-                  className="rounded-lg px-3 py-2 text-[11px]"
+                  className="rounded-lg px-3 py-2 text-xs"
                   style={{
                     background: 'var(--color-glass)',
                     border: '1px solid var(--color-border-subtle)',
@@ -1012,7 +1012,7 @@ function DetailPanel({
           <SectionLabel>Sources</SectionLabel>
           {artifact.sources.length === 0 ? (
             // Zero sources is a real and meaningful state, not a loading one.
-            <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
+            <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
               Nothing recalled. This was made from what you typed, not from
               anything in the Spine.
             </p>
@@ -1021,7 +1021,7 @@ function DetailPanel({
               {artifact.sources.map((s, index) => (
                 <li
                   key={`${s.kind}-${s.url ?? s.title ?? index}`}
-                  className="flex items-start gap-2 rounded-lg px-3 py-2 text-[11px]"
+                  className="flex items-start gap-2 rounded-lg px-3 py-2 text-xs"
                   style={{
                     background: 'var(--color-glass)',
                     border: '1px solid var(--color-border-subtle)',
@@ -1107,7 +1107,7 @@ function DetailPanel({
               Download {artifact.filename.split('.').pop()?.toUpperCase()}
             </button>
             {downloadError && (
-              <p className="text-[11px]" style={{ color: '#fca5a5' }} role="alert">
+              <p className="text-xs" style={{ color: '#fca5a5' }} role="alert">
                 {downloadError}
               </p>
             )}
@@ -1140,7 +1140,7 @@ function DetailPanel({
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
     <div
-      className="mb-2 text-[10px] uppercase tracking-wider"
+      className="mb-2 text-xs uppercase tracking-wider"
       style={{ color: 'var(--color-text-secondary)' }}
     >
       {children}

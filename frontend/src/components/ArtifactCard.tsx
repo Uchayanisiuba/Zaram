@@ -148,7 +148,7 @@ export default function ArtifactCard({
             {artifact.filename}
           </div>
           <div
-            className="mt-0.5 text-[11px]"
+            className="mt-0.5 text-xs"
             style={{ fontFamily: 'var(--font-mono)', color: 'var(--color-text-muted)' }}
           >
             {extension} · {bytes(shown.size_bytes)}
@@ -183,7 +183,7 @@ export default function ArtifactCard({
               reason this document is defensible, and burying it inside a
               .docx the user has not opened yet means they never see it. */}
           <div
-            className="text-[10px] uppercase tracking-wider"
+            className="text-xs uppercase tracking-wider"
             style={{ color: 'var(--color-text-secondary)' }}
           >
             {citedCount === 1 ? '1 claim traced' : `${citedCount} claims traced`}
@@ -191,7 +191,7 @@ export default function ArtifactCard({
           {artifact.claims.slice(0, 2).map((claim) => (
             <div
               key={claim.id}
-              className="flex items-start gap-2 text-[11px]"
+              className="flex items-start gap-2 text-xs"
               style={{ color: 'var(--color-text-muted-light)' }}
             >
               <Quote
@@ -212,7 +212,7 @@ export default function ArtifactCard({
           ))}
           {citedCount > 2 && (
             <div
-              className="text-[11px]"
+              className="text-xs"
               style={{ color: 'var(--color-text-faint)' }}
             >
               and {citedCount - 2} more
@@ -249,7 +249,7 @@ export default function ArtifactCard({
                     )
                     .finally(() => setSaving(false));
                 }}
-                className="flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[11px] transition-colors hover:bg-white/5"
+                className="flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs transition-colors hover:bg-white/5"
                 style={{
                   border: '1px solid var(--color-border)',
                   color: 'var(--color-text)',
@@ -267,7 +267,7 @@ export default function ArtifactCard({
             <button
               type="button"
               onClick={() => setPreviewing(true)}
-              className="flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[11px] transition-colors hover:bg-white/5"
+              className="flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs transition-colors hover:bg-white/5"
               style={{ border: '1px solid var(--color-border)', color: 'var(--color-text)' }}
             >
               <Eye size={12} />
@@ -287,7 +287,7 @@ export default function ArtifactCard({
                   ),
                 );
               }}
-              className="flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[11px] transition-colors hover:bg-white/5"
+              className="flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs transition-colors hover:bg-white/5"
               style={{ border: '1px solid var(--color-border)', color: 'var(--color-text)' }}
             >
               <Download size={12} />
@@ -296,7 +296,7 @@ export default function ArtifactCard({
           </>
         ) : (
           <span
-            className="text-[11px]"
+            className="text-xs"
             style={{ color: 'var(--color-text-faint)' }}
             title="The record is here but the file is not at the path it was written to"
           >
@@ -307,7 +307,7 @@ export default function ArtifactCard({
         {onOpenInWork && (
           <button
             onClick={() => onOpenInWork(artifact.id)}
-            className="rounded-lg px-2.5 py-1 text-[11px] transition-colors hover:bg-white/5"
+            className="rounded-lg px-2.5 py-1 text-xs transition-colors hover:bg-white/5"
             style={{ color: 'var(--color-text-muted)' }}
           >
             Show in Work
@@ -320,7 +320,7 @@ export default function ArtifactCard({
           that missed. */}
       {downloadError && (
         <div
-          className="px-4 pb-2.5 text-[11px]"
+          className="px-4 pb-2.5 text-xs"
           style={{ color: '#fca5a5' }}
           role="alert"
         >

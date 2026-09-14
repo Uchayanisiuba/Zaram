@@ -128,7 +128,7 @@ export default function PluginsWorkspace() {
               {t}
               <span style={{
                 marginLeft: 6,
-                fontSize: 10,
+                fontSize: 12,
                 padding: '1px 6px',
                 borderRadius: 99,
                 background: tab === t ? 'rgba(99,102,241,0.3)' : 'var(--color-border-subtle)',
@@ -182,7 +182,7 @@ export default function PluginsWorkspace() {
                 border: `1px solid ${filter === cat ? 'rgba(99,102,241,0.25)' : 'var(--color-glass-hover)'}`,
                 cursor: 'pointer',
                 color: filter === cat ? 'var(--color-indigo-light)' : 'var(--color-text-muted)',
-                fontSize: 11,
+                fontSize: 12,
                 fontWeight: 500,
                 transition: 'all 0.15s',
               }}
@@ -249,11 +249,11 @@ export default function PluginsWorkspace() {
                     <HealthBadge health={plugin.health} />
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <span style={{ fontSize: 11, color: 'var(--color-text-secondary)' }}>{plugin.author}</span>
-                    <span style={{ fontSize: 10, color: 'var(--color-text-faint)' }}>v{plugin.version}</span>
+                    <span style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>{plugin.author}</span>
+                    <span style={{ fontSize: 12, color: 'var(--color-text-faint)' }}>v{plugin.version}</span>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 3, marginLeft: 'auto' }}>
                       <Star size={10} fill="#f59e0b" style={{ color: '#f59e0b' }} />
-                      <span style={{ fontSize: 10, color: '#f59e0b', fontWeight: 600 }}>{plugin.stars}</span>
+                      <span style={{ fontSize: 12, color: '#f59e0b', fontWeight: 600 }}>{plugin.stars}</span>
                     </div>
                   </div>
                 </div>
@@ -267,7 +267,7 @@ export default function PluginsWorkspace() {
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
                 {plugin.permissions.map(perm => (
                   <span key={perm} style={{
-                    fontSize: 10,
+                    fontSize: 12,
                     padding: '2px 7px',
                     borderRadius: 4,
                     background: 'var(--color-glass)',
@@ -280,7 +280,7 @@ export default function PluginsWorkspace() {
               {/* Action */}
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <span style={{
-                  fontSize: 10,
+                  fontSize: 12,
                   padding: '2px 8px',
                   borderRadius: 4,
                   background: 'var(--color-glass)',
@@ -338,7 +338,7 @@ function HealthBadge({ health }: { health: string }) {
       background: `${cfg.color}15`,
       border: `1px solid ${cfg.color}30`,
       color: cfg.color,
-      fontSize: 9,
+      fontSize: 12,
       fontWeight: 600,
     }}>
       {cfg.icon}

@@ -117,7 +117,7 @@ export default function OrbStatus({
 
       <span className="flex flex-col items-start leading-tight">
         <span
-          className="text-[11px] font-medium"
+          className="text-xs font-medium"
           style={{ color: accent, fontFamily: 'var(--font-display)' }}
         >
           {label}
@@ -125,7 +125,7 @@ export default function OrbStatus({
         {/* Always "Ask Zaram" when the orb navigates: from a workspace it is a
             way out, never a toggle, so offering "Close chat" would describe
             something it no longer does. */}
-        <span className="text-[9px] text-slate-500">
+        <span className="text-xs text-slate-500">
           {!onOpen && chatOpen ? 'Close chat' : 'Ask Zaram'}
         </span>
       </span>

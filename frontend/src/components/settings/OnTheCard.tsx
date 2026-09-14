@@ -138,7 +138,7 @@ export default function OnTheCard() {
         </div>
 
         <p
-          className="text-[11px] leading-snug mt-0.5"
+          className="text-xs leading-snug mt-0.5"
           style={{ color: 'var(--color-text-muted)', maxWidth: '52ch' }}
         >
           What the local servers are holding in graphics memory right now, beside
@@ -151,7 +151,7 @@ export default function OnTheCard() {
             {resident.map((m) => (
               <li
                 key={m.name}
-                className="text-[11px] flex items-baseline gap-2"
+                className="text-xs flex items-baseline gap-2"
                 style={{ fontFamily: 'var(--font-mono)', color: 'var(--color-text)' }}
               >
                 <span className="truncate">{m.name}</span>
@@ -165,7 +165,7 @@ export default function OnTheCard() {
 
         {status?.preloadSkippedBecause && (
           <p
-            className="text-[11px] leading-snug mt-1.5"
+            className="text-xs leading-snug mt-1.5"
             style={{ color: 'var(--color-text-muted)', maxWidth: '52ch' }}
           >
             Nothing was preloaded at launch: {status.preloadSkippedBecause}.
@@ -177,7 +177,7 @@ export default function OnTheCard() {
             {notReleased.map(([name, why]) => (
               <li
                 key={name}
-                className="text-[11px] leading-snug"
+                className="text-xs leading-snug"
                 style={{ color: 'var(--color-amber, #fbbf24)', maxWidth: '52ch' }}
               >
                 {name}: {why.replace(/^not released:\s*/, '')}
@@ -187,7 +187,7 @@ export default function OnTheCard() {
         )}
 
         {error && (
-          <p className="text-[11px] mt-1" style={{ color: 'var(--color-amber, #fbbf24)' }}>
+          <p className="text-xs mt-1" style={{ color: 'var(--color-amber, #fbbf24)' }}>
             {error}
           </p>
         )}
@@ -197,7 +197,7 @@ export default function OnTheCard() {
             type="button"
             onClick={() => void release()}
             disabled={busy || !anything}
-            className="text-[11px] px-2.5 py-1 rounded-md transition-colors disabled:opacity-40"
+            className="text-xs px-2.5 py-1 rounded-md transition-colors disabled:opacity-40"
             style={{
               border: '1px solid var(--color-border)',
               color: 'var(--color-text)',
@@ -210,7 +210,7 @@ export default function OnTheCard() {
             type="button"
             onClick={() => void refresh()}
             disabled={loading || busy}
-            className="text-[11px] px-2 py-1 rounded-md transition-colors disabled:opacity-40"
+            className="text-xs px-2 py-1 rounded-md transition-colors disabled:opacity-40"
             style={{ color: 'var(--color-text-muted)' }}
           >
             Refresh

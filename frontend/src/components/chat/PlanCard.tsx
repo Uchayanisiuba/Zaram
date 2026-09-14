@@ -36,12 +36,11 @@ export default function PlanCard({
   const done = items.filter((i) => i.status === 'done').length;
   return (
     <div
-      className="mt-2 rounded-lg px-3 py-2"
-      style={{ border: '1px solid var(--color-border-subtle)', background: 'var(--color-glass)' }}
+      className="mt-2 rounded-lg px-3 py-2 surface"
       data-testid="plan-card"
       data-awaiting-go={awaitingGo ? 'true' : 'false'}
     >
-      <div className="flex items-center gap-2 text-[10px]" style={{ color: 'var(--color-text-muted)' }}>
+      <div className="flex items-center gap-2 text-xs" style={{ color: 'var(--color-text-muted)' }}>
         <span>Plan</span>
         <span style={{ color: 'var(--color-text-faint)' }}>
           {done}/{items.length} done
@@ -51,7 +50,7 @@ export default function PlanCard({
         {items.map((item, i) => {
           const { Icon, color, label } = STATUS[item.status] ?? STATUS.todo;
           return (
-            <li key={i} className="flex items-start gap-1.5 text-[11px]" data-status={item.status}>
+            <li key={i} className="flex items-start gap-1.5 text-xs" data-status={item.status}>
               <Icon size={11} className="mt-0.5 shrink-0" style={{ color }} aria-label={label} />
               <span
                 style={{
@@ -72,7 +71,7 @@ export default function PlanCard({
         <button
           type="button"
           onClick={onGo}
-          className="mt-2 text-[11px] flex items-center gap-1"
+          className="mt-2 text-xs flex items-center gap-1"
           style={{ color: 'var(--color-cyan-light)' }}
           data-testid="plan-go"
         >

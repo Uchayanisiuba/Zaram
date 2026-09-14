@@ -227,7 +227,7 @@ export default function RoutingControl() {
 
   if (preference === null) {
     return (
-      <span className="flex items-center gap-1.5 text-[11px] text-slate-600">
+      <span className="flex items-center gap-1.5 text-xs text-slate-600">
         <Shuffle size={12} aria-hidden className="shrink-0" />
         {failed ? 'Routing unavailable' : 'Checking routing…'}
       </span>
@@ -235,7 +235,7 @@ export default function RoutingControl() {
   }
 
   return (
-    <div ref={root} className="relative flex items-center gap-1.5 text-[11px]">
+    <div ref={root} className="relative flex items-center gap-1.5 text-xs">
       <button
         type="button"
         onClick={() => void reveal()}
@@ -277,7 +277,7 @@ export default function RoutingControl() {
             boxShadow: '0 12px 32px rgba(0,0,0,0.45)',
           }}
         >
-          <p className="text-[10px] uppercase tracking-wide text-slate-500 mb-1.5">
+          <p className="text-xs uppercase tracking-wide text-slate-500 mb-1.5">
             Where questions may go
           </p>
           <div className="flex gap-1 mb-3">
@@ -304,7 +304,7 @@ export default function RoutingControl() {
                           ? 'Nothing may leave this device yet — allow it in Settings'
                           : 'No cloud provider is connected'
                   }
-                  className="flex-1 px-2 py-1 rounded text-[10px] transition-colors disabled:opacity-40"
+                  className="flex-1 px-2 py-1 rounded text-xs transition-colors disabled:opacity-40"
                   style={{
                     background:
                       preference === mode.value ? 'rgba(34,211,238,0.14)' : 'transparent',
@@ -351,12 +351,12 @@ export default function RoutingControl() {
             disabled={rescanning || loading}
             onClick={() => void rescan()}
             data-testid="routing-rescan"
-            className="mt-1 flex items-center gap-1.5 text-[10px] text-slate-500 hover:text-slate-300 transition-colors disabled:opacity-50"
+            className="mt-1 flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-300 transition-colors disabled:opacity-50"
           >
             <RefreshCw size={10} aria-hidden className={rescanning ? 'animate-spin' : ''} />
             {rescanning ? 'Looking again…' : 'Model missing? Look again'}
           </button>
-          <p className="mt-0.5 text-[10px] leading-snug text-slate-600">
+          <p className="mt-0.5 text-xs leading-snug text-slate-600">
             Zaram lists what your model servers report. One started after Zaram
             is not seen until it looks again.
           </p>
@@ -387,10 +387,10 @@ function Section({
 }) {
   return (
     <div className="mb-3 last:mb-0">
-      <p className="text-[10px] uppercase tracking-wide text-slate-500 mb-1">{title}</p>
-      {loading && <p className="text-[10px] text-slate-600">Looking…</p>}
+      <p className="text-xs uppercase tracking-wide text-slate-500 mb-1">{title}</p>
+      {loading && <p className="text-xs text-slate-600">Looking…</p>}
       {!loading && models.length === 0 && (
-        <p className="text-[10px] text-slate-600">{empty}</p>
+        <p className="text-xs text-slate-600">{empty}</p>
       )}
       {!loading &&
         models.map((model) => {
@@ -411,7 +411,7 @@ function Section({
                 aria-hidden
               />
               <span className="min-w-0">
-                <span className="block text-[11px] text-slate-300 truncate">
+                <span className="block text-xs text-slate-300 truncate">
                   {model.displayName}
                 </span>
                 {/* Both notes are the reason a person would choose differently,
@@ -419,9 +419,9 @@ function Section({
                     data policy is on the cloud list only — `CLAUDE.md` calls
                     naming the deal a primary feature of the picker, and it is
                     the whole question for a model that leaves the device. */}
-                {slow && <span className="block text-[10px] text-amber-400/80">{slow}</span>}
+                {slow && <span className="block text-xs text-amber-400/80">{slow}</span>}
                 {showPolicy && (
-                  <span className="block text-[10px] text-slate-500">
+                  <span className="block text-xs text-slate-500">
                     {describeDataPolicy(model.dataPolicy)}
                   </span>
                 )}
@@ -443,7 +443,7 @@ function Section({
             style={{ color: pinned === null ? 'var(--color-cyan-light)' : 'transparent' }}
             aria-hidden
           />
-          <span className="text-[11px] text-slate-500">Let Zaram decide</span>
+          <span className="text-xs text-slate-500">Let Zaram decide</span>
         </button>
       )}
     </div>

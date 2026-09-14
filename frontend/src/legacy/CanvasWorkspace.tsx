@@ -140,7 +140,7 @@ export default function CanvasWorkspace() {
         >
           <ZoomOut size={13} />
         </button>
-        <span style={{ fontSize: 11, color: 'var(--color-text-muted)', minWidth: 38, textAlign: 'center', fontFamily: "var(--font-mono)" }}>
+        <span style={{ fontSize: 12, color: 'var(--color-text-muted)', minWidth: 38, textAlign: 'center', fontFamily: "var(--font-mono)" }}>
           {Math.round(zoom * 100)}%
         </span>
         <button
@@ -226,7 +226,7 @@ export default function CanvasWorkspace() {
                   flexShrink: 0,
                 }}>
                   <span style={{ color: item.color }}>{TYPE_CONFIGS[item.type].icon}</span>
-                  <span style={{ fontSize: 10, fontWeight: 600, color: item.color, letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: item.color, letterSpacing: '0.04em', textTransform: 'uppercase' }}>
                     {item.title ?? TYPE_CONFIGS[item.type].label}
                   </span>
                 </div>
@@ -250,7 +250,7 @@ export default function CanvasWorkspace() {
                   ) : item.type === 'link' ? (
                     <div>
                       <div style={{ fontSize: 12, color: 'var(--color-text)', fontWeight: 500, marginBottom: 4 }}>{item.content}</div>
-                      <div style={{ fontSize: 11, color: item.color, textDecoration: 'underline', opacity: 0.7 }}>
+                      <div style={{ fontSize: 12, color: item.color, textDecoration: 'underline', opacity: 0.7 }}>
                         {item.content}
                       </div>
                     </div>

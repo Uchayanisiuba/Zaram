@@ -89,7 +89,7 @@ export default function ModelPull({ onFinished }: ModelPullProps) {
               user watches instead of the truth. */}
           {percent !== null && (
             <span
-              className="text-[11px]"
+              className="text-xs"
               style={{
                 color: 'var(--color-text-muted)',
                 fontFamily: 'var(--font-mono, ui-monospace, monospace)',
@@ -117,7 +117,7 @@ export default function ModelPull({ onFinished }: ModelPullProps) {
             }}
           />
         </div>
-        <p className="text-[11px] leading-relaxed" style={{ color: 'var(--color-text-muted)' }}>
+        <p className="text-xs leading-relaxed" style={{ color: 'var(--color-text-muted)' }}>
           You can keep using everything else while this runs.
         </p>
       </div>

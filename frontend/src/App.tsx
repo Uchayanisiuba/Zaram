@@ -12,7 +12,7 @@
  * their own loops and read `useEmbodimentState`; nothing in the live shell
  * needs a frame pipeline.
  */
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { AnimatePresence } from 'framer-motion';
 import TopNav from './components/TopNav';
 import LeftRail from './components/LeftRail';
@@ -48,6 +48,17 @@ export default function App() {
   const platform = detectPlatform();
 
   const isLanding = workspace === 'landing';
+
+  // Where the orb is and what it is doing, for the stylesheet: every
+  // `.surface` takes its rim light from the orb's side and its tone from the
+  // orb's state. Two attributes on <html>, so the material is CSS and the
+  // cards never subscribe to anything.
+  const orbState = useOrbStore((s) => s.orbState);
+  useEffect(() => {
+    const root = document.documentElement;
+    root.dataset.orb = chatView === 'chat' ? 'left' : 'centre';
+    root.dataset.orbState = orbState;
+  }, [chatView, orbState]);
 
   useShortcuts(platform, {
     navigate: (id) => { setWorkspace(id); setCommandOpen(false); },

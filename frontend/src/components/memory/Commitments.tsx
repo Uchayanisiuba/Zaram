@@ -137,12 +137,12 @@ function SourceClause({ text, document }: { text: string; document: string }) {
       className="mt-2 rounded-md px-3 py-2"
       style={{ background: 'var(--color-glass)', borderLeft: '2px solid var(--color-border)' }}
     >
-      <p className="text-[11px] leading-relaxed" style={{ color: 'var(--color-text-muted)' }}>
+      <p className="text-xs leading-relaxed" style={{ color: 'var(--color-text-muted)' }}>
         “{text}”
       </p>
       {document && (
         <p
-          className="mt-1 flex items-center gap-1 text-[10px] text-slate-500"
+          className="mt-1 flex items-center gap-1 text-xs text-slate-500"
           style={{ fontFamily: 'var(--font-mono)' }}
         >
           <FileText size={9} />
@@ -156,7 +156,7 @@ function SourceClause({ text, document }: { text: string; document: string }) {
 function KindBadge({ kind }: { kind: ObligationKind }) {
   return (
     <span
-      className="shrink-0 rounded px-1.5 py-0.5 text-[9px] uppercase tracking-wider"
+      className="shrink-0 rounded px-1.5 py-0.5 text-xs uppercase tracking-wider"
       style={{
         fontFamily: 'var(--font-mono)',
         border: '1px solid var(--color-border-subtle)',
@@ -212,7 +212,7 @@ function QuestionCard({ question, busy, onAnswer }: QuestionCardProps) {
           value={anchor}
           onChange={(e) => setAnchor(e.target.value)}
           aria-label="The date this document was issued"
-          className="rounded-lg px-2.5 py-1.5 text-[11px] outline-none"
+          className="rounded-lg px-2.5 py-1.5 text-xs outline-none"
           style={{
             background: 'var(--color-glass)',
             border: '1px solid var(--color-border-subtle)',
@@ -223,7 +223,7 @@ function QuestionCard({ question, busy, onAnswer }: QuestionCardProps) {
         <button
           disabled={busy || !anchor}
           onClick={() => onAnswer(anchor)}
-          className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] transition-colors disabled:opacity-40"
+          className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs transition-colors disabled:opacity-40"
           style={{
             border: '1px solid var(--color-border)',
             background: 'rgba(255,255,255,0.08)',
@@ -236,7 +236,7 @@ function QuestionCard({ question, busy, onAnswer }: QuestionCardProps) {
         {/* Says what pressing it does, so the user is not agreeing to a
             deadline sight unseen. The commitment appears in the list below,
             with this same clause attached. */}
-        <span className="text-[10px] text-slate-500">
+        <span className="text-xs text-slate-500">
           Zaram counts from this date and shows you what it gets.
         </span>
       </div>
@@ -284,23 +284,23 @@ function CorrectForm({ obligation, busy, onCancel, onSubmit }: CorrectFormProps)
     <div>
       <div className="grid gap-2 sm:grid-cols-2">
         <label className="flex flex-col gap-1">
-          <span className="text-[10px] uppercase tracking-wider text-slate-500">Due</span>
+          <span className="text-xs uppercase tracking-wider text-slate-500">Due</span>
           <input
             type="date"
             value={due}
             onChange={(e) => setDue(e.target.value)}
-            className="rounded-lg px-2.5 py-1.5 text-[11px] outline-none"
+            className="rounded-lg px-2.5 py-1.5 text-xs outline-none"
             style={field}
           />
         </label>
         <label className="flex flex-col gap-1">
-          <span className="text-[10px] uppercase tracking-wider text-slate-500">
+          <span className="text-xs uppercase tracking-wider text-slate-500">
             Who owes it
           </span>
           <select
             value={direction}
             onChange={(e) => setDirection(e.target.value as ObligationDirection)}
-            className="rounded-lg px-2.5 py-1.5 text-[11px] outline-none"
+            className="rounded-lg px-2.5 py-1.5 text-xs outline-none"
             style={field}
           >
             <option value="unknown" style={{ color: '#000' }}>
@@ -315,40 +315,40 @@ function CorrectForm({ obligation, busy, onCancel, onSubmit }: CorrectFormProps)
           </select>
         </label>
         <label className="flex flex-col gap-1 sm:col-span-2">
-          <span className="text-[10px] uppercase tracking-wider text-slate-500">
+          <span className="text-xs uppercase tracking-wider text-slate-500">
             What it is
           </span>
           <input
             value={summary}
             onChange={(e) => setSummary(e.target.value)}
-            className="rounded-lg px-2.5 py-1.5 text-[11px] outline-none"
+            className="rounded-lg px-2.5 py-1.5 text-xs outline-none"
             style={field}
           />
         </label>
         <label className="flex flex-col gap-1">
-          <span className="text-[10px] uppercase tracking-wider text-slate-500">Amount</span>
+          <span className="text-xs uppercase tracking-wider text-slate-500">Amount</span>
           <input
             value={amount}
             onChange={(e) => setAmount(e.target.value)}
             inputMode="decimal"
             placeholder="none stated"
-            className="rounded-lg px-2.5 py-1.5 text-[11px] outline-none"
+            className="rounded-lg px-2.5 py-1.5 text-xs outline-none"
             style={{ ...field, fontFamily: 'var(--font-mono)' }}
           />
         </label>
         <label className="flex flex-col gap-1">
-          <span className="text-[10px] uppercase tracking-wider text-slate-500">Currency</span>
+          <span className="text-xs uppercase tracking-wider text-slate-500">Currency</span>
           <input
             value={currency}
             onChange={(e) => setCurrency(e.target.value)}
             placeholder="GBP"
-            className="rounded-lg px-2.5 py-1.5 text-[11px] outline-none"
+            className="rounded-lg px-2.5 py-1.5 text-xs outline-none"
             style={{ ...field, fontFamily: 'var(--font-mono)' }}
           />
         </label>
       </div>
 
-      <p className="mt-2 text-[10px] text-slate-500">
+      <p className="mt-2 text-xs text-slate-500">
         The clause above is not editable — a correction says Zaram read the sentence
         wrongly, not that the sentence was different. The original is kept and struck
         through.
@@ -358,7 +358,7 @@ function CorrectForm({ obligation, busy, onCancel, onSubmit }: CorrectFormProps)
         <button
           disabled={busy || !changed}
           onClick={() => onSubmit(changes)}
-          className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] transition-colors disabled:opacity-40"
+          className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs transition-colors disabled:opacity-40"
           style={{
             border: '1px solid var(--color-border)',
             background: 'rgba(255,255,255,0.08)',
@@ -370,7 +370,7 @@ function CorrectForm({ obligation, busy, onCancel, onSubmit }: CorrectFormProps)
         </button>
         <button
           onClick={onCancel}
-          className="rounded-lg px-3 py-1.5 text-[11px] text-slate-400 hover:bg-white/5 transition-colors"
+          className="rounded-lg px-3 py-1.5 text-xs text-slate-400 hover:bg-white/5 transition-colors"
         >
           Cancel
         </button>
@@ -473,7 +473,7 @@ export default function Commitments({ onCounts }: CommitmentsProps) {
               setExpanded(null);
               setEditing(null);
             }}
-            className="rounded-full px-3 py-1 text-[11px] transition-colors hover:bg-white/5"
+            className="rounded-full px-3 py-1 text-xs transition-colors hover:bg-white/5"
             style={{
               border: `1px solid ${view === id ? 'var(--color-border)' : 'var(--color-border-subtle)'}`,
               background: view === id ? 'rgba(255,255,255,0.08)' : 'transparent',
@@ -508,7 +508,7 @@ export default function Commitments({ onCounts }: CommitmentsProps) {
           as though it was read cleanly. */}
       {view === 'open' && questions.length > 0 && (
         <section className="mb-5">
-          <h3 className="mb-2 text-[10px] uppercase tracking-wider text-slate-500">
+          <h3 className="mb-2 text-xs uppercase tracking-wider text-slate-500">
             Zaram could not work out {questions.length === 1 ? 'this date' : 'these dates'}
           </h3>
           <ul className="flex flex-col gap-1.5">
@@ -593,7 +593,7 @@ export default function Commitments({ onCounts }: CommitmentsProps) {
                     </div>
 
                     <p
-                      className="mt-1.5 flex items-center gap-1.5 text-[10px]"
+                      className="mt-1.5 flex items-center gap-1.5 text-xs"
                       style={{ fontFamily: 'var(--font-mono)' }}
                     >
                       <CalendarClock size={10} className="text-slate-500" />
@@ -621,7 +621,7 @@ export default function Commitments({ onCounts }: CommitmentsProps) {
                   />
 
                   {superseded && replacement && (
-                    <p className="mt-1.5 flex items-start gap-1.5 text-[11px] text-slate-400">
+                    <p className="mt-1.5 flex items-start gap-1.5 text-xs text-slate-400">
                       <CornerDownRight size={11} className="mt-0.5 shrink-0" />
                       {/* What it became. Direction is named only when it is
                           what moved, because correcting it alone otherwise
@@ -657,7 +657,7 @@ export default function Commitments({ onCounts }: CommitmentsProps) {
                       />
                     ) : confirmDismiss === o.id ? (
                       <div>
-                        <p className="text-[11px] text-slate-300 mb-2">
+                        <p className="text-xs text-slate-300 mb-2">
                           Say this was never a commitment? It stays here, marked, so the
                           same clause is not read out of the document again.
                         </p>
@@ -671,7 +671,7 @@ export default function Commitments({ onCounts }: CommitmentsProps) {
                                 setExpanded(null);
                               })
                             }
-                            className="rounded-lg px-3 py-1.5 text-[11px] transition-colors disabled:opacity-40"
+                            className="rounded-lg px-3 py-1.5 text-xs transition-colors disabled:opacity-40"
                             style={{
                               border: '1px solid rgba(248,113,113,0.4)',
                               color: 'rgb(248,113,113)',
@@ -681,7 +681,7 @@ export default function Commitments({ onCounts }: CommitmentsProps) {
                           </button>
                           <button
                             onClick={() => setConfirmDismiss(null)}
-                            className="rounded-lg px-3 py-1.5 text-[11px] text-slate-400 hover:bg-white/5 transition-colors"
+                            className="rounded-lg px-3 py-1.5 text-xs text-slate-400 hover:bg-white/5 transition-colors"
                           >
                             Cancel
                           </button>
@@ -691,7 +691,7 @@ export default function Commitments({ onCounts }: CommitmentsProps) {
                       <>
                         {/* The one thing the document cannot say, offered as
                             one click rather than buried in the form. */}
-                        <p className="text-[11px] text-slate-400 mb-2">
+                        <p className="text-xs text-slate-400 mb-2">
                           {DIRECTION_LABELS[o.direction]}
                           {o.direction === 'unknown' && '.'}
                         </p>
@@ -704,7 +704,7 @@ export default function Commitments({ onCounts }: CommitmentsProps) {
                                   correctObligation(o.id, { direction: 'owed_by_user' }),
                                 )
                               }
-                              className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] text-slate-300 hover:bg-white/5 transition-colors disabled:opacity-40"
+                              className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs text-slate-300 hover:bg-white/5 transition-colors disabled:opacity-40"
                               style={{ border: '1px solid var(--color-border-subtle)' }}
                             >
                               <ArrowUpRight size={12} />
@@ -717,7 +717,7 @@ export default function Commitments({ onCounts }: CommitmentsProps) {
                                   correctObligation(o.id, { direction: 'owed_to_user' }),
                                 )
                               }
-                              className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] text-slate-300 hover:bg-white/5 transition-colors disabled:opacity-40"
+                              className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs text-slate-300 hover:bg-white/5 transition-colors disabled:opacity-40"
                               style={{ border: '1px solid var(--color-border-subtle)' }}
                             >
                               <ArrowDownLeft size={12} />
@@ -730,7 +730,7 @@ export default function Commitments({ onCounts }: CommitmentsProps) {
                           <button
                             disabled={busy}
                             onClick={() => setEditing(o.id)}
-                            className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] text-slate-300 hover:bg-white/5 transition-colors disabled:opacity-40"
+                            className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs text-slate-300 hover:bg-white/5 transition-colors disabled:opacity-40"
                             style={{ border: '1px solid var(--color-border-subtle)' }}
                           >
                             <Pencil size={12} />
@@ -745,7 +745,7 @@ export default function Commitments({ onCounts }: CommitmentsProps) {
                                   setExpanded(null);
                                 })
                               }
-                              className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] text-slate-300 hover:bg-white/5 transition-colors disabled:opacity-40"
+                              className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs text-slate-300 hover:bg-white/5 transition-colors disabled:opacity-40"
                               style={{ border: '1px solid var(--color-border-subtle)' }}
                             >
                               <Check size={12} />
@@ -756,7 +756,7 @@ export default function Commitments({ onCounts }: CommitmentsProps) {
                             <button
                               disabled={busy}
                               onClick={() => setConfirmDismiss(o.id)}
-                              className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] transition-colors disabled:opacity-40 hover:bg-white/5"
+                              className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs transition-colors disabled:opacity-40 hover:bg-white/5"
                               style={{
                                 border: '1px solid var(--color-border-subtle)',
                                 color: 'rgb(248,113,113)',

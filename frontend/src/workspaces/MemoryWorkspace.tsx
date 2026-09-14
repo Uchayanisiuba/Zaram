@@ -137,12 +137,12 @@ type View = 'facts' | 'commitments';
 function Metric({ label, value, note }: { label: string; value: string; note?: string }) {
   return (
     <span className="flex items-baseline gap-1.5 whitespace-nowrap">
-      <span className="text-[10px] uppercase tracking-wider text-slate-500">{label}</span>
+      <span className="text-xs uppercase tracking-wider text-slate-500">{label}</span>
       <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--color-text)', fontSize: 13 }}>
         {value}
       </span>
       {note && (
-        <span className="text-[10px] text-slate-500" title={note}>
+        <span className="text-xs text-slate-500" title={note}>
           ({note})
         </span>
       )}
@@ -158,7 +158,7 @@ const selectStyle: React.CSSProperties = {
   color: 'var(--color-text-muted)',
   borderRadius: 8,
   padding: '5px 8px',
-  fontSize: 11,
+  fontSize: 12,
 };
 
 function Chip({
@@ -175,7 +175,7 @@ function Chip({
   return (
     <button
       onClick={onClick}
-      className="flex items-center gap-1.5 rounded-full px-3 py-1 text-[11px] transition-colors hover:bg-white/5"
+      className="flex items-center gap-1.5 rounded-full px-3 py-1 text-xs transition-colors hover:bg-white/5"
       style={{
         border: `1px solid ${active ? 'var(--color-border)' : 'var(--color-border-subtle)'}`,
         background: active ? 'rgba(255,255,255,0.08)' : 'transparent',
@@ -542,7 +542,7 @@ export default function MemoryWorkspace() {
               {g.label && (
                 <h3
                   id={`memory-group-${g.key}`}
-                  className="sticky top-0 z-10 mb-1.5 flex items-baseline gap-2 py-1 text-[11px] uppercase tracking-wider"
+                  className="sticky top-0 z-10 mb-1.5 flex items-baseline gap-2 py-1 text-xs uppercase tracking-wider"
                   style={{
                     fontFamily: 'var(--font-display)',
                     color: 'var(--color-text-muted)',
@@ -606,7 +606,7 @@ export default function MemoryWorkspace() {
                             narrows where a fact applies and who could see it. */}
                         {scopeProjectId(r.scope) && (
                           <span
-                            className="mt-0.5 shrink-0 rounded px-1.5 py-0.5 text-[9px]"
+                            className="mt-0.5 shrink-0 rounded px-1.5 py-0.5 text-xs"
                             style={{
                               fontFamily: 'var(--font-mono)',
                               border: '1px solid var(--color-border-subtle)',
@@ -620,7 +620,7 @@ export default function MemoryWorkspace() {
                       </div>
 
                       <p
-                        className="mt-1.5 text-[10px] text-slate-500"
+                        className="mt-1.5 text-xs text-slate-500"
                         style={{ fontFamily: 'var(--font-mono)' }}
                       >
                         {superseded && r.superseded_at ? (
@@ -643,7 +643,7 @@ export default function MemoryWorkspace() {
                       </p>
 
                       {superseded && replacement && (
-                        <p className="mt-1 flex items-start gap-1.5 text-[11px] text-slate-400">
+                        <p className="mt-1 flex items-start gap-1.5 text-xs text-slate-400">
                           <CornerDownRight size={11} className="mt-0.5 shrink-0" />
                           <span>{replacement.content}</span>
                         </p>
@@ -656,7 +656,7 @@ export default function MemoryWorkspace() {
                         style={{ borderTop: '1px solid var(--color-border-subtle)' }}
                       >
                         {/* Why it is here, in plain language rather than a score. */}
-                        <p className="text-[11px] leading-relaxed text-slate-400 mb-3">
+                        <p className="text-xs leading-relaxed text-slate-400 mb-3">
                           {superseded ? (
                             <>
                               You corrected this on{' '}
@@ -694,7 +694,7 @@ export default function MemoryWorkspace() {
                                 color: 'var(--color-text)',
                               }}
                             />
-                            <p className="mt-1.5 text-[10px] text-slate-500">
+                            <p className="mt-1.5 text-xs text-slate-500">
                               The original is kept and struck through. Answers that relied on it
                               will change.
                             </p>
@@ -702,7 +702,7 @@ export default function MemoryWorkspace() {
                               <button
                                 disabled={busy || !draft.trim()}
                                 onClick={() => submitCorrection(r.id)}
-                                className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] transition-colors disabled:opacity-40"
+                                className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs transition-colors disabled:opacity-40"
                                 style={{
                                   border: '1px solid var(--color-border)',
                                   background: 'rgba(255,255,255,0.08)',
@@ -717,7 +717,7 @@ export default function MemoryWorkspace() {
                                   setEditing(null);
                                   setDraft('');
                                 }}
-                                className="rounded-lg px-3 py-1.5 text-[11px] text-slate-400 hover:bg-white/5 transition-colors"
+                                className="rounded-lg px-3 py-1.5 text-xs text-slate-400 hover:bg-white/5 transition-colors"
                               >
                                 Cancel
                               </button>
@@ -725,7 +725,7 @@ export default function MemoryWorkspace() {
                           </div>
                         ) : confirmForget === r.id ? (
                           <div>
-                            <p className="text-[11px] text-slate-300 mb-2">
+                            <p className="text-xs text-slate-300 mb-2">
                               Delete this for good? Unlike correcting, this leaves no record that
                               Zaram ever knew it.
                             </p>
@@ -739,7 +739,7 @@ export default function MemoryWorkspace() {
                                     setExpanded(null);
                                   })
                                 }
-                                className="rounded-lg px-3 py-1.5 text-[11px] transition-colors disabled:opacity-40"
+                                className="rounded-lg px-3 py-1.5 text-xs transition-colors disabled:opacity-40"
                                 style={{
                                   border: '1px solid rgba(248,113,113,0.4)',
                                   color: 'rgb(248,113,113)',
@@ -749,7 +749,7 @@ export default function MemoryWorkspace() {
                               </button>
                               <button
                                 onClick={() => setConfirmForget(null)}
-                                className="rounded-lg px-3 py-1.5 text-[11px] text-slate-400 hover:bg-white/5 transition-colors"
+                                className="rounded-lg px-3 py-1.5 text-xs text-slate-400 hover:bg-white/5 transition-colors"
                               >
                                 Cancel
                               </button>
@@ -767,7 +767,7 @@ export default function MemoryWorkspace() {
                                     setEditing(r.id);
                                     setDraft(r.content);
                                   }}
-                                  className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] text-slate-300 hover:bg-white/5 transition-colors disabled:opacity-40"
+                                  className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs text-slate-300 hover:bg-white/5 transition-colors disabled:opacity-40"
                                   style={{ border: '1px solid var(--color-border-subtle)' }}
                                 >
                                   <Pencil size={12} />
@@ -776,7 +776,7 @@ export default function MemoryWorkspace() {
                                 <button
                                   disabled={busy}
                                   onClick={() => void act(() => pinMemory(r.id, !r.pinned))}
-                                  className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] text-slate-300 hover:bg-white/5 transition-colors disabled:opacity-40"
+                                  className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs text-slate-300 hover:bg-white/5 transition-colors disabled:opacity-40"
                                   style={{ border: '1px solid var(--color-border-subtle)' }}
                                 >
                                   {r.pinned ? <PinOff size={12} /> : <Pin size={12} />}
@@ -791,7 +791,7 @@ export default function MemoryWorkspace() {
                                     scope string, because "about you" is the part
                                     that decides whether it belongs there. */}
                                 <label
-                                  className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] text-slate-300"
+                                  className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs text-slate-300"
                                   style={{ border: '1px solid var(--color-border-subtle)' }}
                                 >
                                   <span className="text-slate-500">Belongs to</span>
@@ -800,7 +800,7 @@ export default function MemoryWorkspace() {
                                     value={scopeProjectId(r.scope) ?? ''}
                                     onChange={(e) => void act(() => setMemoryScope(r.id, e.target.value))}
                                     aria-label="Which project this fact belongs to"
-                                    className="bg-transparent text-[11px] outline-none disabled:opacity-40"
+                                    className="bg-transparent text-xs outline-none disabled:opacity-40"
                                     style={{ color: 'var(--color-text)' }}
                                   >
                                     <option value="" style={{ color: '#000' }}>
@@ -818,7 +818,7 @@ export default function MemoryWorkspace() {
                             <button
                               disabled={busy}
                               onClick={() => setConfirmForget(r.id)}
-                              className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] transition-colors disabled:opacity-40 hover:bg-white/5"
+                              className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs transition-colors disabled:opacity-40 hover:bg-white/5"
                               style={{
                                 border: '1px solid var(--color-border-subtle)',
                                 color: 'rgb(248,113,113)',
@@ -830,7 +830,7 @@ export default function MemoryWorkspace() {
                             <div className="flex-1" />
                             <button
                               onClick={(e) => openSource(`memory:${r.id}`, e.currentTarget)}
-                              className="rounded-lg px-3 py-1.5 text-[11px] text-slate-400 hover:bg-white/5 transition-colors"
+                              className="rounded-lg px-3 py-1.5 text-xs text-slate-400 hover:bg-white/5 transition-colors"
                             >
                               Open source
                             </button>

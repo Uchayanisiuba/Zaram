@@ -117,14 +117,14 @@ export default function AdvancedModelField({
   return (
     <details className="mt-1" data-testid="advanced-model">
       <summary
-        className="text-[11px] cursor-pointer select-none"
+        className="text-xs cursor-pointer select-none"
         style={{ color: 'var(--color-text-muted)' }}
       >
         Advanced
       </summary>
 
       <div className="flex flex-col gap-2 mt-2">
-        <p className="text-[11px] leading-snug" style={{ color: 'var(--color-text-muted)', maxWidth: '52ch' }}>
+        <p className="text-xs leading-snug" style={{ color: 'var(--color-text-muted)', maxWidth: '52ch' }}>
           Type a model name if it is not in the list above. Some providers offer
           more models than a list can hold.
         </p>
@@ -149,7 +149,7 @@ export default function AdvancedModelField({
             type="button"
             disabled={busy || name === ''}
             onClick={() => void onChoose(name)}
-            className="px-2.5 py-1.5 rounded-lg text-[11px]"
+            className="px-2.5 py-1.5 rounded-lg text-xs"
             style={{
               border: '1px solid var(--color-border-subtle)',
               color: 'var(--color-text)',
@@ -167,7 +167,7 @@ export default function AdvancedModelField({
             that is when there is something true to say. */}
         {match && (
           <p
-            className="text-[11px] leading-snug"
+            className="text-xs leading-snug"
             style={{ color: 'var(--color-text-muted)', maxWidth: '52ch' }}
             data-testid="advanced-model-policy"
           >
@@ -180,7 +180,7 @@ export default function AdvancedModelField({
             dispatch, so nothing is sent to a server guessed from the name. */}
         {unplaceable && (
           <p
-            className="text-[11px] leading-snug"
+            className="text-xs leading-snug"
             style={{ color: 'var(--color-amber)', maxWidth: '52ch' }}
             data-testid="advanced-model-unplaceable"
           >
@@ -194,7 +194,7 @@ export default function AdvancedModelField({
             deliberately so. */}
         {name !== '' && models === null && (
           <p
-            className="text-[11px] leading-snug"
+            className="text-xs leading-snug"
             style={{ color: 'var(--color-text-muted)', maxWidth: '52ch' }}
             data-testid="advanced-model-unlooked"
           >
@@ -204,7 +204,7 @@ export default function AdvancedModelField({
           </p>
         )}
 
-        <p className="text-[11px] leading-snug" style={{ color: 'var(--color-text-faint)', maxWidth: '52ch' }}>
+        <p className="text-xs leading-snug" style={{ color: 'var(--color-text-faint)', maxWidth: '52ch' }}>
           Naming a model here permits nothing. A cloud model still needs its
           provider connected and its destination allowed, and every request is
           recorded in Activity.

@@ -63,12 +63,11 @@ export default function AppCard({ call }: { call: ChatToolCall }) {
 
   return (
     <div
-      className="mt-2 rounded-lg"
-      style={{ border: '1px solid var(--color-border-subtle)', background: 'var(--color-glass)' }}
+      className="mt-2 rounded-lg surface"
       data-testid="app-card"
     >
       {call.appUrl && (
-        <div className="flex items-center gap-2 px-3 py-1.5 text-[10px]" style={{ color: 'var(--color-text-muted)' }}>
+        <div className="flex items-center gap-2 px-3 py-1.5 text-xs" style={{ color: 'var(--color-text-muted)' }}>
           <span>{phase === 'stopped' ? 'stopped' : 'running at'}</span>
           <a
             href={call.appUrl}
@@ -99,7 +98,7 @@ export default function AppCard({ call }: { call: ChatToolCall }) {
       )}
       {src && (
         <div className="px-3 py-2">
-          <p className="mb-1 text-[10px]" style={{ color: 'var(--color-text-faint)' }}>
+          <p className="mb-1 text-xs" style={{ color: 'var(--color-text-faint)' }}>
             what Zaram saw{call.target ? ` at ${call.target}` : ''}
           </p>
           {blob ? (
@@ -110,7 +109,7 @@ export default function AppCard({ call }: { call: ChatToolCall }) {
               data-testid="app-screenshot"
             />
           ) : (
-            <p className="text-[11px]" style={{ color: 'var(--color-text-muted)' }} data-testid="app-screenshot-state">
+            <p className="text-xs" style={{ color: 'var(--color-text-muted)' }} data-testid="app-screenshot-state">
               {failed ? `The screenshot could not be loaded (${failed}).` : 'Loading the screenshot…'}
             </p>
           )}

@@ -111,7 +111,7 @@ export default function RememberAction({
             ? 'Kept in Memory'
             : 'Remember this — select part of the message first to keep just that'
         }
-        className="inline-flex items-center gap-1 px-1.5 py-1 rounded-md text-[10px] text-slate-500 hover:text-slate-300 hover:bg-white/5 disabled:opacity-30 transition-colors"
+        className="inline-flex items-center gap-1 px-1.5 py-1 rounded-md text-xs text-slate-500 hover:text-slate-300 hover:bg-white/5 disabled:opacity-30 transition-colors"
       >
         {saved ? (
           <>
@@ -138,7 +138,7 @@ export default function RememberAction({
               moment the user still knows what they meant. A fact they can
               correct a month later is rule 4; a fact they can get right now is
               cheaper for both sides. */}
-          <p className="mb-1.5 text-[10px]" style={{ color: 'var(--color-text-muted)' }}>
+          <p className="mb-1.5 text-xs" style={{ color: 'var(--color-text-muted)' }}>
             What Zaram should remember. Trim it to the part that matters.
           </p>
           <textarea
@@ -155,12 +155,12 @@ export default function RememberAction({
               }
             }}
             aria-label="What Zaram should remember"
-            className="w-full resize-none rounded-md bg-transparent px-2 py-1.5 text-[11px] outline-none"
+            className="w-full resize-none rounded-md bg-transparent px-2 py-1.5 text-xs outline-none"
             style={{ border: '1px solid var(--color-border-subtle)', color: 'var(--color-text)' }}
           />
 
           {error && (
-            <p className="mt-1 text-[10px]" style={{ color: '#fca5a5' }}>
+            <p className="mt-1 text-xs" style={{ color: '#fca5a5' }}>
               {error}
             </p>
           )}
@@ -169,7 +169,7 @@ export default function RememberAction({
             {/* Saved and pinned are different promises, so the difference is
                 stated where the decision is made rather than discovered later
                 when something fades. */}
-            <p className="text-[10px]" style={{ color: 'var(--color-text-muted)' }}>
+            <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
               Kept in Memory. It fades if it is never used — pin it there to keep it for good.
             </p>
             <div className="flex shrink-0 items-center gap-1">
@@ -177,7 +177,7 @@ export default function RememberAction({
                 type="button"
                 onClick={() => setDraft(null)}
                 aria-label="Don't remember this"
-                className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-[10px]"
+                className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-xs"
                 style={{ color: 'var(--color-text-muted)' }}
               >
                 <X size={11} aria-hidden />
@@ -187,7 +187,7 @@ export default function RememberAction({
                 type="button"
                 onClick={() => void save()}
                 disabled={busy || !draft.trim()}
-                className="inline-flex items-center gap-1 rounded px-2 py-1 text-[10px] disabled:opacity-40"
+                className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs disabled:opacity-40"
                 style={{ color: 'var(--color-cyan-light)' }}
               >
                 <Check size={11} aria-hidden />

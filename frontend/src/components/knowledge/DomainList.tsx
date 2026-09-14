@@ -151,7 +151,7 @@ export default function DomainList({ domains, sources, onChanged }: DomainListPr
           <button
             onClick={() => { reset(); setCreating(true); }}
             data-testid="domain-new"
-            className="text-[11px] px-2 py-1 rounded-md flex items-center gap-1"
+            className="text-xs px-2 py-1 rounded-md flex items-center gap-1"
             style={{ border: '1px solid var(--color-border-subtle)', color: 'var(--color-text)' }}
           >
             <Plus size={11} />
@@ -194,12 +194,12 @@ export default function DomainList({ domains, sources, onChanged }: DomainListPr
                   </p>
                   {/* The line routing reads. Shown because the user needs to
                       see what Zaram will act on. */}
-                  <p className="text-[11px] text-slate-500 truncate">{domain.description}</p>
+                  <p className="text-xs text-slate-500 truncate">{domain.description}</p>
                 </div>
 
                 <button
                   onClick={() => setExpanded(expanded === domain.id ? null : domain.id)}
-                  className="text-[11px] px-2 py-1 rounded-md shrink-0"
+                  className="text-xs px-2 py-1 rounded-md shrink-0"
                   style={{ border: '1px solid var(--color-border-subtle)', color: 'var(--color-text)' }}
                   data-testid={`domain-sources-${domain.id}`}
                 >
@@ -257,7 +257,7 @@ export default function DomainList({ domains, sources, onChanged }: DomainListPr
                           <span className="text-xs truncate flex-1" style={{ color: 'var(--color-text)' }}>
                             {source.name}
                           </span>
-                          <span className="text-[11px] text-slate-500 shrink-0">
+                          <span className="text-xs text-slate-500 shrink-0">
                             {source.counts.indexed ?? 0} indexed
                           </span>
                         </button>

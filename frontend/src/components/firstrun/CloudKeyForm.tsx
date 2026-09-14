@@ -175,7 +175,7 @@ export default function CloudKeyForm({ onConnected }: CloudKeyFormProps) {
   return (
     <div className="flex flex-col gap-3" data-testid="cloud-key-form">
       <label className="flex flex-col gap-1.5">
-        <span className="text-[10px] uppercase tracking-wider" style={labelStyle}>
+        <span className="text-xs uppercase tracking-wider" style={labelStyle}>
           Provider
         </span>
         <select
@@ -220,7 +220,7 @@ export default function CloudKeyForm({ onConnected }: CloudKeyFormProps) {
       )}
 
       <label className="flex flex-col gap-1.5">
-        <span className="text-[10px] uppercase tracking-wider" style={labelStyle}>
+        <span className="text-xs uppercase tracking-wider" style={labelStyle}>
           Your key
         </span>
         <input
@@ -293,7 +293,7 @@ function KeyWalkthrough({ steps, url }: { steps: string[]; url: string }) {
       style={{ borderColor: 'rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.02)' }}
       data-testid="cloud-key-walkthrough"
     >
-      <p className="text-[10px] uppercase tracking-wider mb-1.5" style={labelStyle}>
+      <p className="text-xs uppercase tracking-wider mb-1.5" style={labelStyle}>
         Getting a key — no card, a few minutes
       </p>
       <ol className="flex flex-col gap-1.5 pl-4 list-decimal">

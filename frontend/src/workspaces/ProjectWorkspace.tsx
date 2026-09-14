@@ -158,7 +158,7 @@ function UnfinishedSection({
         <PlayCircle size={13} aria-hidden style={{ color: 'var(--color-cyan-light)' }} />
         {tasks.length === 1 ? 'One task is unfinished' : `${tasks.length} tasks are unfinished`}
       </h2>
-      <p className="mt-1.5 max-w-xl text-[11px] leading-relaxed" style={{ color: 'var(--color-text-muted)' }}>
+      <p className="mt-1.5 max-w-xl text-xs leading-relaxed" style={{ color: 'var(--color-text-muted)' }}>
         Zaram ran out of room before it finished these. It kept what it found —
         the results, not the conversation — and can carry on from there. Kept for{' '}
         {keptDays} days.
@@ -174,7 +174,7 @@ function UnfinishedSection({
             <p className="text-xs" style={{ color: 'var(--color-text)' }}>
               {task.question}
             </p>
-            <p className="mt-1 text-[10px] leading-snug" style={{ color: 'var(--color-text-faint)' }}>
+            <p className="mt-1 text-xs leading-snug" style={{ color: 'var(--color-text-faint)' }}>
               {task.steps.length} {task.steps.length === 1 ? 'step' : 'steps'}
               {task.steps.length ? ` · ${task.steps.map((s) => s.tool).join(', ')}` : ''}
               {task.stopped_because ? ` · ${task.stopped_because}` : ''}
@@ -184,7 +184,7 @@ function UnfinishedSection({
               <button
                 type="button"
                 onClick={() => resume(task)}
-                className="text-[11px] flex items-center gap-1"
+                className="text-xs flex items-center gap-1"
                 style={{ color: 'var(--color-cyan-light)' }}
                 data-testid="resume-task"
               >
@@ -194,7 +194,7 @@ function UnfinishedSection({
               <button
                 type="button"
                 onClick={() => void forget(task)}
-                className="text-[11px]"
+                className="text-xs"
                 style={{ color: 'var(--color-text-faint)' }}
                 data-testid="discard-task"
               >
@@ -264,7 +264,7 @@ function FinishedTasks({ tasks, keptDays }: { tasks: UnfinishedTask[]; keptDays:
         <CheckCircle2 size={13} aria-hidden style={{ color: 'var(--color-green, #4ade80)' }} />
         {tasks.length === 1 ? 'One task finished' : `${tasks.length} tasks finished`}
       </h2>
-      <p className="mt-1.5 max-w-xl text-[11px] leading-relaxed" style={{ color: 'var(--color-text-muted)' }}>
+      <p className="mt-1.5 max-w-xl text-xs leading-relaxed" style={{ color: 'var(--color-text-muted)' }}>
         What Zaram did, as it ticked it off. Kept for {keptDays} days; the files it read are not.
       </p>
       <ul className="mt-3 flex flex-col gap-2">
@@ -330,7 +330,7 @@ export default function ProjectWorkspace({ onOpenConversation }: ProjectWorkspac
 
       <div className="px-8">
         {error && (
-          <p className="mb-4 text-[11px]" style={{ color: '#fca5a5' }}>
+          <p className="mb-4 text-xs" style={{ color: '#fca5a5' }}>
             {error}
           </p>
         )}
@@ -412,7 +412,7 @@ function UnclaimedSection({ groups }: { groups: UnclaimedGroup[] }) {
         <AlertTriangle size={13} aria-hidden />
         {groups.length === 1 ? 'One group is not a project yet' : `${groups.length} groups are not projects yet`}
       </h2>
-      <p className="mt-1.5 max-w-xl text-[11px] leading-relaxed" style={{ color: 'var(--color-text-muted)' }}>
+      <p className="mt-1.5 max-w-xl text-xs leading-relaxed" style={{ color: 'var(--color-text-muted)' }}>
         These hold your work but were never created as projects, so they cannot
         be renamed, typed or deleted — and files cannot be moved back into them.
         Adopting one keeps everything where it is and gives it a record.
@@ -455,7 +455,7 @@ function UnclaimedRow({ group }: { group: UnclaimedGroup }) {
           <p className="truncate text-xs" style={{ fontFamily: 'var(--font-mono)' }}>
             {group.id}
           </p>
-          <p className="mt-0.5 text-[10px]" style={{ color: 'var(--color-text-muted)' }}>
+          <p className="mt-0.5 text-xs" style={{ color: 'var(--color-text-muted)' }}>
             {countLabel(group)}
           </p>
         </div>
@@ -464,7 +464,7 @@ function UnclaimedRow({ group }: { group: UnclaimedGroup }) {
           <button
             type="button"
             onClick={() => setOpen(true)}
-            className="inline-flex shrink-0 items-center gap-1 rounded px-2.5 py-1.5 text-[11px]"
+            className="inline-flex shrink-0 items-center gap-1 rounded px-2.5 py-1.5 text-xs"
             style={{ background: 'var(--color-glass)', border: '1px solid rgba(255,255,255,.1)' }}
           >
             <CornerUpLeft size={12} aria-hidden />
@@ -489,7 +489,7 @@ function UnclaimedRow({ group }: { group: UnclaimedGroup }) {
           {/* The id is fixed and the name is not, so the difference is stated
               rather than left to be discovered. Renaming later is ordinary;
               the id can never move, because the contents point at it. */}
-          <p className="mt-1 text-[10px]" style={{ color: 'var(--color-text-muted)' }}>
+          <p className="mt-1 text-xs" style={{ color: 'var(--color-text-muted)' }}>
             Keeps the id <span style={{ fontFamily: 'var(--font-mono)' }}>{group.id}</span> — the
             files and facts already point at it.
           </p>
@@ -501,7 +501,7 @@ function UnclaimedRow({ group }: { group: UnclaimedGroup }) {
                 type="button"
                 onClick={() => setType(candidate)}
                 aria-pressed={type === candidate}
-                className="rounded px-2 py-1 text-[10px] transition-colors"
+                className="rounded px-2 py-1 text-xs transition-colors"
                 style={{
                   background: type === candidate ? 'var(--color-cyan-dim, rgba(120,220,240,.16))' : 'transparent',
                   border: '1px solid rgba(255,255,255,.08)',
@@ -512,7 +512,7 @@ function UnclaimedRow({ group }: { group: UnclaimedGroup }) {
               </button>
             ))}
           </div>
-          <p className="mt-2 text-[10px]" style={{ color: 'var(--color-text-muted)' }}>
+          <p className="mt-2 text-xs" style={{ color: 'var(--color-text-muted)' }}>
             {TYPE_BLURB[type]}
           </p>
 
@@ -521,7 +521,7 @@ function UnclaimedRow({ group }: { group: UnclaimedGroup }) {
               type="button"
               onClick={() => void submit()}
               disabled={!name.trim() || busy}
-              className="inline-flex items-center gap-1 rounded px-2.5 py-1.5 text-[11px] disabled:opacity-40"
+              className="inline-flex items-center gap-1 rounded px-2.5 py-1.5 text-xs disabled:opacity-40"
               style={{ background: 'var(--color-glass)', border: '1px solid rgba(255,255,255,.1)' }}
             >
               <Check size={12} aria-hidden />
@@ -530,7 +530,7 @@ function UnclaimedRow({ group }: { group: UnclaimedGroup }) {
             <button
               type="button"
               onClick={() => setOpen(false)}
-              className="rounded px-2.5 py-1.5 text-[11px]"
+              className="rounded px-2.5 py-1.5 text-xs"
               style={{ color: 'var(--color-text-muted)' }}
             >
               Cancel
@@ -593,7 +593,7 @@ function RepositoryField({
   return (
     <div className="mt-3">
       <label
-        className="block text-[10px] font-medium"
+        className="block text-xs font-medium"
         style={{ color: 'var(--color-text-muted)' }}
       >
         {label}
@@ -617,7 +617,7 @@ function RepositoryField({
           <button
             type="button"
             onClick={() => void pick()}
-            className="shrink-0 rounded px-2 py-1.5 text-[11px]"
+            className="shrink-0 rounded px-2 py-1.5 text-xs"
             style={{ border: '1px solid rgba(255,255,255,.08)', color: 'var(--color-text-muted)' }}
             data-testid="repository-choose"
           >
@@ -625,7 +625,7 @@ function RepositoryField({
           </button>
         )}
       </div>
-      <p className="mt-1 text-[10px] leading-snug" style={{ color: 'var(--color-text-faint)' }}>
+      <p className="mt-1 text-xs leading-snug" style={{ color: 'var(--color-text-faint)' }}>
         Zaram reads this folder and nothing outside it. Leave it empty and the
         code tools have nothing to read.
       </p>
@@ -677,7 +677,7 @@ function CreateRow({ onDone }: { onDone: () => void }) {
             type="button"
             onClick={() => setType(candidate)}
             aria-pressed={type === candidate}
-            className="rounded px-2 py-1 text-[10px] transition-colors"
+            className="rounded px-2 py-1 text-xs transition-colors"
             style={{
               background: type === candidate ? 'var(--color-cyan-dim, rgba(120,220,240,.16))' : 'transparent',
               border: '1px solid rgba(255,255,255,.08)',
@@ -690,7 +690,7 @@ function CreateRow({ onDone }: { onDone: () => void }) {
       </div>
       {/* The type is chosen once, at creation, and activates a pack — so this is
           the only moment the user can be told what they are choosing. */}
-      <p className="mt-2 text-[10px]" style={{ color: 'var(--color-text-muted)' }}>
+      <p className="mt-2 text-xs" style={{ color: 'var(--color-text-muted)' }}>
         {TYPE_BLURB[type]}
       </p>
 
@@ -704,7 +704,7 @@ function CreateRow({ onDone }: { onDone: () => void }) {
           type="button"
           onClick={() => void submit()}
           disabled={!name.trim() || busy}
-          className="inline-flex items-center gap-1 rounded px-2.5 py-1.5 text-[11px] disabled:opacity-40"
+          className="inline-flex items-center gap-1 rounded px-2.5 py-1.5 text-xs disabled:opacity-40"
           style={{ background: 'var(--color-glass)', border: '1px solid rgba(255,255,255,.1)' }}
         >
           <Check size={12} aria-hidden />
@@ -713,7 +713,7 @@ function CreateRow({ onDone }: { onDone: () => void }) {
         <button
           type="button"
           onClick={onDone}
-          className="rounded px-2.5 py-1.5 text-[11px]"
+          className="rounded px-2.5 py-1.5 text-xs"
           style={{ color: 'var(--color-text-muted)' }}
         >
           Cancel
@@ -776,7 +776,7 @@ function ProjectRow({ project, onDelete }: { project: Project; onDelete: () => v
               {project.name}
             </button>
           )}
-          <p className="mt-0.5 text-[10px]" style={{ color: 'var(--color-text-muted)' }}>
+          <p className="mt-0.5 text-xs" style={{ color: 'var(--color-text-muted)' }}>
             {/* The id is shown because it is what appears in the egress log and
                 on every fact as `project:<id>`. A user reading their own logs
                 should be able to match them up. */}
@@ -835,7 +835,7 @@ function RepositoryRow({ project }: { project: Project }) {
 
   if (project.root && !editing) {
     return (
-      <div className="mt-2 flex items-center gap-2 pl-7 text-[10px]">
+      <div className="mt-2 flex items-center gap-2 pl-7 text-xs">
         <span style={{ color: 'var(--color-text-faint)' }}>reads</span>
         <code
           className="truncate"
@@ -865,12 +865,12 @@ function RepositoryRow({ project }: { project: Project }) {
         // Said plainly, because the alternative is a person asking a question
         // of a project that cannot answer it and concluding the tools are
         // broken. `CLAUDE.md`: disabled capabilities are visible, not silent.
-        <p className="mt-2 text-[10px]" style={{ color: '#fbbf24' }}>
+        <p className="mt-2 text-xs" style={{ color: '#fbbf24' }}>
           No repository yet — the code tools have nothing to read until one is set.
         </p>
       )}
       <RepositoryField value={draft} onChange={setDraft} label="" />
-      <div className="mt-2 flex gap-3 text-[11px]">
+      <div className="mt-2 flex gap-3 text-xs">
         <button
           type="button"
           onClick={() => void save()}
@@ -948,7 +948,7 @@ function EditsRow({ project }: { project: Project }) {
     runners === null ? '…' : runners.length ? runners.join(', ') : 'none detected';
 
   return (
-    <div className="mt-1.5 flex flex-col gap-1 pl-7 text-[10px]">
+    <div className="mt-1.5 flex flex-col gap-1 pl-7 text-xs">
       <label className="flex cursor-pointer items-center gap-2">
         <input
           type="checkbox"
@@ -1057,19 +1057,19 @@ function ProjectContents({ project }: { project: Project }) {
   return (
     <div className="mt-3 border-t pt-3" style={{ borderColor: 'rgba(255,255,255,.06)' }}>
       {error && (
-        <p className="mb-2 text-[11px]" style={{ color: '#fca5a5' }}>
+        <p className="mb-2 text-xs" style={{ color: '#fca5a5' }}>
           {error}
         </p>
       )}
 
       {files === null && !error && (
-        <p className="text-[11px]" style={{ color: 'var(--color-text-muted)' }}>
+        <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
           Loading files…
         </p>
       )}
 
       {files !== null && mine.length === 0 && (
-        <p className="text-[11px]" style={{ color: 'var(--color-text-muted)' }}>
+        <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
           No files in this project yet.
         </p>
       )}
@@ -1078,7 +1078,7 @@ function ProjectContents({ project }: { project: Project }) {
         <ul className="flex flex-col gap-1">
           {mine.map((file) => (
             <li key={file.id} className="flex items-center justify-between gap-3">
-              <span className="truncate text-[11px]" title={file.filename}>
+              <span className="truncate text-xs" title={file.filename}>
                 {file.filename}
               </span>
               <button
@@ -1087,7 +1087,7 @@ function ProjectContents({ project }: { project: Project }) {
                 disabled={busy === file.id}
                 aria-label={`Remove ${file.filename} from ${project.name}`}
                 title="Remove from this project. The file is not deleted."
-                className="inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-1 text-[10px] transition-colors disabled:opacity-40"
+                className="inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-1 text-xs transition-colors disabled:opacity-40"
                 style={{ color: 'var(--color-text-muted)' }}
               >
                 <CornerUpLeft size={11} aria-hidden />
@@ -1104,7 +1104,7 @@ function ProjectContents({ project }: { project: Project }) {
         <button
           type="button"
           onClick={() => setPicking(true)}
-          className="mt-2 inline-flex items-center gap-1 rounded px-2 py-1 text-[10px] transition-colors"
+          className="mt-2 inline-flex items-center gap-1 rounded px-2 py-1 text-xs transition-colors"
           style={{ background: 'var(--color-glass)', border: '1px solid rgba(255,255,255,.08)' }}
         >
           <Plus size={11} aria-hidden />
@@ -1124,7 +1124,7 @@ function ProjectContents({ project }: { project: Project }) {
               }}
               placeholder="Find a file"
               aria-label={`Find a file to add to ${project.name}`}
-              className="flex-1 bg-transparent text-[11px] outline-none placeholder-slate-500"
+              className="flex-1 bg-transparent text-xs outline-none placeholder-slate-500"
             />
             <button
               type="button"
@@ -1138,14 +1138,14 @@ function ProjectContents({ project }: { project: Project }) {
           </div>
 
           {elsewhere.length === 0 ? (
-            <p className="mt-2 text-[10px]" style={{ color: 'var(--color-text-muted)' }}>
+            <p className="mt-2 text-xs" style={{ color: 'var(--color-text-muted)' }}>
               {query.trim() ? 'Nothing matches that.' : 'Every file is already in this project.'}
             </p>
           ) : (
             <ul className="mt-2 flex max-h-56 flex-col gap-1 overflow-y-auto">
               {elsewhere.map((file) => (
                 <li key={file.id} className="flex items-center justify-between gap-3">
-                  <span className="min-w-0 truncate text-[11px]" title={file.filename}>
+                  <span className="min-w-0 truncate text-xs" title={file.filename}>
                     {file.filename}
                     {file.project_id && (
                       /* Naming where it currently lives is what makes the
@@ -1158,7 +1158,7 @@ function ProjectContents({ project }: { project: Project }) {
                     type="button"
                     onClick={() => void move(file.id, project.id)}
                     disabled={busy === file.id}
-                    className="shrink-0 rounded px-1.5 py-1 text-[10px] transition-colors disabled:opacity-40"
+                    className="shrink-0 rounded px-1.5 py-1 text-xs transition-colors disabled:opacity-40"
                     style={{ color: 'var(--color-cyan)' }}
                   >
                     {file.project_id ? 'Move here' : 'Add'}
@@ -1275,7 +1275,7 @@ function ImportDocuments({ project }: { project: Project }) {
         type="button"
         onClick={() => inputRef.current?.click()}
         disabled={progress !== null}
-        className="inline-flex items-center gap-1 rounded px-2 py-1 text-[10px] transition-colors disabled:opacity-40"
+        className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs transition-colors disabled:opacity-40"
         style={{ background: 'var(--color-glass)', border: '1px solid rgba(255,255,255,.08)' }}
       >
         <Upload size={11} aria-hidden />
@@ -1283,14 +1283,14 @@ function ImportDocuments({ project }: { project: Project }) {
       </button>
 
       {progress === null && done === null && error === null && (
-        <p className="mt-1 text-[10px] leading-relaxed" style={{ color: 'var(--color-text-muted)' }}>
+        <p className="mt-1 text-xs leading-relaxed" style={{ color: 'var(--color-text-muted)' }}>
           Your own files — a brief, a contract, a rate card. Zaram reads them on this
           machine and keeps what it learns for this project.
         </p>
       )}
 
       {progress !== null && (
-        <p className="mt-1 truncate text-[10px]" style={{ color: 'var(--color-text-muted)' }}>
+        <p className="mt-1 truncate text-xs" style={{ color: 'var(--color-text-muted)' }}>
           {progress.total > 0
             ? `Reading ${progress.index} of ${progress.total} — ${progress.name}`
             : progress.name}
@@ -1298,13 +1298,13 @@ function ImportDocuments({ project }: { project: Project }) {
       )}
 
       {done !== null && (
-        <p className="mt-1 text-[10px]" style={{ color: 'var(--color-text-muted)' }}>
+        <p className="mt-1 text-xs" style={{ color: 'var(--color-text-muted)' }}>
           {done}
         </p>
       )}
 
       {error !== null && (
-        <p className="mt-1 text-[10px]" style={{ color: '#fca5a5' }}>
+        <p className="mt-1 text-xs" style={{ color: '#fca5a5' }}>
           {error}
         </p>
       )}
@@ -1363,14 +1363,14 @@ function DeleteDialog({ project, onClose }: { project: Project; onClose: () => v
         {/* Unknown is shown as unknown. "0 facts" on a confirmation that then
             destroys eleven of them is the precise failure the -1 exists for. */}
         {factsUnknown && (
-          <p className="mt-2 flex items-start gap-1.5 text-[11px]" style={{ color: '#fcd34d' }}>
+          <p className="mt-2 flex items-start gap-1.5 text-xs" style={{ color: '#fcd34d' }}>
             <AlertTriangle size={12} className="mt-0.5 shrink-0" aria-hidden />
             Zaram could not count the facts in this project, so it cannot tell you what
             deleting them would remove.
           </p>
         )}
 
-        <p className="mt-3 text-[11px]" style={{ color: 'var(--color-text-muted)' }}>
+        <p className="mt-3 text-xs" style={{ color: 'var(--color-text-muted)' }}>
           Files are never deleted — Zaram cannot remove a file from your disk.
         </p>
 
@@ -1383,7 +1383,7 @@ function DeleteDialog({ project, onClose }: { project: Project; onClose: () => v
             style={{ background: 'var(--color-glass)', border: '1px solid rgba(255,255,255,.12)' }}
           >
             Delete the project, keep what it knows
-            <span className="mt-0.5 block text-[10px] font-normal" style={{ color: 'var(--color-text-muted)' }}>
+            <span className="mt-0.5 block text-xs font-normal" style={{ color: 'var(--color-text-muted)' }}>
               Facts move to global memory. Nothing is lost, only the grouping.
             </span>
           </button>
@@ -1396,7 +1396,7 @@ function DeleteDialog({ project, onClose }: { project: Project; onClose: () => v
             style={{ border: '1px solid rgba(252,165,165,.35)', color: '#fca5a5' }}
           >
             Delete the project and its facts
-            <span className="mt-0.5 block text-[10px] font-normal" style={{ color: 'rgba(252,165,165,.7)' }}>
+            <span className="mt-0.5 block text-xs font-normal" style={{ color: 'rgba(252,165,165,.7)' }}>
               {factsUnknown
                 ? 'Unavailable while the fact count is unknown.'
                 : 'This cannot be undone.'}

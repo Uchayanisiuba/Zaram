@@ -172,7 +172,7 @@ export default function ProjectScopePicker() {
 
   if (creating) {
     return (
-      <div className="flex flex-col gap-1 text-[11px] text-slate-500">
+      <div className="flex flex-col gap-1 text-xs text-slate-500">
         <div className="flex items-center gap-1.5">
           <FolderOpen size={12} aria-hidden className="shrink-0" />
           <input
@@ -187,13 +187,13 @@ export default function ProjectScopePicker() {
               // by succeeding is a trap in a control this small.
               if (e.key === 'Escape') setCreating(false);
             }}
-            className="bg-transparent text-[11px] text-slate-300 outline-none border-b border-slate-700 focus:border-slate-500 min-w-0 flex-1"
+            className="bg-transparent text-xs text-slate-300 outline-none border-b border-slate-700 focus:border-slate-500 min-w-0 flex-1"
           />
           <select
             aria-label="Project type"
             value={type}
             onChange={(e) => setType(e.target.value)}
-            className="bg-transparent text-[11px] text-slate-400 outline-none cursor-pointer"
+            className="bg-transparent text-xs text-slate-400 outline-none cursor-pointer"
           >
             {TYPES.map((t) => (
               <option key={t.value} value={t.value}>
@@ -205,14 +205,14 @@ export default function ProjectScopePicker() {
             type="button"
             onClick={() => void create()}
             disabled={!name.trim() || busy}
-            className="text-[11px] text-slate-300 disabled:text-slate-600 hover:text-slate-100"
+            className="text-xs text-slate-300 disabled:text-slate-600 hover:text-slate-100"
           >
             {busy ? 'Creating…' : 'Create'}
           </button>
           <button
             type="button"
             onClick={() => setCreating(false)}
-            className="text-[11px] text-slate-600 hover:text-slate-400"
+            className="text-xs text-slate-600 hover:text-slate-400"
           >
             Cancel
           </button>
@@ -227,7 +227,7 @@ export default function ProjectScopePicker() {
             placeholder="Repository folder (optional)"
             value={root}
             onChange={(e) => setRoot(e.target.value)}
-            className="bg-transparent text-[11px] text-slate-400 outline-none border-b border-slate-800 focus:border-slate-600 ml-[18px]"
+            className="bg-transparent text-xs text-slate-400 outline-none border-b border-slate-800 focus:border-slate-600 ml-[18px]"
           />
         )}
         {error && (
@@ -240,7 +240,7 @@ export default function ProjectScopePicker() {
   }
 
   return (
-    <div className="flex items-center gap-1.5 text-[11px] text-slate-500">
+    <div className="flex items-center gap-1.5 text-xs text-slate-500">
       <FolderOpen size={12} aria-hidden className="shrink-0" />
       <label htmlFor="project-scope" className="sr-only">
         Project this conversation belongs to
@@ -257,7 +257,7 @@ export default function ProjectScopePicker() {
           }
           setProject(next || null);
         }}
-        className="bg-transparent text-[11px] text-slate-400 outline-none cursor-pointer hover:text-slate-300 focus:text-slate-200 transition-colors"
+        className="bg-transparent text-xs text-slate-400 outline-none cursor-pointer hover:text-slate-300 focus:text-slate-200 transition-colors"
       >
         {/* Not "All projects". No project active means facts are captured as
             global — about the user rather than about a piece of work — which

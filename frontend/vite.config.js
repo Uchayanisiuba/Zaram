@@ -5,7 +5,10 @@ import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
-const BACKEND = 'http://127.0.0.1:8420';
+// `ZARAM_BACKEND` points the dev proxy at a backend on another port, so a
+// second backend can be looked at beside the one the desktop app holds on
+// 8420. Serving only; `vite build` never reads it.
+const BACKEND = (process.env.ZARAM_BACKEND || '').trim() || 'http://127.0.0.1:8420';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 /**

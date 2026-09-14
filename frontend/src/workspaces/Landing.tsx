@@ -5,7 +5,6 @@ import { ORB_BEHAVIOUR } from '../components/orb/LivingOrb'
 import Embodiment from '@/components/embodiment/Embodiment'
 import ZaramMark from '@/components/brand/ZaramMark'
 import OrbStatusLabel from '../components/orb/OrbStatusLabel'
-import OrbHint from '../components/orb/OrbHint'
 import OrbAura from '../components/orb/OrbAura'
 import { useEmbodimentStore } from '@/stores/embodimentStore'
 import { useChatModeStore } from '@/stores/chatModeStore'
@@ -336,6 +335,15 @@ export default function Landing({ onNavigate, onOrbTap }: LandingProps) {
     viewportHeight - CAPTION_BLOCK - CAPTION_FOOT,
   )
 
+  // Published for the line that sits under the caption — `LandingHint` — so
+  // both are placed by this one formula. The slot's bottom is the label's
+  // block when the label is showing, and the top itself when it is not.
+  const setCaptionSlot = useLayoutStore((s) => s.setCaptionSlot)
+  useEffect(() => {
+    setCaptionSlot({ top: captionTop, bottom: captionTop + (chat ? CAPTION_BLOCK : 0) })
+    return () => setCaptionSlot(null)
+  }, [captionTop, chat, setCaptionSlot, CAPTION_BLOCK])
+
   const orbShift = { scale: zoom, x: shiftX, y: 0 }
   // orbGeometry divides by the container scale for use *inside* the scaled
   // wrapper. Anything outside it needs the undivided value.
@@ -654,7 +662,7 @@ export default function Landing({ onNavigate, onOrbTap }: LandingProps) {
                   </motion.div>
                   <span
                     className="text-slate-400 whitespace-nowrap select-none"
-                    style={{ fontSize: '11px', letterSpacing: '0.03em' }}
+                    style={{ fontSize: '12px', letterSpacing: '0.03em' }}
                   >
                     {node.label}
                   </span>
@@ -682,7 +690,7 @@ export default function Landing({ onNavigate, onOrbTap }: LandingProps) {
            *
            * This was `bottom: '8%'`, which is the exact thing that caption's
            * own docstring was written about: *"a percentage of the window
-           * cannot clear a ring measured in pixels"*. `OrbHint` was moved onto
+           * cannot clear a ring measured in pixels"*. the first-run hint was moved onto
            * the formula and this was not, so the two things that share the low
            * slot were placed by two different rules -- and this one, the one
            * that actually renders while the conversation is open, floated with
@@ -708,10 +716,6 @@ export default function Landing({ onNavigate, onOrbTap }: LandingProps) {
         </motion.div>
       )}
 
-      {/* First-run instruction, in the same low slot. Shown only before the
-          conversation has ever been opened, so it never competes with the
-          status label above. */}
-      <OrbHint offsetX={visualShiftX} top={captionTop} />
 
     </div>
   )

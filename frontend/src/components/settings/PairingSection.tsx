@@ -69,7 +69,7 @@ function ClientRow({ client, onRevoke }: { client: PairedClient; onRevoke: () =>
         >
           {client.name}
         </div>
-        <div className="text-[11px]" style={{ color: 'var(--color-text-muted)' }}>
+        <div className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
           {client.isActive
             ? `Paired ${new Date(client.linkedAt * 1000).toLocaleDateString()} · ${ago(client.lastSeen)}`
             : `Revoked ${new Date((client.revokedAt ?? 0) * 1000).toLocaleDateString()}`}
@@ -80,7 +80,7 @@ function ClientRow({ client, onRevoke }: { client: PairedClient; onRevoke: () =>
           <div className="flex items-center gap-2 shrink-0">
             <button
               type="button"
-              className="text-[11px] px-2 py-1 rounded"
+              className="text-xs px-2 py-1 rounded"
               style={{ color: 'var(--color-red)', border: '1px solid var(--color-border-subtle)' }}
               onClick={onRevoke}
             >
@@ -88,7 +88,7 @@ function ClientRow({ client, onRevoke }: { client: PairedClient; onRevoke: () =>
             </button>
             <button
               type="button"
-              className="text-[11px] px-2 py-1 rounded"
+              className="text-xs px-2 py-1 rounded"
               style={{ color: 'var(--color-text-muted)' }}
               onClick={() => setConfirming(false)}
             >
@@ -98,7 +98,7 @@ function ClientRow({ client, onRevoke }: { client: PairedClient; onRevoke: () =>
         ) : (
           <button
             type="button"
-            className="text-[11px] px-2 py-1 rounded shrink-0"
+            className="text-xs px-2 py-1 rounded shrink-0"
             style={{ color: 'var(--color-text-muted)' }}
             onClick={() => setConfirming(true)}
           >
@@ -228,12 +228,12 @@ export default function PairingSection({ Row }: PairingSectionProps) {
         >
           {token ? (
             <>
-              <div className="text-[11px]" style={{ color: 'var(--color-text-muted)' }}>
+              <div className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
                 Run this where the client lives, within {secondsLeft}s. The code works once; the
                 client prints the block to paste into its MCP configuration.
               </div>
               <code
-                className="text-[11px] font-mono px-2 py-1.5 rounded break-all select-all"
+                className="text-xs font-mono px-2 py-1.5 rounded break-all select-all"
                 style={{
                   background: 'var(--color-surface-2, rgba(127,127,127,0.08))',
                   color: 'var(--color-text)',
@@ -245,12 +245,12 @@ export default function PairingSection({ Row }: PairingSectionProps) {
             </>
           ) : (
             <div className="flex items-center justify-between gap-3">
-              <span className="text-[11px]" style={{ color: 'var(--color-text-muted)' }}>
+              <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
                 {issueError ?? 'Pair a new client with a one-time code.'}
               </span>
               <button
                 type="button"
-                className="text-[11px] px-2 py-1 rounded shrink-0"
+                className="text-xs px-2 py-1 rounded shrink-0"
                 style={{
                   color: 'var(--color-indigo-light)',
                   border: '1px solid var(--color-border-subtle)',

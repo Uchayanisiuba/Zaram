@@ -71,7 +71,7 @@ function Action({
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className="flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[11px] transition-colors hover:bg-white/5 disabled:opacity-40"
+      className="flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs transition-colors hover:bg-white/5 disabled:opacity-40"
       style={{
         border: `1px solid ${danger ? 'var(--color-red, #f87171)' : 'var(--color-border-subtle)'}`,
         background: primary ? 'rgba(255,255,255,0.06)' : 'transparent',
@@ -111,7 +111,7 @@ export default function SelectionBar({
       <div className="flex flex-wrap items-center gap-2">
         {phase === 'choosing' && (
           <>
-            <span className="text-[11px]" style={{ color: 'var(--color-text)' }}>
+            <span className="text-xs" style={{ color: 'var(--color-text)' }}>
               {files} selected
             </span>
             <span className="flex-1" />
@@ -129,7 +129,7 @@ export default function SelectionBar({
 
         {phase === 'confirming' && (
           <>
-            <span className="text-[11px]" style={{ color: 'var(--color-text)' }}>
+            <span className="text-xs" style={{ color: 'var(--color-text)' }}>
               {/* Says what will happen, not "are you sure". A confirmation that
                   asks for certainty without describing the act is a dialog
                   people learn to click through. */}
@@ -149,7 +149,7 @@ export default function SelectionBar({
 
         {phase === 'removed' && (
           <>
-            <span className="text-[11px]" style={{ color: 'var(--color-text)' }}>
+            <span className="text-xs" style={{ color: 'var(--color-text)' }}>
               Removed {files}.
             </span>
             <span className="flex-1" />
@@ -166,7 +166,7 @@ export default function SelectionBar({
       </div>
 
       {phase === 'removed' && note && (
-        <p className="text-[11px] leading-snug" style={{ color: 'var(--color-text-secondary)', maxWidth: '72ch' }}>
+        <p className="text-xs leading-snug" style={{ color: 'var(--color-text-secondary)', maxWidth: '72ch' }}>
           {note}
         </p>
       )}
@@ -174,7 +174,7 @@ export default function SelectionBar({
       {skipped.length > 0 && (
         <ul className="flex flex-col gap-0.5">
           {skipped.map((s) => (
-            <li key={s.id} className="text-[11px]" style={{ color: 'var(--color-amber)' }}>
+            <li key={s.id} className="text-xs" style={{ color: 'var(--color-amber)' }}>
               {s.reason}
             </li>
           ))}

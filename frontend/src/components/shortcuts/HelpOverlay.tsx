@@ -86,7 +86,7 @@ export default function HelpOverlay({ open, platform, onClose }: HelpOverlayProp
                   <div key={g.id} style={{ marginBottom: 20 }}>
                     <div
                       style={{
-                        fontSize: 11,
+                        fontSize: 12,
                         color: 'var(--color-text-muted)',
                         textTransform: 'uppercase',
                         letterSpacing: '0.04em',

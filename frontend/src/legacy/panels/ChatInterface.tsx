@@ -298,7 +298,7 @@ export function ChatInterface() {
             >
               <p className="text-sm text-slate-200 leading-relaxed">{msg.text}</p>
               <div className="flex items-center justify-between mt-2 gap-3">
-                <span className="text-slate-700" style={{ fontSize: '11px' }}>
+                <span className="text-slate-700" style={{ fontSize: '12px' }}>
                   {msg.timestamp.toLocaleTimeString()}
                 </span>
                 {msg.sender === 'ai' && (

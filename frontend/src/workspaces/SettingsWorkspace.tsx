@@ -154,7 +154,7 @@ function Row({
           // it install instructions collapse onto one line and stop being
           // copyable as a command.
           <div
-            className="mt-1 text-[11px] text-slate-500 leading-relaxed"
+            className="mt-1 text-xs text-slate-500 leading-relaxed"
             style={{ whiteSpace: 'pre-wrap' }}
           >
             {detail}
@@ -214,8 +214,7 @@ function Section({
 }) {
   return (
     <div
-      className="rounded-xl overflow-hidden mb-4"
-      style={{ border: '1px solid var(--color-border-subtle)', background: 'var(--color-glass)' }}
+      className="rounded-xl overflow-hidden mb-4 surface"
     >
       <div
         className="flex items-center gap-2 px-5 py-3"
@@ -263,7 +262,7 @@ function PolicyRow({
   return (
     <div className="flex items-center gap-3">
       <span
-        className="text-[11px] w-44 shrink-0 truncate"
+        className="text-xs w-44 shrink-0 truncate"
         title={host}
         style={{
           fontFamily: 'var(--font-mono)',
@@ -291,7 +290,7 @@ function PolicyRow({
           <Trash2 size={12} />
         </button>
       ) : (
-        <span className="text-[10px] text-slate-500">contacted, no rule</span>
+        <span className="text-xs text-slate-500">contacted, no rule</span>
       )}
     </div>
   );
@@ -387,7 +386,7 @@ function countLabel(count: number, singular: string, plural = ''): string {
 function Problem({ message }: { message: string | null }) {
   if (!message) return null;
   return (
-    <p className="mt-2 text-[11px] leading-relaxed" style={{ color: '#fca5a5' }}>
+    <p className="mt-2 text-xs leading-relaxed" style={{ color: '#fca5a5' }}>
       {message}
     </p>
   );
@@ -766,7 +765,7 @@ export default function SettingsWorkspace() {
               ))}
 
               {policy && Object.keys(policy.rules).length === 0 && policy.hostsWithoutARule.length === 0 && (
-                <span className="text-[11px] text-slate-500">
+                <span className="text-xs text-slate-500">
                   Nothing has been contacted yet, so there is nothing to decide about.
                 </span>
               )}
@@ -804,14 +803,14 @@ export default function SettingsWorkspace() {
                   switch on and getting a refusal, with nothing explaining why,
                   is the failure this section exists to prevent. */}
               {search?.forcedByEnvironment && (
-                <p className="text-[11px] leading-relaxed" style={{ color: 'var(--color-amber, #fbbf24)' }}>
+                <p className="text-xs leading-relaxed" style={{ color: 'var(--color-amber, #fbbf24)' }}>
                   ZARAM_WEB_SEARCH is set in the environment, so it decides and this control does
                   not. Unset it to hand the choice back to this screen.
                 </p>
               )}
 
               {search?.on && search.killSwitch && (
-                <p className="text-[11px] leading-relaxed" style={{ color: 'var(--color-amber, #fbbf24)' }}>
+                <p className="text-xs leading-relaxed" style={{ color: 'var(--color-amber, #fbbf24)' }}>
                   The kill switch is on, so no search will be sent regardless.
                 </p>
               )}
@@ -834,7 +833,7 @@ export default function SettingsWorkspace() {
                       void run('search-scope', async () => setSearch(await setSearchScope(next)))
                     }
                   />
-                  <span className="text-[10px] text-slate-500 leading-relaxed">
+                  <span className="text-xs text-slate-500 leading-relaxed">
                     A local model has an older, smaller store of facts, so a live result changes
                     its answer far more often. Cloud models mostly do not come with web search
                     either — they just have a later cutoff — so this trades freshness for speed
@@ -844,7 +843,7 @@ export default function SettingsWorkspace() {
               )}
 
               {search?.on && search.hostPolicy === 'deny' && !search.killSwitch && (
-                <p className="text-[11px] leading-relaxed" style={{ color: 'var(--color-amber, #fbbf24)' }}>
+                <p className="text-xs leading-relaxed" style={{ color: 'var(--color-amber, #fbbf24)' }}>
                   Searches go to {search.host}, which has no rule yet — so they are refused, and the
                   refusal is recorded in Activity. Set that host to Ask or Always in Per-source
                   rules above to let them through. Turning search on does not grant a destination
@@ -896,12 +895,12 @@ export default function SettingsWorkspace() {
                   Export everything
                 </Button>
                 {exported && (
-                  <span className="text-[11px]" style={{ color: 'var(--color-emerald)' }}>
+                  <span className="text-xs" style={{ color: 'var(--color-emerald)' }}>
                     Saved as {exported}
                   </span>
                 )}
               </div>
-              <p className="text-[11px] leading-relaxed" style={{ color: 'var(--color-text-faint)' }}>
+              <p className="text-xs leading-relaxed" style={{ color: 'var(--color-text-faint)' }}>
                 Nothing is deleted and nothing changes — this is a copy. Checking that you could
                 leave should not cost you anything.
               </p>
@@ -963,7 +962,7 @@ export default function SettingsWorkspace() {
                   {models === null ? 'Look for models' : 'Look again'}
                 </Button>
                 {models !== null && (
-                  <span className="text-[11px] text-slate-500">
+                  <span className="text-xs text-slate-500">
                     {models.filter((m) => m.category !== 'embedding').length} found
                   </span>
                 )}
@@ -1034,7 +1033,7 @@ export default function SettingsWorkspace() {
                 if (!chosen || !reason) return null;
                 return (
                   <p
-                    className="text-[11px] leading-snug mt-0.5"
+                    className="text-xs leading-snug mt-0.5"
                     style={{ color: 'var(--color-amber)', maxWidth: '46ch' }}
                   >
                     {chosen.displayName} is {reason}. Part of it will run on the processor,
@@ -1104,7 +1103,7 @@ export default function SettingsWorkspace() {
                       // Said, not hidden. An empty picker and a missing row
                       // look identical, and only one of them is a fact about
                       // the user's machine worth knowing.
-                      <p className="text-[11px] leading-snug" style={{ color: 'var(--color-text-faint)', maxWidth: '46ch' }}>
+                      <p className="text-xs leading-snug" style={{ color: 'var(--color-text-faint)', maxWidth: '46ch' }}>
                         No model found here can do this, so there is nothing to assign. Zaram will
                         say so when a question needs one rather than answering without it.
                       </p>
@@ -1189,7 +1188,7 @@ export default function SettingsWorkspace() {
                 // it is the state in which routing has quietly fallen back to
                 // keyword matching.
                 <p
-                  className="text-[11px] leading-snug"
+                  className="text-xs leading-snug"
                   style={{ color: 'var(--color-text-faint)', maxWidth: '46ch' }}
                 >
                   No embedding model was found here, so routing falls back to matching words.
@@ -1241,17 +1240,17 @@ export default function SettingsWorkspace() {
             <div className="flex flex-col gap-1.5">
               {cloud?.connections.map((connection) => (
                 <div key={connection.providerId} className="flex items-center gap-2 flex-wrap">
-                  <span className="text-[11px]" style={{ color: 'var(--color-text)' }}>
+                  <span className="text-xs" style={{ color: 'var(--color-text)' }}>
                     {connection.displayName}
                   </span>
                   <span
-                    className="text-[10px]"
+                    className="text-xs"
                     style={{ fontFamily: 'var(--font-mono)', color: 'var(--color-text-faint)' }}
                   >
                     {connection.baseUrl}
                   </span>
                   {connection.keyTail && (
-                    <span className="text-[10px] text-slate-500">key ····{connection.keyTail}</span>
+                    <span className="text-xs text-slate-500">key ····{connection.keyTail}</span>
                   )}
                   <Button
                     tone="danger"
@@ -1267,7 +1266,7 @@ export default function SettingsWorkspace() {
                 </div>
               ))}
               {cloud && cloud.connections.length === 0 && (
-                <span className="text-[11px] text-slate-500">
+                <span className="text-xs text-slate-500">
                   None. Everything is answered on this machine.
                 </span>
               )}
@@ -1295,7 +1294,7 @@ export default function SettingsWorkspace() {
                   return (
                     <p
                       key={`needs-rule-${c.providerId}`}
-                      className="text-[11px] leading-relaxed"
+                      className="text-xs leading-relaxed"
                       style={{ color: 'var(--color-amber, #fbbf24)' }}
                     >
                       {c.displayName} is connected, but {host} has no rule yet — so looking for
@@ -1382,7 +1381,7 @@ export default function SettingsWorkspace() {
                   honestly graded — "greyed out" without "and here is why" is
                   the same as missing. */}
               {selected && !selected.available && (
-                <p className="text-[11px] leading-relaxed" style={{ color: 'var(--color-amber, #fbbf24)' }}>
+                <p className="text-xs leading-relaxed" style={{ color: 'var(--color-amber, #fbbf24)' }}>
                   {selected.note}
                 </p>
               )}
@@ -1392,7 +1391,7 @@ export default function SettingsWorkspace() {
                   from the link below the form; nothing here fetches it. */}
               {selected && selected.available && selected.keySteps.length > 0 && (
                 <ol
-                  className="list-decimal pl-4 flex flex-col gap-1 text-[11px] leading-relaxed text-slate-400"
+                  className="list-decimal pl-4 flex flex-col gap-1 text-xs leading-relaxed text-slate-400"
                   data-testid="cloud-key-walkthrough"
                 >
                   {selected.keySteps.map((step, i) => (
@@ -1439,7 +1438,7 @@ export default function SettingsWorkspace() {
                 />
               )}
               {keyExtracted && apiKey && (
-                <p className="text-[11px] leading-relaxed text-slate-400" data-testid="cloud-key-extracted">
+                <p className="text-xs leading-relaxed text-slate-400" data-testid="cloud-key-extracted">
                   That was a code sample; Zaram kept the key out of it. Check it ends the way the
                   provider showed it.
                 </p>
@@ -1455,7 +1454,7 @@ export default function SettingsWorkspace() {
                     href={selected.keyUrl}
                     target="_blank"
                     rel="noreferrer"
-                    className="inline-flex items-center gap-1 text-[11px] text-slate-400 hover:text-slate-200"
+                    className="inline-flex items-center gap-1 text-xs text-slate-400 hover:text-slate-200"
                   >
                     <ExternalLink size={11} />
                     Where to get a key
@@ -1632,7 +1631,7 @@ export default function SettingsWorkspace() {
                         setNameDraft(null);
                       })
                     }
-                    className="text-[11px] px-2 py-1 rounded-lg disabled:opacity-40"
+                    className="text-xs px-2 py-1 rounded-lg disabled:opacity-40"
                     style={{ color: 'var(--color-cyan-light)' }}
                   >
                     {busy === 'name' ? <Loader2 size={12} className="animate-spin" /> : 'Save'}
@@ -1663,7 +1662,7 @@ export default function SettingsWorkspace() {
                       shared character file does — but it is written to the same
                       guardrails anyway: style only, and no claimed feeling. */}
                   <div className="flex items-center gap-1.5 self-end">
-                    <span className="text-[10px]" style={{ color: 'var(--color-text-muted)' }}>
+                    <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
                       Start from
                     </span>
                     {MANNER_PRESETS.map((preset) => (
@@ -1672,7 +1671,7 @@ export default function SettingsWorkspace() {
                         type="button"
                         onClick={() => setMannerDraft(preset.text)}
                         title={preset.text}
-                        className="text-[10px] px-1.5 py-0.5 rounded"
+                        className="text-xs px-1.5 py-0.5 rounded"
                         style={{
                           color: 'var(--color-text-muted)',
                           border: '1px solid var(--color-border-subtle)',
@@ -1703,7 +1702,7 @@ export default function SettingsWorkspace() {
                         setMannerDraft(null);
                       })
                     }
-                    className="text-[11px] px-2 py-1 rounded-lg disabled:opacity-40"
+                    className="text-xs px-2 py-1 rounded-lg disabled:opacity-40"
                     style={{ color: 'var(--color-cyan-light)' }}
                   >
                     {busy === 'manner' ? <Loader2 size={12} className="animate-spin" /> : 'Save'}
@@ -1799,7 +1798,7 @@ export default function SettingsWorkspace() {
           </Row>
         </Section>
 
-        <p className="text-[11px] text-slate-500 leading-relaxed px-1">
+        <p className="text-xs text-slate-500 leading-relaxed px-1">
           Every value on this screen is read from the running backend or from this window's own
           state. Where a control is missing it says so rather than showing a switch that does
           nothing.

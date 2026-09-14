@@ -62,7 +62,7 @@ export default function AttachmentChips({
             key={item.id}
             onMouseEnter={() => setHovered(item.id)}
             onMouseLeave={() => setHovered(null)}
-            className="flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-[11px]"
+            className="flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs"
             style={{
               background: 'var(--color-glass)',
               border: '1px solid var(--color-border-subtle)',
@@ -127,7 +127,7 @@ export default function AttachmentChips({
       {refused.map((item) => (
         <div
           key={item.name}
-          className="flex items-start gap-2 rounded-lg px-2.5 py-1.5 text-[11px]"
+          className="flex items-start gap-2 rounded-lg px-2.5 py-1.5 text-xs"
           style={{
             background: 'var(--color-glass)',
             border: '1px solid var(--color-amber, #d97706)',

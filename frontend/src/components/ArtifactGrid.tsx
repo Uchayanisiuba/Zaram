@@ -113,7 +113,7 @@ function Tile({
                   )
                   .finally(() => setSaving(false));
               }}
-              className="flex items-center gap-1 rounded-md px-1.5 py-1 text-[10px] backdrop-blur transition-colors hover:bg-black/70"
+              className="flex items-center gap-1 rounded-md px-1.5 py-1 text-xs backdrop-blur transition-colors hover:bg-black/70"
               style={{ background: 'rgba(2,6,23,0.55)', color: '#e2e8f0' }}
               title="Save this one to your output folder"
             >
@@ -123,7 +123,7 @@ function Tile({
           )}
           {kept && (
             <span
-              className="flex items-center gap-1 rounded-md px-1.5 py-1 text-[10px] backdrop-blur"
+              className="flex items-center gap-1 rounded-md px-1.5 py-1 text-xs backdrop-blur"
               style={{ background: 'rgba(2,6,23,0.55)', color: '#86efac' }}
               title="In your output folder"
             >
@@ -141,7 +141,7 @@ function Tile({
                 ),
               );
             }}
-            className="flex items-center gap-1 rounded-md px-1.5 py-1 text-[10px] backdrop-blur transition-colors hover:bg-black/70"
+            className="flex items-center gap-1 rounded-md px-1.5 py-1 text-xs backdrop-blur transition-colors hover:bg-black/70"
             style={{ background: 'rgba(2,6,23,0.55)', color: '#e2e8f0' }}
             title={`Download ${artifact.filename}`}
             aria-label={`Download ${artifact.filename}`}
@@ -155,7 +155,7 @@ function Tile({
           from a click that missed. */}
       {saveError && (
         <div
-          className="absolute inset-x-1 top-1 rounded-md px-1.5 py-1 text-[10px]"
+          className="absolute inset-x-1 top-1 rounded-md px-1.5 py-1 text-xs"
           style={{ background: 'rgba(2,6,23,0.75)', color: '#fca5a5' }}
         >
           {saveError}
@@ -214,7 +214,7 @@ export default function ArtifactGrid({ artifacts }: { artifacts: Artifact[] }) {
         className="flex items-center gap-2 px-4 py-2.5"
         style={{ borderTop: '1px solid var(--color-border-subtle)' }}
       >
-        <span className="text-[11px]" style={{ color: 'var(--color-text-muted)' }}>
+        <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
           {artifacts.length === 1
             ? '1 image'
             : `${artifacts.length} images · pick one to open it`}
@@ -232,7 +232,7 @@ export default function ArtifactGrid({ artifacts }: { artifacts: Artifact[] }) {
             cannot see is indistinguishable from a product that loses
             files. */}
         <span
-          className="text-[11px]"
+          className="text-xs"
           style={{ fontFamily: 'var(--font-mono)', color: 'var(--color-text-faint)' }}
           title={artifacts[0].path ?? undefined}
         >

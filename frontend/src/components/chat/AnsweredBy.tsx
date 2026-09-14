@@ -138,7 +138,7 @@ export function AnsweredBy({
     <div className="mt-1">
       <p
         data-testid="answered-by"
-        className="text-[10px] leading-snug"
+        className="text-xs leading-snug"
         style={{ color: attribution.locality === 'cloud' ? 'var(--color-amber, #d9a441)' : '#64748b' }}
         title={why ? `Model: ${why}` : undefined}
       >
@@ -162,17 +162,17 @@ export function AnsweredBy({
 
       {onAskAnother && open && (
         <div className="mt-1 flex flex-wrap items-center gap-1.5">
-          {loading && <span className="text-[10px] text-slate-500">Looking…</span>}
+          {loading && <span className="text-xs text-slate-500">Looking…</span>}
           {failed && (
             // Named rather than silent, and it says where the failure was: a
             // provider that could not be reached is a different problem from
             // having no other model.
-            <span className="text-[10px] text-slate-500">
+            <span className="text-xs text-slate-500">
               Could not reach the model list.
             </span>
           )}
           {!loading && !failed && alternatives.length === 0 && (
-            <span className="text-[10px] text-slate-500">
+            <span className="text-xs text-slate-500">
               No other model is available. Connect one in Settings.
             </span>
           )}
@@ -192,7 +192,7 @@ export function AnsweredBy({
               // is the moment a person is choosing to send a question
               // somewhere new.
               title={`${model.locality === 'cloud' ? 'Leaves this device' : 'On this machine'} · ${describeDataPolicy(model.dataPolicy)}`}
-              className="px-1.5 py-0.5 rounded-full border text-[10px] leading-none transition-colors hover:bg-white/5"
+              className="px-1.5 py-0.5 rounded-full border text-xs leading-none transition-colors hover:bg-white/5"
               style={{
                 borderColor:
                   model.locality === 'cloud'
@@ -207,7 +207,7 @@ export function AnsweredBy({
           <button
             type="button"
             onClick={() => setOpen(false)}
-            className="text-[10px] text-slate-600 hover:text-slate-400 transition-colors"
+            className="text-xs text-slate-600 hover:text-slate-400 transition-colors"
           >
             cancel
           </button>

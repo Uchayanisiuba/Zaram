@@ -71,7 +71,7 @@ function ProposedRow({
     <div className="flex flex-col items-end gap-0.5 w-full">
       <div className="flex items-center gap-2">
         {label && (
-          <span className="text-[11px]" style={{ color: 'var(--color-text-muted)' }}>
+          <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
             {label}
           </span>
         )}
@@ -86,7 +86,7 @@ function ProposedRow({
       </div>
       {evidence && (
         <span
-          className="text-[10px] pr-1"
+          className="text-xs pr-1"
           style={{ color: 'var(--color-text-faint)', fontFamily: 'var(--font-mono)' }}
         >
           read from: {evidence}
@@ -196,7 +196,7 @@ export default function LetterheadSection({ Row }: LetterheadSectionProps) {
                 setNameDraft(null);
               })
             }
-            className="text-[11px] px-2 py-1 rounded-lg disabled:opacity-40"
+            className="text-xs px-2 py-1 rounded-lg disabled:opacity-40"
             style={{ color: 'var(--color-cyan-light)' }}
           >
             {busy === 'name' ? '…' : 'Save'}
@@ -242,7 +242,7 @@ export default function LetterheadSection({ Row }: LetterheadSectionProps) {
                 setLinesDraft(null);
               })
             }
-            className="text-[11px] px-2 py-1 rounded-lg disabled:opacity-40"
+            className="text-xs px-2 py-1 rounded-lg disabled:opacity-40"
             style={{ color: 'var(--color-cyan-light)' }}
           >
             {busy === 'lines' ? '…' : 'Save'}
@@ -299,7 +299,7 @@ export default function LetterheadSection({ Row }: LetterheadSectionProps) {
           <button
             disabled={busy === 'logo'}
             onClick={() => filePicker.current?.click()}
-            className="text-[11px] px-2 py-1 rounded-lg disabled:opacity-40"
+            className="text-xs px-2 py-1 rounded-lg disabled:opacity-40"
             style={{ color: 'var(--color-cyan-light)' }}
           >
             {busy === 'logo' ? '…' : letterhead.hasLogo ? 'Replace' : 'Add a logo'}
@@ -313,7 +313,7 @@ export default function LetterheadSection({ Row }: LetterheadSectionProps) {
                   setLogo('');
                 })
               }
-              className="text-[11px] px-2 py-1 rounded-lg disabled:opacity-40"
+              className="text-xs px-2 py-1 rounded-lg disabled:opacity-40"
               style={{ color: 'var(--color-text-muted)' }}
             >
               Remove
@@ -360,7 +360,7 @@ export default function LetterheadSection({ Row }: LetterheadSectionProps) {
           <button
             disabled={busy === 'template'}
             onClick={() => templatePicker.current?.click()}
-            className="text-[11px] px-2 py-1 rounded-lg disabled:opacity-40"
+            className="text-xs px-2 py-1 rounded-lg disabled:opacity-40"
             style={{ color: 'var(--color-cyan-light)' }}
           >
             {busy === 'template' ? 'Reading\u2026' : 'Read a document'}
@@ -403,7 +403,7 @@ export default function LetterheadSection({ Row }: LetterheadSectionProps) {
 
             {confirmed.logo && (
               <div className="flex items-center gap-2 self-end">
-                <span className="text-[11px]" style={{ color: 'var(--color-text-muted)' }}>
+                <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
                   Logo found
                 </span>
                 <span
@@ -422,7 +422,7 @@ export default function LetterheadSection({ Row }: LetterheadSectionProps) {
                 </span>
                 <button
                   onClick={() => setConfirmed((c) => ({ ...c, logo: '' }))}
-                  className="text-[11px] px-2 py-1 rounded-lg"
+                  className="text-xs px-2 py-1 rounded-lg"
                   style={{ color: 'var(--color-text-muted)' }}
                 >
                   Not my logo
@@ -436,7 +436,7 @@ export default function LetterheadSection({ Row }: LetterheadSectionProps) {
             {proposal.missing.map((gap) => (
               <p
                 key={gap.name}
-                className="text-[11px] leading-relaxed self-start"
+                className="text-xs leading-relaxed self-start"
                 style={{ color: 'var(--color-text-faint)' }}
               >
                 {gap.question}
@@ -449,7 +449,7 @@ export default function LetterheadSection({ Row }: LetterheadSectionProps) {
               // invoice layer. Shown so the review is honest about everything
               // that was read rather than only about what it kept.
               <p
-                className="text-[11px] leading-relaxed self-start"
+                className="text-xs leading-relaxed self-start"
                 style={{ color: 'var(--color-text-faint)' }}
               >
                 Also read, and not saved yet:{' '}
@@ -467,7 +467,7 @@ export default function LetterheadSection({ Row }: LetterheadSectionProps) {
             <div className="flex items-center gap-2">
               <button
                 onClick={() => setProposal(null)}
-                className="text-[11px] px-2 py-1 rounded-lg"
+                className="text-xs px-2 py-1 rounded-lg"
                 style={{ color: 'var(--color-text-muted)' }}
               >
                 Discard
@@ -486,7 +486,7 @@ export default function LetterheadSection({ Row }: LetterheadSectionProps) {
                     setProposal(null);
                   })
                 }
-                className="text-[11px] px-2 py-1 rounded-lg disabled:opacity-40"
+                className="text-xs px-2 py-1 rounded-lg disabled:opacity-40"
                 style={{ color: 'var(--color-cyan-light)' }}
               >
                 {busy === 'adopt' ? '\u2026' : 'Use this'}

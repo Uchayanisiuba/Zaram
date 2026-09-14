@@ -41,7 +41,7 @@ export default function SpeakButton({ text }: { text: string }) {
       // the one control in the conversation whose whole purpose is audio.
       aria-label={active ? 'Stop speaking this reply' : 'Speak this reply aloud'}
       title={active ? 'Stop' : 'Speak this reply'}
-      className="mt-1.5 inline-flex items-center gap-1 rounded px-1 -mx-1 text-[10px] text-slate-500 hover:text-slate-300 transition-colors"
+      className="mt-1.5 inline-flex items-center gap-1 rounded px-1 -mx-1 text-xs text-slate-500 hover:text-slate-300 transition-colors"
     >
       {active ? <Square size={9} aria-hidden /> : <Volume2 size={10} aria-hidden />}
       <span>{active ? 'Stop' : 'Speak'}</span>

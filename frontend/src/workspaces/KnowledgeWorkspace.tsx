@@ -450,7 +450,7 @@ export default function KnowledgeWorkspace() {
               <p className="text-sm" style={{ color: 'var(--color-text)' }} data-testid="drop-invitation">
                 {dragging ? 'Drop them here' : 'Drop documents here'}
               </p>
-              <p className="text-[11px] text-slate-500">
+              <p className="text-xs text-slate-500">
                 Or paste — text or files — anywhere on this screen.
               </p>
             </div>
@@ -625,15 +625,15 @@ export default function KnowledgeWorkspace() {
                   <p className="text-sm truncate" style={{ color: 'var(--color-text)' }}>
                     {source.name}
                   </p>
-                  <p className="text-[11px] text-slate-500 truncate">{source.root}</p>
+                  <p className="text-xs text-slate-500 truncate">{source.root}</p>
                 </div>
 
-                <span className="text-[11px] text-slate-400 shrink-0">
+                <span className="text-xs text-slate-400 shrink-0">
                   {source.counts.indexed ?? 0} indexed
                 </span>
                 {source.problems > 0 && (
                   <span
-                    className="text-[11px] shrink-0 flex items-center gap-1"
+                    className="text-xs shrink-0 flex items-center gap-1"
                     style={{ color: 'var(--color-amber, #d97706)' }}
                     data-testid={`source-problems-${source.id}`}
                   >
@@ -649,7 +649,7 @@ export default function KnowledgeWorkspace() {
                       ? 'Local only — nothing from this folder is sent to a cloud model'
                       : 'Cloud allowed for this folder'
                   }
-                  className="text-[11px] px-2 py-1 rounded-md shrink-0 flex items-center gap-1"
+                  className="text-xs px-2 py-1 rounded-md shrink-0 flex items-center gap-1"
                   style={{
                     border: '1px solid var(--color-border-subtle)',
                     color:
@@ -673,13 +673,13 @@ export default function KnowledgeWorkspace() {
                     onClick={(e) => e.stopPropagation()}
                     data-testid={`confirm-${source.id}`}
                   >
-                    <span className="text-[11px]" style={{ color: 'var(--color-amber, #d97706)' }}>
+                    <span className="text-xs" style={{ color: 'var(--color-amber, #d97706)' }}>
                       Delete {source.total} {source.total === 1 ? 'document' : 'documents'} Zaram
                       copied here? Your originals stay.
                     </span>
                     <button
                       onClick={() => void onRemove(source)}
-                      className="text-[11px] px-2 py-1 rounded-md"
+                      className="text-xs px-2 py-1 rounded-md"
                       style={{ border: '1px solid var(--color-rose, #e11d48)', color: 'var(--color-rose, #e11d48)' }}
                       data-testid={`confirm-yes-${source.id}`}
                     >
@@ -687,7 +687,7 @@ export default function KnowledgeWorkspace() {
                     </button>
                     <button
                       onClick={() => setConfirming(null)}
-                      className="text-[11px] px-2 py-1 rounded-md"
+                      className="text-xs px-2 py-1 rounded-md"
                       style={{ color: 'var(--color-text-dim, #64748b)' }}
                       data-testid={`confirm-no-${source.id}`}
                     >
@@ -752,7 +752,7 @@ export default function KnowledgeWorkspace() {
                           {outcome.name}
                         </p>
                         <span
-                          className="text-[10px] px-1.5 py-0.5 rounded"
+                          className="text-xs px-1.5 py-0.5 rounded"
                           style={{
                             color: STATUS_COLOR[outcome.status],
                             border: `1px solid ${STATUS_COLOR[outcome.status]}`,
@@ -788,7 +788,7 @@ export default function KnowledgeWorkspace() {
                     <button
                       onClick={() => void onRetry(outcome)}
                       disabled={retrying === outcome.id}
-                      className="text-[11px] px-2 py-1 rounded-md shrink-0 flex items-center gap-1 disabled:opacity-40"
+                      className="text-xs px-2 py-1 rounded-md shrink-0 flex items-center gap-1 disabled:opacity-40"
                       style={{ border: '1px solid var(--color-border-subtle)', color: 'var(--color-text)' }}
                       data-testid={`retry-${outcome.id}`}
                     >
@@ -803,7 +803,7 @@ export default function KnowledgeWorkspace() {
                     <button
                       onClick={() => void onRemoveFile(outcome)}
                       disabled={removingFile === outcome.id}
-                      className="text-[11px] px-2 py-1 rounded-md shrink-0 flex items-center gap-1 disabled:opacity-40"
+                      className="text-xs px-2 py-1 rounded-md shrink-0 flex items-center gap-1 disabled:opacity-40"
                       style={{ border: '1px solid var(--color-border-subtle)', color: 'var(--color-text-muted)' }}
                       data-testid={`remove-${outcome.id}`}
                       aria-label={`Remove ${outcome.name} from Knowledge`}
@@ -843,7 +843,7 @@ export default function KnowledgeWorkspace() {
                   <span className="text-xs truncate flex-1" style={{ color: 'var(--color-text)' }}>
                     {outcome.name}
                   </span>
-                  <span className="text-[11px] text-slate-500 shrink-0">
+                  <span className="text-xs text-slate-500 shrink-0">
                     {outcome.status === 'indexed'
                       ? `${outcome.chars.toLocaleString()} characters`
                       : STATUS_LABELS[outcome.status]}

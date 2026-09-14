@@ -43,7 +43,7 @@ const selectStyle: React.CSSProperties = {
   color: 'var(--color-text-muted)',
   borderRadius: 8,
   padding: '5px 8px',
-  fontSize: 11,
+  fontSize: 12,
 };
 
 function Chip({
@@ -62,7 +62,7 @@ function Chip({
       type="button"
       onClick={onClick}
       aria-pressed={active}
-      className="flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1 text-[11px] transition-colors hover:bg-white/5"
+      className="flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1 text-xs transition-colors hover:bg-white/5"
       style={{
         border: `1px solid ${active ? 'var(--color-border)' : 'var(--color-border-subtle)'}`,
         background: active ? 'rgba(255,255,255,0.08)' : 'transparent',

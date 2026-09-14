@@ -64,12 +64,11 @@ export default function ChangeCard({ call }: { call: ChatToolCall }) {
 
   return (
     <div
-      className="mt-2 rounded-lg"
-      style={{ border: '1px solid var(--color-border-subtle)', background: 'var(--color-glass)' }}
+      className="mt-2 rounded-lg surface"
       data-testid="change-card"
       data-commit={call.commit}
     >
-      <div className="flex items-center gap-2 px-3 py-1.5 text-[10px]" style={{ color: 'var(--color-text-muted)' }}>
+      <div className="flex items-center gap-2 px-3 py-1.5 text-xs" style={{ color: 'var(--color-text-muted)' }}>
         <span>{VERB[call.tool] ?? call.tool}</span>
         <code className="truncate" style={{ fontFamily: 'var(--font-mono)' }}>
           {call.target}
@@ -102,7 +101,7 @@ export default function ChangeCard({ call }: { call: ChatToolCall }) {
         )}
       </div>
       {phase === 'failed' && (
-        <p className="px-3 pb-1 text-[10px]" style={{ color: '#fbbf24' }} data-testid="change-revert-failed">
+        <p className="px-3 pb-1 text-xs" style={{ color: '#fbbf24' }} data-testid="change-revert-failed">
           {failure}
         </p>
       )}

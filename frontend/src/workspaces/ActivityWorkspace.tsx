@@ -237,7 +237,7 @@ export default function ActivityWorkspace() {
       >
         <div className="px-4 pt-6 pb-3">
           <h2
-            className="text-[11px] uppercase tracking-wider"
+            className="text-xs uppercase tracking-wider"
             style={{ color: 'var(--color-text-muted)', fontFamily: 'var(--font-display)' }}
           >
             Destinations
@@ -271,7 +271,7 @@ export default function ActivityWorkspace() {
                 >
                   {h}
                 </span>
-                <span className="text-[10px] shrink-0 ml-2" style={{ fontFamily: 'var(--font-mono)', color: 'var(--color-text-faint)' }}>
+                <span className="text-xs shrink-0 ml-2" style={{ fontFamily: 'var(--font-mono)', color: 'var(--color-text-faint)' }}>
                   {count}
                 </span>
               </button>
@@ -289,7 +289,7 @@ export default function ActivityWorkspace() {
                           ? 'Show me the text and let me decide each time'
                           : 'Send without asking. Still logged.'
                     }
-                    className="flex-1 rounded text-[9px] py-1 transition-colors disabled:opacity-40"
+                    className="flex-1 rounded text-xs py-1 transition-colors disabled:opacity-40"
                     style={{
                       background: mode === m ? 'rgba(255,255,255,0.10)' : 'transparent',
                       border: `1px solid ${mode === m ? 'var(--color-border)' : 'var(--color-border-subtle)'}`,
@@ -320,7 +320,7 @@ export default function ActivityWorkspace() {
               {policy?.rules[h] && (
                 <div className="flex items-center gap-1 mt-1">
                   <span
-                    className="text-[9px] shrink-0 w-10"
+                    className="text-xs shrink-0 w-10"
                     style={{ color: 'var(--color-text-faint)', fontFamily: 'var(--font-mono)' }}
                   >
                     images
@@ -339,7 +339,7 @@ export default function ActivityWorkspace() {
                               ? 'Show me the picture and let me decide each time'
                               : 'Send pictures without asking. Still logged.'
                         }
-                        className="flex-1 rounded text-[9px] py-0.5 transition-colors disabled:opacity-40"
+                        className="flex-1 rounded text-xs py-0.5 transition-colors disabled:opacity-40"
                         style={{
                           background: imageMode === m ? 'rgba(255,255,255,0.10)' : 'transparent',
                           border: `1px solid ${imageMode === m ? 'var(--color-border)' : 'var(--color-border-subtle)'}`,
@@ -358,7 +358,7 @@ export default function ActivityWorkspace() {
         })}
 
         {hosts.length === 0 && (
-          <p className="px-4 text-[11px] leading-relaxed" style={{ color: 'var(--color-text-faint)' }}>
+          <p className="px-4 text-xs leading-relaxed" style={{ color: 'var(--color-text-faint)' }}>
             Nothing has been contacted yet.
           </p>
         )}
@@ -417,7 +417,7 @@ export default function ActivityWorkspace() {
               color: 'var(--color-text-muted)',
               borderRadius: 8,
               padding: '3px 6px',
-              fontSize: 11,
+              fontSize: 12,
             }}
           >
             <option value="1">in the last 24 hours</option>
@@ -440,7 +440,7 @@ export default function ActivityWorkspace() {
          *  covered it — and it reads better here anyway: how much left, and how
          *  long that record is kept, are the same question asked twice. */}
         <div className="px-8 pb-4 flex items-center gap-2 flex-wrap">
-          <span className="text-[11px] mr-1" style={{ color: 'var(--color-text-muted)' }}>
+          <span className="text-xs mr-1" style={{ color: 'var(--color-text-muted)' }}>
             Keep this record for
           </span>
           {RETENTION_CHOICES.map((c) => (
@@ -448,7 +448,7 @@ export default function ActivityWorkspace() {
               key={c.days}
               disabled={busy}
               onClick={() => void prune(c.days)}
-              className="px-2.5 py-1 rounded text-[10px] transition-colors disabled:opacity-40 hover:bg-white/5"
+              className="px-2.5 py-1 rounded text-xs transition-colors disabled:opacity-40 hover:bg-white/5"
               style={{
                 border: '1px solid var(--color-border-subtle)',
                 color: 'var(--color-text-muted)',
@@ -458,7 +458,7 @@ export default function ActivityWorkspace() {
               {c.label}
             </button>
           ))}
-          <span className="text-[10px] w-full mt-1" style={{ color: 'var(--color-text-faint)' }}>
+          <span className="text-xs w-full mt-1" style={{ color: 'var(--color-text-faint)' }}>
             A permanent record of every question you have asked is its own privacy
             problem. Pruning is itself recorded.
           </span>
@@ -481,7 +481,7 @@ export default function ActivityWorkspace() {
             <div className="min-w-0">
               <p className="text-xs" style={{ color: 'var(--color-text)' }}>{integrity.detail}</p>
               {integrity.caveat && (
-                <p className="text-[11px] mt-1 leading-relaxed" style={{ color: 'var(--color-text-faint)' }}>
+                <p className="text-xs mt-1 leading-relaxed" style={{ color: 'var(--color-text-faint)' }}>
                   {integrity.caveat}
                 </p>
               )}
@@ -504,7 +504,7 @@ export default function ActivityWorkspace() {
                 : 'Nothing has left this device. Inference runs locally and the Spine is a file on this disk.'}
             </p>
           ) : (
-            <table className="w-full" style={{ fontFamily: 'var(--font-mono)', fontSize: '11px' }}>
+            <table className="w-full" style={{ fontFamily: 'var(--font-mono)', fontSize: '12px' }}>
               <thead>
                 <tr style={{ color: 'var(--color-text-faint)' }}>
                   <th className="text-left font-normal pb-2 pr-3">when</th>
@@ -561,11 +561,11 @@ export default function ActivityWorkspace() {
 
           <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
             <div>
-              <p className="text-[10px] uppercase tracking-wider mb-1.5" style={{ color: 'var(--color-text-faint)' }}>
+              <p className="text-xs uppercase tracking-wider mb-1.5" style={{ color: 'var(--color-text-faint)' }}>
                 {selected.decision === 'allowed' ? 'What left this machine' : 'What was going to be sent'}
               </p>
               <pre
-                className="text-[11px] whitespace-pre-wrap break-all rounded-lg p-3"
+                className="text-xs whitespace-pre-wrap break-all rounded-lg p-3"
                 style={{
                   fontFamily: 'var(--font-mono)',
                   color: 'var(--color-text)',
@@ -575,12 +575,12 @@ export default function ActivityWorkspace() {
               >
                 {selected.literalText}
               </pre>
-              <p className="text-[10px] mt-1.5" style={{ color: 'var(--color-text-faint)' }}>
+              <p className="text-xs mt-1.5" style={{ color: 'var(--color-text-faint)' }}>
                 The full request, not a summary of it.
               </p>
             </div>
 
-            <div className="space-y-2 text-[11px]" style={{ fontFamily: 'var(--font-mono)' }}>
+            <div className="space-y-2 text-xs" style={{ fontFamily: 'var(--font-mono)' }}>
               {[
                 ['when', ts(selected.at)],
                 ['destination', selected.host],
@@ -596,7 +596,7 @@ export default function ActivityWorkspace() {
             </div>
 
             <div>
-              <p className="text-[10px] uppercase tracking-wider mb-1.5" style={{ color: 'var(--color-text-faint)' }}>
+              <p className="text-xs uppercase tracking-wider mb-1.5" style={{ color: 'var(--color-text-faint)' }}>
                 Why
               </p>
               <p className="text-xs leading-relaxed" style={{ color: 'var(--color-text-muted)' }}>
@@ -605,7 +605,7 @@ export default function ActivityWorkspace() {
             </div>
 
             <div>
-              <p className="text-[10px] uppercase tracking-wider mb-2" style={{ color: 'var(--color-text-faint)' }}>
+              <p className="text-xs uppercase tracking-wider mb-2" style={{ color: 'var(--color-text-faint)' }}>
                 {selected.host} from now on
               </p>
               <div className="flex gap-1.5">
@@ -618,7 +618,7 @@ export default function ActivityWorkspace() {
                     key={m}
                     disabled={busy}
                     onClick={() => void changePolicy(selected.host, m)}
-                    className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-[11px] transition-colors disabled:opacity-40 hover:bg-white/5"
+                    className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs transition-colors disabled:opacity-40 hover:bg-white/5"
                     style={{
                       border: `1px solid ${policy?.rules[selected.host] === m ? 'var(--color-border)' : 'var(--color-border-subtle)'}`,
                       background: policy?.rules[selected.host] === m ? 'rgba(255,255,255,0.08)' : 'transparent',

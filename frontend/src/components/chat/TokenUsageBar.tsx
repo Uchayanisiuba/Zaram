@@ -61,7 +61,7 @@ export function TokenUsageBar() {
 
   return (
     <div
-      className="mb-2 flex items-center gap-2 px-1 text-[11px] tabular-nums"
+      className="mb-2 flex items-center gap-2 px-1 text-xs tabular-nums"
       title={title}
       aria-live="off"
     >

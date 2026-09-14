@@ -69,14 +69,14 @@ export default function OrbStatusLabel({
           transition={{ duration: 1.4, repeat: Infinity, ease: 'easeInOut' }}
         />
         <span
-          className={`${compact ? 'text-[11px]' : 'text-[13px]'} font-medium tracking-wide`}
+          className={`${compact ? 'text-xs' : 'text-[13px]'} font-medium tracking-wide`}
           style={{ color: accent, fontFamily: 'var(--font-display)' }}
         >
           {label}
         </span>
       </span>
       <span
-        className={`${compact ? 'text-[10px] max-w-[15rem]' : 'text-[11px] max-w-[16rem]'} text-slate-500 text-center leading-snug`}
+        className={`${compact ? 'text-xs max-w-[15rem]' : 'text-xs max-w-[16rem]'} text-slate-500 text-center leading-snug`}
       >
         {detail}
       </span>

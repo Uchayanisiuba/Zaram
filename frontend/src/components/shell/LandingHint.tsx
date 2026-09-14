@@ -1,6 +1,17 @@
 /**
  * The line under the orb — one slot, and whichever instruction is true.
  *
+ * **It is the only line — 14 September 2026.** A second component,
+ * `OrbHint`, rendered "Click the orb to begin" in the same slot, in a
+ * different face, two lines above this one's "Click Orb to Chat"; both
+ * docstrings said there was one instruction and the screen showed two.
+ * That one is gone and its one good idea kept: the way in is said until
+ * the conversation has been opened once, and never again — a permanent
+ * instruction teaches for a second and is noise every session after.
+ * And it is set in the display face, not the mono: `docs/UI-SPEC.md`
+ * gives the mono to values the system reports about itself, and an
+ * instruction to a person is not one.
+ *
  * Closed, it is "Click Orb to Chat" (or "Click Avatar", following the
  * renderer). Open, that instruction has been taken and would be noise, so the
  * same place carries the one that is true now: `VoiceHint`, "Press Shift Space
@@ -52,6 +63,7 @@ interface LandingHintProps {
 export default function LandingHint({ isLanding }: LandingHintProps) {
   const reduced = useIsReducedMotion();
   const chatOpen = useChatModeStore((s) => s.chatView === 'chat');
+  const hasOpenedChat = useChatModeStore((s) => s.hasOpenedChat);
 
   // Kept above the early return: this is the only component mounted on every
   // surface, so it owns the poll, and an effect placed after a conditional
@@ -97,8 +109,11 @@ export default function LandingHint({ isLanding }: LandingHintProps) {
    * Vertical position is untouched: it comes from sitting last in the column,
    * which already puts it under the orb.
    */
-  const { width: viewportWidth } = useViewport();
+  const { width: viewportWidth, height: viewportHeight } = useViewport();
   const chatFraction = useLayoutStore((s) => s.chatFraction);
+  // The slot under the orb, from the landing's own arithmetic: the line goes
+  // beneath the status label when that is showing, and in its place when not.
+  const captionSlot = useLayoutStore((s) => s.captionSlot);
   const { shiftX } = orbGeometry({
     viewportWidth,
     chatFraction,
@@ -109,6 +124,10 @@ export default function LandingHint({ isLanding }: LandingHintProps) {
 
   // Never on Work, Memory, Knowledge, Activity or Settings.
   if (!isLanding) return null;
+  // A hint that would land below the window is not shown, rather than
+  // shown on top of something else. On a short window the ring alone
+  // fills the height and there is genuinely no room for a second row.
+  if (captionSlot && captionSlot.bottom + 34 > viewportHeight) return null;
 
   return (
     <footer
@@ -118,9 +137,13 @@ export default function LandingHint({ isLanding }: LandingHintProps) {
         flexShrink: 0,
         display: 'flex',
         alignItems: 'center',
-        // Centred on X. Vertical position comes from sitting last in the
-        // column, so the line lands in the lower portion of the screen without
-        // being absolutely positioned against it.
+        // Placed under the caption slot the landing publishes, so this line
+        // and the status label are two rows of one formula and cannot cross.
+        // Without a slot (the landing not yet measured) it sits last in the
+        // column as before.
+        ...(captionSlot
+          ? { position: 'absolute', left: 0, right: 0, top: captionSlot.bottom + 6 }
+          : {}),
         justifyContent: 'center',
         padding: '8px 16px',
         minHeight: 52,
@@ -144,13 +167,14 @@ export default function LandingHint({ isLanding }: LandingHintProps) {
           renders nothing when Zaram cannot listen. */}
       {chatOpen ? (
         <VoiceHint />
-      ) : (
+      ) : hasOpenedChat ? null : (
         <span
           style={{
-            // Same face and colour the status line used for "engine not running".
-            font: '400 18px/1.3 var(--font-mono, ui-monospace, "JetBrains Mono", monospace)',
-            color: '#6B7280',
-            letterSpacing: '0.01em',
+            // An instruction to a person: the display face, readable at a
+            // glance, in the muted text tone rather than a hard-coded grey.
+            font: '400 15px/1.3 var(--font-display, var(--font-sans, system-ui, sans-serif))',
+            color: 'var(--color-text-muted)',
+            letterSpacing: '0.02em',
             userSelect: 'none',
             // Arcade attract loop, slowed to a breath. Suppressed under reduced
             // motion, where the line sits at its bright end — the instruction

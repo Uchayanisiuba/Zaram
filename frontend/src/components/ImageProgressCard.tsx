@@ -60,7 +60,7 @@ export default function ImageProgressCard({
         </span>
         <div className="flex-1" />
         <span
-          className="text-[11px] tabular-nums"
+          className="text-xs tabular-nums"
           style={{ fontFamily: 'var(--font-mono)', color: 'var(--color-text-muted)' }}
         >
           {progress.percent}%
@@ -88,7 +88,7 @@ export default function ImageProgressCard({
           percentage is a rendering of it, and when the two are shown together
           a reader can see that the number is counting something real. */}
       <div
-        className="mt-1.5 text-[11px]"
+        className="mt-1.5 text-xs"
         style={{ fontFamily: 'var(--font-mono)', color: 'var(--color-text-faint)' }}
       >
         step {progress.step} of {progress.total_steps}

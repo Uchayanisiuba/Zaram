@@ -79,8 +79,17 @@ interface LayoutState {
   /** True while a divider is being dragged. Used to suppress transitions that
    *  would otherwise make a panel lag behind the cursor. */
   isResizing: boolean;
+  /**
+   * The low caption slot under the orb, in viewport pixels: where its top is
+   * and where its bottom is. Published by the landing, which computes it
+   * from the ring, and read by the one line that sits beneath it — so the
+   * status label and the hint share one formula rather than two, which is
+   * how they came to overlap on 14 September 2026. Not persisted.
+   */
+  captionSlot: { top: number; bottom: number } | null;
 
   setChatFraction: (f: number, context?: 'landing' | 'workspace') => void;
+  setCaptionSlot: (slot: { top: number; bottom: number } | null) => void;
   setRailWidth: (px: number) => void;
   setResizing: (v: boolean) => void;
   resetChat: (context?: 'landing' | 'workspace') => void;
@@ -94,6 +103,7 @@ export const useLayoutStore = create<LayoutState>()(
       chatFractionWorkspace: CHAT_DEFAULT_WORKSPACE,
       railWidth: RAIL_DEFAULT,
       isResizing: false,
+      captionSlot: null,
 
       setChatFraction: (f, context = 'landing') =>
         set(
@@ -102,6 +112,7 @@ export const useLayoutStore = create<LayoutState>()(
             : { chatFraction: clamp(f, CHAT_MIN, CHAT_MAX) },
         ),
       setRailWidth: (px) => set({ railWidth: clamp(px, RAIL_MIN, RAIL_MAX) }),
+      setCaptionSlot: (slot) => set({ captionSlot: slot }),
       setResizing: (v) => set({ isResizing: v }),
       resetChat: (context = 'landing') =>
         set(

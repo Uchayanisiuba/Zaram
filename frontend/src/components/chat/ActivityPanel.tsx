@@ -117,7 +117,7 @@ export default function ActivityPanel({
           <span className="text-sm" style={{ color: 'var(--color-text)' }}>
             What this reply did
           </span>
-          <span className="text-[11px]" style={{ color: 'var(--color-text-faint)' }}>
+          <span className="text-xs" style={{ color: 'var(--color-text-faint)' }}>
             {calls.length === 1 ? '1 tool call' : `${calls.length} tool calls`}
           </span>
           <div className="flex-1" />
@@ -141,14 +141,14 @@ export default function ActivityPanel({
                 style={{ borderBottom: '1px solid var(--color-border-subtle)' }}
               >
                 <span
-                  className="w-5 shrink-0 pt-px text-right text-[10px] tabular-nums"
+                  className="w-5 shrink-0 pt-px text-right text-xs tabular-nums"
                   style={{ color: 'var(--color-text-faint)' }}
                 >
                   {i + 1}
                 </span>
                 <Icon size={12} className="mt-0.5 shrink-0" style={{ color }} aria-hidden />
                 <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-baseline gap-x-2 text-[11px]">
+                  <div className="flex flex-wrap items-baseline gap-x-2 text-xs">
                     <span
                       style={{ fontFamily: 'var(--font-mono)', color: 'var(--color-text)' }}
                     >
@@ -162,7 +162,7 @@ export default function ActivityPanel({
                       the model, and `call_target` has already bounded it. */}
                   {call.target && (
                     <div
-                      className="mt-0.5 break-all text-[11px]"
+                      className="mt-0.5 break-all text-xs"
                       style={{ fontFamily: 'var(--font-mono)', color: 'var(--color-text-muted)' }}
                       data-testid="call-target"
                     >
@@ -170,7 +170,7 @@ export default function ActivityPanel({
                     </div>
                   )}
                   {call.reason && call.verdict !== 'allow' && (
-                    <div className="mt-0.5 text-[11px]" style={{ color: 'var(--color-text-faint)' }}>
+                    <div className="mt-0.5 text-xs" style={{ color: 'var(--color-text-faint)' }}>
                       {call.reason}
                     </div>
                   )}
@@ -187,7 +187,7 @@ export default function ActivityPanel({
         {/* Said once, at the bottom, rather than as a column that would have to
             be empty. Reading is the whole capability today. */}
         <div
-          className="px-4 py-2 text-[11px]"
+          className="px-4 py-2 text-xs"
           style={{
             borderTop: '1px solid var(--color-border-subtle)',
             color: 'var(--color-text-faint)',

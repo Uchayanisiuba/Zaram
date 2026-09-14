@@ -99,7 +99,7 @@ export default function BuildWorkspace() {
       }}>
         <div style={{
           padding: '12px 12px 8px',
-          fontSize: 10,
+          fontSize: 12,
           fontWeight: 700,
           letterSpacing: '0.08em',
           color: 'var(--color-text-faint)',
@@ -195,7 +195,7 @@ export default function BuildWorkspace() {
                     : '2px solid transparent',
                 }}
               >
-                <span style={{ color: 'var(--color-text-faint)', minWidth: 36, userSelect: 'none', fontSize: 11 }}>
+                <span style={{ color: 'var(--color-text-faint)', minWidth: 36, userSelect: 'none', fontSize: 12 }}>
                   {i + 1}
                 </span>
                 <CodeLine line={line} />
@@ -220,7 +220,7 @@ export default function BuildWorkspace() {
               gap: 6,
             }}>
               <Sparkles size={12} style={{ color: 'var(--color-indigo-light)' }} />
-              <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-indigo-light)', fontFamily: "var(--font-display)" }}>
+              <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-indigo-light)', fontFamily: "var(--font-display)" }}>
                 AI Suggestions
               </span>
             </div>
@@ -239,11 +239,11 @@ export default function BuildWorkspace() {
                 >
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
                     <SuggestionBadge type={s.type} />
-                    <span style={{ fontSize: 9, color: 'var(--color-text-faint)', fontFamily: "var(--font-mono)" }}>
+                    <span style={{ fontSize: 12, color: 'var(--color-text-faint)', fontFamily: "var(--font-mono)" }}>
                       L{s.line}
                     </span>
                   </div>
-                  <p style={{ fontSize: 11, color: '#b0b4cc', margin: 0, lineHeight: 1.5 }}>{s.text}</p>
+                  <p style={{ fontSize: 12, color: '#b0b4cc', margin: 0, lineHeight: 1.5 }}>{s.text}</p>
                 </div>
               ))}
             </div>
@@ -274,7 +274,7 @@ export default function BuildWorkspace() {
             onClick={() => setTerminalOpen(o => !o)}
           >
             <TerminalIcon size={12} style={{ color: 'var(--color-emerald)' }} />
-            <span style={{ fontSize: 11, color: 'var(--color-text-muted)', fontWeight: 500, fontFamily: "var(--font-mono)" }}>
+            <span style={{ fontSize: 12, color: 'var(--color-text-muted)', fontWeight: 500, fontFamily: "var(--font-mono)" }}>
               Terminal
             </span>
             <div style={{ marginLeft: 'auto', display: 'flex', gap: 4 }}>
@@ -387,7 +387,7 @@ function SuggestionBadge({ type }: { type: string }) {
   const [color, bg] = colors[type] ?? ['var(--color-text-muted)', 'rgba(107,112,153,0.1)']
   return (
     <span style={{
-      fontSize: 9,
+      fontSize: 12,
       fontWeight: 700,
       padding: '1px 6px',
       borderRadius: 3,

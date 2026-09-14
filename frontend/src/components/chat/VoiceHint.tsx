@@ -71,7 +71,7 @@ export default function VoiceHint() {
         // instruction for the surface you are now on. Slightly smaller: the
         // landing's is the only thing on screen, and this one shares the
         // surface with a conversation.
-        font: '400 15px/1.3 var(--font-mono, ui-monospace, "JetBrains Mono", monospace)',
+        font: '400 15px/1.3 var(--font-display, var(--font-sans, system-ui, sans-serif))',
         color: '#6B7280',
         letterSpacing: '0.01em',
         userSelect: 'none',

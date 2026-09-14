@@ -742,7 +742,7 @@ export default function ChatSurface({ navigate }: Props) {
             {/* Said at the moment of the drop, because this is the moment the
                 user would otherwise assume the opposite. Rule 7d is invisible
                 unless it is stated where the decision looks like it is made. */}
-            <p className="text-[11px]" style={{ color: 'var(--color-text-muted)' }}>
+            <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
               It is not added to Knowledge unless you keep it
             </p>
           </div>
@@ -863,7 +863,7 @@ export default function ChatSurface({ navigate }: Props) {
                       Side is a third cue and, like colour, it is the one a
                       screen reader cannot use — so the label stays. */}
                   <p
-                    className="text-[10px] uppercase tracking-wider mb-1"
+                    className="text-xs uppercase tracking-wider mb-1"
                     style={{
                       color:
                         msg.role === 'user'
@@ -883,7 +883,7 @@ export default function ChatSurface({ navigate }: Props) {
                   )}
                   {msg.role === 'user' && msg.revises && (
                     <p
-                      className="text-[10px] mb-1"
+                      className="text-xs mb-1"
                       style={{ color: 'var(--color-text-muted)', textAlign: 'right' }}
                       data-testid="revises-label"
                       title={msg.revises.question}
@@ -900,7 +900,7 @@ export default function ChatSurface({ navigate }: Props) {
                       {msg.attachments.map((file) => (
                         <span
                           key={file.id}
-                          className="inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px]"
+                          className="inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-xs"
                           style={{
                             background: 'var(--color-glass)',
                             border: '1px solid var(--color-border-subtle)',
@@ -921,7 +921,7 @@ export default function ChatSurface({ navigate }: Props) {
                   <div
                     className={
                       msg.role === 'user'
-                        ? 'text-sm leading-relaxed whitespace-pre-wrap'
+                        ? 'text-sm leading-relaxed whitespace-pre-wrap surface'
                         : 'text-sm leading-relaxed'
                     }
                     style={{
@@ -939,12 +939,6 @@ export default function ChatSurface({ navigate }: Props) {
                           ? '2px solid var(--color-cyan-light)'
                           : undefined,
                       paddingLeft: msg.role === 'assistant' ? 10 : undefined,
-                      background:
-                        msg.role === 'user' ? 'var(--color-glass)' : undefined,
-                      border:
-                        msg.role === 'user'
-                          ? '1px solid rgba(255,255,255,0.06)'
-                          : undefined,
                       borderRadius: msg.role === 'user' ? 12 : undefined,
                       padding: msg.role === 'user' ? '8px 12px' : undefined,
                     }}
@@ -1062,7 +1056,7 @@ export default function ChatSurface({ navigate }: Props) {
                       const block = extractPreviewable(msg.text);
                       if (!block) return null;
                       const control =
-                        'flex items-center gap-1.5 rounded-lg px-2 py-1 text-[11px] hover:bg-white/5';
+                        'flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs hover:bg-white/5';
                       const controlStyle = {
                         border: '1px solid var(--color-border)',
                         color: 'var(--color-text-muted)',
@@ -1130,7 +1124,7 @@ export default function ChatSurface({ navigate }: Props) {
                     />
                   ))}
                   {msg.error && (
-                    <p className="mt-1 text-[11px]" style={{ color: '#fca5a5' }}>
+                    <p className="mt-1 text-xs" style={{ color: '#fca5a5' }}>
                       {msg.text ? `Interrupted: ${msg.error}` : msg.error}
                     </p>
                   )}
@@ -1150,7 +1144,7 @@ export default function ChatSurface({ navigate }: Props) {
                   {streamingText && (
                     <>
                       <p
-                        className="text-[10px] uppercase tracking-wider mb-1"
+                        className="text-xs uppercase tracking-wider mb-1"
                         style={{
                           color: 'var(--color-cyan)',
                           fontFamily: 'var(--font-display)',
@@ -1283,7 +1277,7 @@ export default function ChatSurface({ navigate }: Props) {
             in. Below the composer would put the evidence after the question. */}
         {revising && (
           <div
-            className="flex items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 mb-2 text-[11px]"
+            className="flex items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 mb-2 text-xs"
             style={{ background: 'var(--color-glass)', border: '1px solid var(--color-border-subtle)' }}
             data-testid="revising-chip"
           >
@@ -1294,7 +1288,7 @@ export default function ChatSurface({ navigate }: Props) {
             </span>
             <button
               type="button"
-              className="text-[11px] px-1.5 py-0.5 rounded shrink-0"
+              className="text-xs px-1.5 py-0.5 rounded shrink-0"
               style={{ color: 'var(--color-text-muted)' }}
               onClick={() => setRevising(null)}
               aria-label="Stop revising"
@@ -1317,7 +1311,7 @@ export default function ChatSurface({ navigate }: Props) {
             read, and red would train them to dread the whole row. */}
         {attachError && (
           <p
-            className="mb-2 px-1 text-[11px] leading-relaxed"
+            className="mb-2 px-1 text-xs leading-relaxed"
             style={{ color: 'var(--color-text-muted)' }}
           >
             {attachError}
@@ -1371,7 +1365,7 @@ export default function ChatSurface({ navigate }: Props) {
             // The original note is worth keeping — the two controls plus their
             // gap occupied 68px, and 64px of padding put the caret under the
             // mic. One more button is 26px more.
-            className="w-full pl-4 pr-28 py-3 text-sm bg-[var(--color-glass)] border border-white/5 rounded-xl text-slate-200 placeholder-slate-500 transition-colors"
+            className="w-full pl-4 pr-28 py-3 text-sm rounded-xl text-slate-200 placeholder-slate-500 transition-colors surface surface-raised"
           />
           {/* One positioned container, three ordinary buttons inside it.
               Each control used to place itself with its own `right-*` offset,
@@ -1448,7 +1442,7 @@ export default function ChatSurface({ navigate }: Props) {
             is exactly the question a silent control leaves unanswered. */}
         {(micError || micUnavailable || speechError) && (
           <p
-            className="mt-2 px-1 text-[11px] leading-relaxed"
+            className="mt-2 px-1 text-xs leading-relaxed"
             style={{
               color: micError || speechError ? '#fca5a5' : 'var(--color-text-muted)',
             }}
@@ -1461,7 +1455,7 @@ export default function ChatSurface({ navigate }: Props) {
             the errors above so a caution never hides a failure or vice versa. */}
         {figureNotice && (
           <p
-            className="mt-2 px-1 text-[11px] leading-relaxed"
+            className="mt-2 px-1 text-xs leading-relaxed"
             style={{ color: '#fcd34d' }}
           >
             {figureNotice}

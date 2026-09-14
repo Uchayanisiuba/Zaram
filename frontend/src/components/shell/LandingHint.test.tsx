@@ -21,7 +21,7 @@ import { useSystemStore } from '@/stores/systemStore';
 beforeEach(() => {
   // The component owns the /health poll, which is not what is under test here.
   useSystemStore.setState({ startPolling: () => () => undefined } as never);
-  useChatModeStore.setState({ chatView: 'landing' } as never);
+  useChatModeStore.setState({ chatView: 'landing', hasOpenedChat: false } as never);
   useEmbodimentStore.setState({ renderer: 'orb' } as never);
 });
 
@@ -47,6 +47,22 @@ describe('the way in', () => {
 
     expect(screen.getByText(/click avatar to chat/i)).toBeInTheDocument();
     expect(screen.queryByText(/click orb/i)).not.toBeInTheDocument();
+  });
+
+  it('is never said again once the conversation has been opened', () => {
+    // The way in is taught once. A permanent instruction is noise every
+    // session after, and the orb's own affordance carries it from then on.
+    useChatModeStore.setState({ chatView: 'landing', hasOpenedChat: true } as never);
+    render(<LandingHint isLanding />);
+    expect(screen.queryByText(/click orb to chat/i)).not.toBeInTheDocument();
+  });
+
+  it('is set in the display face, not the mono', () => {
+    // UI-SPEC: the mono is for values the system reports about itself.
+    render(<LandingHint isLanding />);
+    const line = screen.getByText(/click orb to chat/i);
+    expect(line.style.font).not.toMatch(/mono/i);
+    expect(parseFloat(line.style.font)).toBeGreaterThanOrEqual(12);
   });
 
   it('goes once the conversation is open', () => {

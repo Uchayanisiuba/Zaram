@@ -80,7 +80,7 @@ function SourceCard({
         {/* The number matches the inline chip exactly, so a chip maps to its
             card instantly. Assigned server-side for that reason. */}
         <span
-          className="shrink-0 mt-0.5 inline-flex items-center gap-1 text-[10px]"
+          className="shrink-0 mt-0.5 inline-flex items-center gap-1 text-xs"
           style={{ color: left ? 'rgb(196,152,252)' : 'rgb(120,220,240)' }}
         >
           <Icon size={10} aria-hidden />
@@ -88,7 +88,7 @@ function SourceCard({
         </span>
         <div className="min-w-0 flex-1">
           <p
-            className="text-[11px] text-slate-300 break-words"
+            className="text-xs text-slate-300 break-words"
             style={{ textDecoration: forgotten ? 'line-through' : 'none' }}
           >
             {source.title ?? source.url}
@@ -104,12 +104,12 @@ function SourceCard({
               prefix instead. Found by driving it: the panel showed one fact
               twice, which reads as a bug in recall rather than in layout. */}
           {source.excerpt && !addsNothing(source) && (
-            <p className="mt-1.5 pl-2 border-l border-white/10 text-[10px] leading-relaxed text-slate-500 break-words">
+            <p className="mt-1.5 pl-2 border-l border-white/10 text-xs leading-relaxed text-slate-500 break-words">
               {source.excerpt}
             </p>
           )}
 
-          <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[10px] text-slate-500">
+          <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-slate-500">
             {source.relevance != null && (
               <span title="Similarity to your question, not a ranking blend">
                 relevance {source.relevance.toFixed(2)}
@@ -130,7 +130,7 @@ function SourceCard({
               <button
                 type="button"
                 onClick={() => onCorrect(source)}
-                className="text-[10px] text-slate-500 hover:text-slate-300 transition-colors"
+                className="text-xs text-slate-500 hover:text-slate-300 transition-colors"
               >
                 Correct or forget
               </button>
@@ -139,7 +139,7 @@ function SourceCard({
               <button
                 type="button"
                 onClick={onOpenActivity}
-                className="inline-flex items-center gap-1 text-[10px] transition-colors hover:opacity-80"
+                className="inline-flex items-center gap-1 text-xs transition-colors hover:opacity-80"
                 style={{ color: 'rgb(196,152,252)' }}
               >
                 <ExternalLink size={9} aria-hidden />
@@ -212,7 +212,7 @@ export default function CitationPanel({
     >
       <div className="flex items-center justify-between mb-2">
         <h2
-          className="text-[11px] uppercase text-slate-400"
+          className="text-xs uppercase text-slate-400"
           style={{ letterSpacing: '0.08em', fontFamily: 'var(--font-display)' }}
         >
           Sources
@@ -230,7 +230,7 @@ export default function CitationPanel({
       {stayed.length > 0 && (
         <section className="mb-3">
           <p
-            className="text-[10px] mb-1.5 text-slate-500"
+            className="text-xs mb-1.5 text-slate-500"
             style={{ fontFamily: 'var(--font-mono, monospace)' }}
           >
             nothing left this device
@@ -252,7 +252,7 @@ export default function CitationPanel({
       {left.length > 0 && (
         <section className="mb-3">
           <p
-            className="text-[10px] mb-1.5"
+            className="text-xs mb-1.5"
             style={{
               fontFamily: 'var(--font-mono, monospace)',
               color: 'rgb(196,152,252)',
@@ -285,14 +285,14 @@ export default function CitationPanel({
           arguable. */}
       {uncited.length > 0 && (
         <section className="pt-2 border-t border-white/5">
-          <p className="text-[10px] text-slate-500 mb-1.5">
+          <p className="text-xs text-slate-500 mb-1.5">
             Recalled but not cited — read, and not what carried the answer
           </p>
           <ul className="flex flex-col gap-1">
             {uncited.map((s, i) => (
               <li
                 key={s.url ?? `uncited-${i}`}
-                className="text-[10px] text-slate-500 truncate"
+                className="text-xs text-slate-500 truncate"
                 title={s.excerpt ?? s.title ?? ''}
               >
                 {s.title ?? s.url}

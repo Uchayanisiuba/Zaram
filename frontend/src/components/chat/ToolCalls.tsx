@@ -114,7 +114,7 @@ function CallLine({ call }: { call: ChatToolCall }) {
   const openable = Boolean(call.output);
   return (
     <li
-      className="flex flex-col text-[10px] leading-snug"
+      className="flex flex-col text-xs leading-snug"
       style={{ color: 'var(--color-text-muted)' }}
       data-verdict={call.verdict}
     >
@@ -199,12 +199,8 @@ export default function ToolCalls({
           type="button"
           onClick={() => (active ? setOpen((v) => !v) : setOpen(true))}
           aria-expanded={expanded}
-          className="w-full rounded-lg px-3 py-2 flex items-center gap-2.5 text-left text-[11px] leading-snug"
-          style={{
-            border: '1px solid var(--color-border-subtle)',
-            background: 'var(--color-glass)',
-            color: 'var(--color-text-muted)',
-          }}
+          className="w-full rounded-lg px-3 py-2 flex items-center gap-2.5 text-left text-xs leading-snug surface"
+          style={{ color: 'var(--color-text-muted)' }}
           data-testid="tool-summary"
         >
           <Wrench size={12} className="shrink-0" style={{ color: 'var(--color-text-muted)' }} aria-hidden />

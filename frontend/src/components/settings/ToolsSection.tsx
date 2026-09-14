@@ -83,7 +83,7 @@ function ServerRow({ server, onDetach }: { server: ToolServer; onDetach: () => v
             {server.id}
           </span>
           <span
-            className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded"
+            className="text-xs uppercase tracking-wider px-1.5 py-0.5 rounded"
             style={{
               color:
                 server.writes === 'host_undo' ? 'var(--color-amber)' : 'var(--color-text-muted)',
@@ -98,7 +98,7 @@ function ServerRow({ server, onDetach }: { server: ToolServer; onDetach: () => v
           <div className="flex items-center gap-2 shrink-0">
             <button
               type="button"
-              className="text-[11px] px-2 py-1 rounded"
+              className="text-xs px-2 py-1 rounded"
               style={{ color: 'var(--color-red)', border: '1px solid var(--color-border-subtle)' }}
               onClick={onDetach}
             >
@@ -106,7 +106,7 @@ function ServerRow({ server, onDetach }: { server: ToolServer; onDetach: () => v
             </button>
             <button
               type="button"
-              className="text-[11px] px-2 py-1 rounded"
+              className="text-xs px-2 py-1 rounded"
               style={{ color: 'var(--color-text-muted)' }}
               onClick={() => setConfirming(false)}
             >
@@ -116,7 +116,7 @@ function ServerRow({ server, onDetach }: { server: ToolServer; onDetach: () => v
         ) : (
           <button
             type="button"
-            className="text-[11px] px-2 py-1 rounded shrink-0"
+            className="text-xs px-2 py-1 rounded shrink-0"
             style={{ color: 'var(--color-text-muted)' }}
             onClick={() => setConfirming(true)}
           >
@@ -125,7 +125,7 @@ function ServerRow({ server, onDetach }: { server: ToolServer; onDetach: () => v
         )}
       </div>
 
-      <div className="text-[11px] font-mono truncate" style={{ color: 'var(--color-text-muted)' }}>
+      <div className="text-xs font-mono truncate" style={{ color: 'var(--color-text-muted)' }}>
         {server.transport === 'http' ? server.url : server.command.join(' ')}
       </div>
 
@@ -133,7 +133,7 @@ function ServerRow({ server, onDetach }: { server: ToolServer; onDetach: () => v
           "why is this one allowed to change things" is the question a person
           has when they see the badge above. */}
       {server.knownHost && (
-        <div className="text-[11px]" style={{ color: 'var(--color-text-muted)' }}>
+        <div className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
           {server.knownHost}
         </div>
       )}
@@ -142,14 +142,14 @@ function ServerRow({ server, onDetach }: { server: ToolServer; onDetach: () => v
           server that is broken rather than one this client cannot yet attach
           to. `ServerConfig.reachable` exists for exactly this. */}
       {!server.reachable && (
-        <div className="text-[11px]" style={{ color: 'var(--color-amber)' }}>
+        <div className="text-xs" style={{ color: 'var(--color-amber)' }}>
           Zaram cannot attach to this one yet — it is an HTTP server, and only
           stdio is supported so far. It is kept so the configuration is not lost.
         </div>
       )}
 
       {server.grantedTools.length > 0 && (
-        <div className="text-[11px]" style={{ color: 'var(--color-text-muted)' }}>
+        <div className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
           Allowed: {server.grantedTools.join(', ')}
         </div>
       )}
@@ -242,7 +242,7 @@ export default function ToolsSection({ Row }: ToolsSectionProps) {
       />
 
       {loadError && (
-        <div className="px-5 pb-2 text-[11px]" style={{ color: 'var(--color-red)' }}>
+        <div className="px-5 pb-2 text-xs" style={{ color: 'var(--color-red)' }}>
           {loadError}
         </div>
       )}
@@ -252,7 +252,7 @@ export default function ToolsSection({ Row }: ToolsSectionProps) {
       ))}
 
       {servers !== null && servers.length === 0 && !adding && (
-        <div className="px-5 py-3 text-[11px]" style={{ color: 'var(--color-text-muted)' }}>
+        <div className="px-5 py-3 text-xs" style={{ color: 'var(--color-text-muted)' }}>
           Nothing attached. A server you already use elsewhere can be pasted in
           as-is — the format is the same one every other client reads.
         </div>
@@ -268,7 +268,7 @@ export default function ToolsSection({ Row }: ToolsSectionProps) {
               spellCheck={false}
               rows={8}
               aria-label="Server configuration to paste"
-              className="w-full rounded-lg px-3 py-2 text-[11px] font-mono resize-y"
+              className="w-full rounded-lg px-3 py-2 text-xs font-mono resize-y"
               style={{
                 background: 'var(--color-glass)',
                 border: '1px solid var(--color-border-subtle)',
@@ -279,11 +279,11 @@ export default function ToolsSection({ Row }: ToolsSectionProps) {
                 here rather than on the server: someone mid-paste needs to know
                 which bracket, and needs to read it without scrolling. */}
             {formError && (
-              <div role="alert" className="text-[11px]" style={{ color: 'var(--color-red)' }}>
+              <div role="alert" className="text-xs" style={{ color: 'var(--color-red)' }}>
                 {formError}
               </div>
             )}
-            <div className="text-[11px]" style={{ color: 'var(--color-text-muted)' }}>
+            <div className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
               A pasted block cannot grant itself permission to change things.
               Whether a server may write is decided here, from a checked list of
               applications whose own undo covers what their server does.
@@ -293,7 +293,7 @@ export default function ToolsSection({ Row }: ToolsSectionProps) {
                 type="button"
                 disabled={busy || !block.trim()}
                 onClick={() => void submit()}
-                className="text-[11px] px-2.5 py-1.5 rounded"
+                className="text-xs px-2.5 py-1.5 rounded"
                 style={{
                   color: 'var(--color-text)',
                   border: '1px solid var(--color-border-subtle)',
@@ -309,7 +309,7 @@ export default function ToolsSection({ Row }: ToolsSectionProps) {
                   setBlock('');
                   setFormError(null);
                 }}
-                className="text-[11px] px-2.5 py-1.5 rounded"
+                className="text-xs px-2.5 py-1.5 rounded"
                 style={{ color: 'var(--color-text-muted)' }}
               >
                 Cancel
@@ -320,7 +320,7 @@ export default function ToolsSection({ Row }: ToolsSectionProps) {
           <button
             type="button"
             onClick={() => setAdding(true)}
-            className="text-[11px] px-2.5 py-1.5 rounded"
+            className="text-xs px-2.5 py-1.5 rounded"
             style={{ color: 'var(--color-text)', border: '1px solid var(--color-border-subtle)' }}
           >
             Attach a server

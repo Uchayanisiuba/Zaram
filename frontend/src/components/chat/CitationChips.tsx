@@ -69,7 +69,7 @@ export function CitationChip({
       onClick={(e) => onOpen(source, e.currentTarget)}
       title={`${label}${forgotten ? ' — forgotten' : ''}`}
       aria-label={`Source ${source.number ?? ''}: ${label}`}
-      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full border text-[10px] leading-none align-baseline transition-colors hover:bg-white/5"
+      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full border text-xs leading-none align-baseline transition-colors hover:bg-white/5"
       style={{
         borderColor: left ? 'rgba(168,85,247,0.45)' : 'rgba(34,211,238,0.40)',
         color: left ? 'rgb(196,152,252)' : 'rgb(120,220,240)',
@@ -152,7 +152,7 @@ export default function CitationSummary({
       <button
         type="button"
         onClick={(e) => onOpenPanel(e.currentTarget)}
-        className="text-[10px] text-slate-500 hover:text-slate-300 transition-colors rounded px-1 -mx-1"
+        className="text-xs text-slate-500 hover:text-slate-300 transition-colors rounded px-1 -mx-1"
       >
         {/* Leads with the split, deliberately. The egress count is what someone
             wants at a glance, and burying it after a total makes it look like

@@ -80,7 +80,7 @@ function OrbitalNodeItem({ node, radius, onClick }: OrbitalNodeProps) {
           </motion.div>
           <span
             className="text-slate-400 whitespace-nowrap select-none"
-            style={{ fontSize: '11px', letterSpacing: '0.03em' }}
+            style={{ fontSize: '12px', letterSpacing: '0.03em' }}
           >
             {node.label}
           </span>

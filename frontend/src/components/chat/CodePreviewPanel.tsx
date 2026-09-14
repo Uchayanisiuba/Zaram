@@ -210,7 +210,7 @@ export default function CodePreviewPanel({
           <span className="text-sm truncate" style={{ color: 'var(--color-text)' }}>
             {block.label} from this reply
           </span>
-          <span className="text-[11px]" style={{ color: 'var(--color-text-faint)' }}>
+          <span className="text-xs" style={{ color: 'var(--color-text-faint)' }}>
             preview
           </span>
           <div className="flex-1" />
@@ -224,7 +224,7 @@ export default function CodePreviewPanel({
             onClick={() => savePreviewable(block)}
             aria-label={`Save as ${filenameFor(block)}`}
             title={`Save as ${filenameFor(block)}`}
-            className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-[11px] text-slate-400 hover:bg-white/5 hover:text-slate-200"
+            className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs text-slate-400 hover:bg-white/5 hover:text-slate-200"
             style={{ border: '1px solid var(--color-border)' }}
           >
             <Download size={12} />
@@ -266,7 +266,7 @@ export default function CodePreviewPanel({
           }}
         >
           <Info size={12} className="mt-[3px] shrink-0" />
-          <span className="text-[11px] leading-snug">
+          <span className="text-xs leading-snug">
             {status || "Runs here only — no network, and no access to your files or Zaram's data."}
           </span>
         </div>

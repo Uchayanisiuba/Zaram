@@ -97,7 +97,7 @@ export default function FirstRunPanel({ report, onExplore, onConnected }: FirstR
       <div className="flex flex-col gap-6 p-6">
         <div>
           <p
-            className="text-[10px] uppercase tracking-wider mb-2"
+            className="text-xs uppercase tracking-wider mb-2"
             style={{ color: 'var(--color-text-muted)', fontFamily: 'var(--font-display)' }}
           >
             Before you start
@@ -153,7 +153,7 @@ export default function FirstRunPanel({ report, onExplore, onConnected }: FirstR
                 reads as unconfigured, and that is the difference between
                 someone exploring and someone uninstalling. */}
             <p
-              className="text-[10px] uppercase tracking-wider mb-2"
+              className="text-xs uppercase tracking-wider mb-2"
               style={{ color: 'var(--color-text-muted)', fontFamily: 'var(--font-display)' }}
             >
               Works right now
@@ -208,7 +208,7 @@ function OfferRow({ offer, onChoose }: { offer: ReadinessOffer; onChoose: () => 
             figure — an absent download shows nothing at all. */}
         {offer.downloadLabel && (
           <span
-            className="text-[11px]"
+            className="text-xs"
             style={{
               color: 'var(--color-text-muted)',
               fontFamily: 'var(--font-mono, ui-monospace, monospace)',
@@ -231,7 +231,7 @@ function OfferRow({ offer, onChoose }: { offer: ReadinessOffer; onChoose: () => 
           came from the fallback — nothing dates a fallback. */}
       {offer.recommendedOn && (
         <span
-          className="block mt-1 text-[11px] leading-relaxed"
+          className="block mt-1 text-xs leading-relaxed"
           style={{ color: 'var(--color-text-muted)', opacity: 0.75 }}
         >
           From Zaram’s model list, dated {offer.recommendedOn}.

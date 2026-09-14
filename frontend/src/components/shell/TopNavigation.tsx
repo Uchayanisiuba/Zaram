@@ -30,7 +30,7 @@ const TopNavigation = () => {
           />
           <span
             className="text-xs text-slate-400 uppercase"
-            style={{ fontSize: '10px', letterSpacing: '0.06em' }}
+            style={{ fontSize: '12px', letterSpacing: '0.06em' }}
           >
             Local Active
           </span>
@@ -42,14 +42,14 @@ const TopNavigation = () => {
         {/* Neural Engine indicator (hidden on small screens) */}
         <div
           className="hidden md:flex items-center gap-1 text-xs"
-          style={{ color: '#475569', fontVariantNumeric: 'tabular-nums', fontSize: '11px' }}
+          style={{ color: '#475569', fontVariantNumeric: 'tabular-nums', fontSize: '12px' }}
         >
           <Cpu className="w-3 h-3" />
           <span>Neural Engine</span>
         </div>
 
         {/* Network status */}
-        <div className="hidden sm:flex items-center gap-1 text-xs" style={{ color: '#475569', fontSize: '11px' }}>
+        <div className="hidden sm:flex items-center gap-1 text-xs" style={{ color: '#475569', fontSize: '12px' }}>
           <Wifi className="w-3 h-3" />
         </div>
 

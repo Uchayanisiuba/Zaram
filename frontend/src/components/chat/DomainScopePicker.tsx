@@ -64,7 +64,7 @@ export default function DomainScopePicker() {
   const missing = selected && !domains.some((d) => d.id === selected);
 
   return (
-    <div className="flex items-center gap-1.5 text-[11px] text-slate-500">
+    <div className="flex items-center gap-1.5 text-xs text-slate-500">
       <Library size={12} aria-hidden className="shrink-0" />
       <label htmlFor="domain-scope" className="sr-only">
         Knowledge domain this question is asked inside
@@ -73,7 +73,7 @@ export default function DomainScopePicker() {
         id="domain-scope"
         value={selected}
         onChange={(e) => setDomains(e.target.value ? [e.target.value] : [])}
-        className="bg-transparent text-[11px] text-slate-400 outline-none cursor-pointer hover:text-slate-300 focus:text-slate-200 transition-colors"
+        className="bg-transparent text-xs text-slate-400 outline-none cursor-pointer hover:text-slate-300 focus:text-slate-200 transition-colors"
       >
         {/* Not "No domain". Choosing nothing means Zaram may read everything,
             which is the opposite claim from an empty domain — and those two

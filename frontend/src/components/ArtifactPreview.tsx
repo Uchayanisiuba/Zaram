@@ -208,7 +208,7 @@ export default function ArtifactPreview({
           <span className="text-sm truncate" style={{ color: 'var(--color-text)' }}>
             {artifact.filename}
           </span>
-          <span className="text-[11px]" style={{ color: 'var(--color-text-faint)' }}>
+          <span className="text-xs" style={{ color: 'var(--color-text-faint)' }}>
             preview
           </span>
           <div className="flex-1" />
@@ -225,7 +225,7 @@ export default function ArtifactPreview({
                 ),
               );
             }}
-            className="flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[11px] hover:bg-white/5"
+            className="flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs hover:bg-white/5"
             style={{ border: '1px solid var(--color-border)', color: 'var(--color-text)' }}
           >
             <Download size={12} />
@@ -279,7 +279,7 @@ export default function ArtifactPreview({
             >
               <FileWarning size={20} />
               <p className="text-xs leading-relaxed">{error}</p>
-              <p className="text-[11px]" style={{ color: 'var(--color-text-faint)' }}>
+              <p className="text-xs" style={{ color: 'var(--color-text-faint)' }}>
                 Download it and open it in the app that owns it.
               </p>
             </div>

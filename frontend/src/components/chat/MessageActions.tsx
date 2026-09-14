@@ -57,7 +57,7 @@ function ActionButton({
       disabled={disabled}
       aria-label={label}
       title={label}
-      className="inline-flex items-center gap-1 px-1.5 py-1 rounded-md text-[10px] text-slate-500 hover:text-slate-300 hover:bg-white/5 disabled:opacity-30 transition-colors"
+      className="inline-flex items-center gap-1 px-1.5 py-1 rounded-md text-xs text-slate-500 hover:text-slate-300 hover:bg-white/5 disabled:opacity-30 transition-colors"
     >
       {children}
     </button>

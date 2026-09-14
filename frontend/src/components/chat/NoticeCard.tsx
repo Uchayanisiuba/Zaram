@@ -174,11 +174,7 @@ export default function NoticeCard({ notice, onOpen, onEnableSearch, onContinue,
 
   return (
     <div
-      className="mt-2 rounded-lg px-3 py-2.5 flex items-start gap-2.5"
-      style={{
-        border: '1px solid var(--color-border-subtle)',
-        background: 'var(--color-glass)',
-      }}
+      className="mt-2 rounded-lg px-3 py-2.5 flex items-start gap-2.5 surface"
       data-testid="chat-notice"
       data-kind={notice.kind || 'default'}
       data-tone={tone === DEFAULT_TONE ? 'warning' : 'neutral'}
@@ -192,7 +188,7 @@ export default function NoticeCard({ notice, onOpen, onEnableSearch, onContinue,
             <button
               onClick={() => void enableSearch()}
               disabled={phase === 'working'}
-              className="mt-1.5 text-[11px] flex items-center gap-1 disabled:opacity-50"
+              className="mt-1.5 text-xs flex items-center gap-1 disabled:opacity-50"
               style={{ color: 'var(--color-cyan-light)' }}
               data-testid="notice-enable-search"
             >
@@ -205,7 +201,7 @@ export default function NoticeCard({ notice, onOpen, onEnableSearch, onContinue,
                 because the second is the rule-7j consent this press *is*. An
                 offer whose disclosure covers half of what it does would be the
                 same defect as the refusal it replaced. */}
-            <p className="mt-1 text-[10px] leading-snug" style={{ color: 'var(--color-text-faint)' }}>
+            <p className="mt-1 text-xs leading-snug" style={{ color: 'var(--color-text-faint)' }}>
               {phase === 'failed'
                 ? 'Zaram could not turn search on. It is in Settings under Privacy.'
                 : 'Your question goes to a search engine, which is allowed from now on and ' +
@@ -217,7 +213,7 @@ export default function NoticeCard({ notice, onOpen, onEnableSearch, onContinue,
         {offersContinue && (
           <button
             onClick={onContinue}
-            className="mt-1.5 text-[11px] flex items-center gap-1"
+            className="mt-1.5 text-xs flex items-center gap-1"
             style={{ color: 'var(--color-cyan-light)' }}
             data-testid="notice-continue"
           >
@@ -229,7 +225,7 @@ export default function NoticeCard({ notice, onOpen, onEnableSearch, onContinue,
         {offersCloud && (
           <button
             onClick={() => onTryCloud?.(notice.model as string)}
-            className="mt-1.5 text-[11px] flex items-center gap-1"
+            className="mt-1.5 text-xs flex items-center gap-1"
             style={{ color: 'var(--color-cyan-light)' }}
             data-testid="notice-try-cloud"
           >
@@ -241,7 +237,7 @@ export default function NoticeCard({ notice, onOpen, onEnableSearch, onContinue,
         {!offersSearch && !offersContinue && !offersCloud && !isGo && destination && onOpen && (
           <button
             onClick={() => onOpen(destination.node)}
-            className="mt-1.5 text-[11px] flex items-center gap-1"
+            className="mt-1.5 text-xs flex items-center gap-1"
             style={{ color: 'var(--color-cyan-light)' }}
             data-testid="notice-action"
           >

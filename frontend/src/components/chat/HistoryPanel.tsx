@@ -261,7 +261,7 @@ export default function HistoryPanel() {
             is worse than an empty one. */}
         {rows !== null && rows.length > 0 && (
           <span
-            className="text-[9px]"
+            className="text-xs"
             style={{
               color: 'var(--color-text-muted)',
               fontFamily: 'var(--font-mono)',
@@ -301,7 +301,7 @@ export default function HistoryPanel() {
           style={{ borderBottom: '1px solid var(--color-border-subtle)' }}
         >
           <span
-            className="text-[10px] uppercase tracking-wider"
+            className="text-xs uppercase tracking-wider"
             style={{ color: 'var(--color-text-muted)', fontFamily: 'var(--font-display)' }}
           >
             Conversations
@@ -309,7 +309,7 @@ export default function HistoryPanel() {
           <div className="flex items-center gap-1">
             <button
               type="button"
-              className="text-[10px] px-1.5 py-0.5 rounded"
+              className="text-xs px-1.5 py-0.5 rounded"
               style={{ color: 'var(--color-cyan)' }}
               onClick={() => {
                 // Starting a new conversation does not delete the old one. It
@@ -330,21 +330,21 @@ export default function HistoryPanel() {
 
         <div className="flex-1 overflow-y-auto px-1.5 py-1.5">
           {error && (
-            <p className="text-[11px] px-2 py-2" style={{ color: 'var(--color-red)' }}>
+            <p className="text-xs px-2 py-2" style={{ color: 'var(--color-red)' }}>
               {error}
             </p>
           )}
 
           {/* Three states, told apart. "Not read yet" is not "none". */}
           {rows === null && !error && (
-            <p className="text-[11px] px-2 py-2" style={{ color: 'var(--color-text-muted)' }}>
+            <p className="text-xs px-2 py-2" style={{ color: 'var(--color-text-muted)' }}>
               Reading…
             </p>
           )}
 
           {rows !== null && rows.length === 0 && (
             <p
-              className="text-[11px] px-2 py-2 leading-snug"
+              className="text-xs px-2 py-2 leading-snug"
               style={{ color: 'var(--color-text-muted)' }}
             >
               Nothing here yet. Conversations are kept on this machine as you have them.
@@ -355,7 +355,7 @@ export default function HistoryPanel() {
             groupByDay(rows).map(([label, group]) => (
               <div key={label} className="mb-2">
                 <p
-                  className="text-[9px] uppercase tracking-wider px-2 pt-1.5 pb-1"
+                  className="text-xs uppercase tracking-wider px-2 pt-1.5 pb-1"
                   style={{ color: 'var(--color-text-faint)' }}
                 >
                   {label}
@@ -406,7 +406,7 @@ export default function HistoryPanel() {
 
         {note && (
           <p
-            className="text-[10px] leading-snug px-3 py-2"
+            className="text-xs leading-snug px-3 py-2"
             style={{
               color: 'var(--color-text-muted)',
               borderTop: '1px solid var(--color-border-subtle)',
