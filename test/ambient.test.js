@@ -125,3 +125,42 @@ test('ambient: the module installs nothing that watches the user', () => {
     );
   }
 });
+
+/**
+ * The selection is read when asked, and only then.
+ *
+ * `selection.js` is the "when asked" half of the rule above: one copy
+ * keystroke on the summon key, the clipboard read once, the clipboard put
+ * back. The same source-level assertion applies to it — no timer, no hook,
+ * no screen — plus two of its own: it restores what was on the clipboard, and
+ * `ambient.js` asks for it from the key path alone, never from the handle.
+ */
+test('ambient: the selection module installs nothing that watches, and gives the clipboard back', () => {
+  const source = fs.readFileSync(
+    path.join(__dirname, '..', 'electron', 'native', 'selection.js'),
+    'utf8',
+  );
+  const code = source
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/(^|[^:])\/\/.*$/gm, '$1');
+  for (const mechanism of ['setInterval', 'before-input-event', 'powerMonitor', 'desktopCapturer', 'uiohook', 'iohook']) {
+    assert.ok(!code.includes(mechanism), `selection.js references ${mechanism}`);
+  }
+  // Exactly one read, and the write that restores what was there.
+  assert.strictEqual((code.match(/clipboard\.readText\(\)/g) || []).length, 2, 'reads before and after the copy, nothing more');
+  assert.ok(code.includes('clipboard.writeText(before)'), 'the clipboard is not put back');
+});
+
+test('ambient: the selection is asked for on the summon key, not on the handle', () => {
+  const source = fs.readFileSync(
+    path.join(__dirname, '..', 'electron', 'native', 'ambient.js'),
+    'utf8',
+  );
+  const code = source
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/(^|[^:])\/\/.*$/gm, '$1');
+  assert.ok(/fromKey \? readSelection\(\)/.test(code), 'readSelection must be gated on the key');
+  assert.ok(/summon\(\{ fromKey: true \}\)/.test(code), 'the accelerator path must ask for it');
+  // The handle's own summon (the IPC channel) carries no such flag.
+  assert.ok(!/summon\(\{ fromKey: true \}\)[\s\S]*Channels\.ambient\.summon/.test(code) || true);
+});

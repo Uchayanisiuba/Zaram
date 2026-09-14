@@ -138,6 +138,8 @@ const MAIN_EVENTS = {
   executionEvent: 'runtime:execution-event',
   workspaceEvent: 'workspace:event',
   vscodeEvent: 'vscode:event',
+  // The selection read on the summon key, delivered to the ambient panel.
+  ambientSelection: 'ambient:selection',
 };
 
 /** Channels the renderer is permitted to invoke through the preload bridge. */

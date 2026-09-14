@@ -43,6 +43,9 @@ const api = {
     dismiss: () => invoke(Channels.ambient.dismiss),
     hover: (hovered) => invoke(Channels.ambient.hover, Boolean(hovered)),
     summon: () => invoke(Channels.ambient.summon),
+    // What was selected in the application under the pointer when the
+    // summon key was pressed — read once, then; never between summons.
+    onSelection: (listener) => subscribe(MAIN_EVENTS.ambientSelection, listener),
   },
   window: {
     minimize: () => invoke(Channels.window.minimize),

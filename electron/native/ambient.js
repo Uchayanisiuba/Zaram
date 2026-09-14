@@ -43,6 +43,8 @@
  */
 
 const path = require('path');
+const { readSelection } = require('./selection');
+const { MAIN_EVENTS } = require('../ipc/channels');
 
 /** The default summon key.
  *
@@ -248,13 +250,27 @@ function createAmbientSurface({ config, shortcuts, logger, accelerator, enabled 
     });
   }
 
-  function summon() {
+  function summon(options) {
     if (!running) return;
     if (!panel || panel.isDestroyed()) panel = createPanel();
+    // The selection, when the summon key asked for it. Read *before* the
+    // panel takes focus — the copy keystroke has to reach the application
+    // the person was in — and delivered when it arrives, so the panel is
+    // never held for it. Nothing is read on a click of the handle: that is
+    // a request for Zaram, not for the text under the pointer.
+    const fromKey = Boolean(options && options.fromKey);
+    const selected = fromKey ? readSelection() : Promise.resolve('');
     panel.setBounds(panelBounds(currentWorkArea()));
     panel.show();
     panel.focus();
-    log.info('Ambient surface summoned');
+    log.info('Ambient surface summoned', { fromKey });
+    selected
+      .then((text) => {
+        if (text && panel && !panel.isDestroyed()) {
+          panel.webContents.send(MAIN_EVENTS.ambientSelection, text);
+        }
+      })
+      .catch((error) => log.warn('Selection read failed', { error: String(error) }));
   }
 
   function dismiss() {
@@ -263,7 +279,7 @@ function createAmbientSurface({ config, shortcuts, logger, accelerator, enabled 
 
   function toggle() {
     if (panel && !panel.isDestroyed() && panel.isVisible()) dismiss();
-    else summon();
+    else summon({ fromKey: true });
   }
 
   /** Widen or narrow the handle. Called from the renderer on pointer enter and

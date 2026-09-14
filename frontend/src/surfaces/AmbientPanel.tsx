@@ -26,6 +26,19 @@ import { useSystemStore, describeSystem } from '@/stores/systemStore';
 
 export default function AmbientPanel() {
   const [text, setText] = useState('');
+  // The selection read when the summon key was pressed arrives after the
+  // panel is up. It goes into the composer as the thing to ask about, with
+  // the cursor after it, and is never kept: working state, not memory.
+  useEffect(() => {
+    const api = (window as unknown as { zaram?: { ambient?: { onSelection?: (l: (t: string) => void) => () => void } } }).zaram;
+    const off = api?.ambient?.onSelection?.((selected: string) => {
+      if (typeof selected !== 'string' || !selected.trim()) return;
+      setText((current) => (current.trim() ? `${current}\n\n${selected}` : `${selected}\n\n`));
+    });
+    return () => {
+      if (typeof off === 'function') off();
+    };
+  }, []);
   const [reply, setReply] = useState('');
   // A boolean, not a phase. This was three states — ready, asking, answered —
   // and only `asking` was ever read: the other two rendered identically,
