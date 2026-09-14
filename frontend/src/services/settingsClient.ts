@@ -502,6 +502,52 @@ export async function setSearchScope(scope: SearchScope): Promise<WebSearchStatu
   );
 }
 
+// ----------------------------------------------------------------- pairing
+
+export interface Pairing {
+  providerId: string;
+  displayName: string;
+  /** When the candidate list was last read off the provider's catalogue. */
+  generated: string;
+  /** How many models the key can see. */
+  seen: number;
+  /** Slot → the model that would be assigned, and why. Only slots with one. */
+  picks: Record<string, { model: string; why: string }>;
+}
+
+function toPairing(raw: Record<string, unknown>): Pairing {
+  const picks = (raw.picks ?? {}) as Record<string, { model?: unknown; why?: unknown }>;
+  return {
+    providerId: String(raw.provider_id ?? ''),
+    displayName: String(raw.display_name ?? ''),
+    generated: String(raw.generated ?? ''),
+    seen: typeof raw.seen === 'number' ? raw.seen : 0,
+    picks: Object.fromEntries(
+      Object.entries(picks)
+        .filter(([, p]) => p && typeof p.model === 'string')
+        .map(([slot, p]) => [slot, { model: String(p.model), why: String(p.why ?? '') }]),
+    ),
+  };
+}
+
+/** What one tap would assign for a connected provider. Runs discovery — a
+ *  request to that provider — so it is asked for on a button, never on mount. */
+export async function fetchPairing(providerId: string): Promise<Pairing> {
+  return toPairing(
+    (await get(`/providers/cloud/${encodeURIComponent(providerId)}/pairing`)) as Record<string, unknown>,
+  );
+}
+
+export async function applyPairing(
+  providerId: string,
+  picks: Pairing['picks'],
+): Promise<{ assigned: Record<string, string | null> }> {
+  const out = (await send(`/providers/cloud/${encodeURIComponent(providerId)}/pairing`, 'POST', {
+    picks,
+  })) as { assigned?: Record<string, string | null> };
+  return { assigned: out.assigned ?? {} };
+}
+
 // ------------------------------------------------------------------ images
 
 export type ImageLocality = 'local' | 'cloud';

@@ -54,6 +54,11 @@ import {
 } from '@/services/settingsClient';
 import { pastedKey } from '@/lib/pastedKey';
 import { LOCAL_IS_FREE } from '@/lib/freeTier';
+import PairingOffer from '@/components/settings/PairingOffer';
+
+/** Providers `providers/pairing.py` has a list for. Mirrors the backend; a
+ *  provider missing here simply gets no card, never a broken one. */
+const PAIRED = new Set(['nvidia_nim', 'openrouter', 'groq']);
 
 interface CloudKeyFormProps {
   /** Called after a provider is configured, so readiness can be asked again. */
@@ -65,7 +70,7 @@ type Phase =
   | { name: 'unavailable' }
   | { name: 'ready' }
   | { name: 'saving' }
-  | { name: 'saved'; provider: string }
+  | { name: 'saved'; provider: string; providerId: string }
   | { name: 'failed'; message: string };
 
 /**
@@ -140,7 +145,7 @@ export default function CloudKeyForm({ onConnected }: CloudKeyFormProps) {
       // it in a form field means it sits in the renderer's memory and in the
       // DOM for the rest of the session for no purpose.
       setApiKey('');
-      setPhase({ name: 'saved', provider: chosen.displayName });
+      setPhase({ name: 'saved', provider: chosen.displayName, providerId: chosen.id });
       onConnected();
     } catch (error) {
       setPhase({
@@ -169,6 +174,14 @@ export default function CloudKeyForm({ onConnected }: CloudKeyFormProps) {
           Zaram has not contacted them — nothing has left this device. The key is
           tried the first time you send a message, and you will see what goes.
         </Muted>
+        {/* The offer, for providers with a pairing written: one press fills
+            chat, coding and pictures from what the key can see. Nothing is
+            asked of the provider until "See picks" is pressed. */}
+        {PAIRED.has(phase.providerId) && (
+          <div className="mt-2">
+            <PairingOffer providerId={phase.providerId} displayName={phase.provider} />
+          </div>
+        )}
       </div>
     );
   }

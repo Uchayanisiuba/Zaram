@@ -36,6 +36,10 @@
  */
 import { useCallback, useEffect, useState } from 'react';
 import { LOCAL_IS_FREE } from '@/lib/freeTier';
+import PairingOffer from '@/components/settings/PairingOffer';
+
+/** Providers `providers/pairing.py` has a list for. Mirrors the backend. */
+const PAIRED = new Set(['nvidia_nim', 'openrouter', 'groq']);
 import LetterheadSection from '../components/settings/LetterheadSection';
 import ToolsSection from '../components/settings/ToolsSection';
 import PairingSection from '../components/settings/PairingSection';
@@ -1246,7 +1250,8 @@ export default function SettingsWorkspace() {
           >
             <div className="flex flex-col gap-1.5">
               {cloud?.connections.map((connection) => (
-                <div key={connection.providerId} className="flex items-center gap-2 flex-wrap">
+                <div key={connection.providerId} className="flex flex-col gap-1.5">
+                <div className="flex items-center gap-2 flex-wrap">
                   <span className="text-xs" style={{ color: 'var(--color-text)' }}>
                     {connection.displayName}
                   </span>
@@ -1270,6 +1275,16 @@ export default function SettingsWorkspace() {
                   >
                     Disconnect
                   </Button>
+                </div>
+                {/* One key, a model for each job — offered, for providers
+                    with a pairing written. See `PairingOffer`. */}
+                {PAIRED.has(connection.providerId) && (
+                  <PairingOffer
+                    providerId={connection.providerId}
+                    displayName={connection.displayName}
+                    onAssigned={() => void fetchRoutingSettings().then(setRoutingSettings).catch(() => undefined)}
+                  />
+                )}
                 </div>
               ))}
               {cloud && cloud.connections.length === 0 && (

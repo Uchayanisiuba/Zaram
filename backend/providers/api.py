@@ -32,7 +32,7 @@ from fastapi import APIRouter, Header, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from . import catalogue, cloud_config
+from . import catalogue, cloud_config, pairing
 from .cloud_config import CloudConfigError
 from .manager import ProviderManager
 from .runtime import ProvidersRuntime
@@ -378,6 +378,59 @@ def _require_browser_origin(client: Optional[str]) -> None:
 async def cloud_status() -> dict:
     """Every connected cloud provider. Never a key — see `cloud_config`."""
     return cloud_config.status()
+
+
+@router.get("/cloud/{provider_id}/pairing")
+async def cloud_pairing(provider_id: str) -> dict:
+    """What one tap would assign, for a connected provider, from what its
+    key can actually see. See `pairing`.
+
+    Discovery runs here if it has not, which is a request to the provider
+    the person already connected — the same consent as any model listing.
+    """
+    if provider_id not in cloud_config.connections():
+        raise HTTPException(status_code=404, detail=f"{provider_id} is not connected.")
+    manager = _manager()
+    await manager.ensure_scanned()
+    seen = [m.id for m in manager.list_models(provider=provider_id)]
+    picks = pairing.recommend(provider_id, seen)
+    entry = catalogue.get(provider_id)
+    return {
+        "provider_id": provider_id,
+        "display_name": entry.display_name if entry else provider_id,
+        "generated": pairing.GENERATED,
+        "seen": len(seen),
+        "picks": picks,
+    }
+
+
+class PairingApply(BaseModel):
+    #: The picks as returned by GET, so what is written is what was shown.
+    picks: Dict[str, Dict[str, str]]
+
+
+@router.post("/cloud/{provider_id}/pairing")
+async def cloud_pairing_apply(provider_id: str, body: PairingApply) -> dict:
+    """Write the picks into the same fields the Advanced picker writes.
+
+    Only models the key can see are accepted, checked again here rather
+    than trusted from the request — the list shown may be a minute old.
+    """
+    from core.user_settings import get_user_settings
+
+    if provider_id not in cloud_config.connections():
+        raise HTTPException(status_code=404, detail=f"{provider_id} is not connected.")
+    manager = _manager()
+    await manager.ensure_scanned()
+    seen = {m.id for m in manager.list_models(provider=provider_id)}
+    picks = {
+        slot: pick
+        for slot, pick in body.picks.items()
+        if slot in pairing.SLOTS and isinstance(pick, dict) and pick.get("model") in seen
+    }
+    if not picks:
+        raise HTTPException(status_code=400, detail="None of those models is one this key can see.")
+    return {"assigned": pairing.apply(get_user_settings(), picks), "picks": picks}
 
 
 @router.post("/cloud")
