@@ -22,12 +22,12 @@
  * new colour: it is the same two rings and the same ten motes the orb has
  * always drawn.
  */
-import { motion } from 'framer-motion';
 
 import { useIsReducedMotion } from '@/hooks/useReducedMotion';
 import { useOrbStore } from '@/stores';
 
 import OrbitalParticles from './OrbitalParticles';
+import TrackRing from './TrackRing';
 import { ringColours } from './LivingOrb';
 
 export default function OrbAura({
@@ -98,28 +98,26 @@ export default function OrbAura({
         transition: 'opacity 0.35s ease',
       }}
     >
-      <motion.div
-        className="absolute rounded-full pointer-events-none"
-        style={{
-          width: ring1 + outerGlowOffset,
-          height: ring1 + outerGlowOffset,
-          border: `1px solid ${colours.ring1}`,
-        }}
-        // Colour is the state channel and it changes; nothing here rotates.
-        // `LivingOrb` settled that — a ring that spins is performing, and the
-        // orb does not perform.
-        animate={{ borderColor: colours.ring1 }}
-        transition={{ duration: reduced ? 0 : 0.45 }}
+      {/* The same rings the orb draws for itself, in the landing's plane,
+          with lights running them. Colour is the state channel and changes;
+          the rings never rotate — the lights do. */}
+      <TrackRing
+        size={ring1 + outerGlowOffset}
+        colour={colours.ring1}
+        messengers={2}
+        dir={-1}
+        seconds={9}
+        messengerColour="#22d3ee"
+        reduced={reduced}
       />
-      <motion.div
-        className="absolute rounded-full pointer-events-none"
-        style={{
-          width: ring2,
-          height: ring2,
-          border: `1px solid ${colours.ring2}`,
-        }}
-        animate={{ borderColor: colours.ring2 }}
-        transition={{ duration: reduced ? 0 : 0.45 }}
+      <TrackRing
+        size={ring2}
+        colour={colours.ring2}
+        messengers={1}
+        dir={1}
+        seconds={6}
+        messengerColour="#c084fc"
+        reduced={reduced}
       />
 
       <div className="absolute inset-0">

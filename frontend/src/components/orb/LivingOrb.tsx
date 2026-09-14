@@ -14,6 +14,7 @@ import type { OrbState } from '@/stores/orbStore';
 import globeImage from '@/assets/living-orb-globe.png';
 import { frames, loop } from './stillness';
 import OrbitalParticles from './OrbitalParticles';
+import TrackRing from './TrackRing';
 
 
 // The waveform bar constants are gone with the bars they drove. Their being a
@@ -269,31 +270,29 @@ const LivingOrb = ({
         )}
       </AnimatePresence>
 
-      {/* Energy ring 1 (outer) � STATIC, no rotation */}
+      {/* Energy rings — in the landing's plane, static, with a light or two
+          running each (`TrackRing`). The ring reports state by colour and
+          never turns; the lights are what moves. */}
       {showRings && (
-        <motion.div
-          className="absolute rounded-full pointer-events-none"
-          style={{
-            width: ring1 + outerGlowOffset,
-            height: ring1 + outerGlowOffset,
-            border: `1px solid ${cfg.ring1Color}`,
-          }}
-          animate={{ rotate: 0 }}
-          transition={{ duration: 0.3 }}
+        <TrackRing
+          size={ring1 + outerGlowOffset}
+          colour={cfg.ring1Color}
+          messengers={2}
+          dir={-1}
+          seconds={9}
+          messengerColour="#22d3ee"
+          reduced={reduced}
         />
       )}
-
-      {/* Energy ring 2 (inner) � STATIC, no rotation */}
       {showRings && (
-        <motion.div
-          className="absolute rounded-full pointer-events-none"
-          style={{
-            width: ring2,
-            height: ring2,
-            border: `1px solid ${cfg.ring2Color}`,
-          }}
-          animate={{ rotate: 0 }}
-          transition={{ duration: 0.3 }}
+        <TrackRing
+          size={ring2}
+          colour={cfg.ring2Color}
+          messengers={1}
+          dir={1}
+          seconds={6}
+          messengerColour="#c084fc"
+          reduced={reduced}
         />
       )}
 

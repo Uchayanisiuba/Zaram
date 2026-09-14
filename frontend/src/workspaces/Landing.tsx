@@ -6,6 +6,7 @@ import Embodiment from '@/components/embodiment/Embodiment'
 import ZaramMark from '@/components/brand/ZaramMark'
 import OrbStatusLabel from '../components/orb/OrbStatusLabel'
 import OrbAura from '../components/orb/OrbAura'
+import { RING_TILT } from '../components/orb/TrackRing'
 import { useEmbodimentStore } from '@/stores/embodimentStore'
 import { useChatModeStore } from '@/stores/chatModeStore'
 import { useLayoutStore, orbGeometry } from '@/stores/layoutStore'
@@ -81,7 +82,7 @@ const ORBIT_RADIUS = 240
  * is full size and over it. One number, used by the nodes, both track
  * rings and the fit arithmetic, so none of them can disagree.
  */
-const TILT = 0.58
+const TILT = RING_TILT
 /**
  * The rings, 14 September 2026: **three concentric tracks in one plane**, the
  * outer one the wheel the six nodes ride at exactly `ORBIT_RADIUS`, the two
