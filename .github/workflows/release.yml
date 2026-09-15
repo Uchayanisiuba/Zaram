@@ -50,6 +50,12 @@ jobs:
   build-and-publish:
     runs-on: windows-latest
     timeout-minutes: 90
+    # `secrets` cannot be read in a step's `if:` — GitHub refuses the whole
+    # file with "Unrecognized named-value: 'secrets'", which is how this
+    # workflow failed in 0 s on every push for two days without running a
+    # step. A job-level env may read it; the steps below test the env.
+    env:
+      HAS_BUTTONDOWN: ${{ secrets.BUTTONDOWN_API_KEY != '' }}
 
     steps:
       - name: Check out
@@ -144,7 +150,7 @@ jobs:
 
 
       - name: Tell the testers (Buttondown)
-        if: ${{ secrets.BUTTONDOWN_API_KEY != '' }}
+        if: ${{ env.HAS_BUTTONDOWN == 'true' }}
         shell: bash
         env:
           BUTTONDOWN_API_KEY: ${{ secrets.BUTTONDOWN_API_KEY }}
@@ -171,6 +177,6 @@ jobs:
           echo "tester email queued through Buttondown"
 
       - name: Tester email skipped
-        if: ${{ secrets.BUTTONDOWN_API_KEY == '' }}
+        if: ${{ env.HAS_BUTTONDOWN != 'true' }}
         shell: bash
         run: echo "BUTTONDOWN_API_KEY is not set as a repository secret; the release is published and the site is on, but no email went out."
