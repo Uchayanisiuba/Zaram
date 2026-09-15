@@ -22,6 +22,88 @@ publishing step over rather than finding another route. `CLAUDE.md`,
 
 *The latest work is first. Earlier sessions follow below.*
 
+### Next milestone, decided 15 September — the coworker: Zaram carries a task through, with the memory it already has.
+
+**The maintainer's direction, in their words: Zaram was always meant to run
+agentic workflows the way OpenWorker does, with consistent memory.** The
+docs had filed "agents" under after-v1 and sessions repeated that line as
+"Zaram is not an agent". Wrong reading. What was deferred was *mutating
+things outside Zaram without undo, confirm and sandbox* — a sequencing
+rule, never a decision that Zaram stays a library. `CLAUDE.md`'s own
+definition ends "…and acts before it's late", and the daily-driver
+sequence ends "indispensable because it acts". This milestone is that step.
+
+**What already exists, verified in the code on 15 September, not the
+roadmap:** the planner turns a request into an `ExecutionPlan`; the
+scheduler and task queue run its steps with dependencies and cancellation;
+the tool loop works with local models (text-marker calls, because local
+weights do not do native tool calling reliably); the MCP client attaches
+any server, with per-server write modes (the code server runs `HOST_UNDO`:
+git is the undo); the loop **pauses before a mutative call, shows the plan,
+and resumes on the person's Go** with context rebuilt from recall, not
+replayed. That is plan → act → check in → finish. The gaps are breadth
+and the safety rails, not architecture.
+
+**Reference: OpenWorker** (`github.com/andrewyng/openworker`, MIT, July
+2026). An agent product with a notebook for memory — no retrieval, no
+provenance, no correction. Its governance is worth taking as modules, with
+attribution: `risk.py` (read / egress / write_local / exec / external),
+`permissions.py` (shell-command safety: opaque constructs, arg-executors,
+inline interpreters), `provenance.py` (did the agent write or download
+this file this session — one fixed-vocabulary fact, misses only move
+toward caution), the approval-provenance columns in its audit. **Not
+taken:** its engine, `aisuite`, and the reviewer model that auto-approves
+in auto mode — a model's judgement is never the permission here; the
+ladder below gets the same daily usability without one.
+
+**Where it lives in the interface — no seventh node.** The coworker *is*
+the conversation: ask for the outcome, it plans, acts, pauses where it
+must, and the finished file lands as a card in Work. Configuration (which
+servers, which standing rules, what may run unattended) is under Settings
+with Tools. Held asks and unattended runs are in Activity. A coworker
+bundle — persona, tools, check-ins for one job — is what a pack is; the
+invoicing pack ships as the first named one.
+
+**Steps, in order, each with what you can see:**
+
+1. **Attach two real MCP servers and run one task end to end.** GitHub and
+   an email server, through the existing loop, from a real request ("find
+   the invoice I sent Northwind and draft the reminder"). *Seen:* the plan,
+   the pause before the send, the Go, the draft, the egress entries
+   addressed to each server. This is a day, and it decides how real the
+   rest is.
+2. **Lift the three OpenWorker modules** with attribution in the file
+   headers, wired to the tier gate. *Seen:* a shell command with `$(` or
+   `xargs` in it refused by the allowlist path and sent to confirm; a
+   script the agent wrote this session named as such on the confirm card.
+3. **Standing rules, hard floors, circuit breaker.** One-off approval →
+   standing rule → allowlist, each visible under Settings and revocable.
+   A written list no mode lowers: money, deletion outside the trash,
+   mass-send, privacy-rule changes. Repeated denials pause the automation
+   and say so. *Seen:* approve a send to one address once, watch the
+   second not ask; deny three times, watch the run stop and the notice.
+4. **Triggers and the inbox.** Scheduled runs on the existing scheduler;
+   "when an obligation is seven days out, draft the reply and hold it".
+   Unattended runs never self-approve; held asks land in Activity. *Seen:*
+   a Monday-morning month's picture that ran while the window was closed,
+   with its transcript.
+5. **Native tool calling for cloud models** at the provider layer, so a
+   cloud step uses the provider's own function calling and the text-marker
+   path stays for local weights. *Seen:* the same plan run by qwen locally
+   and by a cloud model, both completing.
+6. **The invoicing pack as the first coworker**, named on the site.
+
+**Accuracy, said plainly so nobody oversells it.** A local 8–14B handles
+tasks of two to four well-defined tool steps; long multi-tool chains and
+hard judgement steps are where small weights fail, and the routing already
+knows how to send a step to a stronger model when the person allows it.
+The pattern that makes any of this trustworthy is OpenWorker's own: the
+deterministic part is done by a tool and checked by a tool, the model
+supplies judgement, and the fixer is never the only checker. Rule 9
+holds — when a step cannot be resolved, the loop stops and asks; it never
+guesses a client. Estimate: four to six weeks after the 21st for steps
+1–4 with two connectors; not before the alpha is in testers' hands.
+
 ### 15 September — the installer is real, the manual is a domain, and the release is one tag. HANDOFF.
 
 **Read this block first.** Everything is committed and pushed (`main` at
