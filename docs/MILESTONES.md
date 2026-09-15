@@ -22,7 +22,106 @@ publishing step over rather than finding another route. `CLAUDE.md`,
 
 *The latest work is first. Earlier sessions follow below.*
 
-### 14 September, later — fewer notices, a cloud model sized by its provider, documents written to a brief. HANDOFF.
+### 15 September — the installer is real, the manual is a domain, and the release is one tag. HANDOFF.
+
+**Read this block first.** Everything is committed and pushed (`main` at
+`e4af9cc`). Two earlier 14 September blocks follow and are still current
+for what they list; this block is what changed after them, in the order it
+mattered.
+
+#### The one thing to know
+
+**The built installer had never started on any machine but this one.**
+Found on the first cold install (`npm run build`, silent install to a
+scratch folder, launched from `C:\`): a black window reading *"Frontend
+not built"*, and a backend that ran only because the launcher's last-resort
+root, `process.cwd()`, was the checkout. `electron/main.js` was handing
+`createConfig` `process.resourcesPath` as the application path; the
+interface lives in `app.asar` and the backend in `app.asar.unpacked`, both
+under `app.getAppPath()`. Every check had passed — `packagedBackend.test.js`
+was giving the launcher the right path and passing while `main.js` gave it
+the wrong one. Fixed, pinned at source in `test/bootstrap.test.js`,
+rebuilt, reinstalled as an update, launched from `C:\` with an empty data
+directory: backend from the bundled runtime, interface up, Settings
+rendering. **Do this again before every release.** It is the only test
+that runs where the product will.
+
+Three more that the release checks found once they were run for real:
+* `/extras`, `/diagnostics`, `/images` and now `/manual` were not in the
+  packaged proxy list — `check:guards` names both lists; add there.
+* `check:runtime` looked for three sentinel packages and said "with
+  backend dependencies" while five pins added on the 14th were absent from
+  the bundled runtime. It now compares every pin through the runtime's own
+  interpreter; a stale `charset-normalizer` pin surfaced and was corrected.
+* Windows OCR took the whole backend down with an access violation from
+  inside the suite. `attachments/ocr.py` runs the engine in a child process
+  now; a fault there costs one picture's text.
+
+#### Built this session
+
+* **Packs** (`backend/extras/`, `PacksSection.tsx`) — Speaking (290 MB,
+  ONNX build), Listening (81 MB), Reading scans (321 MB): one button each,
+  pip into Zaram's own runtime, the installer's lines streamed, the download
+  recorded before the first byte. Never asked at install; offered where the
+  feature is chosen (avatar → Speaking, mic → Listening) and listed under
+  Settings → Packs. The pip-in-runtime path has **not** run in a packaged
+  build yet — first thing to try on the next installer.
+* **Report a problem** (`core/report.py`, Settings → Help) — copies a report
+  with no conversation, names, facts or keys; the person pastes it. The
+  only feedback channel, on purpose.
+* **Due-soon notifications** (`lib/dueSoon.ts`) — the desktop notification
+  service had never been called; now what falls due within seven days is
+  said once a day, one notice, nearest first.
+* **The coding loop** — a failed run names where it failed and shows the
+  code (`packs/code/locations.py`); the project's own check (tsc, ruff,
+  typecheck, lint, build — `runner: "check"`) runs before a change is
+  called done, at most twice per reply. The "VS Code diagnostics" bridge
+  turned out to be the desktop layer running `tsc` into a list nothing read.
+* **The manual** (`backend/manual/`) — ten pages for a person, four real
+  screenshots and one drawing, shipped in the installer, read at start
+  into the built-in **Zaram** domain (visible, not deletable, cloud-
+  recallable, re-read when the content fingerprint changes), readable
+  under Settings → Help. Verified on the running product: *"How do I
+  export my memory?"* answered from the manual by qwen3-14b with a
+  citation. Indexing takes ~90 s on CPU, once, in the background.
+* **Release workflow** (`.github/workflows/release.yml`) — push a `v*` tag:
+  build runtime and installer on a Windows runner, GitHub Release with
+  SHA256SUMS (pre-release for a suffixed tag), `site/site.js` updated with
+  version/size/sha/tag and `gh-pages` republished, Buttondown email if
+  `BUTTONDOWN_API_KEY` is a repo secret. The page switches from sign-up to
+  download on `releaseAt` by itself; a tag containing `public` flips it at
+  once. `scripts/site-release.mjs` does the site half by hand.
+* Also: the landing's far nodes were unclickable under the orb's box
+  (measured with `elementFromPoint`, fixed, re-measured over a revolution);
+  ring lights retuned three times to the maintainer's eye; a warm chat
+  model is not evicted to draw when the cloud can; the GLM window and the
+  first NIM picture verified end to end through the real classes; three
+  test files had window fixtures that were no-ops since 13 September.
+
+#### Not done, and honest about why
+
+* **`@zaram/engine` is not packaged**, so the optional desktop presence
+  layer (`desktop/`) does not load in the built app. Nothing mounted uses
+  it (`PresenceContext.tsx`, `OrbEngine.tsx` are unreachable from the
+  shell). Logged with its cause now. Candidate for deletion, not a fix.
+* **A machine without Ollama** has not been tried; Ollama runs here.
+* **The site** still explains features the manual now covers; trim it to
+  the pitch and the download when there is a moment.
+* **The installer is unsigned**; `check:signing` demands a certificate only
+  under `ZARAM_RELEASE=1`, which the workflow does not set.
+* Three `.fbx` idles in `avatar-source/animations/` are Mixamo exports and
+  stay untracked.
+
+#### To release
+
+1. `git tag v0.1.0-alpha.1 && git push origin v0.1.0-alpha.1`.
+2. Install what the workflow produces on a machine that is not this one;
+   open Settings → Packs and press one Get it; ask the manual a question;
+   draw a picture on NIM; press Report a problem.
+3. Add `BUTTONDOWN_API_KEY` under repo Settings → Secrets if the tester
+   email should go out on its own.
+
+### 14 September, later — fewer notices, a cloud model sized by its provider, documents written to a brief.
 
 **Read this block first.** Everything below is committed and pushed. The
 earlier 14 September block follows it and is still current for what it
