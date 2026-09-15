@@ -49,7 +49,7 @@ from core.untrusted import Provenance, scan
 
 from .client import McpServer, ToolDescriptor
 from .config import ServerConfig, ServerStore
-from .policy import Verdict, decide
+from .policy import Verdict, decide, looks_destructive
 
 logger = logging.getLogger(__name__)
 
@@ -340,6 +340,12 @@ class McpRuntime:
                 "server": server_id,
                 "tool": tool_name,
                 "reason": reason,
+                # Whether a grant would settle it. A destructive tool keeps
+                # asking whatever is granted (`decide`), so offering to allow
+                # it would promise something the gate will not honour.
+                "grantable": not looks_destructive(
+                    tool_name, input_data.get("annotations")
+                ),
             }
 
         server = await self._connect(cfg)

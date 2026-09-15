@@ -136,6 +136,26 @@ export async function attachServers(blockText: string): Promise<ToolServer[]> {
   return Array.isArray(raw.servers) ? raw.servers.map((s) => toServer(s as Record<string, unknown>)) : [];
 }
 
+/**
+ * Allow one tool on one server, for good.
+ *
+ * Rule 7j's second half — confirm once, then remember. The endpoint has
+ * existed since the tool layer shipped and nothing called it: the only way to
+ * answer *"this needs your say-so"* was to find the server in Settings and
+ * grant the tool by name, which is a dead end at the moment a person is trying
+ * to get something done. This is what the confirm row presses.
+ */
+export async function grantTool(serverId: string, tool: string): Promise<string[]> {
+  const res = await fetch(`${API_BASE}/tools/servers/${encodeURIComponent(serverId)}/grant`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ tool }),
+  });
+  if (!res.ok) throw new Error(`Could not allow ${tool} (${res.status}).`);
+  const body: { grantedTools?: string[] } = await res.json();
+  return body.grantedTools ?? [];
+}
+
 export async function detachServer(serverId: string): Promise<void> {
   await readOrThrow(
     await fetch(`${API_BASE}/tools/servers/${encodeURIComponent(serverId)}`, { method: 'DELETE' }),

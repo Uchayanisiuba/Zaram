@@ -152,6 +152,9 @@ export interface ChatToolCall {
    *  by `AppCard`, never folded. */
   image?: string;
   appUrl?: string;
+  /** On a `confirm`: whether allowing this tool would settle it. See
+   *  `ChatEvent`. */
+  grantable?: boolean;
 }
 
 interface ChatState {
@@ -586,6 +589,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
               ...(event.commit ? { commit: event.commit } : {}),
               ...(event.image ? { image: event.image } : {}),
               ...(event.appUrl ? { appUrl: event.appUrl } : {}),
+              ...(event.grantable ? { grantable: true } : {}),
             });
             set({ streamingToolCalls: [...toolCalls] });
             break;

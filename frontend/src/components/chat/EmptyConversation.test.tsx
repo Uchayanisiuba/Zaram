@@ -34,7 +34,7 @@ beforeEach(() => {
   vi.mocked(fetchSources).mockResolvedValue([] as never);
   vi.mocked(fetchReadiness).mockResolvedValue({ canChat: false } as never);
   vi.mocked(fetchServers).mockResolvedValue([] as never);
-  global.fetch = vi.fn(async () => ({ ok: true, json: async () => ({ projects: [] }) })) as never;
+  globalThis.fetch = vi.fn(async () => ({ ok: true, json: async () => ({ projects: [] }) })) as never;
 });
 
 describe('EmptyConversation', () => {

@@ -391,6 +391,7 @@ class StreamEvent:
         commit: str = "",
         image: str = "",
         app_url: str = "",
+        grantable: bool = False,
     ) -> StreamEvent:
         """One tool call, and what the gate said about it.
 
@@ -427,6 +428,13 @@ class StreamEvent:
                 # project's screens folder) and the URL an app started on.
                 "image": image,
                 "app_url": app_url,
+                # Only meaningful on a `confirm`: whether *allowing this tool*
+                # would let it run. False for a deletion, which asks however
+                # much has been granted — so the interface must not offer a
+                # button that would change nothing, which is the shape of a
+                # product that looks broken. The gate decides this, not the
+                # interface, because the rule lives with the verdict.
+                "grantable": grantable,
             },
             correlation_id=correlation_id,
         )

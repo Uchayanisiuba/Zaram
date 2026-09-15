@@ -45,6 +45,7 @@ import { useState } from 'react';
 import { AnimatePresence } from 'framer-motion';
 import { Check, ChevronRight, CircleAlert, Clock, Wrench } from 'lucide-react';
 import type { ChatToolCall } from '../../stores/chatStore';
+import { grantTool } from '@/services/toolsClient';
 import ActivityPanel from './ActivityPanel';
 import AppCard from './AppCard';
 import ChangeCard from './ChangeCard';
@@ -108,7 +109,62 @@ export function summarise(calls: ChatToolCall[]): string {
   return opensWithProse ? joined.charAt(0).toUpperCase() + joined.slice(1) : joined;
 }
 
-function CallLine({ call }: { call: ChatToolCall }) {
+/**
+ * The answer to *"this needs your say-so"*, on the row that says it.
+ *
+ * **Built 15 September 2026, and what it replaced was a dead end.** A tool the
+ * gate held returned "needs your say-so", the loop stopped, and there was
+ * nowhere to say so: the only way through was Settings → Tools, finding the
+ * server, and granting the tool by name — at the exact moment somebody is
+ * trying to get something done. Rule 7j says *confirm once per destination,
+ * then remember*; the "then remember" half had an endpoint and no button.
+ *
+ * It allows the **tool**, not the call, and says so. That is the gate's own
+ * unit of consent and it is what the reason text already promises — "Zaram
+ * will stop asking about this tool once you allow it". Allowing a single call
+ * would need the paused call kept somewhere, which is a store this does not
+ * have and a promise it will not imply.
+ *
+ * **A deletion never gets this button.** `grantable` comes from the gate,
+ * which keeps asking about destructive tools however much has been granted —
+ * so offering it here would promise something the gate will not honour, and a
+ * button that changes nothing is worse than no button.
+ */
+function AllowTool({ call, onAllowed }: { call: ChatToolCall; onAllowed: () => void }) {
+  const [state, setState] = useState<'idle' | 'working' | 'failed'>('idle');
+  if (!call.grantable || call.verdict !== 'confirm') return null;
+  return (
+    <span className="flex items-center gap-2 pl-[18px] pt-0.5">
+      <button
+        type="button"
+        disabled={state === 'working'}
+        onClick={async () => {
+          setState('working');
+          try {
+            await grantTool(call.server, call.tool);
+            onAllowed();
+          } catch {
+            // Said on the row rather than thrown away: a grant that failed
+            // silently would look like a grant that worked and did nothing.
+            setState('failed');
+          }
+        }}
+        className="text-xs"
+        style={{ color: 'var(--color-cyan-light)', background: 'none', border: 0, padding: 0, cursor: 'pointer' }}
+        data-testid="allow-tool"
+      >
+        {state === 'working' ? 'Allowing…' : `Allow ${call.tool}`}
+      </button>
+      <span className="text-[11px]" style={{ color: 'var(--color-text-faint)' }}>
+        {state === 'failed'
+          ? 'That did not save — try again, or allow it in Settings → Tools.'
+          : 'and stop asking about it'}
+      </span>
+    </span>
+  );
+}
+
+function CallLine({ call, onAllowed }: { call: ChatToolCall; onAllowed?: () => void }) {
   const { Icon, color, label } = VERDICTS[call.verdict] ?? UNKNOWN;
   const [showOutput, setShowOutput] = useState(false);
   const openable = Boolean(call.output);
@@ -156,6 +212,7 @@ function CallLine({ call }: { call: ChatToolCall }) {
           <span style={{ color: 'var(--color-text-faint)' }}>· {call.reason}</span>
         )}
       </button>
+      {onAllowed && <AllowTool call={call} onAllowed={onAllowed} />}
       {showOutput && <StepOutput text={call.output ?? ''} />}
     </li>
   );
@@ -164,8 +221,13 @@ function CallLine({ call }: { call: ChatToolCall }) {
 export default function ToolCalls({
   calls,
   active = false,
+  onAllowed,
 }: {
   calls: ChatToolCall[];
+  /** Called after a held tool has been allowed, so the shell can ask the
+   *  question again — the tool is permitted now and the answer changes.
+   *  Absent on a replayed history, where allowing settles nothing to retry. */
+  onAllowed?: () => void;
   /** The reply is still being written, so this is work in progress.
    *
    *  Live work stays open: folding it would hide the only thing on screen
@@ -254,7 +316,11 @@ export default function ToolCalls({
       {notable.length > 0 && (
         <ul className="mt-1 flex flex-col gap-1">
           {notable.map((call, i) => (
-            <CallLine key={`n/${call.server}/${call.tool}/${i}`} call={call} />
+            <CallLine
+              key={`n/${call.server}/${call.tool}/${i}`}
+              call={call}
+              onAllowed={onAllowed}
+            />
           ))}
         </ul>
       )}

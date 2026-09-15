@@ -1482,6 +1482,10 @@ class ExecutionEngine:
                 yield StreamEvent.tool_call(
                     call.server, call.tool, "confirm", reason,
                     target=call_target(call.tool, call.arguments),
+                    # Carried so the row can offer the one thing that settles
+                    # it. Read off the gate's answer rather than guessed from
+                    # the tool's name a second time.
+                    grantable=bool(result.get("grantable")),
                 )
                 yield from self._answer_without_the_tool(
                     original_prompt, call, reason, model, system_prompt, spoken,

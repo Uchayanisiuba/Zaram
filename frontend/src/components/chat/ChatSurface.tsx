@@ -216,6 +216,20 @@ export default function ChatSurface({ navigate }: Props) {
     [send],
   );
 
+  /** A held tool has just been allowed, so ask the question again.
+   *
+   *  The loop answered without the tool when the gate held it — that answer
+   *  is what it could say at the time, and it stays in the transcript. The
+   *  permission changed, so the answer can change, and asking again is how
+   *  that happens: recall runs afresh, the gate now lets the tool through,
+   *  and the reply is honestly a new one rather than the old one patched. */
+  const askAgainAfterAllowing = useCallback(() => {
+    const lastAsked = [...useChatStore.getState().messages]
+      .reverse()
+      .find((message) => message.role === 'user');
+    if (lastAsked) void send(lastAsked.text);
+  }, [send]);
+
   /** Ask the last question again with the cloud model the offer named.
    *
    *  A per-message override, not a preference change: the next question goes
@@ -1142,7 +1156,9 @@ export default function ChatSurface({ navigate }: Props) {
                   {msg.plan ? (
                     <PlanCard items={msg.plan.items} awaitingGo={msg.plan.awaitingGo} onGo={goPlan} />
                   ) : null}
-                  {msg.toolCalls?.length ? <ToolCalls calls={msg.toolCalls} /> : null}
+                  {msg.toolCalls?.length ? (
+                    <ToolCalls calls={msg.toolCalls} onAllowed={askAgainAfterAllowing} />
+                  ) : null}
                   {msg.notices?.map((notice, i) => (
                     <NoticeCard
                       key={i}
@@ -1244,7 +1260,9 @@ export default function ChatSurface({ navigate }: Props) {
                   {streamingPlan ? (
                     <PlanCard items={streamingPlan.items} awaitingGo={streamingPlan.awaitingGo} />
                   ) : null}
-                  {streamingToolCalls.length > 0 && <ToolCalls calls={streamingToolCalls} active />}
+                  {streamingToolCalls.length > 0 && (
+                    <ToolCalls calls={streamingToolCalls} active onAllowed={askAgainAfterAllowing} />
+                  )}
                   {streamingNotices.map((notice, i) => (
                     <NoticeCard
                       key={i}

@@ -217,6 +217,11 @@ export type ChatEvent =
       output: string;
       /** A write's unified diff, bounded by the backend, or `''`. */
       diff: string;
+      /** Only meaningful on a `confirm`: whether allowing this tool would
+       *  let it run. False for a deletion, which keeps asking however much
+       *  has been granted — so the row must not offer a button that would
+       *  change nothing. Decided by the gate, never by the interface. */
+      grantable?: boolean;
       /** The commit a write made, or `''`. What `Revert` reverses. */
       commit: string;
       /** A screenshot `look_at_app` took — a file name in the project's
@@ -733,6 +738,7 @@ function parseLine(line: string): ChatEvent | null {
         commit: typeof data.commit === 'string' ? data.commit : '',
         image: typeof data.image === 'string' ? data.image : '',
         appUrl: typeof data.app_url === 'string' ? data.app_url : '',
+        grantable: data.grantable === true,
       };
 
     case 'status':
