@@ -28,7 +28,12 @@ import {
   Brain,
   FileText,
   Image as ImageIcon,
+  Cpu,
   Library,
+  ListChecks,
+  MessageSquare,
+  Quote,
+  Search,
   Wrench,
 } from 'lucide-react';
 import type { ChatNotice } from '../../stores/chatStore';
@@ -76,7 +81,44 @@ const TONES: Record<string, { Icon: typeof AlertTriangle; color: string }> = {
   // say something broke. `Brain` is the icon the Memory node already wears, so
   // the notice reads as being about memory without needing to say so twice.
   memory: { Icon: Brain, color: 'var(--color-text-muted, #94a3b8)' },
+  // A recalled passage that reads like an instruction and was quoted rather
+  // than obeyed. Neutral, and the reasoning is the header's own, arriving
+  // through a fifth case: nothing went wrong, the defence worked, and an
+  // amber triangle over "this was handled" spends the warning on a reader
+  // who is not in any danger. Normally this does not render as a card at
+  // all — it rides the sources line (`quotedNotice.ts`) — and this tone is
+  // for the answer that cited nothing, where there is no line to ride.
+  untrusted: { Icon: Quote, color: 'var(--color-text-muted, #94a3b8)' },
+  // **Five more, audited together on 15 September 2026**, after the
+  // maintainer asked why a caution mark was on something that endangers
+  // nobody. Every one of these had been arriving as an amber triangle purely
+  // because it was added to the backend after this map — which is how the
+  // argument at the top of this file gets lost one kind at a time.
+  //
+  // The plan is waiting on a person to read it and press Go. Nothing is
+  // wrong; the pause is the product working.
+  plan: { Icon: ListChecks, color: 'var(--color-text-muted, #94a3b8)' },
+  // "3 servers are available for this question." A statement of what is
+  // attached, and the least alarming sentence in the product.
+  tools: { Icon: Wrench, color: 'var(--color-text-muted, #94a3b8)' },
+  // Something the model said between steps.
+  step: { Icon: MessageSquare, color: 'var(--color-text-muted, #94a3b8)' },
+  // A model swap. Housekeeping about VRAM the user can do nothing about, and
+  // the same call `IMAGES_HOUSEKEEPING` makes below for the same reason.
+  resident: { Icon: Cpu, color: 'var(--color-text-muted, #94a3b8)' },
+  // Search is off, so the answer may be stale. A disabled capability stated
+  // plainly, which `CLAUDE.md` requires — and it carries a button to turn it
+  // on, which is what makes it an offer rather than a warning.
+  search: { Icon: Search, color: 'var(--color-text-muted, #94a3b8)' },
 };
+
+// **What keeps the amber triangle**, so the audit above is a decision rather
+// than a sweep: `ingest` — a file the user added that gave nothing back, the
+// founding case this component was written for — and `stuck`, which offers to
+// send the question and the files Zaram read to a cloud model. One is data the
+// user believes they have and do not; the other is bytes about to leave the
+// machine. Those are the two that earn it, and an unrecognised kind keeps it
+// too, because understating a problem is the worse of the two failures.
 
 const DEFAULT_TONE = { Icon: AlertTriangle, color: 'var(--color-amber, #d97706)' };
 

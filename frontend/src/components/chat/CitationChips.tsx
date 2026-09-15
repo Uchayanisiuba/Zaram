@@ -17,6 +17,7 @@
 import { FileText, Diamond, Globe } from 'lucide-react';
 
 import { type ChatSource, sourceHost, sourceLeftDevice } from '@/services/chatClient';
+import { QUOTED_SEGMENT } from './quotedNotice';
 
 /** Icon per kind. The kind is *what* it is; the colour is whether it left. */
 const KIND_ICON = {
@@ -101,11 +102,20 @@ export default function CitationSummary({
   deleted,
   onOpenPanel,
   onOpenSource,
+  quoted = false,
 }: {
   sources: ChatSource[];
   deleted: Set<string>;
   onOpenPanel: (el: HTMLElement) => void;
   onOpenSource: (source: ChatSource, el: HTMLElement) => void;
+  /** One of these passages read like an instruction and was quoted rather
+   *  than obeyed.
+   *
+   *  It rides here, in the same muted tone as the counts beside it, because
+   *  it is a fact about the sources and not a warning about the reader — see
+   *  `quotedNotice.ts`. The sentence itself is in the panel this line opens;
+   *  a segment is what a line that gets scanned can carry. */
+  quoted?: boolean;
 }) {
   const cited = sources.filter((s) => s.cited);
   const uncited = sources.length - cited.length;
@@ -173,6 +183,12 @@ export default function CitationSummary({
           <span className="text-slate-600">
             {' · '}
             {uncited} recalled, not cited
+          </span>
+        )}
+        {quoted && (
+          <span className="text-slate-600" data-testid="quoted-segment">
+            {' · '}
+            {QUOTED_SEGMENT}
           </span>
         )}
       </button>

@@ -43,6 +43,7 @@ import ProjectScopePicker from './ProjectScopePicker';
 import DomainScopePicker from './DomainScopePicker';
 import MicButton from './MicButton';
 import CitationSummary from './CitationChips';
+import { splitQuotedNotice } from './quotedNotice';
 import MessageActions from './MessageActions';
 import { AnsweredBy } from './AnsweredBy';
 import SpeakButton from './SpeakButton';
@@ -490,6 +491,10 @@ export default function ChatSurface({ navigate }: Props) {
   const [panelFor, setPanel] = useState<{
     sources: ChatSource[];
     anchor: HTMLElement | null;
+    /** The quoted-passage sentence for *this* reply, when there was one. It
+     *  travels with the sources because it is about them, and the line that
+     *  opens the panel carries only a short segment. */
+    quotedNote?: string;
   } | null>(null);
 
   useEffect(() => {
@@ -1081,8 +1086,15 @@ export default function ChatSurface({ navigate }: Props) {
                     <CitationSummary
                       sources={msg.sources}
                       deleted={deletedUrls}
-                      onOpenPanel={(el) => setPanel({ sources: msg.sources, anchor: el })}
+                      onOpenPanel={(el) =>
+                        setPanel({
+                          sources: msg.sources,
+                          anchor: el,
+                          quotedNote: splitQuotedNotice(msg.notices).quoted?.content ?? '',
+                        })
+                      }
                       onOpenSource={(s, el) => s.url && openSourcePanel(s.url, el)}
+                      quoted={splitQuotedNotice(msg.notices).quoted !== null}
                     />
                   )}
                   {/* The "unless asked" half of "orb, silent unless asked".
@@ -1159,7 +1171,15 @@ export default function ChatSurface({ navigate }: Props) {
                   {msg.toolCalls?.length ? (
                     <ToolCalls calls={msg.toolCalls} onAllowed={askAgainAfterAllowing} />
                   ) : null}
-                  {msg.notices?.map((notice, i) => (
+                  {/* The quoted-passage notice is taken out here and shown on
+                      the sources line instead — unless this answer cited
+                      nothing, in which case there is no line to ride and it
+                      stays a card. Quiet either way; never absent. See
+                      `quotedNotice.ts`. */}
+                  {(msg.sources.some((s) => s.cited)
+                    ? splitQuotedNotice(msg.notices).cards
+                    : (msg.notices ?? [])
+                  ).map((notice, i) => (
                     <NoticeCard
                       key={i}
                       notice={notice}
@@ -1232,9 +1252,14 @@ export default function ChatSurface({ navigate }: Props) {
                       sources={streamingSources}
                       deleted={deletedUrls}
                       onOpenPanel={(el) =>
-                        setPanel({ sources: streamingSources, anchor: el })
+                        setPanel({
+                          sources: streamingSources,
+                          anchor: el,
+                          quotedNote: splitQuotedNotice(streamingNotices).quoted?.content ?? '',
+                        })
                       }
                       onOpenSource={(s, el) => s.url && openSourcePanel(s.url, el)}
+                      quoted={splitQuotedNotice(streamingNotices).quoted !== null}
                     />
                   )}
                   {/* The bar, while the picture is being drawn.
@@ -1263,7 +1288,10 @@ export default function ChatSurface({ navigate }: Props) {
                   {streamingToolCalls.length > 0 && (
                     <ToolCalls calls={streamingToolCalls} active onAllowed={askAgainAfterAllowing} />
                   )}
-                  {streamingNotices.map((notice, i) => (
+                  {(streamingSources.some((s) => s.cited)
+                    ? splitQuotedNotice(streamingNotices).cards
+                    : streamingNotices
+                  ).map((notice, i) => (
                     <NoticeCard
                       key={i}
                       notice={notice}
@@ -1557,6 +1585,7 @@ export default function ChatSurface({ navigate }: Props) {
             <CitationPanel
               sources={panelFor.sources}
               deleted={deletedUrls}
+              quotedNote={panelFor.quotedNote}
               returnFocusTo={panelFor.anchor}
               onClose={() => setPanel(null)}
               onCorrect={(s) => {

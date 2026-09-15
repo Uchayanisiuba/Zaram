@@ -160,6 +160,7 @@ export default function CitationPanel({
   onClose,
   onCorrect,
   onOpenActivity,
+  quotedNote = '',
 }: {
   sources: ChatSource[];
   deleted: Set<string>;
@@ -167,6 +168,15 @@ export default function CitationPanel({
   onClose: () => void;
   onCorrect: (source: ChatSource) => void;
   onOpenActivity: () => void;
+  /** The backend's sentence about a recalled passage that read like an
+   *  instruction, when there was one.
+   *
+   *  The whole disclosure used to be an amber banner across the reply. It is
+   *  here instead because it is a fact about these sources, and on the line
+   *  that opens this panel as a short segment — see `quotedNotice.ts`. The
+   *  sentence is carried rather than rewritten: the backend owns the wording,
+   *  and a second copy here is the one that drifts. */
+  quotedNote?: string;
 }) {
   const reduced = useIsReducedMotion();
   const ref = useRef<HTMLDivElement>(null);
@@ -226,6 +236,19 @@ export default function CitationPanel({
           <X size={13} />
         </button>
       </div>
+
+      {/* First, because it changes how everything below it should be read:
+          one of these passages tried to give an instruction. Stated in the
+          panel's own quiet register — this is the defence having worked, not
+          a problem for the reader to solve. */}
+      {quotedNote && (
+        <p
+          className="text-xs mb-3 pb-2.5 text-slate-400 border-b border-white/5"
+          data-testid="quoted-note"
+        >
+          {quotedNote}
+        </p>
+      )}
 
       {stayed.length > 0 && (
         <section className="mb-3">
