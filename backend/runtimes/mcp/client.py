@@ -197,6 +197,25 @@ class McpServer:
             return [comspec, "/c", resolved, *command[1:]]
         return [resolved, *command[1:]]
 
+    def _child_env(self) -> Dict[str, str]:
+        """The server's declared variables **on top of** this process's, never
+        instead of them.
+
+        Found on 15 September 2026 by attaching the first server that needs a
+        token. `Popen(env=...)` replaces the environment wholesale, so a server
+        block with `env: {TOKEN: ...}` was spawned with that one variable and
+        nothing else: no `PATH`, so `npx` could not find `node`, and no
+        `SYSTEMROOT`, without which Node's OpenSSL cannot seed its random
+        source on Windows and aborts with `Assertion failed:
+        ncrypto::CSPRNG(nullptr, 0)`. Every server without an `env` block
+        inherited everything and worked, which is why the bundled servers never
+        showed it — and every server *with* a credential was unstartable.
+        """
+        merged = dict(os.environ)
+        if self._env:
+            merged.update({str(k): str(v) for k, v in self._env.items()})
+        return merged
+
     def _start(self) -> None:
         # `stderr` is captured, not inherited: the spec allows a server to log
         # there freely, and a child writing to Zaram's own stderr would put a
@@ -206,7 +225,7 @@ class McpServer:
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            env=self._env,
+            env=self._child_env(),
             cwd=self._cwd,
             text=True,
             encoding="utf-8",
