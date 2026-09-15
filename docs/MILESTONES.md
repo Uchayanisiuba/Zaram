@@ -112,14 +112,44 @@ Three more that the release checks found once they were run for real:
 * Three `.fbx` idles in `avatar-source/animations/` are Mixamo exports and
   stay untracked.
 
-#### To release
+#### Released, 15 September, later — by hand, and why
 
-1. `git tag v0.1.0-alpha.1 && git push origin v0.1.0-alpha.1`.
-2. Install what the workflow produces on a machine that is not this one;
-   open Settings → Packs and press one Get it; ask the manual a question;
-   draw a picture on NIM; press Report a problem.
-3. Add `BUTTONDOWN_API_KEY` under repo Settings → Secrets if the tester
-   email should go out on its own.
+**`v0.1.0-alpha.1` is published and the site links it.** Not through the
+workflow: the workflow had never parsed. `secrets` cannot be read in a
+step's `if:`, GitHub refuses the whole file for it, and every push since the
+14th had produced a 0 s failure without running a step — the tag in step 1
+above would have done exactly that. Fixed (`e805f10`, a job-level env flag),
+but the fix has **never run end to end**; the next `v*` tag is its first
+real exercise, and the runner build is unproven where the local one is not.
+
+What was done instead, in order: `npm run build` here; silent install to
+`%LOCALAPPDATA%\Programs\Zaram`; launched from `C:\` on an empty
+`ZARAM_DATA_DIR` — backend from `resourcesuntime\python.exe`, `/health`
+401 without the credential, every store in the scratch directory, Memory
+rendering live counts (window captured by handle; the largest visible
+window, since the 6×128 ambient handle is also a window); `gh release create`
+under the maintainer's login with installer, portable and `SHA256SUMS.txt`;
+`scripts/site-release.mjs` without `--live`; `main` pushed; `site/` split to
+`gh-pages`; the served `site.js` and the assembled link checked.
+
+* The page still opens the download on `releaseAt` (21 September, 09:00
+  BST). The link works now for anyone who has it. `site.js`'s own rule for
+  flipping early — installed on a machine that is not this one — is not met.
+* The 13 September `v0.1.0` release still exists with the installer that
+  could not start elsewhere. The notes on the new one say it is replaced;
+  deleting the old one is the maintainer's call.
+* **Seen on the cold install and left alone:** with an empty data
+  directory, Memory → Facts lists the manual's chunks as ten records marked
+  `user · provisional`. Not the manual's doing — `ingest/service.py` stores
+  every chunk of any scanned folder as a Spine record and `GET /memory`
+  lists the whole Spine — but the manual makes it the first thing a fresh
+  install shows under a heading about the person. Worth a filter or a label
+  before testers see it.
+* `backend/manual.json` is the stamp for the new store, written beside the
+  databases; it is now ignored like them.
+* Still to do from the list above: install on a machine that is not this
+  one; Packs → Get it in a packaged build; NIM; Report a problem;
+  `BUTTONDOWN_API_KEY` if the tester email should go out on its own.
 
 ### 14 September, later — fewer notices, a cloud model sized by its provider, documents written to a brief.
 
