@@ -408,7 +408,6 @@ function armScene() {
     }, { rootMargin: "120px" }).observe(scene);
   }
 
-  const stars = armStars(scene.querySelector('[data-role="stars"]'));
   const face = armFace(scene.querySelector('[data-role="avatar-face"]'), scene.querySelector('[data-role="avatar-img"]'));
   const stage = scene.querySelector('[data-role="orb-stage"]');
 
@@ -419,7 +418,6 @@ function armScene() {
     scene.style.setProperty("--mx", mx.toFixed(4));
     scene.style.setProperty("--my", my.toFixed(4));
     scene.style.setProperty("--sy", sy.toFixed(1));
-    if (stars) stars(mx, my);
     if (face) face(mx, my, !!(stage && stage.classList.contains("is-working")));
     if (visible && !document.hidden) raf = requestAnimationFrame(tick);
   }
@@ -537,50 +535,6 @@ function armFace(canvas, img) {
 /** A field of slow points with depth, on a canvas. About a hundred and
     forty of them, drifting toward the viewer, shifted by the pointer so the
     near ones move more than the far ones. Returns the per-frame draw. */
-function armStars(canvas) {
-  if (!canvas) return null;
-  const ctx = canvas.getContext("2d", { alpha: true });
-  if (!ctx) return null;
-
-  const N = 140;
-  const pts = [];
-  let w = 0, h = 0, dpr = 1;
-
-  function size() {
-    const r = canvas.getBoundingClientRect();
-    dpr = Math.min(window.devicePixelRatio || 1, 2);
-    w = Math.max(1, Math.round(r.width)); h = Math.max(1, Math.round(r.height));
-    canvas.width = w * dpr; canvas.height = h * dpr;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  }
-  function seed(p) {
-    p.x = Math.random() * 2 - 1; p.y = Math.random() * 2 - 1;
-    p.z = Math.random() * 0.9 + 0.1;              // 0.1 far … 1 near
-    p.c = Math.random() < 0.72 ? "94,231,220" : "139,127,212";
-    return p;
-  }
-  size();
-  for (let i = 0; i < N; i++) pts.push(seed({}));
-  window.addEventListener("resize", size, { passive: true });
-
-  return function draw(mx, my) {
-    ctx.clearRect(0, 0, w, h);
-    const cx = w / 2, cy = h / 2;
-    for (const p of pts) {
-      p.z += 0.0011;                              // drift toward the viewer
-      if (p.z > 1.15) seed(p), (p.z = 0.1);
-      const k = 0.55 / p.z;                       // perspective
-      const x = cx + (p.x + mx * 0.08 * p.z) * cx * k;
-      const y = cy + (p.y + my * 0.06 * p.z) * cy * k;
-      if (x < -4 || x > w + 4 || y < -4 || y > h + 4) continue;
-      const a = Math.min(1, (p.z - 0.1) * 1.4) * 0.75;
-      const s = 0.6 + p.z * 1.6;
-      ctx.fillStyle = `rgba(${p.c},${a.toFixed(3)})`;
-      ctx.beginPath(); ctx.arc(x, y, s, 0, Math.PI * 2); ctx.fill();
-    }
-  };
-}
-
 /** Cards lean toward the pointer, a few degrees, and a glare follows it. */
 function armTilt() {
   if (!MOTION_OK || !FINE_POINTER) return;
