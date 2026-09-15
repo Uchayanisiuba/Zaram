@@ -475,6 +475,28 @@ class IntentRouter:
         "wallpaper", "avatar", "portrait", "sketch", "render", "rendering",
     })
 
+    #: Verbs that make a *written* thing. `_MAKING_VERBS` is a drawing
+    #: vocabulary and has no "write" in it, which is correct there and useless
+    #: here — so the shared matcher takes its verbs as an argument rather than
+    #: one set being stretched to cover both jobs.
+    _WRITING_VERBS = frozenset({
+        "write", "draft", "compose", "prepare", "summarise", "summarize",
+        "produce", "make", "create", "generate", "put",
+    })
+
+    #: Nouns that name a **written** thing somebody asked to be made.
+    #:
+    #: Used only to notice that a request asks for *two* things — a document
+    #: and a picture — which is a compound request and not an image request.
+    #: Never used on its own to route anything, so a miss costs nothing beyond
+    #: the old behaviour.
+    _WRITTEN_NOUNS = frozenset({
+        "proposal", "report", "letter", "invoice", "quote", "contract",
+        "document", "doc", "memo", "summary", "brief", "plan", "article",
+        "post", "email", "reply", "deck", "presentation", "slides",
+        "spreadsheet", "essay", "outline", "agenda", "minutes", "note", "notes",
+    })
+
     #: Words that turn a picture noun into a reference to one that exists.
     #:
     #: The distinction the whole rule turns on: *"generate an image of a blue
@@ -584,6 +606,64 @@ class IntentRouter:
         return any(cls._looks_like(word, entry) for entry in vocabulary)
 
     @classmethod
+    def _asks_for_work_with_a_picture_in_it(cls, prompt: str) -> bool:
+        """Whether this asks for something written **with a picture in it**.
+
+        Not an image request, and not a plain one either: it is ordinary work
+        with a drawing as one step of it, which is a thing Zaram could not
+        express until `draw_image` existed. Used to send the request down the
+        tool path, where the model is handed a drawing verb it can choose.
+
+        **It deliberately catches what `_asks_for_a_drawing` refuses.** That
+        rule requires a making verb within `_VERB_REACH` of the picture noun,
+        and its own docstring gives the excluded example — *"generate a
+        document that explains the process and includes a picture"*, where the
+        verb governs the document. That exclusion is right for *"is this a
+        drawing request"* and wrong for *"is there a drawing in this
+        request"*, which is a different question with a different answer.
+
+        So a picture noun is enough here, as long as nothing marks it as a
+        picture that already exists: *"summarise the report and tell me about
+        the photo I sent"* is blocked by "about", the same reference guard the
+        drawing rule uses. Widening only ever reaches the tool plan, which
+        degrades to an ordinary reply when no tool applies.
+        """
+        if not cls._asks_for_a_written_thing(prompt):
+            return False
+        return cls._asks_for_a_drawing(prompt) or cls._mentions_a_new_picture(prompt)
+
+    @classmethod
+    def _mentions_a_new_picture(cls, prompt: str) -> bool:
+        """A picture noun that is not a reference to one that already exists."""
+        words = re.findall(r"[a-z]+", (prompt or "").lower())
+        for index, word in enumerate(words):
+            if not cls._is_one_of(word, cls._PICTURE_NOUNS):
+                continue
+            before = words[max(0, index - cls._REFERENCE_REACH):index]
+            if any(w in cls._REFERS_TO_AN_EXISTING_PICTURE for w in before):
+                continue
+            return True
+        return False
+
+    @classmethod
+    def _asks_for_a_written_thing(cls, prompt: str) -> bool:
+        """Whether ``prompt`` also asks for something *written* to be made.
+
+        The same shape as `_asks_for_a_drawing` and for one purpose: telling a
+        request that wants a picture from one that wants a document **with** a
+        picture in it. *"Draft the report, then generate an image for the
+        cover"* asked for two things and used to produce one — the classifier
+        saw "generate an image", routed the whole request to a drawing model,
+        and the report was never written.
+
+        Deliberately one-directional and used only to *widen* what runs: a
+        false positive sends a request down the tool path, which degrades to an
+        ordinary reply when no tool applies. A false negative leaves the old
+        behaviour exactly as it was.
+        """
+        return cls._verb_near_noun(prompt, cls._WRITTEN_NOUNS, cls._WRITING_VERBS)
+
+    @classmethod
     def _asks_for_a_drawing(cls, prompt: str) -> bool:
         """Whether ``prompt`` asks for a picture to be *made*.
 
@@ -614,9 +694,19 @@ class IntentRouter:
         *"photorealistic"* — which are requests to draw with nothing here to
         match.
         """
+        return cls._verb_near_noun(prompt, cls._PICTURE_NOUNS, cls._MAKING_VERBS)
+
+    @classmethod
+    def _verb_near_noun(cls, prompt: str, nouns: frozenset, verbs: frozenset) -> bool:
+        """One of `verbs` within `_VERB_REACH` words before one of `nouns`.
+
+        Factored out on 15 September 2026 when the same shape was needed for
+        written things — one rule, two vocabularies, rather than the rule
+        copied and one copy later corrected.
+        """
         words = re.findall(r"[a-z]+", (prompt or "").lower())
         for index, word in enumerate(words):
-            if not cls._is_one_of(word, cls._PICTURE_NOUNS):
+            if not cls._is_one_of(word, nouns):
                 continue
             before = words[max(0, index - cls._REFERENCE_REACH):index]
             # Exactly, never fuzzily. These are short function words — `in`,
@@ -624,7 +714,7 @@ class IntentRouter:
             if any(w in cls._REFERS_TO_AN_EXISTING_PICTURE for w in before):
                 continue
             reach = words[max(0, index - cls._VERB_REACH):index]
-            if any(cls._is_one_of(w, cls._MAKING_VERBS) for w in reach):
+            if any(cls._is_one_of(w, verbs) for w in reach):
                 return True
         return False
     _SPEECH_KEYWORDS = {"speak", "say", "voice", "audio", "talk", "pronounce", "read aloud",
@@ -1283,11 +1373,32 @@ class IntentPlanner:
                     depends_on=[0],
                 ),
             ]
-        elif classification.intent_type is IntentType.TOOL or (
-            self._coding_project_is_open()
-            and classification.intent_type
-            in (IntentType.CODE, IntentType.CONVERSATION, IntentType.FILESYSTEM, IntentType.VISION)
-            and not has_images
+        elif (
+            classification.intent_type is IntentType.TOOL
+            or (
+                self._coding_project_is_open()
+                and classification.intent_type
+                in (IntentType.CODE, IntentType.CONVERSATION, IntentType.FILESYSTEM)
+                and not has_images
+            )
+            # **Vision with nothing attached, whatever is open.** The comment
+            # below already argued this — with no attachment the picture can
+            # only come from a tool — and then gated it on a coding project,
+            # which was right when `look_at_app` was the only tool that could
+            # produce one. `draw_image` is registered on every machine now, so
+            # the gate was the narrower half of a correct idea. The `else`
+            # branch's alternative is `vision.analyze`, which the dispatcher
+            # refuses because there is no image: a plan that cannot run is
+            # worse than one that degrades to an ordinary reply.
+            or (classification.intent_type is IntentType.VISION and not has_images)
+            # **A request that asks for two things is not an image request.**
+            # *"Draft the report, then generate an image for the cover"* used
+            # to classify as IMAGE, route the whole request to a drawing model,
+            # and return a picture with no report — the second half silently
+            # dropped. One request gets one intent, so the fix is to stop
+            # calling this one an image: with `draw_image` in the tool list the
+            # drawing is a *step*, which is what the person asked for.
+            or (not has_images and IntentRouter._asks_for_work_with_a_picture_in_it(prompt))
         ):
             # Same shape as the search pair above: gather, then answer with
             # what was gathered. The list step is what puts the user's attached

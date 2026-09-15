@@ -519,6 +519,26 @@ class KernelBootstrapper:
 
         self.mcp_runtime.register_builtin(ServerConfig(server_id=WEB_SERVER), WebTools())
 
+        # The draw pack: `draw_image`, so a picture can be a *step* rather than
+        # a whole request. Generative tier — it writes a new artifact through
+        # the same `ArtifactService` documents use and can destroy nothing — so
+        # no write mode, no undo, no confirmation, exactly as `documents`.
+        #
+        # It calls the images runtime registered above rather than drawing
+        # anything itself: the modality gate, the card check, the provider's
+        # data policy and the refusal-with-its-remedy all already live there,
+        # and a second route to one capability would be a second no-overwrite
+        # guarantee nobody had proved. Registered whether or not the machine
+        # can draw, because the tool's refusal is the thing that tells a model
+        # not to narrate a picture it never made.
+        from packs.draw import SERVER_ID as DRAW_SERVER, DrawTools
+
+        images_runtime = self.images_runtime
+        self.mcp_runtime.register_builtin(
+            ServerConfig(server_id=DRAW_SERVER),
+            DrawTools(lambda capability, payload: run_sync(images_runtime.execute(capability, payload))),
+        )
+
         # **Registering it is not reaching it, and that distinction is the
         # whole reason this line exists.** The runtime was registered here for
         # a fortnight while `planner.py` contained no occurrence of "mcp", so
