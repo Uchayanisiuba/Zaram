@@ -43,6 +43,7 @@ const PAIRED = new Set(['nvidia_nim', 'openrouter', 'groq']);
 import LetterheadSection from '../components/settings/LetterheadSection';
 import ToolsSection from '../components/settings/ToolsSection';
 import ReportSection from '../components/settings/ReportSection';
+import ManualReader from '../components/settings/ManualReader';
 import PacksSection, { PackOffer } from '../components/settings/PacksSection';
 import PairingSection from '../components/settings/PairingSection';
 import {
@@ -499,6 +500,7 @@ export function groupModelsByLocality(models: DiscoveredModel[]): ModelGroup[] {
 }
 
 export default function SettingsWorkspace() {
+  const [manualOpen, setManualOpen] = useState(false);
   const backendOnline = useSystemStore((s) => s.backendOnline);
   const routing = useSystemStore((s) => s.routing);
   const speech = useSystemStore((s) => s.speech);
@@ -1885,6 +1887,17 @@ export default function SettingsWorkspace() {
         </Section>
 
         <Section title="Help" icon={<LifeBuoy size={14} style={{ color: 'var(--color-indigo-light)' }} />}>
+          <Row
+            label="The manual"
+            state="good"
+            detail={
+              'How Zaram works, in ten short pages: memory, what leaves your computer, documents, ' +
+              'pictures, voice, packs, tools, and what to do when something goes wrong. The same pages ' +
+              'live in the Zaram domain under Knowledge, so you can also just ask.'
+            }
+          >
+            <Button onClick={() => setManualOpen(true)}>Open the manual</Button>
+          </Row>
           <ReportSection Row={Row} />
         </Section>
 
@@ -1895,6 +1908,7 @@ export default function SettingsWorkspace() {
         </p>
         <Problem message={null} />
       </div>
+      {manualOpen && <ManualReader onClose={() => setManualOpen(false)} />}
     </div>
   );
 }

@@ -52,7 +52,7 @@ files:
   - backend/**/*.yml
   # The manual: Zaram's own pages and their pictures, read into the Zaram
   # domain at start and shown under Settings → Help.
-  - backend/manual/pages/*.md
+  - backend/manual/zaram-manual/*.md
   - backend/manual/assets/*
 
   # Never, whatever matched above. Ordered after the includes deliberately.

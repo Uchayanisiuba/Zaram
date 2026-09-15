@@ -787,6 +787,21 @@ class ExecutionEngine:
                             logger.exception(
                                 "Document step emitted an unparseable artifact marker"
                             )
+                    elif token.lstrip().startswith("[FALLBACK]") and i > 0:
+                        # A later step's refusal — "I'd be guessing", nothing
+                        # to draw — is the system speaking, not the model, and
+                        # it must not be pasted onto the end of the reply the
+                        # first step already gave. Seen 15 September 2026:
+                        # "how do I export my memory" was routed to the
+                        # document plan, the answer came out well, and then
+                        # `[FALLBACK] document.generate failed: I'd be
+                        # guessing…` printed under it as if the model had
+                        # said it. It becomes a notice, once, and the loop
+                        # below still records the step as failed.
+                        said = token.strip()[len("[FALLBACK]"):].strip()
+                        said = re.sub(r"^[\w.]+ failed:\s*", "", said)
+                        if said:
+                            yield StreamEvent.notice(said, kind="step")
                     else:
                         yield token
 

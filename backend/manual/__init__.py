@@ -38,7 +38,8 @@ from typing import Any, Dict, List, Optional
 logger = logging.getLogger(__name__)
 
 HERE = Path(__file__).resolve().parent
-PAGES = HERE / "pages"
+#: Named for what Knowledge lists it as: the folder's name is the source's.
+PAGES = HERE / "zaram-manual"
 ASSETS = HERE / "assets"
 
 DOMAIN_NAME = "Zaram"
@@ -159,6 +160,12 @@ def ensure_indexed(ingest_service: Any, domains: Any, data_dir: Path) -> Dict[st
         return {"indexed": False, "version": current, **known}
 
     source_id, report = ingest_service.scan(str(PAGES))
+    # Public text, not the person's: a cloud model may recall it, or the
+    # manual would answer only on machines that never use one.
+    try:
+        ingest_service.records.set_policy(source_id, "cloud_allowed")
+    except Exception:  # noqa: BLE001 - the default is the safe direction
+        logger.debug("manual: could not set the source policy", exc_info=True)
     domain = next((d for d in domains.all() if d.get("name") == DOMAIN_NAME), None)
     if domain is None:
         domain = domains.create(DOMAIN_NAME, DOMAIN_DESCRIPTION)

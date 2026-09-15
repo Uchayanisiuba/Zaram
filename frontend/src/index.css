@@ -776,3 +776,14 @@ select:focus-visible {
 }
 .zaram-md .hljs-emphasis { font-style: italic; }
 .zaram-md .hljs-strong { font-weight: 600; }
+
+/* The manual, read in Settings → Help. Reading measure and rhythm for
+   ten pages of prose; the chat's message styles are for replies. */
+.manual-article h1 { font-size: 1.5rem; font-weight: 600; margin: 1.25rem 0 0.75rem; }
+.manual-article h2 { font-size: 1.05rem; font-weight: 600; margin: 1.5rem 0 0.5rem; }
+.manual-article p, .manual-article li { line-height: 1.6; margin: 0.5rem 0; color: var(--color-text-muted); }
+.manual-article p strong, .manual-article li strong { color: var(--color-text); }
+.manual-article ul, .manual-article ol { padding-left: 1.25rem; }
+.manual-article ul { list-style: disc; }
+.manual-article ol { list-style: decimal; }
+.manual-article code { font-family: var(--font-mono); font-size: 0.85em; }

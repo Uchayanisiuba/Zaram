@@ -110,6 +110,15 @@ INTENT_EXEMPLARS: Dict[str, List[str]] = {
         "why did that happen",
         "summarise what we agreed",
         "remind me what the client said about the deadline",
+        #: Questions about Zaram itself, answered from the built-in manual.
+        #: Without these, "how do I export my memory" landed nearest "export
+        #: this as a Word file" and ran the document plan (15 September 2026):
+        #: the answer was right and a refusal to write a file followed it.
+        "how do I export my memory and take it with me",
+        "how do I add a cloud key to Zaram",
+        "where does Zaram keep my data",
+        "what leaves my computer when I ask something",
+        "how do I correct something Zaram remembered",
     ],
     #: Written to sit clear of its two neighbours, which is the whole
     #: difficulty here. `tool` is *acting on* a repository — committing,

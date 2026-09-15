@@ -93,6 +93,9 @@ class TestIndexing:
         zaram = next(d for d in domains.all() if d["name"] == "Zaram")
         assert first["domain_id"] == zaram["id"]
         assert first["source_id"] in domains.source_ids(zaram["id"])
+        # Public text: a cloud model may recall it too.
+        source = next(s for s in service.records.sources() if s["id"] == first["source_id"])
+        assert source["policy"] == "cloud_allowed" and source["name"] == "zaram-manual"
         assert manual.indexed_version(data) == manual.version()
         chunks_after_first = len(service.memory.chunks)
         assert chunks_after_first > 0

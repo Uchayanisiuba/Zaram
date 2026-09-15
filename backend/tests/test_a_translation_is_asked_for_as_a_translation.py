@@ -135,3 +135,18 @@ class TestItRoutesOnTheRealEmbedder:
         ):
             decision = router.route(prompt)
             assert decision is not None and decision.intent == intent, (prompt, decision)
+
+
+class TestQuestionsAboutZaramAreConversation:
+    """Measured on bge-m3: a question about Zaram itself is a conversation
+    answered from the manual, not a document to write or a translation."""
+
+    def test_the_manual_questions_route_to_conversation(self):
+        router, _ = _live_router()
+        for prompt in (
+            "How do I export my memory and take it with me?",
+            "how do I add a cloud key",
+            "what leaves my computer when I ask a question",
+        ):
+            decision = router.route(prompt)
+            assert decision is not None and decision.intent == "conversation", (prompt, decision)
