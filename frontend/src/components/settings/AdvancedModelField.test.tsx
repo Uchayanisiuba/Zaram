@@ -22,6 +22,7 @@ function model(over: Partial<DiscoveredModel> = {}): DiscoveredModel {
     locality: 'local',
     dataPolicy: 'never_leaves_device',
     selectableByDefault: true,
+    supportsTools: true,
     fitsResident: true,
     sizeBytes: 4_000_000_000,
     residentCostBytes: 4_800_000_000,

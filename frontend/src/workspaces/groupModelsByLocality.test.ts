@@ -20,6 +20,7 @@ function model(id: string, locality: string): DiscoveredModel {
     locality,
     dataPolicy: null,
     selectableByDefault: true,
+  supportsTools: true,
     category: 'chat',
     fitsResident: null,
     sizeBytes: null,

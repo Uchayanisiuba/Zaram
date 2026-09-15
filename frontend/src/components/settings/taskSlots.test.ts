@@ -21,6 +21,7 @@ function model(overrides: Partial<DiscoveredModel> & { id: string }): Discovered
     locality: 'local',
     dataPolicy: 'never_leaves_device',
     selectableByDefault: true,
+    supportsTools: true,
     fitsResident: true,
     sizeBytes: null,
     residentBudgetBytes: null,

@@ -1028,6 +1028,14 @@ export default function SettingsWorkspace() {
                               that always survives. Same shape as the terms
                               note beside it. */}
                           {model.fitsResident === false ? ' · too large for this machine' : ''}
+                          {/* The one that matters for a task rather than a
+                              chat. A model that cannot take tools answers
+                              "I have written the proposal" and writes
+                              nothing — it cannot call a thing — and until
+                              this line the picker gave no way to tell. Said
+                              as what it cannot do, not as a grade: the model
+                              is fine, it is the job it cannot do. */}
+                          {model.supportsTools ? '' : ' · cannot use tools'}
                         </option>
                       ))}
                     </optgroup>

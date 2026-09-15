@@ -220,6 +220,15 @@ export interface DiscoveredModel {
   /** Whether Zaram may route here without being asked. False is normal for
    *  cloud models and is the reason one has to be chosen deliberately. */
   selectableByDefault: boolean;
+  /** Whether this model can be handed tools.
+   *
+   *  **Read from what the provider declares, never guessed from a name.**
+   *  Ollama reports it in the model's own capabilities, and the OpenAI-
+   *  compatible and Anthropic paths state it for the servers they speak to.
+   *  It decides whether a model can do the work of a coworker at all: one
+   *  that cannot take tools will answer a task in prose and do none of it,
+   *  and nothing on screen said so until 15 September 2026. */
+  supportsTools: boolean;
   /** Whether this model can sit in VRAM beside the embedding model.
    *
    *  **Three values, and `null` is not a quiet yes.** It means the question
@@ -318,7 +327,7 @@ export async function rescanModels(): Promise<DiscoveredModel[]> {
  *  for one payload is how a field comes to be read in one place and dropped in
  *  the other, and it is the same argument `hostOf` settled for a citation's
  *  domain. */
-function toDiscoveredModel(m: Record<string, unknown>): DiscoveredModel {
+export function toDiscoveredModel(m: Record<string, unknown>): DiscoveredModel {
   return {
     id: String(m.id),
     displayName: String(m.display_name ?? m.id),
@@ -326,6 +335,11 @@ function toDiscoveredModel(m: Record<string, unknown>): DiscoveredModel {
     locality: String(m.locality ?? ''),
     dataPolicy: typeof m.data_policy === 'string' ? m.data_policy : null,
     selectableByDefault: m.selectable_by_default === true,
+    // `=== true`, so an older backend that does not send the field reads as
+    // "cannot", which is the safe direction: the note it produces is "this one
+    // cannot run tasks", and being wrong about that costs a visible sentence
+    // rather than a task that silently does nothing.
+    supportsTools: m.supports_tools === true,
     // `?? null` rather than a boolean coercion, deliberately: `Boolean(null)`
     // is `false`, which would render "too large for this machine" for every
     // model on a Mac — where the answer is genuinely unknown, not no.
