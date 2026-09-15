@@ -200,10 +200,21 @@ export default function ChatSurface({ navigate }: Props) {
   }, [send]);
 
   /** Go on a plan the task paused to show. The same resume as Continue, with
-   *  the approval recorded on the task so it does not pause again. */
-  const goPlan = useCallback(() => {
-    void send('Go', { continueTask: true, approvePlan: true });
-  }, [send]);
+   *  the approval recorded on the task so it does not pause again.
+   *
+   *  `level` is which rung the person pressed. `ask` is the plain Go and
+   *  leaves every individual change asking; `full` lets this plan run without
+   *  stopping — still never past a delete, which the engine excludes. */
+  const goPlan = useCallback(
+    (level: 'ask' | 'full' = 'ask') => {
+      void send(level === 'full' ? 'Go — run without stopping' : 'Go', {
+        continueTask: true,
+        approvePlan: true,
+        approveLevel: level,
+      });
+    },
+    [send],
+  );
 
   /** Ask the last question again with the cloud model the offer named.
    *
@@ -843,6 +854,7 @@ export default function ChatSurface({ navigate }: Props) {
                 setInputText(prompt);
                 inputRef.current?.focus();
               }}
+              onNavigate={navigate}
             />
           ) : (
             <>

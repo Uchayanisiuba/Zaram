@@ -50,6 +50,7 @@ class ChatRouter:
         resume: bool = False,
         plan_id: str = "",
         approve_plan: bool = False,
+        approve_level: str = "ask",
     ) -> AsyncGenerator:
         """Returns the correct generator based on the feature flag.
 
@@ -74,7 +75,7 @@ class ChatRouter:
         if USE_NEW_KERNEL:
             return self._kernel_stream(
                 request_text, model, system_prompt, session_id, project_id,
-                only_ids, images, resume, plan_id, approve_plan,
+                only_ids, images, resume, plan_id, approve_plan, approve_level,
             )
         else:
             # The legacy path has no image plumbing and is not getting any.
@@ -94,6 +95,7 @@ class ChatRouter:
         resume: bool = False,
         plan_id: str = "",
         approve_plan: bool = False,
+        approve_level: str = "ask",
     ) -> AsyncGenerator:
         """Streams structured StreamEvent lines from the new Execution Engine.
 
@@ -125,6 +127,7 @@ class ChatRouter:
                     plan_id=plan_id,
                     project_id=project_id,
                     approve=approve_plan,
+                    approve_level=approve_level,
                 )
                 if resume
                 else self.execution_engine.execute(

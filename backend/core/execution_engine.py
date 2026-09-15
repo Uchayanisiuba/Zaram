@@ -226,6 +226,12 @@ class ExecutionEngine:
         #: Sessions whose current plan the person has pressed Go on. Cleared
         #: when a new question starts, because Go was for *that* plan.
         self._approved: set[str] = set()
+        #: Sessions whose plan the person let run **without stopping** — the
+        #: second rung of the plan card's choice. It suppresses the *per-tool*
+        #: confirmation for this run only, never the refusals, never the
+        #: destructive ones, and never a tool on a read-only server. Cleared
+        #: exactly where `_approved` is, because it was consent for that plan.
+        self._uninterrupted: set[str] = set()
         #: session_id → the model's checklist, read off the `plan` tool's own
         #: result. **Not a ContextVar and not a channel into the pack**: the
         #: first version was, and a tool runs in `asyncio.to_thread`, so what
@@ -372,6 +378,21 @@ class ExecutionEngine:
         if session_id in self._approved:
             return False
         return len(self._plan_items(session_id)) >= self.PLAN_REVIEW_ITEMS
+
+    def _runs_uninterrupted(self, session_id: str, tool_name: str) -> bool:
+        """Whether this call may skip its confirmation because the person let
+        the whole plan run.
+
+        Deliberately narrow. Destructive tools are excluded here rather than in
+        the gate, because the gate cannot tell a run the person waved through
+        from one the model waved through — and that distinction is the entire
+        safety of this flag.
+        """
+        from runtimes.mcp.policy import looks_destructive
+
+        if session_id not in self._uninterrupted:
+            return False
+        return not looks_destructive(tool_name)
 
     def set_notice_source(self, source: Any | None) -> None:
         """Provide a callable returning a one-off notice, or None.
@@ -578,6 +599,7 @@ class ExecutionEngine:
         # request's checklist starts empty — the ContextVar is per request,
         # but a resumed task's items are seeded explicitly, never inherited.
         self._approved.discard(session_id)
+        self._uninterrupted.discard(session_id)
         self._seed_plan(session_id, [])
         plan = self._drop_unavailable_steps(plan)
         plan.state = PlanState.RUNNING
@@ -1430,9 +1452,15 @@ class ExecutionEngine:
                 "server": call.server,
                 "tool": call.tool,
                 "arguments": call.arguments,
-                # Never set from here. `confirmed` means a surface asked a
-                # person, and this method has not — if it set the flag, the
-                # model's own request would be its own permission.
+                # `confirmed` means a *person* said yes, never the model. The
+                # only thing that sets it is the plan card's second rung: the
+                # person read this plan and chose to let it run without being
+                # stopped at each change. That is a surface asking, once, for
+                # this run — rule 7j's "confirm once, then remember", scoped to
+                # one plan instead of forever. A delete is never covered by it
+                # (`looks_destructive`), a read-only server still refuses, and
+                # a new question clears it.
+                "confirmed": self._runs_uninterrupted(session_id, call.tool),
             }))
             if not isinstance(result, dict):
                 result = {"success": False, "error": "the tool returned nothing readable"}
@@ -1940,6 +1968,7 @@ class ExecutionEngine:
             except Exception:
                 logger.exception("Could not clear the finished task")
         self._approved.discard(session_id)
+        self._uninterrupted.discard(session_id)
         self._checklists.pop(session_id, None)
 
     def set_plan_records(self, records: Any | None) -> None:
@@ -1959,6 +1988,7 @@ class ExecutionEngine:
         plan_id: str = "",
         project_id: str | None = None,
         approve: bool = False,
+        approve_level: str = "ask",
     ) -> Iterator[Any]:
         """Resume a stopped task, with a fresh window and a rebuilt context.
 
@@ -2036,6 +2066,11 @@ class ExecutionEngine:
         self._seed_plan(session_id, [i.to_json() for i in pending.items])
         if approve or pending.approved:
             self._approved.add(session_id)
+            # "Run without stopping" is the person's second rung and is never
+            # inherited from the stored task: a level is chosen at the moment
+            # of pressing, for the plan on screen.
+            if approve and approve_level == "full":
+                self._uninterrupted.add(session_id)
             if approve and self._plans is not None:
                 try:
                     self._plans.approve(pending.id)
@@ -2043,6 +2078,7 @@ class ExecutionEngine:
                     logger.exception("Could not record Go on the task")
         else:
             self._approved.discard(session_id)
+            self._uninterrupted.discard(session_id)
         if pending.items:
             yield StreamEvent.plan([i.to_json() for i in pending.items])
 

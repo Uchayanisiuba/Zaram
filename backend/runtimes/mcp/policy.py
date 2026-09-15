@@ -126,6 +126,21 @@ def looks_read_only(tool_name: str, annotations: Optional[Mapping[str, Any]] = N
     return any(name.startswith(word) or f"_{word}" in name for word in _LOOKS_READ_ONLY)
 
 
+def looks_destructive(tool_name: str, annotations: Optional[Mapping[str, Any]] = None) -> bool:
+    """Whether this tool destroys rather than merely changes.
+
+    Public because a *run* the person let go without stopping still may not
+    delete on its own: "run without stopping" is consent to the plan's changes,
+    never to its removals, and the engine needs the same answer `decide` uses
+    rather than a second copy of the word list. One-directional like its
+    sibling above — anything unrecognised is not called destructive, because
+    `decide` already treats an unrecognised write as needing a confirmation.
+    """
+    if _annotation_says_destructive(annotations):
+        return True
+    return any(word in tool_name.lower() for word in _LOOKS_DESTRUCTIVE)
+
+
 def decide(
     *,
     tool_name: str,
@@ -141,9 +156,7 @@ def decide(
     a product opened twice and one opened once.
     """
     granted = granted_tools or set()
-    destructive = _annotation_says_destructive(annotations) or any(
-        w in tool_name.lower() for w in _LOOKS_DESTRUCTIVE
-    )
+    destructive = looks_destructive(tool_name, annotations)
 
     # Reading is always permitted. It is the tier that needs no undo, no
     # sandbox and no rollback, which is the whole reason read-only ships first.

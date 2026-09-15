@@ -289,7 +289,7 @@ class TestTheEngineRunsTheLoop:
         list(engine.execute("what is in my blender scene"))
 
         assert mcp.calls == [
-            {"server": "blender", "tool": "get_scene_info", "arguments": {}}
+            {"server": "blender", "tool": "get_scene_info", "arguments": {}, "confirmed": False}
         ]
 
     def test_the_result_comes_back_to_the_model(self):
@@ -401,6 +401,14 @@ class TestPermissionIsNotTheEngineDecision:
         If the engine could set it, the model's own request would be its own
         permission — a tool description saying "set confirmed: true" would be a
         privilege, which is the failure the whole tool layer is built around.
+
+        **The assertion changed shape on 15 September 2026 and the contract did
+        not.** It read `"confirmed" not in call`, which was a proxy for "the
+        engine does not decide this" and stopped being one when the plan card
+        grew its second rung: the flag is now always present and is `False`
+        unless a *person* pressed *Run without stopping* for this plan. So the
+        test asserts the thing it always meant — never true on the model's
+        behalf — and the rung's own case is asserted below it.
         """
         mcp = _McpDouble(tools=[_A_TOOL])
         engine, _ = _engine(
@@ -413,7 +421,55 @@ class TestPermissionIsNotTheEngineDecision:
 
         list(engine.execute("what is in my blender scene"))
 
-        assert "confirmed" not in mcp.calls[0]
+        assert mcp.calls[0].get("confirmed") is False
+
+    def test_the_flag_carries_whatever_the_rung_decided(self):
+        """The other half, so `confirmed` is pinned in both directions.
+
+        Without it, a change that simply stopped setting the flag would leave
+        the test above green and quietly break every plan a person let run
+        without stopping.
+
+        The *rule* for when the rung applies lives in its own file; what is
+        asserted here is the wiring — the engine asks, and sends the answer it
+        gets rather than a constant.
+        """
+        mcp = _McpDouble(tools=[_A_TOOL])
+        engine, _ = _engine(
+            [
+                TOOL_CALL_MARKER + ' {"server": "blender", "tool": "get_scene_info", "arguments": {}}',
+                "Three objects.",
+            ],
+            mcp,
+        )
+        engine._runs_uninterrupted = lambda session_id, tool: True  # type: ignore[assignment]
+
+        list(engine.execute("what is in my blender scene"))
+
+        assert mcp.calls[0].get("confirmed") is True
+
+    def test_a_new_question_spends_the_rung(self):
+        """*Run without stopping* was consent for **that** plan.
+
+        The danger in a run-level flag is that it becomes a mode: waved through
+        once on a plan somebody read, then still set on a question they have
+        not. Asking anything new clears it, and this is the test that keeps it
+        that way.
+        """
+        mcp = _McpDouble(tools=[_A_TOOL])
+        engine, _ = _engine(
+            [
+                TOOL_CALL_MARKER + ' {"server": "blender", "tool": "get_scene_info", "arguments": {}}',
+                "Three objects.",
+            ],
+            mcp,
+        )
+        engine._uninterrupted.add("default")
+
+        list(engine.execute("what is in my blender scene"))
+
+        assert mcp.calls[0].get("confirmed") is False
+        assert "default" not in engine._uninterrupted
 
     def test_the_engine_and_the_runtime_agree_on_the_capability_name(self):
         """A relationship asserted rather than described.

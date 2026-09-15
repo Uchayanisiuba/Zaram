@@ -359,7 +359,10 @@ class TestItCanSequenceTwoCalls:
         list(engine.execute("use the code tools to tell me about x"))
 
         assert len(mcp.calls) == 2
-        assert all("confirmed" not in call for call in mcp.calls), (
+        # `confirmed` is present and False on an ordinary run — see the note
+        # in `test_the_engine_never_sets_confirmed_itself`. What must never
+        # happen is a *true* the model asked for.
+        assert all(call.get("confirmed") is False for call in mcp.calls), (
             "the loop must never mark a call confirmed on the model's behalf"
         )
 

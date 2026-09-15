@@ -30,6 +30,28 @@ describe('PlanCard', () => {
     expect(onGo).toHaveBeenCalledTimes(1);
   });
 
+  it('names which rung was pressed, so plain Go never asks for the louder one', () => {
+    // The two are one button apart on screen and a long way apart in what
+    // they permit; a card that reported the wrong one would hand over an
+    // uninterrupted run for a press that asked to be stopped at each change.
+    const onGo = vi.fn();
+    render(<PlanCard items={items} awaitingGo onGo={onGo} />);
+    fireEvent.click(screen.getByTestId('plan-go'));
+    expect(onGo).toHaveBeenLastCalledWith('ask');
+    fireEvent.click(screen.getByTestId('plan-go-full'));
+    expect(onGo).toHaveBeenLastCalledWith('full');
+  });
+
+  it('says what the second rung costs, and that deletions still ask', () => {
+    render(<PlanCard items={items} awaitingGo onGo={vi.fn()} />);
+    expect(screen.getByText(/deletions still ask/i)).toBeTruthy();
+  });
+
+  it('offers neither rung when the loop did not pause', () => {
+    render(<PlanCard items={items} />);
+    expect(screen.queryByTestId('plan-go-full')).toBeNull();
+  });
+
   it('renders nothing for an empty list', () => {
     const { container } = render(<PlanCard items={[]} />);
     expect(container.innerHTML).toBe('');

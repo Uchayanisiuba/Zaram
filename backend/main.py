@@ -1180,6 +1180,11 @@ class ChatRequest(BaseModel):
     #: meaningful with `continue_task`; recorded on the task so the resumed
     #: loop does not pause again for the same plan.
     approve_plan: bool = False
+    #: Which rung of the plan card the person pressed: `ask` keeps the
+    #: confirmation before each change, `full` lets this one plan run without
+    #: stopping. Meaningless without `approve_plan`, and never a stored
+    #: preference — a level is chosen for the plan on screen.
+    approve_level: str = "ask"
     #: **Revise**: `text` is a correction to an earlier reply, and this is
     #: that reply with the question it answered. Composed into one prompt by
     #: `core.revise.revision_prompt` and sent down the ordinary plan path —
@@ -1868,6 +1873,7 @@ async def chat(request: ChatRequest):
             resume=request.continue_task,
             plan_id=request.plan_id,
             approve_plan=request.approve_plan,
+            approve_level=request.approve_level,
         ):
             _collect_answer(chunk, answer)
             yield chunk

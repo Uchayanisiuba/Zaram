@@ -312,6 +312,10 @@ export interface ChatRequest {
   /** The person pressed Go on the plan the task paused to show them. Only
    *  meaningful with `continueTask`. */
   approvePlan?: boolean;
+  /** Which rung of Go: `ask` keeps the confirmation before each change,
+   *  `full` lets this one plan run without stopping. Chosen for the plan on
+   *  screen and never stored — see `PlanCard`. */
+  approveLevel?: 'ask' | 'full';
   /** **Revise**: `text` is a correction to an earlier reply, and this is
    *  that reply with the question it answered. The backend composes one
    *  prompt from the three and sends it down the ordinary path — recall,
@@ -385,6 +389,7 @@ export async function* streamChat(
         continue_task: req.continueTask ?? false,
         plan_id: req.planId ?? '',
         approve_plan: req.approvePlan ?? false,
+        approve_level: req.approveLevel ?? 'ask',
         ...(req.revise ? { revise: { question: req.revise.question, reply: req.revise.reply } } : {}),
       }),
       signal,
