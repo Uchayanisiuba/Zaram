@@ -278,3 +278,8 @@ backend/tests/_flux_sample.png
 backend/plans.db
 backend/plans.db-wal
 backend/plans.db-shm
+
+# The manual's index stamp — which version of the pages this data directory
+# has read, and the ids of the built-in source and domain. Data, written by
+# the backend beside the databases above; the ids differ on every machine.
+backend/manual.json
