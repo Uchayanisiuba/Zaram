@@ -150,6 +150,7 @@ export default defineConfig(({ command }) => ({
       '/diagnostics': { target: BACKEND, changeOrigin: true },
       '/extras': { target: BACKEND, changeOrigin: true },
       '/images': { target: BACKEND, changeOrigin: true },
+      '/manual': { target: BACKEND, changeOrigin: true },
     },
   },
 }));

@@ -99,6 +99,7 @@ function createConfig(options) {
         '/ingest',
         '/knowledge',
         '/letterhead',
+        '/manual',
         '/memory',
         '/models',
         '/obligations',

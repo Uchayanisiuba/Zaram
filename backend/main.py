@@ -430,6 +430,16 @@ async def startup_event():
     source_watcher = SourceWatcher(ingest_service)
     asyncio.create_task(source_watcher.run())
 
+    # Zaram's own manual, into the Zaram domain — once per version of the
+    # pages, off the startup path. See `manual/__init__.py`.
+    try:
+        from core.paths import data_dir as _data_dir
+        from manual import ensure_indexed_in_background
+
+        ensure_indexed_in_background(ingest_service, knowledge_domains, _data_dir())
+    except Exception:  # noqa: BLE001 - the manual must never stop Zaram starting
+        logging.getLogger(__name__).exception("manual: could not start indexing")
+
     print("[Startup] Chat Router initialized. Kernel Online.")
 
 
@@ -5826,6 +5836,14 @@ async def remove_ingest_source(source_id: str):
     their originals and nothing there is ever touched. `IngestService.withdraw`
     is where that distinction lives and why.
     """
+    from core.paths import data_dir as _data_dir
+    from manual import is_builtin_source
+
+    if is_builtin_source(_data_dir(), source_id):
+        raise HTTPException(
+            status_code=403,
+            detail="This is Zaram's own manual. It cannot be removed, and it is refreshed when Zaram updates.",
+        )
     outcome = ingest_service.withdraw(source_id)
     if outcome is None:
         raise HTTPException(status_code=404, detail="No such source")
@@ -5955,9 +5973,56 @@ async def remove_domain(domain_id: str):
     source, which does take facts with it. The two sit on the same screen, so
     the difference is worth being explicit about in both places.
     """
+    from core.paths import data_dir as _data_dir
+    from manual import is_builtin_domain
+
+    if is_builtin_domain(_data_dir(), domain_id):
+        raise HTTPException(
+            status_code=403,
+            detail="The Zaram domain holds Zaram's own manual. It cannot be removed.",
+        )
     if not knowledge_domains.remove(domain_id):
         raise HTTPException(status_code=404, detail="No such domain")
     return {"id": domain_id, "facts_removed": 0, "sources_removed": 0}
+
+
+# --------------------------------------------------------------------------- #
+# The manual — Zaram's own pages, for Settings → Help and for recall.
+# --------------------------------------------------------------------------- #
+
+
+@app.get("/manual")
+async def manual_index():
+    """The pages in reading order, and the version the Zaram domain holds."""
+    from core.paths import data_dir as _data_dir
+    from manual import indexed_version, pages, version
+
+    return {
+        "pages": [p.to_json() for p in pages()],
+        "version": version(),
+        "indexed_version": indexed_version(_data_dir()),
+    }
+
+
+@app.get("/manual/assets/{name}")
+async def manual_asset(name: str):
+    from manual import asset
+
+    found = asset(name)
+    if found is None:
+        raise HTTPException(status_code=404, detail="no such picture in the manual")
+    path, media_type = found
+    return FileResponse(str(path), media_type=media_type)
+
+
+@app.get("/manual/{slug}")
+async def manual_page(slug: str):
+    from manual import read
+
+    text = read(slug)
+    if text is None:
+        raise HTTPException(status_code=404, detail="no such page in the manual")
+    return {"slug": slug, "markdown": text}
 
 
 @app.post("/knowledge/domains/{domain_id}/sources/{source_id}")

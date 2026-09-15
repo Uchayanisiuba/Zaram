@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 420" width="900" height="420" font-family="system-ui, Segoe UI, sans-serif" font-size="15">
+  <rect width="900" height="420" rx="16" fill="#0f1220"/>
+  <!-- Your machine -->
+  <rect x="24" y="24" width="540" height="372" rx="14" fill="#161a2e" stroke="#2f3554"/>
+  <text x="44" y="54" fill="#c7cbe6" font-weight="600">Your computer</text>
+  <!-- Memory -->
+  <rect x="44" y="80" width="230" height="120" rx="10" fill="#1d2140" stroke="#4b52a3"/>
+  <text x="60" y="106" fill="#e6e8ff" font-weight="600">Memory</text>
+  <text x="60" y="130" fill="#aab0d8">facts, with their source</text>
+  <text x="60" y="150" fill="#aab0d8">documents you added</text>
+  <text x="60" y="170" fill="#aab0d8">commitments and dates</text>
+  <text x="60" y="190" fill="#7c86c9" font-size="13">never leaves · you can correct or delete any of it</text>
+  <!-- Local model -->
+  <rect x="304" y="80" width="230" height="120" rx="10" fill="#1d2140" stroke="#2fa38c"/>
+  <text x="320" y="106" fill="#e6e8ff" font-weight="600">A model on this machine</text>
+  <text x="320" y="130" fill="#aab0d8">free per question</text>
+  <text x="320" y="150" fill="#aab0d8">works with the internet off</text>
+  <text x="320" y="170" fill="#aab0d8">nothing you say goes anywhere</text>
+  <text x="320" y="190" fill="#5fc9b0" font-size="13">the default</text>
+  <!-- Gate -->
+  <rect x="44" y="236" width="490" height="130" rx="10" fill="#1a1d33" stroke="#8b7fd4"/>
+  <text x="60" y="262" fill="#e6e8ff" font-weight="600">The gate — every byte that would leave passes here</text>
+  <text x="60" y="288" fill="#aab0d8">1. Is this destination one you allowed?  (connecting a provider is the yes)</text>
+  <text x="60" y="310" fill="#aab0d8">2. Is this kind of data allowed there?  (a picture is asked about once, then remembered)</text>
+  <text x="60" y="332" fill="#aab0d8">3. Written to the log before it goes — Activity → What left</text>
+  <text x="60" y="354" fill="#7c86c9" font-size="13">Block everything: one switch, and the local model keeps answering</text>
+  <!-- Arrow -->
+  <line x1="534" y1="300" x2="612" y2="300" stroke="#8b7fd4" stroke-width="2" marker-end="url(#a)"/>
+  <defs><marker id="a" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#8b7fd4"/></marker></defs>
+  <!-- Cloud -->
+  <rect x="616" y="236" width="260" height="130" rx="14" fill="#161a2e" stroke="#8b7fd4" stroke-dasharray="6 4"/>
+  <text x="636" y="262" fill="#c7cbe6" font-weight="600">A cloud provider (optional)</text>
+  <text x="636" y="288" fill="#aab0d8">one key, pasted once</text>
+  <text x="636" y="310" fill="#aab0d8">a model paired to each job</text>
+  <text x="636" y="332" fill="#aab0d8">Zaram tells you what it does</text>
+  <text x="636" y="354" fill="#aab0d8">with your data</text>
+  <!-- Caption -->
+  <text x="616" y="120" fill="#7c86c9" font-size="13">Any model, local or cloud,</text>
+  <text x="616" y="140" fill="#7c86c9" font-size="13">reads from the same memory.</text>
+  <text x="616" y="160" fill="#7c86c9" font-size="13">Change the model; keep the memory.</text>
+</svg>
