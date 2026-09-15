@@ -577,7 +577,10 @@ footer nav a:hover { color: var(--text); }
    --------------------------------------------------------------------------
    Layers carry a depth `--d` (0 far, 1 near) and are moved against two
    things the script measures: where the pointer is (`--mx`, `--my`, −1..1)
-   and how far the page has scrolled (`--sy`, px). Nothing here is state —
+   and how far the page has scrolled (`--sy`, px). The travel is small on
+   purpose — a dozen pixels at the nearest layer — after a first cut at
+   nearly three times that read as the figures sliding about rather than
+   the viewer moving. Nothing here is state —
    the orb still reports only "working" through the class the demo sets —
    and every animation stops under `prefers-reduced-motion`, leaving the
    same composition standing still. Without the script the variables are 0
@@ -605,8 +608,8 @@ main { overflow-x: clip; }
   position: absolute;
   will-change: transform;
   transform: translate3d(
-    calc(var(--mx) * var(--d) * -34px),
-    calc(var(--my) * var(--d) * -22px + var(--sy) * var(--d) * -0.12px),
+    calc(var(--mx) * var(--d) * -12px),
+    calc(var(--my) * var(--d) * -8px + var(--sy) * var(--d) * -0.04px),
     0
   );
 }
@@ -629,12 +632,6 @@ main { overflow-x: clip; }
 }
 @keyframes floor-drift { to { background-position: 0 44px, 0 0; } }
 
-.scene .stars {
-  position: absolute; inset: -10% -6% 4%;
-  width: 112%; height: 106%;
-  opacity: .9;
-}
-
 .scene .nebula {
   width: 46%; aspect-ratio: 1; border-radius: 50%;
   filter: blur(40px);
@@ -651,7 +648,14 @@ main { overflow-x: clip; }
   width: min(46%, 400px);
 }
 .scene .orb-stage { transform-style: preserve-3d; }
-.scene .orb-img { width: 100%; }
+/* The render is opaque on its own near-black, a shade lighter than the
+   page, and the square showed against the glow behind it. The mask takes the
+   corners out; the halo inside it is untouched. */
+.scene .orb-img {
+  width: 100%;
+  -webkit-mask-image: radial-gradient(circle at 50% 50%, #000 52%, transparent 70%);
+          mask-image: radial-gradient(circle at 50% 50%, #000 52%, transparent 70%);
+}
 
 /* Two rings on real tilts, so the sphere sits inside an orbit rather than
    behind a circle. Each turns in its own plane. */
@@ -693,7 +697,7 @@ main { overflow-x: clip; }
 }
 .scene .avatar-tilt {
   transform-style: preserve-3d;
-  transform: rotateY(calc(var(--mx) * 10deg)) rotateX(calc(var(--my) * -7deg));
+  transform: rotateY(calc(var(--mx) * 5deg)) rotateX(calc(var(--my) * -3.5deg));
   transition: transform .18s ease-out;
 }
 /* The character's lower edge dissolves rather than ends: the render is
@@ -754,12 +758,16 @@ main { overflow-x: clip; }
 }
 .embodiment .pair h3 { font-size: 1rem; margin: 0 0 .35em; color: var(--text); }
 .embodiment .pair p { margin: 0; color: var(--text-2); font-size: .96rem; }
-.embodiment .scene { height: clamp(220px, 28vw, 300px); width: min(100%, 760px); margin: 56px auto 0; }
-/* The orb's render carries its own halo, so its visible sphere sits well
-   inside the box; the character sits a little lower so the two read as one
-   row rather than a helmet above a ball. */
-.embodiment .scene .orb-layer { left: 25%; top: 2%; width: 30%; margin-left: -15%; }
-.embodiment .scene .avatar-layer { left: 75%; top: 14%; bottom: auto; width: 27%; margin-left: -13.5%; }
+.embodiment .scene { height: clamp(210px, 26vw, 280px); width: min(100%, 760px); margin: 48px auto 0; }
+/* One row, drawn in toward the middle: the orb a third of the way across,
+   the character two thirds, close enough that the orbit's outer ring just
+   reaches the character's shoulder. The orb's render carries its own halo,
+   so its sphere sits well inside the box, and its centre is set level with
+   the character's face — the two things a person looks at — rather than
+   with the top of the helmet. The character is a little the larger of the
+   two, being the nearer. */
+.embodiment .scene .orb-layer { left: 33%; top: -4%; width: 28%; margin-left: -14%; }
+.embodiment .scene .avatar-layer { left: 67%; top: 6%; bottom: auto; width: 30%; margin-left: -15%; }
 .embodiment .scene .orb-state { display: none; }
 .embodiment .scene .floor { display: none; }
 .embodiment .scene::before {
@@ -768,13 +776,12 @@ main { overflow-x: clip; }
   background: radial-gradient(60% 60% at 50% 55%, rgba(139,127,212,.10), transparent 70%);
   pointer-events: none;
 }
-.embodiment .scene .stars { inset: 0; width: 100%; height: 100%; }
 .embodiment .scene .orb-state { white-space: nowrap; font-size: .78rem; }
 @media (max-width: 860px) {
   .embodiment .pair { grid-template-columns: 1fr; gap: 18px; }
-  .embodiment .scene { height: clamp(200px, 48vw, 300px); margin-top: 24px; }
-  .embodiment .scene .orb-layer { width: 38%; margin-left: -19%; }
-  .embodiment .scene .avatar-layer { width: 34%; margin-left: -17%; }
+  .embodiment .scene { height: clamp(200px, 46vw, 280px); margin-top: 24px; }
+  .embodiment .scene .orb-layer { left: 30%; width: 38%; margin-left: -19%; }
+  .embodiment .scene .avatar-layer { left: 70%; width: 36%; margin-left: -18%; }
 }
 
 @media (max-width: 860px) {
