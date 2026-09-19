@@ -18,9 +18,162 @@ publishing step over rather than finding another route. `CLAUDE.md`,
 
 ---
 
-## Current state — 14 September 2026
+## Current state — 19 September 2026
 
 *The latest work is first. Earlier sessions follow below.*
+
+### 15-19 September — v0.1.0-alpha.1 is out, and four of the coworker's pieces are built. HANDOFF.
+
+**Read this block first.** Everything is committed and pushed; `main` at
+`69d34bd`. The coworker milestone immediately below is still the plan, and
+several of its steps are now built rather than described.
+
+#### The release
+
+**`v0.1.0-alpha.1` is published and the site links it.** Installer, portable
+build and `SHA256SUMS.txt` on the GitHub release; `site/site.js` carries the
+tag, the size (204 MiB) and the checksum; `gh-pages` republished and the
+served `site.js` checked. The download stays hidden on the page until
+`releaseAt` (21 September, 09:00 BST) — the link works now for anyone who has
+it, which is how a few people get it first.
+
+**It went out by hand, and the reason matters.** The release workflow had
+never parsed: `secrets` cannot be read in a step's `if:`, GitHub rejects the
+whole file for it, and **every push since the 14th failed in 0 s without
+running a step**. Pushing the tag from the previous handoff would have done
+exactly that. Fixed in `e805f10` with a job-level env flag — and **that fix
+has never run end to end**. The next `v*` tag is its first real exercise.
+
+Done by hand instead: `npm run build`, silent install, launch from `C:\` on
+an empty `ZARAM_DATA_DIR` (backend from the bundled runtime, `/health` 401
+without the credential, every store in the scratch directory, Memory
+rendering live counts), `gh release create`, `scripts/site-release.mjs`,
+`main` pushed, `site/` split to `gh-pages`.
+
+#### Built this session
+
+* **Three starter tasks on the empty conversation** (`starterTasks.ts`) —
+  outcome-worded, each with a **connection dot** lit only where the interface
+  *measured* what that task needs. An unread signal is never a lit dot, so a
+  failed fetch lights nothing; an unlit row's action is its setup. Read from
+  OpenWorker's `SessionIntro`. The orb and the avatar are untouched.
+* **A second rung on the plan pause** (`PlanCard.tsx`) — *Go* keeps asking
+  before each change; *Run without stopping* spends itself on that one plan.
+  This closed a real hole rather than adding a choice: plain Go cleared only
+  the plan-level review, so every individual change still returned "needs
+  your say-so", and a plan a person had read could not finish unless every
+  tool was already granted in Settings. Deletions are excluded in the engine
+  (`_runs_uninterrupted`), not in the gate, because the gate cannot tell a
+  run a *person* waved through from one the *model* did.
+* **A held tool can be allowed from the row that holds it** (`ToolCalls.tsx`)
+  — the dead end before this was Settings, find the server, grant by name, at
+  the moment somebody is trying to get something done. It allows the *tool*,
+  which is the gate's own unit of consent, then asks the question again.
+  **A deletion never gets the button**: `grantable` is decided by the gate and
+  carried on the event, because `decide` keeps asking about destructive tools
+  however much has been granted.
+* **`draw_image`** (`packs/draw/`) — a picture as a *step*, not a whole
+  request. It calls `ImagesRuntime` rather than drawing anything itself;
+  generative tier, so no undo, sandbox or confirm. **Registering it was not
+  reaching it**, and measuring found the gap: the planner hijacked exactly
+  the requests it was built for. *"Write the proposal and put a cover image
+  on it"* planned `vision.analyze` — reading a picture nobody attached, which
+  the dispatcher then refuses — and *"draft the report, then generate an
+  image"* planned `image.generate` and dropped the report entirely. Two
+  narrowings in `planner.py` fixed it; a plain "draw me a logo" is untouched.
+* **The picker says when a model cannot be given tools.** `supports_tools`
+  has been on `ModelInfo` since the provider layer shipped, read from what
+  Ollama declares, and **nothing in the interface read it** — so a person
+  could pick a model that cannot call a thing, ask for a task, and be told
+  the work was done with none of it done.
+* **The quoted-passage disclosure moved onto the sources line.** It was an
+  amber warning triangle across the reply, for something that endangers
+  nobody and describes the defence working. Now a quiet segment —
+  *"4 sources · nothing left this device · one passage quoted, not acted
+  on"* — opening into the panel that holds the sentence. Demoted in loudness,
+  never in reach: a reply that cited nothing still renders it as a card, in
+  the neutral tone. Then **five more notice kinds** that were arriving amber
+  for no decided reason (the plan awaiting Go, servers available, a step's
+  aside, a model swap, search being off) went neutral. `ingest` and `stuck`
+  keep the triangle, and a test pins every one of those decisions so the next
+  notice added gets a tone or fails the suite.
+* **MCP: a server with an `env` block now gets an environment.** `Popen(env=)`
+  replaces rather than merges, so a server configured with a token was spawned
+  with *only* that token — no `PATH`, so `npx` could not find `node`, and no
+  `SYSTEMROOT`, so Node aborts in CSPRNG init. **Every server needing a
+  credential was unstartable on Windows**, and no bundled server has an `env`
+  block, which is exactly why nothing ever showed it.
+* **Site**: the scene lost its star field and two thirds of its parallax, the
+  orb's opaque render box is masked out, and the two figures were drawn in to
+  read as one row.
+
+#### Where the coworker stands
+
+Attached and listing tools through Zaram's own client: **GitHub** (26 tools,
+needs a fine-grained token pasted into Settings → Tools) and **email**
+(40 tools, `imap-mcp-server`; the account is set up through that server's own
+wizard, never through a chat tool call — a password must not travel through
+the model). Steps 1b to 6 of the milestone below are untouched.
+
+#### Not done, and honest about why
+
+* **The full backend suite has not run.** A run was attempted with
+  `--timeout`, which is not installed here; pytest rejected the arguments and
+  exited without running a single test, and the task notification still said
+  "completed". The affected subsets did run — **670 backend, 429 frontend,
+  tsc and eslint clean** — and they cover every module touched. The planner
+  change is broad enough that the full suite is still worth running:
+  `cd backend && venv\Scripts\python.exe -m pytest -q`.
+* **No connector task has been run end to end.** The loop, the gate, the
+  pause and the tools all exist; nothing has been watched doing a real job
+  through GitHub or a mailbox. That measurement is what turns "architecturally
+  yes" into "yes", and it needs a person at the pause.
+* **The lit starter dot has not been seen on screen.** The unlit case was —
+  engine down, three unlit rows, each carrying its setup. The lit path is
+  covered by a component test instead.
+* **Telling the testers is unsolved.** Signups land in Formspree (50 a month,
+  which one good post exceeds); the workflow's Buttondown step emails a list
+  nobody is on, and fires on the *tag* while the page flips on `releaseAt`.
+  Those are different moments on purpose, so the tester email should leave the
+  workflow and become a script run on the day.
+* The 13 September `v0.1.0` release still exists, with the installer that
+  could not start anywhere but the build machine.
+
+#### Researched, decided, not built
+
+**OpenWorker** (`andrewyng/openworker`, MIT, July 2026) — an agent product
+whose memory is a notebook: no retrieval, no provenance, no correction, by
+its own spec. Worth taking as *modules*, with attribution: `risk.py`,
+`permissions.py` (shell-command safety — opaque constructs, arg-executors,
+inline interpreters), `provenance.py`, and the approval-provenance columns in
+its audit. **Not** taken: its engine, `aisuite`, and the reviewer model that
+auto-approves in auto mode — a model's judgement is never the permission
+here. Its interface is ahead on the Access rail, automations, an inbox and a
+command palette; Zaram is ahead on everything the memory does.
+
+**Colibrì** (`JustVugg/colibri`, Apache-2.0, pure C, 36k stars) — streams MoE
+experts from disk so a 744B model runs on consumer hardware, with an
+OpenAI-compatible gateway. **Decided: do not integrate.** The useful work is
+not "Colibrì support" but letting a person *name* any OpenAI-compatible
+endpoint — `providers/discoverers/openai_compat.py` is hardcoded to
+`127.0.0.1:1234` — which serves Colibrì, vLLM, llama.cpp's server and a
+second TabbyAPI at once. An October item, after the alpha.
+
+**Measured on the maintainer's machine, 19 September**, because it changes
+the advice: 31.9 GB RAM, RTX 3060 12 GB, and **both SSDs are SATA, not
+NVMe** — C: 56 GB and E: 87 GB free on one, G: 238 GB free and empty on the
+other, while the 898 GB that looks free on D:/F: is a spinning Hitachi.
+Colibrì's performance rests on NVMe, so its headline demo would not reproduce
+here. The one configuration that suits this machine is **Qwen3.6-35B-A3B
+(~20 GB)**, which needs 24 GB RAM in *full residency* and therefore streams
+nothing at all.
+
+#### Do these next
+
+1. Run the full backend suite.
+2. `npm run dev:app -- -NoTabby`, paste a GitHub token, and run one real task
+   end to end — the plan, the pause, the Go, the result, the egress entries.
+3. Decide the tester email before the 21st.
 
 ### Next milestone, decided 15 September — the coworker: Zaram carries a task through, with the memory it already has.
 
@@ -104,7 +257,7 @@ holds — when a step cannot be resolved, the loop stops and asks; it never
 guesses a client. Estimate: four to six weeks after the 21st for steps
 1–4 with two connectors; not before the alpha is in testers' hands.
 
-### 15 September — the installer is real, the manual is a domain, and the release is one tag. HANDOFF.
+### 15 September — the installer is real, the manual is a domain, and the release is one tag.
 
 **Read this block first.** Everything is committed and pushed (`main` at
 `e4af9cc`). Two earlier 14 September blocks follow and are still current
