@@ -314,3 +314,41 @@ class TestConnectorRouting:
         """A misclassification must cost a wider search, never an empty answer."""
         for query in ("", "the", "asdfghjkl", "python", "who won the election"):
             assert "duckduckgo" in connectors_for(query, ["duckduckgo", "github"])
+
+
+class TestATypedQuestionCanClearTheFloor:
+    """The reported failure of 20 September 2026: twelve results fetched, none
+    kept, and the model told the person the web returned nothing.
+
+    A typed question is longer than a search query, and half its stems are
+    the person talking to Zaram — *check*, *web*, *current*, *month*. The page
+    that answers it covered two of nine and scored 0.032; the floor is 0.18.
+    """
+
+    QUERY = "What is the current version of the Blender 3D application, released this month? Check the web."
+
+    def test_the_page_that_answers_it_is_kept(self):
+        page = relevance_of(
+            self.QUERY,
+            "Blender 5.1 Release Notes - blender.org",
+            "Blender 5.1 was released on September 2026 with new features",
+            "https://www.blender.org/download/releases/5-1/",
+        )
+        assert page >= MIN_WEB_RELEVANCE, page
+
+    def test_the_asking_words_do_not_make_a_page_relevant(self):
+        """A page carrying only *month*, *check* and *web* is about nothing
+        that was asked."""
+        pizza = relevance_of(
+            self.QUERY,
+            "Best pizza in Lagos",
+            "Ten places to eat this month. Check the web for menus.",
+            "https://example.com/pizza",
+        )
+        assert pizza < MIN_WEB_RELEVANCE, pizza
+
+    def test_the_stemmer_reaches_a_fixed_point(self):
+        from runtimes.internet.relevance import _stem
+
+        assert _stem("version") == _stem("versions")
+        assert _stem("release") == _stem("released") == _stem("releases")

@@ -316,6 +316,60 @@ class OpenAICompatibleAdapter:
             return {}
         return {str(model_id): None}
 
+    def release_resident(self, *, timeout: float = 60.0) -> Dict[str, str]:
+        """Unload what this server holds, where it has a route for that.
+
+        **TabbyAPI has one — `POST /v1/model/unload` — and until 20
+        September 2026 this adapter said it did not.** Measured against the
+        maintainer's own server on 127.0.0.1:1234 with `disable_auth: true`:
+        the call took about thirty seconds to answer and the card went from
+        11.8 GB to 5 GB. The route is TabbyAPI's admin API, so on a server
+        with auth enabled it answers 401/403 and the outcome says so; LM
+        Studio and the other OpenAI-compatible servers answer 404 or 405 and
+        the outcome is the same sentence it always was. Nothing is guessed
+        from the server's name — the route is asked and its answer reported.
+
+        A long timeout on purpose: unloading a 27B is slow, and cutting the
+        connection early leaves the server mid-unload and unable to answer
+        anything for the next half minute (seen). Loopback only.
+        """
+        if self.kind is ProviderKind.CLOUD_API:
+            return {}
+        resident = self.resident_models(timeout=min(timeout, 2.0))
+        if not resident:
+            return {}
+        from core.egress import get_gate
+
+        headers = {}
+        if self._api_key:
+            headers["Authorization"] = f"Bearer {self._api_key}"
+        no_route = (
+            f"not released: {self.provider_id} has no unload route; "
+            "stop or unload it from that app"
+        )
+        try:
+            get_gate().request(
+                f"{self.base_url}/v1/model/unload",
+                method="POST",
+                timeout=timeout,
+                headers=headers,
+                source="providers.openai_compat",
+            )
+        except urllib.error.HTTPError as exc:
+            if exc.code in (401, 403):
+                reason = f"not released: {self.provider_id} wants an admin key to unload"
+            elif exc.code in (404, 405):
+                reason = no_route
+            elif _says_nothing_is_loaded(exc):
+                return {name: "released" for name in resident}
+            else:
+                reason = f"not released: {self.provider_id} answered {exc.code}"
+            return {name: reason for name in resident}
+        except Exception as exc:  # noqa: BLE001 - the outcome is the report
+            logger.debug("%s release failed: %s", self.provider_id, exc)
+            return {name: f"not released: {exc}" for name in resident}
+        return {name: "released" for name in resident}
+
     def to_dict(self) -> Dict[str, Any]:
         return ProviderSummary(
             id=self.provider_id,

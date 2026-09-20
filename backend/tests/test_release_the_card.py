@@ -143,3 +143,50 @@ class TestTheWire:
 
         assert outcome["fine"] == "released"
         assert outcome["stuck"].startswith("not released")
+
+
+class TestAnOpenAICompatibleServerIsAsked:
+    """TabbyAPI has an unload route, and this adapter used to say it did not.
+
+    Measured 20 September 2026 against the maintainer's own server:
+    `POST /v1/model/unload` took about thirty seconds and the card went from
+    11.8 GB to 5 GB. The route is asked and its answer reported — nothing is
+    inferred from the server's name, so LM Studio (404) still reads as "no
+    unload route" and a server with auth on reads as wanting a key.
+    """
+
+    def _adapter(self, monkeypatch, answer):
+        import urllib.error
+
+        from providers.discoverers.openai_compat import OpenAICompatibleAdapter
+
+        adapter = OpenAICompatibleAdapter("lm_studio", base_url="http://127.0.0.1:1234")
+        monkeypatch.setattr(adapter, "resident_models", lambda timeout=1.0: {"Qwen3.8-27B": None})
+        sent: list[dict] = []
+
+        class _Gate:
+            def request(self, url, *, method="GET", **kw):
+                sent.append({"url": url, "method": method})
+                if answer >= 400:
+                    raise urllib.error.HTTPError(url, answer, "x", {}, None)
+                return b"{}"
+
+        import core.egress as egress
+
+        monkeypatch.setattr(egress, "get_gate", lambda: _Gate())
+        return adapter, sent
+
+    def test_tabby_is_asked_on_its_unload_route(self, monkeypatch):
+        adapter, sent = self._adapter(monkeypatch, 200)
+        assert adapter.release_resident() == {"Qwen3.8-27B": "released"}
+        assert sent == [{"url": "http://127.0.0.1:1234/v1/model/unload", "method": "POST"}]
+
+    def test_a_server_without_the_route_is_reported(self, monkeypatch):
+        adapter, _ = self._adapter(monkeypatch, 404)
+        assert adapter.release_resident() == {
+            "Qwen3.8-27B": "not released: lm_studio has no unload route; stop or unload it from that app"
+        }
+
+    def test_a_server_that_wants_a_key_says_so(self, monkeypatch):
+        adapter, _ = self._adapter(monkeypatch, 401)
+        assert adapter.release_resident() == {"Qwen3.8-27B": "not released: lm_studio wants an admin key to unload"}

@@ -587,6 +587,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
               action: event.action,
               ...(event.servers ? { servers: event.servers } : {}),
               ...(event.model ? { model: event.model } : {}),
+              // The "open-project" offer is only pressable with these. They
+              // were parsed by `chatClient` and dropped here, so the card
+              // asked "Open it as a coding project?" with nothing to press
+              // — seen 20 September 2026, the first time F1 ran on screen.
+              ...(event.path ? { path: event.path } : {}),
+              ...(event.name ? { name: event.name } : {}),
             });
             set({ streamingNotices: [...notices] });
             break;

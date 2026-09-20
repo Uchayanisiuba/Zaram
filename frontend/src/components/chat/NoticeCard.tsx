@@ -222,48 +222,60 @@ export default function NoticeCard({ notice, onOpen, onEnableSearch, onContinue,
     }
   }
 
+  // **A line, not a box — 20 September 2026.** Two of these under one reply
+  // were a bordered card each with a sentence, a button and a paragraph of
+  // small print, and the maintainer's word for the result was "cluttered".
+  // The disclosure is not weakened: every sentence a card used to carry is
+  // still here, the offer is still on the line, and the rule-7j consent
+  // sentence is still shown — one line, muted, under the offer it explains.
+  // What changed is the frame: a hairline at the left edge, one icon, the
+  // colour of a footnote rather than of the reply. A notice is read beside
+  // an answer; it does not compete with it.
   return (
     <div
-      className="mt-2 rounded-lg px-3 py-2.5 flex items-start gap-2.5 surface"
+      className="mt-1.5 pl-2.5 flex items-start gap-2"
+      style={{ borderLeft: '1px solid var(--color-border-subtle)' }}
       data-testid="chat-notice"
       data-kind={notice.kind || 'default'}
       data-tone={tone === DEFAULT_TONE ? 'warning' : 'neutral'}
     >
-      <Icon size={13} className="mt-0.5 shrink-0" style={{ color }} />
+      <Icon size={11} className="mt-[3px] shrink-0" style={{ color, opacity: 0.8 }} />
       <div className="flex-1 min-w-0">
-        <p className="text-xs leading-relaxed text-slate-300">{notice.content}</p>
+        <p className="text-xs leading-snug" style={{ color: 'var(--color-text-muted)' }}>
+          {notice.content}
+          {offersSearch && (
+            <>
+              {' '}
+              <button
+                onClick={() => void enableSearch()}
+                disabled={phase === 'working'}
+                className="inline-flex items-center gap-0.5 disabled:opacity-50"
+                style={{ color: 'var(--color-cyan-light)' }}
+                data-testid="notice-enable-search"
+              >
+                {phase === 'working' ? 'Turning it on…' : 'Search the web and try again'}
+                <ArrowRight size={10} />
+              </button>
+            </>
+          )}
+        </p>
 
         {offersSearch && (
-          <>
-            <button
-              onClick={() => void enableSearch()}
-              disabled={phase === 'working'}
-              className="mt-1.5 text-xs flex items-center gap-1 disabled:opacity-50"
-              style={{ color: 'var(--color-cyan-light)' }}
-              data-testid="notice-enable-search"
-            >
-              {phase === 'working' ? 'Turning it on…' : 'Search the web and try again'}
-              <ArrowRight size={10} />
-            </button>
-            {/* Said under the button, not behind it. Two things happen when
-                this is pressed — search is turned on, and the search engine
-                becomes a permitted destination — and the sentence names both,
-                because the second is the rule-7j consent this press *is*. An
-                offer whose disclosure covers half of what it does would be the
-                same defect as the refusal it replaced. */}
-            <p className="mt-1 text-xs leading-snug" style={{ color: 'var(--color-text-faint)' }}>
-              {phase === 'failed'
-                ? 'Zaram could not turn search on. It is in Settings under Privacy.'
-                : 'Your question goes to a search engine, which is allowed from now on and ' +
-                  'recorded in Activity. You can revoke it in Settings.'}
-            </p>
-          </>
+          /* Said under the offer, not behind it. Two things happen when it
+             is pressed — search is turned on, and the search engine becomes
+             a permitted destination — and the sentence names both, because
+             the second is the rule-7j consent this press *is*. */
+          <p className="mt-0.5 text-[11px] leading-snug" style={{ color: 'var(--color-text-faint)' }}>
+            {phase === 'failed'
+              ? 'Zaram could not turn search on. It is in Settings under Privacy.'
+              : 'Your question goes to a search engine, allowed from now on and recorded in Activity; revoke it in Settings.'}
+          </p>
         )}
 
         {offersContinue && (
           <button
             onClick={onContinue}
-            className="mt-1.5 text-xs flex items-center gap-1"
+            className="mt-0.5 text-xs flex items-center gap-1"
             style={{ color: 'var(--color-cyan-light)' }}
             data-testid="notice-continue"
           >
@@ -275,7 +287,7 @@ export default function NoticeCard({ notice, onOpen, onEnableSearch, onContinue,
         {offersCloud && (
           <button
             onClick={() => onTryCloud?.(notice.model as string)}
-            className="mt-1.5 text-xs flex items-center gap-1"
+            className="mt-0.5 text-xs flex items-center gap-1"
             style={{ color: 'var(--color-cyan-light)' }}
             data-testid="notice-try-cloud"
           >
@@ -286,7 +298,7 @@ export default function NoticeCard({ notice, onOpen, onEnableSearch, onContinue,
         {/* The offer to leave the machine says, in the same breath, what
             staying costs: nothing. See `lib/freeTier`. */}
         {offersCloud && (
-          <p className="mt-1 text-xs leading-relaxed" style={{ color: 'var(--color-text-faint)' }} data-testid="notice-local-free">
+          <p className="mt-0.5 text-[11px] leading-snug" style={{ color: 'var(--color-text-faint)' }} data-testid="notice-local-free">
             {LOCAL_IS_FREE}
           </p>
         )}
@@ -294,7 +306,7 @@ export default function NoticeCard({ notice, onOpen, onEnableSearch, onContinue,
         {offersProject && (
           <button
             onClick={() => void onOpenProject?.(notice.path as string, notice.name || 'Project')}
-            className="mt-1.5 text-xs flex items-center gap-1"
+            className="mt-0.5 text-xs flex items-center gap-1"
             style={{ color: 'var(--color-cyan-light)' }}
             data-testid="notice-open-project"
           >

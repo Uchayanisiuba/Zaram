@@ -162,7 +162,11 @@ class TestWhoDecides:
         call = TOOL_CALL_MARKER + ' {"server": "code", "tool": "search_code", "arguments": {"query": "cat"}}\n'
         engine, _, _ = _engine(tmp_path, [call, "Nothing there."], mcp, chooses=True)
         list(engine.execute(PLAIN, session_id="s"))
-        assert mcp.calls == [{"server": "code", "tool": "search_code", "arguments": {"query": "cat"}, "confirmed": False}]
+        # The session travels with the call, so the runtime's per-session
+        # grant can be checked against it.
+        assert mcp.calls == [
+            {"server": "code", "tool": "search_code", "arguments": {"query": "cat"}, "confirmed": False, "session": "s"}
+        ]
 
 
 class TestTheRulesComeFirst:

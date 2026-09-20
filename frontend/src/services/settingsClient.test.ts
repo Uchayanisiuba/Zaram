@@ -163,6 +163,9 @@ describe('routing updates leave untouched fields alone', () => {
       // or their routing model as a side effect of not mentioning them.
       task_models: null,
       router_model: null,
+      // Thinking on/off (E2b, 20 September 2026) sits behind the same
+      // endpoint and gets the same null.
+      thinking: null,
     });
   });
 

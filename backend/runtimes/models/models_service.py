@@ -40,9 +40,21 @@ class ModelsService:
             yield from self.engine.stream_response(full_prompt, system_prompt, model, images)
 
     def search_knowledge(self, query: str, persona: str = "zaram_prime") -> Iterator[str]:
-        """Search knowledge across all providers."""
+        """The web, for a search step.
+
+        **`include_memory=False`, and it was the default `True` until 20
+        September 2026.** The knowledge runtime fans out to the web *and*
+        the Spine and cuts the union to six on a cross-provider confidence —
+        a blend deciding membership, which `CLAUDE.md` records as this
+        codebase's most expensive recurring bug. Seen live: a question about
+        the current Blender release got DuckDuckGo answering and a result
+        page read, and the model still said "the web returned nothing
+        usable", because the six it was handed were mostly the manual's own
+        paragraphs at a cosine of 0.4. Recall is its own step, run before
+        this one, with its own citations; a search step asks for the web.
+        """
         if self._knowledge_runtime:
-            response = self._knowledge_runtime.search(query, max_results=6)
+            response = self._knowledge_runtime.search(query, max_results=6, include_memory=False)
             results = [r.to_dict() for r in response.results]
             print(f"[ModelsService] Knowledge search for '{query[:50]}...' returned {len(results)} results from providers: {response.providers_consulted}")
             yield json.dumps({

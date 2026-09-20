@@ -94,6 +94,10 @@ __all__ = [
 #: by editing code.
 MIN_WEB_RELEVANCE = 0.18
 
+#: How many of the question's terms a page is expected to carry before it
+#: counts as fully about the question. See `relevance_of`.
+COVERAGE_TERMS = 4
+
 #: How much a domain is trusted to be a *source*, independent of this query.
 #:
 #: Used for ordering only, and fused by rank rather than added to a score — so
@@ -145,25 +149,66 @@ _CODE_DOMAINS = ("github.com", "stackoverflow.com", "gitlab.com", "npmjs.com", "
 #: "univers" is the kind of match that makes a citation look wrong to the
 #: person reading it. These six suffixes cover plurals and the common
 #: adjectival forms and stop there.
-_SUFFIXES = ("ational", "iness", "ings", "edly", "ian", "ing", "ies", "ed", "es", "s", "n")
+_SUFFIXES = ("ational", "iness", "ings", "edly", "ian", "ing", "ies", "ed", "es", "s", "n", "e")
 
 
 def _stem(token: str) -> str:
-    """A conservative common form, so `Nigeria` and `Nigerian` compare equal."""
+    """A conservative common form, so `Nigeria` and `Nigerian` compare equal.
+
+    Run to a fixed point. One pass stemmed `versions` to `version` and
+    `version` to `versio`, so the plural and the singular of the same word
+    never compared equal — and `release` (no suffix) never matched
+    `released` (`releas`), which is what kept *Blender 5.1 Release Notes*
+    below the floor on 20 September 2026. The trailing `e` is stripped for
+    the same reason; a root of three letters is still the shortest allowed.
+    """
     if len(token) <= 3:
         return token
-    for suffix in _SUFFIXES:
-        if token.endswith(suffix) and len(token) - len(suffix) >= 3:
-            root = token[: -len(suffix)]
-            # `ies` -> `y` keeps "policies"/"policy" together; everything else
-            # keeps the bare root.
-            return root + "y" if suffix == "ies" else root
+    for _ in range(4):
+        before = token
+        for suffix in _SUFFIXES:
+            if token.endswith(suffix) and len(token) - len(suffix) >= 3:
+                root = token[: -len(suffix)]
+                # `ies` -> `y` keeps "policies"/"policy" together; everything
+                # else keeps the bare root.
+                token = root + "y" if suffix == "ies" else root
+                break
+        if token == before:
+            return token
     return token
 
 
 def _stems(text: str) -> set[str]:
     """Meaningful tokens, reduced to their common form. Shares one tokenizer."""
     return {_stem(t) for t in content_tokens(text)}
+
+
+#: Words about the *asking*, not the subject. A person typing to Zaram says
+#: "check the web", "look up", "what is the current", "this month" — none of
+#: which a page answering them would carry, and all of which the shared
+#: tokenizer rightly keeps for recall, where "current" in a stored fact is
+#: content. Removed from the *query* side only, here, so a page is scored on
+#: what was asked about rather than on how it was asked. Temporal words
+#: (*latest*, *now*, *today*) are read separately by `temporality_of`, which
+#: is where they belong.
+_ASKING_WORDS = frozenset(
+    _stem(w) for w in (
+        "check", "web", "search", "look", "lookup", "find", "tell", "please",
+        "online", "internet", "google", "browse", "verify", "confirm",
+        "current", "currently", "latest", "newest", "recent", "recently",
+        "now", "today", "tonight", "yesterday", "week", "month", "year",
+        "know", "wonder", "curious", "quick", "quickly",
+    )
+)
+
+
+def _query_stems(query: str) -> set[str]:
+    """The question's subject terms: its stems less the asking words. Falls
+    back to every stem when nothing else is left, so "what is new this week"
+    still scores against something rather than nothing."""
+    stems = _stems(query)
+    subject = stems - _ASKING_WORDS
+    return subject or stems
 
 
 def _bigrams(tokens: Sequence[str]) -> set[tuple[str, str]]:
@@ -201,7 +246,7 @@ def relevance_of(query: str, title: str, snippet: str, url: str = "") -> float:
     * **A URL-slug signal**, small, because a term in the path is weak
       evidence and strong enough to break ties between otherwise equal results.
     """
-    query_tokens = _stems(query)
+    query_tokens = _query_stems(query)
     if not query_tokens:
         # Nothing meaningful was asked — a query of pure stopwords. Refusing to
         # score is honest; scoring it 1.0 would let anything through.
@@ -211,10 +256,28 @@ def relevance_of(query: str, title: str, snippet: str, url: str = "") -> float:
     snippet_tokens = _stems(snippet)
     body_tokens = title_tokens | snippet_tokens
 
-    coverage = len(query_tokens & body_tokens) / len(query_tokens)
-    title_hit = len(query_tokens & title_tokens) / len(query_tokens)
+    # **Coverage is out of the first few terms a page could be expected to
+    # carry, not out of every stem in the sentence.** Found 20 September
+    # 2026 on a live question, "What is the current version of the Blender
+    # 3D application, released this month? Check the web." — nine stems,
+    # four of them the person talking to Zaram rather than describing the
+    # page (*current*, *month*, *check*, *web*). The page that answers it,
+    # *Blender 5.1 Release Notes — released September 2026*, covered two of
+    # nine, and because coverage multiplies as well as contributes it scored
+    # **0.032** against a floor of 0.18. Twelve results, none kept, and the
+    # model told the person the web had returned nothing.
+    #
+    # The floor and the multiplication were both tuned on three- and
+    # five-word queries and are right there. A typed question is longer, and
+    # its length is not evidence about the page. A result that carries four
+    # distinct terms of the question is about the question; one that carries
+    # one of three still is not, and the election repository below the floor
+    # stays below it (1/4 rather than 1/5 — measured, 0.05).
+    denominator = min(len(query_tokens), COVERAGE_TERMS)
+    coverage = min(1.0, len(query_tokens & body_tokens) / denominator)
+    title_hit = min(1.0, len(query_tokens & title_tokens) / denominator)
 
-    query_seq = [_stem(t) for t in _ordered_tokens(query)]
+    query_seq = [_stem(t) for t in _ordered_tokens(query) if _stem(t) in query_tokens]
     phrase = 0.0
     if len(query_seq) > 1:
         wanted = _bigrams(query_seq)
@@ -226,7 +289,7 @@ def relevance_of(query: str, title: str, snippet: str, url: str = "") -> float:
     if url:
         slug_tokens = _stems(re.sub(r"[/\-_.]+", " ", urlparse(url).path))
         if slug_tokens:
-            slug = len(query_tokens & slug_tokens) / len(query_tokens)
+            slug = min(1.0, len(query_tokens & slug_tokens) / denominator)
 
     quality = 0.50 * coverage + 0.28 * title_hit + 0.17 * phrase + 0.05 * slug
 

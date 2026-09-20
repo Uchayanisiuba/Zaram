@@ -16,7 +16,13 @@ export interface MemoryRecord {
   last_accessed: number;
   access_count: number;
   importance: number;
+  /** The store's default, "user", for everything — never read for display.
+   *  `origin` is the field that says whose words these are. */
   source: string;
+  /** Rule 7b: `conversation` (the person said it), `user_document` (a
+   *  passage of a file they indexed) or `generated` (Zaram wrote it).
+   *  Absent on a record older than the field. */
+  origin?: 'conversation' | 'user_document' | 'generated' | string;
   tags: string[];
   session_id: string | null;
   metadata: Record<string, unknown>;
@@ -81,7 +87,12 @@ export interface MemoryListing {
 }
 
 export interface MemoryStats {
+  /** Everything in the Spine, passages of indexed documents included. */
   total_records: number;
+  /** What Zaram believes — `total_records` less the document passages, which
+   *  belong to Knowledge. Absent from a backend older than 20 September 2026. */
+  facts?: number;
+  document_passages?: number;
   by_type: Record<string, number>;
   sessions: number;
   newest_at: number | null;

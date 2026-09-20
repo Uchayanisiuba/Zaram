@@ -197,7 +197,20 @@ export type ChatEvent =
    *  first case is a file ingest could not read. Kept separate from `token` so
    *  it is never rendered as the model speaking, and from `error` because
    *  nothing failed in this exchange. `action` names where to go about it. */
-  | { type: 'notice'; content: string; kind: string; action: string; servers?: string[]; model?: string }
+  | {
+      type: 'notice';
+      content: string;
+      kind: string;
+      action: string;
+      servers?: string[];
+      model?: string;
+      /** On the "open-project" offer: the folder named and the project's
+       *  name. Declared here because the parser has sent them since F1 and
+       *  the store, typed against this union, could not read what the type
+       *  did not name — which is how the offer shipped with no button. */
+      path?: string;
+      name?: string;
+    }
   /** The model's checklist for this task, whole, each time it changes.
    *  `awaitingGo` means the loop paused before its first change so the
    *  person can read it first. */

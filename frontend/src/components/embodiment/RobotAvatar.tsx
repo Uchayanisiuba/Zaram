@@ -165,15 +165,29 @@ const NEUTRAL_HOLD_MAX = 41
 const SMILE_HOLD_MIN = 6
 const SMILE_HOLD_MAX = 10
 
+// **Switched off on 20 September 2026, for `v0.1.0-alpha.2`.** Seen on the
+// landing with the avatar renderer on: happy eyes and a smile at rest, and the
+// maintainer's note against it reads `CLAUDE.md` back — the rest face is
+// `sil`, the smile is for the mascot, never the status indicator. Even at a
+// fifth of idle, a smile that arrives on a schedule is an expression the state
+// did not ask for, which is the projection the embodiment rule exists to
+// prevent. The greeting (an event the user caused) and `swapping` (a state)
+// keep theirs. The schedule and its numbers stay so the decision can be
+// reversed in one line, and `?smileEvery=` still turns it on for a look.
+const IDLE_SMILES_ON_A_SCHEDULE = false
+
 /** How long to wait between smiles, overridable as `?smileEvery=2`.
  *
  *  Here because the shipped gap is 14-32 seconds and nobody should have to sit
  *  through that to check a sprite. The same reason `?noAnim=1` exists: the
  *  alternative is editing a constant, rebuilding, and remembering to put it
- *  back — which is how a debug value ships. */
-function neutralHold(): [number, number] {
+ *  back — which is how a debug value ships.
+ *
+ *  `null` means no schedule at all: the idle face holds `sil`. */
+function neutralHold(): [number, number] | null {
   const every = numberParam('smileEvery', 0, 0.1)
-  return every > 0 ? [every, every] : [NEUTRAL_HOLD_MIN, NEUTRAL_HOLD_MAX]
+  if (every > 0) return [every, every]
+  return IDLE_SMILES_ON_A_SCHEDULE ? [NEUTRAL_HOLD_MIN, NEUTRAL_HOLD_MAX] : null
 }
 
 /** How long a smile is held, overridable as `?smileHold=`. */
@@ -801,7 +815,10 @@ export default function RobotAvatar({ px = 320, src = '/avatars/zaram-robo.glb' 
     /** When the eyes last changed to something the mouth has not caught up to. */
     let mouthPending: number | null = null
     const faceDebug = new URLSearchParams(window.location.search).has('faceDebug')
-    const [neutralMin, neutralMax] = neutralHold()
+    // No schedule: the idle face holds `sil`, and the phase timer below is
+    // never read.
+    const neutralRange = neutralHold()
+    const [neutralMin, neutralMax] = neutralRange ?? [0, 0]
     const [smileMin, smileMax] = smileHold()
     const pick = (lo: number, hi: number) => lo + Math.random() * (hi - lo)
     // The idle face starts neutral, so the first thing a viewer sees is the
@@ -1563,7 +1580,7 @@ export default function RobotAvatar({ px = 320, src = '/avatars/zaram-robo.glb' 
         smiling = true
       } else if (s === 'idle') {
         idlePhaseLeft -= dt
-        if (idlePhaseLeft <= 0) {
+        if (neutralRange && idlePhaseLeft <= 0) {
           idleSmiling = !idleSmiling
           idlePhaseLeft = idleSmiling ? pick(smileMin, smileMax) : pick(neutralMin, neutralMax)
         }

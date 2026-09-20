@@ -169,3 +169,44 @@ describe('a file sent with a question', () => {
     await sending;
   });
 });
+
+describe('the open-project offer keeps what makes it pressable', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    streamChat.mockReset();
+    useSystemStore.setState({ activity: 'idle', swappingTo: null, oversizedModel: null });
+    useChatStore.setState({ messages: [], isStreaming: false, streamingText: '' });
+  });
+
+  // Seen 20 September 2026, the first time F1 ran on screen: the card asked
+  // "Open it as a coding project?" with nothing to press. `chatClient` parsed
+  // `path` and `name`; this store dropped them; `NoticeCard` offers the
+  // button only when `path` is there. A test that hands the card a complete
+  // notice cannot see that.
+  it('carries path and name from the event onto the stored notice', async () => {
+    const { stream, release } = pausedStream([
+      {
+        type: 'notice',
+        content: 'That names a folder on this machine — C:/code/my-app. Open it as a coding project?',
+        kind: 'project',
+        action: 'open-project',
+        path: 'C:/code/my-app',
+        name: 'my-app',
+      },
+    ]);
+    streamChat.mockImplementation(() => stream());
+
+    const sending = useChatStore.getState().send('have a look at C:/code/my-app');
+    await vi.advanceTimersByTimeAsync(10);
+    expect(useChatStore.getState().streamingNotices[0]).toMatchObject({
+      action: 'open-project',
+      path: 'C:/code/my-app',
+      name: 'my-app',
+    });
+
+    release();
+    await sending;
+    const reply = [...useChatStore.getState().messages].reverse().find((m) => m.role === 'assistant');
+    expect(reply?.notices[0]).toMatchObject({ path: 'C:/code/my-app', name: 'my-app' });
+  });
+});

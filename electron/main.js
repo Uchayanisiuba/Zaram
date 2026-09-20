@@ -546,7 +546,24 @@ app.on('window-all-closed', () => {
   }
 });
 
-app.on('before-quit', () => {
+// **Give the card back before the backend is stopped.** `cleanup()` is
+// synchronous and `backend.stop()` is a hard terminate, so the release has
+// to happen ahead of it: the first `before-quit` is held, the backend is
+// asked to unload what it can (bounded — a backend that does not answer
+// does not keep the app open), and quit is called again with the flag set.
+// See `electron/backend/releaseCard.js`.
+let cardReleased = false;
+app.on('before-quit', (event) => {
+  if (!cardReleased && backend && config && apiSecret) {
+    event.preventDefault();
+    cardReleased = true;
+    const { releaseCard } = require('./backend/releaseCard');
+    releaseCard(config.backend.baseUrl, { 'X-Zaram-Auth': apiSecret })
+      .then((outcome) => logger.info('Card release on quit', outcome))
+      .catch(() => { /* logged inside; never blocks the quit */ })
+      .then(() => app.quit());
+    return;
+  }
   cleanup();
 });
 

@@ -639,11 +639,20 @@ class InternetRuntimeImpl(InternetRuntime):
         connector_results = await asyncio.gather(*tasks, return_exceptions=True)
 
         all_results: list[SearchResult] = []
+        # Which connectors *answered* — returned at least one result before
+        # the relevance floor. Read by the knowledge runtime to say whether
+        # the web was reached: with every result dropped as irrelevant the
+        # returned list is empty, exactly as it is when the gate refused the
+        # request, and the reply then claimed "the search engine is not a
+        # permitted destination yet" about a search that ran (20 September
+        # 2026, twelve results fetched).
+        self.answered_last: list[str] = []
         for i, result in enumerate(connector_results):
             if isinstance(result, Exception):
                 print(f"[InternetRuntime] Connector {connectors[i].get_connector_id()} error: {result}")
             elif result:
                 all_results.extend(result)
+                self.answered_last.append(connectors[i].get_connector_id())
 
         # Rank and deduplicate
         ranked = self._rank_results(all_results, query)

@@ -239,6 +239,12 @@ class KnowledgeRuntime:
                     )
                     internet_results = run_sync(self._internet_runtime.search(internet_query))
                     self._stats["internet_searches"] += 1
+                    # A connector that answered reached the web, whether or
+                    # not anything it returned survived the relevance floor
+                    # — `reached_the_web` reads this, and an empty survivor
+                    # list must not read as a refused request.
+                    for name in getattr(self._internet_runtime, "answered_last", None) or []:
+                        connector_status[name] = "ok"
                     for r in internet_results:
                         consulted.append(r.connector)
                         connector_status[r.connector] = "ok"

@@ -55,6 +55,25 @@ export const SORT_LABELS: Record<MemorySortBy, string> = {
   forgotten: 'Least recalled',
 };
 
+/** Where a fact came from, in the user's words — off `origin` (rule 7b),
+ *  never off `source`, which is the store's default and says "user" for
+ *  everything. That constant is what put `user · provisional` under the
+ *  manual's own paragraphs on a fresh install (15 September 2026). */
+export function originLabel(record: Pick<MemoryRecord, 'origin' | 'metadata'>): string {
+  switch (record.origin) {
+    case 'conversation':
+      return 'you said this';
+    case 'generated':
+      return 'Zaram wrote this';
+    case 'user_document': {
+      const name = record.metadata?.source_name;
+      return typeof name === 'string' && name ? `from ${name}` : 'from a document';
+    }
+    default:
+      return 'origin not recorded';
+  }
+}
+
 /** The scope cut, in the user's words rather than the field's.
  *
  *  `global` is not a word anybody uses about themselves, and `project:acme` is
@@ -177,7 +196,7 @@ export function group(
         ? record.scope || 'global'
         : by === 'standing'
           ? record.standing || 'unknown'
-          : record.source || 'unknown';
+          : originLabel(record);
     const existing = buckets.get(key);
     if (existing) existing.push(record);
     else buckets.set(key, [record]);

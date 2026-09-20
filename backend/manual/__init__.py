@@ -159,7 +159,9 @@ def ensure_indexed(ingest_service: Any, domains: Any, data_dir: Path) -> Dict[st
     if indexed_version(data_dir) == current and known.get("source_id") and known.get("domain_id"):
         return {"indexed": False, "version": current, **known}
 
-    source_id, report = ingest_service.scan(str(PAGES))
+    # Recall only: the pages describe commitments as examples, and an
+    # example of a payment term is not a payment the person owes.
+    source_id, report = ingest_service.scan(str(PAGES), obligations=False)
     # Public text, not the person's: a cloud model may recall it, or the
     # manual would answer only on machines that never use one.
     try:

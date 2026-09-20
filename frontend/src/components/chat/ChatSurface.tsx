@@ -206,6 +206,13 @@ export default function ChatSurface({ navigate }: Props) {
    *  the tools now offered. `docs/PLAN.md` F1. */
   const openFolderAsProject = useCallback(
     async (path: string, name: string) => {
+      // The offer arrives before the answer, so it is pressed while the
+      // answer is still streaming — and `send` refuses while one is in
+      // flight. Seen 20 September 2026: the project was created and
+      // selected, and the question was never asked again. The answer under
+      // way is the one that says "no project is open", so stopping it is
+      // what the press means.
+      if (useChatStore.getState().isStreaming) useChatStore.getState().cancel();
       const { useProjectStore } = await import('@/stores/projectStore');
       const project = await useProjectStore.getState().create(name, 'coding', '', path);
       if (!project) return;

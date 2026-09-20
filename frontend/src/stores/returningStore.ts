@@ -169,7 +169,10 @@ export const useReturningStore = create<ReturningState>()(
           returning: {
             sinceAt: since,
             newFacts: stats?.new_since ?? null,
-            totalFacts: stats?.total_records ?? null,
+            // `facts` leaves out passages of indexed documents — on a fresh
+            // install `total_records` was the manual, and the landing read
+            // "29 facts" to somebody who had told it nothing.
+            totalFacts: stats?.facts ?? stats?.total_records ?? null,
             projects,
             last: last ? { id: last.id, title: last.title } : null,
             bytesToday: stats?.bytes_left_device_today ?? null,

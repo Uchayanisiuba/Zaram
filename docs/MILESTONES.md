@@ -18,9 +18,161 @@ publishing step over rather than finding another route. `CLAUDE.md`,
 
 ---
 
-## Current state — 19 September 2026
+## Current state — 20 September 2026
 
 *The latest work is first. Earlier sessions follow below.*
+
+### 20 September, night — the road to `v0.1.0-alpha.2`, walked. HANDOFF.
+
+**Read this block first.** The evening handoff below listed seven steps to
+the tag; this session worked steps 1–5 and the build half of 6, and found
+eight defects on the way, every one by looking rather than by a test. The
+19 September and 15–19 September blocks are still accurate about the plan
+and the coworker.
+
+#### The list, item by item
+
+1. **Security 1 — the real server list under the allow-list environment.**
+   `tests/test_the_real_servers_start_under_the_allow_list.py` (`-m measure`,
+   reads the file `ZARAM_REAL_SERVERS` names, never the data directory)
+   spawns every stdio server and asks each for its tools. **Six of eight
+   started**: blender, context7, email, figma, filesystem, playwright.
+   `davinci` and `unreal` fail with WinError 2 because **`uvx` is not
+   installed on this machine** — not the allow-list; they could never have
+   started here. Install `uv` or remove the two entries.
+   **Bug 6** — Tabby's `reasoning` and `tool_format` keys, the
+   `use_as_default` rule and the measurement are in `docs/RUNNING.md`.
+2. **Bug 4 — the avatar's smile at rest.** It was the *scheduled* idle
+   smile: 6–10 s every 23–41 s, built 3 September at the maintainer's
+   request as a deliberate exception to the rest-face rule, and flagged
+   on the 20th against `CLAUDE.md`. Taking the later record:
+   `IDLE_SMILES_ON_A_SCHEDULE = false` in `RobotAvatar.tsx`, one line to
+   reverse, `?smileEvery=` still turns it on for a look. The greeting
+   (an event) and `swapping` (a state) keep theirs. **Seen**: `sil` at
+   36 s and 56 s after opening, inside the window the old schedule fired.
+   **Bug 5 — the manual under Memory → Facts.** Two defects in one row.
+   `source` is the store's default and says "user" for everything, so the
+   surface printed a constant as provenance; and a passage of an indexed
+   document is not a belief about anyone. `GET /memory` now leaves
+   `user_document` passages out unless `documents=true`, sends `origin`,
+   and `/memory/stats` counts `facts` and `document_passages` apart; the
+   row says *you said this* / *from export.md* / *Zaram wrote this* off
+   `origin`; the landing's returning line and *Facts stored* read `facts`.
+   **Seen**: *Facts stored 0* and "no new facts" on a fresh directory with
+   the manual indexed. The twin: the manual's own sentence about "a
+   payment due in 30 days" became an open **commitment question** on every
+   fresh install — `scan(obligations=False)` for the manual now.
+   `tests/test_memory_lists_facts_not_the_manual.py`.
+3. **The unseen list, with the GPU — all seen, four defects found.**
+   * *Rows between paragraphs* — seen: recall row → "Let me look at that
+     folder." → *Listed files* row → prose → *Read a file* row → the
+     answer, on the 27B, `add` explained correctly.
+   * *The folder in a sentence* — the offer rendered with **no button**:
+     `chatStore` dropped `path`/`name` when it stored the notice (and the
+     `ChatEvent` type never declared them, so the store *could not* read
+     them); `NoticeCard.test.tsx` hands the card a complete notice and
+     cannot see it. Fixed, `chatStore.test.ts`. Then, pressed while the
+     first answer was still streaming — which is when it arrives —
+     `send` refused silently and the project was created with no re-ask;
+     `openFolderAsProject` now cancels the in-flight answer first.
+     **Seen** end to end, `northwind-2` created on the name collision.
+   * *The model choosing a tool* — seen: the 27B chose `code/list_files`
+     unprompted. `web.search` never got the chance, because the planner
+     plans the search itself on a "current information" question; the
+     model's own choice is exercised only where the planner does not act
+     first.
+   * *Search with search on* — **the day's largest finding.** Twelve
+     DuckDuckGo results, `blender.org` read, and the model said the web
+     returned nothing usable, under a notice claiming the search engine
+     was "not a permitted destination". Three defects: (a)
+     `search_knowledge` asked the knowledge runtime with
+     `include_memory=True`, so the manual's passages competed with the web
+     for six slots on a cross-provider confidence — a blend deciding
+     membership, again; now `include_memory=False`, recall being its own
+     step. (b) The relevance floor: a typed question has nine stems, four
+     of them the person talking (*check*, *web*, *current*, *month*), and
+     coverage both contributes and multiplies, so the page that answered
+     scored **0.032** against 0.18; and the stemmer was not idempotent
+     (`version`→`versio`, `versions`→`version`; `release`≠`released`).
+     Coverage is now out of `COVERAGE_TERMS = 4`, asking-words are dropped
+     from the query side only, and `_stem` runs to a fixed point: release
+     notes 0.201, the kitchen-blender page 0.16, a page carrying only
+     *month/check/web* 0.0, the election junk still 0.052. (c)
+     `reached_the_web` read `provider_status`, which was filled only for
+     results that *survived* the floor — an empty survivor list read as a
+     refused request; `InternetRuntime.answered_last` now records which
+     connectors answered. **Seen**: `blender.org`, `developer.blender.org`
+     cited, no false notice, an honest rule-9 answer. Three
+     `cookwithrome.com` hits above the blender.org download page are an
+     *ordering* matter for later, not membership.
+   * *Settings → Runs on its own* — mounted beside Tools; the trigger was
+     created through its route. *An obligations trigger with real
+     obligations* — an invoice pasted with net-30 terms produced two
+     obligations (payment, deliverable, both 25 September); *Run now*
+     produced two runs, each a conversation under Activity, the payment
+     draft naming Invoice 0042 and USD 4,200 correctly. 256 s per run on
+     the 27B. One wobble: the draft cited "the June 2026 reminder
+     template [S3]" from a web search it ran on its own — search was on.
+4. **Full backend suite, detached, GPU free: 4,269 passed, 3 failed, 50
+   skipped, 7 min 48 s.** The three: `test_egress_chokepoint` flagged the
+   trigger runner's `httpx.AsyncClient` in `main.py` — it dispatches over
+   `ASGITransport` and opens no socket, and lives in `core/ask_in_process.py`
+   now, one function long, on `LOCAL_ONLY` with that fact written down;
+   and two stale assertions (`test_mcp_reaches_chat`,
+   `test_the_model_chooses_its_tools`) predating the `session` a call
+   carries since step 3. The evening's "three unread" were the payload
+   pair (fixed) and `test_residency_sees_every_server`, which passes.
+   **A second full run with everything applied: 4,286 passed, 0 failed,
+   50 skipped, 9 min 44 s** (GPU shared with a build; a clean card ran
+   the first in 7 min 48 s).
+5. **Frontend 887 tests / 93 files, Electron 75, `tsc`, `eslint`, the four
+   guards, reachability: clean.** One stale assertion
+   (`settingsClient.test.ts`, E2b's `thinking` field). `check:payload`'s
+   only complaint is the new modules being untracked, which the commit
+   settles.
+
+#### Also built, on the maintainer's questions during the session
+
+* **The card is freed on quit.** `electron/backend/releaseCard.js`: the
+  first `before-quit` is held, `POST /providers/release` is asked with the
+  launch credential, bounded to 4 s, then quit proceeds — `backend.stop()`
+  is a hard terminate on Windows, so the backend's own shutdown never got
+  the chance. And **TabbyAPI has an unload route**: `POST /v1/model/unload`
+  measured against the maintainer's server, ~30 s, 11.8 GB → 5 GB; the
+  OpenAI-compatible adapter asks it and reports 401/403 (wants a key),
+  404/405 (no route — LM Studio) honestly. `test/releaseCard.test.js`,
+  `test_release_the_card.py`.
+* **Notices are a line, not a box.** Hairline at the left, one icon,
+  footnote colour, the offer inline; the four wordiest backend sentences
+  cut to one clause each. The rule-7j consent sentence is still shown
+  under the search offer, shorter, with its three load-bearing phrases
+  intact (`NoticeCard.search.test.tsx` pins them). **Not seen on screen**
+  — a notice needs a reply with one and the card was released for Unreal
+  by then; the component tests render it.
+* **Playwright MCP — answered, not adopted.** It starts under the
+  allow-list and lists its tools; it is not a search and would not replace
+  one — scraping a results page through a ~150 MB Chromium, slower and
+  brittle. The honest route to a governed browser is a loopback CONNECT
+  proxy (host and byte count, no MITM) or `--allowed-origins` derived from
+  the policy; neither for this build. Where a browser wins is *reading*
+  JS-rendered pages, and that is a later reader, not a search.
+* **A fourth character** (a Black woman, not anime): licence is the whole
+  problem for a stranger's VRM, and the maintainer can author one; it
+  should arrive as the first *downloaded* avatar, not a bundled one
+  (`avatars/` is already 50 MB). After the tag.
+
+#### Still to do for the tag — step 6
+
+Build → cold install from outside the checkout → `git tag v0.1.0-alpha.2`
+→ push → import the Formspree list into Buttondown → `node
+scripts/tell-the-testers.mjs v0.1.0-alpha.2 --send`. The commit and push
+are the maintainer's; the cold install is not negotiable.
+
+*Loose ends:* the obligations run's draft searched the web on its own;
+`cookwithrome.com` outranking `blender.org/download` (ordering); `uvx`
+missing for two of the maintainer's servers; with a tray, closing the
+window keeps Zaram up and so does not release the card — that is the
+person keeping it up, which is right.
 
 ### 19 September, later — the plan is written, and Week 1 of it is built but not yet seen. HANDOFF.
 

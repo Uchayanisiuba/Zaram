@@ -431,11 +431,13 @@ class ProviderManager:
     def release_resident(self) -> Dict[str, str]:
         """Give the card back: unload every model every local server holds.
 
-        Model name to outcome. A server with no release route — TabbyAPI, LM
-        Studio and the other OpenAI-compatible servers have no standard one —
-        reports each of its resident models as *not released* with the
-        reason, so the interface can say "still holding 9.5 GB" rather than
-        "done". Cloud providers hold nothing on this machine and are skipped.
+        Model name to outcome. Ollama unloads by name; an OpenAI-compatible
+        server is asked on TabbyAPI's `POST /v1/model/unload` (measured
+        working 20 September 2026 — this docstring said "no unload route"
+        until then) and one without the route reports each of its resident
+        models as *not released* with the reason, so the interface can say
+        "still holding 9.5 GB" rather than "done". Cloud providers hold
+        nothing on this machine and are skipped.
 
         This is the user's "I am about to open Unreal" action, and it is the
         mutative half of the preload: `warm` spends the card and this hands

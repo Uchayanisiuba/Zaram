@@ -65,6 +65,7 @@ import {
   filterCounts,
   group,
   matchesFilter,
+  originLabel,
   scopesPresent,
   type MemoryFilter,
   type MemoryGroupBy,
@@ -379,7 +380,12 @@ export default function MemoryWorkspace() {
       <div className="px-8 flex flex-wrap items-baseline gap-x-6 gap-y-1">
         {view === 'facts' ? (
           <>
-            <Metric label="Facts stored" value={stats ? String(stats.total_records) : '—'} />
+            <Metric
+              label="Facts stored"
+              // `facts` leaves out passages of indexed documents, which this
+              // list also leaves out; the older `total_records` counts both.
+              value={stats ? String(stats.facts ?? stats.total_records) : '—'}
+            />
             <Metric label="Sessions" value={stats ? String(stats.sessions) : '—'} />
             <Metric
               label="Left device today"
@@ -629,7 +635,7 @@ export default function MemoryWorkspace() {
                           </span>
                         ) : (
                           <>
-                            {r.source} · {relative(r.created_at)} · recalled {r.access_count}×
+                            {originLabel(r)} · {relative(r.created_at)} · recalled {r.access_count}×
                             {r.standing && (
                               <>
                                 {' · '}

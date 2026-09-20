@@ -166,14 +166,21 @@ class IngestService:
         on_outcome: Callable[[IngestOutcome], None] | None = None,
         *,
         scope: str | None = None,
+        obligations: bool = True,
     ) -> tuple[str, IngestReport]:
-        """Ingest a folder and record the result. Returns (source_id, report)."""
+        """Ingest a folder and record the result. Returns (source_id, report).
+
+        ``obligations=False`` indexes for recall and reads no commitments —
+        for text that is not the person's: the manual's own sentence about
+        "a payment due in 30 days" became an open question under Memory →
+        Commitments on every fresh install (seen 20 September 2026).
+        """
         report = ingest_folder(
             root,
             store_fact=self._fact_writer(scope),
-                read_obligations=(
-                    self._read_obligations if self._obligations is not None else None
-                ),
+            read_obligations=(
+                self._read_obligations if obligations and self._obligations is not None else None
+            ),
             on_outcome=on_outcome,
         )
         source_id = self._records.upsert_source(report.root, seconds=report.seconds)

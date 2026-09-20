@@ -53,6 +53,13 @@ LOCAL_ONLY = {
     # one machine -- and the backend logs every one of those calls as egress
     # to the paired client. Written down here as a fact about the code.
     "zaram_mcp.py": "Zaram's own API on 127.0.0.1:8420, loopback enforced",
+    # A trigger's unattended run is `POST /chat` dispatched through
+    # `httpx.ASGITransport(app=app)`: the client calls this process's own
+    # ASGI app and no socket is opened. The loopback `base_url` exists only
+    # so the Host-header guard sees the name it expects. Written down here
+    # as a fact about the code, and the module is one function long so the
+    # exemption cannot quietly cover a second call.
+    "core/ask_in_process.py": "httpx over ASGITransport into this process's own app; no socket",
 }
 
 #: Directories that are not shipped product code.

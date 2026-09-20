@@ -2006,13 +2006,36 @@ def _standing_reader():
     return standing
 
 
+def _is_document_passage(record: Any) -> bool:
+    """A chunk of a file the person indexed, as opposed to a fact.
+
+    The origin field is authoritative (rule 7b); the metadata key is the
+    older spelling ingest also writes, kept so records stored before the
+    field existed are classified the same way.
+    """
+    origin = getattr(record, "origin", None)
+    value = getattr(origin, "value", origin)
+    if value == "user_document":
+        return True
+    return (getattr(record, "metadata", None) or {}).get("origin") == "user_document"
+
+
 @app.get("/memory")
-async def list_memory(limit: int = 200, offset: int = 0, q: str = ""):
-    """Everything in the Spine, newest first.
+async def list_memory(limit: int = 200, offset: int = 0, q: str = "", documents: bool = False):
+    """What Zaram believes, newest first.
 
     Backs the Memory surface. Returns what is actually stored — if the Spine
     holds four records, this returns four records. There is no sample data
     anywhere behind this endpoint.
+
+    **Passages from indexed documents are left out unless `documents=true`.**
+    Found 15 September 2026 and fixed 20 September: on a fresh install the
+    first thing under *Memory → Facts* was the manual, chunk by chunk, each
+    row reading `user · provisional` — the product's own help text listed as
+    facts about a person it had just met. `CLAUDE.md` separates the two
+    nodes on exactly this line: Memory holds derived facts about the user,
+    Knowledge holds the documents those came from. A passage is browsed and
+    removed in Knowledge, by its source; it is not a belief about anyone.
     """
     if not kernel.memory_runtime:
         raise HTTPException(status_code=503, detail="Memory runtime not available")
@@ -2022,6 +2045,8 @@ async def list_memory(limit: int = 200, offset: int = 0, q: str = ""):
     # and dated, is the point of supersession — a correction they cannot see is
     # indistinguishable from a deletion.
     records = await kernel.memory_runtime._store.all_records(include_superseded=True)
+    if not documents:
+        records = [r for r in records if not _is_document_passage(r)]
     records.sort(key=lambda r: r.created_at, reverse=True)
 
     if q:
@@ -2052,6 +2077,11 @@ async def list_memory(limit: int = 200, offset: int = 0, q: str = ""):
                 # field — the surface derives the project id from it rather
                 # than being handed a second spelling that can disagree.
                 "scope": r.scope,
+                # Rule 7b: whose words these are — `conversation`,
+                # `user_document` or `generated`. `source` above is the
+                # store's default and says "user" for everything; the surface
+                # says where a fact came from off this field instead.
+                "origin": getattr(getattr(r, "origin", None), "value", getattr(r, "origin", None)),
                 "superseded_by": r.superseded_by,
                 "superseded_at": r.superseded_at,
                 "pinned": r.pinned,
@@ -2206,9 +2236,15 @@ async def memory_stats(since: float | None = None):
 
     sessions = {r.session_id for r in records if r.session_id}
     newest = max((r.created_at for r in records), default=None)
+    passages = sum(1 for r in records if _is_document_passage(r))
 
     out: Dict[str, Any] = {
         "total_records": stats.total_records,
+        # The split the surface shows: what Zaram believes, and how many
+        # passages of the person's documents sit beside it. `GET /memory`
+        # lists the first by default; Knowledge lists the second by source.
+        "facts": len(records) - passages,
+        "document_passages": passages,
         "by_type": dict(stats.by_type or {}),
         "sessions": len(sessions),
         "newest_at": newest,
@@ -2219,7 +2255,12 @@ async def memory_stats(since: float | None = None):
         "bytes_left_device_today": _egress_bytes_today(),
     }
     if since is not None:
-        out["new_since"] = sum(1 for r in records if r.created_at > since)
+        # Facts, not passages: the landing says "N new facts", and the manual
+        # indexed at first start is not fourteen things Zaram learned about
+        # the person.
+        out["new_since"] = sum(
+            1 for r in records if r.created_at > since and not _is_document_passage(r)
+        )
     return out
 
 
@@ -5478,44 +5519,19 @@ trigger_runner: TriggerRunner | None = None
 
 async def _ask_unattended(question: str, session_id: str, project_id: str) -> tuple[str, str, str]:
     """Ask the product one question the way a person would — `POST /chat`, in
-    process — and say how it ended.
-
-    The same route, so a scheduled run gets recall, the planner, the tools,
-    the gate, the egress log and a transcript exactly as a typed question
-    does, and nothing here becomes a second engine. The session id is minted
-    by the runner and nothing ever grants to it, which is what "never
-    self-approves" means in code: `_approved`, `_uninterrupted` and the
-    conversation rung are all keyed on a session a person is in.
-    """
-    import httpx
-
+    process — and say how it ended. `core/ask_in_process.py` has the shape
+    and the reason it lives there rather than here."""
     from core.api_secret import api_secret
+    from core.ask_in_process import ask_in_process
 
-    events: list[dict] = []
-    conversation_id = ""
-    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1:8420") as client:
-        async with client.stream(
-            "POST",
-            "/chat",
-            json={"text": question, "session_id": session_id, "project_id": project_id},
-            headers={"X-Zaram-Auth": api_secret(), "Host": "127.0.0.1:8420"},
-            timeout=None,
-        ) as response:
-            if response.status_code != 200:
-                return "failed", "", f"the chat route answered {response.status_code}"
-            async for line in response.aiter_lines():
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    event = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                events.append(event)
-                if event.get("type") == "conversation":
-                    conversation_id = str(event.get("data", {}).get("id") or event.get("data", {}).get("conversation_id") or "")
-    outcome, note = outcome_of(events)
-    return outcome, conversation_id, note
+    return await ask_in_process(
+        app,
+        question=question,
+        session_id=session_id,
+        project_id=project_id,
+        secret=api_secret(),
+        outcome_of=outcome_of,
+    )
 
 
 def _obligations_due_within(days: int) -> list[tuple[str, str, str]]:

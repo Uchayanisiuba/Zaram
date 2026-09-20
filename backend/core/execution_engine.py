@@ -388,9 +388,11 @@ class ExecutionEngine:
         if reason not in (None, "off"):
             return None
 
+        # One clause each, 20 September 2026: the maintainer's word was
+        # "cluttered". A notice is read beside an answer, and it earns one
+        # line — what happened, and what it means for this reply.
         return StreamEvent.notice(
-            "This looks like it needs current information. Web search is off, "
-            "so this answer comes only from what the model already knows.",
+            "Web search is off — answered from what the model already knows.",
             kind="search",
             action="settings",
         )
@@ -883,18 +885,15 @@ class ExecutionEngine:
                         out = reached_the_web(searched)
                         if out is False:
                             yield StreamEvent.notice(
-                                "Zaram could not reach the web for this "
-                                "answer — the search engine is not a permitted "
-                                "destination yet, so this comes only from what "
-                                "the model already knows.",
+                                "The search engine is not a permitted destination "
+                                "yet — answered from what the model already knows.",
                                 kind="search",
                                 action="settings",
                             )
                         elif out is True:
                             yield StreamEvent.notice(
-                                "Web search ran but returned no results, so "
-                                "this answer comes only from what the model "
-                                "already knows.",
+                                "The web returned no results worth citing — "
+                                "answered from what the model already knows.",
                                 kind="search",
                                 action="settings",
                             )
@@ -3354,12 +3353,12 @@ class ExecutionEngine:
             self._told_about_dropped_turns.add(session_id)
             while len(self._told_about_dropped_turns) > self.MAX_SESSIONS:
                 self._told_about_dropped_turns.pop()
+            exchanges = max(1, len(kept) // 2)
             notice = StreamEvent.notice(
-                f"This conversation is now longer than {self._model_label(model)} "
-                f"can hold, so Zaram is answering from the last "
-                f"{max(1, len(kept) // 2)} exchange(s). The earlier ones are "
-                "still in the transcript above but are no longer in front of "
-                "the model — quote anything it needs to see.",
+                f"Answering from the last {exchanges} "
+                f"{'exchange' if exchanges == 1 else 'exchanges'} — the conversation "
+                f"outgrew {self._model_label(model)}'s window; earlier turns are "
+                "above but not in front of it. Quote anything it should see.",
                 kind="memory",
             )
         return (system_prompt or "") + "\n".join([

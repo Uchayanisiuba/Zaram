@@ -190,6 +190,49 @@ installed"*.
 
 ---
 
+## The local 27B on TabbyAPI, and the two keys that are not in this repository
+
+The dev machine serves `Qwen3.8-27B` through TabbyAPI on **127.0.0.1:1234**,
+where Zaram's generic OpenAI-compatible adapter finds it with no
+configuration. The config that makes it behave lives in **TabbyAPI's own
+`config.yml`**, not here, and on 20 September 2026 two of its keys turned
+out to have been silently ignored since 3 September. Written down so the
+next machine does not lose native tool calls without a warning on either side.
+
+**The rule that bit: with `inline_model_loading: true`, a key set under
+`model:` reaches an API-driven load only if it is also named in
+`use_as_default`.** The startup load reads every key; an inline load — which
+is every real request, since `model_name` is empty on purpose — reads only
+the named ones. A key that is set but not named looks correct in the file
+and changes nothing.
+
+Two keys, both load-time, both needed:
+
+| Key | Value | Without it |
+|---|---|---|
+| `reasoning` | `true` | The template opens `<think>` and the server never splits it: the monologue arrives as the answer. |
+| `tool_format` | `qwen3_5` | A tool call comes back as `<tool_call>` *text* in `content`, `finish_reason: stop`, `tool_calls: null` — theroyallab/tabbyAPI #479. Zaram's text-marker fallback still works, at 61.7 s with the load against 3.4 s native. |
+
+```yaml
+model:
+  model_name:
+  inline_model_loading: true
+  use_as_default: ["cache_mode", "cache_size", "max_seq_len", "gpu_split_auto",
+                   "autosplit_reserve", "vision", "vision_offload",
+                   "reasoning", "tool_format"]
+  reasoning: true
+  tool_format: qwen3_5
+```
+
+`tests/test_tabby_parses_the_call_it_is_sent.py` (`-m measure`) asks the
+served model for one tool call and asserts it arrives as `tool_calls`, not
+text — it is the check that the two keys are reaching the load. When it
+fails on a fresh machine, look at `use_as_default` before anything else.
+The full annotated config is backed up beside the live one as
+`config.yml.bak-before-tool-format-20260920` in the TabbyAPI checkout.
+
+---
+
 ## Running the suites
 
 ```bash

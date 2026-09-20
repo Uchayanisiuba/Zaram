@@ -288,8 +288,12 @@ class TestTheEngineRunsTheLoop:
 
         list(engine.execute("what is in my blender scene"))
 
+        # `session` travels with the call since 20 September 2026: the
+        # runtime's per-session grant (`allow_for_session`, coworker step 3)
+        # is keyed on it, so a call that did not say which session it came
+        # from could not be covered by one.
         assert mcp.calls == [
-            {"server": "blender", "tool": "get_scene_info", "arguments": {}, "confirmed": False}
+            {"server": "blender", "tool": "get_scene_info", "arguments": {}, "confirmed": False, "session": "default"}
         ]
 
     def test_the_result_comes_back_to_the_model(self):
