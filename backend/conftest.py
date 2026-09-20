@@ -87,6 +87,31 @@ def _isolate_user_settings(tmp_path_factory):
     yield
 
 
+@pytest.fixture(autouse=True, scope="session")
+def _isolate_data_dir(tmp_path_factory):
+    """No test reads the developer's own data directory.
+
+    The settings fixture above closed this for one file and left every other
+    store open. Measured 19 September 2026: `test_read_page_is_offered_from_the_
+    real_boot` calls `KernelBootstrapper().boot()`, which reads
+    `mcp-servers.json` from `data_dir()` — in a checkout that holds data, the
+    backend folder itself — and **spawned the maintainer's own attached
+    servers**: a Blender MCP that then waited on a Blender that was not
+    running, and would equally have started the GitHub server with its token
+    and the mail server. The suite stalled at 5% for six minutes, and an
+    earlier run left `blender-mcp.exe` orphaned after the test was killed.
+
+    A test suite must never touch the real data directory, whatever the
+    developer's environment says — so this sets the variable rather than
+    defaulting it. A test that wants a specific location still wins, because
+    `monkeypatch.setenv` runs after this and is undone after the test.
+    """
+    import os
+
+    os.environ["ZARAM_DATA_DIR"] = str(tmp_path_factory.mktemp("zaram-data"))
+    yield
+
+
 def pytest_configure(config):
     config.addinivalue_line(
         "markers",
