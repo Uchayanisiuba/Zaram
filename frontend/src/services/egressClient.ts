@@ -131,6 +131,36 @@ export async function fetchEgressLog(limit = 100, offset = 0): Promise<EgressPag
   };
 }
 
+/** What one step of one reply sent off this machine — `docs/PLAN.md` C2.
+ *
+ *  Every entry the gate wrote while that step ran carries its id
+ *  (`core/egress/step_context.py`); a bare correlation id covers the whole
+ *  reply. An empty list is a real answer: the gate logs every request, so a
+ *  marked step with no entries sent nothing. Entries written outside any
+ *  step are never matched, and the pane says nothing about them rather than
+ *  guessing. */
+export async function fetchEgressForStep(stepId: string, limit = 50): Promise<EgressEntry[]> {
+  if (!stepId.trim()) return [];
+  const page = await json<{ total: number; entries: Array<Record<string, unknown>> }>(
+    `/egress?step_id=${encodeURIComponent(stepId)}&limit=${limit}`,
+  );
+  return page.entries.map((e) => ({
+    id: String(e.id),
+    at: Number(e.at),
+    kind: String(e.kind),
+    host: String(e.host),
+    method: String(e.method),
+    url: String(e.url),
+    body: e.body == null ? null : String(e.body),
+    literalText: String(e.literal_text ?? e.url),
+    bytes: Number(e.bytes ?? 0),
+    decision: String(e.decision),
+    reason: String(e.reason),
+    source: String(e.source),
+    meta: (e.meta as Record<string, unknown>) ?? {},
+  }));
+}
+
 export async function verifyEgressLog(): Promise<EgressIntegrity> {
   const raw = await json<Record<string, unknown>>('/egress/verify');
   return {

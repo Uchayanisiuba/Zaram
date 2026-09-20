@@ -160,9 +160,14 @@ interface Props {
    *  The card's own sentence says what leaves; pressing it is the rule-7j
    *  decision, and the egress gate and log still run on the way out. */
   onTryCloud?: (model: string) => void;
+  /** Open the folder the person named as a coding project and ask again.
+   *  The "open-project" offer — `docs/PLAN.md` F1, rule 7h: the project is
+   *  created from the sentence, at the moment it is wanted, never required
+   *  in advance. Optional like the others. */
+  onOpenProject?: (path: string, name: string) => Promise<void> | void;
 }
 
-export default function NoticeCard({ notice, onOpen, onEnableSearch, onContinue, onTryCloud }: Props) {
+export default function NoticeCard({ notice, onOpen, onEnableSearch, onContinue, onTryCloud, onOpenProject }: Props) {
   // **"14 attached tools are available for this question" is not shown.**
   // Available means offered — the definitions were put in front of the
   // model — not called, and a person reading it asked whether all fourteen
@@ -181,6 +186,8 @@ export default function NoticeCard({ notice, onOpen, onEnableSearch, onContinue,
   // `go` is offered by the plan card's own button, above; the notice carries
   // the sentence and nothing else, so one press exists rather than two.
   const isGo = notice.action === 'go';
+  const offersProject =
+    notice.action === 'open-project' && Boolean(notice.path) && Boolean(onOpenProject);
 
   // **Rule 7h, which this card was one click short of.** "Offer at the moment
   // of doubt; never make the user choose in advance" — and the search notice
@@ -284,7 +291,19 @@ export default function NoticeCard({ notice, onOpen, onEnableSearch, onContinue,
           </p>
         )}
 
-        {!offersSearch && !offersContinue && !offersCloud && !isGo && destination && onOpen && (
+        {offersProject && (
+          <button
+            onClick={() => void onOpenProject?.(notice.path as string, notice.name || 'Project')}
+            className="mt-1.5 text-xs flex items-center gap-1"
+            style={{ color: 'var(--color-cyan-light)' }}
+            data-testid="notice-open-project"
+          >
+            Open {notice.name || 'it'} as a coding project
+            <ArrowRight size={10} />
+          </button>
+        )}
+
+        {!offersSearch && !offersContinue && !offersCloud && !isGo && !offersProject && destination && onOpen && (
           <button
             onClick={() => onOpen(destination.node)}
             className="mt-1.5 text-xs flex items-center gap-1"

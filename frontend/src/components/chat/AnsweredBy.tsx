@@ -36,6 +36,35 @@ import { useState } from 'react';
 import { describeDataPolicy } from '@/components/settings/AdvancedModelField';
 import { fetchModels, type DiscoveredModel } from '@/services/settingsClient';
 import type { ChatAttribution } from '@/stores/chatStore';
+import type { ChatTiming } from '@/services/chatClient';
+
+/** "first word in 3.9 s" — the one number a person feels, on the line that
+ *  already explains the reply. The rest of the breakdown rides the tooltip.
+ *
+ *  **Measured or absent.** A phase the backend did not time is null and is
+ *  left out, never printed as 0 s: a zero here would read as instant, which
+ *  is the opposite of unmeasured. The instrument behind "Zaram is slow
+ *  sometimes" — `docs/PLAN.md` A1. */
+export function timingLine(timing: ChatTiming | null | undefined): { text: string; title: string } | null {
+  if (!timing) return null;
+  const s = (ms: number | null) =>
+    ms === null ? null : ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)} s`;
+  const first = s(timing.firstTokenMs);
+  const total = s(timing.totalMs);
+  if (!first && !total) return null;
+  const parts = [
+    ['recall', s(timing.recallMs)],
+    ['plan', s(timing.planMs)],
+    ['steps', s(timing.stepsMs)],
+    ['first word', first],
+    ['writing', s(timing.generationMs)],
+    ['total', total],
+  ].filter(([, v]) => v !== null) as [string, string][];
+  return {
+    text: first ? `first word in ${first}` : `${total} in all`,
+    title: parts.map(([k, v]) => `${k} ${v}`).join(' · '),
+  };
+}
 
 /** Where the choice came from, in words a person would use. Unknown values
  *  render nothing rather than being echoed raw — a backend that grows a fourth
@@ -85,10 +114,14 @@ export function AnsweredBy({
    *  Optional, so every existing caller and every test rendering this on its
    *  own is unchanged. */
   onAskAnother,
+  timing,
 }: {
   attribution: ChatAttribution | null | undefined;
   onAskAnother?: (model: string) => void;
+  /** Where the time went, when the backend measured it. */
+  timing?: ChatTiming | null;
 }) {
+  const took = timingLine(timing);
   const [open, setOpen] = useState(false);
   const [models, setModels] = useState<DiscoveredModel[] | null>(null);
   const [loading, setLoading] = useState(false);
@@ -148,6 +181,9 @@ export function AnsweredBy({
           <span className={attribution.locality === 'cloud' ? 'role-vi' : 'role-ok'}>{` · ${locality}`}</span>
         ) : null}
         {why ? <span className="role-dim">{` · ${why}`}</span> : null}
+        {took ? (
+          <span className="role-dim" title={took.title} data-testid="took">{` · ${took.text}`}</span>
+        ) : null}
         {onAskAnother && !open && (
           <>
             {' · '}

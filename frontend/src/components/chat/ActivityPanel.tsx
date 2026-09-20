@@ -29,7 +29,7 @@
  * is rendered as text, never as markup: the tool-description rule applied one
  * layer along, since nothing a model writes may widen what a surface does.
  */
-import { useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { motion } from 'framer-motion';
 import { Check, CircleAlert, Clock, X } from 'lucide-react';
@@ -38,6 +38,9 @@ import { useChatModeStore } from '@/stores/chatModeStore';
 import { useViewport } from '@/hooks/useViewport';
 import type { ChatToolCall } from '@/stores/chatStore';
 import StepOutput from './StepOutput';
+import ChangeCard from './ChangeCard';
+import AppCard from './AppCard';
+import { fetchEgressForStep, type EgressEntry } from '@/services/egressClient';
 import { DID } from '@/lib/workingLine';
 
 const VERDICTS: Record<string, { Icon: typeof Check; color: string; label: string }> = {
@@ -48,13 +51,75 @@ const VERDICTS: Record<string, { Icon: typeof Check; color: string; label: strin
 
 const UNKNOWN = { Icon: CircleAlert, color: 'var(--color-amber, #d97706)', label: '' };
 
+/**
+ * What one step sent off this machine, under its row — `docs/PLAN.md` C2.
+ *
+ * Asked of the log by the step's mark, never inferred from timing. Three
+ * states and each is said: not yet read, nothing recorded (a real answer —
+ * the gate logs every request), and the entries themselves with host,
+ * bytes and decision. A call with no mark (an older history) shows nothing.
+ */
+function StepEgress({ stepId }: { stepId: string }) {
+  const [entries, setEntries] = useState<EgressEntry[] | null | undefined>(undefined);
+  useEffect(() => {
+    let live = true;
+    fetchEgressForStep(stepId)
+      .then((found) => live && setEntries(found))
+      .catch(() => live && setEntries(null));
+    return () => {
+      live = false;
+    };
+  }, [stepId]);
+  if (entries === undefined) return null;
+  if (entries === null) {
+    return (
+      <div className="trace-line">
+        <span className="trace-k" />
+        <span className="trace-v role-dim">The egress log could not be read.</span>
+      </div>
+    );
+  }
+  if (entries.length === 0) {
+    return (
+      <div className="trace-line" data-testid="step-egress-none">
+        <span className="trace-k" />
+        <span className="trace-v role-ok">Nothing left this device for this step.</span>
+      </div>
+    );
+  }
+  return (
+    <ul className="mt-1 flex flex-col gap-0.5" data-testid="step-egress">
+      {entries.map((e) => (
+        <li key={e.id} className="trace-line">
+          <span className="trace-k">{e.decision === 'allowed' ? 'sent' : e.decision}</span>
+          <span className="trace-v" style={{ color: 'var(--color-text)' }}>
+            {e.host}
+          </span>
+          <span className="role-dim">
+            · {e.bytes} bytes{e.decision !== 'allowed' && e.reason ? ` · ${e.reason}` : ''}
+          </span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 export default function ActivityPanel({
   calls,
   onClose,
+  focus,
 }: {
   calls: ChatToolCall[];
   onClose: () => void;
+  /** The call the person opened this from, scrolled to and opened out —
+   *  its output, its change with Revert, what it sent. Absent when opened
+   *  from the folded summary, where every call is listed and none is open. */
+  focus?: ChatToolCall | null;
 }) {
+  const focused = useRef<HTMLLIElement | null>(null);
+  useEffect(() => {
+    focused.current?.scrollIntoView?.({ block: 'center' });
+  }, [focus]);
   // The panel occupies the orb's half of the window, derived from the same
   // fraction the conversation uses so the two cannot disagree when the
   // divider is dragged. Copied in shape from `CodePreviewPanel` because they
@@ -137,13 +202,20 @@ export default function ActivityPanel({
         <ol className="trace flex-1 overflow-y-auto px-4 py-3">
           {calls.map((call, i) => {
             const { Icon, color, label } = VERDICTS[call.verdict] ?? UNKNOWN;
-            const verb = DID[call.tool] ?? `${call.server}/${call.tool}`;
+            // A plan step carries its own phrase; a tool call is looked up.
+            const verb = call.label ?? DID[call.tool] ?? `${call.server}/${call.tool}`;
+            const isFocus = focus != null && call === focus;
             return (
               <li
                 key={`${call.server}/${call.tool}/${i}`}
+                ref={isFocus ? focused : undefined}
                 className="flex items-start gap-2 py-1"
                 data-verdict={call.verdict}
-                style={{ borderBottom: '1px solid var(--color-border-subtle)' }}
+                data-focus={isFocus ? 'true' : undefined}
+                style={{
+                  borderBottom: '1px solid var(--color-border-subtle)',
+                  ...(isFocus ? { background: 'rgba(255,255,255,.03)' } : {}),
+                }}
               >
                 <span className="w-5 shrink-0 text-right tabular-nums role-dim">{i + 1}</span>
                 <Icon size={12} className="mt-1 shrink-0" style={{ color }} aria-hidden />
@@ -173,6 +245,13 @@ export default function ActivityPanel({
                       read four files is four rows and any one can be checked
                       without unrolling the rest. */}
                   {call.output && <StepOutput text={call.output} />}
+                  {/* The change and the app, on the step that made them,
+                      with Revert where it belongs; and what the step sent,
+                      only for the step opened out — one query, not one per
+                      row. */}
+                  {isFocus && call.diff ? <ChangeCard call={call} /> : null}
+                  {isFocus && (call.image || call.appUrl) ? <AppCard call={call} /> : null}
+                  {isFocus && call.stepId ? <StepEgress stepId={call.stepId} /> : null}
                 </div>
               </li>
             );
@@ -188,8 +267,8 @@ export default function ActivityPanel({
             color: 'var(--color-text-faint)',
           }}
         >
-          Zaram read these. It does not edit files — every mutative tool is out
-          of scope until v1.
+          Every change a call made has its diff and a Revert under the reply;
+          anything a call sent off this machine is in the egress log.
         </div>
       </motion.div>
     </motion.div>,

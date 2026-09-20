@@ -230,6 +230,14 @@ class EgressLog:
             ).fetchone()
             prev_hash = row["entry_hash"] if row else GENESIS_HASH
 
+            # Which step of which reply this belongs to, when one is running
+            # — see `step_context`. Inside `meta`, so the hash covers it.
+            stamped = dict(meta or {})
+            from core.egress.step_context import current_step
+
+            step = current_step()
+            if step and "step_id" not in stamped:
+                stamped["step_id"] = step
             entry = EgressEntry(
                 id=str(uuid.uuid4()),
                 at=time.time(),
@@ -243,7 +251,7 @@ class EgressLog:
                 reason=reason,
                 source=source,
                 prev_hash=prev_hash,
-                meta=meta or {},
+                meta=stamped,
             )
             entry_hash = _hash(prev_hash, entry.payload())
             conn.execute(
@@ -272,6 +280,29 @@ class EgressLog:
                 (limit, offset),
             ).fetchall()
         return [self._to_entry(r) for r in rows]
+
+    def entries_for_step(self, step_id: str, limit: int = 100) -> list[EgressEntry]:
+        """Every entry stamped with `step_id`, or with a step of the same
+        reply when `step_id` is a bare correlation id. Read from the stored
+        meta rather than a column, since the stamp lives inside the hashed
+        record; the log is small enough per reply for that to be fine."""
+        wanted = (step_id or "").strip()
+        if not wanted:
+            return []
+        out: list[EgressEntry] = []
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM egress WHERE meta LIKE ? ORDER BY row DESC LIMIT ?",
+                ('%"step_id"%', max(1, limit) * 20),
+            ).fetchall()
+        for r in rows:
+            entry = self._to_entry(r)
+            stamp = str((entry.meta or {}).get("step_id") or "")
+            if stamp == wanted or stamp.startswith(wanted + ":"):
+                out.append(entry)
+                if len(out) >= limit:
+                    break
+        return out
 
     def count(self) -> int:
         with self._connect() as conn:

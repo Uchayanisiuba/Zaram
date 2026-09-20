@@ -271,21 +271,26 @@ class OllamaEngine(LLMEngine):
     def _chat_with_tools(self, payload: dict, tools: list[dict]) -> Iterator[str]:
         """One `/api/chat` turn with a tools array; calls re-emitted as markers.
 
-        **Not streamed, and that costs nothing here.** A generation that may
-        call a tool is already buffered by `ExecutionEngine` — the marker has
-        to be parsed off accumulated text — so a streamed reply on this path
-        would be assembled and held anyway. One response, read once.
+        **Streamed, since 19 September 2026.** This used to post with
+        ``stream: False`` on the argument that the execution engine buffered a
+        tool-capable generation anyway, so a streamed reply "would be
+        assembled and held". The engine no longer buffers — it holds back only
+        a possible marker (`core.tool_loop.visible_length`) and shows the rest
+        as it arrives — so a whole-reply response here would put the blank
+        screen back on the one path that just lost it.
 
-        Ollama answers with ``message.content`` (prose, possibly empty) and
-        ``message.tool_calls`` (``[{"function": {"name", "arguments"}}]``).
-        The content is yielded first so anything the model said before
-        calling is kept, then one marker per call, in the order given; the
-        loop runs the first and shows the model what came back, exactly as it
-        does for a marker the model typed itself.
+        Ollama streams `/api/chat` as one JSON object per line: ``message.
+        content`` and ``message.thinking`` arrive as deltas, ``message.
+        tool_calls`` arrives whole on whichever chunk produced it, and the
+        last chunk carries ``done: true``. Thinking is re-tagged into
+        ``<think>`` … ``</think>`` exactly as `stream_response` does, for the
+        same reason: one convention, one splitter, and thinking never reaches
+        the synthesiser. Calls are re-emitted as markers *after* the prose, in
+        the order given, so `parse_call` reads exactly what it read before.
 
-        ``think`` is carried across from the generate payload; thinking on
-        `/api/chat` arrives under ``message.thinking`` and is re-tagged the
-        same way the streaming path re-tags it.
+        A model that thinks and then only calls — no content at all — must
+        still close its tag, or the splitter files the marker as thinking and
+        the loop never sees the call.
         """
         body = {
             "model": payload["model"],
@@ -298,7 +303,7 @@ class OllamaEngine(LLMEngine):
                 },
             ],
             "tools": tools,
-            "stream": False,
+            "stream": True,
             "keep_alive": payload.get("keep_alive", KEEP_ALIVE),
         }
         if payload.get("think"):
@@ -307,28 +312,53 @@ class OllamaEngine(LLMEngine):
             response = requests.post(
                 f"{self.base_url}/api/chat",
                 json=body,
+                stream=True,
                 timeout=(CONNECT_TIMEOUT, self._read_timeout(payload["model"], attached=bool(payload.get("images")))),
             )
             response.raise_for_status()
-            data = response.json()
         except Exception as exc:
             logger.error("OllamaEngine._chat_with_tools failed: %s", exc)
             yield ERROR_PREFIX + f"Ollama request failed: {exc}"
             return
-        if "error" in data:
-            yield ERROR_PREFIX + str(data["error"])
+
+        calls: list[dict] = []
+        in_thinking = False
+        try:
+            for line in response.iter_lines():
+                if not line:
+                    continue
+                data = json.loads(line)
+                if "error" in data:
+                    yield ERROR_PREFIX + str(data["error"])
+                    return
+                message = data.get("message") or {}
+                thinking = message.get("thinking")
+                if thinking:
+                    if not in_thinking:
+                        in_thinking = True
+                        yield OPEN_TAG
+                    yield str(thinking)
+                content = message.get("content")
+                if content:
+                    if in_thinking:
+                        in_thinking = False
+                        yield CLOSE_TAG
+                    yield str(content)
+                for call in message.get("tool_calls") or []:
+                    if isinstance(call, dict):
+                        calls.append(call)
+                if data.get("done"):
+                    break
+        except Exception as exc:
+            logger.error("OllamaEngine._chat_with_tools stream failed: %s", exc)
+            if in_thinking:
+                yield CLOSE_TAG
+            yield ERROR_PREFIX + f"Ollama request failed: {exc}"
             return
-        message = data.get("message") or {}
-        thinking = message.get("thinking")
-        if thinking:
-            yield OPEN_TAG
-            yield str(thinking)
+        if in_thinking:
             yield CLOSE_TAG
-        content = message.get("content")
-        if content:
-            yield str(content)
-        for call in message.get("tool_calls") or []:
-            function = call.get("function") if isinstance(call, dict) else None
+        for call in calls:
+            function = call.get("function")
             if not isinstance(function, dict):
                 continue
             marker = marker_for_native_call(

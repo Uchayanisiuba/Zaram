@@ -158,3 +158,50 @@ class TestRecallIsStillBudgeted:
         assert len(with_reserved) < len(without), (
             "a large reserved block left the conversation budget untouched"
         )
+
+
+class TestTheFrontHoldsStillOnceTheWindowIsFull:
+    """`docs/PLAN.md` A3. Once a session has outgrown the window the old
+    behaviour dropped the oldest turn on every message, so the *front* of the
+    transcript — where a local server's prefix cache begins — moved every
+    turn and the whole history was re-read each time. Now the same cut is
+    reused while what remains fits, and a new cut takes a quarter of the
+    window at once.
+    """
+
+    def _prompt_after(self, engine, monkeypatch, pairs, question):
+        engine._session_turns["s"] = list(pairs)
+        monkeypatch.setattr(engine, "_recall", lambda *a, **k: [])
+        seen = _capture_system_prompt(engine, monkeypatch)
+        list(engine.execute(question, session_id="s", system_prompt=IDENTITY))
+        return seen[0]
+
+    def _first_turn_in(self, prompt: str) -> str:
+        # The oldest question the model was shown.
+        at = prompt.index("User: ")
+        return prompt[at : prompt.index("\n", at)]
+
+    def test_adding_turns_does_not_move_the_front_until_the_block_is_spent(self, engine, monkeypatch):
+        _pin_window(monkeypatch, 2048)
+        filler = "word " * 60
+        pairs = [(f"question {i} {filler}", f"answer {i} {filler}") for i in range(40)]
+
+        first = self._first_turn_in(self._prompt_after(engine, monkeypatch, pairs, "next"))
+        assert "question 0" not in first, "the window is not full; the test measures nothing"
+
+        moved_at = None
+        for n in range(1, 12):
+            pairs = pairs + [(f"question {40 + n} {filler}", f"answer {40 + n} {filler}")]
+            now = self._first_turn_in(self._prompt_after(engine, monkeypatch, pairs, "next"))
+            if now != first:
+                moved_at = n
+                break
+        # It held for several turns, then moved once — never every turn.
+        assert moved_at is None or moved_at >= 3, f"the front moved after {moved_at} turn(s)"
+
+    def test_a_session_that_never_overflowed_sends_everything(self, engine, monkeypatch):
+        _pin_window(monkeypatch, 65536)
+        pairs = [(f"question {i}", f"answer {i}") for i in range(5)]
+        prompt = self._prompt_after(engine, monkeypatch, pairs, "next")
+        assert "question 0" in prompt
+        assert engine._front_cut.get("s", 0) == 0

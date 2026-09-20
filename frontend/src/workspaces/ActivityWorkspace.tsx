@@ -24,6 +24,7 @@
  * displays is transparency theatre.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { UnfinishedSection } from '@/components/tasks/TaskLists';
 import SurfaceHeader from '../components/common/SurfaceHeader';
 import {
   ShieldCheck,
@@ -91,7 +92,13 @@ function decisionLabel(d: string): string {
   return d.toUpperCase();
 }
 
-export default function ActivityWorkspace() {
+interface ActivityWorkspaceProps {
+  /** Leave Activity and open the conversation — a resumed task answers
+   *  there. The shell owns the transition, as it does for Project. */
+  onOpenConversation?: () => void;
+}
+
+export default function ActivityWorkspace({ onOpenConversation }: ActivityWorkspaceProps = {}) {
   const [entries, setEntries] = useState<EgressEntry[]>([]);
   const [total, setTotal] = useState(0);
   const [integrity, setIntegrity] = useState<EgressIntegrity | null>(null);
@@ -497,6 +504,12 @@ export default function ActivityWorkspace() {
 
         {/* The table. */}
         <div className="flex-1 overflow-y-auto px-8 pb-4">
+          {/* **What is waiting on you, first** — `docs/PLAN.md` C3. A task that
+              stopped for room or for a Go is filed under its project, and until
+              now findable only there. Activity is the log; the tasks are the
+              part of the log that still needs a person. Across every project,
+              because "what is waiting on me" is not a per-project question. */}
+          <UnfinishedSection onOpenConversation={onOpenConversation} />
           {shown.length === 0 ? (
             <p className="text-xs leading-relaxed" style={{ color: 'var(--color-text-faint)' }}>
               {hostFilter

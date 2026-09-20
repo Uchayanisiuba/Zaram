@@ -1335,6 +1335,39 @@ async def readiness():
     return result.to_dict()
 
 
+@app.post("/models/warm")
+async def warm_on_return():
+    """Load the selected local model again, because the person is back.
+
+    `docs/PLAN.md` A4. `keep_alive` keeps the weights resident for thirty
+    minutes after the last request; a longer pause — lunch, a meeting, an
+    afternoon in Unreal — unloads them, and the next question then pays a
+    full reload from disk before its first token. On this machine's SATA
+    SSDs that is twenty seconds of nothing. The interface calls this when
+    its window regains focus after such a pause, so the reload happens while
+    the person is reading and typing rather than after they press Enter.
+
+    Every refusal `warm_local_model` already applies still applies: nothing
+    selected, `prefer_cloud`, a default on another local server, a model
+    that does not fit what the driver says is free *now*. A person in Unreal
+    with the card full gets ``{"warmed": false, "because": "..."}`` and no
+    load — which is the whole reason this goes through that path rather than
+    straight to the engine. Loopback, authenticated, never egress.
+    """
+    try:
+        runtime = kernel.registry.get_runtime("models")
+    except Exception:
+        return {"warmed": False, "because": "the models runtime is not up"}
+    try:
+        warmed = bool(await runtime.warm_local_model())
+    except Exception as exc:  # noqa: BLE001 - a preload is an optimisation
+        return {"warmed": False, "because": str(exc)}
+    return {
+        "warmed": warmed,
+        "because": "" if warmed else str(getattr(runtime, "preload_skipped_because", "") or ""),
+    }
+
+
 @app.get("/health")
 async def health():
     """Liveness/readiness probe used by the desktop runtime health check."""
@@ -1858,6 +1891,28 @@ async def chat(request: ChatRequest):
         # generator actually runs in, which is the one the tools are called
         # from.
         _open_code_project(request.project_id)
+        # **A folder in the sentence is an offer to open it** — `docs/PLAN.md`
+        # F1, rule 7h. Only when no coding project is open: with one open the
+        # tools are already offered and a second project is not what "look
+        # at C:oo" means. Read off the file system, never asked of the
+        # model; the reply still goes ahead as an ordinary one, so the offer
+        # costs nothing when it is declined.
+        from packs.code import active_root
+
+        if active_root() is None:
+            from core.named_folder import named_folder
+
+            folder = named_folder(request.text)
+            if folder is not None:
+                yield StreamEvent.notice(
+                    f"That names a folder on this machine — {folder.path}. "
+                    "Open it as a coding project? Zaram can then read, change "
+                    "and run what is in it, with your say-so at each change.",
+                    kind="project",
+                    action="open-project",
+                    path=folder.path,
+                    name=folder.name,
+                ).to_ipc() + "\n"
         # The addresses in the person's own message, for `read_page`'s grant.
         # From `request.text` and never from the composed prompt: a revision
         # carries an earlier reply, and an address the *model* wrote there
@@ -2181,18 +2236,27 @@ def _egress_bytes_today() -> int | None:
 
 
 @app.get("/egress")
-async def egress_log(limit: int = 100, offset: int = 0):
+async def egress_log(limit: int = 100, offset: int = 0, step_id: str = ""):
     """The log itself, newest first.
 
     ``literal_text`` is the point of this endpoint. Showing that a request went
     to wikipedia.org tells the user almost nothing; showing the exact query
     string that left is the thing they cannot get anywhere else.
+
+    ``step_id`` narrows it to what one step of one reply sent — the working
+    pane's question (`docs/PLAN.md` C2). A bare correlation id covers every
+    step of that reply. Entries written outside any step are never matched;
+    the pane shows nothing for them rather than a guess.
     """
     from core.egress import get_gate
 
     gate = get_gate()
     limit = max(1, min(limit, 500))
-    entries = gate.log.entries(limit=limit, offset=max(0, offset))
+    entries = (
+        gate.log.entries_for_step(step_id, limit=limit)
+        if step_id.strip()
+        else gate.log.entries(limit=limit, offset=max(0, offset))
+    )
 
     return {
         "total": gate.log.count(),

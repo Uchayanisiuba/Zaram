@@ -156,6 +156,16 @@ export interface TokenUsage {
   measured: boolean;
 }
 
+/** See the `timing` event. Milliseconds, or null where not measured. */
+export interface ChatTiming {
+  recallMs: number | null;
+  planMs: number | null;
+  stepsMs: number | null;
+  firstTokenMs: number | null;
+  generationMs: number | null;
+  totalMs: number | null;
+}
+
 export type ChatEvent =
   | { type: 'token'; content: string }
   | { type: 'usage'; usage: TokenUsage }
@@ -187,7 +197,12 @@ export type ChatEvent =
   /** The model's checklist for this task, whole, each time it changes.
    *  `awaitingGo` means the loop paused before its first change so the
    *  person can read it first. */
-  | { type: 'plan'; items: { text: string; status: string; reason?: string }[]; awaitingGo: boolean }
+  /** `source` is `planner` for the checklist the engine builds from its own
+   *  steps (search → answer) and absent for the model's own `plan`. The
+   *  first is shown only while the reply is in flight — finished, it would
+   *  duplicate the folded row line under the reply — while the second stays,
+   *  because Project keeps it. */
+  | { type: 'plan'; items: { text: string; status: string; reason?: string }[]; awaitingGo: boolean; source?: 'planner' }
   /** One tool the model asked for, and what the gate said about it.
    *
    *  **Emitted since the tool loop shipped and rendered nowhere until now.**
@@ -229,6 +244,42 @@ export type ChatEvent =
       image: string;
       /** The URL an app was started on, or `''`. */
       appUrl: string;
+      /** The mark this call's egress entries carry, or `''`. */
+      stepId: string;
+    }
+  /** A plan step has begun — a web search, a page read, a drawing — in the
+   *  words a row prints while it runs (`doing`) and after (`done`). Yielded
+   *  by the backend since 19 September 2026; the events existed from the
+   *  first day and reached nothing. A step with no `doing` is one the
+   *  backend decided gets no row, and is dropped here for the same reason:
+   *  a verb on a status row is a claim, and a guessed one is an invented
+   *  value. */
+  | {
+      type: 'step_start';
+      stepId: string;
+      capability: string;
+      doing: string;
+      done: string;
+      target: string;
+    }
+  /** The same step, finished. `detail` is the one thing said after the verb
+   *  ("4 results", or what went wrong); `seconds` is measured or null. A
+   *  completion with no start — recall, which reports after the fact — is
+   *  a row on its own. */
+  /** Where the time went in this reply, in milliseconds, measured by the
+   *  backend — one per reply, after the text. Any phase that did not happen
+   *  is null, never zero; a plain reply has no steps and a failed one no
+   *  first token. The instrument behind "Zaram is slow sometimes". */
+  | { type: 'timing'; timing: ChatTiming }
+  | {
+      type: 'step_complete';
+      stepId: string;
+      capability: string;
+      success: boolean;
+      done: string;
+      target: string;
+      detail: string;
+      seconds: number | null;
     }
   /** What the reply is waiting for, sent *before* generation so the orb can
    *  say why rather than going quiet and letting the user guess.
@@ -702,6 +753,11 @@ function parseLine(line: string): ChatEvent | null {
       // ask. A string or nothing; it is sent back as the per-message
       // override and rendered nowhere as markup.
       const model = typeof data.model === 'string' && data.model ? data.model : undefined;
+      // `path` and `name` ride on the "open-project" offer: the folder the
+      // person named and the name the project would get. Strings, rendered
+      // as text, sent back only to `POST /projects`.
+      const path = typeof data.path === 'string' && data.path ? data.path : undefined;
+      const name = typeof data.name === 'string' && data.name ? data.name : undefined;
       return {
         type: 'notice',
         content,
@@ -709,6 +765,8 @@ function parseLine(line: string): ChatEvent | null {
         action: String(data.action ?? ''),
         ...(servers && servers.length > 0 ? { servers } : {}),
         ...(model ? { model } : {}),
+        ...(path ? { path } : {}),
+        ...(name ? { name } : {}),
       };
     }
 
@@ -722,7 +780,12 @@ function parseLine(line: string): ChatEvent | null {
           ...(typeof x.reason === 'string' && x.reason ? { reason: x.reason } : {}),
         }))
         .filter((x) => x.text);
-      return { type: 'plan', items, awaitingGo: data.awaiting_go === true };
+      return {
+        type: 'plan',
+        items,
+        awaitingGo: data.awaiting_go === true,
+        ...(data.source === 'planner' ? { source: 'planner' as const } : {}),
+      };
     }
 
     case 'tool_call':
@@ -739,7 +802,46 @@ function parseLine(line: string): ChatEvent | null {
         image: typeof data.image === 'string' ? data.image : '',
         appUrl: typeof data.app_url === 'string' ? data.app_url : '',
         grantable: data.grantable === true,
+        stepId: typeof data.step_id === 'string' ? data.step_id : '',
       };
+
+    case 'step_start':
+      return {
+        type: 'step_start',
+        stepId: String(data.step_id ?? ''),
+        capability: String(data.capability_id ?? ''),
+        doing: String(data.doing ?? ''),
+        done: String(data.done ?? ''),
+        target: String(data.target ?? ''),
+      };
+
+    case 'step_complete':
+      return {
+        type: 'step_complete',
+        stepId: String(data.step_id ?? ''),
+        capability: String(data.capability_id ?? ''),
+        success: data.success !== false,
+        done: String(data.done ?? ''),
+        target: String(data.target ?? ''),
+        detail: String(data.detail ?? ''),
+        seconds: typeof data.seconds === 'number' ? data.seconds : null,
+      };
+
+    case 'timing': {
+      const ms = (value: unknown): number | null =>
+        typeof value === 'number' && Number.isFinite(value) && value >= 0 ? Math.round(value) : null;
+      return {
+        type: 'timing',
+        timing: {
+          recallMs: ms(data.recall_ms),
+          planMs: ms(data.plan_ms),
+          stepsMs: ms(data.steps_ms),
+          firstTokenMs: ms(data.first_token_ms),
+          generationMs: ms(data.generation_ms),
+          totalMs: ms(data.total_ms),
+        },
+      };
+    }
 
     case 'status':
       return { type: 'status', state: String(data.state ?? '') };
@@ -751,8 +853,9 @@ function parseLine(line: string): ChatEvent | null {
       return { type: 'done' };
 
     default:
-      // start, step_start, plan_complete and similar are internal execution
-      // detail. Ignored rather than treated as an error.
+      // start, plan_start, plan_complete and similar are internal execution
+      // detail. Ignored rather than treated as an error. (`step_start` and
+      // `step_complete` were listed here for a year and are rows now.)
       return null;
   }
 }

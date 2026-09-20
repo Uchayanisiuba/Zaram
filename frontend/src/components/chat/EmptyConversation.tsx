@@ -25,11 +25,12 @@ import { fetchObligations, countObligations, type ObligationCounts } from '@/ser
 import { fetchSources, type IngestSource } from '@/services/ingestClient';
 import { fetchReadiness } from '@/services/readinessClient';
 import { fetchServers } from '@/services/toolsClient';
+import { fetchWebSearch } from '@/services/settingsClient';
 import type { Project } from '@/stores/projectStore';
 import type { WorkspaceId } from '@/runtime/shortcuts/registry';
 import { useSystemStore } from '@/stores/systemStore';
 import { groundedPrompts, type GroundedPrompt } from './groundedPrompts';
-import { starterTasks, fillTo, type Capabilities, type OfferedTask } from './starterTasks';
+import { starterTasks, fillTo, serverKinds, type Capabilities, type OfferedTask } from './starterTasks';
 
 const API = import.meta.env.VITE_ZARAM_API ?? '';
 
@@ -69,21 +70,26 @@ export default function EmptyConversation({
   useEffect(() => {
     let live = true;
     void (async () => {
-      const [listing, sources, projects, readiness, servers] = await Promise.all([
+      const [listing, sources, projects, readiness, servers, search] = await Promise.all([
         settled(fetchObligations()),
         settled(fetchSources()),
         settled(fetchProjects()),
         settled(fetchReadiness()),
         settled(fetchServers()),
+        settled(fetchWebSearch()),
       ]);
       if (!live) return;
 
       // Unread is not ready. Every one of these is `false` unless something
       // came back and said otherwise.
+      const kinds = serverKinds(servers ?? []);
       const capabilities: Capabilities = {
         model: readiness?.canChat === true,
         documents: (sources ?? []).some((s) => s.total > 0),
         tools: (servers ?? []).some((s) => s.reachable),
+        search: search?.on === true && readiness?.canChat === true,
+        email: kinds.email && readiness?.canChat === true,
+        github: kinds.github && readiness?.canChat === true,
       };
       setStarters(starterTasks(capabilities));
 
@@ -100,7 +106,12 @@ export default function EmptyConversation({
   }, [backendOnline]);
 
   const grounded = prompts ?? [];
-  const shown = starters.slice(0, fillTo(grounded.length));
+  // Three rows at first, as before; the rest of the use cases sit behind
+  // one quiet line, so the screen stays calm and the list stays complete.
+  const [more, setMore] = useState(false);
+  const firstFew = starters.slice(0, fillTo(grounded.length));
+  const rest = starters.slice(firstFew.length);
+  const shown = more ? starters : firstFew;
 
   return (
     <div className="flex flex-col gap-3" data-testid="empty-conversation">
@@ -186,6 +197,18 @@ export default function EmptyConversation({
             </li>
           ))}
         </ul>
+      )}
+      {prompts !== undefined && rest.length > 0 && (
+        <button
+          type="button"
+          onClick={() => setMore((v) => !v)}
+          aria-expanded={more}
+          className="self-start text-xs t-mono transition-colors"
+          style={{ color: 'var(--color-text-faint)', background: 'none', border: 0, padding: 0, cursor: 'pointer' }}
+          data-testid="starter-more"
+        >
+          {more ? 'Fewer' : rest.length + ' more things Zaram does ›'}
+        </button>
       )}
     </div>
   );

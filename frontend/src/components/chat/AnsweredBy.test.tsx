@@ -142,3 +142,20 @@ describe('asking another model', () => {
     );
   });
 });
+
+describe('where the time went — 19 September 2026', () => {
+  it('says how long the first word took, and the rest on hover', async () => {
+    const { timingLine } = await import('./AnsweredBy');
+    const line = timingLine({ recallMs: 120, planMs: 8, stepsMs: null, firstTokenMs: 3900, generationMs: 12400, totalMs: 16500 });
+    expect(line?.text).toBe('first word in 3.9 s');
+    expect(line?.title).toBe('recall 120 ms · plan 8 ms · first word 3.9 s · writing 12 s · total 17 s');
+  });
+
+  it('prints nothing for a phase that was not measured, never a zero', async () => {
+    const { timingLine } = await import('./AnsweredBy');
+    const line = timingLine({ recallMs: null, planMs: null, stepsMs: null, firstTokenMs: null, generationMs: null, totalMs: 900 });
+    expect(line?.text).toBe('900 ms in all');
+    expect(line?.title).toBe('total 900 ms');
+    expect(timingLine(null)).toBeNull();
+  });
+});

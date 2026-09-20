@@ -98,7 +98,9 @@ def from_messages(messages: Iterable) -> List[Turn]:
     return turns
 
 
-def fit(turns: Sequence[Turn], budget_tokens: int) -> tuple[List[Turn], int]:
+def fit(
+    turns: Sequence[Turn], budget_tokens: int, *, headroom_tokens: int = 0
+) -> tuple[List[Turn], int]:
     """The most recent turns that fit, and how many were dropped.
 
     Oldest first, whole turns only. Returns ``([], len(turns))`` when even the
@@ -110,9 +112,23 @@ def fit(turns: Sequence[Turn], budget_tokens: int) -> tuple[List[Turn], int]:
     question has been dropped reads as context from nowhere, and a model handed
     one will answer as though it had already been asked something. Dropping the
     orphan costs one turn and removes a whole class of confusion.
+
+    **`headroom_tokens` drops in blocks rather than one turn at a time —
+    19 September 2026, `docs/PLAN.md` A3.** A transcript that fits is kept
+    whole, headroom or not. One that overflows is cut to fit within
+    ``budget - headroom``, so the next several turns arrive under the budget
+    without moving the front of the transcript again. The front is the
+    prompt's prefix: a local server caches by prefix, and once a session
+    filled its window the old behaviour moved that front on *every* turn —
+    the whole history re-read per message, which is the 12 September measure
+    (21.5 s against 3.9 s to the first token) in reverse. Zero keeps the
+    old contract exactly.
     """
     if budget_tokens <= 0 or not turns:
         return [], len(turns)
+
+    total = sum(t.tokens for t in turns)
+    target = budget_tokens if total <= budget_tokens else max(0, budget_tokens - max(0, headroom_tokens))
 
     kept: List[Turn] = []
     spent = 0
@@ -120,7 +136,7 @@ def fit(turns: Sequence[Turn], budget_tokens: int) -> tuple[List[Turn], int]:
     # that gets the budget.
     for turn in reversed(turns):
         cost = turn.tokens
-        if spent + cost > budget_tokens:
+        if spent + cost > target:
             break
         kept.append(turn)
         spent += cost

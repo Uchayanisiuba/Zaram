@@ -212,3 +212,50 @@ class TestReadingTheStoredRecords:
             text = "You are Zaram."
 
         assert from_messages([Row()]) == []
+
+
+class TestDroppingInBlocks:
+    """`docs/PLAN.md` A3: once the window is full, the front of the transcript
+    moves in blocks, not on every turn, so a local server's prefix cache
+    survives the next several messages. Zero headroom is the old contract.
+
+    Turns are built from text and `Turn.tokens` is estimated from it, so the
+    budgets below are stated in turn counts via a helper that measures one."""
+
+    def _turns(self, n):
+        from core.transcript import ASSISTANT, USER, Turn
+
+        out = []
+        for i in range(n):
+            out.append(Turn(role=USER, text=f"question number {i} " + "word " * 30))
+            out.append(Turn(role=ASSISTANT, text=f"answer number {i} " + "word " * 30))
+        return out
+
+    def _cost(self, turns):
+        return sum(t.tokens for t in turns)
+
+    def test_a_transcript_that_fits_is_kept_whole_whatever_the_headroom(self):
+        from core.transcript import fit
+
+        turns = self._turns(3)
+        kept, dropped = fit(turns, self._cost(turns) + 10, headroom_tokens=self._cost(turns))
+        assert dropped == 0 and len(kept) == 6
+
+    def test_an_overflow_is_cut_to_budget_minus_headroom(self):
+        from core.transcript import fit
+
+        turns = self._turns(10)
+        budget = self._cost(turns) // 2
+        kept, dropped = fit(turns, budget, headroom_tokens=budget // 4)
+        assert self._cost(kept) <= budget - budget // 4
+        assert kept[0].role == "user"
+        assert dropped == len(turns) - len(kept)
+
+    def test_zero_headroom_is_the_old_behaviour(self):
+        from core.transcript import fit
+
+        turns = self._turns(10)
+        budget = self._cost(turns) // 2
+        assert fit(turns, budget, headroom_tokens=0) == fit(turns, budget)
+        kept, _ = fit(turns, budget)
+        assert self._cost(kept) <= budget < self._cost(kept) + turns[0].tokens

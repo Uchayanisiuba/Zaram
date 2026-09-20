@@ -13,6 +13,7 @@
  * needs a frame pipeline.
  */
 import { useEffect, useState } from 'react';
+import { installWarmOnReturn } from '@/lib/warmOnReturn';
 import { AnimatePresence } from 'framer-motion';
 import TopNav from './components/TopNav';
 import LeftRail from './components/LeftRail';
@@ -53,6 +54,11 @@ export default function App() {
   // What falls due this week, said once through the desktop's notification
   // service — the one time Zaram speaks first. See `lib/dueSoon.ts`.
   useDueSoon();
+
+  // The local model is reloaded when the window regains focus after a long
+  // pause, while the person is reading rather than after they press Enter.
+  // `docs/PLAN.md` A4; the backend still decides whether loading is allowed.
+  useEffect(() => installWarmOnReturn(), []);
 
   // Where the orb is and what it is doing, for the stylesheet: every
   // `.surface` takes its rim light from the orb's side and its tone from the
@@ -179,7 +185,7 @@ export default function App() {
           )}
           {workspace === 'activity' && (
             <div key="activity" style={{ flex: 1, display: 'flex', animation: 'fade-in 0.25s ease' }}>
-              <ActivityWorkspace />
+              <ActivityWorkspace onOpenConversation={openConversation} />
             </div>
           )}
           {workspace === 'settings' && (

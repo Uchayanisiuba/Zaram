@@ -62,8 +62,35 @@ def run_sync(coro: Coroutine[Any, Any, T]) -> T:
     # A loop is already running here, so the coroutine has to go elsewhere.
     # Blocks the calling thread (the event loop thread) until it finishes,
     # which is acceptable for the short calls this is used for.
-    future = asyncio.run_coroutine_threadsafe(coro, _background_loop())
-    return future.result()
+    #
+    # **In the caller's context.** `run_coroutine_threadsafe` would create
+    # the task inside the background loop's own context, so a `ContextVar`
+    # set by the caller — which step of which reply is running, for the
+    # egress log (`core/egress/step_context.py`) — would be invisible to the
+    # coroutine. The task is created from a callback scheduled *with* the
+    # caller's copied context, and a task copies the context it is created
+    # in, so the coroutine sees what the caller saw.
+    import concurrent.futures
+    import contextvars
+
+    loop = _background_loop()
+    done: concurrent.futures.Future = concurrent.futures.Future()
+
+    def _start() -> None:
+        task = loop.create_task(coro)
+
+        def _settle(t: "asyncio.Task[T]") -> None:
+            if t.cancelled():
+                done.cancel()
+            elif t.exception() is not None:
+                done.set_exception(t.exception())  # type: ignore[arg-type]
+            else:
+                done.set_result(t.result())
+
+        task.add_done_callback(_settle)
+
+    loop.call_soon_threadsafe(_start, context=contextvars.copy_context())
+    return done.result()
 
 
 def is_loop_running() -> bool:

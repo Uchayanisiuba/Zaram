@@ -132,18 +132,46 @@ class _Resp:
         return self._payload
 
 
+class _Chunked(_Resp):
+    """`/api/chat` as Ollama streams it: one JSON object per line."""
+
+    def __init__(self, chunks):
+        super().__init__({})
+        self._chunks = chunks
+
+    def iter_lines(self):
+        import json as _json
+
+        for chunk in self._chunks:
+            yield _json.dumps(chunk).encode()
+
+
 class TestOllamaUsesApiChat:
     def _engine(self, monkeypatch, capabilities, reply):
+        """`reply` is either one whole message (streamed here as content
+        deltas of a few characters, then the calls, then `done`) or an
+        explicit list of chunks."""
         import runtimes.models.engines.ollama_engine as mod
 
         sent: list[dict] = []
+
+        def chunks_for(message: dict) -> list[dict]:
+            out = []
+            content = message.get("content") or ""
+            for i in range(0, len(content), 4):
+                out.append({"message": {"role": "assistant", "content": content[i:i + 4]}, "done": False})
+            if message.get("tool_calls"):
+                out.append({"message": {"role": "assistant", "content": "", "tool_calls": message["tool_calls"]}, "done": False})
+            out.append({"message": {"role": "assistant", "content": ""}, "done": True})
+            return out
 
         def fake_post(url, json=None, timeout=None, stream=False):
             if url.endswith("/api/show"):
                 return _Resp({"capabilities": capabilities})
             if url.endswith("/api/chat"):
                 sent.append({"url": url, **json})
-                return _Resp(reply)
+                assert stream is True, "the tools path must stream"
+                return _Chunked(reply if isinstance(reply, list) else chunks_for(reply["message"]))
             if url.endswith("/api/generate"):
                 sent.append({"url": url, **json})
                 raise AssertionError("the tools path must not use /api/generate")
@@ -165,16 +193,44 @@ class TestOllamaUsesApiChat:
             }},
         )
         specs = native_tool_specs(OFFERED)
-        out = "".join(engine.stream_response("q", "sys", "qwen3", tools=specs))
+        pieces = list(engine.stream_response("q", "sys", "qwen3", tools=specs))
+        out = "".join(pieces)
 
         assert sent[0]["url"].endswith("/api/chat")
         assert sent[0]["tools"] == specs
         assert sent[0]["messages"][0] == {"role": "system", "content": "sys"}
         assert sent[0]["messages"][1]["content"] == "q"
-        assert sent[0]["stream"] is False
+        # Streamed since 19 September 2026: the content arrives as it is
+        # written, in pieces, and the call follows it as a marker.
+        assert sent[0]["stream"] is True
+        assert len([p for p in pieces if p and not p.startswith("[TOOL_CALL]")]) >= 3
         assert out.startswith("Let me look.")
         call = parse_call(out)
         assert call is not None and call.tool == "read_lines" and call.arguments == {"path": "a.py"}
+
+    def test_thinking_then_a_call_with_no_prose_still_closes_the_tag(self, monkeypatch):
+        """A model that reasons and then only calls: the think tag must close
+        before the marker, or the splitter files the call as thinking and the
+        loop never runs it."""
+        from core.reasoning import CLOSE_TAG, OPEN_TAG
+
+        engine, _ = self._engine(
+            monkeypatch,
+            ["completion", "tools", "thinking"],
+            [
+                {"message": {"role": "assistant", "thinking": "I should read ", "content": ""}, "done": False},
+                {"message": {"role": "assistant", "thinking": "the file.", "content": ""}, "done": False},
+                {"message": {"role": "assistant", "content": "", "tool_calls": [
+                    {"function": {"name": "code__read_lines", "arguments": {"path": "a.py"}}},
+                ]}, "done": False},
+                {"message": {"role": "assistant", "content": ""}, "done": True},
+            ],
+        )
+        out = "".join(engine.stream_response("q", "sys", "qwen3", tools=native_tool_specs(OFFERED)))
+
+        assert out.startswith(OPEN_TAG + "I should read the file." + CLOSE_TAG)
+        call = parse_call(out)
+        assert call is not None and call.tool == "read_lines"
 
     def test_a_model_without_the_capability_takes_the_ordinary_path(self, monkeypatch):
         import runtimes.models.engines.ollama_engine as mod

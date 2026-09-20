@@ -1,4 +1,11 @@
-"""`read_page`: fetch a page and hand back its prose, through the gate.
+"""`read_page` and `search`: the web, as tools the model can choose.
+
+`read_page` fetches a page and hands back its prose, through the gate.
+`search` — added 19 September 2026, `docs/PLAN.md` D1 — runs the same
+search the planner's `knowledge.search` step runs, so that a model which
+can call tools may *decide* to look something up instead of waiting for a
+classifier to decide for it. Same connectors, same egress gate, same
+web-search switch: off is a refusal that says so, never a silent empty list.
 
 The same shape as the code pack's tools — a built-in MCP server in process,
 so it inherits the policy gate, the injection scan on results, the tool
@@ -18,10 +25,15 @@ from .active import named_urls, normalise
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["WebTools", "READ_PAGE", "SERVER_ID", "PAGE_TIMEOUT"]
+__all__ = ["WebTools", "READ_PAGE", "SEARCH", "SERVER_ID", "PAGE_TIMEOUT"]
 
 SERVER_ID = "web"
 READ_PAGE = "read_page"
+SEARCH = "search"
+#: How many results a search hands the model. The planner's step uses six;
+#: a tool result sits in the model's context beside everything else, so it
+#: is kept to the same number rather than more.
+SEARCH_RESULTS = 6
 #: A person is waiting; a page that takes longer than this is reported as
 #: slow rather than held open. Longer than deep read's six seconds because
 #: this page was asked for by name, and its absence is the whole answer.
@@ -29,11 +41,22 @@ PAGE_TIMEOUT = 15.0
 
 
 class WebTools:
-    """Zaram's built-in web server: one tool, `read_page`."""
+    """Zaram's built-in web server: `read_page` and `search`."""
 
-    def __init__(self, fetch: Optional[Callable[..., bytes]] = None) -> None:
+    def __init__(
+        self,
+        fetch: Optional[Callable[..., bytes]] = None,
+        search: Optional[Callable[[str], Dict[str, Any]]] = None,
+        search_enabled: Optional[Callable[[], bool]] = None,
+    ) -> None:
         # Injectable for tests; the real one is the gate's synchronous path.
         self._fetch = fetch
+        # The knowledge service's `search_knowledge`, and the person's web
+        # search switch. `None` for the search means the tool is not offered:
+        # a search nobody wired is not a capability, and listing it would
+        # promise something the machine cannot do.
+        self._search = search
+        self._search_enabled = search_enabled
 
     # -- the built-in server surface ------------------------------------------ #
 
@@ -46,11 +69,39 @@ class WebTools:
     def granted_tools(self) -> set:
         """Always offered. The consent question is per page, inside the tool:
         a page the person named may be read; any other meets the per-host
-        policy. Withholding the tool would not make either safer."""
-        return {READ_PAGE}
+        policy. Withholding the tool would not make either safer. Search is
+        the same shape: the switch and the gate decide inside the call."""
+        return {READ_PAGE, SEARCH} if self._search is not None else {READ_PAGE}
 
     def list_tools(self) -> List[ToolDescriptor]:
-        return [
+        tools = [self._read_page_descriptor()]
+        if self._search is not None:
+            tools.append(self._search_descriptor())
+        return tools
+
+    def _search_descriptor(self) -> ToolDescriptor:
+        return ToolDescriptor(
+            server_id=SERVER_ID,
+            name=SEARCH,
+            description=(
+                "Search the web. Use it for anything recent, anything you are not "
+                "sure of, or anything about a specific product, place, person or "
+                "event. Returns titles, addresses and snippets; open a result with "
+                "read_page when the snippet is not enough. If the person has web "
+                "search turned off the tool says so — then answer from what you "
+                "know and say that you could not search."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "What to search for, in a few words."},
+                },
+                "required": ["query"],
+            },
+        )
+
+    def _read_page_descriptor(self) -> ToolDescriptor:
+        return (
             ToolDescriptor(
                 server_id=SERVER_ID,
                 name=READ_PAGE,
@@ -73,13 +124,62 @@ class WebTools:
                     "required": ["url"],
                 },
             )
-        ]
+        )
 
     def call_tool(self, name: str, arguments: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         arguments = arguments or {}
+        if name == SEARCH:
+            return self.search(str(arguments.get("query") or ""))
         if name != READ_PAGE:
             return {"error": f"the web server has no tool called {name!r}"}
         return self.read_page(str(arguments.get("url") or ""), str(arguments.get("question") or ""))
+
+    # -- search --------------------------------------------------------------- #
+
+    def search(self, query: str) -> Dict[str, Any]:
+        """The planner's search, as a call the model chose to make.
+
+        Three answers and each is said in words: the switch is off (a refusal
+        naming where to turn it on), the search ran (results), the search
+        ran and reached nothing (an empty list with the connectors' own
+        status, so the model can say *that* rather than invent a page).
+        """
+        if self._search is None:
+            return {"error": "search is not available on this machine"}
+        query = " ".join(query.split())
+        if not query:
+            return {"error": "no query was given"}
+        if self._search_enabled is not None and not self._search_enabled():
+            return {
+                "query": query,
+                "refused": True,
+                "error": (
+                    "Web search is off, so Zaram did not search. The person can turn "
+                    "it on in Settings › Privacy, or on the card under the reply."
+                ),
+            }
+        try:
+            found = self._search(query) or {}
+        except Exception as exc:  # noqa: BLE001 - a failed search is an answer, not a crash
+            logger.info("search failed for %r: %s", query, exc)
+            return {"query": query, "error": f"the search failed: {exc}"}
+        results = []
+        for r in (found.get("results") or [])[:SEARCH_RESULTS]:
+            if not isinstance(r, dict):
+                continue
+            results.append({
+                "title": str(r.get("title") or ""),
+                "url": str(r.get("url") or ""),
+                "snippet": str(r.get("snippet") or ""),
+                **({"published": str(r["published"])} if r.get("published") else {}),
+            })
+        out: Dict[str, Any] = {"query": query, "results": results, "total": len(results)}
+        status = found.get("provider_status")
+        if not results and status:
+            # Why nothing came back, in the connectors' own words — a denied
+            # host reads differently from an engine that found nothing.
+            out["status"] = status
+        return out
 
     # -- the tool ------------------------------------------------------------- #
 

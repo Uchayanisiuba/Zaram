@@ -833,7 +833,15 @@ class TestTheProjectChecksTheChangeBeforeDone:
         assert mcp.calls[1]["arguments"] == {"runner": "check"}
         assert mcp.calls[3]["arguments"] == {"runner": "check"}
         assert "could not satisfy" in _text(out)
-        assert "Done." not in _text(out) and "Done again." not in _text(out)
+        # Until 19 September 2026 this asserted that neither "Done." reached
+        # the user — the loop buffered each round and spoke only the last.
+        # Tool turns stream now (`_stream_round`), so a "done" the checker
+        # then refutes has already been read, exactly as it is in Claude Code:
+        # the prose, then the failed check as a row, then the fix. What must
+        # still hold is that the *final* word is the honest one and that
+        # every round reached the screen in order.
+        text = _text(out)
+        assert text.index("Done.") < text.index("Done again.") < text.index("could not satisfy")
         # The model was told why it got another turn, with the place named.
         told = [p for p in model.service.prompts if "did not pass" in p]
         assert len(told) >= 2 and "src/a.ts" in told[0]

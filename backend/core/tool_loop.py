@@ -337,6 +337,49 @@ def strip_calls(text: str) -> str:
     return _XML_CALL_RE.sub("", _CALL_RE.sub("", text or "")).strip()
 
 
+#: The two ways a call begins. Everything a holdback decides is decided
+#: against these, so a third call form is added here and nowhere else.
+_CALL_OPENERS = (TOOL_CALL_MARKER, "<tool_call>")
+
+
+def visible_length(text: str) -> int:
+    """How much of an accumulating reply can be shown right now.
+
+    **A generation that may call a tool used to be buffered whole**, because
+    ``[TOOL_CALL]`` arrives split across tokens and cannot be recognised until
+    the text is accumulated — and by then a streamed version has been read.
+    That cost the typewriter on every tool turn, which in a coding project is
+    every turn: a blank screen for as long as the model took, then the whole
+    reply at once. Measured on 19 September 2026 as the thing that made a
+    working reply read as a hung one.
+
+    The fix is a holdback, not a buffer. Text up to the first *complete*
+    opener is safe: the model meant to say it, and it contains no call. Past
+    that point nothing more is shown, since the call and anything after it
+    belong to the loop. With no complete opener, only the tail that could be
+    the *start* of one is withheld — a trailing ``[`` or ``<tool_`` — and it is
+    released the moment the next token shows it was prose. So the marker
+    still never reaches the screen, and the prose no longer waits for it.
+
+    Returns a length: ``text[:n]`` is what may be shown. Never raises.
+    """
+    text = text or ""
+    earliest = len(text)
+    for opener in _CALL_OPENERS:
+        at = text.find(opener)
+        if at != -1 and at < earliest:
+            earliest = at
+    if earliest < len(text):
+        return earliest
+    hold = 0
+    for opener in _CALL_OPENERS:
+        for n in range(min(len(opener) - 1, len(text)), 0, -1):
+            if text.endswith(opener[:n]):
+                hold = max(hold, n)
+                break
+    return len(text) - hold
+
+
 def _argument_line(schema: Any) -> str:
     """A tool's parameters, in one line, or ``""`` when it declares none.
 

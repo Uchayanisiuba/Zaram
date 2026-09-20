@@ -23,6 +23,6 @@ Bounded (`MAX_CHARS`) so one page cannot become the whole window.
 """
 
 from .active import named_urls, set_named_urls
-from .tools import READ_PAGE, SERVER_ID, WebTools
+from .tools import READ_PAGE, SEARCH, SERVER_ID, WebTools
 
-__all__ = ["WebTools", "READ_PAGE", "SERVER_ID", "set_named_urls", "named_urls"]
+__all__ = ["WebTools", "READ_PAGE", "SEARCH", "SERVER_ID", "set_named_urls", "named_urls"]

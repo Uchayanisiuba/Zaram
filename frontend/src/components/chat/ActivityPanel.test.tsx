@@ -7,8 +7,10 @@
  * was read and says so out loud rather than leaving a reader to assume.
  */
 import { describe, expect, it, vi, afterEach } from 'vitest';
-import { render, screen, cleanup } from '@testing-library/react';
+import { render, screen, cleanup, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+
+vi.mock('@/services/egressClient', () => ({ fetchEgressForStep: vi.fn(async () => []) }));
 
 import ActivityPanel from './ActivityPanel';
 import ToolCalls from './ToolCalls';
@@ -36,13 +38,25 @@ describe('what the panel opens to', () => {
     );
   });
 
-  it('says plainly that nothing was edited', () => {
-    // The claim the reference panel makes and this one must not. Every mutative
-    // tool is out of scope until v1, so a reader who assumed otherwise would
-    // believe their repository had been changed.
+  it('says where a change and an egress can be checked, and no longer claims nothing was edited', () => {
+    // Until 19 September 2026 this asserted "does not edit files — every
+    // mutative tool is out of scope until v1". `write_file` and `edit_file`
+    // shipped on 12 September, so the footer had been a false claim on the
+    // one panel whose job is to say what happened.
     render(<ActivityPanel calls={[call()]} onClose={() => {}} />);
 
-    expect(screen.getByText(/does not edit files/)).toBeTruthy();
+    expect(screen.queryByText(/does not edit files/)).toBeNull();
+    expect(screen.getByText(/egress log/)).toBeTruthy();
+  });
+
+  it('a plan step reads by its own phrase', () => {
+    render(
+      <ActivityPanel
+        calls={[call({ server: 'zaram', tool: 'knowledge.search', label: 'Searched the web', target: 'fable outage', reason: '4 results' })]}
+        onClose={() => {}}
+      />,
+    );
+    expect(screen.getByText('Searched the web')).toBeTruthy();
   });
 
   it('omits the target line for a call that named nothing', () => {
@@ -82,5 +96,31 @@ describe('how it is reached', () => {
 
     await userEvent.click(screen.getByTestId('tool-summary'));
     expect(screen.queryByTestId('activity-panel')).toBeNull();
+  });
+});
+
+describe('what one step sent — 19 September 2026', () => {
+  it('shows the focused step’s change with Revert, and asks the log what it sent', async () => {
+    const { fetchEgressForStep } = await import('@/services/egressClient');
+    vi.mocked(fetchEgressForStep).mockResolvedValue([
+      { id: 'e1', at: 1, kind: 'request', host: 'api.github.com', method: 'GET', url: 'https://api.github.com/x', body: null, literalText: 'x', bytes: 240, decision: 'allowed', reason: '', source: 'client:github', meta: {} },
+    ] as never);
+    const focused = call({ tool: 'edit_file', target: 'a.py', diff: '--- a\n+++ b\n-x\n+y', commit: 'abc', stepId: 'c:0:call:2' });
+    render(<ActivityPanel calls={[call(), focused]} focus={focused} onClose={() => {}} />);
+
+    expect(document.querySelector('[data-focus="true"]')).not.toBeNull();
+    expect(screen.getByTestId('change-card')).toBeTruthy();
+    await waitFor(() => expect(screen.getByTestId('step-egress')).toBeTruthy());
+    expect(screen.getByTestId('step-egress').textContent).toContain('api.github.com');
+    expect(screen.getByTestId('step-egress').textContent).toContain('240 bytes');
+    expect(fetchEgressForStep).toHaveBeenCalledWith('c:0:call:2');
+  });
+
+  it('says plainly when a step sent nothing', async () => {
+    const { fetchEgressForStep } = await import('@/services/egressClient');
+    vi.mocked(fetchEgressForStep).mockResolvedValue([] as never);
+    const focused = call({ stepId: 'c:0:call:1' });
+    render(<ActivityPanel calls={[focused]} focus={focused} onClose={() => {}} />);
+    await waitFor(() => expect(screen.getByTestId('step-egress-none')).toBeTruthy());
   });
 });

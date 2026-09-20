@@ -207,9 +207,11 @@ describe('parsing', () => {
   });
 
   it('ignores internal event types it does not model', async () => {
+    // `step_start` used to be the example here; since 19 September 2026 it
+    // is a row (see the step tests below), so the bookkeeping events stand in.
     mockFetch(() =>
       streamingResponse([
-        line({ type: 'step_start', data: { capability_id: 'reasoning.generate' } }),
+        line({ type: 'plan_start', data: { step_count: 2 } }),
         line({ type: 'plan_complete', data: { state: 'completed' } }),
         token('answer'),
         done(),
@@ -218,6 +220,28 @@ describe('parsing', () => {
 
     const events = await collect(streamChat({ text: 'hi' }));
     expect(events.map((e) => e.type)).toEqual(['token', 'done']);
+  });
+
+  it('models a plan step as a row, with its words', async () => {
+    mockFetch(() =>
+      streamingResponse([
+        line({
+          type: 'step_start',
+          data: { capability_id: 'knowledge.search', step_index: 0, step_id: 'c:0', doing: 'Searching the web', done: 'Searched the web', target: 'q' },
+        }),
+        line({
+          type: 'step_complete',
+          data: { capability_id: 'knowledge.search', step_index: 0, success: true, step_id: 'c:0', done: 'Searched the web', target: 'q', detail: '4 results', seconds: 1.5 },
+        }),
+        token('answer'),
+        done(),
+      ]),
+    );
+
+    const events = await collect(streamChat({ text: 'hi' }));
+    expect(events.map((e) => e.type)).toEqual(['step_start', 'step_complete', 'token', 'done']);
+    expect(events[0]).toMatchObject({ stepId: 'c:0', doing: 'Searching the web', done: 'Searched the web', target: 'q' });
+    expect(events[1]).toMatchObject({ stepId: 'c:0', success: true, detail: '4 results', seconds: 1.5 });
   });
 
   it('handles a final line with no trailing newline', async () => {

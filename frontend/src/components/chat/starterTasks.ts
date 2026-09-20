@@ -31,8 +31,14 @@
  * `vram_bytes` returns `None` rather than `0`.
  */
 
-/** The one thing a task needs before it can do anything. */
-export type Requirement = 'model' | 'documents' | 'tools';
+/** The one thing a task needs before it can do anything.
+ *
+ *  Widened on 19 September 2026 (`docs/PLAN.md` F2) from three to six: the
+ *  use cases the product ships, each lit only by a thing the interface
+ *  measured. `search` is the web-search switch; `email` and `github` are a
+ *  reachable attached server of that kind — read off the server list, never
+ *  assumed from a pack being installed. */
+export type Requirement = 'model' | 'documents' | 'tools' | 'search' | 'email' | 'github';
 
 export interface StarterTask {
   /** Goes into the composer, ready to send or edit. */
@@ -51,6 +57,27 @@ export interface Capabilities {
   model: boolean;
   documents: boolean;
   tools: boolean;
+  /** Web search is on. Off is the default and is not a failure. */
+  search: boolean;
+  /** A reachable mail server is attached. */
+  email: boolean;
+  /** A reachable GitHub server is attached. */
+  github: boolean;
+}
+
+/** Which attached servers count as mail and as GitHub — by id or by the
+ *  command that starts them, because a person names a server whatever they
+ *  like and `imap-mcp-server` is the thing that actually says what it is. */
+export function serverKinds(servers: { id: string; command: string[]; reachable: boolean }[]): {
+  email: boolean;
+  github: boolean;
+} {
+  const text = (s: { id: string; command: string[] }) => [s.id, ...s.command].join(' ').toLowerCase();
+  const up = servers.filter((s) => s.reachable);
+  return {
+    email: up.some((s) => /\b(imap|mail|email|smtp)\b/.test(text(s))),
+    github: up.some((s) => /github/.test(text(s))),
+  };
 }
 
 export interface OfferedTask extends StarterTask {
@@ -71,15 +98,36 @@ const TASKS: StarterTask[] = [
     configure: { label: 'Point Zaram at a folder', node: 'knowledge' },
   },
   {
-    prompt: 'Explain how this project works, starting from the entry point.',
+    // The folder is typed into the sentence: a message that names one is
+    // offered as a coding project on the spot (`docs/PLAN.md` F1), so this
+    // needs a model and nothing set up in advance.
+    prompt: 'Explain how the project in C:\\path\\to\\folder works, starting from the entry point.',
     outcome: 'An answer that names the files it read, all of it on your machine.',
-    needs: 'tools',
-    configure: { label: 'Attach a tool', node: 'settings' },
+    needs: 'model',
+    configure: { label: 'Add a model or a key', node: 'settings' },
+  },
+  {
+    prompt: 'What is the latest on ',
+    outcome: 'An answer with the pages it read cited, and a log of what left this machine to get them.',
+    needs: 'search',
+    configure: { label: 'Turn web search on', node: 'settings' },
+  },
+  {
+    prompt: 'Find the last email from ',
+    outcome: 'The message, and a reply drafted for you to read before anything is sent.',
+    needs: 'email',
+    configure: { label: 'Attach your mail', node: 'settings' },
+  },
+  {
+    prompt: 'What is open on my GitHub repository ',
+    outcome: 'Issues and pull requests, read through your own token, with nothing changed until you say.',
+    needs: 'github',
+    configure: { label: 'Attach GitHub', node: 'settings' },
   },
 ];
 
 /**
- * The three tasks, each carrying whether it can run right now.
+ * The six tasks, each carrying whether it can run right now.
  *
  * Order is fixed rather than sorted by readiness. A list that reshuffles as
  * folders are indexed teaches nobody where anything is, and the unlit rows are

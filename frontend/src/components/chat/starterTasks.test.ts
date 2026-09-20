@@ -8,18 +8,20 @@
  * ready when nothing measured it.
  */
 import { describe, it, expect } from 'vitest';
-import { starterTasks, fillTo, type Capabilities } from './starterTasks';
+import { starterTasks, fillTo, serverKinds, type Capabilities } from './starterTasks';
 
-const NOTHING: Capabilities = { model: false, documents: false, tools: false };
-const EVERYTHING: Capabilities = { model: true, documents: true, tools: true };
+const NOTHING: Capabilities = { model: false, documents: false, tools: false, search: false, email: false, github: false };
+const EVERYTHING: Capabilities = { model: true, documents: true, tools: true, search: true, email: true, github: true };
 
 describe('starterTasks', () => {
   it('lights a row only when its own requirement was measured as met', () => {
-    const tasks = starterTasks({ model: true, documents: false, tools: false });
+    const tasks = starterTasks({ ...NOTHING, model: true });
     const byNeed = Object.fromEntries(tasks.map((t) => [t.needs, t.ready]));
     expect(byNeed.model).toBe(true);
     expect(byNeed.documents).toBe(false);
-    expect(byNeed.tools).toBe(false);
+    expect(byNeed.search).toBe(false);
+    expect(byNeed.email).toBe(false);
+    expect(byNeed.github).toBe(false);
   });
 
   it('lights nothing on a machine where nothing could be read', () => {
@@ -28,9 +30,12 @@ describe('starterTasks', () => {
     expect(starterTasks(NOTHING).every((t) => !t.ready)).toBe(true);
   });
 
-  it('offers exactly three, in a fixed order, whatever is ready', () => {
+  it('offers the six use cases, in a fixed order, whatever is ready', () => {
     const order = (c: Capabilities) => starterTasks(c).map((t) => t.needs);
-    expect(order(NOTHING)).toHaveLength(3);
+    // Six since 19 September 2026 (F2); the first three are what a fresh
+    // install sees, the rest sit behind one line.
+    expect(order(NOTHING)).toHaveLength(6);
+    expect(order(NOTHING).slice(0, 3)).toEqual(['model', 'documents', 'model']);
     // A list that reshuffles as folders are indexed teaches nobody where
     // anything is.
     expect(order(EVERYTHING)).toEqual(order(NOTHING));
@@ -44,6 +49,18 @@ describe('starterTasks', () => {
       expect(task.configure.label.length).toBeGreaterThan(0);
       expect(['knowledge', 'settings']).toContain(task.configure.node);
     }
+  });
+});
+
+describe('serverKinds', () => {
+  it('reads mail and GitHub off the attached servers, by id or command, only when reachable', () => {
+    const kinds = serverKinds([
+      { id: 'mail', command: ['npx', '-y', 'imap-mcp-server'], reachable: true },
+      { id: 'github', command: ['npx', '-y', '@modelcontextprotocol/server-github'], reachable: false },
+    ]);
+    expect(kinds).toEqual({ email: true, github: false });
+    expect(serverKinds([])).toEqual({ email: false, github: false });
+    expect(serverKinds([{ id: 'my-gh', command: ['github-mcp-server'], reachable: true }]).github).toBe(true);
   });
 });
 

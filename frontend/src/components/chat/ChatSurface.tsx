@@ -51,6 +51,7 @@ import ReasoningPanel from './ReasoningPanel';
 import EmptyConversation from './EmptyConversation';
 import EngineDown from './EngineDown';
 import MessageBody from './MessageBody';
+import Interleaved from './Interleaved';
 import StreamingReply from './StreamingReply';
 import CitationPanel from './CitationPanel';
 import CodePreviewPanel from './CodePreviewPanel';
@@ -199,6 +200,23 @@ export default function ChatSurface({ navigate }: Props) {
   const continueTask = useCallback(() => {
     void send('Continue', { continueTask: true });
   }, [send]);
+
+  /** The "open-project" offer's one press: create the coding project on the
+   *  folder the person named, select it, and ask their question again with
+   *  the tools now offered. `docs/PLAN.md` F1. */
+  const openFolderAsProject = useCallback(
+    async (path: string, name: string) => {
+      const { useProjectStore } = await import('@/stores/projectStore');
+      const project = await useProjectStore.getState().create(name, 'coding', '', path);
+      if (!project) return;
+      useChatStore.getState().setProject(project.id);
+      const lastAsked = [...useChatStore.getState().messages]
+        .reverse()
+        .find((message) => message.role === 'user');
+      if (lastAsked) void send(lastAsked.text);
+    },
+    [send],
+  );
 
   /** Go on a plan the task paused to show. The same resume as Continue, with
    *  the approval recorded on the task so it does not pause again.
@@ -997,7 +1015,12 @@ export default function ChatSurface({ navigate }: Props) {
                         and a message that reformats itself after sending
                         reads as the product editing them. */}
                     {msg.role === 'assistant' ? (
-                      <MessageBody text={stripMarkers(msg.text)} />
+                      <Interleaved
+                        text={stripMarkers(msg.text)}
+                        calls={msg.toolCalls ?? []}
+                        onAllowed={askAgainAfterAllowing}
+                        renderText={(chunk) => <MessageBody text={chunk} />}
+                      />
                     ) : (
                       stripMarkers(msg.text)
                     )}
@@ -1064,6 +1087,7 @@ export default function ChatSurface({ navigate }: Props) {
                   {msg.role === 'assistant' && (
                     <AnsweredBy
                       attribution={msg.answeredBy}
+                      timing={msg.timing}
                       /* The question this reply answered, not the last thing
                          said. Re-asking from the middle of a history must
                          re-send *that* question — taking the most recent one
@@ -1168,9 +1192,8 @@ export default function ChatSurface({ navigate }: Props) {
                   {msg.plan ? (
                     <PlanCard items={msg.plan.items} awaitingGo={msg.plan.awaitingGo} onGo={goPlan} />
                   ) : null}
-                  {msg.toolCalls?.length ? (
-                    <ToolCalls calls={msg.toolCalls} onAllowed={askAgainAfterAllowing} />
-                  ) : null}
+                  {/* The rows are drawn between the paragraphs of the body above
+                      (`Interleaved`), where they happened, and no longer here. */}
                   {/* The quoted-passage notice is taken out here and shown on
                       the sources line instead — unless this answer cited
                       nothing, in which case there is no line to ride and it
@@ -1187,6 +1210,7 @@ export default function ChatSurface({ navigate }: Props) {
                       onEnableSearch={enableSearchAndRetry}
                       onContinue={continueTask}
                       onTryCloud={tryCloud}
+                      onOpenProject={openFolderAsProject}
                     />
                   ))}
                   {msg.error && (
@@ -1206,7 +1230,11 @@ export default function ChatSurface({ navigate }: Props) {
                       Same argument as the `model_load` event: a wait that shows
                       its cause is explicable, and one that shows nothing reads
                       as a hang. */}
-                  <ReasoningPanel text={streamingReasoning} streaming />
+                  <ReasoningPanel
+                    text={streamingReasoning}
+                    streaming
+                    doing={streamingPlan?.items.find((i) => i.status === 'doing')?.text}
+                  />
                   {streamingText && (
                     <>
                       <p
@@ -1232,9 +1260,14 @@ export default function ChatSurface({ navigate }: Props) {
                             plainness rather than a defect -- and the
                             alternative, plain text that reflows into markdown
                             at the end, is a much louder one. */}
-                        <StreamingReply
+                        <Interleaved
                           text={stripMarkers(streamingText)}
-                          done={!isStreaming}
+                          calls={streamingToolCalls}
+                          active
+                          onAllowed={askAgainAfterAllowing}
+                          renderText={(chunk, last) =>
+                            last ? <StreamingReply text={chunk} done={!isStreaming} /> : <MessageBody text={chunk} />
+                          }
                         />
                       </div>
                     </>
@@ -1285,7 +1318,10 @@ export default function ChatSurface({ navigate }: Props) {
                   {streamingPlan ? (
                     <PlanCard items={streamingPlan.items} awaitingGo={streamingPlan.awaitingGo} />
                   ) : null}
-                  {streamingToolCalls.length > 0 && (
+                  {/* Rows that arrived before any text: the body above is not
+                      mounted until there is text, so they are drawn here until
+                      it is, and move inside it the moment it appears. */}
+                  {!streamingText && streamingToolCalls.length > 0 && (
                     <ToolCalls calls={streamingToolCalls} active onAllowed={askAgainAfterAllowing} />
                   )}
                   {(streamingSources.some((s) => s.cited)
@@ -1299,6 +1335,7 @@ export default function ChatSurface({ navigate }: Props) {
                       onEnableSearch={enableSearchAndRetry}
                       onContinue={continueTask}
                       onTryCloud={tryCloud}
+                      onOpenProject={openFolderAsProject}
                     />
                   ))}
                 </div>

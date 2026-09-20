@@ -163,3 +163,83 @@ describe('a step opens to what it produced', () => {
     expect(pane.textContent).toContain('<img');
   });
 });
+
+describe('a plan step on the same row — 19 September 2026', () => {
+  const step = (over: Partial<ChatToolCall> = {}): ChatToolCall => ({
+    server: 'zaram',
+    tool: 'knowledge.search',
+    verdict: 'allow',
+    reason: '4 results',
+    target: 'fable outage',
+    label: 'Searched the web',
+    doing: 'Searching the web',
+    stepId: 's1',
+    ...over,
+  });
+
+  it('reads as prose while it runs, with a spinner and no verdict word', () => {
+    render(<ToolCalls calls={[step({ verdict: 'running', reason: '' })]} active />);
+
+    expect(screen.getByTestId('step-phrase').textContent).toBe('Searching the web');
+    expect(screen.getByTestId('step-row').textContent).toContain('“fable outage”');
+    expect(screen.getByTestId('step-row').querySelector('.animate-spin')).not.toBeNull();
+    expect(screen.getByTestId('step-row').textContent).not.toContain('ran');
+  });
+
+  it('settles to the past tense with its one detail', () => {
+    render(<ToolCalls calls={[step()]} active />);
+
+    const row = screen.getByTestId('step-row');
+    expect(screen.getByTestId('step-phrase').textContent).toBe('Searched the web');
+    expect(row.textContent).toContain('4 results');
+    expect(row.querySelector('.animate-spin')).toBeNull();
+  });
+
+  it('folds by its own phrase, beside the tool verbs', () => {
+    render(
+      <ToolCalls
+        calls={[
+          step(),
+          call({ tool: 'read_lines' }),
+          call({ tool: 'read_lines' }),
+          step({ tool: 'memory.recall', label: 'Recalled 3 facts', target: '', reason: '' }),
+        ]}
+      />,
+    );
+
+    expect(screen.getByTestId('tool-summary').textContent).toContain(
+      'Searched the web, read 2 files, recalled 3 facts',
+    );
+  });
+
+  it('a step that failed is never folded and says why', () => {
+    render(<ToolCalls calls={[step({ verdict: 'refuse', reason: 'search is off' })]} />);
+
+    expect(screen.queryByTestId('tool-summary')).toBeNull();
+    expect(screen.getByTestId('step-row').textContent).toContain('search is off');
+  });
+});
+
+describe('the working pane, from a row — 19 September 2026', () => {
+  it('opens the panel focused on the row that was opened', () => {
+    render(
+      <ToolCalls
+        calls={[call({ tool: 'read_lines', target: 'a.py', output: 'def f(): pass', stepId: 'c:0:call:1' })]}
+        active
+      />,
+    );
+    fireEvent.click(screen.getByTestId('open-step'));
+    const panel = screen.getByTestId('activity-panel');
+    expect(panel.querySelector('[data-focus="true"]')).not.toBeNull();
+  });
+
+  it('a step still running has nothing to open yet', () => {
+    render(
+      <ToolCalls
+        calls={[call({ server: 'zaram', tool: 'knowledge.search', verdict: 'running', label: 'Searched the web', doing: 'Searching the web', stepId: 'c:0' })]}
+        active
+      />,
+    );
+    expect(screen.queryByTestId('open-step')).toBeNull();
+  });
+});

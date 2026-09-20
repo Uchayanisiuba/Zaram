@@ -43,8 +43,10 @@ describe('EmptyConversation', () => {
 
     render(<EmptyConversation onPick={vi.fn()} />);
 
-    await waitFor(() => expect(lit()).toHaveLength(1));
-    expect(screen.getByText('Start →')).toBeTruthy();
+    // Two of the first three need only a model: the document, and coding a
+    // project, which since F1 needs no tool attached in advance.
+    await waitFor(() => expect(lit()).toHaveLength(2));
+    expect(screen.getAllByText('Start →').length).toBeGreaterThan(0);
   });
 
   it('leaves every dot unlit when nothing could be read, and shows the setup instead', async () => {
@@ -69,7 +71,7 @@ describe('EmptyConversation', () => {
 
     render(<EmptyConversation onPick={onPick} onNavigate={onNavigate} />);
 
-    await waitFor(() => expect(lit()).toHaveLength(1));
+    await waitFor(() => expect(lit()).toHaveLength(2));
 
     fireEvent.click(lit()[0].querySelector('button')!);
     expect(onPick).toHaveBeenCalledTimes(1);
@@ -89,5 +91,21 @@ describe('EmptyConversation', () => {
     render(<EmptyConversation onPick={vi.fn()} />);
     await waitFor(() => expect(document.querySelectorAll('[data-testid="starter-task"]')).toHaveLength(3));
     expect(screen.getByText(/A document in Work, written from your words/)).toBeTruthy();
+  });
+});
+
+describe('the rest of what Zaram does', () => {
+  it('sits behind one line and unfolds to all six', async () => {
+    render(<EmptyConversation onPick={vi.fn()} />);
+
+    await waitFor(() => expect(document.querySelectorAll('[data-testid="starter-task"]')).toHaveLength(3));
+    const more = screen.getByTestId('starter-more');
+    expect(more.textContent).toContain('3 more');
+
+    fireEvent.click(more);
+    await waitFor(() => expect(document.querySelectorAll('[data-testid="starter-task"]')).toHaveLength(6));
+    expect(screen.getByText(/Turn web search on/)).toBeTruthy();
+    expect(screen.getByText(/Attach your mail/)).toBeTruthy();
+    expect(screen.getByText(/Attach GitHub/)).toBeTruthy();
   });
 });

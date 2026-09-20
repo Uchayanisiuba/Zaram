@@ -517,7 +517,25 @@ class KernelBootstrapper:
         # builds per URL. See `packs/web/__init__.py` for the consent rule.
         from packs.web import SERVER_ID as WEB_SERVER, WebTools
 
-        self.mcp_runtime.register_builtin(ServerConfig(server_id=WEB_SERVER), WebTools())
+        # `search` beside it — `docs/PLAN.md` D1: the same search the
+        # planner's step runs, offered as a call the model may choose. The
+        # knowledge service and the web-search switch are both resolved at
+        # call time, so the tool honours the switch as it stands now rather
+        # than as it stood at boot.
+        def _search_for_the_model(query: str) -> dict:
+            from knowledge.knowledge_service import search_knowledge
+
+            return search_knowledge(query)
+
+        def _search_is_on() -> bool:
+            from core.planner import web_search_enabled
+
+            return bool(web_search_enabled())
+
+        self.mcp_runtime.register_builtin(
+            ServerConfig(server_id=WEB_SERVER),
+            WebTools(search=_search_for_the_model, search_enabled=_search_is_on),
+        )
 
         # The draw pack: `draw_image`, so a picture can be a *step* rather than
         # a whole request. Generative tier — it writes a new artifact through

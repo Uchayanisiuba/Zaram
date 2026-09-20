@@ -242,9 +242,14 @@ class TestEveryRealFileIsAccountedFor:
         the first: they cover a stray checkpoint dropped somewhere the config
         does not name.
         """
-        _, excludes = patterns
+        includes, excludes = patterns
         surprises: list[str] = []
         backend = REPO_ROOT / "backend"
+        # An include that names a path rather than a suffix — the manual's
+        # pictures, `backend/manual/assets/*` — carries files whose extension
+        # is in no suffix list, and that is a decision too. Read from the
+        # same config, so the two cannot drift.
+        named_includes = [i for i in includes if i.startswith("backend/") and not i.startswith("backend/**/*.")]
 
         for root, dirs, files in os.walk(backend):
             rel_root = Path(root).relative_to(REPO_ROOT)
@@ -259,6 +264,9 @@ class TestEveryRealFileIsAccountedFor:
                     # Named in `electron-builder.yml`. Somebody decided about
                     # it, which is exactly what this test asks for.
                     continue
+                rel = str(rel_root / name).replace(os.sep, "/")
+                if any(fnmatch.fnmatch(rel, form) for form in named_includes):
+                    continue  # carried by name; see `named_includes`
                 suffix = Path(name).suffix.lower()
                 if suffix in CARRIED_SUFFIXES:
                     continue

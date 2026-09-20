@@ -222,3 +222,26 @@ describe('the tools disclosure', () => {
     expect(container.textContent).toBe('');
   });
 });
+
+describe('a folder in the sentence — the open-project offer', () => {
+  it('offers one press that opens the named folder, with the name prefilled', () => {
+    const onOpenProject = vi.fn();
+    render(
+      <NoticeCard
+        notice={notice({ kind: 'project', action: 'open-project', content: 'That names a folder.', path: 'C:/code/my-app', name: 'my-app' })}
+        onOpenProject={onOpenProject}
+      />,
+    );
+    const button = screen.getByTestId('notice-open-project');
+    expect(button.textContent).toContain('Open my-app as a coding project');
+    fireEvent.click(button);
+    expect(onOpenProject).toHaveBeenCalledWith('C:/code/my-app', 'my-app');
+  });
+
+  it('offers nothing without a handler, and nothing without a path', () => {
+    render(<NoticeCard notice={notice({ action: 'open-project', path: 'C:/x', name: 'x' })} />);
+    expect(screen.queryByTestId('notice-open-project')).toBeNull();
+    render(<NoticeCard notice={notice({ action: 'open-project' })} onOpenProject={vi.fn()} />);
+    expect(screen.queryByTestId('notice-open-project')).toBeNull();
+  });
+});

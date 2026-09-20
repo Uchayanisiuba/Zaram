@@ -105,3 +105,40 @@ describe('unfinished tasks in Project', () => {
     expect(screen.queryByText(/unfinished/i)).toBeNull();
   });
 });
+
+describe('the same tasks, in Activity — 19 September 2026', () => {
+  beforeEach(() => {
+    useChatStore.setState({ isStreaming: false, messages: [] });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it('lists what is waiting on you, across projects, and continues it into the conversation', async () => {
+    const { default: ActivityWorkspace } = await import('./ActivityWorkspace');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes('/plans')) {
+          return new Response(JSON.stringify({ plans: [A_TASK], finished: [], kept_for_days: 7 }), { status: 200 });
+        }
+        // Activity's own loads: an empty log is enough for this test.
+        return new Response(JSON.stringify({ entries: [], total: 0, rules: {}, hosts_seen: [], hostsSeen: [] }), { status: 200 });
+      }),
+    );
+    const send = vi.fn();
+    const open = vi.fn();
+    useChatStore.setState({ send } as never);
+
+    render(<ActivityWorkspace onOpenConversation={open} />);
+
+    await waitFor(() => expect(screen.getByTestId('resume-task')).toBeTruthy());
+    expect(screen.getByText(A_TASK.question)).toBeTruthy();
+    fireEvent.click(screen.getByTestId('resume-task'));
+    expect(open).toHaveBeenCalled();
+    expect(send).toHaveBeenCalledWith('Continue', expect.objectContaining({ continueTask: true, planId: A_TASK.id }));
+  });
+});

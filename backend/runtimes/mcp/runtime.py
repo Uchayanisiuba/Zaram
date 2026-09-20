@@ -265,8 +265,15 @@ class McpRuntime:
         # pack reached fourteen tools and the interface said "7 attached".
         ours = [t for t in found if t.server_id in self._builtin]
         theirs = [t for t in found if t.server_id not in self._builtin]
+        # An empty query means "the same set as last time": the listing order
+        # cut to the budget, with no ranking to move it. The engine asks this
+        # way on every turn that is not about tools, so the tool rules are the
+        # same bytes each turn and stay in the server's prompt cache
+        # (`docs/PLAN.md` A3).
         shortlisted = ours + (
-            self._rank(query, theirs, self._budget) if self._rank else theirs[: self._budget]
+            self._rank(query, theirs, self._budget)
+            if self._rank and query.strip()
+            else theirs[: self._budget]
         )
 
         described = []

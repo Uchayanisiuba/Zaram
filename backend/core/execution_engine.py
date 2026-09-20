@@ -53,7 +53,7 @@ from core.dispatcher import (
 from core.event_bus import EventBus, ZaramEvent
 from core.execution_context import ExecutionContext
 from core.planner import IntentClassification, IntentPlanner, IntentType
-from core.streaming_events import StreamEvent
+from core.streaming_events import EventType, StreamEvent
 from core.tool_loop import (
     MAX_AUTO_CONTINUATIONS,
     MAX_TOOL_ROUNDS,
@@ -67,10 +67,40 @@ from core.tool_loop import (
     tool_instructions,
     output_excerpt,
     native_tool_specs,
+    visible_length,
 )
 from core.registry import RuntimeRegistry
+from core.egress.step_context import current_step, running_step
+from core.step_labels import describe_step
 from core.scheduler import RuntimeScheduler
 from core.task_queue import TaskQueue
+
+
+class _Ticker:
+    """A checklist built from the planner's steps, ticking by step index.
+
+    The items are the same shape `PlanCard` renders for the model's own
+    `plan` tool — ``{text, status, reason?}`` — so the interface has one
+    checklist, whoever wrote it.
+    """
+
+    def __init__(self, items: list[tuple[int, str]]):
+        self._rows = [{"index": i, "text": text, "status": "todo"} for i, text in items]
+
+    def mark(self, index: int, status: str, *, reason: str = "") -> bool:
+        """Set one step's status; returns whether anything changed."""
+        for row in self._rows:
+            if row["index"] == index:
+                if row["status"] == status:
+                    return False
+                row["status"] = status
+                if reason:
+                    row["reason"] = " ".join(reason.split())[:160]
+                return True
+        return False
+
+    def items(self) -> list[dict[str, str]]:
+        return [{k: v for k, v in row.items() if k != "index"} for row in self._rows]
 
 
 def _step_tokens(step: Any) -> int:
@@ -210,6 +240,14 @@ class ExecutionEngine:
         #: because nothing here needs recency -- being told once is being told,
         #: and evicting an arbitrary entry costs at worst one repeated notice.
         self._told_about_dropped_turns: set[str] = set()
+        #: session_id → how many turns were cut from the front of the
+        #: transcript last time it overflowed. **This is what holds the
+        #: prompt's prefix still** (`docs/PLAN.md` A3): the same cut is reused
+        #: while what remains still fits, and only when it does not is a new,
+        #: deeper cut made — a quarter of the window at a time — so a local
+        #: server re-reads the history once per block rather than once per
+        #: message. Bounded with the buffer it shadows.
+        self._front_cut: OrderedDict[str, int] = OrderedDict()
         #: Where an unfinished task is written down, injected by `main.py`.
         #:
         #: `projects.plans.PlanRecords`, and `None` when nothing supplied one —
@@ -449,6 +487,13 @@ class ExecutionEngine:
         whole way down. Nothing on this path may test it for truthiness.
         """
         logger.debug("Engine: execute prompt='%s...' model=%s", prompt[:50], model)
+        #: Where the time goes, phase by phase. Read at the end into one
+        #: `timing` event; `None` for a phase that did not happen.
+        t0 = time.monotonic()
+        timing: dict[str, int | None] = {
+            "recall_ms": None, "plan_ms": None, "steps_ms": None,
+            "first_token_ms": None, "generation_ms": None,
+        }
 
         # Before anything else, including recall: will this route force a model
         # out of VRAM? Asked first because the whole point is that the user
@@ -489,7 +534,9 @@ class ExecutionEngine:
             self._project_ids.popitem(last=False)
 
         # --- Recall: what does the Spine already know that bears on this? ---
+        t = time.monotonic()
         recalled = self._recall(prompt, session_id, project_id, only_ids)
+        timing["recall_ms"] = int((time.monotonic() - t) * 1000)
         # **Composed now, appended last.** The block is built here so the
         # conversation budget below can account for it, but it is not put on
         # the prompt until after the conversation — see the note above
@@ -497,6 +544,19 @@ class ExecutionEngine:
         # anything that changes every turn must come *after* everything that
         # does not, or the local server's prompt cache never hits.
         recall_block = self._recall_block(recalled) if recalled else ""
+        # **Recall is a step, and it gets a row.** It is the one action every
+        # competitor hides and the one this product exists to show; a reply
+        # that used the Spine says so where the other rows are, not only in
+        # the citations under the answer. Complete on arrival — it already
+        # ran — and only when it found something: "recalled nothing" on every
+        # greeting would be noise, and the recall gate already decided those.
+        if recalled:
+            n = len(recalled)
+            yield StreamEvent.step_complete(
+                "memory.recall", -1,
+                step_id="recall",
+                done=f"Recalled {n} fact{'s' if n != 1 else ''}",
+            )
         if recalled:
             # Before the sources, before the answer. A reader who is told
             # afterwards that one of the cited passages was trying to give
@@ -563,6 +623,93 @@ class ExecutionEngine:
         # only the new turn. The ordering guarantee `_recall_block` relies on
         # is unchanged: the recalled text still sits *before* its closing
         # rule, and the question still comes after everything.
+        # The attachment is a fact; the planner's keyword match is a guess.
+        # Told about it, the plan stays an ordinary generation rather than
+        # diverting to `vision.analyze`, whose input key is singular and which
+        # this engine never fills. See `IntentPlanner.create_plan`.
+        t = time.monotonic()
+        plan = self._planner.create_plan(prompt, has_images=bool(images))
+        timing["plan_ms"] = int((time.monotonic() - t) * 1000)
+        # What the planner *meant*, before unavailable steps are dropped: a
+        # document plan on a machine with no document runtime degrades to a
+        # plain generation, and that degraded plan must not read as "an
+        # ordinary question" to the model-chooses rule below.
+        as_planned = [step.capability_id for step in plan.steps]
+        # A new question is a new plan; Go was for the last one. And the
+        # request's checklist starts empty — the ContextVar is per request,
+        # but a resumed task's items are seeded explicitly, never inherited.
+        self._approved.discard(session_id)
+        self._uninterrupted.discard(session_id)
+        self._seed_plan(session_id, [])
+        plan = self._drop_unavailable_steps(plan)
+        plan.state = PlanState.RUNNING
+        logger.debug("Engine: plan created with %d steps", len(plan.steps))
+
+        self._active_plans[plan.correlation_id] = plan
+        self._publish("execution.plan_created", {
+            "correlation_id": plan.correlation_id,
+            "step_count": len(plan.steps),
+        })
+
+        #: Tools `mcp.list_tools` put in front of the model, if the plan had
+        #: that step and any server answered. Empty is the overwhelmingly
+        #: common case and it costs nothing: no instructions are added, no
+        #: buffering happens, and the reply streams exactly as it always did.
+        offered_tools: list[dict[str, Any]] = []
+        #: The same tools in the wire shape, for engines with a native channel.
+        #: Empty whenever `offered_tools` is; see `native_tool_specs`.
+        native_specs: list[dict[str, Any]] = []
+
+        # **For a model that can call tools, the model chooses — `docs/PLAN.md`
+        # D1, 19 September 2026.** Until now the planner decided, from an
+        # embedding classification, whether a turn got tools at all, and on
+        # every ordinary turn the model was handed a fixed plan and could not
+        # decide to search or read a page. That is the structural reason a
+        # 27B felt limited inside Zaram and unlimited outside it. So a plain
+        # generation plan, on a model the models runtime says may choose,
+        # gets the listing step in front of it: the core set is offered and
+        # the model decides. Every other plan — document (rule 9's refusal),
+        # image, translate, search the classifier was sure of — is untouched,
+        # and so is every model that cannot call tools. The gate still runs
+        # on the tool actually chosen; a listing authorises nothing.
+        if as_planned == ["reasoning.generate"] and self._model_chooses_tools(model):
+            plan.steps[0].depends_on = [0]
+            plan.steps.insert(
+                0,
+                ExecutionStep(capability_id="mcp.list_tools", input_data={"query": ""}, depends_on=[]),
+            )
+            plan = self._drop_unavailable_steps(plan)
+
+        # **Tools first, then the conversation — the second half of A3.** The
+        # tool rules and the repository briefing are constant for a session,
+        # so they belong in the cached prefix ahead of the history, not in the
+        # tail that is re-read every turn. That means listing *before* the
+        # conversation is composed, which is why the listing step, when it is
+        # first, runs here rather than in the loop below. The stranger
+        # shortlist is ranked by the question only when the question is about
+        # tools (`_wants_ranked_tools`); otherwise the listing order is used,
+        # so the set — and therefore the prefix — is the same on every turn.
+        prelisted: str | None = None
+        tools_applied = False
+        if plan.steps and plan.steps[0].capability_id == "mcp.list_tools":
+            listing = plan.steps[0]
+            if not self._wants_ranked_tools(prompt):
+                listing.input_data = {**(listing.input_data or {}), "query": ""}
+            t = time.monotonic()
+            with running_step(f"{plan.correlation_id}:0"):
+                prelisted = "".join(self._dispatcher.execute_step(listing, model, system_prompt))
+            timing["steps_ms"] = (timing["steps_ms"] or 0) + int((time.monotonic() - t) * 1000)
+            offered_tools = self._parse_tool_list(prelisted)
+            if offered_tools:
+                system_prompt = (
+                    (system_prompt or "")
+                    + self._parse_briefing(prelisted)
+                    + tool_instructions(offered_tools)
+                )
+                native_specs = native_tool_specs(offered_tools)
+                tools_applied = True
+                yield self._tools_notice(offered_tools)
+
         context_resolved = False
         if self._is_document_request(prompt):
             system_prompt, context_resolved = self._augment_with_recent_turns(
@@ -590,37 +737,20 @@ class ExecutionEngine:
         if search_notice is not None:
             yield search_notice
 
-        # The attachment is a fact; the planner's keyword match is a guess.
-        # Told about it, the plan stays an ordinary generation rather than
-        # diverting to `vision.analyze`, whose input key is singular and which
-        # this engine never fills. See `IntentPlanner.create_plan`.
-        plan = self._planner.create_plan(prompt, has_images=bool(images))
-        # A new question is a new plan; Go was for the last one. And the
-        # request's checklist starts empty — the ContextVar is per request,
-        # but a resumed task's items are seeded explicitly, never inherited.
-        self._approved.discard(session_id)
-        self._uninterrupted.discard(session_id)
-        self._seed_plan(session_id, [])
-        plan = self._drop_unavailable_steps(plan)
-        plan.state = PlanState.RUNNING
-        logger.debug("Engine: plan created with %d steps", len(plan.steps))
-
-        self._active_plans[plan.correlation_id] = plan
-        self._publish("execution.plan_created", {
-            "correlation_id": plan.correlation_id,
-            "step_count": len(plan.steps),
-        })
-
         step_results: dict[str, str] = {}
         failed_steps: list[dict[str, Any]] = []
-        #: Tools `mcp.list_tools` put in front of the model, if the plan had
-        #: that step and any server answered. Empty is the overwhelmingly
-        #: common case and it costs nothing: no instructions are added, no
-        #: buffering happens, and the reply streams exactly as it always did.
-        offered_tools: list[dict[str, Any]] = []
-        #: The same tools in the wire shape, for engines with a native channel.
-        #: Empty whenever `offered_tools` is; see `native_tool_specs`.
-        native_specs: list[dict[str, Any]] = []
+
+        # **The planner's own steps are a checklist too — `docs/PLAN.md` C1.**
+        # A research question is *search → read → answer*, and a person
+        # should see that list tick as it happens, exactly as they see the
+        # model's own `plan`. Display only: nothing here touches
+        # `_checklists`, which is the model's list and what Go reads. A plan
+        # of one step gets no list — a list of one is noise (`AGENT-UX.md`) —
+        # and the moment the model writes its own checklist this one stops
+        # being sent, so a later completion never overwrites the model's.
+        ticker = self._planner_checklist(plan)
+        if ticker:
+            yield StreamEvent.plan(ticker.items(), correlation_id=plan.correlation_id, source="planner")
 
         for i, step in enumerate(plan.steps):
             self._publish("execution.step_started", {
@@ -628,6 +758,22 @@ class ExecutionEngine:
                 "capability_id": step.capability_id,
                 "step_index": i,
             })
+            # The row, if this step gets one — see `core/step_labels.py` for
+            # which do. Yielded before the step runs so the person watches it
+            # happen rather than learning of it from the sources line.
+            row = describe_step(step.capability_id, step.input_data)
+            step_id = f"{plan.correlation_id}:{i}"
+            started_at = time.monotonic()
+            # Every byte this step sends is stamped with its id — `step_context`.
+            step_mark = running_step(step_id)
+            step_mark.__enter__()
+            if row is not None:
+                yield StreamEvent.step_start(
+                    step.capability_id, i,
+                    step_id=step_id, doing=row.doing, done=row.done, target=row.target,
+                )
+            if ticker and ticker.mark(i, "doing") and not self._plan_items(session_id):
+                yield StreamEvent.plan(ticker.items(), correlation_id=plan.correlation_id, source="planner")
 
             logger.debug("Engine: executing step %d/%d: %s", i + 1, len(plan.steps), step.capability_id)
 
@@ -740,20 +886,26 @@ class ExecutionEngine:
                 step.input_data = dict(step.input_data or {})
                 step.input_data["tools"] = list(native_specs)
 
-            # **A generation that may call a tool is buffered, not streamed.**
+            # **A generation that may call a tool is held back, not buffered.**
             #
             # `[TOOL_CALL]` arrives split across tokens exactly as `[M1]` does,
-            # so it cannot be recognised until the text is accumulated — and by
-            # then a streamed version has already been read. Buffering is the
-            # only way the marker stays off the screen.
+            # so it cannot be recognised until the text is accumulated. Until
+            # 19 September 2026 that meant buffering the whole reply: in a
+            # coding project tools are offered on every turn, so every turn
+            # was a blank screen for as long as the model took, then the
+            # whole answer at once — a working reply that read as a hung one.
             #
-            # It costs the typewriter effect on these replies, which matters,
-            # because speed is the daily-driver thesis. So it is scoped as
-            # narrowly as it can be: only a generation step, and only when tools
-            # were actually offered. Every other reply in the product is
-            # untouched. When the provider layer grows a real tool-call channel
-            # the call leaves the text stream and this buffer goes with it.
+            # `visible_length` is the narrower answer: everything up to a
+            # complete call opener is prose the model meant to say and is
+            # shown as it arrives; only a tail that could *start* a marker is
+            # withheld, and only until the next token settles it. The marker
+            # still never reaches the screen. What is shown here is recorded
+            # in `spoken` so the loop below does not say it twice.
             buffering = bool(offered_tools) and step.capability_id == "reasoning.generate"
+            #: Prose already on screen from this generation, in order, and how
+            #: far into `step_output` it reaches.
+            shown_pieces: list[str] = []
+            shown = 0
 
             # **What this step is about to cost, counted where every generation
             # passes.** `execute_step` is the one route to a model on both the
@@ -762,11 +914,34 @@ class ExecutionEngine:
             # would have had to, and it would have missed recall entirely --
             # which is most of what a Zaram prompt actually is.
             sent = estimate_tokens(system_prompt) + _step_tokens(step)
+            generating = step.capability_id == "reasoning.generate"
+            first_token_at: float | None = None
 
             try:
-                for token in self._dispatcher.execute_step(step, model, system_prompt):
+                tokens = (
+                    iter([prelisted])
+                    if i == 0 and prelisted is not None and step.capability_id == "mcp.list_tools"
+                    else self._dispatcher.execute_step(step, model, system_prompt)
+                )
+                for token in tokens:
                     step_output += token
-                    if internal or buffering:
+                    if generating and first_token_at is None and token.strip():
+                        first_token_at = time.monotonic()
+                        # The wait before the first token is the prefill on a
+                        # local server and the round trip on a remote one — the
+                        # number that grows with history when the cache misses.
+                        # Measured for the first generation only.
+                        if timing["first_token_ms"] is None:
+                            timing["first_token_ms"] = int((first_token_at - started_at) * 1000)
+                    if internal:
+                        continue
+                    if buffering:
+                        safe = self._showable(step_output)
+                        if safe > shown:
+                            piece = step_output[shown:safe]
+                            shown = safe
+                            shown_pieces.append(piece)
+                            yield piece
                         continue
                     if token.startswith(PROGRESS_MARKER):
                         # Becomes a bar, never text. Same treatment as the
@@ -832,6 +1007,16 @@ class ExecutionEngine:
                 # would be arithmetic happening on screen rather than a number,
                 # and a reply is not a cost until it exists.
                 yield StreamEvent.usage(added=sent + estimate_tokens(step_output))
+                if generating and first_token_at is not None:
+                    timing["generation_ms"] = (timing["generation_ms"] or 0) + int(
+                        (time.monotonic() - first_token_at) * 1000
+                    )
+                elif not generating:
+                    # A search, a tool listing, a drawing: what ran before or
+                    # instead of the answer.
+                    timing["steps_ms"] = (timing["steps_ms"] or 0) + int(
+                        (time.monotonic() - started_at) * 1000
+                    )
 
                 if step_output.strip().startswith("[FALLBACK]") or step_output.strip().startswith("[WARN]"):
                     step_failed = True
@@ -848,12 +1033,13 @@ class ExecutionEngine:
                         pass
 
                 if buffering and not step_failed:
-                    # Nothing has reached the user yet for this step. Everything
-                    # they see — the call, the gate's verdict, and the answer —
-                    # comes out of here.
-                    spoken: list[str] = []
+                    # The prose before any call has already reached the user;
+                    # the call, the gate's verdict, and everything after come
+                    # out of here.
+                    spoken: list[str] = list(shown_pieces)
                     for piece in self._run_tool_loop(
                         buffered=step_output,
+                        shown=shown,
                         original_prompt=step.input_data.get("prompt", "") or prompt,
                         model=model,
                         system_prompt=system_prompt,
@@ -861,6 +1047,17 @@ class ExecutionEngine:
                         session_id=session_id,
                         native_tools=native_specs,
                     ):
+                        # A source the model fetched itself — `web.search` —
+                        # is deduplicated and numbered at the same point the
+                        # planner's sources are, so the chips agree.
+                        if isinstance(piece, StreamEvent) and piece.type is EventType.SOURCE:
+                            key = piece.data.get("url") or piece.data.get("title", "")
+                            if key and key in seen_sources:
+                                continue
+                            if key:
+                                seen_sources.add(key)
+                            yield _numbered(piece)
+                            continue
                         yield piece
                     # The transcript stores what was said, not the marker that
                     # produced it. One stripper, every caller — the lesson the
@@ -893,7 +1090,10 @@ class ExecutionEngine:
                             if key and key not in seen_sources:
                                 seen_sources.add(key)
                                 yield _numbered(event)
-                elif step.capability_id == "mcp.list_tools":
+                elif step.capability_id == "mcp.list_tools" and not tools_applied:
+                    # A listing that is not the plan's first step — after a
+                    # search, say — lands here, in the tail. The first step's
+                    # listing was applied ahead of the conversation above.
                     offered_tools = self._parse_tool_list(step_output)
                     if offered_tools:
                         # The briefing first, the rules last: a repository map
@@ -902,25 +1102,7 @@ class ExecutionEngine:
                         system_prompt += self._parse_briefing(step_output)
                         system_prompt += tool_instructions(offered_tools)
                         native_specs = native_tool_specs(offered_tools)
-                        # Said out loud, because `CLAUDE.md` requires disabled
-                        # capabilities to be visible rather than silent — and
-                        # the inverse is just as true. A reply that quietly
-                        # used somebody's Blender session should not be the
-                        # first the user hears of it.
-                        yield StreamEvent.notice(
-                            f"{len(offered_tools)} attached tool"
-                            f"{'s are' if len(offered_tools) != 1 else ' is'} "
-                            "available for this question.",
-                            kind="tools",
-                            # Which servers, so the orb can report *coding*
-                            # while the buffered reply is still being
-                            # written — the only signal it gets until then.
-                            servers=sorted({
-                                str(t.get("server") or "")
-                                for t in offered_tools
-                                if t.get("server")
-                            }),
-                        )
+                        yield self._tools_notice(offered_tools)
 
             self._publish("execution.step_completed" if not step_failed else "execution.step_failed", {
                 "correlation_id": plan.correlation_id,
@@ -929,6 +1111,20 @@ class ExecutionEngine:
                 "failed": step_failed,
                 "error": step_error,
             })
+            step_mark.__exit__(None, None, None)
+            if row is not None:
+                yield StreamEvent.step_complete(
+                    step.capability_id, i, success=not step_failed,
+                    step_id=step_id, done=row.done, target=row.target,
+                    detail=self._step_detail(step, step_output, step_failed, step_error),
+                    seconds=round(time.monotonic() - started_at, 1),
+                )
+            if (
+                ticker
+                and ticker.mark(i, "skipped" if step_failed else "done", reason=step_error or "")
+                and not self._plan_items(session_id)
+            ):
+                yield StreamEvent.plan(ticker.items(), correlation_id=plan.correlation_id, source="planner")
 
         if failed_steps:
             if len(failed_steps) == len(plan.steps):
@@ -950,6 +1146,16 @@ class ExecutionEngine:
             "state": plan.state.value,
             "failed_steps": failed_steps,
         })
+
+        # --- Where the time went. One event, after the reply, before the
+        # bookkeeping below; Activity shows it and the log keeps it. ---
+        total_ms = int((time.monotonic() - t0) * 1000)
+        logger.info(
+            "Engine: timing recall=%s plan=%s steps=%s first_token=%s generation=%s total=%s ms",
+            timing["recall_ms"], timing["plan_ms"], timing["steps_ms"],
+            timing["first_token_ms"], timing["generation_ms"], total_ms,
+        )
+        yield StreamEvent.timing(total_ms=total_ms, correlation_id=plan.correlation_id, **timing)
 
         # --- Remember: commit what the user told us to the Spine. ---
         answer = step_results.get("reasoning.generate", "")
@@ -1213,6 +1419,37 @@ class ExecutionEngine:
         plan.steps = available
         return plan
 
+    def _planner_checklist(self, plan: ExecutionPlan) -> "_Ticker | None":
+        """The plan's steps as checklist items, or ``None`` when a list would
+        say nothing: one step, or no step that gets a row."""
+        labelled = {
+            i: describe_step(s.capability_id, s.input_data) for i, s in enumerate(plan.steps)
+        }
+        if len(plan.steps) < 2 or not any(labelled.values()):
+            return None
+        items: list[tuple[int, str]] = []
+        for i, step in enumerate(plan.steps):
+            row = labelled[i]
+            if row is not None:
+                items.append((i, f"{row.doing}{' — ' + row.target if row.target else ''}"))
+            elif step.capability_id == "reasoning.generate":
+                items.append((i, "Answering"))
+        return _Ticker(items) if len(items) >= 2 else None
+
+    def _step_detail(self, step: ExecutionStep, output: str, failed: bool, error: str | None) -> str:
+        """The one thing a finished row says after its verb.
+
+        A search says how many results; a failure says what went wrong, in
+        the step's own words. Everything else says nothing — a row that ran as
+        asked needs no filler, and the tool rows already keep that rule.
+        """
+        if failed:
+            return " ".join(str(error or "did not finish").split())[:160]
+        if step.capability_id in ("knowledge.search", "discovery.search"):
+            n = len(self._parse_search_results(output))
+            return f"{n} result{'s' if n != 1 else ''}"
+        return ""
+
     def _parse_search_results(self, raw: str) -> list[dict[str, Any]]:
         """Pull the result list out of a knowledge.search payload."""
         try:
@@ -1254,10 +1491,67 @@ class ExecutionEngine:
         briefing = parsed.get("briefing")
         return briefing if isinstance(briefing, str) else ""
 
+    def _showable(self, text: str) -> int:
+        """How much of an accumulating tool-turn reply may be shown now.
+
+        `visible_length` answers for the call markers. This adds the one
+        thing that layer does not know: a reply that *begins* with a system
+        prefix — ``[FALLBACK]``, ``[WARN]``, ``[ERROR]`` — is the dispatcher
+        speaking, not the model, and the step-failure handling below turns it
+        into a notice. It must not be typed onto the screen first. Held while
+        the text so far could still become one of those, released the moment
+        it cannot.
+        """
+        head = text.lstrip()
+        for prefix in self._SYSTEM_PREFIXES:
+            if head.startswith(prefix) or prefix.startswith(head):
+                return 0
+        return visible_length(text)
+
+    #: What a step yields when it is the system rather than the model talking.
+    _SYSTEM_PREFIXES = ("[FALLBACK]", "[WARN]", "[ERROR]")
+
+    def _stream_round(
+        self,
+        step: ExecutionStep,
+        model: str | None,
+        system_prompt: str,
+        spoken: list[str],
+    ):
+        """One generation of the loop, shown as it arrives.
+
+        Yields the prose that is safe to show — see `visible_length` — and
+        appends it to `spoken`; *returns* the whole text and how much of it
+        was shown, so the caller can parse the call off the accumulated text
+        exactly as before and speak only the remainder at the end.
+
+        This is what puts the model's narration between tool rows on screen.
+        Before 19 September 2026 each round's text was replaced by the next
+        round's and only the last was spoken, so "I'll read the store first"
+        was generated, paid for, and never seen.
+        """
+        text = ""
+        shown = 0
+        # A round starts a paragraph. Rounds are separated on screen by the
+        # tool row between them, but the stored answer has no row in it, and
+        # "Done.Working on it." is what two rounds read as without this.
+        separator = "\n\n" if spoken and not spoken[-1].endswith("\n") else ""
+        for token in self._dispatcher.execute_step(step, model, system_prompt):
+            text += token
+            safe = self._showable(text)
+            if safe > shown:
+                piece = separator + text[shown:safe]
+                separator = ""
+                shown = safe
+                spoken.append(piece)
+                yield piece
+        return text, shown
+
     def _run_tool_loop(
         self,
         *,
         buffered: str,
+        shown: int = 0,
         original_prompt: str,
         model: str | None,
         system_prompt: str,
@@ -1334,6 +1628,13 @@ class ExecutionEngine:
         #: satisfy the checker in two laps needs the person, not a third.
         checks_failed = 0
 
+        def _speak_rest() -> str:
+            """What of `text` has not reached the screen, markers removed."""
+            rest = strip_calls(text[shown:])
+            if rest:
+                spoken.append(rest)
+            return rest
+
         while True:
             call = parse_call(text)
             if call is None:
@@ -1356,7 +1657,8 @@ class ExecutionEngine:
                         )
                         turns.append(ToolTurn(call=failed_call, result=failed_result))
                         checks_failed += 1
-                        text = "".join(self._dispatcher.execute_step(
+                        _speak_rest()
+                        text, shown = yield from self._stream_round(
                             ExecutionStep(
                                 capability_id="reasoning.generate",
                                 input_data={
@@ -1365,16 +1667,17 @@ class ExecutionEngine:
                                 },
                                 depends_on=[],
                             ),
-                            model, system_prompt,
-                        ))
+                            model, system_prompt, spoken,
+                        )
                         continue
-                # Nothing more wanted: the answer, minus any half-written
-                # marker. The task finished, so nothing is left to continue —
-                # except its checklist, which Project keeps.
+                # Nothing more wanted: whatever of the answer is not yet on
+                # screen, minus any half-written marker. The task finished, so
+                # nothing is left to continue — except its checklist, which
+                # Project keeps.
                 self._finished(session_id, original_prompt, turns, model)
-                answer = strip_calls(text)
-                spoken.append(answer)
-                yield answer
+                rest = _speak_rest()
+                if rest:
+                    yield rest
                 offer = self._stuck_offer(turns, model)
                 if offer is not None:
                     yield offer
@@ -1384,9 +1687,9 @@ class ExecutionEngine:
             if runtime is None:
                 # The list step ran, so this should be unreachable. Degrade
                 # rather than raise: the model has already written something.
-                answer = strip_calls(text)
-                spoken.append(answer)
-                yield answer
+                rest = _speak_rest()
+                if rest:
+                    yield rest
                 return
 
             if self._plan_wants_go(session_id, call.tool):
@@ -1416,7 +1719,7 @@ class ExecutionEngine:
                 turns.append(ToolTurn(call=call, result={
                     "note": "the plan is unchanged; carry on with the first step that is not done",
                 }))
-                text = "".join(self._dispatcher.execute_step(
+                text, shown = yield from self._stream_round(
                     ExecutionStep(
                         capability_id="reasoning.generate",
                         input_data={
@@ -1425,8 +1728,8 @@ class ExecutionEngine:
                         },
                         depends_on=[],
                     ),
-                    model, system_prompt,
-                ))
+                    model, system_prompt, spoken,
+                )
                 continue
 
             if call.is_repeat_without_progress(turns):
@@ -1448,20 +1751,23 @@ class ExecutionEngine:
                 )
                 return
 
-            result = run_sync(runtime.execute(MCP_CALL, {
-                "server": call.server,
-                "tool": call.tool,
-                "arguments": call.arguments,
-                # `confirmed` means a *person* said yes, never the model. The
-                # only thing that sets it is the plan card's second rung: the
-                # person read this plan and chose to let it run without being
-                # stopped at each change. That is a surface asking, once, for
-                # this run — rule 7j's "confirm once, then remember", scoped to
-                # one plan instead of forever. A delete is never covered by it
-                # (`looks_destructive`), a read-only server still refuses, and
-                # a new question clears it.
-                "confirmed": self._runs_uninterrupted(session_id, call.tool),
-            }))
+            call_mark = f"{current_step() or session_id}:call:{made + 1}"
+            with running_step(call_mark):
+                result = run_sync(runtime.execute(MCP_CALL, {
+                    "server": call.server,
+                    "tool": call.tool,
+                    "arguments": call.arguments,
+                    # `confirmed` means a *person* said yes, never the model.
+                    # The only thing that sets it is the plan card's second
+                    # rung: the person read this plan and chose to let it run
+                    # without being stopped at each change. That is a surface
+                    # asking, once, for this run — rule 7j's "confirm once,
+                    # then remember", scoped to one plan instead of forever. A
+                    # delete is never covered by it (`looks_destructive`), a
+                    # read-only server still refuses, and a new question
+                    # clears it.
+                    "confirmed": self._runs_uninterrupted(session_id, call.tool),
+                }))
             if not isinstance(result, dict):
                 result = {"success": False, "error": "the tool returned nothing readable"}
 
@@ -1470,6 +1776,7 @@ class ExecutionEngine:
                 yield StreamEvent.tool_call(
                     call.server, call.tool, "refuse", reason,
                     target=call_target(call.tool, call.arguments),
+                    step_id=call_mark,
                 )
                 yield from self._answer_without_the_tool(
                     original_prompt, call, reason, model, system_prompt, spoken,
@@ -1482,6 +1789,7 @@ class ExecutionEngine:
                 yield StreamEvent.tool_call(
                     call.server, call.tool, "confirm", reason,
                     target=call_target(call.tool, call.arguments),
+                    step_id=call_mark,
                     # Carried so the row can offer the one thing that settles
                     # it. Read off the gate's answer rather than guessed from
                     # the tool's name a second time.
@@ -1509,6 +1817,7 @@ class ExecutionEngine:
                 yield StreamEvent.tool_call(
                     call.server, call.tool, "refuse", error,
                     target=call_target(call.tool, call.arguments),
+                    step_id=call_mark,
                 )
                 payload: Any = {"error": error}
             else:
@@ -1521,12 +1830,21 @@ class ExecutionEngine:
                 yield StreamEvent.tool_call(
                     call.server, call.tool, "allow", "ran",
                     target=call_target(call.tool, call.arguments),
+                    step_id=call_mark,
                     output=output_excerpt(payload),
                     diff=str(change.get("diff") or ""),
                     commit=str(change.get("commit") or ""),
                     image=str(change.get("image") or ""),
                     app_url=str(change.get("url") or "") if call.tool in ("start_app", "get_app_status") else "",
                 )
+
+            if call.server == "web" and call.tool == "search" and isinstance(payload, dict):
+                # Rule 2: bytes left the machine to fetch these, so they are
+                # disclosed as sources whether or not the answer leans on them
+                # — exactly as the planner's search step discloses its own.
+                results = [r for r in (payload.get("results") or []) if isinstance(r, dict)]
+                for event in self._search_provenance_events(results):
+                    yield event
 
             turns.append(ToolTurn(call=call, result=payload))
             rounds += 1
@@ -1625,8 +1943,8 @@ class ExecutionEngine:
                             },
                             depends_on=[],
                         )
-                        text = "".join(
-                            self._dispatcher.execute_step(follow_up, model, system_prompt)
+                        text, shown = yield from self._stream_round(
+                            follow_up, model, system_prompt, spoken
                         )
                         continue
 
@@ -1644,10 +1962,8 @@ class ExecutionEngine:
                 return
 
             # Asked again, carrying every result so far and still holding the
-            # tools. Buffered like the first generation and for the same
-            # measured reason: `[TOOL_CALL]` arrives split across tokens, so it
-            # cannot be recognised until the text is accumulated, and by then a
-            # streamed version has already been read.
+            # tools. Shown as it arrives, held back only where a marker could
+            # be starting — see `_stream_round`.
             follow_up = ExecutionStep(
                 capability_id="reasoning.generate",
                 input_data={
@@ -1656,7 +1972,9 @@ class ExecutionEngine:
                 },
                 depends_on=[],
             )
-            text = "".join(self._dispatcher.execute_step(follow_up, model, system_prompt))
+            text, shown = yield from self._stream_round(
+                follow_up, model, system_prompt, spoken
+            )
 
     def _close_the_loop(
         self,
@@ -2103,9 +2421,10 @@ class ExecutionEngine:
             },
             depends_on=[],
         )
-        buffered = "".join(self._dispatcher.execute_step(first, model, system_prompt))
+        buffered, shown = yield from self._stream_round(first, model, system_prompt, spoken)
         yield from self._run_tool_loop(
             buffered=buffered,
+            shown=shown,
             original_prompt=pending.question,
             model=model,
             system_prompt=system_prompt,
@@ -2589,6 +2908,55 @@ class ExecutionEngine:
         })
         return kept
 
+    def _model_chooses_tools(self, model: str | None) -> bool:
+        """Whether the model that will answer is one that may pick its own
+        tools — `ModelsRuntime.chooses_tools`, through the router, ``False``
+        whenever nothing can answer. Failing closed keeps every model that
+        cannot call tools, and every test double that never heard of the
+        question, on the planner's path exactly as before."""
+        runtime = self._router.try_resolve("reasoning.generate") if self._router else None
+        probe = getattr(runtime, "chooses_tools", None)
+        if not callable(probe):
+            return False
+        try:
+            return bool(probe(self._effective_model(model)))
+        except Exception:  # noqa: BLE001 - a lookup must not fail a reply
+            return False
+
+    def _wants_ranked_tools(self, prompt: str) -> bool:
+        """Whether the stranger shortlist should be ranked by *this* question.
+
+        Only when the question is about tools — the planner's TOOL intent, or
+        a page named in the message. Every other turn takes the listing order,
+        so the tool rules are the same bytes on every turn and stay in the
+        server's prompt cache. Zaram's own tools are never ranked or cut, so
+        this decides only which of a stranger's tools are shown.
+        """
+        try:
+            from core.planner import IntentType, _names_a_page
+
+            if _names_a_page(prompt):
+                return True
+            return self._planner.classify_intent(prompt).intent_type is IntentType.TOOL
+        except Exception:  # noqa: BLE001 - routing must never fail a request
+            return False
+
+    def _tools_notice(self, offered_tools: list[dict[str, Any]]) -> StreamEvent:
+        """Said out loud, because `CLAUDE.md` requires disabled capabilities
+        to be visible rather than silent — and the inverse is just as true.
+        A reply that quietly used somebody's Blender session should not be
+        the first the user hears of it. `servers` is what lets the orb report
+        *coding* before the first token."""
+        return StreamEvent.notice(
+            f"{len(offered_tools)} attached tool"
+            f"{'s are' if len(offered_tools) != 1 else ' is'} "
+            "available for this question.",
+            kind="tools",
+            servers=sorted({
+                str(t.get("server") or "") for t in offered_tools if t.get("server")
+            }),
+        )
+
     def _is_document_request(self, prompt: str) -> bool:
         """Whether this plan will write a file.
 
@@ -2836,7 +3204,24 @@ class ExecutionEngine:
         remaining = budget.input_tokens - spent - self.CONVERSATION_MARGIN
         floor = int(budget.input_tokens * self.CONVERSATION_SHARE)
         cap = max(0, min(max(remaining, floor), budget.input_tokens - self.CONVERSATION_MARGIN))
-        kept, dropped = fit(turns, cap)
+        # **The front holds still.** Once a session has overflowed, the turns
+        # cut last time stay cut while the rest still fits — that keeps the
+        # first kept turn, which is where the server's prompt cache begins,
+        # in place. When the rest no longer fits, a fresh cut is made with a
+        # quarter of the window as headroom, so the next several turns arrive
+        # without moving it again. A session that never overflowed pays
+        # nothing: the cut is zero and every turn is sent.
+        previous_cut = self._front_cut.get(session_id, 0)
+        remaining_turns = turns[previous_cut:] if previous_cut else list(turns)
+        kept, dropped = fit(remaining_turns, cap)
+        if dropped:
+            kept, dropped = fit(turns, cap, headroom_tokens=cap // 4)
+            self._front_cut[session_id] = dropped
+            self._front_cut.move_to_end(session_id)
+            while len(self._front_cut) > self.MAX_SESSIONS:
+                self._front_cut.popitem(last=False)
+        else:
+            dropped = previous_cut
         if not kept:
             # Every turn was too long to fit. Saying nothing is right: a
             # heading with nothing under it claims a continuity that is not

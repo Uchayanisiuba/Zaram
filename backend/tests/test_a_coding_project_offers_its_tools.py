@@ -79,10 +79,17 @@ class TestLookingAtTheAppIsATool:
         planner.set_code_project_open(lambda: True)
         assert _ids(planner.create_plan(self.LOOK)) == ["mcp.list_tools", "reasoning.generate"]
 
-    def test_closed_it_is_still_refused_as_a_picture_nobody_gave(self):
+    def test_closed_it_still_takes_the_tool_plan_rather_than_a_refusal(self):
+        """Was "closed, it is still refused as a picture nobody gave", and
+        `ef79d0d` (15 September 2026) reversed that on purpose: `draw_image`
+        is registered on every machine, so with nothing attached the picture
+        can only come from a tool whatever project is open — and a
+        `vision.analyze` the dispatcher refuses for having no image is a plan
+        that cannot run, which is worse than one that degrades to an ordinary
+        reply. The test kept asserting the old contract for four days."""
         planner = IntentPlanner()
         planner.set_code_project_open(lambda: False)
-        assert _ids(planner.create_plan(self.LOOK)) == ["vision.analyze"]
+        assert _ids(planner.create_plan(self.LOOK)) == ["mcp.list_tools", "reasoning.generate"]
 
     def test_an_attached_screenshot_still_goes_to_the_model_with_it(self):
         planner = IntentPlanner()

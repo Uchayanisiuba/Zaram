@@ -513,6 +513,36 @@ class ModelsRuntime(Runtime):
             logger.debug("catalogue lookup failed for %r: %s", model, exc)
             return None
 
+    #: A model on disk at least this large may pick its own tools; smaller
+    #: weights over-call. **Provisional until D2 is measured** — the
+    #: tool-choice eval in `docs/PLAN.md` decides this number from twenty
+    #: questions on three models, not from this comment. A 14B at Q4 is
+    #: ~9 GB and an 8B ~5 GB, so the line falls between them. A model whose
+    #: size is unknown (an OpenAI-compatible server reports none) is trusted:
+    #: a person who runs Tabby chose what is loaded there.
+    CHOOSES_TOOLS_MIN_BYTES = 6_000_000_000
+
+    def chooses_tools(self, model: Optional[str]) -> bool:
+        """Whether this model may decide for itself when to use a tool.
+
+        `docs/PLAN.md` D1. Two facts, both from discovery and neither from
+        the shape of the name: the provider says the model accepts a tools
+        array (`supports_tools`), and it is not so small that it will call a
+        tool on every greeting. ``False`` for anything unresolved — the
+        planner's path is the safe default and it is the one every model had
+        until today.
+        """
+        if not model or self._provider_manager is None:
+            return False
+        info = self._provider_manager.get_model(model)
+        if info is None:
+            resolve = getattr(self._provider_manager, "_resolve_model", None)
+            info = resolve(model) if callable(resolve) else None
+        if info is None or not getattr(info, "supports_tools", False):
+            return False
+        size = getattr(info, "size_bytes", None)
+        return size is None or size >= self.CHOOSES_TOOLS_MIN_BYTES
+
     def locality_of(self, model: Optional[str]) -> Optional[str]:
         """Where this model runs: ``"local"``, ``"cloud"``, or ``None``.
 

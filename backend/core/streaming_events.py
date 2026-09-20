@@ -130,6 +130,9 @@ class EventType(str, Enum):
     #: though it were a fact about their machine -- so the flag travels with the
     #: number rather than being inferred from it.
     USAGE = "usage"
+    #: Where the time went in one reply, in milliseconds, measured. Emitted
+    #: once, at the end. See `StreamEvent.timing`.
+    TIMING = "timing"
 
 
 @dataclass
@@ -182,6 +185,41 @@ class StreamEvent:
                 "measured": bool(measured),
             },
             seq=seq,
+            correlation_id=correlation_id,
+        )
+
+    @staticmethod
+    def timing(
+        *,
+        recall_ms: int | None = None,
+        plan_ms: int | None = None,
+        steps_ms: int | None = None,
+        first_token_ms: int | None = None,
+        generation_ms: int | None = None,
+        total_ms: int | None = None,
+        correlation_id: str = "",
+    ) -> StreamEvent:
+        """Where the time went in this reply — the instrument, 19 September 2026.
+
+        "Zaram is slow sometimes" was a feeling with four candidate causes and
+        no number pointing at any of them. These six are the phases a reply
+        actually passes through: recall (gate plus retrieval), planning, the
+        steps before generation (a search, listing tools), the wait for the
+        first token (prefill on a local server, the round trip on a remote
+        one), the generation itself, and the whole. Each is ``None`` when it
+        was not measured — a reply that never generated has no first token —
+        never zero, for the reason `vram_bytes` is never zero.
+        """
+        return StreamEvent(
+            type=EventType.TIMING,
+            data={
+                "recall_ms": recall_ms,
+                "plan_ms": plan_ms,
+                "steps_ms": steps_ms,
+                "first_token_ms": first_token_ms,
+                "generation_ms": generation_ms,
+                "total_ms": total_ms,
+            },
             correlation_id=correlation_id,
         )
 
@@ -392,6 +430,7 @@ class StreamEvent:
         image: str = "",
         app_url: str = "",
         grantable: bool = False,
+        step_id: str = "",
     ) -> StreamEvent:
         """One tool call, and what the gate said about it.
 
@@ -435,20 +474,33 @@ class StreamEvent:
                 # product that looks broken. The gate decides this, not the
                 # interface, because the rule lives with the verdict.
                 "grantable": grantable,
+                # The mark every egress entry this call wrote carries
+                # (`core/egress/step_context.py`), so the working pane can
+                # ask the log what this call sent. Empty when unmarked.
+                "step_id": step_id,
             },
             correlation_id=correlation_id,
         )
 
     @staticmethod
-    def plan(items: list, correlation_id: str = "", *, awaiting_go: bool = False) -> StreamEvent:
+    def plan(
+        items: list, correlation_id: str = "", *, awaiting_go: bool = False, source: str = ""
+    ) -> StreamEvent:
         """The checklist, whole. Sent each time the model rewrites it, so the
         card under the reply is the record and never a diff of one.
 
         `awaiting_go` rides with it when the loop has paused before its first
-        mutative call so the person can read the plan first."""
+        mutative call so the person can read the plan first. `source` is
+        ``"planner"`` for the list the engine builds from its own steps (C1),
+        which the interface shows only while the reply is in flight; empty
+        for the model's own `plan`, which stays."""
         return StreamEvent(
             type=EventType.PLAN,
-            data={"items": list(items), "awaiting_go": awaiting_go},
+            data={
+                "items": list(items),
+                "awaiting_go": awaiting_go,
+                **({"source": source} if source else {}),
+            },
             correlation_id=correlation_id,
         )
 
@@ -542,18 +594,66 @@ class StreamEvent:
         )
 
     @staticmethod
-    def step_start(capability_id: str, step_index: int, correlation_id: str = "") -> StreamEvent:
+    def step_start(
+        capability_id: str,
+        step_index: int,
+        correlation_id: str = "",
+        *,
+        step_id: str = "",
+        doing: str = "",
+        done: str = "",
+        target: str = "",
+    ) -> StreamEvent:
+        """A plan step has begun, in words a row can print.
+
+        **Yielded into the stream since 19 September 2026.** Both step events
+        existed from the first day and were only ever `_publish`ed to the event
+        bus, which nothing on screen read — built, unreached. `doing` and
+        `done` are the row's verbs (`core/step_labels.py`), `target` what the
+        step is aimed at; an event with no `doing` is a step that gets no row.
+        `step_id` is what `step_complete` uses to settle the same row.
+        """
         return StreamEvent(
             type=EventType.STEP_START,
-            data={"capability_id": capability_id, "step_index": step_index},
+            data={
+                "capability_id": capability_id,
+                "step_index": step_index,
+                "step_id": step_id,
+                "doing": doing,
+                "done": done,
+                "target": target,
+            },
             correlation_id=correlation_id,
         )
 
     @staticmethod
-    def step_complete(capability_id: str, step_index: int, success: bool = True, correlation_id: str = "") -> StreamEvent:
+    def step_complete(
+        capability_id: str,
+        step_index: int,
+        success: bool = True,
+        correlation_id: str = "",
+        *,
+        step_id: str = "",
+        done: str = "",
+        target: str = "",
+        detail: str = "",
+        seconds: float | None = None,
+    ) -> StreamEvent:
+        """A plan step has finished. `detail` is the one thing worth saying
+        on the row after the verb — "4 results", or the error — and `seconds`
+        how long it took, measured, or ``None``."""
         return StreamEvent(
             type=EventType.STEP_COMPLETE,
-            data={"capability_id": capability_id, "step_index": step_index, "success": success},
+            data={
+                "capability_id": capability_id,
+                "step_index": step_index,
+                "success": success,
+                "step_id": step_id,
+                "done": done,
+                "target": target,
+                "detail": detail,
+                "seconds": seconds,
+            },
             correlation_id=correlation_id,
         )
 

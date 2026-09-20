@@ -19,8 +19,10 @@ import {
   type ChatRequest,
   type ImageProgress,
   type TokenUsage,
+  type ChatTiming,
 } from '@/services/chatClient';
 import type { Artifact } from '@/services/artifactsClient';
+import { stripCitationMarkers } from '@/lib/markers';
 import { useSystemStore } from '@/stores/systemStore';
 import { useSessionStatusStore } from '@/stores/sessionStatusStore';
 import { useEmbodimentStore } from '@/stores/embodimentStore';
@@ -85,6 +87,9 @@ export interface ChatMessage {
    *  more after the answer than during it. Never part of `text`, so it is
    *  never spoken and never committed as something the model said. */
   reasoning?: string;
+  /** Where the time went, measured by the backend. Kept on the message so
+   *  a slow reply can be read afterwards: which phase, not just how long. */
+  timing?: ChatTiming;
   /** Set when this reply failed or was cut short. Any text already received is
    *  kept — a partial answer is still worth showing, provided it is labelled. */
   error?: string;
@@ -112,6 +117,9 @@ export interface ChatNotice {
   servers?: string[];
   /** On the "cloud" offer: the model to ask this step again with. */
   model?: string;
+  /** On the "open-project" offer: the folder named and the project's name. */
+  path?: string;
+  name?: string;
 }
 
 /** One line of the model's checklist. See `PlanCard`. */
@@ -155,6 +163,21 @@ export interface ChatToolCall {
   /** On a `confirm`: whether allowing this tool would settle it. See
    *  `ChatEvent`. */
   grantable?: boolean;
+  /** **A plan step rather than a tool call** — a web search, a page read,
+   *  a drawing, recall — rendered on the same row so there is one place the
+   *  work lives. `label` is the past-tense phrase ("Searched the web"),
+   *  `doing` the present one shown while `verdict` is `running`, and
+   *  `stepId` is what the completion event settles. Absent on a tool call,
+   *  whose row prints its server and name instead. */
+  label?: string;
+  doing?: string;
+  stepId?: string;
+  /** How long a finished step took, measured by the backend, in seconds. */
+  seconds?: number | null;
+  /** How much of the reply's text (markers stripped) had arrived when this
+   *  row did — where it sits between the paragraphs. See `Interleaved`.
+   *  Absent on a history restored from before 19 September 2026. */
+  at?: number;
 }
 
 interface ChatState {
@@ -399,6 +422,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
     let replyError: string | undefined;
     let answeredBy: ChatAttribution | null = null;
     let reasoning_ = '';
+    let timing_: ChatTiming | undefined;
+    let planIsLiveOnly = false;
 
     // A cold local model can take many seconds to load before its first token.
     // Left unexplained that silence reads as a hang, so it is named instead.
@@ -569,6 +594,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
           case 'plan': {
             plan = { items: event.items, awaitingGo: event.awaitingGo };
+            // The engine's own step list is live-only; see `ChatEvent`.
+            planIsLiveOnly = event.source === 'planner';
             set({ streamingPlan: plan });
             break;
           }
@@ -585,12 +612,61 @@ export const useChatStore = create<ChatState>((set, get) => ({
               reason: event.reason,
               target: event.target,
               output: event.output,
+              at: stripCitationMarkers(text_).length,
               ...(event.diff ? { diff: event.diff } : {}),
               ...(event.commit ? { commit: event.commit } : {}),
               ...(event.image ? { image: event.image } : {}),
               ...(event.appUrl ? { appUrl: event.appUrl } : {}),
               ...(event.grantable ? { grantable: true } : {}),
+              ...(event.stepId ? { stepId: event.stepId } : {}),
             });
+            set({ streamingToolCalls: [...toolCalls] });
+            break;
+          }
+
+          case 'timing': {
+            timing_ = event.timing;
+            break;
+          }
+
+          case 'step_start': {
+            // A step the planner is running, before any token of the reply:
+            // the row a person watches while Zaram searches or reads. Settled
+            // in place by the matching completion rather than followed by a
+            // second row.
+            if (!event.doing) break;
+            toolCalls.push({
+              server: 'zaram',
+              tool: event.capability,
+              verdict: 'running',
+              reason: '',
+              target: event.target,
+              output: '',
+              label: event.done,
+              doing: event.doing,
+              stepId: event.stepId,
+              at: stripCitationMarkers(text_).length,
+            });
+            set({ streamingToolCalls: [...toolCalls] });
+            break;
+          }
+
+          case 'step_complete': {
+            if (!event.done) break;
+            const at = event.stepId ? toolCalls.findIndex((c) => c.stepId === event.stepId) : -1;
+            const settled = {
+              server: 'zaram',
+              tool: event.capability,
+              verdict: event.success ? 'allow' : 'refuse',
+              reason: event.detail,
+              target: event.target,
+              output: '',
+              label: event.done,
+              stepId: event.stepId,
+              seconds: event.seconds,
+            };
+            if (at >= 0) toolCalls[at] = { ...toolCalls[at], ...settled };
+            else toolCalls.push({ ...settled, at: stripCitationMarkers(text_).length });
             set({ streamingToolCalls: [...toolCalls] });
             break;
           }
@@ -670,6 +746,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
     // and a bar that goes quiet instead would read as a missing feature.
     useSessionStatusStore.getState().setRecallCount(sources.length);
 
+    // A step row still `running` when the stream ended never got its
+    // completion — the reply failed or was stopped mid-step. It is settled as
+    // not having finished rather than left spinning on a message that is
+    // over: a spinner on a finished reply is a status claim that is false.
+    for (let i = 0; i < toolCalls.length; i += 1) {
+      if (toolCalls[i].verdict === 'running') {
+        toolCalls[i] = { ...toolCalls[i], verdict: 'refuse', reason: 'did not finish' };
+      }
+    }
+
     // Commit the reply, including a partial or failed one. Dropping text the
     // backend genuinely produced would be worse than showing it labelled.
     set((s) => ({
@@ -689,10 +775,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 artifacts,
                 notices,
                 toolCalls: toolCalls.length ? toolCalls : undefined,
-                plan: plan ?? undefined,
+                plan: plan && !planIsLiveOnly ? plan : undefined,
                 timestamp: Date.now(),
                 answeredBy,
                 reasoning: reasoning_ || undefined,
+                timing: timing_,
                 error: replyError,
               },
             ]

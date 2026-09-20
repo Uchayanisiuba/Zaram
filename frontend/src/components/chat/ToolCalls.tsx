@@ -43,7 +43,7 @@
  */
 import { useState } from 'react';
 import { AnimatePresence } from 'framer-motion';
-import { Check, ChevronRight, CircleAlert, Clock, Wrench } from 'lucide-react';
+import { Check, ChevronRight, CircleAlert, Clock, Loader2, Wrench } from 'lucide-react';
 import type { ChatToolCall } from '../../stores/chatStore';
 import { grantTool } from '@/services/toolsClient';
 import ActivityPanel from './ActivityPanel';
@@ -58,6 +58,9 @@ import StepOutput from './StepOutput';
  *  train the eye past the two that matter. */
 const VERDICTS: Record<string, { Icon: typeof Check; color: string; label: string }> = {
   allow: { Icon: Check, color: 'var(--color-text-faint)', label: 'ran' },
+  // A step still going. The spinner is the row's only motion and it stops
+  // the moment the completion settles the row — see `chatStore`.
+  running: { Icon: Loader2, color: 'var(--color-cyan)', label: '' },
   confirm: { Icon: Clock, color: 'var(--color-amber, #d97706)', label: 'waiting on you' },
   refuse: { Icon: CircleAlert, color: 'var(--color-amber, #d97706)', label: 'did not run' },
 };
@@ -88,15 +91,26 @@ const PHRASES: Record<string, (n: number) => string> = {
   look_at_app: (n) => (n === 1 ? 'looked at the app' : `looked at the app ${n}×`),
 };
 
-/** "Searched code, read 3 files" — distinct actions, in the order first used. */
+/** "Searched the web, read 3 files" — distinct actions, in the order first
+ *  used. A plan step carries its own phrase (`label`) and is folded by it;
+ *  a tool call is folded by the verb table above. */
 export function summarise(calls: ChatToolCall[]): string {
-  const counts = new Map<string, number>();
-  for (const call of calls) counts.set(call.tool, (counts.get(call.tool) ?? 0) + 1);
+  const counts = new Map<string, { n: number; label?: string }>();
+  for (const call of calls) {
+    const key = call.label ? `step:${call.label}` : call.tool;
+    const entry = counts.get(key) ?? { n: 0, label: call.label };
+    entry.n += 1;
+    counts.set(key, entry);
+  }
 
   const entries = [...counts.entries()];
-  const parts = entries.map(([tool, n]) => {
-    const phrase = PHRASES[tool];
-    return phrase ? phrase(n) : n === 1 ? tool : `${tool} ${n}×`;
+  const parts = entries.map(([key, { n, label }]) => {
+    if (label) {
+      const lower = label.charAt(0).toLowerCase() + label.slice(1);
+      return n === 1 ? lower : `${lower} ${n}×`;
+    }
+    const phrase = PHRASES[key];
+    return phrase ? phrase(n) : n === 1 ? key : `${key} ${n}×`;
   });
   if (!parts.length) return '';
 
@@ -105,7 +119,8 @@ export function summarise(calls: ChatToolCall[]): string {
   // is an identifier, and `some_new_tool` capitalised to `Some_new_tool` is no
   // longer the thing a reader would grep for — the fallback exists precisely so
   // an unknown tool arrives intact.
-  const opensWithProse = PHRASES[entries[0][0]] !== undefined;
+  const first = entries[0][1];
+  const opensWithProse = Boolean(first.label) || PHRASES[entries[0][0]] !== undefined;
   return opensWithProse ? joined.charAt(0).toUpperCase() + joined.slice(1) : joined;
 }
 
@@ -164,7 +179,16 @@ function AllowTool({ call, onAllowed }: { call: ChatToolCall; onAllowed: () => v
   );
 }
 
-function CallLine({ call, onAllowed }: { call: ChatToolCall; onAllowed?: () => void }) {
+function CallLine({
+  call,
+  onAllowed,
+  onOpen,
+}: {
+  call: ChatToolCall;
+  onAllowed?: () => void;
+  /** Open the working pane on this call — `docs/PLAN.md` C2. */
+  onOpen?: (call: ChatToolCall) => void;
+}) {
   const { Icon, color, label } = VERDICTS[call.verdict] ?? UNKNOWN;
   const [showOutput, setShowOutput] = useState(false);
   const openable = Boolean(call.output);
@@ -194,17 +218,42 @@ function CallLine({ call, onAllowed }: { call: ChatToolCall; onAllowed?: () => v
             aria-hidden
           />
         ) : (
-          <Icon size={11} className="mt-px shrink-0" style={{ color }} aria-hidden />
+          <Icon
+            size={11}
+            className={`mt-px shrink-0${call.verdict === 'running' ? ' animate-spin' : ''}`}
+            style={{ color }}
+            aria-hidden
+          />
         )}
-        <span style={{ fontFamily: 'var(--font-mono)' }}>
-          {call.server}/{call.tool}
-        </span>
+        {/* A plan step reads as prose — "Searching the web" — because its
+            verb is a phrase the backend chose for a person; a tool call keeps
+            its server/name, which is an identifier a reader can grep for. */}
+        {call.label ? (
+          <span data-testid="step-phrase">
+            {call.verdict === 'running' && call.doing ? call.doing : call.label}
+          </span>
+        ) : (
+          <span style={{ fontFamily: 'var(--font-mono)' }}>
+            {call.server}/{call.tool}
+          </span>
+        )}
         {call.target && (
-          <span className="break-all" style={{ color: 'var(--color-text-faint)', fontFamily: 'var(--font-mono)' }}>
-            {call.target}
+          <span
+            className="break-all"
+            style={{
+              color: 'var(--color-text-faint)',
+              fontFamily: call.label ? undefined : 'var(--font-mono)',
+            }}
+          >
+            {call.label ? `“${call.target}”` : call.target}
           </span>
         )}
         {label && <span style={{ color: 'var(--color-text-faint)' }}>· {label}</span>}
+        {/* A finished step's one detail — "4 results" — sits where a tool
+            row's verdict word does; a running one says nothing yet. */}
+        {call.label && call.verdict === 'allow' && call.reason && (
+          <span style={{ color: 'var(--color-text-faint)' }}>· {call.reason}</span>
+        )}
         {/* The reason only when there is one, and there is one exactly when
             something did not go as asked. A "ran" carries none, and inventing
             filler for it would make the line longer and say less. */}
@@ -212,6 +261,19 @@ function CallLine({ call, onAllowed }: { call: ChatToolCall; onAllowed?: () => v
           <span style={{ color: 'var(--color-text-faint)' }}>· {call.reason}</span>
         )}
       </button>
+      {/* The pane, from the row. A step that is still running has nothing
+          to open yet. */}
+      {onOpen && call.verdict !== 'running' && (
+        <button
+          type="button"
+          onClick={() => onOpen(call)}
+          className="ml-[18px] self-start text-[11px]"
+          style={{ color: 'var(--color-text-faint)', background: 'none', border: 0, padding: 0, cursor: 'pointer' }}
+          data-testid="open-step"
+        >
+          open ›
+        </button>
+      )}
       {onAllowed && <AllowTool call={call} onAllowed={onAllowed} />}
       {showOutput && <StepOutput text={call.output ?? ''} />}
     </li>
@@ -235,11 +297,17 @@ export default function ToolCalls({
   active?: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  const [focus, setFocus] = useState<ChatToolCall | null>(null);
   if (!calls.length) return null;
+  const openOn = (call: ChatToolCall) => {
+    setFocus(call);
+    setOpen(true);
+  };
 
-  const ran = calls.filter((c) => c.verdict === 'allow');
+  const ran = calls.filter((c) => c.verdict === 'allow' || c.verdict === 'running');
   // Everything the gate did not simply allow, kept out of the fold entirely.
-  const notable = calls.filter((c) => c.verdict !== 'allow');
+  // A running step is not notable — it is in the fold with the work.
+  const notable = calls.filter((c) => c.verdict !== 'allow' && c.verdict !== 'running');
   // And every change to a file, likewise never folded — see `ChangeCard`.
   const changes = calls.filter((c) => c.verdict === 'allow' && Boolean(c.diff));
   // A started app and what Zaram saw of it — see `AppCard`.
@@ -291,7 +359,7 @@ export default function ToolCalls({
       {active && ran.length > 0 && (
         <ul className="mt-1 flex flex-col gap-1 pl-3">
           {ran.map((call, i) => (
-            <CallLine key={`${call.server}/${call.tool}/${i}`} call={call} />
+            <CallLine key={`${call.server}/${call.tool}/${i}`} call={call} onOpen={openOn} />
           ))}
         </ul>
       )}
@@ -300,8 +368,18 @@ export default function ToolCalls({
           at. The same overlay `ArtifactPreview` and `CitationPanel` use — one
           way to bring something forward is a thing users learn once. */}
       <AnimatePresence>
-        {open && !active && (
-          <ActivityPanel calls={calls} onClose={() => setOpen(false)} />
+        {/* From the summary only once the work is done — an overlay must not
+            take the conversation away while it is the only thing to read. From
+            a row's own "open ›", whenever: that is a person asking for it. */}
+        {((open && !active) || focus) && (
+          <ActivityPanel
+            calls={calls}
+            focus={focus}
+            onClose={() => {
+              setOpen(false);
+              setFocus(null);
+            }}
+          />
         )}
       </AnimatePresence>
 
@@ -320,6 +398,7 @@ export default function ToolCalls({
               key={`n/${call.server}/${call.tool}/${i}`}
               call={call}
               onAllowed={onAllowed}
+              onOpen={openOn}
             />
           ))}
         </ul>
