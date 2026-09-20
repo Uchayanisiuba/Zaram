@@ -86,6 +86,7 @@ files:
   - "!backend/settings.json"            # assistant name, manner, routing
   - "!backend/letterhead.json"          # the user's business name and logo
   - "!backend/mcp-servers.json"         # the user's tool servers and grants
+  - "!backend/manual.json"              # which manual version this machine indexed
   - "!backend/api-secret"               # the development credential at rest
   - "!backend/generated"   # the output directory — the user's own documents
   - "!backend/tests"
