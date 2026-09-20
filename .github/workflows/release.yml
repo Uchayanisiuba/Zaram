@@ -23,9 +23,11 @@
 #      from sign-up to download by itself on `releaseAt`; until then the
 #      link works for anyone who has it, which is how a few people get it
 #      first. Tag with `-public` in the name to flip the page at once.
-#   4. Emails the tester list through Buttondown, if `BUTTONDOWN_API_KEY` is
-#      set as a repository secret. Without it, step 4 is skipped and says so;
-#      nothing else waits on it.
+#   4. Does *not* email the testers. That step lived here until 20 September
+#      2026 and was removed: it fired on the tag while the page flips on
+#      `releaseAt`, which are different moments on purpose, so the email
+#      could arrive before the page was on. `scripts/tell-the-testers.mjs`
+#      is run by hand, on the day, by the person whose name signs it.
 #
 # Signing: the alpha ships unsigned, on purpose, and `check:signing` only
 # demands a certificate under ZARAM_RELEASE=1, which this workflow does not
@@ -50,13 +52,6 @@ jobs:
   build-and-publish:
     runs-on: windows-latest
     timeout-minutes: 90
-    # `secrets` cannot be read in a step's `if:` — GitHub refuses the whole
-    # file with "Unrecognized named-value: 'secrets'", which is how this
-    # workflow failed in 0 s on every push for two days without running a
-    # step. A job-level env may read it; the steps below test the env.
-    env:
-      HAS_BUTTONDOWN: ${{ secrets.BUTTONDOWN_API_KEY != '' }}
-
     steps:
       - name: Check out
         uses: actions/checkout@v4
@@ -147,36 +142,3 @@ jobs:
           git branch -D site-only 2>/dev/null || true
           git subtree split --prefix site -b site-only
           git push --force origin site-only:gh-pages
-
-
-      - name: Tell the testers (Buttondown)
-        if: ${{ env.HAS_BUTTONDOWN == 'true' }}
-        shell: bash
-        env:
-          BUTTONDOWN_API_KEY: ${{ secrets.BUTTONDOWN_API_KEY }}
-          TAG: ${{ steps.art.outputs.tag }}
-          SHA: ${{ steps.art.outputs.sha }}
-          SIZE: ${{ steps.art.outputs.size }}
-        run: |
-          set -euo pipefail
-          url="https://github.com/${GITHUB_REPOSITORY}/releases/tag/${TAG}"
-          {
-            echo "Zaram ${TAG} is up: ${url}"
-            echo
-            echo "Windows, x64, ${SIZE} MiB. It is unsigned, so Windows will warn before it runs; the SHA-256 is ${SHA} if you want to check the file."
-            echo
-            echo "Local is free: a model on your own machine costs nothing per question, and nothing you say to it leaves your device or is trained on. Cloud keys are optional."
-            echo
-            echo "If something goes wrong: Settings, then Help, then Report a problem copies what I need. Paste it into a reply to this email, with what you expected and what happened instead."
-            echo
-            echo "Uche"
-          } > body.txt
-          node -e 'const fs=require("fs"); console.log(JSON.stringify({subject: process.argv[1], body: fs.readFileSync("body.txt","utf8"), status: "about_to_send"}))' "Zaram ${TAG} is ready to download" > payload.json
-          curl --fail --silent --show-error -X POST "https://api.buttondown.com/v1/emails" -H "Authorization: Token ${BUTTONDOWN_API_KEY}" -H "Content-Type: application/json" --data @payload.json > /dev/null
-          rm -f body.txt payload.json
-          echo "tester email queued through Buttondown"
-
-      - name: Tester email skipped
-        if: ${{ env.HAS_BUTTONDOWN != 'true' }}
-        shell: bash
-        run: echo "BUTTONDOWN_API_KEY is not set as a repository secret; the release is published and the site is on, but no email went out."
