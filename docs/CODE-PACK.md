@@ -741,6 +741,33 @@ is worth it on the 27B's `xhigh` reasoning is a measurement for the next
 run. **The Ollama 14B has not been run yet** — it needs the Tabby server
 stopped to get the card, and this session did not stop it.
 
+#### 9b — the tool-choice eval. Written and first run 20 September.
+
+`tests/test_eval_tool_choice.py`, `-m measure`. Twenty questions with the
+tool a careful person reaches for first — or *none* — put to the model with
+the product's own listing (`tool_instructions`), scored the way BFCL scores:
+exact tool, required arguments present and sane, and on the eight *none*
+questions calling nothing is the only pass. BFCL taken as a method, not a
+dependency. This is `docs/PLAN.md` D2 / G5, and it sets D1's default.
+
+**Measured 20 September 2026, card otherwise free (Maya open, nothing else):**
+
+| model | server | right | over-called (of 8 none) | wrong | time |
+|---|---|---|---|---|---|
+| `Qwen3.8-27B-exl3-2.20bpw` | TabbyAPI | **20/20** | 0 | 0 | 2:25 |
+| `qwen3-14b-16k` | Ollama | **19/20** | 0 | 1 — `list_files` before `read_lines` on a named file | 6:03, first question 77 s (cold load) |
+
+Neither model over-calls: a rewrite, a translation, an arithmetic question
+and a general question with a project open all answered with no tool. The
+14B's one miss is *find before read* applied where the file was already
+named — defensible, scored wrong. `chooses_tools` stays on for both.
+
+**What the floor is not.** `CHOOSES_TOOLS_MIN_BYTES` is 6 GB and both
+measured models are above it (9.3 and 9.6 GB on disk); nothing smaller is
+installed. The 6 GB line is therefore the *untested* boundary, not a
+measured one — the next model pulled under it gets this run before it is
+allowed to choose.
+
 ### 10 — pairing, then the Spine as an MCP server. Built 13 September; pairing seen on screen.
 
 `core/pairing.py` got its caller. `core/paired_clients.py` persists the
