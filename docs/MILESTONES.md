@@ -400,20 +400,45 @@ must not handle the tokens themselves.
 
 #### Is it good enough for the test? — the assessment, 20 September
 
-**The build testers get is `v0.1.0-alpha.1` (15 September), and yes, for
-what the test is** — point it at a folder, get a cited answer, correct a
-fact, write a document, see the log. That build predates every defect
-found this week and none of this week's features; it has been cold-installed
-once (13 September, on this machine, from outside the checkout) and never
-on a stranger's machine. What it needs before the email goes: the Formspree
-list imported into Buttondown (maintainer), and one more cold install if a
-second machine is available.
+**The maintainer's decision, 20 September, evening: testers get this
+week's work, not `v0.1.0-alpha.1`.** So the build that ships is
+**`v0.1.0-alpha.2`, cut from `main` after the loose ends below are tied**,
+and the tester email goes for that tag. `alpha.1` (15 September) stays on
+the release page until then; it predates every defect found this week and
+every feature built this week, and was cold-installed once, on this
+machine.
 
-**`main` is not ready to build.** Two days of work, four defects found by
-the first look, and the full backend suite has not run whole since the 19th.
-A build from `main` needs, in order: the full suite detached with the GPU
-free (three unread failures from the last partial run); the rest of the
-*Look* list; a cold install. Estimate a day with the card free.
+**What `main` carries that `alpha.1` does not**, all of it built 19–20
+September and most of it seen once: streamed tool turns with rows that
+fold; the thinking as one line, with *Thinking on/off* (27B 4.3 s → 0.8 s);
+the checklist ticking; the pane from a row with what the step sent; the
+six use-case tiles; tasks in Activity; the model choosing its own tools
+(20/20 and 19/20 on the eval); the folder-in-a-sentence offer; the floors
+no grant lowers; the conversation rung on a held tool; work that runs on
+its own with its transcript; the fixed timing line; and the tool-server
+environment that no longer carries the API secret. Plus four defects fixed
+that `alpha.1` never had because it never had the features.
+
+**What stands between `main` and a build a stranger can install**, in the
+order to do it — this is the day's work before the tag:
+
+1. **Tie the loose ends below**: security 1 and 3, bugs 4–7, and the
+   *seen* half of UX 8 (each unseen item either seen working or its
+   feature switched off for this build — never shipped unseen).
+2. **Full backend suite, detached, GPU free.** Read the three unread
+   failures; fix or delete, never leave (`CLAUDE.md`).
+3. **Frontend suite, `tsc`, `eslint`, the reachability and proxy guards,
+   `check-installer-payload`.**
+4. **Build, then cold install from outside the checkout** — on a second
+   machine if one is reachable, this one if not. The installer has failed
+   before for reasons every green check missed.
+5. **Tag `v0.1.0-alpha.2`**; the workflow uploads and flips the site.
+   Then `node scripts/tell-the-testers.mjs v0.1.0-alpha.2 --send`, once
+   the Buttondown list exists.
+
+Estimate: one full day with the card free, two if the cold install finds
+something. Nothing in this list is optional; a build that skips step 4 is
+the 13 September installer again.
 
 **Loose ends to tie today, by kind:**
 
@@ -460,14 +485,23 @@ free (three unread failures from the last partial run); the rest of the
 13. Three `.fbx` idle animations under `avatar-source/animations/` are
     untracked and were not this session's; keep or ignore.
 
-#### Do these next, in order
+#### Do these next, in order — the road to `v0.1.0-alpha.2`
 
-1. **Send the tester email** for `v0.1.0-alpha.1` once the Buttondown list
-   exists: `node scripts/tell-the-testers.mjs v0.1.0-alpha.1 --send`.
-2. Items 1, 4 and 6 above — an hour, no GPU for 6.
-3. **Full backend suite detached**, GPU free; then the *Look* list; then
-   a cold install; then a build from `main`.
-4. G3, then the socials catalogue, then G2 and G7.
+1. **Security 1** — open the real app, confirm Blender, GitHub and mail
+   servers start under the allow-list environment. Then **bug 6** —
+   Tabby's two keys into `docs/RUNNING.md`. No GPU, an hour.
+2. **Bug 4** (the avatar's smile at rest) and **bug 5** (the manual's
+   chunks under Memory → Facts) — both are what a tester sees first.
+3. **UX 8, the unseen list** — with the GPU: rows between paragraphs, the
+   folder offer, the model choosing `web.search` with search on, Settings →
+   Runs on its own, an obligations trigger with real obligations. Seen, or
+   switched off for this build.
+4. **Full backend suite detached**; the three unread failures.
+5. Frontend suite, `tsc`, `eslint`, the guards, `check-installer-payload`.
+6. Build; cold install from outside the checkout; tag `v0.1.0-alpha.2`;
+   import the Formspree list into Buttondown; send the email for alpha.2.
+7. After the tag: G3 (the five verbs), the socials/YouTube catalogue, G2,
+   G7. Delete the stale `v0.1.0` release when convenient.
 2. **Workstream G, the GPU-free half**: G4 (once · session · always · deny,
    with the floor), G2 (bm25s + RRF, `history.search`), G3 (the five verbs
    on the ambient panel). None needs the card.
