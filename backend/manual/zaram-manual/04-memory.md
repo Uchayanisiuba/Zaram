@@ -6,6 +6,10 @@ Zaram remembers facts about you and your work: a client's rate, a decision you m
 
 Conversation itself is not memory. What you say in passing stays with that conversation; a fact enters memory when Zaram judges it worth keeping, or when you press **Remember** under a reply.
 
+## What is a fact and what is a document
+
+**Memory → Facts** lists what Zaram believes about you and your work: what you said, what it drew from a document, what it wrote. Each row says which — *you said this*, *from invoice-0042.md*, *Zaram wrote this*. The pages of the documents themselves, including Zaram's own manual, live under **Knowledge**, by source, and are not listed as facts about you.
+
 ## Seeing what it knows
 
 ![Memory: facts with their source, and the commitments Zaram found.](assets/memory.png)
