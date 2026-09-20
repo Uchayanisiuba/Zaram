@@ -35,7 +35,7 @@
  * a choice that can only fail.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Check, Cloud, HardDrive, RefreshCw, Shuffle } from 'lucide-react';
+import { Brain, Check, Cloud, HardDrive, RefreshCw, Shuffle } from 'lucide-react';
 
 import { describeDataPolicy } from '@/components/settings/AdvancedModelField';
 import {
@@ -96,6 +96,13 @@ export default function RoutingControl() {
   const [open, setOpen] = useState(false);
   const [preference, setPreference] = useState<RoutingPreference | null>(null);
   const [pinned, setPinned] = useState<string | null>(null);
+  // Whether a thinking model is asked to think — `docs/PLAN.md` E2b. Here
+  // rather than in Settings for the reason the routing chip is: on a 27B
+  // thinking is 4 s against 0.8 s, on the 14B 19 s against 0.3 s (measured
+  // 20 September 2026), and the person writing an email decides that per
+  // conversation, not per visit to Settings. `null` until fetched, so the
+  // chip never shows a value that was not read.
+  const [thinking, setThinking] = useState<boolean | null>(null);
   const [models, setModels] = useState<DiscoveredModel[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [failed, setFailed] = useState(false);
@@ -111,6 +118,7 @@ export default function RoutingControl() {
         if (cancelled) return;
         setPreference(settings.routingPreference);
         setPinned(settings.defaultModel);
+        setThinking(settings.thinking);
       } catch {
         // A preference we could not read is not `auto`. Rendering a default
         // never fetched would put an invented value on the control that says
@@ -191,22 +199,26 @@ export default function RoutingControl() {
   async function save(update: {
     routingPreference?: RoutingPreference;
     defaultModel?: string;
+    thinking?: boolean;
   }) {
-    const previous = { preference, pinned };
+    const previous = { preference, pinned, thinking };
     if (update.routingPreference) setPreference(update.routingPreference);
     if (update.defaultModel !== undefined) setPinned(update.defaultModel || null);
+    if (update.thinking !== undefined) setThinking(update.thinking);
     setBusy(true);
     setFailed(false);
     try {
       const saved = await updateRoutingSettings(update);
       setPreference(saved.routingPreference);
       setPinned(saved.defaultModel);
+      setThinking(saved.thinking);
     } catch {
       // Put it back. A control that appears to have worked and did not would
       // leave someone believing their next question stays on this machine
       // when it may not.
       setPreference(previous.preference);
       setPinned(previous.pinned);
+      setThinking(previous.thinking);
       setFailed(true);
     } finally {
       setBusy(false);
@@ -258,6 +270,28 @@ export default function RoutingControl() {
         // bias the consent gate still governs, and claiming symmetry would
         // overstate one half and understate the other.
         <span className="text-slate-600">· stays on this machine</span>
+      )}
+      {thinking !== null && (
+        // One press, two states, the current one named. Not a menu: there is
+        // nothing to choose between but on and off, and the cost of each is
+        // in the title so the choice is informed rather than guessed.
+        <button
+          type="button"
+          onClick={() => void save({ thinking: !thinking })}
+          disabled={busy}
+          aria-pressed={thinking}
+          data-testid="thinking-chip"
+          title={
+            thinking
+              ? 'The model thinks before answering — slower, better on hard questions. Press to turn off.'
+              : 'The model answers directly — fast. Press to let it think first.'
+          }
+          className="flex items-center gap-1.5 text-slate-500 hover:text-slate-300 transition-colors"
+        >
+          <span className="text-slate-700">·</span>
+          <Brain size={12} aria-hidden className="shrink-0" />
+          <span>{thinking ? 'Thinking on' : 'Thinking off'}</span>
+        </button>
       )}
       {failed && (
         <span className="text-slate-600" title="The change did not save">

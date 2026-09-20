@@ -344,6 +344,62 @@ class TestItCanSequenceTwoCalls:
         assert [c["tool"] for c in mcp.calls] == ["search_code", "read_lines"]
         assert "9137000000" in _text(out)
 
+    def test_the_loops_time_is_in_the_timing_event(self, a_generous_window):
+        """Seen 20 September 2026: a 240 s reply whose *where the time went*
+        summed to 30 s — everything after the first round (the tool calls,
+        and the model rounds that followed them) landed in no phase. Two
+        calls and two later rounds here; both phases must be measured, and
+        absent on a reply that called nothing."""
+        mcp = _McpDouble(
+            tools=[_SEARCH, _READ],
+            results=[
+                {"success": True, "result": {"matches": [{"path": "a.py", "line": 1}]}},
+                {"success": True, "result": {"lines": [{"line": 1, "text": "x = 1"}]}},
+            ],
+        )
+        engine, _ = _engine(
+            [_call("search_code", query="x"), _call("read_lines", path="a.py"), "x is 1."],
+            mcp,
+        )
+
+        out = list(engine.execute("use the code tools to tell me about x"))
+
+        timing = _events(out, EventType.TIMING)[0].data
+        assert isinstance(timing["tools_ms"], int) and timing["tools_ms"] >= 0
+        assert isinstance(timing["rounds_ms"], int) and timing["rounds_ms"] >= 0
+
+        engine, _ = _engine(["Nothing to call."], _McpDouble(tools=[_SEARCH]))
+        out = list(engine.execute("say hello"))
+        timing = _events(out, EventType.TIMING)[0].data
+        assert timing["tools_ms"] is None and timing["rounds_ms"] is None
+
+    def test_a_confirm_card_names_the_file_zaram_just_wrote(self, a_generous_window):
+        """Coworker step 2 — provenance on the card. Nobody at the card sees
+        the test file's contents, but the engine knows it wrote it a step
+        ago, and says so in one line of fixed vocabulary."""
+        mcp = _McpDouble(
+            tools=[_SEARCH, _READ],
+            results=[
+                {"success": True, "result": {"path": "tests/test_a.py", "diff": "+x", "commit": "abc"}},
+                {"success": False, "needs_confirmation": True, "server": "code", "tool": "run_command",
+                 "reason": "run_command changes something.", "grantable": True},
+            ],
+        )
+        engine, _ = _engine(
+            [
+                _call("write_file", path="tests/test_a.py", content="def test_a(): pass"),
+                _call("run_command", runner="pytest", args=["tests/test_a.py"]),
+                "Done.",
+            ],
+            mcp,
+        )
+
+        out = list(engine.execute("use the code tools to add a test and run it"))
+
+        held = [e for e in _events(out, EventType.TOOL_CALL) if e.data.get("verdict") == "confirm"]
+        assert held, "the run was not held for confirmation"
+        assert "tests/test_a.py was created by Zaram 1 step ago" in held[0].data["reason"]
+
     def test_the_gate_is_asked_on_every_call(self, a_generous_window):
         """Two calls are two permission decisions, never one reused."""
         mcp = _McpDouble(tools=[_SEARCH, _READ])

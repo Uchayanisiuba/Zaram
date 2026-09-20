@@ -126,6 +126,12 @@ class CodeTools:
             return runners.HOW_TO_PERMIT
         return writes.HOW_TO_PERMIT
 
+    def root(self) -> Optional[Path]:
+        """The open project's folder, or ``None``. Asked per request, like
+        everything else here. The runtime's floors resolve a relative path
+        against it the way the writer does."""
+        return self._root_for()
+
     def briefing(self, query: str) -> str:
         """What the model is told about the open project before it acts.
 

@@ -163,6 +163,10 @@ export interface ChatTiming {
   stepsMs: number | null;
   firstTokenMs: number | null;
   generationMs: number | null;
+  /** Inside tool calls, and in the model rounds after the first — the
+   *  loop's share, absent on a reply that called nothing. */
+  toolsMs?: number | null;
+  roundsMs?: number | null;
   totalMs: number | null;
 }
 
@@ -838,6 +842,8 @@ function parseLine(line: string): ChatEvent | null {
           stepsMs: ms(data.steps_ms),
           firstTokenMs: ms(data.first_token_ms),
           generationMs: ms(data.generation_ms),
+          toolsMs: ms(data.tools_ms),
+          roundsMs: ms(data.rounds_ms),
           totalMs: ms(data.total_ms),
         },
       };

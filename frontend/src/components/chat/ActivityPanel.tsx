@@ -116,6 +116,14 @@ export default function ActivityPanel({
    *  from the folded summary, where every call is listed and none is open. */
   focus?: ChatToolCall | null;
 }) {
+  // A row can be opened out from inside the panel too. Seen 20 September
+  // 2026: once the rows in the conversation fold, their *open* goes with
+  // them, and the panel reached from the summary listed every call with
+  // none of them openable — so what a step *sent* was reachable only while
+  // it was still running. The person's pick wins over the row this was
+  // opened from; picking the same row again closes it.
+  const [picked, setPicked] = useState<ChatToolCall | null>(null);
+  const opened = picked ?? focus ?? null;
   const focused = useRef<HTMLLIElement | null>(null);
   useEffect(() => {
     focused.current?.scrollIntoView?.({ block: 'center' });
@@ -204,7 +212,7 @@ export default function ActivityPanel({
             const { Icon, color, label } = VERDICTS[call.verdict] ?? UNKNOWN;
             // A plan step carries its own phrase; a tool call is looked up.
             const verb = call.label ?? DID[call.tool] ?? `${call.server}/${call.tool}`;
-            const isFocus = focus != null && call === focus;
+            const isFocus = opened != null && call === opened;
             return (
               <li
                 key={`${call.server}/${call.tool}/${i}`}
@@ -212,8 +220,11 @@ export default function ActivityPanel({
                 className="flex items-start gap-2 py-1"
                 data-verdict={call.verdict}
                 data-focus={isFocus ? 'true' : undefined}
+                data-testid="panel-call"
+                onClick={() => setPicked(isFocus ? null : call)}
                 style={{
                   borderBottom: '1px solid var(--color-border-subtle)',
+                  cursor: 'pointer',
                   ...(isFocus ? { background: 'rgba(255,255,255,.03)' } : {}),
                 }}
               >

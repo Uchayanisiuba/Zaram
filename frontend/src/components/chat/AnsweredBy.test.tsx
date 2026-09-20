@@ -146,9 +146,12 @@ describe('asking another model', () => {
 describe('where the time went — 19 September 2026', () => {
   it('says how long the first word took, and the rest on hover', async () => {
     const { timingLine } = await import('./AnsweredBy');
+    // The wait is measured from the question: recall + plan + steps + prefill.
+    // Seen 20 September 2026: the prefill alone read "first word in 0 ms"
+    // under a six-second wait.
     const line = timingLine({ recallMs: 120, planMs: 8, stepsMs: null, firstTokenMs: 3900, generationMs: 12400, totalMs: 16500 });
-    expect(line?.text).toBe('first word in 3.9 s');
-    expect(line?.title).toBe('recall 120 ms · plan 8 ms · first word 3.9 s · writing 12 s · total 17 s');
+    expect(line?.text).toBe('first word in 4.0 s');
+    expect(line?.title).toBe('recall 120 ms · plan 8 ms · prefill 3.9 s · writing 12 s · total 17 s');
   });
 
   it('prints nothing for a phase that was not measured, never a zero', async () => {

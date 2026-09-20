@@ -116,6 +116,12 @@ class GrantRequest(BaseModel):
     tool: str
 
 
+class SessionGrantRequest(BaseModel):
+    tool: str
+    #: The conversation this covers — the chat request's `session_id`.
+    session_id: str
+
+
 @router.get("/servers")
 async def list_servers() -> Dict[str, Any]:
     """Every configured server, connected or not."""
@@ -205,6 +211,24 @@ async def grant_tool(server_id: str, request: GrantRequest) -> Dict[str, Any]:
 
     store.grant(server_id, request.tool)
     return {"server": server_id, "grantedTools": sorted(store.load()[server_id].granted_tools)}
+
+
+@router.post("/servers/{server_id}/allow-for-session")
+async def allow_tool_for_session(server_id: str, request: SessionGrantRequest) -> Dict[str, Any]:
+    """Allow one tool for one conversation — the middle rung of *once · this
+    conversation · always* (coworker step 3). Nothing is written to disk: a
+    restart ends the conversation and the grant with it. A built-in server
+    (the code pack) is a valid target here even though it is not in the
+    store, because its grants are per request rather than per file."""
+    if _MCP_RUNTIME is None:
+        raise HTTPException(status_code=503, detail="tool layer not initialized")
+    if not request.tool.strip() or not request.session_id.strip():
+        raise HTTPException(status_code=400, detail="tool and session_id are required")
+    known = set(_store().load()) | set(getattr(_MCP_RUNTIME, "_builtin", {}))
+    if server_id not in known:
+        raise HTTPException(status_code=404, detail=f"no server named {server_id!r}")
+    allowed = _MCP_RUNTIME.allow_for_session(request.session_id, server_id, request.tool.strip())
+    return {"server": server_id, "session_id": request.session_id, "allowedForSession": sorted(allowed)}
 
 
 @router.get("/health")

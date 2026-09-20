@@ -121,3 +121,86 @@ class TestRunSyncKeepsTheContext:
                 return run_sync(read())
 
         assert asyncio.run(caller()) == "corr-9:2"
+
+
+class TestTheMarkSurvivesAYield:
+    """Found on screen, 20 September 2026: the first real reply after C2
+    shipped was empty, with `Token ... was created in a different Context`
+    where the answer should be. `ChatRouter` iterates the engine with
+    Starlette's `iterate_in_threadpool`, which runs *each* `next()` under a
+    fresh copy of the request's context — so a `ContextVar` set before a
+    `yield` is gone after it, and `reset` across the seam raises. Every
+    other test here iterates in one context and could not see it.
+
+    This drives a generator the way the router does: one `copy_context()`
+    per `next()`.
+    """
+
+    @staticmethod
+    def _like_the_threadpool(events):
+        import contextvars
+
+        out = []
+        while True:
+            try:
+                out.append(contextvars.copy_context().run(next, events))
+            except StopIteration:
+                return out
+
+    def test_the_step_is_still_known_after_a_yield(self):
+        from core.egress.step_context import carried
+
+        seen = []
+
+        def engine():
+            with running_step("c:0"):
+                yield "start"
+                seen.append(current_step())  # after a yield, inside the mark
+                with running_step("c:0:call:1"):
+                    yield "call"
+                    seen.append(current_step())
+                seen.append(current_step())  # the call's exit restores the step
+            seen.append(current_step())  # and the step's exit restores nothing
+
+        items = self._like_the_threadpool(carried(engine()))
+
+        assert items == ["start", "call"]
+        assert seen == ["c:0", "c:0:call:1", "c:0", None]
+
+    def test_an_unwrapped_generator_is_the_defect(self):
+        # The regression this class exists for: without `carried`, the mark
+        # does not survive the seam. Asserted so the wrapper is known to be
+        # doing something rather than assumed to.
+        seen = []
+
+        def engine():
+            with running_step("c:0"):
+                yield "start"
+                seen.append(current_step())
+
+        self._like_the_threadpool(engine())
+        assert seen == [None]
+
+    def test_the_engines_entry_points_are_wrapped(self):
+        from core.execution_engine import ExecutionEngine
+
+        for name in ("execute", "continue_task"):
+            fn = getattr(ExecutionEngine, name)
+            assert getattr(fn, "__wrapped__", None) is not None, f"{name} is not carried"
+
+    def test_closing_the_wrapper_closes_the_engine(self):
+        from core.egress.step_context import carried
+
+        closed = []
+
+        def engine():
+            try:
+                yield "a"
+                yield "b"
+            finally:
+                closed.append(True)
+
+        wrapped = carried(engine())
+        assert next(wrapped) == "a"
+        wrapped.close()
+        assert closed == [True]

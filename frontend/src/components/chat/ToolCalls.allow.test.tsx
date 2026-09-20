@@ -16,9 +16,15 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 
-vi.mock('@/services/toolsClient', () => ({ grantTool: vi.fn(async () => ['imap_send_email']) }));
+vi.mock('@/services/toolsClient', () => ({
+  grantTool: vi.fn(async () => ['imap_send_email']),
+  allowToolForSession: vi.fn(async () => ['email/imap_send_email']),
+}));
+vi.mock('@/stores/chatStore', () => ({
+  useChatStore: (selector: (s: { sessionId: string }) => unknown) => selector({ sessionId: 'session-1' }),
+}));
 
-import { grantTool } from '@/services/toolsClient';
+import { allowToolForSession, grantTool } from '@/services/toolsClient';
 import ToolCalls from './ToolCalls';
 import type { ChatToolCall } from '../../stores/chatStore';
 
@@ -32,13 +38,31 @@ const held = (over: Partial<ChatToolCall> = {}): ChatToolCall => ({
   ...over,
 });
 
-beforeEach(() => vi.mocked(grantTool).mockClear());
+beforeEach(() => {
+  vi.mocked(grantTool).mockClear();
+  vi.mocked(allowToolForSession).mockClear();
+});
 
 describe('allowing a held tool', () => {
-  it('offers to allow the tool the gate is holding', () => {
+  it('offers to allow the tool the gate is holding, for this conversation or always', () => {
     render(<ToolCalls calls={[held()]} onAllowed={vi.fn()} />);
-    expect(screen.getByTestId('allow-tool').textContent).toContain('imap_send_email');
-    expect(screen.getByText(/stop asking about it/)).toBeTruthy();
+    expect(screen.getByText(/Allow imap_send_email/)).toBeTruthy();
+    expect(screen.getByTestId('allow-tool-session').textContent).toBe('for this conversation');
+    expect(screen.getByTestId('allow-tool').textContent).toBe('always');
+    expect(screen.getByText(/stops asking about it/)).toBeTruthy();
+  });
+
+  it('the conversation rung allows for this session and asks again — 20 September 2026', async () => {
+    // Coworker step 3: a yes for the task in hand, not forever, and nothing
+    // written to disk.
+    const onAllowed = vi.fn();
+    render(<ToolCalls calls={[held()]} onAllowed={onAllowed} />);
+
+    fireEvent.click(screen.getByTestId('allow-tool-session'));
+
+    await waitFor(() => expect(onAllowed).toHaveBeenCalledTimes(1));
+    expect(allowToolForSession).toHaveBeenCalledWith('email', 'imap_send_email', 'session-1');
+    expect(grantTool).not.toHaveBeenCalled();
   });
 
   it('never offers to allow a deletion, because the gate would still ask', () => {

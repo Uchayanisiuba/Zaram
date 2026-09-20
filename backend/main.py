@@ -2924,6 +2924,10 @@ class RoutingPreferenceUpdate(BaseModel):
     #: The embedding model that decides where questions go, or `""` to hand
     #: the choice back. `None` leaves it unchanged.
     router_model: str | None = None
+    #: Whether a thinking model is asked to think — `docs/PLAN.md` E2b. `None`
+    #: leaves it unchanged. Applied by the local engines; a cloud provider's
+    #: own reasoning control is not guessed at, so its thinking still shows.
+    thinking: bool | None = None
 
 
 async def _task_assignment_refusal(slot: str, model: str) -> str:
@@ -3032,6 +3036,9 @@ async def set_routing_preference(update: RoutingPreferenceUpdate):
 
     if update.default_model is not None:
         settings.set_default_model(update.default_model)
+
+    if update.thinking is not None:
+        settings.set_thinking(update.thinking)
 
     return _routing_payload()
 

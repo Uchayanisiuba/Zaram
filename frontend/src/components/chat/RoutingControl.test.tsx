@@ -366,3 +366,38 @@ describe('when cloud cannot be reached, it says which reason', () => {
     expect((cloudButton as HTMLButtonElement).disabled).toBe(false);
   });
 });
+
+describe('the thinking control — 20 September 2026', () => {
+  // Measured the day it was built: on the 27B thinking is 4.3 s against
+  // 0.8 s; on the 14B, 19.4 s against 0.3 s — 1,410 characters of thought
+  // for "17 times 23". A person writing an email decides that here, per
+  // conversation, not in Settings.
+  it('is not shown until the setting has been read', () => {
+    fetchRoutingSettings.mockReturnValue(new Promise(() => {}));
+    render(<RoutingControl />);
+    expect(screen.queryByTestId('thinking-chip')).toBeNull();
+  });
+
+  it('names the current state and flips it in one press', async () => {
+    fetchRoutingSettings.mockResolvedValue({ routingPreference: 'auto', defaultModel: null, thinking: true });
+    updateRoutingSettings.mockResolvedValue({ routingPreference: 'auto', defaultModel: null, thinking: false });
+    render(<RoutingControl />);
+    const chip = await screen.findByTestId('thinking-chip');
+    expect(chip.textContent).toContain('Thinking on');
+    expect(chip.getAttribute('aria-pressed')).toBe('true');
+
+    await userEvent.click(chip);
+
+    expect(updateRoutingSettings).toHaveBeenCalledWith({ thinking: false });
+    await waitFor(() => expect(screen.getByTestId('thinking-chip').textContent).toContain('Thinking off'));
+  });
+
+  it('puts the state back when the save fails', async () => {
+    fetchRoutingSettings.mockResolvedValue({ routingPreference: 'auto', defaultModel: null, thinking: true });
+    updateRoutingSettings.mockRejectedValue(new Error('down'));
+    render(<RoutingControl />);
+    await userEvent.click(await screen.findByTestId('thinking-chip'));
+    await waitFor(() => expect(screen.getByText(/not saved/)).toBeTruthy());
+    expect(screen.getByTestId('thinking-chip').textContent).toContain('Thinking on');
+  });
+});

@@ -378,3 +378,104 @@ class TestAgainstTheServerOnThisMachine:
             "the answer is most of the stream, which means the monologue is "
             f"still in it: {seen[ANSWER][:200]!r}"
         )
+
+
+class TestTheServerMaySplitEvenWhenTheTemplateOpens:
+    """Seen 20 September 2026, the moment TabbyAPI's `reasoning: true` was
+    actually applied to an inline load (it had been silently ignored since
+    3 September — `use_as_default` did not name it). The template still
+    opens `<think>`, so `starts_in_reasoning` is true; but the thinking now
+    arrives as `reasoning_content` and the answer, clean, as `content`. The
+    parser kept waiting for a `</think>` in `content` and filed the whole
+    answer as thinking: every reply read *"the model stopped before writing
+    an answer"*. A `reasoning_content` delta is proof the server owns the
+    split, and from then on `content` is the answer.
+    """
+
+    def test_a_server_split_answer_is_the_answer(self):
+        seen = split(run(
+            {"reasoning_content": "The user asks for 17 times 23. "},
+            {"reasoning_content": "That is 391.\n"},
+            {"content": "17 × 23 = **391**"},
+        ))
+
+        assert "391.\n" in seen[REASONING]
+        assert seen[ANSWER].strip() == "17 × 23 = **391**"
+        assert "user asks" not in seen[ANSWER]
+
+    def test_the_block_is_opened_and_closed_once(self):
+        stream = run(
+            {"reasoning_content": "thinking\n"},
+            {"content": "answer"},
+        )
+        assert stream.count(OPEN_TAG) == 1
+        assert stream.count(CLOSE_TAG) == 1
+        assert stream.endswith("answer")
+
+    def test_a_template_opened_stream_with_no_server_split_is_unchanged(self):
+        # The original shape still works: one content stream, the model
+        # closes the block itself.
+        seen = split(run({"content": THINKING + CLOSE_TAG + ANSWER_TEXT}))
+        assert "391" in seen[ANSWER]
+        assert "Let me calculate" in seen[REASONING]
+
+
+class TestTheThinkingControl:
+    """`docs/PLAN.md` E2b. Off means two things on this engine: the body
+    says `enable_thinking: false` — loopback only, since OpenAI's API
+    refuses a field it does not know and a cloud vendor's reasoning control
+    is not guessed at — and the prompt-opened path stands down, because the
+    template now *closes* the block it opens and the first content is the
+    answer. Without the second half, thinking off filed every reply as
+    thought."""
+
+    def _engine(self, base_url: str, template: str | None):
+        engine = OpenAICompatibleEngine(base_url=base_url, api_key="k", default_model="m")
+        sent: dict = {}
+
+        class _Gate:
+            def request(self, url, **_kw):
+                if template is None:
+                    raise OSError("no such route")
+                return json.dumps({"id": "m", "parameters": {"prompt_template_content": template}}).encode()
+
+            def stream_lines(self, url, *, body, **_kw):
+                sent.update(json.loads(body))
+                yield from sse({"content": "17 × 23 = 391"})
+
+        engine._gate = _Gate()
+        return engine, sent
+
+    def _off(self):
+        from core.user_settings import get_user_settings
+
+        settings = get_user_settings()
+        settings.set_thinking(False)
+        return lambda: settings.set_thinking(True)
+
+    def test_off_reaches_a_local_server_and_the_answer_is_the_answer(self):
+        restore = self._off()
+        try:
+            engine, sent = self._engine("http://127.0.0.1:1234", TEMPLATE_THAT_OPENS)
+            seen = split("".join(engine.stream_response("17 times 23?")))
+        finally:
+            restore()
+
+        assert sent.get("enable_thinking") is False
+        assert seen[ANSWER].strip() == "17 × 23 = 391"
+        assert seen[REASONING] == ""
+
+    def test_off_is_not_sent_to_a_cloud_provider(self):
+        restore = self._off()
+        try:
+            engine, sent = self._engine("https://api.example.com", None)
+            list(engine.stream_response("hello"))
+        finally:
+            restore()
+
+        assert "enable_thinking" not in sent
+
+    def test_on_sends_nothing_extra(self):
+        engine, sent = self._engine("http://127.0.0.1:1234", TEMPLATE_THAT_OPENS)
+        list(engine.stream_response("hello"))
+        assert "enable_thinking" not in sent

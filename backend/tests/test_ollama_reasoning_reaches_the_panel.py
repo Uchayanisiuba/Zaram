@@ -99,6 +99,20 @@ class TestTheRequestAsksForThinking:
 
         assert sent.get("think") is True
 
+    def test_the_thinking_control_turns_it_off_for_a_model_that_can(self, monkeypatch):
+        """`docs/PLAN.md` E2b. Sent as `false`, not omitted: with `think`
+        unset a thinking model still thinks, untagged, in the content."""
+        from core.user_settings import get_user_settings
+
+        engine, sent = _engine(monkeypatch, [{"response": "hi", "done": True}])
+        get_user_settings().set_thinking(False)
+        try:
+            list(engine.stream_response("hello"))
+        finally:
+            get_user_settings().set_thinking(True)
+
+        assert sent.get("think") is False
+
     def test_a_model_that_cannot_think_is_not_asked(self, monkeypatch):
         """Ollama refuses the *whole request* for a model that cannot think.
 

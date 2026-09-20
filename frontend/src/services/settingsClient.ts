@@ -399,12 +399,18 @@ export interface RoutingSettings {
    *  not route worse, it does not route at all. Takes effect when Zaram
    *  restarts, because the embedder is built once at boot. */
   routerModel: string | null;
+  /** Whether a model that can think is asked to. Applied by the local
+   *  engines; a cloud provider's own control is not guessed at, so there the
+   *  thinking still shows. `docs/PLAN.md` E2b. */
+  thinking: boolean;
 }
 
 function toRoutingSettings(raw: Record<string, unknown>): RoutingSettings {
   const tasks = raw.task_models;
   const slots = raw.task_slots;
   return {
+    // Only an exact `false` is off — the same reading the backend makes.
+    thinking: raw.thinking !== false,
     routingPreference: (raw.routing_preference as RoutingPreference) ?? 'auto',
     defaultModel: typeof raw.default_model === 'string' ? raw.default_model : null,
     // Read value by value rather than cast wholesale. This object is written
@@ -439,12 +445,15 @@ export async function updateRoutingSettings(update: {
   taskModels?: Record<string, string>;
   /** An embedding model, or `''` to hand the choice back to Zaram. */
   routerModel?: string;
+  /** Ask a thinking model to think, or not. `undefined` leaves it alone. */
+  thinking?: boolean;
 }): Promise<RoutingSettings> {
   const raw = (await send('/routing/preference', 'POST', {
     routing_preference: update.routingPreference ?? null,
     default_model: update.defaultModel ?? null,
     task_models: update.taskModels ?? null,
     router_model: update.routerModel ?? null,
+    thinking: update.thinking ?? null,
   })) as Record<string, unknown>;
   // The POST answers with the same payload the GET does, `task_slots`
   // included, so replacing state with what came back cannot blank the list of

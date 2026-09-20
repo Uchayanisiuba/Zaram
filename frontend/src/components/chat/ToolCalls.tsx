@@ -45,7 +45,8 @@ import { useState } from 'react';
 import { AnimatePresence } from 'framer-motion';
 import { Check, ChevronRight, CircleAlert, Clock, Loader2, Wrench } from 'lucide-react';
 import type { ChatToolCall } from '../../stores/chatStore';
-import { grantTool } from '@/services/toolsClient';
+import { allowToolForSession, grantTool } from '@/services/toolsClient';
+import { useChatStore } from '@/stores/chatStore';
 import ActivityPanel from './ActivityPanel';
 import AppCard from './AppCard';
 import ChangeCard from './ChangeCard';
@@ -147,33 +148,61 @@ export function summarise(calls: ChatToolCall[]): string {
  */
 function AllowTool({ call, onAllowed }: { call: ChatToolCall; onAllowed: () => void }) {
   const [state, setState] = useState<'idle' | 'working' | 'failed'>('idle');
+  // The conversation this row belongs to — the middle rung's scope.
+  const sessionId = useChatStore((s) => s.sessionId);
   if (!call.grantable || call.verdict !== 'confirm') return null;
+  // Two rungs on one row, coworker step 3 (20 September 2026): *for this
+  // conversation* and *always*. The first is what most people mean by yes —
+  // a yes for the task in hand — and without it the only choices were one
+  // call or forever, which is what pushes people to "always". Once is the
+  // plan card's Go; deny is not pressing anything.
+  const press = async (how: 'session' | 'always') => {
+    setState('working');
+    try {
+      if (how === 'session') await allowToolForSession(call.server, call.tool, sessionId);
+      else await grantTool(call.server, call.tool);
+      onAllowed();
+    } catch {
+      // Said on the row rather than thrown away: a grant that failed
+      // silently would look like a grant that worked and did nothing.
+      setState('failed');
+    }
+  };
+  const link = {
+    color: 'var(--color-cyan-light)',
+    background: 'none',
+    border: 0,
+    padding: 0,
+    cursor: 'pointer',
+  } as const;
   return (
-    <span className="flex items-center gap-2 pl-[18px] pt-0.5">
+    <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5 pl-[18px] pt-0.5 text-xs">
+      <span style={{ color: 'var(--color-text-faint)' }}>Allow {call.tool}</span>
       <button
         type="button"
         disabled={state === 'working'}
-        onClick={async () => {
-          setState('working');
-          try {
-            await grantTool(call.server, call.tool);
-            onAllowed();
-          } catch {
-            // Said on the row rather than thrown away: a grant that failed
-            // silently would look like a grant that worked and did nothing.
-            setState('failed');
-          }
-        }}
-        className="text-xs"
-        style={{ color: 'var(--color-cyan-light)', background: 'none', border: 0, padding: 0, cursor: 'pointer' }}
+        onClick={() => void press('session')}
+        style={link}
+        data-testid="allow-tool-session"
+      >
+        for this conversation
+      </button>
+      <span style={{ color: 'var(--color-text-faint)' }}>·</span>
+      <button
+        type="button"
+        disabled={state === 'working'}
+        onClick={() => void press('always')}
+        style={link}
         data-testid="allow-tool"
       >
-        {state === 'working' ? 'Allowing…' : `Allow ${call.tool}`}
+        always
       </button>
       <span className="text-[11px]" style={{ color: 'var(--color-text-faint)' }}>
-        {state === 'failed'
-          ? 'That did not save — try again, or allow it in Settings → Tools.'
-          : 'and stop asking about it'}
+        {state === 'working'
+          ? 'Allowing…'
+          : state === 'failed'
+            ? 'That did not save — try again, or allow it in Settings → Tools.'
+            : 'always means Zaram stops asking about it'}
       </span>
     </span>
   );

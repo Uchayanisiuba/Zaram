@@ -196,6 +196,8 @@ class StreamEvent:
         steps_ms: int | None = None,
         first_token_ms: int | None = None,
         generation_ms: int | None = None,
+        tools_ms: int | None = None,
+        rounds_ms: int | None = None,
         total_ms: int | None = None,
         correlation_id: str = "",
     ) -> StreamEvent:
@@ -218,6 +220,11 @@ class StreamEvent:
                 "steps_ms": steps_ms,
                 "first_token_ms": first_token_ms,
                 "generation_ms": generation_ms,
+                # After the first round: inside tool calls, and the model
+                # rounds that follow them. Seen 20 September 2026 — a 240 s
+                # reply whose breakdown summed to 30 s without these.
+                "tools_ms": tools_ms,
+                "rounds_ms": rounds_ms,
                 "total_ms": total_ms,
             },
             correlation_id=correlation_id,

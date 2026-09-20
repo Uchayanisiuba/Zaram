@@ -42,6 +42,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from pathlib import Path
 from typing import Set, Any, Callable, Dict, List, Optional, Sequence
 
 from core.contracts import Capability, CapabilityLocality, RuntimeMetadata, RuntimeState
@@ -49,6 +50,7 @@ from core.untrusted import Provenance, scan
 
 from .client import McpServer, ToolDescriptor
 from .config import ServerConfig, ServerStore
+from .floors import floor_for
 from .policy import Verdict, decide, looks_destructive
 
 logger = logging.getLogger(__name__)
@@ -90,6 +92,31 @@ class McpRuntime:
         self._builtin: Dict[str, Any] = {}
         #: Injected. See `set_ranker`.
         self._rank: Optional[Callable[[str, Sequence[ToolDescriptor], int], List[ToolDescriptor]]] = None
+        #: session_id → qualified tool names allowed **for that conversation
+        #: only**. The middle rung of *once · this conversation · always*
+        #: (coworker step 3, `docs/PLAN.md` G4): a person who says yes to
+        #: `write_file` for the task in hand has not said yes forever, and
+        #: making them choose between one call and forever is what pushes
+        #: people to "always". In memory by design — a restart ends every
+        #: conversation, so the empty dict is correct, not a loss. Never
+        #: covers a destructive tool or a floor: `decide` and `floor_for`
+        #: run the same whichever rung the grant came from.
+        self._session_grants: Dict[str, Set[str]] = {}
+
+    def allow_for_session(self, session_id: str, server_id: str, tool_name: str) -> Set[str]:
+        """Remember that the person allowed one tool for one conversation."""
+        qualified = f"{server_id}/{tool_name}"
+        allowed = self._session_grants.setdefault(session_id, set())
+        allowed.add(qualified)
+        return set(allowed)
+
+    def _session_granted(self, session_id: str, server_id: str) -> Set[str]:
+        prefix = f"{server_id}/"
+        return {
+            name[len(prefix):]
+            for name in self._session_grants.get(session_id, set())
+            if name.startswith(prefix)
+        }
 
     def register_builtin(self, config: ServerConfig, server: Any) -> None:
         """Attach a server Zaram ships, in process.
@@ -319,15 +346,41 @@ class McpRuntime:
         if cfg is None:
             return {"success": False, "error": f"no server called {server_id!r} is configured"}
 
+        # **The floors, before the gate.** Argument-aware and one-directional:
+        # a write to a file that governs Zaram is refused under any grant,
+        # and a write to a file that runs later asks whatever has been
+        # granted — a grant is consent to a *tool*, made in advance, never to
+        # this file. Only `confirmed`, the person's Go on this run, covers it,
+        # and the row cannot offer a grant. `runtimes/mcp/floors.py`.
+        root = self._root_of(server_id)
+        under = floor_for(server_id, tool_name, arguments, root)
+        if under is not None and under.verdict == "refuse":
+            return {"success": False, "refused": True, "reason": under.reason}
+
+        session_id = str(input_data.get("session") or "")
         decision = decide(
             tool_name=tool_name,
             mode=cfg.writes,
-            granted_tools=cfg.granted_tools | self._builtin_grants(server_id),
+            granted_tools=(
+                cfg.granted_tools
+                | self._builtin_grants(server_id)
+                | self._session_granted(session_id, server_id)
+            ),
             annotations=input_data.get("annotations"),
         )
 
         if decision.verdict is Verdict.REFUSE:
             return {"success": False, "refused": True, "reason": decision.reason}
+
+        if under is not None and under.verdict == "confirm" and not confirmed:
+            return {
+                "success": False,
+                "needs_confirmation": True,
+                "server": server_id,
+                "tool": tool_name,
+                "reason": under.reason,
+                "grantable": False,
+            }
 
         if decision.verdict is Verdict.CONFIRM and not confirmed:
             # Returned rather than asked. This runtime has no user; the surface
@@ -372,6 +425,18 @@ class McpRuntime:
             # something Zaram said.
             "provenance": Provenance.TOOL_OUTPUT.value,
         }
+
+    def _root_of(self, server_id: str) -> Optional[Path]:
+        """The project folder a built-in resolves relative paths against, or
+        ``None``. A stranger's server has no root Zaram knows."""
+        report = getattr(self._builtin_server(server_id), "root", None)
+        if not callable(report):
+            return None
+        try:
+            root = report()
+        except Exception:  # noqa: BLE001 - a root lookup must never fail a call
+            return None
+        return Path(root) if root else None
 
     def _builtin_server(self, server_id: str) -> Any:
         """The in-process object behind a server Zaram ships, or ``None``.

@@ -216,6 +216,19 @@ class MissingApiKey(ValueError):
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1", "[::1]", "0.0.0.0"})
 
 
+def _thinking_wanted() -> bool:
+    """The person's *Thinking* control, read at request time; *on* when the
+    settings store cannot be reached — the direction that costs a wait, not
+    an answer. Same helper as `ollama_engine`'s, kept local for the same
+    import-boundary reason."""
+    try:
+        from core.user_settings import get_user_settings
+
+        return bool(get_user_settings().thinking)
+    except Exception:
+        return True
+
+
 def _is_loopback(base_url: str) -> bool:
     """True when the endpoint is on this machine, by address not by name."""
     try:
@@ -590,6 +603,14 @@ class OpenAICompatibleEngine(LLMEngine):
         # so an ordinary reply's body is byte-for-byte what it always was.
         if tools:
             body["tools"] = list(tools)
+        # The person's *Thinking* control — `docs/PLAN.md` E2b. TabbyAPI reads
+        # a top-level `enable_thinking` into the template (Qwen3's template
+        # then emits an empty think block); LM Studio ignores what it does not
+        # know. **Loopback only**: OpenAI's API refuses a field it does not
+        # recognise, and a cloud vendor's reasoning control differs per vendor
+        # — not guessed at, so there the thinking still shows, visibly.
+        if _is_loopback(self.base_url) and not _thinking_wanted():
+            body["enable_thinking"] = False
         if self._sampling:
             body.update(self._sampling)
         return body
@@ -697,7 +718,14 @@ class OpenAICompatibleEngine(LLMEngine):
             # filed it as thought, and the person was told "the model
             # stopped before writing an answer" — which named the symptom
             # and hid the cause, four times in one afternoon.
-            for token in self._tokens(lines, self._template_opens_thinking()):
+            # With thinking off the template *closes* the block it opens
+            # (`<think>\n\n</think>` in the prompt), so the first content is
+            # the answer and the prompt-opened path must not run — it would
+            # file the whole reply as thought. Same key as `_body` sends.
+            opened = self._template_opens_thinking() and (
+                "enable_thinking" not in body or body["enable_thinking"] is not False
+            )
+            for token in self._tokens(lines, opened):
                 if token == OPEN_TAG:
                     thinking = True
                 elif token == CLOSE_TAG:
@@ -871,6 +899,20 @@ class OpenAICompatibleEngine(LLMEngine):
 
                 thinking = _thinking_from(delta)
                 if thinking:
+                    # **The server is splitting; the template flag is moot.**
+                    # Seen 20 September 2026, the moment TabbyAPI's
+                    # `reasoning: true` was actually applied to an inline load:
+                    # the thinking arrived as `reasoning_content` and the
+                    # answer, clean, as `content` — and this parser, still
+                    # trusting the template that opens `<think>`, filed the
+                    # whole answer as thinking while waiting for a `</think>`
+                    # that no longer comes. Every reply read "the model
+                    # stopped before writing an answer". A `reasoning_content`
+                    # delta is proof the server owns the split, so from here
+                    # `content` is the answer and closes the block as usual.
+                    if starts_in_reasoning:
+                        starts_in_reasoning = False
+                        model_closed_its_block = False
                     if not in_reasoning:
                         in_reasoning = True
                         yield OPEN_TAG

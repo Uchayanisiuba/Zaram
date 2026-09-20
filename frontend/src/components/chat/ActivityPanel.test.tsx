@@ -123,4 +123,25 @@ describe('what one step sent — 19 September 2026', () => {
     render(<ActivityPanel calls={[focused]} focus={focused} onClose={() => {}} />);
     await waitFor(() => expect(screen.getByTestId('step-egress-none')).toBeTruthy());
   });
+
+  it('a row can be opened out from inside the panel, after the fold — 20 September 2026', async () => {
+    // Seen on screen: once the conversation's rows folded, their *open* went
+    // with them, and the panel reached from the summary listed every call
+    // with none openable — what a step sent was reachable only while it ran.
+    const { fetchEgressForStep } = await import('@/services/egressClient');
+    vi.mocked(fetchEgressForStep).mockClear();
+    vi.mocked(fetchEgressForStep).mockResolvedValue([] as never);
+    const first = call({ stepId: 'c:0:call:1', output: 'one' });
+    const second = call({ tool: 'read_lines', stepId: 'c:0:call:2', output: 'two' });
+    render(<ActivityPanel calls={[first, second]} onClose={() => {}} />);
+    expect(document.querySelector('[data-focus="true"]')).toBeNull();
+
+    await userEvent.click(screen.getAllByTestId('panel-call')[1]);
+
+    expect(screen.getAllByTestId('panel-call')[1].getAttribute('data-focus')).toBe('true');
+    await waitFor(() => expect(fetchEgressForStep).toHaveBeenCalledWith('c:0:call:2'));
+    // Picking it again closes it.
+    await userEvent.click(screen.getAllByTestId('panel-call')[1]);
+    expect(document.querySelector('[data-focus="true"]')).toBeNull();
+  });
 });

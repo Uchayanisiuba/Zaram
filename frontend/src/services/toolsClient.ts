@@ -145,6 +145,24 @@ export async function attachServers(blockText: string): Promise<ToolServer[]> {
  * grant the tool by name, which is a dead end at the moment a person is trying
  * to get something done. This is what the confirm row presses.
  */
+/** Allow a tool for one conversation — the middle rung of *once · this
+ *  conversation · always*. Nothing is written to disk; a restart ends the
+ *  conversation and the grant with it. Coworker step 3. */
+export async function allowToolForSession(
+  serverId: string,
+  tool: string,
+  sessionId: string,
+): Promise<string[]> {
+  const res = await fetch(`${API_BASE}/tools/servers/${encodeURIComponent(serverId)}/allow-for-session`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ tool, session_id: sessionId }),
+  });
+  if (!res.ok) throw new Error(`Could not allow ${tool} for this conversation (${res.status}).`);
+  const body: { allowedForSession?: string[] } = await res.json();
+  return body.allowedForSession ?? [];
+}
+
 export async function grantTool(serverId: string, tool: string): Promise<string[]> {
   const res = await fetch(`${API_BASE}/tools/servers/${encodeURIComponent(serverId)}/grant`, {
     method: 'POST',

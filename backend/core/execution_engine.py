@@ -70,7 +70,8 @@ from core.tool_loop import (
     visible_length,
 )
 from core.registry import RuntimeRegistry
-from core.egress.step_context import current_step, running_step
+from core.reasoning import CLOSE_TAG, OPEN_TAG
+from core.egress.step_context import carries_step, current_step, running_step
 from core.step_labels import describe_step
 from core.scheduler import RuntimeScheduler
 from core.task_queue import TaskQueue
@@ -198,6 +199,18 @@ def _is_check_runner(runner: str, result: dict) -> bool:
     }
 
 
+def _is_model_text(token: str) -> bool:
+    """A token that came from the model, not from this side of the wire.
+
+    The engines yield `<think>` before any frame when the prompt opened the
+    block, and `</think>` on their own account when the answer starts. Seen
+    20 September 2026: *"first word in 0 ms"* under a reply the person had
+    waited six seconds for — the instrument had timed its own tag.
+    """
+    stripped = token.strip()
+    return bool(stripped) and stripped not in (OPEN_TAG, CLOSE_TAG)
+
+
 class ExecutionEngine:
     """The operational core of Zaram. Orchestrates the lifecycle of a user request.
 
@@ -270,6 +283,9 @@ class ExecutionEngine:
         #: destructive ones, and never a tool on a read-only server. Cleared
         #: exactly where `_approved` is, because it was consent for that plan.
         self._uninterrupted: set[str] = set()
+        #: session_id → the files Zaram wrote in it, for the confirm card's
+        #: one line of provenance. Runtime-only, like the two sets above.
+        self._written: dict[str, Any] = {}
         #: session_id → the model's checklist, read off the `plan` tool's own
         #: result. **Not a ContextVar and not a channel into the pack**: the
         #: first version was, and a tool runs in `asyncio.to_thread`, so what
@@ -417,6 +433,28 @@ class ExecutionEngine:
             return False
         return len(self._plan_items(session_id)) >= self.PLAN_REVIEW_ITEMS
 
+    def _session_files(self, session_id: str):
+        """What Zaram wrote this session, per conversation — provenance for
+        the confirm card. `runtimes/mcp/floors.py`."""
+        from runtimes.mcp.floors import SessionFiles
+
+        files = self._written.get(session_id)
+        if files is None:
+            files = self._written[session_id] = SessionFiles()
+        return files
+
+    @staticmethod
+    def _code_root():
+        """The open coding project's folder, or ``None`` — asked when needed,
+        never held, because the open project changes while the engine does
+        not."""
+        try:
+            from packs.code import active_root
+
+            return active_root()
+        except Exception:  # noqa: BLE001 - a root lookup must never fail a call
+            return None
+
     def _runs_uninterrupted(self, session_id: str, tool_name: str) -> bool:
         """Whether this call may skip its confirmation because the person let
         the whole plan run.
@@ -455,6 +493,7 @@ class ExecutionEngine:
     # Legacy synchronous execution (backward compatible)
     # ------------------------------------------------------------------
 
+    @carries_step
     def execute(
         self,
         prompt: str,
@@ -493,6 +532,7 @@ class ExecutionEngine:
         timing: dict[str, int | None] = {
             "recall_ms": None, "plan_ms": None, "steps_ms": None,
             "first_token_ms": None, "generation_ms": None,
+            "tools_ms": None, "rounds_ms": None,
         }
 
         # Before anything else, including recall: will this route force a model
@@ -925,7 +965,7 @@ class ExecutionEngine:
                 )
                 for token in tokens:
                     step_output += token
-                    if generating and first_token_at is None and token.strip():
+                    if generating and first_token_at is None and _is_model_text(token):
                         first_token_at = time.monotonic()
                         # The wait before the first token is the prefill on a
                         # local server and the round trip on a remote one — the
@@ -1037,6 +1077,7 @@ class ExecutionEngine:
                     # the call, the gate's verdict, and everything after come
                     # out of here.
                     spoken: list[str] = list(shown_pieces)
+                    loop_clock: dict[str, int] = {}
                     for piece in self._run_tool_loop(
                         buffered=step_output,
                         shown=shown,
@@ -1046,6 +1087,7 @@ class ExecutionEngine:
                         spoken=spoken,
                         session_id=session_id,
                         native_tools=native_specs,
+                        clock=loop_clock,
                     ):
                         # A source the model fetched itself — `web.search` —
                         # is deduplicated and numbered at the same point the
@@ -1059,6 +1101,9 @@ class ExecutionEngine:
                             yield _numbered(piece)
                             continue
                         yield piece
+                    for phase in ("tools_ms", "rounds_ms"):
+                        if phase in loop_clock:
+                            timing[phase] = (timing.get(phase) or 0) + loop_clock[phase]
                     # The transcript stores what was said, not the marker that
                     # produced it. One stripper, every caller — the lesson the
                     # citation markers cost when the caller that *spoke* was
@@ -1560,8 +1605,15 @@ class ExecutionEngine:
         turns: list[ToolTurn] | None = None,
         continuations_left: int | None = None,
         native_tools: list[dict[str, Any]] | None = None,
+        clock: dict[str, int] | None = None,
     ):
         """Call a tool, show the model what came back, and let it call another.
+
+        ``clock`` collects where the loop's time went — ``tools_ms`` inside
+        tool calls, ``rounds_ms`` in the model rounds after the first — for
+        the `timing` event. Seen 20 September 2026: a 240 s reply whose
+        breakdown summed to 30 s, because everything after the first round
+        landed in no phase at all.
 
         ``native_tools`` are the offered tools in wire shape; they ride on
         every follow-up generation so a model that called natively on round
@@ -1601,6 +1653,17 @@ class ExecutionEngine:
         — a task that stopped short is the silent-degradation case, and it is
         the only one here that needs a sentence.
         """
+        clock = clock if clock is not None else {}
+
+        def _round(step: ExecutionStep, model_: str | None, system_prompt_: str, spoken_: list[str]):
+            # `_stream_round`, timed into the clock. A generator so the
+            # prose still streams through it.
+            t = time.monotonic()
+            try:
+                return (yield from self._stream_round(step, model_, system_prompt_, spoken_))
+            finally:
+                clock["rounds_ms"] = clock.get("rounds_ms", 0) + int((time.monotonic() - t) * 1000)
+
         turns = list(turns or [])
         if continuations_left is None:
             # **The same allowance whichever model is answering.** An earlier
@@ -1658,7 +1721,7 @@ class ExecutionEngine:
                         turns.append(ToolTurn(call=failed_call, result=failed_result))
                         checks_failed += 1
                         _speak_rest()
-                        text, shown = yield from self._stream_round(
+                        text, shown = yield from _round(
                             ExecutionStep(
                                 capability_id="reasoning.generate",
                                 input_data={
@@ -1719,7 +1782,7 @@ class ExecutionEngine:
                 turns.append(ToolTurn(call=call, result={
                     "note": "the plan is unchanged; carry on with the first step that is not done",
                 }))
-                text, shown = yield from self._stream_round(
+                text, shown = yield from _round(
                     ExecutionStep(
                         capability_id="reasoning.generate",
                         input_data={
@@ -1752,6 +1815,7 @@ class ExecutionEngine:
                 return
 
             call_mark = f"{current_step() or session_id}:call:{made + 1}"
+            called_at = time.monotonic()
             with running_step(call_mark):
                 result = run_sync(runtime.execute(MCP_CALL, {
                     "server": call.server,
@@ -1767,7 +1831,10 @@ class ExecutionEngine:
                     # read-only server still refuses, and a new question
                     # clears it.
                     "confirmed": self._runs_uninterrupted(session_id, call.tool),
+                    # For the conversation-scoped grants — the middle rung.
+                    "session": session_id,
                 }))
+            clock["tools_ms"] = clock.get("tools_ms", 0) + int((time.monotonic() - called_at) * 1000)
             if not isinstance(result, dict):
                 result = {"success": False, "error": "the tool returned nothing readable"}
 
@@ -1786,6 +1853,14 @@ class ExecutionEngine:
 
             if result.get("needs_confirmation"):
                 reason = result.get("reason", "")
+                # What the card cannot see from the call's text: that the file
+                # this would run was written by Zaram moments ago. One line,
+                # fixed vocabulary — `runtimes/mcp/floors.py`, provenance.
+                created = self._session_files(session_id).match(
+                    call.tool, call.arguments, step=made, root=self._code_root(),
+                )
+                if created is not None:
+                    reason = f"{reason} {created.render()}."
                 yield StreamEvent.tool_call(
                     call.server, call.tool, "confirm", reason,
                     target=call_target(call.tool, call.arguments),
@@ -1822,6 +1897,11 @@ class ExecutionEngine:
                 payload: Any = {"error": error}
             else:
                 payload = result.get("result")
+                # A successful write is remembered for this session, so a
+                # later `run_command` that would execute it can say so.
+                self._session_files(session_id).record(
+                    call.tool, call.arguments, step=made, root=self._code_root(),
+                )
                 # A write carries its diff and commit; the card shows the
                 # change and can revert it. Read off the payload rather than
                 # the tool name so a stranger's server that returns a `diff`
@@ -1943,7 +2023,7 @@ class ExecutionEngine:
                             },
                             depends_on=[],
                         )
-                        text, shown = yield from self._stream_round(
+                        text, shown = yield from _round(
                             follow_up, model, system_prompt, spoken
                         )
                         continue
@@ -1972,7 +2052,7 @@ class ExecutionEngine:
                 },
                 depends_on=[],
             )
-            text, shown = yield from self._stream_round(
+            text, shown = yield from _round(
                 follow_up, model, system_prompt, spoken
             )
 
@@ -2302,6 +2382,7 @@ class ExecutionEngine:
         """
         self._plans = records
 
+    @carries_step
     def continue_task(
         self,
         session_id: str = "default",

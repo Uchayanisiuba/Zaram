@@ -131,6 +131,33 @@ class TestWhereTheTimeWent:
         assert out.index(timings[0]) > last_text
 
 
+    def test_the_first_token_is_the_models_not_the_engines_tag(self):
+        """Seen 20 September 2026: *"first word in 0 ms"* under a reply the
+        person had waited six seconds for. The engine yields `<think>` on its
+        own account before any frame when the prompt opened the block, and
+        the instrument timed its own tag."""
+        import time
+
+        from core.reasoning import CLOSE_TAG, OPEN_TAG
+
+        engine, service = _engine_with(PAYLOAD)
+
+        def slow_thinker(user_text, personality_context="", model=None):
+            yield OPEN_TAG
+            time.sleep(0.05)
+            yield "a thought"
+            yield CLOSE_TAG
+            yield "an answer"
+
+        service.generate_response = slow_thinker
+        out = list(engine.execute(QUESTION))
+
+        t = _events(out, EventType.TIMING)[0].data
+        # Windows sleeps in ~15 ms ticks; 0.05 s measured as 46 ms on the
+        # maintainer's machine. The claim is "not zero", not "exactly 50".
+        assert t["first_token_ms"] >= 30, t
+
+
 class TestThePlannersStepsAreAChecklist:
     """C1 of `docs/PLAN.md`: a multi-step plan ticks as a checklist, in the
     same shape as the model's own `plan`; a one-step plan shows no list."""

@@ -49,15 +49,26 @@ export function timingLine(timing: ChatTiming | null | undefined): { text: strin
   if (!timing) return null;
   const s = (ms: number | null) =>
     ms === null ? null : ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)} s`;
-  const first = s(timing.firstTokenMs);
+  // What the person waited: everything before the model's first word,
+  // measured from the question. The engine's phases are disjoint — recall,
+  // plan, the steps that ran before the answer, then the prefill — so the
+  // wait is their sum, and the prefill alone is one line of the breakdown.
+  // Seen 20 September 2026: "first word in 0 ms" under a six-second wait.
+  const waited =
+    timing.firstTokenMs === null
+      ? null
+      : (timing.recallMs ?? 0) + (timing.planMs ?? 0) + (timing.stepsMs ?? 0) + timing.firstTokenMs;
+  const first = s(waited);
   const total = s(timing.totalMs);
   if (!first && !total) return null;
   const parts = [
     ['recall', s(timing.recallMs)],
     ['plan', s(timing.planMs)],
     ['steps', s(timing.stepsMs)],
-    ['first word', first],
+    ['prefill', s(timing.firstTokenMs)],
     ['writing', s(timing.generationMs)],
+    ['tools', s(timing.toolsMs ?? null)],
+    ['more rounds', s(timing.roundsMs ?? null)],
     ['total', total],
   ].filter(([, v]) => v !== null) as [string, string][];
   return {

@@ -198,7 +198,26 @@ class UserSettings:
         # Local first, as everything is: CLAUDE.md's "local is the fallback
         # for everything" is also its default. The person flips it.
         self._image_locality = ImageLocality.LOCAL
+        # Whether a model that can think is asked to. On by default, because
+        # the thinking is where a 27B earns its keep on a hard question; off
+        # is for the person writing an email who does not want to wait 10–40 s
+        # for it. `docs/PLAN.md` E2b. Applied by the local engines — Ollama's
+        # `think` and TabbyAPI's `enable_thinking` — and left alone for cloud
+        # providers, whose controls differ per vendor and are not guessed at.
+        self._thinking = True
         self._load()
+
+    @property
+    def thinking(self) -> bool:
+        """Whether a thinking model is asked to think. Read at request time by
+        the local engines."""
+        return self._thinking
+
+    def set_thinking(self, on: bool) -> bool:
+        with self._lock:
+            self._thinking = bool(on)
+            self._save()
+        return self._thinking
 
     @property
     def image_locality(self) -> ImageLocality:
@@ -348,6 +367,7 @@ class UserSettings:
             "manner": self._manner,
             "voice": self._voice,
             "image_locality": self._image_locality.value,
+            "thinking": self._thinking,
         }
 
     # ----------------------------------------------------------------- write
@@ -508,6 +528,11 @@ class UserSettings:
         scope = raw.get("search_scope")
         if scope in {s.value for s in SearchScope}:
             self._search_scope = SearchScope(scope)
+
+        # Only an exact `false` turns thinking off; anything else keeps the
+        # default. The safe direction is the opposite of `web_search`'s — a
+        # misread here costs a wait, not a byte leaving.
+        self._thinking = raw.get("thinking") is not False
 
         # The character. Read defensively and bounded on the way in: a settings
         # file is a file, a character is meant to travel as one, and the day

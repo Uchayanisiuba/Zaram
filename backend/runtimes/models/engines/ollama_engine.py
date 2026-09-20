@@ -62,6 +62,21 @@ COLD_START_TIMEOUT = 600.0
 WireName = Callable[[str], str]
 
 
+def _thinking_wanted() -> bool:
+    """The person's *Thinking* control, read at request time.
+
+    Imported late so this module keeps not depending on settings at import;
+    a settings store that cannot be reached answers *on*, which is the
+    default and the direction that costs a wait rather than an answer.
+    """
+    try:
+        from core.user_settings import get_user_settings
+
+        return bool(get_user_settings().thinking)
+    except Exception:
+        return True
+
+
 class OllamaEngine(LLMEngine):
     """Text generation against a local Ollama server.
 
@@ -306,8 +321,8 @@ class OllamaEngine(LLMEngine):
             "stream": True,
             "keep_alive": payload.get("keep_alive", KEEP_ALIVE),
         }
-        if payload.get("think"):
-            body["think"] = True
+        if "think" in payload:
+            body["think"] = bool(payload["think"])
         try:
             response = requests.post(
                 f"{self.base_url}/api/chat",
@@ -557,7 +572,11 @@ class OllamaEngine(LLMEngine):
         # revisited — which is why the maintainer saw thinking on TabbyAPI and
         # lost it on switching to Ollama, and read that as Zaram breaking.
         if self._supports_thinking(payload["model"]):
-            payload["think"] = True
+            # `False` is sent, not omitted: with `think` unset a thinking model
+            # still thinks, in the content, untagged — the state this comment
+            # describes. The setting is the person's *Thinking* control,
+            # `docs/PLAN.md` E2b.
+            payload["think"] = _thinking_wanted()
         logger.debug(
             "OllamaEngine.stream_response: model=%s images=%d prompt='%s...'",
             payload["model"],
