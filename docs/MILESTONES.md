@@ -365,10 +365,109 @@ September installer that could not start off the build machine) — deleting
 a public release is the maintainer's click; coworker step 4 (triggers and
 the inbox), a multi-day item.
 
+#### 20 September, evening — coworker step 4, and the handoff
+
+**Step 4 — work that runs on its own.** `core/triggers.py`: a trigger is
+a question and when to ask it (`daily`, `weekly` on a weekday, or
+`obligations`, which expands once a day into one run per open obligation
+due within N days, deduplicated by id). A run **is `POST /chat`, in
+process**, under a session minted by the runner that nothing ever grants
+to — no Go, no *run without stopping*, no conversation rung — so the first
+held tool stops it exactly as it stops a typed question and the unfinished
+task lands in Activity's *waiting on you*. **Circuit breaker:** three
+held runs in a row pause the trigger with the reason; turning it back on
+is the person having looked. Run records keep 30 days; the transcript is
+the conversation it made, under Activity's own retention. Routes:
+`GET/POST /triggers`, `PATCH/DELETE /triggers/{id}`, `POST
+/triggers/{id}/run`. Settings → *Runs on its own* configures; Activity →
+*Ran on its own* lists runs with *open* to the transcript and says when a
+trigger is paused. `/triggers` added to both proxy lists (guard: 29
+prefixes). **Seen live:** a weekly trigger, *Run now* → 23 s through the
+real route on the 27B → a conversation with its transcript, listed under
+Activity with *open*, next run Monday 09:00. **Not seen:** the Settings
+section (built, 7 component tests, the session ended first); a real
+obligations run (the scratch data dir had none).
+
+**Asked, answered, not built: social media and YouTube.** Same shape as
+email — an attached, API-backed MCP server; a scheduled post is a trigger
+whose one call the gate holds; replies to strangers stay drafts for a Go
+unless the person grants *always*, by name. Never the consumer web apps
+(`CLAUDE.md` prohibits driving them). The maintainer asked for it to be
+set up for the popular networks and YouTube: the work is a *catalogue* of
+known API-backed servers in Settings → Tools — name, package, the env var
+each needs — so the person pastes only the token. Not started; a session
+must not handle the tokens themselves.
+
+#### Is it good enough for the test? — the assessment, 20 September
+
+**The build testers get is `v0.1.0-alpha.1` (15 September), and yes, for
+what the test is** — point it at a folder, get a cited answer, correct a
+fact, write a document, see the log. That build predates every defect
+found this week and none of this week's features; it has been cold-installed
+once (13 September, on this machine, from outside the checkout) and never
+on a stranger's machine. What it needs before the email goes: the Formspree
+list imported into Buttondown (maintainer), and one more cold install if a
+second machine is available.
+
+**`main` is not ready to build.** Two days of work, four defects found by
+the first look, and the full backend suite has not run whole since the 19th.
+A build from `main` needs, in order: the full suite detached with the GPU
+free (three unread failures from the last partial run); the rest of the
+*Look* list; a cold install. Estimate a day with the card free.
+
+**Loose ends to tie today, by kind:**
+
+*Security*
+1. **G1 against the real server list.** The allow-list environment is
+   tested at the process boundary but has not spawned your Blender, GitHub
+   or mail server. Open the real app once and confirm each starts.
+   Two minutes.
+2. **The trigger runner authenticates in process with `api_secret()`** —
+   correct, but a second reader of the credential; noted so the next audit
+   knows it is deliberate.
+3. **Every attached server is a stranger's process with your standing
+   grants** — unchanged, and the floors now stop it writing
+   `mcp-servers.json`. The remaining known hole is the dev-file secret at
+   rest (`core/api_secret.py`, documented).
+
+*Bugs*
+4. **The avatar smiles at rest.** Seen today on the landing with the
+   avatar renderer on: happy eyes and a smile while idle. `CLAUDE.md`: the
+   rest face is `sil`, a flat line; the smile is for the mascot, never the
+   status indicator. Find which expression the idle state maps to.
+5. **Memory → Facts lists the manual's chunks as `user · provisional`** on
+   a fresh install (15 September note, still open) — the first thing a
+   tester sees under a heading about themselves.
+6. **Tabby's `reasoning`/`tool_format` fix lives in your `config.yml`, not
+   the repo.** `docs/RUNNING.md` should carry the two keys and the
+   `use_as_default` rule, or the next machine loses native calls silently.
+7. **Three unread failures** from the last partial full-suite run.
+
+*User experience*
+8. **Not yet seen:** rows *between* paragraphs (every turn today called
+   before writing); a folder named in a sentence; the model choosing
+   `web.search` with search *on*; Settings → Runs on its own; an
+   obligations trigger with real obligations.
+9. **G3, the five verbs on Alt+C** — the highest-leverage daily-use item in
+   Workstream G, not started.
+10. **The socials/YouTube catalogue** above.
+11. **The 26 s re-prefill** after a file read on the 27B — now measured
+    and visible under *first word*; the next A3 item.
+
+*Housekeeping*
+12. Delete the stale `v0.1.0` release — the maintainer's click:
+    `gh release delete v0.1.0 --yes`.
+13. Three `.fbx` idle animations under `avatar-source/animations/` are
+    untracked and were not this session's; keep or ignore.
+
 #### Do these next, in order
 
-1. **Commit** — G1, G5, G8, E2b, the four fixes, the panel change, the
-   floors, the conversation rung, the tester script, this block.
+1. **Send the tester email** for `v0.1.0-alpha.1` once the Buttondown list
+   exists: `node scripts/tell-the-testers.mjs v0.1.0-alpha.1 --send`.
+2. Items 1, 4 and 6 above — an hour, no GPU for 6.
+3. **Full backend suite detached**, GPU free; then the *Look* list; then
+   a cold install; then a build from `main`.
+4. G3, then the socials catalogue, then G2 and G7.
 2. **Workstream G, the GPU-free half**: G4 (once · session · always · deny,
    with the floor), G2 (bm25s + RRF, `history.search`), G3 (the five verbs
    on the ambient panel). None needs the card.

@@ -576,8 +576,13 @@ Sets `CHOOSES_TOOLS_MIN_BYTES` from a number; recorded in `CODE-PACK.md`
 slice 9. The go/no-go stands: over-calling on more than one question in five
 keeps the planner primary on that model. *Seen:* the table.
 
-**G6. Two official servers, one real task, then the triggers.** *A week,
-needs a model — coworker steps 1 and 4.* `github/github-mcp-server` (MIT) and
+**G6. Two official servers, one real task, then the triggers.** *The
+triggers half built 20 Sept (coworker step 4: `core/triggers.py`, seen
+live once); the real GitHub/mail task still needs the maintainer's tokens.
+Social media and YouTube fit the same shape — an attached API-backed
+server, a scheduled post as a trigger the gate holds, replies to strangers
+draft-only unless granted by name — and want a catalogue of known servers
+under Settings → Tools, not a build.* `github/github-mcp-server` (MIT) and
 `microsoft/playwright-mcp` (Apache-2.0), and a mail server, attached rather
 than built. One task end to end — the plan, the pause, the Go, the egress
 entries addressed to each. Then the scheduler runs the month's picture and
