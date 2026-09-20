@@ -22,7 +22,232 @@ publishing step over rather than finding another route. `CLAUDE.md`,
 
 *The latest work is first. Earlier sessions follow below.*
 
-### 15-19 September — v0.1.0-alpha.1 is out, and four of the coworker's pieces are built. HANDOFF.
+### 19 September, later — the plan is written, and Week 1 of it is built but not yet seen. HANDOFF.
+
+**Read this block first, then `docs/PLAN.md`.** That file is new today: the
+diagnosis of "Zaram is slow sometimes" and "the model seems limited inside
+Zaram", read from the code with line references; six workstreams; acceptance
+criteria that are things seen on screen; a week-by-week order. The 15–19
+September block below is still accurate about the release and the coworker.
+
+**Nothing in this block has been seen on screen.** The maintainer was in
+Unreal on a deadline for the whole session, so no model was run and the app
+was not launched — every item below is built and green against fakes, and
+`docs/PLAN.md`'s acceptance for each is a thing to *watch*, which is the
+next session's first job. Committing is also the maintainer's call; the tree
+is uncommitted at the time of writing.
+
+#### Built — Week 1 of the plan
+
+* **A2 — tool turns stream.** `visible_length` (`core/tool_loop.py`) is a
+  holdback: text up to a complete `[TOOL_CALL]` / `<tool_call>` opener is
+  shown as it arrives; only a tail that could start one is withheld, and
+  released on the next token. `_stream_round` (`core/execution_engine.py`)
+  replaces the five `"".join(execute_step(...))` sites in the loop, so **the
+  model's narration between calls now reaches the screen** — before today
+  each round's prose was overwritten by the next and only the last was
+  spoken. `OllamaEngine._chat_with_tools` streams `/api/chat` and re-tags
+  thinking as `stream_response` does. `tests/test_tool_turns_stream.py`
+  (three-character tokens, so every marker really is split).
+* **B1 — a row for every step.** `core/step_labels.py` is the verb table
+  (*Searching the web / Searched the web*, *Reading the image*, *Drawing*,
+  *Writing the document*); a capability it does not name gets no row, and
+  `mcp.list_tools` / `reasoning.generate` never do. `StreamEvent.step_start`
+  / `step_complete` — which existed from the first day and reached nothing —
+  are yielded into the stream with the words, a `step_id`, a detail
+  ("4 results" or the error) and measured seconds. Recall gets *Recalled N
+  facts* when it found something. Frontend: `chatClient` parses both,
+  `chatStore` settles the row in place by `step_id` (and marks a row still
+  running at stream end as *did not finish* rather than leaving a spinner on
+  a finished reply), `ToolCalls` renders a step in prose with a spinner
+  while running and folds it by its own phrase. `tests/test_every_step_gets_a_row.py`,
+  `chatStore.steps.test.ts`, `ToolCalls.test.tsx`.
+* **E1 — the preamble says identity is settled.** One line in
+  `_HOW_TO_ANSWER_ABOUT_YOURSELF`: *"What you are is settled above. Do not
+  reason or deliberate about it, in your thinking or anywhere else; reason
+  about the question."* Structural test in `test_identity_stays_truthful.py`.
+  **The measurement — ten prompts on a Qwen with thinking on, counting
+  "Qwen" in the reasoning before and after — has not been taken.**
+* **E2 — thinking is one quiet line.** `ReasoningPanel` is collapsed by
+  default, always; the line is the checklist's `doing` item, else the first
+  sentence of the latest paragraph (`reasoningLabel.ts`), never a generated
+  summary; *Thought for N s* only when this component watched it stream.
+  The per-conversation Thinking on/off control is not built.
+* **A1 — where the time went.** One `timing` event per reply — recall, plan,
+  steps, first token, generation, total, in ms, `None` where unmeasured —
+  logged at INFO and shown as *"· first word in 3.9 s"* on the *answered by*
+  line with the breakdown in its tooltip. Deviates from the plan's "Activity
+  only" because Activity opens only when tools ran, and a plain reply is the
+  common slow case.
+
+#### Built later the same session — into Week 2 and 3 of the plan
+
+* **C1 — the planner's steps are a checklist.** A plan with more than one
+  step sends `StreamEvent.plan` with `source="planner"` — *Searching the web
+  — q → Answering* — and ticks it by step; the model's own `plan` still
+  wins the moment it writes one. Live-only on the interface: finished, it
+  would duplicate the folded row line, so `chatStore` drops it on commit
+  and keeps the model's. `_Ticker` in `execution_engine.py`.
+* **A3 — the front of the transcript holds still.** `_front_cut` per
+  session: the turns cut last time stay cut while the rest fits; only when
+  it does not is a new cut made, with a quarter of the window as headroom
+  (`transcript.fit(headroom_tokens=)`), so a full session re-reads its
+  history once per block rather than once per message.
+  `test_prompt_prefix_is_stable_between_turns.py::TestTheFrontHoldsStill…`.
+  The other half of A3 — tool rules ahead of the conversation — waits on D1.
+* **A4 — reload on return.** `POST /models/warm` goes through
+  `warm_local_model` and therefore every refusal it already applies
+  (nothing selected, `prefer_cloud`, does not fit what is free *now*);
+  `lib/warmOnReturn.ts` calls it on window focus after 25 min idle, once
+  per return. A person back from Unreal with the card full gets a refusal
+  and no load.
+* **F1 — a folder in the sentence is an offer.** `core/named_folder.py`
+  finds a real folder named in the message (quoted or bare, drive, UNC,
+  POSIX, `~`; only one that exists; never a bare word); with no coding
+  project open the chat handler sends an `open-project` notice carrying
+  path and name, and `NoticeCard`'s one press creates the coding project,
+  selects it and re-asks. Rule 7h.
+
+#### Built on 20 September, on the maintainer's "execute it next" — the rest of the GPU-free list
+
+Still not seen on screen; the GPU was still Unreal's.
+
+* **D1 — for a model that can call tools, the model chooses.** A plain
+  generation plan, on a model `ModelsRuntime.chooses_tools` says may choose
+  (`supports_tools`, and on disk >= 6 GB — **provisional until D2 is
+  measured**; unknown size is trusted), gets `mcp.list_tools` in front of it
+  and the model decides. Read off the plan *as planned*, so a document plan
+  that degraded because a runtime is missing is not mistaken for an
+  ordinary question. The gate runs unchanged on what is chosen. Every model
+  that cannot call tools, and every test double that never heard of the
+  question, stays on the planner's path. `web.search` is a new tool on the
+  web pack — the planner's own search, offered as a call; off is a refusal
+  naming Settings; results the model fetched are cited and numbered at the
+  same point the planner's are (rule 2). `tests/test_the_model_chooses_its_tools.py`.
+* **A3, second half — the tool rules sit before the conversation.** When
+  the listing is the plan's first step it runs before the history is
+  composed, so identity -> tools -> conversation -> recall -> question, and
+  the rules are in the cached prefix. The stranger shortlist is ranked by
+  the question only on a TOOL-intent turn or a named page
+  (`_wants_ranked_tools`); otherwise the listing order, so the bytes are the
+  same every turn (an empty query means "listing order" in
+  `McpRuntime.available_tools`). Prefix byte-identical across two tool
+  turns, pinned.
+* **F2 — six use cases on the empty conversation.** Document, obligations,
+  code a project (needs only a model now, since F1 opens the folder from the
+  sentence), research (web search on), email (a reachable mail server),
+  GitHub (a reachable GitHub server) — each lit by a measurement, three
+  shown, the rest behind *"3 more things Zaram does"*. `serverKinds`
+  reads mail/GitHub off the server list by id or command.
+* **C3 — tasks in Activity.** The unfinished/finished task lists moved out
+  of `ProjectWorkspace` into `components/tasks/TaskLists.tsx` and Activity
+  mounts them at the top, across projects, with Continue into the
+  conversation. Project keeps its per-project view.
+* **B2 — rows between paragraphs.** Each row records the reply's text
+  length when it arrived (`ChatToolCall.at`, markers stripped);
+  `Interleaved` cuts the text at those offsets and draws each group of rows
+  with the existing `ToolCalls`, so folding, change cards and the held-tool
+  button are untouched and a group folds to its own line where it sits.
+  Rows with no offset (an older history) sit in front.
+* **C2 — the working pane, from a row.** Every step and every tool call is
+  marked (`core/egress/step_context.py`, a ContextVar) and the one place an
+  egress entry is written stamps the mark into `meta["step_id"]` — inside
+  the hash. `run_sync` now carries the caller's context onto the background
+  loop, which it did not (the task was created in that loop's own context).
+  `GET /egress?step_id=` filters by step or by reply. Each row has *open*
+  which opens `ActivityPanel` focused on it: its output, its change with
+  Revert, its app card, and what it sent — *"Nothing left this device for
+  this step"* is a real answer, since the gate logs every request. The
+  summary still cannot open the panel during live work (existing contract);
+  a row's own *open* can, because a person asked.
+
+#### Found and fixed on the way
+
+* **`tests/test_local_dispatch.py` made live requests to port 1234.** Two
+  unit tests built a real `OpenAICompatibleEngine` and generated "hi" on
+  whatever was listening — the maintainer's Tabby 27B, while Unreal held the
+  card. The suite looked hung for half an hour. An autouse fake at the class
+  boundary now records what reached it, which was the assertion those tests
+  were missing.
+* **Two stale tests**, fixed rather than left: the planner's "closed, still
+  refused as a picture nobody gave" (reversed on purpose by `ef79d0d`, 15
+  Sept, and the test not updated), and the loop's "a refuted *Done.* is
+  never shown" (a buffered-era contract; with streaming the prose is on
+  screen before the check runs, as in Claude Code).
+* **`ActivityPanel`'s footer claimed "does not edit files — every mutative
+  tool is out of scope until v1"** — false since 12 September.
+* `chatClient.test.ts` asserted `step_start` is ignored; it is a row now.
+* **`conftest.py` never isolated the data directory.** It redirects the
+  settings file (and says why) but every other store still resolved to
+  `backend/` — so `test_read_page_is_offered_from_the_real_boot`, which
+  boots the real kernel, read the maintainer's real `mcp-servers.json` and
+  **spawned their attached servers**: `blender-mcp` (which then waited on
+  a Blender that was not running — the orphan seen earlier today), and it
+  would equally have started GitHub with its token and the mail server.
+  One session fixture sets `ZARAM_DATA_DIR` to a temp dir; the three
+  real-boot files then pass in 5 min 39 s with nothing spawned.
+* **Two installer defects** (`test_installer_payload.py`): the manual's
+  pictures under `backend/manual/assets/` are carried by name but the test
+  knew only suffixes, so it reported them as uncarried — now it reads the
+  named includes from the same config; and `backend/manual.json`, the
+  runtime stamp of which manual version was indexed, matched `**/*.json`
+  and would have shipped this machine's record — excluded by name beside
+  `settings.json`.
+
+#### Measured
+
+* Backend, model-free subsets, Ollama up but never asked: loop and search
+  files 224 + 93 + 56 passed; identity 79; engine files 42. The **199 files
+  that do not name a live server** were run as one set at the end of the
+  session — see the line below for the result.
+* Frontend: **871 passed, 91 files** on the full suite at the end of
+  20 September (860 on the 19th, 848 after Week 1 alone); `tsc` and `eslint`
+  clean on every changed file. Backend, the 32 files touched across both
+  days as one run: **581 passed**, the only failure the untracked-files
+  check on the new modules.
+* **The 199 model-free backend files, run detached with the GPU in use by
+  Unreal: 3,204 passed, 3 failed, 16 skipped, 50 min.** Two of the three
+  were the installer defects above (fixed); the third,
+  `test_the_app_can_run_and_be_looked_at::test_a_real_screenshot…`, starts
+  a real app and a browser and timed out at 40 s under that load —
+  environmental, re-run idle. After the fixes the only payload failure is
+  "these are untracked" for the two new modules, which the commit settles.
+* **The full backend suite still has not completed a run.** Attempt three
+  today reached 85% and was killed with Unreal on the card. It cannot run
+  while the GPU is in use — 46 test files probe or generate against live
+  servers by design — and it exceeds the tool's ten-minute ceiling, so it
+  needs a detached run. Four failures were seen through 85%:
+  `test_a_coding_project_offers_its_tools` (fixed above),
+  `test_installer_payload` ×2 and `test_residency_sees_every_server` ×1 —
+  the last three unread.
+
+#### Deliberately not built blind
+
+E2b (a Thinking on/off control) needs a per-request flag on both engines
+and Tabby's half (`enable_thinking` vs Qwen's `/no_think`) can only be
+verified against a live model; a switch that works on one engine and
+silently not on the other is the "disabled capability, silent" failure.
+B2 and C2 *were* built on the 20th at the maintainer's instruction — they
+are layout changes to the transcript and the first thing to look at, since
+a wrong offset or a pane that opens onto the wrong call is invisible to a
+test.
+
+#### Do these next, in order
+
+1. **Look.** `npm run dev:app -- -NoTabby`, then: a research question (rows
+   appear before prose, fold after); a coding turn in a project (prose
+   streams *between* rows, in order); a thinking model (one line, expands);
+   hover the *answered by* line; press *open* on a row (the pane, focused,
+   with what it sent); name a folder in a sentence (the offer); a plain
+   question on the 14B with no project open — does it choose `web.search`
+   or `read_page` on its own, and does the fold say so; the six tiles and
+   *3 more*; Activity's *waiting on you*. None has been seen.
+2. **Take E1's measurement** and record the before/after count here.
+3. **Run the full backend suite detached**, GPU free, and read the three
+   unread failures.
+4. Then `docs/PLAN.md` Week 2: D2 (the tool-choice eval) before D1.
+
+### 15-19 September — v0.1.0-alpha.1 is out, and four of the coworker's pieces are built.
 
 **Read this block first.** Everything is committed and pushed; `main` at
 `69d34bd`. The coworker milestone immediately below is still the plan, and
@@ -359,7 +584,8 @@ real exercise, and the runner build is unproven where the local one is not.
 
 What was done instead, in order: `npm run build` here; silent install to
 `%LOCALAPPDATA%\Programs\Zaram`; launched from `C:\` on an empty
-`ZARAM_DATA_DIR` — backend from `resourcesuntime\python.exe`, `/health`
+`ZARAM_DATA_DIR` — backend from `resources
+untime\python.exe`, `/health`
 401 without the credential, every store in the scratch directory, Memory
 rendering live counts (window captured by handle; the largest visible
 window, since the 6×128 ambient handle is also a window); `gh release create`
