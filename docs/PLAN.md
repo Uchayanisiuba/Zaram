@@ -397,7 +397,7 @@ count occurrences of "Qwen" and "as an AI" in the reasoning before and after.
 Recorded in `MILESTONES.md`; the pinned test is structural (the line exists,
 in that position).
 
-### E2. Collapsed by default, one line of the model's own words. *Built 19 Sept, not yet seen; the on/off control is not.*
+### E2. Collapsed by default, one line of the model's own words. *Seen 20 Sept; the on/off control built and measured the same day — 27B 4.3 s → 0.8 s, 14B 19.4 s → 0.3 s.*
 
 `ReasoningPanel` collapsed while streaming and after. The line, in priority:
 
@@ -463,6 +463,193 @@ self-approve. The Monday month's-picture is the acceptance.
   local, silent path. A week, mostly the consent surface.
 - **Scheduled tasks** — F4.
 - **The inbox** — F3.
+
+---
+
+## Workstream G — the daily driver (every claim, and the one `CLAUDE.md` puts first)
+
+Added 20 September 2026, at the maintainer's request, wearing two hats: the
+product designer asking *why would someone open this on a Tuesday in month
+three*, and the architect asking *what has to be true underneath for that to
+keep being the answer*. `CLAUDE.md` already gives the order — **usable daily →
+useful because it remembers → indispensable because it acts** — and A–F build
+the first step. G is the second and third, designed from a day rather than
+from a feature list.
+
+### The day it is designed for
+
+Three people, one product, no seventh node. The freelancer with invoices, the
+developer with a repository, and anyone who types for a living — the same
+person on different afternoons.
+
+| moment | what happens | what it rests on |
+|---|---|---|
+| **08:30, opening the laptop** | Activity, once: what ran overnight, what is waiting on a *Go*, which obligations fall due this week. Empty when nothing is — Zaram speaks first only with something real. | F3, F4, G6 |
+| **10:15, in Outlook, a client's mail selected** | **Alt+C.** "Reply — we agreed 30 days, they are asking for 45." The draft knows the client, the terms and the last three exchanges, says which of that it recalled, and goes back where the selection came from. Under a second to the first word. | the ambient surface (built), A1–A4, G2 |
+| **11:40, a paragraph selected anywhere** | Alt+C: *rewrite · shorter · translate · summarise · explain*. Five verbs, no chat, no window to find. Local, nothing leaves. | G3 |
+| **14:00, at the desk** | "Add the export button to the app in `C:\foo`" — a list that ticks, rows between the prose, a pause before the write with the diff, one *Go*. The second time the same shape of task comes, Zaram already has the procedure. | A–F, G5, G7 |
+| **16:30** | "Chase Northwind for the March invoice." Plan, the draft, the send held — *once · this session · always for this address · deny*. Chosen once; never asked again for the same class. | G4, G6 |
+| **Monday 09:00** | The month's picture, run while the window was closed, with what it read and what left the machine. | F4, G6 |
+| **Any time** | "What did we decide about the rate?" — the actual line, dated, from the transcript, with the fact beside it from memory. | G2 |
+
+Five design rules, each derived from one of those rows and each checkable:
+
+1. **The first word within a second, or a row within 300 ms.** A person waits
+   for progress, not for silence. (A1–A4; measured in `timing`.)
+2. **Never the same question twice.** Consent once per destination and data
+   class, remembered, visible in Settings, revocable. Forty dialogs a day is a
+   product nobody opens on day two. (Rule 7j, G4.)
+3. **Every reply says why it knew.** One line: what was recalled and from
+   where, what answered and where it runs. The *"it remembered"* moment is the
+   retention mechanism, and it only lands when it is visible. (Rule 2, G2.)
+4. **The app is not the destination.** For the five daily jobs the person
+   stays in Outlook, Word, the browser; Zaram comes to the selection and
+   leaves. The main window is for tasks, memory and the record. (G3.)
+5. **Nothing nags.** No streaks, no "you haven't asked me anything", no
+   re-engagement. Activity fills only with things the person caused. (Rule
+   against engagement mechanics; F3.)
+
+### The items, in the order daily use ranks them
+
+**G1. A tool server sees only what it was given.** *Built 20 Sept, tested
+at the process boundary; not yet re-run against the real server list.* Read from
+`runtimes/mcp/client.py:214` on 20 September: `_child_env` starts from
+`dict(os.environ)`, so every attached server inherits **`ZARAM_API_SECRET`** —
+the credential that authenticates `GET /memory`. A third-party MCP server can
+read the whole Spine. The 15 September fix was right about `PATH` and
+`SYSTEMROOT` and did not subtract. The base becomes what a process needs to
+start (`PATH`, `SYSTEMROOT`, `TEMP`/`TMP`, `USERPROFILE`/`HOME`, `COMSPEC`,
+`LANG`/locale, `APPDATA`/`LOCALAPPDATA` for Node) plus the server's own `env`
+block; nothing whose name contains `SECRET`, `TOKEN`, `KEY` or `PASSWORD`
+crosses unless the block names it. *Seen:* a server that prints its
+environment shows no `ZARAM_API_SECRET`; Blender and GitHub still start.
+
+**G2. Memory that answers the daily question.** *Three days; build without
+GPU, measure with.* Two halves, one item, because they are the same promise —
+*it remembered*:
+
+* *Lexical retrieval beside the vectors.* `bm25s` (MIT, numpy/scipy) over the
+  same facts and chunks the Spine embeds, fused with the dense list by RRF —
+  `Σ 1/(k + rank)` — for **ordering only**. Membership and citation stay on
+  the cosine; a test asserts the fused score never meets the citation floor.
+  The acceptance is rule 9's own case: "write that up as a proposal" after
+  the Northwind conversation retrieves Northwind. Client names, invoice
+  numbers and reference codes are what a person says every day and what an
+  embedding is worst at.
+* *The transcript as a tool.* `history.search` over what Activity already
+  keeps: FTS5 in the standard-library `sqlite3`, verbatim results, dated,
+  retention honoured (a pruned turn is not searchable). A read tool — nothing
+  it returns enters the Spine, so 7d holds and no new store is added.
+
+*Seen:* "what did we decide about the rate" answered with the line and the
+date; the recall eval's before/after on the rule 9 question.
+
+**G3. The five verbs on the selection.** *Two days, no GPU for the build.*
+The ambient surface already reads the selection on **Alt+C**. What it lacks is
+the five jobs a local 8–14B does well as *verbs* rather than as a chat:
+rewrite, shorter, translate, summarise, reply — plus explain. Each is a
+one-keystroke choice on the panel, answers from the resident model, and puts
+the result on the clipboard (insertion into the host app stays out: pasting
+is the person's act, and it is the one Superhuman Go gets wrong by doing it
+for them). Memory is carried — *reply* knows the sender if the Spine does —
+and the panel's own egress line says whether anything left. *Seen:* a
+paragraph in Word, Alt+C, *shorter*, paste; the sender's name recalled on
+*reply* with the source named.
+
+**G4. Once · session · always · deny, and a floor.** *The conversation rung
+and the floor built 20 Sept (coworker steps 2–3); the standing-rules page
+under Settings and the circuit breaker are still to build.* The held-tool card offers the four;
+*always* writes a standing rule under Settings beside Tools, revocable, keyed
+by destination and data class (an address, a repository, a folder) so the
+grant is legible; an allowlist entry may name a danger rule rather than a
+command. The floor is a written list no mode lowers — money, deletion outside
+the trash, mass-send, privacy-rule changes — tested by attempting each under
+every mode. Three denials pause the run and say so in Activity. *Seen:*
+approve a send to one address once, watch the second not ask; try a mass-send
+under *always*, watch it refuse.
+
+**G5. The tool-choice eval, on BFCL's scorer.** *Run 20 Sept: 27B 20/20,
+14B 19/20, no over-calls; `CODE-PACK.md` 9b.* Twenty Zaram questions in BFCL's format plus its *relevance
+detection* slice — the right answer is *no tool* — scored by its AST matcher
+(`bfcl-eval`, Apache-2.0), run on the 14B, the 27B and one cloud model.
+Sets `CHOOSES_TOOLS_MIN_BYTES` from a number; recorded in `CODE-PACK.md`
+slice 9. The go/no-go stands: over-calling on more than one question in five
+keeps the planner primary on that model. *Seen:* the table.
+
+**G6. Two official servers, one real task, then the triggers.** *A week,
+needs a model — coworker steps 1 and 4.* `github/github-mcp-server` (MIT) and
+`microsoft/playwright-mcp` (Apache-2.0), and a mail server, attached rather
+than built. One task end to end — the plan, the pause, the Go, the egress
+entries addressed to each. Then the scheduler runs the month's picture and
+the seven-days-out reminder draft, held in Activity, never self-approved.
+The Playwright half is F5's browser with per-site consent as the only new
+surface. *Seen:* the Monday picture that ran with the window closed.
+
+**G7. Procedural memory — skills the system writes.** *A week, after G6,
+because a skill is written from a real task.* Zaram remembers facts; it does
+not remember *how it did something*, and for a local 14B — whose weakness is
+planning, not execution — that is the larger half. After a multi-step task
+finishes, after a dead end is resolved, or after a correction, Zaram drafts a
+skill: *When to use / Procedure / Pitfalls / Verification*, lessons not logs,
+a pitfall as a rule plus one clause of why. It lands as a card, origin
+`zaram-generated`, provenance to the session and the correction, correctable
+and deletable like any fact (rules 4, 7b, 7d, 7e, 7f all apply unchanged).
+Listed to the model by name and description, loaded whole only when it asks —
+progressive disclosure, so a hundred skills cost ~3k tokens, not the window.
+A skill is prompt text and therefore third-party text: never silently
+installed, never widening a permission. *Seen:* the second "chase an invoice"
+runs on the procedure the first one wrote, and the card that says so.
+
+**G8. TabbyAPI's native calls.** *Done 20 Sept — two keys, the second being
+`use_as_default`; measured 3.4 s with a parsed call.* `tool_calls` are
+null unless `tool_format` is set in Tabby's config — the call comes back as
+text in `content`, silently. Check, set, pin with a live test skipped when
+Tabby is down. Without it D4's native path on the maintainer's own server is
+the marker path wearing a different name.
+
+**G9. The memory number.** *One day, needs a model.* LongMemEval's 500
+questions through recall, reported with the model and the environment
+stated. LoCoMo stays internal (CC-BY-NC). `CLAUDE.md` says benchmark memory
+"not by feel"; this is the first time it is.
+
+### The order, revised
+
+GPU-free first, in the order the day ranks them; the rest the moment the GPU
+is free, after the *Look* list.
+
+| when | build | what a person sees |
+|---|---|---|
+| **Now, GPU held** | G1, G2 build, G3 build, G4, G5 scaffold | Nothing yet — the environment test, the fused-ranking test, the five verbs and the four-option card all pinned by tests that assert the contract. |
+| **GPU free, day 1** | the *Look* list; G8 | Everything built since 19 September, seen; Tabby's native calls confirmed or fixed. |
+| **GPU free, days 2–3** | G2 measured, G3 seen, G5 run | Alt+C → *shorter* → paste; the rule 9 question retrieving Northwind; the tool-choice table and the floor it sets. |
+| **Week after** | G6 | The GitHub task at the pause; the Monday picture that ran while closed. |
+| **Week after that** | G7, G9 | The second task on the first task's procedure; the LongMemEval number. |
+
+### What this does not do, said so nobody expects it
+
+* **It does not make the local half smarter.** A 14B answers the five jobs
+  fast and well and hands hard reasoning to a key the person added. The
+  reply says which happened. A person expecting frontier reasoning from the
+  local model will feel the difference, and the product says so rather than
+  hides it.
+* **It does not put the result into the host application.** Clipboard, then
+  the person's paste. The one interaction Superhuman Go automates is the one
+  that reads as the product acting in your document.
+* **It adds no surface.** Verbs live on the ambient panel; rules under
+  Settings beside Tools; the inbox is Activity; skills are memory.
+* **It adds no store without a retention answer.** The transcript index is a
+  view over Activity's retention; skills are facts and prune with them.
+
+### How daily use is measured, before the fifteen-person test
+
+Counted locally, sent nowhere, and **not shown as a running score** — a
+count of days opened is a streak, and streaks are the engagement mechanic
+`CLAUDE.md` forbids. It sits under Settings as a plain table the person can
+read and a tester can choose to copy into a reply. Days opened per week;
+ambient summons per day; tasks that reached *Go*; replies whose recall line
+named a source. The number that decides whether G worked is the second: **a
+person who summons the panel three times a day has a habit; one who opens
+the window once a week has a tool.** Everything in G is aimed at the first.
 
 ---
 

@@ -232,20 +232,151 @@ are layout changes to the transcript and the first thing to look at, since
 a wrong offset or a pane that opens onto the wrong call is invisible to a
 test.
 
+#### 20 September, later — the GPU came free, and the first look found four defects
+
+The maintainer closed Unreal and Blender mid-session. What was looked at,
+through the browser pane on the dev backend, with the 27B on TabbyAPI:
+
+**Seen working.** The six tiles (two lit beside one grounded prompt, *4
+more things Zaram does*); the thinking as one muted line while streaming,
+folded to the model's own last sentence; the search-off notice with its
+one-click offer under an honest rule-9 answer; a coding turn with the
+recall row, the *Searched code* row and the *Read a file* row folding as
+they finished, the checklist ticking 0/3 → 3/3 in the model's words, prose
+streaming *after* the rows through A2's holdback, the answer correct; the
+pane from the summary with the call's arguments and the file's lines; the
+pane's row opened out to **"Nothing left this device for this step"** —
+the egress log answering by step id, end to end; the hover breakdown.
+
+**Four defects, all found by looking, none by the 871 + 581 tests:**
+
+1. **Every reply was empty**, with `Token … was created in a different
+   Context` where the answer should be. C2's `running_step` set a
+   `ContextVar` and reset it after a `yield` — but `ChatRouter` drives the
+   engine with `iterate_in_threadpool`, which runs each `next()` under a
+   fresh context copy, so the value never survived a yield and the reset
+   raised. Fixed with a per-reply `StepHolder` and `carried()` re-applying
+   it at every `next()`; `carries_step` on `execute` and `continue_task`.
+   The regression test iterates the way the router does.
+2. **The answer filed as thinking** the moment TabbyAPI's `reasoning: true`
+   was actually applied (below): the server now splits, the template still
+   opens `<think>`, and the parser waited for a `</think>` that no longer
+   comes. A `reasoning_content` delta now overrides the template flag.
+3. **"first word in 0 ms"** under a six-second wait: the engine timed its
+   own `<think>` tag. `_is_model_text` excludes the tags, and the line now
+   reports the wait from the question (recall + plan + steps + prefill),
+   with *prefill* as one row of the breakdown.
+4. **210 s of a 240 s reply in no phase**: `generation_ms` covered the first
+   round only. `tools_ms` and `rounds_ms` from the loop's clock; a 37 s
+   reply now reads `recall 1.2 s · plan 61 ms · steps 811 ms · prefill
+   6.8 s · writing 2.0 s · tools 30 ms · more rounds 26 s`. And that last
+   number is the finding: after a 250-line read, the second round's
+   re-prefill on the 27B is 26 s — the cost A3's caching has to attack.
+
+Plus one usability gap, fixed: once rows folded, their *open* went with
+them and the panel's rows were not clickable — a step's egress was
+reachable only while it ran. Panel rows open out now.
+
+**G8 — TabbyAPI's native calls, measured.** `tool_format` was unset;
+setting it did nothing, because with `inline_model_loading` only keys named
+in `use_as_default` reach an API-driven load — and `reasoning: true` had
+been ignored the same way since 3 September, covered for by
+`starts_in_reasoning`. Both named now. Before: `finish_reason: stop`,
+`tool_calls: null`, the call as text, 61.7 s with the load. After: 3.4 s,
+`tool_calls`, the thinking in `reasoning`; through Zaram's engine the call
+arrives as the one `[TOOL_CALL]` line, first token 20 ms.
+`tests/test_tabby_parses_the_call_it_is_sent.py`, `-m measure`. Config
+backed up as `config.yml.bak-before-tool-format-20260920`.
+
+**G1 — a tool server sees only what it was given.** `_child_env` was
+`dict(os.environ)` plus the block: every attached server received
+`ZARAM_API_SECRET`. `runtimes/mcp/child_env.py` is an allow-list of what a
+process needs to start, plus the block, nothing else; asserted at the
+process boundary. Not yet re-run against the maintainer's real
+`mcp-servers.json` (Blender, GitHub, mail) — the dev backend ran on a
+scratch data directory.
+
+**G5 — the tool-choice eval, run on both models.** 27B **20/20**, 14B
+**19/20**, neither over-calls once on the eight *none* questions. Table in
+`docs/CODE-PACK.md` 9b. The 6 GB floor is the untested boundary — nothing
+smaller is installed.
+
+**Not seen yet:** rows *between* paragraphs (every turn today called its
+tools before writing, so the rows sat in front); a folder named in a
+sentence; the model choosing `web.search` on its own with search *on*;
+Activity's *waiting on you*. E1's before/after count is still not taken.
+
+#### 20 September, afternoon — "DO this": E2b, the tester email, coworker steps 2 and 3
+
+**E2b — Thinking on/off, built and verified on both engines.** A
+`thinking` setting (on by default) beside the routing chip: *Auto · Thinking
+on*. Ollama gets `think: false` (sent, not omitted — with it unset a
+thinking model thinks in the content, untagged); TabbyAPI gets a top-level
+`enable_thinking: false`, **loopback only**, since OpenAI's API refuses a
+field it does not know and a cloud vendor's reasoning control is not
+guessed at — there the thinking still shows, visibly. The prompt-opened
+`<think>` path stands down when the flag is off, because the template then
+*closes* the block it opens. Measured: **27B on 4.3 s → off 0.8 s; 14B on
+19.4 s (1,410 characters of thought for 17 × 23) → off 0.3 s.** Seen on
+screen: pressed, stored, read back.
+
+**The tester email — decided and scripted.** Send it for `v0.1.0-alpha.1`
+as it stands: that build is from the 15th and predates every defect found
+this week. `scripts/tell-the-testers.mjs <tag> [--send]` reads the size and
+SHA from the release, prints the email, and sends through Buttondown only
+with `--send` and the key in the environment. The workflow's Buttondown
+step is removed — it fired on the tag while the page flips on `releaseAt`.
+**Before it can go:** the Formspree signups have to be imported into
+Buttondown by the maintainer; the list is otherwise empty.
+
+**Coworker step 2 — the OpenWorker modules, and what was not taken.**
+Zaram has no shell tool: `run_command` takes a runner name and a filtered
+argv, never free text. So OpenWorker's command parser (`$(`, `xargs`,
+`sh -c`) would have been the sixteenth unreachable subsystem, and the
+plan's *"a shell command with `$(` refused"* cannot be seen because there
+is nothing to type it into. Taken, with attribution, into
+`runtimes/mcp/floors.py` and wired before `policy.decide`:
+* **The self-protection floor** — `mcp-servers.json`, `egress-policy.json`,
+  `api-secret`, the paired clients, the cloud connections, `settings.json`:
+  refused under every mode and every grant, not grantable. On this machine
+  the checkout is the data directory, so a project rooted at `backend/`
+  reaches them by relative path.
+* **Files that run later** — `.git/hooks/`, `.github/workflows/`, CI and
+  task files — ask whatever is granted; only the person's Go on the run
+  covers them.
+* **Provenance on the card** — *"tests/test_a.py was created by Zaram 1
+  step ago"* when `run_command` would execute a file written this session.
+`risk.py`'s third-party floor (a stranger's tool is never a free read by
+its own name) is deliberately not taken: the GitHub task depends on reads
+flowing, and the tier table says reads need nothing.
+
+**Coworker step 3 — the conversation rung.** The held row now offers
+*Allow write_file — for this conversation · always*. The middle one is
+new: an in-memory, per-session grant (`McpRuntime.allow_for_session`,
+`POST /tools/servers/{id}/allow-for-session`), which never covers a delete
+or a floor. *Once* is the plan card's Go; *deny* is not pressing. The
+**hard floor**, written down: `floors.py` + `looks_destructive` — no rung,
+no mode, no grant lowers either. **Not built:** the circuit breaker (three
+denials pause an unattended run) — it belongs with step 4's unattended
+runs, where a denial has somewhere to go.
+
+**Still open from the same list:** the stale `v0.1.0` release (the 13
+September installer that could not start off the build machine) — deleting
+a public release is the maintainer's click; coworker step 4 (triggers and
+the inbox), a multi-day item.
+
 #### Do these next, in order
 
-1. **Look.** `npm run dev:app -- -NoTabby`, then: a research question (rows
-   appear before prose, fold after); a coding turn in a project (prose
-   streams *between* rows, in order); a thinking model (one line, expands);
-   hover the *answered by* line; press *open* on a row (the pane, focused,
-   with what it sent); name a folder in a sentence (the offer); a plain
-   question on the 14B with no project open — does it choose `web.search`
-   or `read_page` on its own, and does the fold say so; the six tiles and
-   *3 more*; Activity's *waiting on you*. None has been seen.
-2. **Take E1's measurement** and record the before/after count here.
+1. **Commit** — G1, G5, G8, E2b, the four fixes, the panel change, the
+   floors, the conversation rung, the tester script, this block.
+2. **Workstream G, the GPU-free half**: G4 (once · session · always · deny,
+   with the floor), G2 (bm25s + RRF, `history.search`), G3 (the five verbs
+   on the ambient panel). None needs the card.
 3. **Run the full backend suite detached**, GPU free, and read the three
    unread failures.
-4. Then `docs/PLAN.md` Week 2: D2 (the tool-choice eval) before D1.
+4. **G6** — attach GitHub and mail, one real task — needs the maintainer to
+   paste tokens. Then G7 (skills), G9 (LongMemEval).
+5. The remaining *Look* items above, and E1's measurement.
 
 ### 15-19 September — v0.1.0-alpha.1 is out, and four of the coworker's pieces are built.
 
