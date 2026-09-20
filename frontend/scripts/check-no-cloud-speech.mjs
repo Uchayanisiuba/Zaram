@@ -80,7 +80,7 @@ export function scanText(text, { rel = 'fixture.ts', inQuarantine = false } = {}
   const out = [];
   let inBlockComment = false;
 
-  text.split('\n').forEach((line, i) => {
+  text.split(/\r?\n/).forEach((line, i) => {
     // Comments discuss this API by name — including this script's own
     // documentation elsewhere — and banning the word in prose would make the
     // rule unexplainable in the codebase that enforces it.

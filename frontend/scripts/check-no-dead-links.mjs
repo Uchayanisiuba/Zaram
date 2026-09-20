@@ -35,7 +35,11 @@ async function walk(dir) {
 
 export function scanText(text, { rel = 'fixture.tsx' } = {}) {
   const out = [];
-  text.split('\n').forEach((line, i) => {
+  // `\r?\n`, not `\n`: a Windows checkout is CRLF, a `\r` is a line
+  // terminator to a JS regex, and `//.*$` then strips nothing — the first
+  // run of this guard on the release runner flagged its own explanatory
+  // comment in ManualReader.tsx, green here on an LF working copy.
+  text.split(/\r?\n/).forEach((line, i) => {
     const code = line.replace(/\/\/.*$/, '').replace(/\/\*.*?\*\//g, '');
     // Prose in a block comment may name the attribute — this file's own
     // docstring does. Only a line that looks like JSX or a string literal
@@ -48,7 +52,8 @@ export function scanText(text, { rel = 'fixture.tsx' } = {}) {
 }
 
 const SELF_TEST = `<a href={u} target="_blank" rel="noreferrer">x</a>`;
-if (scanText(SELF_TEST).length !== 1) {
+const SELF_TEST_CRLF = '// a comment naming target="_blank"\r\nconst x = 1;\r\n';
+if (scanText(SELF_TEST).length !== 1 || scanText(SELF_TEST_CRLF).length !== 0) {
   console.error('check-no-dead-links: the scanner no longer catches the thing it exists to catch.');
   process.exit(2);
 }

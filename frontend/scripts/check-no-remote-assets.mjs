@@ -77,7 +77,7 @@ const BLOCK_OPEN = /^\s*\/\*/;
 function commentLines(text) {
   const inComment = new Set();
   let open = false;
-  text.split('\n').forEach((line, i) => {
+  text.split(/\r?\n/).forEach((line, i) => {
     const lineNo = i + 1;
     if (open) {
       inComment.add(lineNo);
@@ -99,7 +99,7 @@ function commentLines(text) {
 /** Scan one file's text. Exported shape so the self-test can drive it. */
 export function scanText(text, rel = 'fixture.css') {
   const out = [];
-  const lines = text.split('\n');
+  const lines = text.split(/\r?\n/);
   const comments = commentLines(text);
 
   // One remote URL is one finding, however many patterns match it. The patterns
