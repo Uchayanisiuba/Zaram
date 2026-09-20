@@ -66,6 +66,8 @@ from dataclasses import dataclass, field
 from queue import Empty, Queue
 from typing import Any, Dict, List, Optional
 
+from runtimes.mcp.child_env import child_environment
+
 logger = logging.getLogger(__name__)
 
 #: The version this client prefers, newest first. Sent in `server/discover` and
@@ -198,23 +200,17 @@ class McpServer:
         return [resolved, *command[1:]]
 
     def _child_env(self) -> Dict[str, str]:
-        """The server's declared variables **on top of** this process's, never
-        instead of them.
+        """What the server is allowed to see: enough to start, plus its own
+        `env` block. `runtimes/mcp/child_env.py` holds the list and the reason.
 
         Found on 15 September 2026 by attaching the first server that needs a
-        token. `Popen(env=...)` replaces the environment wholesale, so a server
-        block with `env: {TOKEN: ...}` was spawned with that one variable and
-        nothing else: no `PATH`, so `npx` could not find `node`, and no
-        `SYSTEMROOT`, without which Node's OpenSSL cannot seed its random
-        source on Windows and aborts with `Assertion failed:
-        ncrypto::CSPRNG(nullptr, 0)`. Every server without an `env` block
-        inherited everything and worked, which is why the bundled servers never
-        showed it — and every server *with* a credential was unstartable.
+        token: `Popen(env=...)` replaces the environment wholesale, so a block
+        with one variable produced a child with no `PATH` and no `SYSTEMROOT`,
+        and Node aborted before reading stdin. The fix then was to inherit
+        everything — which handed every attached server `ZARAM_API_SECRET`
+        (found 20 September). The allow-list is the answer to both.
         """
-        merged = dict(os.environ)
-        if self._env:
-            merged.update({str(k): str(v) for k, v in self._env.items()})
-        return merged
+        return child_environment(os.environ, self._env)
 
     def _start(self) -> None:
         # `stderr` is captured, not inherited: the spec allows a server to log
