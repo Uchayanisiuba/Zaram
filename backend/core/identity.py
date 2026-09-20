@@ -172,7 +172,18 @@ _WHAT_ZARAM_IS = (
 #: this file's own description, which speaks of Zaram in the third person and
 #: so invites the model to speak *for* it rather than *as* it. Identity is a
 #: fact the system supplies; the number is part of the fact.
+#:
+#: **"Do not reason about what you are" — added 19 September 2026.** With
+#: thinking on, a Qwen spent the opening of every reasoning block on itself —
+#: *"I am Qwen, but the system says Zaram… we should…"* — which the maintainer
+#: watched in the reasoning panel and read as the product arguing with itself.
+#: Every rule above governs the *answer*; none said anything about the
+#: working, and a model told what it is but not that the matter is settled
+#: treats it as a question still open. One line, in the same register as the
+#: rest: an instruction, no story attached to be recited back.
 _HOW_TO_ANSWER_ABOUT_YOURSELF = (
+    "What you are is settled above. Do not reason or deliberate about it, "
+    "in your thinking or anywhere else; reason about the question.\n"
     "Asked what you are: you are Zaram. Do not call yourself a language model.\n"
     "Do not name the company or lab that trained the model as Zaram's maker. "
     "They did not make Zaram, whatever your training says.\n"

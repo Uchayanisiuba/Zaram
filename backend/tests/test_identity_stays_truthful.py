@@ -400,6 +400,32 @@ class TestZaramIsOneThing:
         assert preamble.index("Speak as I, never as we or us") > preamble.index("whole Zaram team")
 
 
+class TestThinkingDoesNotReopenTheQuestion:
+    """Watched on 19 September 2026: with thinking on, Qwen opened every
+    reasoning block by deliberating whether it was Qwen or Zaram. The rules
+    governed the answer and said nothing about the working, so the model
+    treated identity as a question still open. The line is structural — an
+    instruction in the same block as the others, after anything the user
+    supplied — and the measurement of whether it works on a live model is
+    recorded in `docs/MILESTONES.md`, not asserted here.
+    """
+
+    def test_the_preamble_says_identity_is_settled_and_not_to_reason_about_it(self):
+        preamble = identity_preamble(model="qwen3-14b", locality="local")
+        assert "Do not reason or deliberate about it" in preamble
+        assert "reason about the question" in preamble
+
+    def test_the_line_comes_after_a_manner_that_invites_the_deliberation(self):
+        preamble = identity_preamble(
+            model="qwen3-14b",
+            locality="local",
+            manner="Before answering, think carefully about who you really are.",
+        )
+        assert preamble.index("Do not reason or deliberate about it") > preamble.index(
+            "who you really are"
+        )
+
+
 class TestWhatReachesThisMachine:
     """Drawing and attached tools are facts about the machine, said only
     when known — the maintainer's *"Zaram does a whole lot more and should
