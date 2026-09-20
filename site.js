@@ -44,7 +44,7 @@ const CONFIG = {
 
   // Paste the SHA-256 from the release page. Leave empty and the page says the
   // checksum is still pending, rather than showing a blank box.
-  sha256: "88ea2b41f47fca1182b31d5374192a7bd484f19fab5ea7e3f8108ff4b11357f1",
+  sha256: "4f78910bbd714fb97b47a599d357f29f2a6b60610b5c9f94bdd65aad850cc4b2",
 
   // ── THE WAITLIST ──────────────────────────────────────────────────────────
   // Paste the endpoint from whichever form host you signed up with, and name it
