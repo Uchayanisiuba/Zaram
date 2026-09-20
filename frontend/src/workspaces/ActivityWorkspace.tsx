@@ -25,6 +25,7 @@
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { UnfinishedSection } from '@/components/tasks/TaskLists';
+import { RunsSection } from '@/components/tasks/RunsSection';
 import SurfaceHeader from '../components/common/SurfaceHeader';
 import {
   ShieldCheck,
@@ -510,6 +511,9 @@ export default function ActivityWorkspace({ onOpenConversation }: ActivityWorksp
               part of the log that still needs a person. Across every project,
               because "what is waiting on me" is not a per-project question. */}
           <UnfinishedSection onOpenConversation={onOpenConversation} />
+          {/* What ran while the window was closed, with its transcript —
+              coworker step 4. Nothing when nothing runs on its own. */}
+          <RunsSection onOpenConversation={onOpenConversation} />
           {shown.length === 0 ? (
             <p className="text-xs leading-relaxed" style={{ color: 'var(--color-text-faint)' }}>
               {hostFilter

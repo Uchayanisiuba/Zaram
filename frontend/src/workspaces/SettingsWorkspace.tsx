@@ -42,6 +42,7 @@ import PairingOffer from '@/components/settings/PairingOffer';
 const PAIRED = new Set(['nvidia_nim', 'openrouter', 'groq']);
 import LetterheadSection from '../components/settings/LetterheadSection';
 import ToolsSection from '../components/settings/ToolsSection';
+import RunsOnItsOwnSection from '../components/settings/RunsOnItsOwnSection';
 import ReportSection from '../components/settings/ReportSection';
 import ManualReader from '../components/settings/ManualReader';
 import PacksSection, { PackOffer } from '../components/settings/PacksSection';
@@ -68,6 +69,7 @@ import {
   Wrench,
   Link2,
   LifeBuoy,
+  Clock,
 } from 'lucide-react';
 import SurfaceHeader from '../components/common/SurfaceHeader';
 import AdvancedModelField from '../components/settings/AdvancedModelField';
@@ -1644,6 +1646,17 @@ export default function SettingsWorkspace() {
           icon={<Wrench size={14} style={{ color: 'var(--color-indigo-light)' }} />}
         >
           <ToolsSection Row={Row} />
+        </Section>
+
+        {/* ------------------------------------------------ Runs on its own */}
+        {/* Coworker step 4. Configured beside Tools because it is the same
+            kind of thing — what Zaram may do without a person typing — and
+            for the same reason: no menu item. What it made is under Activity. */}
+        <Section
+          title="Runs on its own"
+          icon={<Clock size={14} style={{ color: 'var(--color-indigo-light)' }} />}
+        >
+          <RunsOnItsOwnSection Row={Row} />
         </Section>
 
         {/* --------------------------------------------------- Other assistants */}

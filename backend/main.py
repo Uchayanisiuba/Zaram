@@ -406,6 +406,14 @@ async def startup_event():
     # restart to honour a window it advertised on day one.
     asyncio.create_task(_sweep_staging_forever())
 
+    # Work that runs on its own — coworker step 4. Ticks every minute, runs
+    # whatever is due through `POST /chat` in process, unattended: no Go, no
+    # grants beyond the standing ones, and the first held tool stops it and
+    # lands in Activity. `core/triggers.py`.
+    global trigger_runner
+    trigger_runner = TriggerRunner(trigger_store, _ask_unattended, _obligations_due_within)
+    trigger_runner.start()
+
     # Preload the local model, in the background, so the first message does not
     # pay for it. Fire-and-forget on purpose: the backend must answer /health
     # and /readiness while several gigabytes move onto the card, or the first
@@ -5458,6 +5466,136 @@ async def export_obligations_calendar(scope: str = ""):
     filename = f"obligations-{date.today().isoformat()}.ics"
     path = artifact_service.store.write_new(filename, data)
     return {"path": str(path), "count": sum(1 for r in records if r.get("due"))}
+
+
+# --- Work that runs on its own — coworker step 4, `core/triggers.py` ---------
+
+from core.triggers import KINDS, TriggerRunner, TriggerStore, outcome_of  # noqa: E402
+
+trigger_store = TriggerStore()
+trigger_runner: TriggerRunner | None = None
+
+
+async def _ask_unattended(question: str, session_id: str, project_id: str) -> tuple[str, str, str]:
+    """Ask the product one question the way a person would — `POST /chat`, in
+    process — and say how it ended.
+
+    The same route, so a scheduled run gets recall, the planner, the tools,
+    the gate, the egress log and a transcript exactly as a typed question
+    does, and nothing here becomes a second engine. The session id is minted
+    by the runner and nothing ever grants to it, which is what "never
+    self-approves" means in code: `_approved`, `_uninterrupted` and the
+    conversation rung are all keyed on a session a person is in.
+    """
+    import httpx
+
+    from core.api_secret import api_secret
+
+    events: list[dict] = []
+    conversation_id = ""
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1:8420") as client:
+        async with client.stream(
+            "POST",
+            "/chat",
+            json={"text": question, "session_id": session_id, "project_id": project_id},
+            headers={"X-Zaram-Auth": api_secret(), "Host": "127.0.0.1:8420"},
+            timeout=None,
+        ) as response:
+            if response.status_code != 200:
+                return "failed", "", f"the chat route answered {response.status_code}"
+            async for line in response.aiter_lines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    event = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                events.append(event)
+                if event.get("type") == "conversation":
+                    conversation_id = str(event.get("data", {}).get("id") or event.get("data", {}).get("conversation_id") or "")
+    outcome, note = outcome_of(events)
+    return outcome, conversation_id, note
+
+
+def _obligations_due_within(days: int) -> list[tuple[str, str, str]]:
+    """Open obligations due within `days`, as ``(id, what, due)``."""
+    from datetime import date, timedelta
+
+    horizon = date.today() + timedelta(days=days)
+    out: list[tuple[str, str, str]] = []
+    for record in obligation_records.open_obligations():
+        due = str(record.get("due") or "")
+        try:
+            when = date.fromisoformat(due[:10])
+        except ValueError:
+            continue
+        if date.today() <= when <= horizon:
+            out.append((str(record["id"]), str(record.get("summary") or record.get("kind") or "an obligation"), due[:10]))
+    return out
+
+
+class TriggerBody(BaseModel):
+    question: str = ""
+    kind: str
+    at: str = "09:00"
+    weekday: str = "mon"
+    days_ahead: int = 7
+    project_id: str = ""
+
+
+class TriggerUpdate(BaseModel):
+    enabled: bool
+
+
+@app.get("/triggers")
+async def list_triggers():
+    """What runs on its own, and the last runs. Configured under Settings;
+    read by Activity."""
+    return {
+        "triggers": [t.to_json() for t in trigger_store.all()],
+        "runs": [r.to_json() for r in trigger_store.runs(limit=50)],
+        "kinds": list(KINDS),
+    }
+
+
+@app.post("/triggers")
+async def create_trigger(body: TriggerBody):
+    try:
+        trigger = trigger_store.create(
+            body.question, body.kind, body.at, weekday=body.weekday, days_ahead=body.days_ahead, project_id=body.project_id
+        )
+    except ValueError as why:
+        raise HTTPException(status_code=400, detail=str(why))
+    return trigger.to_json()
+
+
+@app.patch("/triggers/{trigger_id}")
+async def update_trigger(trigger_id: str, body: TriggerUpdate):
+    trigger = trigger_store.set_enabled(trigger_id, body.enabled)
+    if trigger is None:
+        raise HTTPException(status_code=404, detail="no such trigger")
+    return trigger.to_json()
+
+
+@app.delete("/triggers/{trigger_id}")
+async def delete_trigger(trigger_id: str):
+    if not trigger_store.delete(trigger_id):
+        raise HTTPException(status_code=404, detail="no such trigger")
+    return {"deleted": trigger_id}
+
+
+@app.post("/triggers/{trigger_id}/run")
+async def run_trigger_now(trigger_id: str):
+    """Run it now — a person pressed the button, which is a person at the
+    pause, so a paused or disabled trigger may run this once."""
+    trigger = trigger_store.get(trigger_id)
+    if trigger is None:
+        raise HTTPException(status_code=404, detail="no such trigger")
+    if trigger_runner is None:
+        raise HTTPException(status_code=503, detail="the runner has not started")
+    runs = await trigger_runner.run_trigger(trigger, force=True)
+    return {"runs": [r.to_json() for r in runs]}
 
 
 @app.get("/obligations/{obligation_id}")

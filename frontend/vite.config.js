@@ -151,6 +151,7 @@ export default defineConfig(({ command }) => ({
       '/extras': { target: BACKEND, changeOrigin: true },
       '/images': { target: BACKEND, changeOrigin: true },
       '/manual': { target: BACKEND, changeOrigin: true },
+      '/triggers': { target: BACKEND, changeOrigin: true },
     },
   },
 }));
