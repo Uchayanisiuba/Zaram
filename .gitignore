@@ -285,4 +285,6 @@ backend/plans.db-shm
 backend/manual.json
 
 # Idle-animation sources the maintainer is still choosing between (20 Sep 2026); tracked when one is picked.
-avatar-source/animations/*.fbx
+"avatar-source/animations/Breathing Idle.fbx"
+"avatar-source/animations/Idle 03.fbx"
+"avatar-source/animations/Sad Idle.fbx"
