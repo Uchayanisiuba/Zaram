@@ -161,12 +161,40 @@ and the coworker.
   should arrive as the first *downloaded* avatar, not a bundled one
   (`avatars/` is already 50 MB). After the tag.
 
-#### Still to do for the tag — step 6
+#### Step 6 — built, cold-installed, tagged, and what the workflow found
 
-Build → cold install from outside the checkout → `git tag v0.1.0-alpha.2`
-→ push → import the Formspree list into Buttondown → `node
-scripts/tell-the-testers.mjs v0.1.0-alpha.2 --send`. The commit and push
-are the maintainer's; the cold install is not negotiable.
+* **Built and cold-installed.** `npm run build`, silent install, launched
+  from `C:\` on an empty `ZARAM_DATA_DIR`: backend from the bundled
+  runtime, `/health` 401 without the credential, the landing rendered
+  (captured by PrintWindow — the main window comes up **minimised** when
+  launched from a non-interactive shell; `ShowWindow(SW_RESTORE)` first).
+* **The manual was not updated, and nearly shipped that way.** Last
+  touched 15 September; none of this week's features were in it, and it
+  is what recall answers "how do I…" from. Five sections added in the
+  manual's own voice — *Watching it work*, *Thinking*, *Naming a folder*,
+  *Work that runs on its own*, *Giving the graphics card back* — plus the
+  fact/document split under Memory and the one-line notices. Only what
+  was seen working.
+* **The site has a Milestones panel** beside the alpha→beta gate: what
+  alpha.1 and alpha.2 brought, what is next, what is later. Dated by when
+  a build reached testers; nothing on *next* carries a date.
+* **The release workflow's first real run failed at `desktop`'s `tsc`.**
+  `@zaram/engine` resolves to `packages/zaram-engine/dist`, which was
+  built once on this machine and never committed; on a clean runner `tsc`
+  compiled the engine's source without the DOM lib. Exactly the 15
+  September installer's shape — green here because of a file only this
+  machine has. `build:desktop` now runs `build:engine` first, proven from
+  a clean clone (`npm ci` → engine → desktop `tsc` exit 0). The tag was
+  moved to the final commit (`0ca06a3`) and force-pushed. **The rerun
+  went green end to end** — the first time this workflow has ever
+  completed: installer 194.8 MiB, portable, `SHA256SUMS.txt` on the
+  release, marked pre-release; `gh-pages` republished with the milestones
+  panel and `site.js` carrying the tag. The page flips on `releaseAt`,
+  21 September 09:00 BST.
+* **Left to the maintainer:** import the Formspree list into Buttondown,
+  then `BUTTONDOWN_API_KEY=… node scripts/tell-the-testers.mjs
+  v0.1.0-alpha.2 --send`; check the release page and the served `site.js`
+  once the workflow is green; `gh release delete v0.1.0 --yes`.
 
 *Loose ends:* the obligations run's draft searched the web on its own;
 `cookwithrome.com` outranking `blender.org/download` (ordering); `uvx`
