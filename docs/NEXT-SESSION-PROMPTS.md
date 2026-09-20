@@ -1,5 +1,9 @@
 # Next session — handoff
 
+> **Superseded.** This is a handoff from 10 September 2026, kept for the record. The current
+> state lives in the *Current state* block at the top of `docs/MILESTONES.md`,
+> which is the authority on status; `CLAUDE.md` is the authority on the rules.
+
 > **Out of date at the top, current at the bottom.** The newest prompt is
 > *"Prompt for the next session — written 10 September 2026"*, at the very
 > end of this file, and the authoritative state is the **Current state** block

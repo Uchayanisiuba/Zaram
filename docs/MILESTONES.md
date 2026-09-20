@@ -201,6 +201,17 @@ and the coworker.
   `<a target="_blank">`, which the packaged app's `hardenWindow` denies —
   a dead link on the one screen a tester in trouble reaches. Both go
   through the shell bridge now, asserted.
+* **Every external link in the app was dead in the packaged build.** Four
+  `<a target="_blank">`s — *Where to get a key* under a cloud provider (the
+  one a tester adding a key follows), *running at* on the app card, every
+  link inside the manual, and the issues link — all denied by
+  `hardenWindow`, all green in jsdom. `lib/openInBrowser.ts` is the one
+  route (shell bridge; `window.open` in a plain tab), the anchors keep
+  their `href`, and `frontend/scripts/check-no-dead-links.mjs` is the fifth
+  guard, on the build and in `check:guards`.
+* **README brought to today** — *Try it*, this week's items under Status,
+  the honest "not yet on a stranger's machine", the layout — and the three
+  older handoff files carry a *Superseded* banner pointing here.
 * **The release page carries only `alpha.2`** — `v0.1.0` (the 13
   September build that could not start) deleted with its tag, `alpha.1`'s
   release deleted, its tag kept.

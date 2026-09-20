@@ -1,5 +1,9 @@
 # Handover — 19 August 2026
 
+> **Superseded.** This is a handoff from 19 August 2026, kept for the record. The current
+> state lives in the *Current state* block at the top of `docs/MILESTONES.md`,
+> which is the authority on status; `CLAUDE.md` is the authority on the rules.
+
 Paste the block below into a new session. It is written to be read cold.
 
 The previous handover (18 August) is superseded. Read *What changed* at the

@@ -14,6 +14,21 @@ you can correct it, and you control what leaves the device.
 Not a model: it routes to yours. Not an agent framework: it serves people doing work,
 not developers building products.
 
+## Try it
+
+**Windows, alpha.** The current build is
+[`v0.1.0-alpha.2`](https://github.com/Uchayanisiuba/Zaram/releases/tag/v0.1.0-alpha.2)
+— an installer and a portable build, 195 MiB each, with `SHA256SUMS.txt` beside them.
+It is not code-signed yet, so SmartScreen warns; *More info → Run anyway*. Everything
+works with a local model through [Ollama](https://ollama.com) and nothing else; a cloud
+key is optional and framed that way.
+
+The site is [uchayanisiuba.github.io/Zaram](https://uchayanisiuba.github.io/Zaram) —
+what it is, what each build brought, what is next. **Something broke?** Settings → Help
+→ *Report a problem* copies a report that holds no conversation, no document names and
+no keys; *Send feedback* opens [a form](https://uchayanisiuba.github.io/Zaram/#feedback)
+that needs no account. Zaram itself sends nothing.
+
 ## Who this is for
 
 **Anyone who types on a computer.** That is not a hedge, it is the design: what earns a
@@ -86,7 +101,8 @@ evidence of June it is the only part anybody owned at all.
 
 ## Status
 
-**Pre-v1.** What has been observed working, rather than merely written:
+**Pre-v1, alpha.2 with testers from 21 September 2026.** What has been observed
+working, rather than merely written:
 
 - **The recall loop, end to end.** The Spine persists to SQLite with Ollama `bge-m3`
   embeddings, the index rebuilds on boot, and a fact stored in one session is recalled
@@ -118,9 +134,29 @@ evidence of June it is the only part anybody owned at all.
 - **Generated documents** — .docx, .xlsx, .pdf, .md, .csv, charts — with preview.
 - **Speech both directions**, local and optional, keeping pace with the text rather than
   waiting for the reply to finish.
-- **An installer**: `Zaram-0.1.0-x64.exe`, 198 MB, plus a portable build — published
-  as the [v0.1.0 pre-release](https://github.com/Uchayanisiuba/Zaram/releases/tag/v0.1.0),
-  with the SHA-256 beside it. Unsigned; SmartScreen will warn.
+- **An installer**, built by the release workflow on a hosted runner from the tag,
+  published as [`v0.1.0-alpha.2`](https://github.com/Uchayanisiuba/Zaram/releases/tag/v0.1.0-alpha.2)
+  with the SHA-256 beside it, and cold-installed from outside the checkout before the
+  tag was cut. Unsigned; SmartScreen will warn.
+- **You can watch it work.** A tool-using reply streams as it happens: a row for every
+  step — *Searching the web…*, *Read a file* — between the paragraphs, in the order it
+  happened, folding to one line when done. Each row opens what that step read, changed
+  (with Revert) and sent — or *"Nothing left this device for this step"*, read from the
+  egress log by step id.
+- **Thinking on/off**, per conversation, on both local engines: measured 4.3 s → 0.8 s
+  to the first word on a 27B. The thought is one quiet line while it streams.
+- **A model that can call tools chooses its own.** On the tool-choice eval: 20/20 on a
+  27B, 19/20 on a 14B, no over-calling on the questions that need none. The permission
+  gate still runs on whatever it chose.
+- **Name a folder and it opens.** *"Have a look at C:\Work
+orthwind"* offers, with one
+  button, to open it as a coding project and ask again — rule 7h, never in advance.
+- **Work that runs on its own.** A question on a schedule, or one run per obligation
+  coming due, drafting the message that should go out. A run is an ordinary
+  conversation made without you; the first thing that needs your say-so stops it, and
+  nothing that runs unattended can approve itself or send anything.
+- **The graphics card comes back.** *Release the card* unloads what every local server
+  can unload — including TabbyAPI — and closing Zaram does the same on its way out.
 - **Image generation**, routed to a model that can draw — one you brought, on your own
   card, or a provider you chose — with the request shown before it leaves.
 - **The Spine as an MCP server.** Pair Claude Code, Cline or any MCP client from Settings
@@ -133,9 +169,15 @@ evidence of June it is the only part anybody owned at all.
 What is not built:
 
 - **A macOS or Linux build.** Windows only, for now.
-- **The installer has not been run on a machine that has never seen this repo.** Until
-  that happens, treat "a stranger can install this" as unproven. It is the actual
-  blocker, and no amount of further capability substitutes for it.
+- **A signed installer.** SmartScreen warns on every install until it is.
+- **The installer has been run from outside the checkout on the build machine, not
+  yet on a machine that has never seen this repo.** The alpha testers are the first;
+  until one of them reports it started, treat "a stranger can install this" as
+  unproven. It is the actual blocker, and no amount of further capability
+  substitutes for it.
+- **Web search is governed, not great.** It goes through the egress gate and the
+  per-host policy, and the relevance floor was retuned on 20 September so a typed
+  question can clear it; result ordering still needs work.
 
 ## v1 scope
 
@@ -165,7 +207,8 @@ backend/     FastAPI service. Kernel, event bus, execution engine, runtimes.
 frontend/    React + Vite interface. The live UI.
 electron/    Electron desktop host (JavaScript).
 desktop/     Second Electron host (TypeScript). Duplicate — see below.
-packages/    zaram-engine. Currently unused by the frontend.
+packages/    zaram-engine. Built before the desktop host, which imports it.
+site/        The static site, published to gh-pages by the release workflow.
 figma-assets/ Design exports.
 ```
 
@@ -176,8 +219,11 @@ desktop host, and there are two virtualenvs. `docs/RUNNING.md` has the detail.
 
 `CLAUDE.md` is the project contract — vocabulary, immutable rules, v1 scope, technical
 decisions. Read it first. `docs/VISION.md` holds the rationale, `docs/MILESTONES.md` the
-current state, `docs/SPEECH.md` what speaks and when, `docs/RUNNING.md` how to start the
-real app and the four ways it fails that each look like something else.
+current state (its *Current state* block is the handoff between sessions and is the
+authority on status), `docs/PLAN.md` the plan from here to the vision, `docs/SPEECH.md`
+what speaks and when, `docs/RUNNING.md` how to start the real app and the ways it fails
+that each look like something else. `docs/HANDOVER.md`, `docs/NEXT-SESSION.md` and
+`docs/SESSION-NOTES.md` are earlier handoffs, kept for the record and superseded.
 
 The working agreement in short: read before you write, verify against the code rather
 than the documentation, and when a plan and the codebase disagree, the codebase wins.

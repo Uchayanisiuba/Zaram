@@ -11,6 +11,7 @@
  * `CLAUDE.md` guards the count.
  */
 
+import { onOpen } from '@/lib/openInBrowser';
 import { useCallback, useEffect, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -149,8 +150,11 @@ export default function ManualReader({ onClose, load = fetchManual, loadPage = f
                       )}
                     </figure>
                   ),
+                  // Through the shell bridge: the packaged app denies a
+                  // window-open, so a plain `target="_blank"` here was a
+                  // dead link on every page of the manual.
                   a: ({ href, children }) => (
-                    <a href={href} target="_blank" rel="noreferrer" style={{ color: 'var(--color-indigo-light)' }}>
+                    <a href={href} onClick={onOpen(href)} rel="noreferrer" style={{ color: 'var(--color-indigo-light)' }}>
                       {children}
                     </a>
                   ),

@@ -1,5 +1,9 @@
 # Next session — start here
 
+> **Superseded.** This is a handoff from 31 August 2026, kept for the record. The current
+> state lives in the *Current state* block at the top of `docs/MILESTONES.md`,
+> which is the authority on status; `CLAUDE.md` is the authority on the rules.
+
 A prompt and a state snapshot. Rewritten 31 August 2026. The previous session's
 work was reviewed and committed, and then a single defect — Zaram looked for
 models exactly once, at boot — cost most of a day because it was diagnosed as

@@ -12,6 +12,7 @@
  * no tool. The screenshot is served from Zaram's own data directory by name;
  * nothing in the URL is the model's.
  */
+import { onOpen } from '@/lib/openInBrowser';
 import { useEffect, useState } from 'react';
 import { ExternalLink, Square } from 'lucide-react';
 import type { ChatToolCall } from '../../stores/chatStore';
@@ -71,7 +72,7 @@ export default function AppCard({ call }: { call: ChatToolCall }) {
           <span>{phase === 'stopped' ? 'stopped' : 'running at'}</span>
           <a
             href={call.appUrl}
-            target="_blank"
+            onClick={onOpen(call.appUrl)}
             rel="noreferrer"
             className="flex items-center gap-1"
             style={{ color: 'var(--color-cyan-light)', fontFamily: 'var(--font-mono)' }}

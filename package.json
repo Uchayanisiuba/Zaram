@@ -53,7 +53,7 @@
     "test:backend": "cd backend && venv\\Scripts\\python.exe -m pytest -q",
     "lint": "cd frontend && npm run lint",
     "typecheck": "cd frontend && npm run typecheck",
-    "check:guards": "cd frontend && npm run check:assets && npm run check:speech && npm run check:visemes && npm run check:proxy",
+    "check:guards": "cd frontend && npm run check:assets && npm run check:speech && npm run check:visemes && npm run check:proxy && npm run check:links",
     "check:all": "npm run lint && npm run typecheck && npm run check:guards && npm run check:reachability && npm run check:payload && npm run test && npm run test:backend",
     "check:payload": "node scripts/check-installer-payload.mjs",
     "check:signing": "node scripts/check-signing.mjs",

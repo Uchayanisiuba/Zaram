@@ -6,10 +6,11 @@
   "scripts": {
     "dev": "vite",
     "test": "vitest run",
-    "build": "npm run check:assets && npm run check:speech && npm run check:visemes && npm run check:proxy && vite build",
+    "build": "npm run check:assets && npm run check:speech && npm run check:visemes && npm run check:proxy && npm run check:links && vite build",
     "check:assets": "node scripts/check-no-remote-assets.mjs",
     "check:proxy": "node scripts/check-proxy-covers-backend.mjs",
     "check:speech": "node scripts/check-no-cloud-speech.mjs",
+    "check:links": "node scripts/check-no-dead-links.mjs",
     "check:visemes": "node --experimental-strip-types scripts/check-visemes.mjs",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "typecheck": "tsc --noEmit",

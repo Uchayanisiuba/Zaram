@@ -34,6 +34,7 @@
  * because a screen was opened. So the model list has a *Look for models*
  * action, and it says that it is a network call before it makes one.
  */
+import { onOpen } from '@/lib/openInBrowser';
 import { useCallback, useEffect, useState } from 'react';
 import { LOCAL_IS_FREE } from '@/lib/freeTier';
 import PairingOffer from '@/components/settings/PairingOffer';
@@ -1501,7 +1502,7 @@ export default function SettingsWorkspace() {
                 {selected?.keyUrl && (
                   <a
                     href={selected.keyUrl}
-                    target="_blank"
+                    onClick={onOpen(selected.keyUrl)}
                     rel="noreferrer"
                     className="inline-flex items-center gap-1 text-xs text-slate-400 hover:text-slate-200"
                   >

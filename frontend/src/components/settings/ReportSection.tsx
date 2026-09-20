@@ -14,6 +14,8 @@
 
 import { useCallback, useState } from 'react';
 
+import { openInBrowser } from '../../lib/openInBrowser';
+
 const API_BASE = import.meta.env.VITE_ZARAM_API ?? '';
 
 export const ISSUES_URL = 'https://github.com/Uchayanisiuba/Zaram/issues/new';
@@ -21,21 +23,10 @@ export const ISSUES_URL = 'https://github.com/Uchayanisiuba/Zaram/issues/new';
  *  signup. The report is copied first, so the person has it to paste. */
 export const FEEDBACK_URL = 'https://uchayanisiuba.github.io/Zaram/#feedback';
 
-/** Open a page in the system browser.
- *
- *  Found 20 September 2026: the GitHub link here was a plain `<a
- *  target="_blank">`, and the packaged app's `hardenWindow` denies every
- *  window-open and off-app navigation — so on the one screen a tester in
- *  trouble reaches, the link did nothing. The shell bridge is the route; a
- *  plain browser tab during development falls back to `window.open`. */
-export function openInBrowser(url: string): void {
-  const shell = window.zaram?.shell?.openExternal;
-  if (typeof shell === 'function') {
-    void shell(url);
-    return;
-  }
-  window.open(url, '_blank', 'noopener,noreferrer');
-}
+/** Found 20 September 2026: the GitHub link here was a plain `<a
+ *  target="_blank">`, which the packaged app denies — see
+ *  `lib/openInBrowser.ts`, which every external link now goes through. */
+export { openInBrowser } from '../../lib/openInBrowser';
 
 export interface ReportSectionProps {
   Row: React.ComponentType<{

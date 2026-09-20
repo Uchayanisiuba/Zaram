@@ -236,10 +236,10 @@ The full annotated config is backed up beside the live one as
 ## Running the suites
 
 ```bash
-cd backend && venv/Scripts/python.exe -m pytest -q   # ~3m with Ollama up, ~20m down
+cd backend && venv/Scripts/python.exe -m pytest -q   # ~8m with the card free (4,286 tests, 20 Sep 2026); ~20m with Ollama down; run it detached
 cd frontend && npx vitest run                         # ~20s
 npm run test:electron                                 # from the root, no Zaram running
-npm run check:all                                     # lint, types, guards, reachability, all suites
+npm run check:all                                     # lint, types, the five guards, reachability, payload, all suites
 ```
 
 **Say which condition you measured in.** With Ollama running the backend suite

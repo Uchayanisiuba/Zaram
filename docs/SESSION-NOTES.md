@@ -1,5 +1,9 @@
 # Session notes — 2 August 2026
 
+> **Superseded.** This is a handoff from 2 August 2026, kept for the record. The current
+> state lives in the *Current state* block at the top of `docs/MILESTONES.md`,
+> which is the authority on status; `CLAUDE.md` is the authority on the rules.
+
 Facts recorded at the end of a working session. What changed, what was learned by
 running the code, and what was left undone.
 
