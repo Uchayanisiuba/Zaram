@@ -191,6 +191,19 @@ and the coworker.
   release, marked pre-release; `gh-pages` republished with the milestones
   panel and `site.js` carrying the tag. The page flips on `releaseAt`,
   21 September 09:00 BST.
+* **Testers can send feedback without an account.** `#feedback` on the
+  site: which build, what happened, what was expected, the report pasted,
+  email optional — same form host as the signup, one field (`kind:
+  feedback`) tells them apart in the inbox; one test submission sent and
+  accepted. In Zaram, *Report a problem* gained **Send feedback**, which
+  opens it in the system browser with the report already on the
+  clipboard. Found on the way: the GitHub link on that row was a plain
+  `<a target="_blank">`, which the packaged app's `hardenWindow` denies —
+  a dead link on the one screen a tester in trouble reaches. Both go
+  through the shell bridge now, asserted.
+* **The release page carries only `alpha.2`** — `v0.1.0` (the 13
+  September build that could not start) deleted with its tag, `alpha.1`'s
+  release deleted, its tag kept.
 * **Left to the maintainer:** import the Formspree list into Buttondown,
   then `BUTTONDOWN_API_KEY=… node scripts/tell-the-testers.mjs
   v0.1.0-alpha.2 --send`; check the release page and the served `site.js`

@@ -758,6 +758,55 @@
 
   <!-- Only appears once there is a build to download: an alpha tester who has
        already installed it wants to hear about the next one, not to re-apply. -->
+  <!-- FEEDBACK — the tester's channel. Same form host as the signup, so the
+       page still makes a request to nobody else. Zaram itself sends nothing:
+       Settings → Help → Report a problem copies a report to the clipboard and
+       opens this section, and the person pastes and presses. -->
+  <section class="feedback" id="feedback">
+    <div class="alpha-card">
+      <h2 class="alpha-title">Tell me what happened.</h2>
+      <p class="alpha-sub">
+        No account needed. What broke, what you expected, and — if you have it —
+        the report Zaram copies from <strong>Settings → Help → Report a problem</strong>.
+        That report holds no conversation, no document names and no keys; it says so at
+        the top, so read it before you paste it.
+      </p>
+      <form class="alpha-form" data-role="feedback" novalidate>
+        <input type="hidden" name="kind" value="feedback">
+        <input type="hidden" name="_subject" value="Zaram feedback">
+        <div class="field">
+          <label for="fb-build">Which build</label>
+          <select id="fb-build" name="build" required>
+            <option value="" disabled selected>Choose one</option>
+            <option value="v0.1.0-alpha.2">v0.1.0-alpha.2 (21 September)</option>
+            <option value="other">Something else / not sure</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="fb-happened">What happened</label>
+          <textarea id="fb-happened" name="happened" rows="4" required
+                    placeholder="What you did, and what Zaram did."></textarea>
+        </div>
+        <div class="field">
+          <label for="fb-expected">What you expected instead <span class="muted">(optional)</span></label>
+          <textarea id="fb-expected" name="expected" rows="2"></textarea>
+        </div>
+        <div class="field">
+          <label for="fb-report">The report from Settings → Help <span class="muted">(optional — paste it here)</span></label>
+          <textarea id="fb-report" name="report" rows="4" spellcheck="false"
+                    placeholder="Zaram report · v0.1.0 · …"></textarea>
+        </div>
+        <div class="field">
+          <label for="fb-email">Email, if you want a reply <span class="muted">(optional)</span></label>
+          <input id="fb-email" name="email" type="email" autocomplete="email"
+                 placeholder="you@example.com" spellcheck="false">
+        </div>
+        <button type="submit">Send feedback</button>
+      </form>
+      <p class="cta-status" data-role="signup-status" role="status" aria-live="polite"></p>
+    </div>
+  </section>
+
   <section class="closing">
     <h2>Told when the next build lands.</h2>
     <p>One email per release. Nothing else.</p>
@@ -780,7 +829,8 @@
   <nav>
     <a href="https://github.com/Uchayanisiuba/Zaram">Source on GitHub</a>
     <a href="https://github.com/Uchayanisiuba/Zaram/blob/main/LICENSE">Licence</a>
-    <a href="https://github.com/Uchayanisiuba/Zaram/issues">Report a problem</a>
+    <a href="#feedback">Send feedback</a>
+    <a href="https://github.com/Uchayanisiuba/Zaram/issues">Report a problem on GitHub</a>
   </nav>
   <p class="muted colophon">
     This page loads no fonts, no analytics and no third-party scripts. The only request it

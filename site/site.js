@@ -143,7 +143,7 @@ function armRelease() {
 
 function statusFor(form) {
   // Each form sits in a section that carries its own status line.
-  const scope = form.closest('.cta, .closing') || document;
+  const scope = form.closest('.cta, .closing, .feedback') || document;
   return scope.querySelector('[data-role="signup-status"]');
 }
 
@@ -214,6 +214,58 @@ async function submitSignup(event) {
       "ok",
     );
     button.textContent = "Done";
+  } catch (err) {
+    say(status, "That didn't send. Try again, or open an issue on GitHub.", "err");
+    button.disabled = false;
+    button.textContent = original;
+  }
+}
+
+/* ── Feedback ────────────────────────────────────────────────────────────────
+   The same form host as the signup, so the page still talks to nobody else,
+   and one field (`kind: feedback`) tells the two apart in the inbox. Email is
+   optional here, deliberately: a tester who does not want a reply should not
+   have to hand over an address to say what broke.                            */
+async function submitFeedback(event) {
+  event.preventDefault();
+  const form   = event.currentTarget;
+  const button = form.querySelector("button");
+  const status = statusFor(form);
+
+  const missing = Array.from(form.elements).find(
+    (el) => el.willValidate && el.required && !el.checkValidity(),
+  );
+  if (missing) {
+    say(status, missing.name === "build" ? "Pick which build." : "Say what happened — one line is enough.", "err");
+    missing.focus();
+    return;
+  }
+  const email = form.querySelector('input[name="email"]');
+  if (email && email.value && !email.checkValidity()) {
+    say(status, "That doesn't look like an email address — or leave it empty.", "err");
+    email.focus();
+    return;
+  }
+  if (!CONFIG.formEndpoint) {
+    say(status, "The form isn't connected yet — open an issue on GitHub instead.", "err");
+    return;
+  }
+
+  const payload = Object.fromEntries(new FormData(form).entries());
+  const original = button.textContent;
+  button.disabled = true;
+  button.textContent = "Sending…";
+  say(status, "", "");
+  try {
+    const response = await fetch(CONFIG.formEndpoint, {
+      method: "POST",
+      headers: { "Accept": "application/json", "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!response.ok) throw new Error("HTTP " + response.status);
+    form.reset();
+    say(status, "Sent. Thank you — it goes straight to the maintainer.", "ok");
+    button.textContent = "Sent";
   } catch (err) {
     say(status, "That didn't send. Try again, or open an issue on GitHub.", "err");
     button.disabled = false;
@@ -356,6 +408,7 @@ function armDemo() {
 applyConfig();
 armRelease();
 $all('[data-role="signup"]').forEach(form => form.addEventListener("submit", submitSignup));
+$all('[data-role="feedback"]').forEach(form => form.addEventListener("submit", submitFeedback));
 armDemo();
 
 /* ---------------------------------------------------------------------------

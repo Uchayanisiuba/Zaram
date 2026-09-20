@@ -4,7 +4,7 @@
 
 **Settings → Help → Report a problem → Copy report.** This copies a short report to your clipboard: the version, your computer's hardware, the models Zaram found, your routing choices, and the last few things that left your machine — without their contents. It holds no conversation text, no document names, no remembered facts and no keys; the report says so at its top, so you can read it before you send it.
 
-Paste it into a reply to the tester email, or into an issue at github.com/Uchayanisiuba/Zaram/issues, with what you expected and what happened instead. Zaram never sends anything on its own.
+Then press **Send feedback**, which opens a short form in your browser — no account needed — and paste the report there with what you expected and what happened instead. A reply to the tester email, or an issue at github.com/Uchayanisiuba/Zaram/issues, works too. Zaram never sends anything on its own; the form is a page in your browser.
 
 ## Zaram says its engine is not running
 
