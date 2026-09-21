@@ -202,6 +202,9 @@ strong { font-weight: 600; }
 .alpha-terms .muted { font-size: .82rem; line-height: 1.6; margin: 0; }
 
 .cta-note { font-size: .9rem; color: var(--text-2); max-width: 46ch; margin: 0 auto; }
+.tester-card { margin-top: 34px; }
+.tester-card .alpha-title { font-size: 1.2rem; }
+.tester-card .alpha-fine { font-size: .82rem; line-height: 1.6; margin: 14px 0 0; }
 .cta-note .muted { display: block; font-size: .85rem; margin-top: 5px; }
 .cta-status { font-size: .92rem; min-height: 1.5em; margin: 12px 0 0; }
 .cta-status.ok { color: var(--accent); }

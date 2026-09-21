@@ -103,12 +103,60 @@
     <div class="cta" data-role="download" hidden>
       <a class="btn-primary" data-role="download-link" href="#">
         Download for Windows
-        <span class="btn-sub">v<span data-role="version">0.1.0</span> · <span data-role="size">178</span> MB · 64-bit</span>
+        <span class="btn-sub"><span data-role="build">v0.1.0</span> · <span data-role="size">178</span> MB · 64-bit</span>
       </a>
       <p class="cta-note">
-        The alpha opens <strong data-role="alpha-date">21 September</strong>; this is the build
-        testers get. <a href="#install">Windows will show a warning the first time. Here's why, and what to click.</a>
+        <strong data-role="build">v0.1.0</strong>, out <strong data-role="alpha-date">21 September</strong> — what it
+        brought is under <a href="#milestones">Milestones</a>.
+        <a href="#install">Windows will show a warning the first time. Here's why, and what to click.</a>
       </p>
+
+      <!-- TESTER FORM — the two questions the signup asked, kept after the flip.
+           Whether Zaram is any good on a machine depends on the machine, and
+           what a person points it at first is the thing the next build is built
+           for. Same form host; `kind: tester` tells it apart in the inbox. -->
+      <div class="alpha-card tester-card">
+        <h2 class="alpha-title">Two questions before you start.</h2>
+        <p class="alpha-sub">
+          Whether Zaram is any good on your machine depends on the machine, and what you
+          point it at first is what the next build gets built for. A minute, no account.
+        </p>
+        <form class="alpha-form" data-role="signup" novalidate>
+          <input type="hidden" name="kind" value="tester">
+          <input type="hidden" name="_subject" value="Zaram tester">
+          <div class="field">
+            <label for="t-email">Email address</label>
+            <input id="t-email" name="email" type="email" required autocomplete="email"
+                   placeholder="you@example.com" spellcheck="false">
+            <p class="hint">So I can tell you about the next build, and ask what went wrong. Nothing else.</p>
+          </div>
+          <div class="field">
+            <label for="t-setup">What are you running?</label>
+            <select id="t-setup" name="setup" required>
+              <option value="" selected disabled>Choose one…</option>
+              <option>A dedicated GPU with 8GB of memory or more</option>
+              <option>A dedicated GPU, but a smaller one</option>
+              <option>No dedicated GPU — laptop or integrated graphics</option>
+              <option>Not sure</option>
+            </select>
+            <p class="hint">
+              Zaram runs the model on your machine, so this decides how fast it feels. Every
+              answer is welcome — "not sure" included, and no GPU is still a useful test.
+            </p>
+          </div>
+          <div class="field">
+            <label for="t-intent">What will you use Zaram for?</label>
+            <textarea id="t-intent" name="intent" rows="2" required
+                      placeholder="A folder of contracts, three years of invoices, a thesis, a codebase…"></textarea>
+          </div>
+          <button type="submit">Send, then download</button>
+        </form>
+        <p class="cta-status" data-role="signup-status" role="status" aria-live="polite"></p>
+        <p class="muted alpha-fine">
+          Your answers go to the form host named in the footer, and nowhere else. The
+          download works whether or not you fill this in.
+        </p>
+      </div>
     </div>
 
     <div class="hero-showcase">
