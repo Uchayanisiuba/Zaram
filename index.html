@@ -100,28 +100,19 @@
     </div>
 
     <!-- DOWNLOAD — shown when releaseLive is true -->
+    <!-- DOWNLOAD — the form is the door. Two questions, then the file starts:
+         whether Zaram is any good on a machine depends on the machine, and what
+         a person points it at first is what the next build gets built for. Same
+         form host as the signup; `kind: tester` tells it apart in the inbox. -->
     <div class="cta" data-role="download" hidden>
-      <a class="btn-primary" data-role="download-link" href="#">
-        Download for Windows
-        <span class="btn-sub"><span data-role="build">v0.1.0</span> · <span data-role="size">178</span> MB · 64-bit</span>
-      </a>
-      <p class="cta-note">
-        <strong data-role="build">v0.1.0</strong>, out <strong data-role="alpha-date">21 September</strong> — what it
-        brought is under <a href="#milestones">Milestones</a>.
-        <a href="#install">Windows will show a warning the first time. Here's why, and what to click.</a>
-      </p>
-
-      <!-- TESTER FORM — the two questions the signup asked, kept after the flip.
-           Whether Zaram is any good on a machine depends on the machine, and
-           what a person points it at first is the thing the next build is built
-           for. Same form host; `kind: tester` tells it apart in the inbox. -->
       <div class="alpha-card tester-card">
-        <h2 class="alpha-title">Two questions before you start.</h2>
+        <h2 class="alpha-title">Download for Windows</h2>
         <p class="alpha-sub">
-          Whether Zaram is any good on your machine depends on the machine, and what you
-          point it at first is what the next build gets built for. A minute, no account.
+          <strong data-role="build">v0.1.0</strong> · <span data-role="size">178</span> MB · 64-bit · out
+          <strong data-role="alpha-date">21 September</strong>. Two questions first — a minute, no account —
+          and the download starts when you send them.
         </p>
-        <form class="alpha-form" data-role="signup" novalidate>
+        <form class="alpha-form" data-role="signup" data-then="download" novalidate>
           <input type="hidden" name="kind" value="tester">
           <input type="hidden" name="_subject" value="Zaram tester">
           <div class="field">
@@ -152,9 +143,13 @@
           <button type="submit">Send, then download</button>
         </form>
         <p class="cta-status" data-role="signup-status" role="status" aria-live="polite"></p>
+        <p class="cta-note after-send" data-role="download-again" hidden>
+          Didn't start? <a data-role="download-link" href="#">Download <span data-role="build">v0.1.0</span> again</a>.
+        </p>
         <p class="muted alpha-fine">
-          Your answers go to the form host named in the footer, and nowhere else. The
-          download works whether or not you fill this in.
+          Your answers go to the form host named in the footer, and nowhere else.
+          <a href="#install">Windows will show a warning the first time — here's why, and what to click.</a>
+          What this build brought is under <a href="#milestones">Milestones</a>.
         </p>
       </div>
     </div>

@@ -212,13 +212,22 @@ async function submitSignup(event) {
       if (!response.ok) throw new Error("HTTP " + response.status);
     }
     form.reset();
+    if (form.dataset.then === "download") {
+      // The form is the door: the file starts the moment the answers are in.
+      // A navigation to the .exe downloads it without leaving the page; the
+      // "didn't start?" link is for a browser that blocked it.
+      say(status, "Thank you — that shapes the next build. Your download is starting.", "ok");
+      button.textContent = "Downloading…";
+      const again = form.parentElement.querySelector('[data-role="download-again"]');
+      if (again) again.hidden = false;
+      window.location.href = downloadUrl();
+      return;
+    }
     say(
       status,
-      payload.kind === "tester"
-        ? "Thank you — that shapes the next build. The download is just above."
-        : isLive()
-          ? "Done — you'll hear about the next build."
-          : "You're in. I'll email you when the first build is ready.",
+      isLive()
+        ? "Done — you'll hear about the next build."
+        : "You're in. I'll email you when the first build is ready.",
       "ok",
     );
     button.textContent = "Done";
