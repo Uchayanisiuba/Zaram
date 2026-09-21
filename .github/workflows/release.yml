@@ -103,6 +103,10 @@ jobs:
           echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
           case "${GITHUB_REF_NAME}" in *-*) echo "prerelease=true" >> "$GITHUB_OUTPUT" ;; *) echo "prerelease=false" >> "$GITHUB_OUTPUT" ;; esac
           cat dist-electron/SHA256SUMS.txt
+          # The release page, in the site's voice — `scripts/release-notes.mjs`
+          # carries what each build brought; the auto-generated commit list
+          # is not a page a tester can read.
+          node scripts/release-notes.mjs "${GITHUB_REF_NAME}" "$sha" "$size" > dist-electron/RELEASE-NOTES.md
 
       - name: Publish the release
         uses: softprops/action-gh-release@v2
@@ -110,13 +114,8 @@ jobs:
           tag_name: ${{ steps.art.outputs.tag }}
           name: Zaram ${{ steps.art.outputs.tag }}
           prerelease: ${{ steps.art.outputs.prerelease }}
-          generate_release_notes: true
-          body: |
-            **Windows, x64. Unsigned alpha** — Windows will warn before it runs; that is expected for a build with no certificate. Check the SHA-256 below against `SHA256SUMS.txt` if you want to be sure of what you downloaded.
-
-            `${{ steps.art.outputs.sha }}`  ·  ${{ steps.art.outputs.size }} MiB
-
-            Local is free: a model on this machine costs nothing per question, and nothing you say to it leaves this device or is trained on. Cloud keys are optional. Problems: Settings → Help → Report a problem copies what a maintainer needs; paste it into an issue here or a reply to the tester email.
+          generate_release_notes: false
+          body_path: dist-electron/RELEASE-NOTES.md
           files: |
             ${{ steps.art.outputs.installer }}
             ${{ steps.art.outputs.portable }}
