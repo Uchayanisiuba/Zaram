@@ -101,9 +101,14 @@ function applyConfig() {
 
   // A version number is meaningless until there is a file carrying it, so before
   // the build exists the badge states the timing instead.
+  // The build's own name — the release tag, which carries the alpha suffix
+  // the installer's filename does not. A tester comparing the page with the
+  // email should read the same word in both.
+  const build = CONFIG.releaseTag || `v${CONFIG.version}`;
+  $all('[data-role="build"]').forEach(el => { el.textContent = build; });
   $all('[data-role="eyebrow"]').forEach(el => {
     el.textContent = live
-      ? `Alpha · Windows · v${CONFIG.version} · opens ${CONFIG.alphaOpens}`
+      ? `Alpha · Windows · ${build} · out ${CONFIG.alphaOpens}`
       : `Alpha · Windows · ${CONFIG.firstBuild}`;
   });
   $all('[data-role="alpha-date"]').forEach(el => { el.textContent = CONFIG.alphaOpens; });
@@ -166,6 +171,7 @@ async function submitSignup(event) {
   );
   if (missing) {
     const label = missing === input ? "That doesn't look like an email address."
+                                    : missing.name === "intent" ? "Say what you'd use it for — one line is enough."
                                     : "Pick an option for “What are you running?”";
     say(status, label, "err");
     missing.focus();
@@ -208,9 +214,11 @@ async function submitSignup(event) {
     form.reset();
     say(
       status,
-      isLive()
-        ? "Done — you'll hear about the next build."
-        : "You're in. I'll email you when the first build is ready.",
+      payload.kind === "tester"
+        ? "Thank you — that shapes the next build. The download is just above."
+        : isLive()
+          ? "Done — you'll hear about the next build."
+          : "You're in. I'll email you when the first build is ready.",
       "ok",
     );
     button.textContent = "Done";
