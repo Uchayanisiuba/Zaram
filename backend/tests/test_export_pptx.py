@@ -14,6 +14,7 @@ import io
 import pytest
 
 from artifacts import export
+from artifacts.contracts import Heading, TableBlock
 from artifacts.html import render_deck, render_document, render_spreadsheet
 
 pytest.importorskip("pptx", reason="python-pptx is not installed")
@@ -38,6 +39,20 @@ TABLE = render_spreadsheet(
     header=["Client", "Amount"],
     rows=[["Northwind", "1,470.50"]],
     caption="Outstanding",
+)
+
+#: A fee table in the middle of a proposal — the shape this exporter used to
+#: get wrong, and the reason it matters: a reader looking at "What it costs"
+#: found the costs three slides later, after the closing section.
+INTERLEAVED = render_document(
+    title="Northwind",
+    blocks=[
+        Heading(text="What it costs", level=2),
+        "Two rates, depending on the month.",
+        TableBlock(header=["Item", "Amount"], rows=[["Design day", "700.00"]]),
+        Heading(text="What happens next", level=2),
+        "Sign and return.",
+    ],
 )
 
 
@@ -105,6 +120,41 @@ class TestAnyDocumentBecomesADeck:
         body = "\n".join(text_of(s) for s in slides_of(PROSE))
 
         assert "Opening context before any heading." in body
+
+
+class TestWhereATableLands:
+    """It goes in the section it was written in — 23 September 2026.
+
+    Every table used to be appended after the last slide, and this exporter's
+    docstring called that a chosen loss on the grounds that the position was
+    "not recoverable". It was recoverable: `_reader.Table.after_block` had
+    been carrying it for the Word exporter for weeks. The test is here so the
+    claim cannot quietly go back to being a paragraph in a docstring.
+    """
+
+    @staticmethod
+    def _titles(slides):
+        return [s.shapes.title.text if s.shapes.title is not None else "" for s in slides]
+
+    def test_the_table_follows_its_own_section(self):
+        slides = list(slides_of(INTERLEAVED))
+        titles = self._titles(slides)
+        table_at = next(
+            index for index, s in enumerate(slides) if any(sh.has_table for sh in s.shapes)
+        )
+
+        assert titles.index("What it costs") < table_at
+        assert table_at < titles.index("What happens next")
+
+    def test_the_sections_after_it_are_not_disturbed(self):
+        # The walk that positions a table counts every block, including the
+        # ones in the Sources section that never become a slide. Getting that
+        # wrong moves the table rather than raising, so the ordinary outline
+        # is asserted alongside it.
+        titles = self._titles(slides_of(INTERLEAVED))
+
+        assert titles[0] == "Northwind"
+        assert "What it costs" in titles and "What happens next" in titles
 
 
 class TestTables:

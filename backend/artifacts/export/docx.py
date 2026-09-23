@@ -91,9 +91,23 @@ class DocxExporter:
         for table in doc.tables:
             tables_after.setdefault(table.after_block, []).append(table)
 
+        # Pictures, positioned the same way and for the same reason. The
+        # reader was blind to `<img>` until 23 September 2026, so a chart in a
+        # document arrived in Word as a hole with nothing reporting it — the
+        # identical silent loss `_add_table` below was written to end.
+        images_after: Dict[int, list] = {}
+        for image in doc.images:
+            # The letterhead's mark is chrome the masthead draws; printing it
+            # again in the middle of the prose is not what a logo is for.
+            if "logo" in image.role.split():
+                continue
+            images_after.setdefault(image.after_block, []).append(image)
+
         for index, block in enumerate(doc.blocks):
             for table in tables_after.pop(index, ()):
                 _add_table(word, table)
+            for image in images_after.pop(index, ()):
+                _add_picture(word, image)
 
             if block.in_sources:
                 continue
@@ -120,10 +134,14 @@ class DocxExporter:
                 else:
                     _add_styled_run(paragraph, run)
 
-        # A table that opened after the last block still belongs in the file.
+        # A table or picture that opened after the last block still belongs in
+        # the file.
         for index in sorted(tables_after):
             for table in tables_after[index]:
                 _add_table(word, table)
+        for index in sorted(images_after):
+            for image in images_after[index]:
+                _add_picture(word, image)
 
         source_blocks = doc.source_blocks()
         if source_blocks:
@@ -155,6 +173,42 @@ class DocxExporter:
         word.save(buffer)
         return buffer.getvalue()
 
+
+
+def _add_picture(word, image) -> None:
+    """One picture, where the author put it, never wider than the page.
+
+    Word places a picture at its native size, and a 1200-pixel chart at native
+    size is wider than the page — it runs into the margin and off the paper,
+    which is how an export that "worked" prints wrong. Scaled down to fit and
+    never scaled up, because enlarging a small chart only makes it blurred.
+
+    The `alt` text is written onto the drawing's description, which is what
+    Word's own accessibility checker reads and what a screen reader announces.
+    `python-docx` has no API for it, so this reaches the element directly and
+    tolerates the attribute moving: a picture with no description is worth
+    less than one that is not there, and neither is worth failing an export.
+    """
+    if not image.data:
+        return
+
+    try:
+        picture = word.add_picture(io.BytesIO(image.data))
+    except Exception:
+        # An image format python-docx cannot measure. The prose still exports.
+        return
+
+    section = word.sections[0]
+    usable = section.page_width - section.left_margin - section.right_margin
+    if usable and picture.width > usable:
+        picture.height = int(picture.height * usable / picture.width)
+        picture.width = int(usable)
+
+    if image.alt:
+        try:
+            picture._inline.docPr.set("descr", image.alt)
+        except AttributeError:  # pragma: no cover - shape of a third-party tree
+            pass
 
 
 def _add_table(word, table) -> None:

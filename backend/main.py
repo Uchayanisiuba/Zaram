@@ -4743,13 +4743,80 @@ class GenerateSlide(BaseModel):
     bullets: list[str] = []
 
 
+#: The largest picture a document may carry, decoded. Generous for a chart or
+#: a screenshot and far below what would make a .docx unopenable — a document
+#: is a thing people email, and a 40 MB attachment bounces.
+_MAX_IMAGE_BYTES = 12 * 1024 * 1024
+
+
+def _sniff_image(data: bytes) -> str | None:
+    """The media type, read from the bytes rather than taken from the caller.
+
+    It travels into a `data:` URI that a browser honours, so a caller naming
+    its own type would be choosing what the preview executes. Two formats,
+    because two are what the pipeline produces.
+    """
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if data.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    return None
+
+
+def _image_from_request(block: dict) -> Any:
+    """One picture from the request body, checked before it is embedded.
+
+    **Base64, never a path and never a URL**, and that is the whole policy. A
+    path would let a request body choose which file on this machine gets
+    embedded in a document and handed back; a URL would make generating a
+    document an egress, performed by a route nobody thinks of as one. The
+    caller holds the bytes, so neither question arises.
+    """
+    from artifacts.contracts import ImageBlock
+
+    import base64
+    import binascii
+
+    raw = block.get("data") or block.get("base64") or ""
+    if not isinstance(raw, str) or not raw.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="an image block needs `data`: the picture, base64-encoded",
+        )
+
+    try:
+        data = base64.b64decode(raw, validate=True)
+    except (binascii.Error, ValueError):
+        raise HTTPException(
+            status_code=400, detail="`data` on an image block is not valid base64"
+        ) from None
+
+    if len(data) > _MAX_IMAGE_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=(
+                f"that picture is {len(data) // (1024 * 1024)} MB and the limit "
+                f"is {_MAX_IMAGE_BYTES // (1024 * 1024)} MB"
+            ),
+        )
+
+    media_type = _sniff_image(data)
+    if media_type is None:
+        raise HTTPException(
+            status_code=400,
+            detail="that is not a PNG or a JPEG, which are the two a document can carry",
+        )
+
+    return ImageBlock(data=data, alt=str(block.get("alt", "")), media_type=media_type)
+
+
 def _document_block(block: Any, by_id: dict[str, Any]) -> Any:
     """One request block as something `render_document` understands.
 
     The vocabulary is deliberately the one `export/_reader.py` already parses —
-    `h2`/`h3`, `li`, `table` — so a structured document exports to .docx and
-    .pptx through the readers that were built for it and were, until now, being
-    fed nothing but paragraphs.
+    `h2`/`h3`, `li`, `table`, `img` — so a structured document exports to .docx
+    and .pptx through the readers that were built for it and were, until now,
+    being fed nothing but paragraphs.
 
     Three shapes, and the order matters:
 
@@ -4807,6 +4874,9 @@ def _document_block(block: Any, by_id: dict[str, Any]) -> Any:
             numeric_columns=[int(i) for i in block.get("numeric_columns", [])],
         )
 
+    if kind in ("image", "picture"):
+        return _image_from_request(block)
+
     if kind in ("pagebreak", "page_break"):
         return PageBreak()
 
@@ -4814,7 +4884,7 @@ def _document_block(block: Any, by_id: dict[str, Any]) -> Any:
         status_code=400,
         detail=(
             f"unknown block type {kind!r}. Known types: paragraph, heading, "
-            "list, table, pagebreak"
+            "list, table, image, pagebreak"
         ),
     )
 

@@ -18,9 +18,85 @@ publishing step over rather than finding another route. `CLAUDE.md`,
 
 ---
 
-## Current state — 20 September 2026
+## Current state — 23 September 2026
 
 *The latest work is first. Earlier sessions follow below.*
+
+### 23 September — a deck puts a table where it belongs, and a picture survives being exported.
+
+Asked what it would take to make decks better, and the first answer was to
+read the code rather than the note in it.
+
+**Tables land in their section.** `artifacts/export/pptx.py` appended every
+table after the last slide, and its own docstring called that "a real loss of
+ordering" justified by the position being "not recoverable". It was
+recoverable: `_reader.Table.after_block` had been carrying it since the Word
+exporter learned to interleave, weeks earlier. The exporter simply was not
+reading the field. **A cost accepted in a docstring outlives the constraint
+that justified it** — the note is not evidence, the code is, and that is the
+transferable lesson rather than the fix.
+
+`_outline` now walks every block, including the ones in the Sources section
+that never become a slide, and records which section was open at each
+position. Dropping those from the walk would shift every index after them and
+move a fee table into the wrong part of the deck, which is the kind of bug
+that looks like a rendering fault.
+
+**Pictures were invisible to every exporter.** `_reader`'s tag vocabulary has
+no `img` in it, so a picture in a document was dropped on the way to Word
+*and* PowerPoint with nothing anywhere reporting it — the same silent loss
+`_add_table` was written to end for tables, in the one place nobody had
+looked, and invisible because until now no document could contain a picture.
+
+- `_reader.Image` carries the bytes, the media type, the alt text and the
+  position. **Only a `data:` URI is read.** A remote `src` is never fetched:
+  an export that makes a network request is rule 3 broken by a file format,
+  where no gate sees it and no log records it.
+- `ImageBlock` in `artifacts/contracts.py`, rendered by `render_block` as an
+  embedded data URI, so the preview, WeasyPrint and the exporters all read
+  the same thing.
+- `POST /artifacts/generate` takes `{"type": "image", "data": "<base64>",
+  "alt": "…"}`. Base64 only — a path would let a request body choose which
+  file on the machine is embedded and handed back, and a URL would make
+  generating a document an egress performed by a route nobody thinks of as
+  one. The media type is **sniffed from the bytes**, not taken from the
+  caller, because it travels into a `data:` URI the preview honours; an SVG
+  calling itself a PNG is refused.
+- PowerPoint gives a picture its own slide, centred, scaled to fit and never
+  enlarged. Word places it inline, capped at the text width, with the alt
+  text written onto the drawing where Word's accessibility checker reads it.
+  The letterhead logo is skipped in both — it is chrome the masthead draws.
+
+**Seen, not inferred.** A proposal with a matplotlib chart and a fee table
+exported both ways: the deck came out cover → *Where the quarter went* → the
+chart → *What it costs* → the table → *What happens next*, the picture 6.06in
+wide and centred; the .docx carried one picture at 6.06in against a 6.69in
+text width with `descr="Revenue by month"`, in the same order. The preview
+renders the picture in place. Tests: `tests/test_exports_keep_pictures.py`
+(13) and `TestWhereATableLands` in `tests/test_export_pptx.py`, which was
+confirmed to **fail against the previous exporter** before it was kept.
+
+#### What this does not do, stated plainly
+
+**Zaram still has no chart producer.** `create_chart` has no caller and
+`runtimes/documents/runtime.py` refuses a chart request on purpose — *"a
+chart needs the figures as data, and what we have here is prose"* — pending
+the business layer. So this is the plumbing a chart will travel through, and
+it was broken; the picture that reaches a slide today is one a caller
+supplies through the API. Markdown images are still dropped to their alt
+text, deliberately, because a markdown image names a URL.
+
+**Still true of decks, and the next rungs if they are wanted:** no speaker
+notes (python-pptx supports them; the source would be prose too long for a
+bullet, which is a composer change rather than an exporter one); no `.pptx`
+preview inside Zaram, which stays right while the alternative is embedding an
+office renderer; one design, because the layouts are left as the template's
+so a user's own theme applies. The designed-slide route — HTML laid out in a
+real browser, boxes measured, written to `.pptx` at those coordinates — is
+what Anthropic's own document skill does and is a build rather than a
+dependency: their skills are source-available and not open source, and the
+open alternatives are Pandoc (GPL, so an optional external binary at most) or
+slide tools whose `.pptx` export is one image per slide.
 
 ### 20 September, night — the road to `v0.1.0-alpha.2`, walked. HANDOFF.
 

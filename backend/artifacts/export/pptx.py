@@ -11,14 +11,21 @@ top of it, and it buys something a dedicated deck format would not — **any
 document Zaram has already generated can be exported as slides**, because every
 document has headings. A proposal becomes a pitch without being rewritten.
 
-What that costs, stated plainly
--------------------------------
-`_reader` collects tables separately from blocks, so their position relative to
-the headings is not recoverable. Tables therefore land on their own slides at
-the end rather than inside the section they belonged to. That is a real loss of
-ordering and it is preferred to the alternatives: dropping them silently, or
-teaching the reader to interleave for one exporter's benefit. A deck is
-re-ordered by hand anyway, and a missing table is not.
+Tables and pictures land in their own section — 23 September 2026
+-----------------------------------------------------------------
+This used to read *"`_reader` collects tables separately from blocks, so their
+position relative to the headings is not recoverable… that is a real loss of
+ordering and it is preferred to the alternatives"*. It was a real loss, and by
+the time anybody re-read the sentence it was not the only option available:
+`Table.after_block` had been carrying the position for the Word exporter for
+weeks, and this exporter was not reading the field. A cost accepted in a
+docstring outlives the constraint that justified it, which is the general
+lesson worth keeping — **the note is not evidence; the code is.**
+
+So a fee table now follows the section it was written in, and pictures work
+the same way. What is still deliberate is that each gets **its own slide**:
+PowerPoint's content placeholder is the column a bullet list occupies, and a
+table or a chart squeezed into it is unreadable from the back of a room.
 
 It carries the same design as everything else — 4 September 2026
 --------------------------------------------------------------
@@ -53,7 +60,8 @@ thing to undo" the old note was actually right about.
 from __future__ import annotations
 
 import io
-from typing import List, Tuple
+from dataclasses import dataclass, field
+from typing import List, Optional, Tuple
 
 from . import _reader
 from .. import theme
@@ -87,6 +95,20 @@ _TABLE_PT = 12.0
 _MAX_BULLETS = 8
 
 
+@dataclass
+class _Section:
+    """One heading and everything under it, in the order it was written."""
+
+    heading: str
+    bullets: List[str] = field(default_factory=list)
+    #: Tables and pictures, each with the block position it opened at, so a
+    #: chart written above a fee table is still above it on the slides.
+    extras: List[Tuple[int, object]] = field(default_factory=list)
+
+    def ordered_extras(self) -> List[object]:
+        return [item for _, item in sorted(self.extras, key=lambda pair: pair[0])]
+
+
 class PptxExporter:
     extension = "pptx"
     media_type = (
@@ -107,7 +129,7 @@ class PptxExporter:
         deck.slide_width = Inches(_WIDESCREEN_IN[0])
         deck.slide_height = Inches(_WIDESCREEN_IN[1])
 
-        title, slides = self._outline(doc)
+        title, sections, leading = self._outline(doc)
 
         cover = deck.slides.add_slide(deck.slide_layouts[_TITLE_SLIDE])
         cover.shapes.title.text = title or "Untitled"
@@ -118,10 +140,18 @@ class PptxExporter:
         if len(cover.placeholders) > 1:
             cover.placeholders[1].text = ""
 
-        for heading, bullets in slides:
-            for index, chunk in enumerate(self._chunk(bullets)):
+        # A table or picture that opened before the first heading. Rare, and it
+        # goes straight after the cover rather than inventing a section header
+        # nobody wrote.
+        for item in leading:
+            self._extra_slide(deck, item)
+
+        for section in sections:
+            for index, chunk in enumerate(self._chunk(section.bullets)):
                 slide = deck.slides.add_slide(deck.slide_layouts[_TITLE_AND_CONTENT])
-                slide.shapes.title.text = heading if index == 0 else f"{heading} (cont.)"
+                slide.shapes.title.text = (
+                    section.heading if index == 0 else f"{section.heading} (cont.)"
+                )
                 # The accent on section titles and nowhere else, which is the
                 # same rule `theme.ACCENT` follows on the page: one accent, used
                 # for the thing that says what this is.
@@ -134,25 +164,43 @@ class PptxExporter:
                     paragraph.level = 0
                 self._style(slide.placeholders[1], size=_BULLET_PT, colour=theme.INK)
 
-        for table in doc.tables:
-            self._table_slide(deck, table)
+            for item in section.ordered_extras():
+                self._extra_slide(deck, item)
 
         buffer = io.BytesIO()
         deck.save(buffer)
         return buffer.getvalue()
 
     @staticmethod
-    def _outline(doc: _reader.Document) -> Tuple[str, List[Tuple[str, List[str]]]]:
-        """Title, then (heading, bullets) per slide.
+    def _outline(
+        doc: _reader.Document,
+    ) -> Tuple[str, List[_Section], List[object]]:
+        """Title, the sections under it, and anything that came before them.
 
         Content before the first `<h2>` is gathered under the document title, so
         an opening paragraph is not thrown away for arriving early.
+
+        Tables and pictures arrive on their own lists rather than in the block
+        stream — `Table.after_block` records why — so this walks **every**
+        block, including the ones in the Sources section that never become a
+        slide, and keeps which section was open at each position. Dropping the
+        sources blocks from the walk would shift every index after them and
+        move a fee table into the wrong part of the deck.
         """
         title = ""
-        slides: List[Tuple[str, List[str]]] = []
-        current: Tuple[str, List[str]] | None = None
+        sections: List[_Section] = []
+        current: Optional[_Section] = None
+        #: The section open when each block was read, by block index. Recorded
+        #: before the block is processed, because a table at position `i`
+        #: opened *before* block `i` was read — and one entry longer than
+        #: `blocks`, because a table at the very end opens after the last one.
+        section_at: List[int] = []
 
-        for block in doc.body_blocks():
+        for block in doc.blocks:
+            section_at.append(len(sections) - 1)
+            if block.in_sources:
+                continue
+
             text = block.text.strip()
             if not text:
                 continue
@@ -162,18 +210,84 @@ class PptxExporter:
                 continue
 
             if block.tag in ("h1", "h2", "h3"):
-                current = (text, [])
-                slides.append(current)
+                current = _Section(heading=text)
+                sections.append(current)
                 continue
 
             if current is None:
-                current = (title or "Overview", [])
-                slides.append(current)
-            current[1].append(text)
+                current = _Section(heading=title or "Overview")
+                sections.append(current)
+            current.bullets.append(text)
+
+        section_at.append(len(sections) - 1)
+
+        extras: List[Tuple[int, object]] = [
+            (table.after_block, table) for table in doc.tables
+        ]
+        extras += [
+            (image.after_block, image)
+            for image in doc.images
+            # The letterhead's mark is chrome the masthead draws, not content.
+            # A slide of somebody's logo is not what they asked for.
+            if "logo" not in image.role.split()
+        ]
+
+        leading: List[object] = []
+        for position, item in sorted(extras, key=lambda pair: pair[0]):
+            index = section_at[min(position, len(section_at) - 1)] if section_at else -1
+            if index < 0:
+                leading.append(item)
+            else:
+                sections[index].extras.append((position, item))
 
         # A heading with nothing under it is still a slide: it is a section
         # marker, and dropping it loses the deck's structure.
-        return title, slides
+        return title, sections, leading
+
+    @staticmethod
+    def _extra_slide(deck, item: object) -> None:
+        """A table or a picture, whichever this is."""
+        if isinstance(item, _reader.Image):
+            PptxExporter._picture_slide(deck, item)
+        else:
+            PptxExporter._table_slide(deck, item)
+
+    @staticmethod
+    def _picture_slide(deck, image: _reader.Image) -> None:
+        """One picture, centred, as large as the slide allows.
+
+        Never enlarged past its own size: a 300-pixel chart blown up to fill a
+        widescreen slide is worse than a small sharp one, and PowerPoint gives
+        no way to tell the difference back to whoever made it.
+        """
+        from pptx.util import Inches
+
+        if not image.data:
+            return
+
+        slide = deck.slides.add_slide(deck.slide_layouts[_TITLE_ONLY])
+        slide.shapes.title.text = image.alt or "Figure"
+        PptxExporter._style(
+            slide.shapes.title, size=_TITLE_PT, colour=theme.ACCENT, bold=True
+        )
+
+        try:
+            picture = slide.shapes.add_picture(
+                io.BytesIO(image.data), Inches(0.6), Inches(1.8)
+            )
+        except Exception:
+            # python-pptx refuses a format it cannot measure, and a picture
+            # that will not go in is not worth failing an export over. The
+            # slide keeps its title, so the deck says where something was
+            # rather than closing over the gap.
+            return
+
+        box_width = deck.slide_width - Inches(1.2)
+        box_height = deck.slide_height - Inches(2.4)
+        scale = min(box_width / picture.width, box_height / picture.height, 1.0)
+        picture.width = int(picture.width * scale)
+        picture.height = int(picture.height * scale)
+        picture.left = int((deck.slide_width - picture.width) / 2)
 
     @staticmethod
     def _style(shape, *, size: float, colour: str, bold: bool = False) -> None:

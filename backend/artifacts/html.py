@@ -34,6 +34,7 @@ from .contracts import (
     BulletList,
     Claim,
     Heading,
+    ImageBlock,
     PageBreak,
     RichText,
     TableBlock,
@@ -113,6 +114,30 @@ def _table_block(table: TableBlock) -> str:
     return "".join(parts)
 
 
+def _image_block(block: ImageBlock) -> str:
+    """A picture in the prose, embedded.
+
+    Self-contained for the same reason the stylesheet is inline: this string is
+    what the preview renders, what WeasyPrint prints and what the exporters
+    read back, and a picture that lives anywhere else is a picture one of the
+    three does not have.
+
+    An empty block renders as nothing rather than as a broken-image icon. The
+    caller asked for a picture and supplied none; drawing the browser's grey
+    box in its place would report a fault in the document instead.
+    """
+    import base64
+
+    if not block.data:
+        return ""
+
+    encoded = base64.b64encode(block.data).decode("ascii")
+    return (
+        f'<img alt="{_esc(block.alt)}" '
+        f'src="data:{_esc(block.media_type)};base64,{encoded}">'
+    )
+
+
 def render_block(block: object) -> str:
     """One member of ``blocks`` as HTML.
 
@@ -138,6 +163,8 @@ def render_block(block: object) -> str:
         return f"<{tag}>{''.join(_list_item(i) for i in block.items)}</{tag}>"
     if isinstance(block, TableBlock):
         return _table_block(block)
+    if isinstance(block, ImageBlock):
+        return _image_block(block)
     if isinstance(block, PageBreak):
         return '<div class="pagebreak"></div>'
     return f"<p>{_esc(str(block))}</p>"

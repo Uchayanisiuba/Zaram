@@ -18,6 +18,9 @@ structure of this document".
 
 from __future__ import annotations
 
+import base64
+import binascii
+import re
 from dataclasses import dataclass, field
 from html.parser import HTMLParser
 from typing import Dict, List, Optional, Tuple
@@ -98,12 +101,46 @@ class Table:
 
 
 @dataclass
+class Image:
+    """A picture in the document: its bytes, what it is, and where it was.
+
+    Pictures were invisible to every exporter until 23 September 2026, because
+    the tag vocabulary above has no `img` in it. A document carrying a chart
+    exported to Word or PowerPoint as a document with a hole in it, and nothing
+    anywhere said so — which is the silent loss this package refuses everywhere
+    else, happening in the one place nobody had looked.
+
+    **Only a `data:` URI is read.** `render_chart` and `render_image` already
+    embed their PNG that way and the HTML is self-contained by design, so
+    decoding is all there is to do. A remote `src` is not fetched: that would
+    be an export making a network request, which is rule 3 broken by a file
+    format. An image this cannot decode is skipped, and the prose still
+    exports.
+    """
+
+    data: bytes = b""
+    media_type: str = "image/png"
+    #: The `alt` text — what a screen reader announces, and what titles the
+    #: slide this picture lands on. A picture without one is "Figure".
+    alt: str = ""
+    #: The `class` attribute. `logo` is the letterhead's mark, which the
+    #: masthead already draws as chrome; exporters skip it in the body flow
+    #: rather than printing somebody's logo in the middle of their proposal.
+    role: str = ""
+    #: How many blocks had been read when this picture appeared. Same field and
+    #: the same reason as `Table.after_block`: two flat lists say what a
+    #: document contains, never what order it is in.
+    after_block: int = 0
+
+
+@dataclass
 class Document:
     """Everything an exporter needs, with nothing format-specific in it."""
 
     title: str = ""
     blocks: List[Block] = field(default_factory=list)
     tables: List[Table] = field(default_factory=list)
+    images: List[Image] = field(default_factory=list)
 
     def body_blocks(self) -> List[Block]:
         return [b for b in self.blocks if not b.in_sources]
@@ -113,6 +150,23 @@ class Document:
 
     def anchors(self) -> Dict[str, Block]:
         return {b.anchor: b for b in self.blocks if b.anchor}
+
+
+#: `data:image/png;base64,…`. Anchored, because a `src` that merely contains
+#: those characters somewhere is not a data URI.
+_DATA_URI = re.compile(r"data:(image/[a-z0-9.+-]+);base64,(.*)", re.IGNORECASE | re.DOTALL)
+
+
+def _decode_data_uri(src: str) -> Optional[Tuple[bytes, str]]:
+    """The bytes and the media type, or None for anything not embedded."""
+    match = _DATA_URI.fullmatch(src.strip())
+    if not match:
+        return None
+    try:
+        return base64.b64decode(match.group(2), validate=True), match.group(1).lower()
+    except (binascii.Error, ValueError):
+        # A malformed picture is not a malformed document.
+        return None
 
 
 class _Reader(HTMLParser):
@@ -186,6 +240,21 @@ class _Reader(HTMLParser):
                 # A malformed span is not worth failing an export over. One
                 # column is the value that changes nothing.
                 self._cell_span = 1
+            return
+
+        if tag == "img":
+            decoded = _decode_data_uri(attr.get("src") or "")
+            if decoded is not None:
+                data, media_type = decoded
+                self.doc.images.append(
+                    Image(
+                        data=data,
+                        media_type=media_type,
+                        alt=(attr.get("alt") or "").strip(),
+                        role=(attr.get("class") or "").strip(),
+                        after_block=len(self.doc.blocks),
+                    )
+                )
             return
 
         if tag in _BLOCK_TAGS:

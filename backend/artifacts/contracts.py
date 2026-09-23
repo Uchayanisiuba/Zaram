@@ -265,6 +265,28 @@ class TableBlock:
 
 
 @dataclass(frozen=True)
+class ImageBlock:
+    """A picture inside a prose document — a chart, a screenshot, a diagram.
+
+    The **bytes** travel with the block, not a path. `render_chart` already
+    gives the reason and it applies unchanged: the HTML is the source of truth
+    and is self-contained, so a picture is embedded as a `data:` URI. A
+    relative path breaks the moment the preview renders from memory rather
+    than from disk, and a remote one is forbidden outright — a document that
+    fetches something when it is opened is a beacon, whoever opens it.
+
+    ``alt`` is only nominally optional. It is what a screen reader announces,
+    what a text extraction of the PDF carries, and what titles the slide this
+    picture lands on when the document is exported as a deck. A picture with
+    none exports as "Figure", which is the honest thing to call it.
+    """
+
+    data: bytes = b""
+    alt: str = ""
+    media_type: str = "image/png"
+
+
+@dataclass(frozen=True)
 class PageBreak:
     """Start the next block on a new page.
 

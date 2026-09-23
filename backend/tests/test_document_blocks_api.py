@@ -39,6 +39,18 @@ def client(tmp_path_factory):
     importlib.reload(main_module)
 
 
+def _png() -> str:
+    """A real PNG, base64-encoded, as a caller would send one."""
+    import base64
+    import io
+
+    from PIL import Image
+
+    buffer = io.BytesIO()
+    Image.new("RGB", (240, 120), "#4338ca").save(buffer, format="PNG")
+    return base64.b64encode(buffer.getvalue()).decode("ascii")
+
+
 def _html(client, **overrides):
     body = {"title": "Proposal", "kind": "document", "blocks": []}
     body.update(overrides)
@@ -79,6 +91,59 @@ class TestStructureThroughTheWire:
 
     def test_a_plain_string_is_still_a_paragraph(self, client):
         assert "<p>Just prose.</p>" in _html(client, blocks=["Just prose."])
+
+    def test_an_image_block_is_embedded_not_linked(self, client):
+        html = _html(
+            client,
+            blocks=[{"type": "image", "data": _png(), "alt": "Revenue by month"}],
+        )
+
+        # Embedded, because the HTML is the source of truth and is what the
+        # preview renders from memory. A path would break there and a URL
+        # would make opening a document a network request.
+        assert 'src="data:image/png;base64,' in html
+        assert 'alt="Revenue by month"' in html
+
+
+class TestAPictureIsCheckedBeforeItIsEmbedded:
+    """The media type travels into a `data:` URI, so it is read, not taken."""
+
+    def test_base64_that_is_not_base64_is_refused(self, client):
+        response = client.post(
+            "/artifacts/generate",
+            json={"title": "P", "kind": "document",
+                  "blocks": [{"type": "image", "data": "not base64 at all"}]},
+        )
+
+        assert response.status_code == 400
+        assert "base64" in response.text
+
+    def test_something_that_is_not_a_picture_is_refused(self, client):
+        import base64
+
+        response = client.post(
+            "/artifacts/generate",
+            json={"title": "P", "kind": "document", "blocks": [{
+                "type": "image",
+                "data": base64.b64encode(b"<svg onload=alert(1)>").decode("ascii"),
+            }]},
+        )
+
+        # An SVG is a document that runs script, and this one arrives as a
+        # `data:` URI the preview would honour. Sniffed from the bytes rather
+        # than believed from a field, which is why naming it `image/png` in
+        # the request changes nothing.
+        assert response.status_code == 400
+        assert "PNG or a JPEG" in response.text
+
+    def test_an_image_block_with_no_data_says_what_is_missing(self, client):
+        response = client.post(
+            "/artifacts/generate",
+            json={"title": "P", "kind": "document", "blocks": [{"type": "image"}]},
+        )
+
+        assert response.status_code == 400
+        assert "`data`" in response.text
 
     def test_the_masthead_fields_reach_the_document(self, client):
         html = _html(
