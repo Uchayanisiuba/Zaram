@@ -55,8 +55,10 @@ from urllib.parse import urlparse
 
 from .contracts import (
     AVAILABLE,
+    TEXT_TO_IMAGE_ONLY,
     Availability,
     GeneratedImage,
+    ImageCapabilities,
     ImageProgress,
     ImageRequest,
 )
@@ -151,6 +153,16 @@ class CloudImageProvider:
     #: What Settings should say when the key is missing.
     key_hint: str = ""
 
+    def capabilities(self) -> ImageCapabilities:
+        """Words in, picture out, and nothing else unless a subclass says so.
+
+        Conservative by default and on purpose: a provider that silently
+        ignored a reference picture would draw something from the prompt
+        alone and hand it back as though it had understood, which is rule 9's
+        failure in the one medium where nothing on screen shows the omission.
+        """
+        return TEXT_TO_IMAGE_ONLY
+
     @property
     def host(self) -> str:
         return (urlparse(self.endpoint).hostname or "").lower()
@@ -173,6 +185,11 @@ class CloudImageProvider:
     def _headers(self, api_key: str) -> Dict[str, str]:
         return {"Authorization": f"Bearer {api_key}"}
 
+    def _url(self, request: ImageRequest) -> str:
+        """Where to post. One endpoint unless a provider has a second for
+        requests that carry pictures."""
+        return self.endpoint
+
     def _body(self, request: ImageRequest, seed: int) -> Dict[str, Any]:
         raise NotImplementedError
 
@@ -194,7 +211,9 @@ class CloudImageProvider:
         # One request per image rather than a batch: the three providers
         # disagree about batching and a loop is the same on all of them.
         for i in range(request.count):
-            payload = _send_json(self.endpoint, self._body(request, seed + i), self._headers(conn.api_key))
+            payload = _send_json(
+                self._url(request), self._body(request, seed + i), self._headers(conn.api_key)
+            )
             images = self._parse(payload, seed + i)
             if not images:
                 raise RuntimeError(f"{self.name} answered without a picture")
@@ -298,8 +317,103 @@ class FalImages(CloudImageProvider):
         return out
 
 
+class QwenImages(CloudImageProvider):
+    """Qwen-Image on fal.ai — the one that edits.
+
+    Added 24 September 2026, four days after Qwen-Image 2.1 was published,
+    because it is the first open-weight model whose *editing* surface is ahead
+    of the closed ones: reference pictures, region edits, and a real alpha
+    channel instead of a white rectangle. Zaram ships none of it — rule: no
+    image weights, ever — it routes to it with the user's own key and logs
+    what left.
+
+    **Not self-hosted, and the licence is why.** The weights are published
+    under the Qwen Research License, which permits research and evaluation and
+    bars commercial use without a separate agreement. A freelancer drawing a
+    client's logo is commercial use, so bundling or recommending a local copy
+    would be handing somebody a licence problem with their invoice. Through an
+    API the terms are the provider's and the user's, which is the same
+    arrangement as every other key here.
+
+    **The model path is dated, like every other candidate list in this
+    codebase.** `fal-ai/qwen-image` and its `image-to-image` sibling are what
+    fal published on the date above. A path that is withdrawn or renamed comes
+    back as fal's own 404 message carrying this provider's name, which is a
+    sentence in a notice rather than a stack trace — the same defensive
+    posture the parsers here already take about response shapes.
+    """
+
+    provider_id = "fal"
+    name = "qwen-image · fal.ai"
+    endpoint = "https://fal.run/fal-ai/qwen-image"
+    #: Where the same model takes pictures as well as words.
+    edit_endpoint = "https://fal.run/fal-ai/qwen-image/image-to-image"
+    key_hint = (
+        "Add a fal.ai key under Settings → Providers. Paid per image; "
+        "nothing is trained on."
+    )
+
+    def capabilities(self) -> ImageCapabilities:
+        # Ten references and 2048 to the long edge are the model's own numbers,
+        # not a policy of ours. `MAX_REFERENCES` matches, so a request that
+        # passes the contract passes here too.
+        return ImageCapabilities(references=10, transparent=True, max_edge=2048)
+
+    def _headers(self, api_key: str) -> Dict[str, str]:
+        return {"Authorization": f"Key {api_key}"}
+
+    def _url(self, request: ImageRequest) -> str:
+        return self.edit_endpoint if request.references else self.endpoint
+
+    def _body(self, request: ImageRequest, seed: int) -> Dict[str, Any]:
+        body: Dict[str, Any] = {
+            "prompt": request.prompt,
+            "image_size": {"width": request.width, "height": request.height},
+            "num_inference_steps": request.steps,
+            "num_images": 1,
+            "seed": seed,
+            # Data URIs in the answer, so the picture arrives inside this one
+            # gated request rather than through a second fetch the log would
+            # have to account for separately.
+            "sync_mode": True,
+        }
+        if request.negative_prompt:
+            body["negative_prompt"] = request.negative_prompt
+        if request.transparent:
+            body["output_format"] = "png"
+            body["transparent_background"] = True
+        if request.references:
+            # Sent the way they arrived: as data, in the body, through the
+            # gate. Uploading them somewhere first would be a second egress
+            # for the same picture and a URL the user never saw.
+            urls = [
+                "data:image/png;base64," + base64.b64encode(ref).decode("ascii")
+                for ref in request.references
+            ]
+            body["image_urls"] = urls
+            # Single-reference endpoints name the field in the singular; both
+            # are sent because an unknown field is ignored and a missing one
+            # is a picture drawn from the words alone.
+            body["image_url"] = urls[0]
+        return body
+
+    def _parse(self, payload: Any, seed: int) -> List[GeneratedImage]:
+        return FalImages._parse(self, payload, seed)
+
+
 #: Every cloud provider, in the order they are tried.
-CLOUD_PROVIDERS: List[CloudImageProvider] = [NimImages(), TogetherImages(), FalImages()]
+#:
+#: Qwen first among the fal entries: it is the only one that edits, and a
+#: request carrying references would be refused by the others. Ordering is not
+#: what decides that — `_pick` gates on `capabilities()` — but trying the more
+#: capable one first means a person with one key gets the better answer
+#: without choosing a model, which is the whole posture of the picker.
+CLOUD_PROVIDERS: List[CloudImageProvider] = [
+    QwenImages(),
+    NimImages(),
+    TogetherImages(),
+    FalImages(),
+]
 
 
 def _stored_image_locality() -> str:
@@ -310,6 +424,54 @@ def _stored_image_locality() -> str:
         return get_user_settings().image_locality.value
     except Exception:  # noqa: BLE001 - a settings file that cannot be read is local
         return "local"
+
+
+#: What to say when the request needs an ability nothing connected has.
+_QWEN_REMEDY = (
+    "Add a fal.ai key under Settings → Providers — Qwen-Image edits from "
+    "reference pictures and can draw on a transparent background."
+)
+
+
+def _can_serve(provider: Any, request: Optional[ImageRequest]) -> bool:
+    """Whether this generator can do what the request actually asks.
+
+    **A gate, not a score, and CLAUDE.md names the failure it prevents**:
+    *"Modality is a capability gate, never a ranking… letting a score decide
+    modality gets a text model asked to draw, answering with confident prose
+    about a picture it did not make."* One level down, the same shape — a
+    generator that takes no reference picture, handed one, draws from the
+    prompt alone and returns something that looks like an answer.
+
+    A request with neither references nor transparency asks nothing special,
+    so every generator passes and routing is exactly what it was.
+    """
+    if request is None:
+        return True
+    if not request.references and not request.transparent:
+        return True
+
+    read = getattr(provider, "capabilities", None)
+    capabilities = read() if callable(read) else TEXT_TO_IMAGE_ONLY
+    if request.references and len(request.references) > capabilities.references:
+        return False
+    if request.transparent and not capabilities.transparent:
+        return False
+    return True
+
+
+def _missing(routed: Any, request: ImageRequest) -> str:
+    """The sentence for a request nothing connected can serve."""
+    wants: List[str] = []
+    if request.references:
+        wants.append(
+            f"work from {len(request.references)} reference picture"
+            f"{'s' if len(request.references) != 1 else ''}"
+        )
+    if request.transparent:
+        wants.append("draw on a transparent background")
+    what = " and ".join(wants) or "do that"
+    return f"{routed.describe()} cannot {what}."
 
 
 class RoutedImageProvider:
@@ -345,22 +507,34 @@ class RoutedImageProvider:
         # Defaults to the user's stored preference; tests hand in their own.
         self._prefer = prefer or _stored_image_locality
 
-    def _first_cloud(self) -> Optional[CloudImageProvider]:
+    def _first_cloud(
+        self, request: Optional[ImageRequest] = None
+    ) -> Optional[CloudImageProvider]:
         for provider in self._cloud:
-            if provider.availability().ok:
+            if provider.availability().ok and _can_serve(provider, request):
                 return provider
         return None
 
-    def _local_ok(self) -> bool:
-        return self._local is not None and self._local.availability().ok
+    def _local_ok(self, request: Optional[ImageRequest] = None) -> bool:
+        return (
+            self._local is not None
+            and self._local.availability().ok
+            and _can_serve(self._local, request)
+        )
 
     # The provider that will draw the next picture, decided fresh each time —
     # a key can be added, or the preference flipped, between two requests.
     # The preferred one first; the other is the fallback, always.
-    def _pick(self) -> Any:
+    def _pick(self, request: Optional[ImageRequest] = None) -> Any:
         if self._prefer() == "cloud":
-            return self._first_cloud() or (self._local if self._local_ok() else None)
-        return self._local if self._local_ok() else self._first_cloud()
+            return self._first_cloud(request) or (
+                self._local if self._local_ok(request) else None
+            )
+        return (
+            self._local
+            if self._local_ok(request)
+            else self._first_cloud(request)
+        )
 
     @property
     def name(self) -> str:
@@ -373,6 +547,38 @@ class RoutedImageProvider:
             return "nothing can draw"
         describe = getattr(chosen, "describe", None)
         return describe() if callable(describe) else chosen.name
+
+    def capabilities(self) -> ImageCapabilities:
+        """What the generator that would answer *now* can do.
+
+        Read by the interface to decide which controls are live — a reference
+        well that accepts nothing, or a transparency switch that quietly does
+        not apply, is worse than one that is not offered.
+        """
+        chosen = self._pick()
+        if chosen is None:
+            return TEXT_TO_IMAGE_ONLY
+        capabilities = getattr(chosen, "capabilities", None)
+        return capabilities() if callable(capabilities) else TEXT_TO_IMAGE_ONLY
+
+    def availability_for(self, request: ImageRequest) -> Availability:
+        """Whether this particular request can be served, and if not, why.
+
+        Separate from `availability()` because the two questions are
+        different: *can anything draw* and *can anything draw **this***. A
+        request carrying reference pictures is not a harder version of a
+        text-to-image request — it is a different request, and the generator
+        that cannot take them would answer it from the words alone and hand
+        back something confident and unrelated.
+        """
+        if self._pick(request) is not None:
+            return AVAILABLE
+        # Something can draw, but not this. Name the missing ability rather
+        # than the missing key — the remedy is a different provider, not a
+        # different setting.
+        if self._pick() is not None:
+            return Availability(ok=False, reason=_missing(self, request), remedy=_QWEN_REMEDY)
+        return self.availability()
 
     def availability(self) -> Availability:
         if self._pick() is not None:
@@ -410,7 +616,9 @@ class RoutedImageProvider:
             return None
         return getattr(self._local, "vram_needed_bytes", None)
 
-    def instead_of_the_card(self) -> Optional[CloudImageProvider]:
+    def instead_of_the_card(
+        self, request: Optional[ImageRequest] = None
+    ) -> Optional[CloudImageProvider]:
         """Who draws when local was picked and the card turned out to be
         full: the first cloud provider that can, or ``None``.
 
@@ -420,7 +628,7 @@ class RoutedImageProvider:
         in Settings, while a provider the user had connected sat unused.
         A full card is a reason to draw elsewhere, not a reason to stop.
         """
-        return self._first_cloud()
+        return self._first_cloud(request)
 
     @property
     def loaded(self) -> bool:
@@ -436,7 +644,12 @@ class RoutedImageProvider:
         request: ImageRequest,
         on_progress: Optional[Callable[[ImageProgress], None]] = None,
     ) -> List[GeneratedImage]:
-        chosen = self._pick()
+        # Picked *for this request*: a generator that cannot take the
+        # reference pictures in it is not a slower answer, it is a different
+        # picture drawn from the words alone.
+        chosen = self._pick(request)
         if chosen is None:
-            raise RuntimeError("nothing can draw")
+            raise RuntimeError(
+                _missing(self, request) if self._pick() is not None else "nothing can draw"
+            )
         return chosen.generate(request, on_progress)

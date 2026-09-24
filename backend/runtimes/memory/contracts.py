@@ -88,6 +88,24 @@ class MemoryRecord:
     memory_type: MemoryType = MemoryType.CONVERSATION
     metadata: dict[str, Any] = field(default_factory=dict)
     embedding: list[float] | None = None
+    #: Which embedder produced ``embedding`` — ``"ollama:bge-m3:1024"``.
+    #:
+    #: **A cosine between two different embedders is a number with no
+    #: meaning**, and until 24 September 2026 nothing recorded which one made a
+    #: vector. The embedder is a setting a user can change (Settings writes
+    #: `router_model`, and the bootstrapper hands it to this runtime), so
+    #: changing it left every stored vector in one space and every new query in
+    #: another — recall silently degrading with nothing anywhere saying why.
+    #: That is this codebase's oldest recurring error, a score used for a
+    #: question it does not answer, arriving through a settings field.
+    #:
+    #: `None` means "written before this was recorded" and is treated as the
+    #: current embedder when the dimensions agree. That is a deliberate,
+    #: one-time bridge: refusing every unstamped vector would empty the vector
+    #: index of every Spine in existence on upgrade, which is a worse answer
+    #: than a weak assumption that repairs itself the first time the fact is
+    #: re-embedded.
+    embedded_by: str | None = None
     created_at: float = field(default_factory=time.time)
     updated_at: float = field(default_factory=time.time)
     access_count: int = 0

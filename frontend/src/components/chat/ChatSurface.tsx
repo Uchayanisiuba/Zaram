@@ -296,6 +296,10 @@ export default function ChatSurface({ navigate }: Props) {
   // their ids keep travelling with every later question, underneath.
   const sentAttachments = useRef<ChatAttachment[]>([]);
   const [refused, setRefused] = useState<RefusedAttachment[]>([]);
+  // How many reference pictures the generator that would answer *now* accepts.
+  // Zero — the honest default before anything is known — hides the offer
+  // rather than showing one that ends in a refusal.
+  const [canWorkFrom, setCanWorkFrom] = useState(0);
   const [kept, setKept] = useState<string[]>([]);
   const [attachBusy, setAttachBusy] = useState<string | null>(null);
   const [attachError, setAttachError] = useState<string | null>(null);
@@ -586,6 +590,49 @@ export default function ChatSurface({ navigate }: Props) {
     };
   }, [sessionId]);
 
+  // Read once per conversation rather than per card: it changes when a key is
+  // added or the preference flipped, neither of which happens while somebody
+  // is looking at a picture they just made.
+  useEffect(() => {
+    let live = true;
+    void (async () => {
+      try {
+        const { fetchImageSetting } = await import('@/services/settingsClient');
+        const setting = await fetchImageSetting();
+        if (live) setCanWorkFrom(setting.can.references);
+      } catch {
+        // A setting that cannot be read is not a reason to break the
+        // conversation. The offer stays hidden, which is the safe side.
+      }
+    })();
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  /** Attach a picture Zaram made to the next message, to be worked from.
+   *
+   *  The whole of "edit this image" in one gesture, and it reuses the path a
+   *  dropped file already takes: the picture becomes an ordinary attachment,
+   *  and the image runtime reads attachments on a drawing request as the
+   *  pictures to work from. No second composer, no modal, no separate editor
+   *  surface — the person says what they want changed in the box they were
+   *  already typing in. */
+  const workFromPicture = useCallback(
+    async (artifact: { id: string; filename: string }) => {
+      setAttachError(null);
+      try {
+        const { artifactAsFile } = await import('@/services/artifactsClient');
+        await takeFilesRef.current([await artifactAsFile(artifact.id, artifact.filename)]);
+      } catch (err) {
+        setAttachError(
+          err instanceof Error ? err.message : 'Could not use that picture.',
+        );
+      }
+    },
+    [],
+  );
+
   const takeFiles = useCallback(
     async (files: File[]) => {
       if (files.length === 0) return;
@@ -613,6 +660,14 @@ export default function ChatSurface({ navigate }: Props) {
     },
     [sessionId],
   );
+
+  // `workFromPicture` is declared above `takeFiles` — it reads better beside
+  // the setting it depends on — so it calls through this rather than through a
+  // binding that does not exist at that point.
+  const takeFilesRef = useRef(takeFiles);
+  useEffect(() => {
+    takeFilesRef.current = takeFiles;
+  }, [takeFiles]);
 
   /**
    * A screenshot pasted into the message box.
@@ -1190,7 +1245,11 @@ export default function ChatSurface({ navigate }: Props) {
                         artifacts={group.artifacts}
                       />
                     ) : (
-                      <ArtifactCard key={group.artifact.id} artifact={group.artifact} />
+                      <ArtifactCard
+                        key={group.artifact.id}
+                        artifact={group.artifact}
+                        onWorkFrom={canWorkFrom > 0 ? workFromPicture : undefined}
+                      />
                     ),
                   )}
                   {/* Above the notices, below the answer: the working reads as
@@ -1314,7 +1373,11 @@ export default function ChatSurface({ navigate }: Props) {
                         artifacts={group.artifacts}
                       />
                     ) : (
-                      <ArtifactCard key={group.artifact.id} artifact={group.artifact} />
+                      <ArtifactCard
+                        key={group.artifact.id}
+                        artifact={group.artifact}
+                        onWorkFrom={canWorkFrom > 0 ? workFromPicture : undefined}
+                      />
                     ),
                   )}
                   {/* While a tool-using reply is in flight this is the only

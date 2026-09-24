@@ -13,10 +13,40 @@ from .contracts import MemoryIndex, MemoryQuery, MemoryRecord, RetrievalStrategy
 class VectorMemoryIndex(MemoryIndex):
     """In-memory vector index for semantic similarity search."""
 
-    def __init__(self, embedding_dim: int = 384):
+    def __init__(self, embedding_dim: int = 384, signature: str = ""):
         self._embeddings: dict[str, list[float]] = {}
         self._embedding_dim = embedding_dim
+        #: Which embedder's vectors this index will hold. Empty means "hold
+        #: anything", which is what a test constructing this bare wants and
+        #: what the product never passes.
+        self._signature = signature
+        #: Vectors left out because another embedder made them. Counted rather
+        #: than dropped quietly: the number is what tells a surface that recall
+        #: is running on keywords for part of the Spine.
+        self._foreign = 0
         self._indexed_at = 0.0
+
+    def _comparable(self, record: MemoryRecord) -> bool:
+        """Whether this vector may be compared with the ones being asked for.
+
+        **A cosine between two embedders is arithmetic on unrelated numbers.**
+        It does not fail, it returns a plausible figure, and that figure then
+        decides what the model is allowed to see — which is the membership
+        error `CLAUDE.md` records costing this codebase three times already.
+        So a vector from a different embedder is not ranked lower; it is not
+        in the running at all, and keyword matching finds the record instead.
+
+        A record with no signature was written before any of this existed. It
+        is accepted when the dimensions agree, because the alternative is
+        emptying the vector index of every Spine on earth at upgrade time, and
+        because it stops being a guess the moment that fact is re-embedded.
+        """
+        if not self._signature:
+            return True
+        stamp = getattr(record, "embedded_by", None)
+        if stamp:
+            return stamp == self._signature
+        return len(record.embedding or ()) == self._embedding_dim
 
     def _cosine_similarity(self, a: list[float], b: list[float]) -> float:
         if len(a) != len(b):
@@ -29,7 +59,7 @@ class VectorMemoryIndex(MemoryIndex):
         return dot / (norm_a * norm_b)
 
     async def add(self, record: MemoryRecord) -> None:
-        if record.embedding:
+        if record.embedding and self._comparable(record):
             self._embeddings[record.id] = record.embedding
 
     async def remove(self, record_id: str) -> None:
@@ -60,9 +90,14 @@ class VectorMemoryIndex(MemoryIndex):
         """
         if records is not None:
             self._embeddings.clear()
+            self._foreign = 0
             for record in records:
-                if record.embedding:
+                if not record.embedding:
+                    continue
+                if self._comparable(record):
                     self._embeddings[record.id] = record.embedding
+                else:
+                    self._foreign += 1
         self._indexed_at = time.time()
 
     async def health_check(self) -> dict[str, Any]:
@@ -71,6 +106,11 @@ class VectorMemoryIndex(MemoryIndex):
             "indexed_vectors": len(self._embeddings),
             "dimension": self._embedding_dim,
             "last_rebuilt": self._indexed_at,
+            "embedder": self._signature,
+            #: Facts held by the Spine whose vectors another embedder made.
+            #: Findable by keyword, absent from semantic recall until they are
+            #: re-embedded.
+            "vectors_from_another_embedder": self._foreign,
         }
 
 
@@ -181,8 +221,8 @@ class HybridMemoryIndex(MemoryIndex):
     #: nothing measured how relevant it is.
     KEYWORD_ONLY_SCORE = 0.4
 
-    def __init__(self, embedding_dim: int = 384):
-        self._vector_index = VectorMemoryIndex(embedding_dim)
+    def __init__(self, embedding_dim: int = 384, signature: str = ""):
+        self._vector_index = VectorMemoryIndex(embedding_dim, signature)
         self._keyword_index: dict[str, set[str]] = {}
         # The lexical side is BM25 (`bm25s`, MIT) over the same tokens the
         # set index holds — added 14 September 2026 for the failure CLAUDE.md
@@ -390,7 +430,11 @@ class TemporalMemoryIndex(MemoryIndex):
 
 def create_memory_index(index_type: str = "hybrid", **kwargs) -> MemoryIndex:
     if index_type == "vector":
-        return VectorMemoryIndex(kwargs.get("embedding_dim", 384))
+        return VectorMemoryIndex(
+            kwargs.get("embedding_dim", 384), kwargs.get("signature", "")
+        )
     elif index_type == "temporal":
         return TemporalMemoryIndex()
-    return HybridMemoryIndex(kwargs.get("embedding_dim", 384))
+    return HybridMemoryIndex(
+        kwargs.get("embedding_dim", 384), kwargs.get("signature", "")
+    )

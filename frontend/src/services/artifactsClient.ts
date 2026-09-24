@@ -266,6 +266,22 @@ export async function downloadArtifact(id: string, filename: string): Promise<vo
   }
 }
 
+/** A generated file as a `File`, for handing straight back into a message.
+ *
+ *  The route this exists for is *work from this picture*: an image Zaram drew
+ *  becomes an attachment on the next message, which the image runtime reads as
+ *  a reference rather than as something to look at. A `File` rather than a
+ *  `Blob` because that is what `attachFiles` posts and what the backend names
+ *  the attachment after — a reference called `blob` in the log is a picture
+ *  nobody can identify afterwards.
+ *
+ *  It goes through `fetchArtifactFile` like every other read, so the
+ *  credential is attached; an `<img src>` or an anchor would get 401. */
+export async function artifactAsFile(id: string, filename: string): Promise<File> {
+  const blob = await fetchArtifactFile(id);
+  return new File([blob], filename, { type: blob.type || 'application/octet-stream' });
+}
+
 /** An object URL for an artifact that *is* a picture, for a thumbnail.
  *
  *  Same reason as above — an `<img src="/artifacts/…">` never carries the

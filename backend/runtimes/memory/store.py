@@ -263,6 +263,7 @@ class SQLiteMemoryStore(MemoryStore):
                 ("superseded_by", "ALTER TABLE memories ADD COLUMN superseded_by TEXT"),
                 ("superseded_at", "ALTER TABLE memories ADD COLUMN superseded_at REAL"),
                 ("pinned", "ALTER TABLE memories ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0"),
+                ("embedded_by", "ALTER TABLE memories ADD COLUMN embedded_by TEXT"),
                 # M8, and the reason it lands before the alpha rather than
                 # after: retrofitting scope onto facts that lack it means
                 # guessing for everything already stored. `global` is the only
@@ -300,8 +301,8 @@ class SQLiteMemoryStore(MemoryStore):
                 (id, content, memory_type, metadata, embedding, created_at, updated_at,
                  access_count, last_accessed, tags, session_id, user_id, importance, source,
                  superseded_by, superseded_at, pinned, scope, origin, recalled_in,
-                 valid_from, valid_until)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 valid_from, valid_until, embedded_by)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
                 (
                     record.id,
@@ -326,6 +327,7 @@ class SQLiteMemoryStore(MemoryStore):
                     json.dumps(list(record.recalled_in or [])),
                     record.valid_from,
                     record.valid_until,
+                    record.embedded_by,
                 ),
             )
         return record.id
@@ -524,6 +526,7 @@ class SQLiteMemoryStore(MemoryStore):
             # `in row.keys()` rather than a bare lookup: a Spine written before
             # the supersession migration has rows without these columns, and
             # sqlite3.Row raises on a missing key rather than returning None.
+            embedded_by=row["embedded_by"] if "embedded_by" in row.keys() else None,
             superseded_by=row["superseded_by"] if "superseded_by" in row.keys() else None,
             superseded_at=row["superseded_at"] if "superseded_at" in row.keys() else None,
             pinned=bool(row["pinned"]) if "pinned" in row.keys() else False,

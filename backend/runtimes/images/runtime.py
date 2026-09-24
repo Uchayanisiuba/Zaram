@@ -281,9 +281,40 @@ class ImagesRuntime(Runtime):
                 steps=int(input_data.get("steps") or DEFAULT_STEPS),
                 seed=input_data.get("seed"),
                 count=max(1, min(MAX_IMAGES, int(input_data.get("count") or 1))),
+                # **The pictures the person attached are the pictures they
+                # want worked from.** `execution_engine` already puts
+                # attachments on the step as `images`, because a vision model
+                # reads them there; an image *generation* step given the same
+                # attachments is somebody saying "this one, but…". Reading the
+                # field that already arrives is what makes editing reachable
+                # from the composer that exists rather than from a second one.
+                references=_references(
+                    input_data.get("references") or input_data.get("images")
+                ),
+                transparent=(
+                    bool(input_data.get("transparent"))
+                    or _asks_for_transparency(prompt)
+                ),
             )
         except (TypeError, ValueError) as error:
             return {"success": False, "error": f"I can't draw that: {error}"}
+
+        # **The second refusal, and it is a different question from the
+        # first.** Above asked whether anything can draw; this asks whether
+        # anything can draw *this*. A generator handed reference pictures it
+        # cannot read does not fail — it draws from the prompt alone and
+        # returns something confident and unrelated, which is rule 9's failure
+        # in the medium where nothing on screen shows the omission.
+        for_request = getattr(self._provider, "availability_for", None)
+        if callable(for_request):
+            verdict = for_request(request)
+            if not verdict.ok:
+                return {
+                    "success": False,
+                    "error": verdict.reason or _UNAVAILABLE,
+                    "remedy": verdict.remedy,
+                    "unavailable": True,
+                }
 
         # Where each step's progress goes, supplied by whoever is going to
         # show it. A plain callable on `input_data` rather than an event on
@@ -597,6 +628,67 @@ def _app_from(outcome: str) -> str:
         if marker in body:
             return body.split(marker, 1)[0].strip() or "another app"
     return body.split(" ", 1)[0] or "another app"
+
+
+#: How someone asks for an alpha channel without knowing the words for it.
+#:
+#: Keywords rather than a switch, for rule 7h: *offer at the moment of doubt,
+#: never make the user choose in advance.* A transparency control on every
+#: message taxes every request to serve the few that need it, and "on a
+#: transparent background" is what a person types anyway. The gate below still
+#: refuses honestly when nothing connected can do it, so a missed phrase costs
+#: an ordinary picture and a wrong one costs nothing.
+_TRANSPARENCY_PHRASES = (
+    "transparent background",
+    "transparent backdrop",
+    "no background",
+    "without a background",
+    "without background",
+    "on transparency",
+    "alpha channel",
+    "cut out",
+    "cutout",
+    "die cut",
+    "sticker",
+    "png with alpha",
+)
+
+
+def _asks_for_transparency(prompt: str) -> bool:
+    lowered = prompt.lower()
+    return any(phrase in lowered for phrase in _TRANSPARENCY_PHRASES)
+
+
+def _references(raw: Any) -> tuple:
+    """Reference pictures from the request, as bytes.
+
+    Accepts what the wire carries — base64 strings, with or without a
+    ``data:`` prefix — and what an in-process caller carries, which is bytes
+    already. **Never a path and never a URL**: a path would let a request body
+    choose which file on this machine is sent to a provider, and a URL would
+    make drawing a picture a fetch nobody declared. The same rule the document
+    blocks follow, for the same reason.
+    """
+    import base64
+    import binascii
+
+    if not raw:
+        return ()
+    if isinstance(raw, (bytes, bytearray)):
+        raw = [raw]
+    out = []
+    for item in raw:
+        if isinstance(item, (bytes, bytearray)):
+            out.append(bytes(item))
+            continue
+        if not isinstance(item, str):
+            raise ValueError("a reference picture must be bytes or base64 text")
+        text = item.split(",", 1)[1] if item.startswith("data:") else item
+        try:
+            out.append(base64.b64decode(text, validate=True))
+        except (binascii.Error, ValueError):
+            raise ValueError("a reference picture is not valid base64") from None
+    return tuple(out)
 
 
 def _card(artifact: Artifact) -> Dict[str, Any]:

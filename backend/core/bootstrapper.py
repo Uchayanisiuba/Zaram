@@ -208,7 +208,24 @@ class KernelBootstrapper:
             print(f"[Bootstrapper] Could not read the routing model ({error}).")
 
         model = chosen or os.getenv("ZARAM_EMBED_MODEL", "bge-m3")
-        dim = int(os.getenv("ZARAM_EMBED_DIM", "1024" if backend == "ollama" else "384"))
+
+        # **The model's own answer, not a number in a variable.** The default
+        # here used to be 1024 "because bge-m3", which is correct until the
+        # setting above names something else -- and the service then padded or
+        # truncated every vector to the configured length rather than saying
+        # so. `ZARAM_EMBED_DIM` still overrides, for a machine where the probe
+        # cannot run; with nothing set, the embedder is measured.
+        configured = os.getenv("ZARAM_EMBED_DIM")
+        if configured:
+            dim = int(configured)
+        else:
+            from runtimes.memory.embeddings import probe_dim
+
+            dim = probe_dim(
+                backend=backend,
+                model=model,
+                fallback=1024 if backend == "ollama" else 384,
+            )
 
         # **Where the embedder's weights go is decided by the card, here,
         # because the memory runtime must not know about hardware.** On a

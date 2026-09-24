@@ -27,6 +27,7 @@ import {
   Receipt,
   Save,
   UserRound,
+  Wand2,
 } from 'lucide-react';
 
 import ArtifactPreview from '@/components/ArtifactPreview';
@@ -69,9 +70,16 @@ const bytes = (n: number) => {
 export default function ArtifactCard({
   artifact,
   onOpenInWork,
+  onWorkFrom,
 }: {
   artifact: Artifact;
   onOpenInWork?: (id: string) => void;
+  /** Attach this picture to the next message, to be worked from.
+   *
+   *  Absent when nothing connected can read a reference picture — the button
+   *  is not rendered rather than rendered and refused, because an offer that
+   *  cannot be taken is worse than one that was never made. */
+  onWorkFrom?: (artifact: Artifact) => void;
 }) {
   const extension = artifact.filename.split('.').pop()?.toUpperCase() ?? 'FILE';
   const citedCount = artifact.claims?.length ?? 0;
@@ -258,6 +266,25 @@ export default function ArtifactCard({
               >
                 <Save size={12} />
                 {saving ? 'Saving…' : 'Save'}
+              </button>
+            )}
+            {/* **Work from this** — the second half of an image model that
+                edits. A picture Zaram drew goes back in as a reference on the
+                next message, so "the same logo, on a dark background" is one
+                sentence instead of a re-description of something that already
+                exists. It attaches; it does not send, because what to do with
+                it is the next thing the person types. */}
+            {pictorial && onWorkFrom && (
+              <button
+                type="button"
+                onClick={() => onWorkFrom(shown)}
+                className="flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs transition-colors hover:bg-white/5"
+                style={{ border: '1px solid var(--color-border)', color: 'var(--color-text)' }}
+                title="Attach this picture to your next message"
+                data-testid="work-from"
+              >
+                <Wand2 size={12} />
+                Work from this
               </button>
             )}
             {/* Preview sits beside Download, not instead of it. The preview is

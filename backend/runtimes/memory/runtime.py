@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from dataclasses import replace
 from typing import Any, Dict
 
 from core.async_bridge import run_sync
@@ -76,8 +77,13 @@ class MemoryRuntimeImpl(MemoryRuntime):
         if db_path is not None:
             store_kwargs["db_path"] = db_path
         self._store: MemoryStore = create_memory_store(store_type, **store_kwargs)
+        self._embedder_signature = (
+            f"{embedding_backend}:{embedding_model}:{embedding_dim}"
+            if embedding_backend == "ollama"
+            else f"{embedding_backend}:{embedding_dim}"
+        )
         self._index: MemoryIndex = create_memory_index(
-            index_type, embedding_dim=embedding_dim
+            index_type, embedding_dim=embedding_dim, signature=self._embedder_signature
         )
         self._retriever: MemoryRetriever = HybridMemoryRetriever(self._store, self._index)
         self._ranker: MemoryRanker = MemoryRankerImpl()
@@ -100,6 +106,71 @@ class MemoryRuntimeImpl(MemoryRuntime):
             "total_latency_ms": 0.0,
         }
 
+    async def reembed_stale(self, *, batch: int = 32) -> int:
+        """Re-embed facts whose vectors another embedder made. Returns how many.
+
+        **Why this is not a migration.** A migration runs once, at a version
+        boundary, and this is not a version boundary — the embedder is a
+        setting, so the Spine can fall out of step with it on any launch after
+        the user changes it in Settings. Something has to notice and repair,
+        and doing it here means a swap costs time rather than a rebuild.
+
+        **Why it is not a dialog either.** Rule 7h: offer at the moment of
+        doubt, never make the user choose in advance. "Your 4,000 facts need
+        re-embedding, proceed?" is a question with one sensible answer, asked
+        of somebody who did not know the Spine had vectors. Keyword recall
+        carries the gap while this runs, so the honest thing is to repair
+        quietly and say so in the log.
+
+        Resumable by construction: it re-reads what is stale on each pass and
+        writes each fact as it goes, so a crash or a quit costs the batch in
+        flight and nothing else. Never runs on the hash backend — stamping
+        fallback vectors as though they were a model's would make the mismatch
+        undetectable, which is the one outcome worse than the mismatch.
+        """
+        if getattr(self._embedder, "_backend", "hash") != "ollama":
+            return 0
+        health = await asyncio.to_thread(self._embedder.health_check)
+        if health.get("status") != "healthy":
+            return 0
+
+        signature = self._embedder.signature()
+        repaired = 0
+        for record in await self._store.all_records():
+            if not record.content:
+                continue
+            if record.embedded_by == signature:
+                continue
+            if (
+                record.embedded_by is None
+                and len(record.embedding or ()) == self._embedder.get_dim()
+            ):
+                # Unstamped and the right shape: the index already accepts it,
+                # so re-embedding buys a stamp and nothing else. Stamp it from
+                # the record rather than spending a model call on it.
+                repaired_record = replace(record, embedded_by=signature)
+            else:
+                # Off the loop: `embed` is a blocking HTTP call, and a few
+                # thousand of them on the event loop is an API that stops
+                # answering while the Spine repairs itself.
+                vector = await asyncio.to_thread(self._embedder.embed, record.content)
+                repaired_record = replace(
+                    record, embedding=vector, embedded_by=signature
+                )
+
+            # `replace` rather than assignment: a record is frozen, which is
+            # what stops a fact being edited in place anywhere in this package.
+            await self._store.put(repaired_record)
+            await self._index.add(repaired_record)
+            repaired += 1
+            if repaired % batch == 0:
+                # Yield the loop. This runs behind a live product on the same
+                # machine as the model answering questions.
+                await asyncio.sleep(0)
+        if repaired:
+            print(f"[MemoryRuntime] Re-embedded {repaired} fact(s) with {signature}.")
+        return repaired
+
     async def initialize(self) -> None:
         self._state = MemoryStatus.INITIALIZING
         await self._store.health_check()
@@ -110,15 +181,34 @@ class MemoryRuntimeImpl(MemoryRuntime):
 
         # The index is in-memory and starts empty on every boot. Without this,
         # persisted records exist but cannot be found.
+        stale = 0
         try:
             records = await self._store.all_records()
             await self._index.rebuild(records)
+            health = await self._index.health_check()
+            stale = int(health.get("vectors_from_another_embedder") or 0)
             print(f"[MemoryRuntime] Reindexed {len(records)} persisted record(s).")
+            if stale:
+                print(
+                    f"[MemoryRuntime] {stale} fact(s) were embedded by a different "
+                    f"model and are findable by keyword only until they are "
+                    f"re-embedded."
+                )
         except Exception as e:
             print(f"[MemoryRuntime] Index rebuild failed: {e}")
 
         self._state = MemoryStatus.READY
         self._initialized = True
+
+        if stale:
+            # Scheduled, not awaited: boot does not wait for the Spine to
+            # re-embed itself, and recall works on keywords while it does.
+            try:
+                asyncio.get_running_loop().create_task(self.reembed_stale())
+            except RuntimeError:
+                # No loop (a synchronous test). The repair stays available to
+                # be called directly; nothing is lost but the automatic run.
+                pass
         if self._event_bus:
             self._event_bus.subscribe("memory.store", self._handle_store_event)
             self._event_bus.subscribe("memory.retrieve", self._handle_retrieve_event)
@@ -219,6 +309,9 @@ class MemoryRuntimeImpl(MemoryRuntime):
                 memory_type=memory_type,
                 metadata=metadata or {},
                 embedding=embedding,
+                # Which embedder made it. A vector with no maker recorded is
+                # one nothing can decide about later; see `embedded_by`.
+                embedded_by=self._embedder.signature() if embedding else None,
                 session_id=session_id,
                 user_id=user_id,
                 tags=tags or [],
@@ -343,6 +436,7 @@ class MemoryRuntimeImpl(MemoryRuntime):
             # back through however many corrections preceded it.
             metadata={**original.metadata, "corrects": record_id},
             embedding=self._embedder.embed(corrected_content) if corrected_content else None,
+            embedded_by=self._embedder.signature() if corrected_content else None,
             session_id=original.session_id,
             user_id=original.user_id,
             tags=list(original.tags),
@@ -676,14 +770,17 @@ class MemoryRuntimeImpl(MemoryRuntime):
 
     async def store_record(self, record: MemoryRecord) -> str:
         embedding = record.embedding
+        embedded_by = record.embedded_by
         if embedding is None and record.content:
             embedding = self._embedder.embed(record.content)
+            embedded_by = self._embedder.signature()
         stored_record = MemoryRecord(
             id=record.id,
             content=record.content,
             memory_type=record.memory_type,
             metadata=record.metadata,
             embedding=embedding,
+            embedded_by=embedded_by,
             created_at=record.created_at,
             updated_at=record.updated_at,
             access_count=record.access_count,

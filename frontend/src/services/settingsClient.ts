@@ -581,7 +581,23 @@ export interface ImageSetting {
   /** Whether the model on this machine can draw right now. */
   localOk: boolean;
   /** Every cloud provider that could draw, with why it cannot when it cannot. */
-  cloud: Array<{ id: string; name: string; ok: boolean; reason: string; remedy: string }>;
+  cloud: Array<{
+    id: string;
+    name: string;
+    ok: boolean;
+    reason: string;
+    remedy: string;
+    /** How many pictures it will work from. Zero means words only. */
+    references: number;
+    /** Whether it can draw on a transparent background rather than a white one. */
+    transparent: boolean;
+  }>;
+  /** What the generator that would answer *now* can do beyond words-to-picture.
+   *
+   *  Read to decide which affordances are live. An interface offering to work
+   *  from a picture, backed by something that cannot read one, is an offer
+   *  that ends in a refusal — worse than not offering. */
+  can: { references: number; transparent: boolean };
   /** Who would answer the next picture, or null when nothing can. */
   answers: string | null;
 }
@@ -597,7 +613,13 @@ function toImageSetting(raw: Record<string, unknown>): ImageSetting {
       ok: c.ok === true,
       reason: String(c.reason ?? ''),
       remedy: String(c.remedy ?? ''),
+      references: Number(c.references ?? 0) || 0,
+      transparent: c.transparent === true,
     })),
+    can: {
+      references: Number((raw.can as Record<string, unknown> | undefined)?.references ?? 0) || 0,
+      transparent: (raw.can as Record<string, unknown> | undefined)?.transparent === true,
+    },
     answers: typeof raw.answers === 'string' ? raw.answers : null,
   };
 }

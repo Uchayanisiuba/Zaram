@@ -6,6 +6,9 @@ draws is replaceable, and what records provenance is not.
 """
 
 from .contracts import (
+    MAX_REFERENCES,
+    TEXT_TO_IMAGE_ONLY,
+    ImageCapabilities,
     AVAILABLE,
     DEFAULT_STEPS,
     MAX_IMAGES,
@@ -22,7 +25,10 @@ __all__ = [
     "AVAILABLE",
     "DEFAULT_STEPS",
     "MAX_IMAGES",
+    "MAX_REFERENCES",
+    "TEXT_TO_IMAGE_ONLY",
     "Availability",
+    "ImageCapabilities",
     "GeneratedImage",
     "ImageProgress",
     "ImageProvider",

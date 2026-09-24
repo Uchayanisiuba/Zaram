@@ -2584,11 +2584,34 @@ async def image_setting():
         local_ok = bool(local is not None and local.availability().ok)
         for p in getattr(provider, "_cloud", []) or []:
             a = p.availability()
-            cloud.append({"id": p.provider_id, "name": p.name, "ok": a.ok, "reason": a.reason, "remedy": a.remedy})
+            caps = p.capabilities()
+            cloud.append({
+                "id": p.provider_id,
+                "name": p.name,
+                "ok": a.ok,
+                "reason": a.reason,
+                "remedy": a.remedy,
+                "references": caps.references,
+                "transparent": caps.transparent,
+            })
+
+    # What the generator that would answer *now* can do beyond turning words
+    # into a picture. The interface reads it to decide which affordances are
+    # live: a "work from this picture" button that leads to a refusal is a
+    # worse offer than no button, and CLAUDE.md says a disabled capability is
+    # visible rather than silent.
+    can = {"references": 0, "transparent": False}
+    if provider is not None:
+        read = getattr(provider, "capabilities", None)
+        if callable(read):
+            caps = read()
+            can = {"references": caps.references, "transparent": caps.transparent}
+
     return {
         "prefer": settings.image_locality.value,
         "local_ok": local_ok,
         "cloud": cloud,
+        "can": can,
         "answers": provider.describe() if provider is not None and provider.availability().ok else None,
     }
 

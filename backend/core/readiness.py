@@ -156,8 +156,8 @@ class Diagnosis:
 #: tier holding nothing with a size on it. Never fail closed: a first run that
 #: recommends an older model than it might have is a smaller problem than a
 #: first run that offers nothing at all.
-SMALLEST_CHAT_MODEL = "qwen2.5:0.5b"
-SMALLEST_CHAT_BYTES = 397 * 1024 * 1024
+SMALLEST_CHAT_MODEL = "qwen3:0.6b"
+SMALLEST_CHAT_BYTES = 523 * 1024 * 1024
 
 #: The sentence that goes with the fallback. Every manifest entry carries its
 #: own `why`; this stands in when there is no entry to read one from.

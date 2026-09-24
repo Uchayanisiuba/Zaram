@@ -62,8 +62,10 @@ from typing import Any, List, Optional
 
 from .contracts import (
     AVAILABLE,
+    TEXT_TO_IMAGE_ONLY,
     Availability,
     GeneratedImage,
+    ImageCapabilities,
     ImageProgress,
     ImageRequest,
     ProgressCallback,
@@ -374,6 +376,15 @@ class FluxProvider:
         if self._model is None:
             self._model = find_model()
         return self._model
+
+    def capabilities(self) -> ImageCapabilities:
+        """Words in, picture out.
+
+        FLUX.1 [schnell] is text-to-image: no reference pictures, no alpha
+        channel. Saying so is what keeps a request that needs either from
+        being handed to it and answered with something plausible instead.
+        """
+        return TEXT_TO_IMAGE_ONLY
 
     def availability(self) -> Availability:
         """Whether a picture could be drawn here right now.

@@ -113,7 +113,12 @@ class DataPolicy(Enum):
 #: whatever ships next year without any of them being listed. Add markers here,
 #: never model names.
 TASK_MARKERS: Dict[str, tuple[str, ...]] = {
-    "code": ("coder", "code"),
+    # "coding" is not caught by "code" — the letters run c-o-d-i-n-g and the
+    # substring is not there. Qwen named its 2026 coding builds
+    # `qwen3.6:27b-coding`, so the marker table silently stopped recognising
+    # the newest coding models in the product while still matching the older
+    # `-coder` ones. Add the word, not the model.
+    "code": ("coder", "coding", "code"),
     "math": ("math",),
     "moderation": ("guard", "shield", "moderation"),
 }

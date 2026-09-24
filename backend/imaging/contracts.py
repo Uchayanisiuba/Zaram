@@ -41,7 +41,7 @@ place.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable, List, Optional, Protocol, runtime_checkable
+from typing import Callable, List, Optional, Protocol, Tuple, runtime_checkable
 
 #: Hard ceiling on how many images one request may produce.
 #:
@@ -50,6 +50,14 @@ from typing import Callable, List, Optional, Protocol, runtime_checkable
 #: twenty is a request to sit still for several minutes, which is not a thing
 #: to discover after saying yes.
 MAX_IMAGES = 4
+
+#: How many pictures may be handed to a model as references for one request.
+#:
+#: Ten, because that is what Qwen-Image 2.1 accepts and it is already more than
+#: anyone assembles by hand. The number is a ceiling on *this* side rather than
+#: a promise: what a given provider actually takes is on its `ImageCapabilities`,
+#: and a request is refused against that before anything is sent.
+MAX_REFERENCES = 10
 
 #: Denoising steps when the caller does not say.
 #:
@@ -60,6 +68,40 @@ MAX_IMAGES = 4
 #: for a picture that is no better and often slightly worse, because the extra
 #: steps push past what the distillation was trained to produce.
 DEFAULT_STEPS = 4
+
+
+@dataclass(frozen=True)
+class ImageCapabilities:
+    """What one generator can actually do, as facts rather than as a score.
+
+    **This is a gate, never a ranking — 24 September 2026.** CLAUDE.md is
+    explicit about the class of error: *"Modality is a capability gate, never a
+    ranking… 'Can this model accept an image, or emit one?' is binary and is a
+    precondition."* Editing is the same shape one level down. A generator that
+    cannot take a reference picture is not a worse answer to "make the
+    background of this transparent" — it is not an answer, and ranking it
+    lower means it wins whenever it is the only one connected and then draws
+    something unrelated from the words alone.
+
+    So a request carrying references or asking for transparency is checked
+    against this **before a provider is chosen**, and a provider that cannot is
+    out of the running rather than last in it.
+    """
+
+    #: Accepts pictures alongside the prompt — editing, style, "this person".
+    references: int = 0
+    #: Emits a real alpha channel rather than a white square.
+    transparent: bool = False
+    #: The longest edge it will draw. Zero means "no stated limit".
+    max_edge: int = 0
+
+    @property
+    def edits(self) -> bool:
+        return self.references > 0
+
+
+#: What a generator that only turns words into pictures can do.
+TEXT_TO_IMAGE_ONLY = ImageCapabilities()
 
 
 @dataclass(frozen=True)
@@ -82,6 +124,17 @@ class ImageRequest:
     #: nobody can reproduce, including us.
     seed: Optional[int] = None
     count: int = 1
+    #: Pictures to work from: the thing being edited, a style, a face to keep.
+    #:
+    #: Bytes rather than paths or URLs, for the reason every other picture in
+    #: this codebase travels as bytes — a path lets a request body choose which
+    #: file on the machine is read, and a URL makes drawing an egress nobody
+    #: declared. The caller has already read them.
+    references: Tuple[bytes, ...] = ()
+    #: Ask for a real alpha channel. A cutout, a logo, a sticker — the thing
+    #: someone actually wants when they say "with no background", as opposed to
+    #: the white rectangle a model produces when it is asked in words.
+    transparent: bool = False
 
     def __post_init__(self) -> None:
         if not self.prompt.strip():
@@ -90,6 +143,12 @@ class ImageRequest:
             raise ValueError(f"count must be 1..{MAX_IMAGES}, not {self.count}")
         if self.steps < 1:
             raise ValueError("steps must be at least 1")
+        if len(self.references) > MAX_REFERENCES:
+            raise ValueError(
+                f"at most {MAX_REFERENCES} reference pictures, not {len(self.references)}"
+            )
+        if any(not r for r in self.references):
+            raise ValueError("a reference picture with no bytes in it is not a picture")
         # SDXL's UNet works in units of 8 pixels; a size that is not a multiple
         # is silently rounded by the pipeline, which means the image the user
         # gets is not the size the record says it is.
@@ -171,6 +230,10 @@ class ImageProvider(Protocol):
 
     def availability(self) -> Availability:
         """Whether this provider can run right now. Cheap; no model loading."""
+        ...
+
+    def capabilities(self) -> ImageCapabilities:
+        """What it can do beyond turning words into a picture."""
         ...
 
     def generate(

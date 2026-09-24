@@ -18,9 +18,118 @@ publishing step over rather than finding another route. `CLAUDE.md`,
 
 ---
 
-## Current state — 23 September 2026
+## Current state — 24 September 2026
 
 *The latest work is first. Earlier sessions follow below.*
+
+### 24 September — the models are current, a vector says who made it, and a picture can be worked from.
+
+Three pieces, and the middle one is a bug that had been live since Settings
+gained a routing model.
+
+#### The recommendations were a generation and a half behind
+
+`providers/models.manifest.json` offered qwen2.5 on every tier. Rewritten
+against Ollama's registry rather than against a blog, and dated:
+
+| Budget | Was | Now |
+|---|---|---|
+| ≤3 GB | `qwen2.5:0.5b` | `qwen3:0.6b` |
+| ≤5 GB | `llama3.2:3b` | `qwen3:4b` |
+| ≤9 GB | `qwen2.5:7b` | `qwen3:8b` |
+| ≤18 GB | `qwen2.5:14b` | **`gemma4:12b-it-qat`** — vision, tools, 256K |
+| above | `qwen2.5:32b` | `qwen3.8:27b`, then `gemma4:26b-a4b-it-qat` |
+
+The 12 GB tier is the interesting one: Gemma 4 12B is *smaller* than the 14B
+it replaces, which buys KV cache rather than weights, and it brings the two
+things Zaram's own scope list needs — it reads pictures, so receipt capture
+stops being blocked on the model, and it calls tools natively.
+
+Three wiring bugs came out of checking what the new names do:
+
+* **`qwen3.6:35b-a3b-coding` was not recognised as a coding model.**
+  `TASK_MARKERS` matched `coder` and `code`; Qwen's 2026 builds are named
+  `-coding`, and `code` is not a substring of `coding`.
+* **Every current model's context window was wrong.** `qwen3` matched
+  `qwen3.6` and `qwen3.8` at 32K when all of them are 256K, and `gemma4` had
+  no entry at all. The context budget reads this, so recall that would have
+  fitted was being truncated.
+* The first-run fallback still named `qwen2.5:0.5b`.
+
+#### A vector now says which embedder made it
+
+**The embedder is a setting.** Settings writes `router_model`, the
+bootstrapper hands it to the memory runtime, and nothing recorded which model
+made a given vector — so changing it left old vectors in one space and new
+queries in another. Cosine does not fail on that: it returns a plausible
+number, and the number decides what the model is allowed to see. This
+codebase's oldest error, arriving through a settings field rather than
+through a ranking formula.
+
+* `MemoryRecord.embedded_by`, written on every path that embeds, migrated with
+  `ALTER TABLE` like every column before it.
+* The index **excludes** a vector from another embedder rather than ranking it
+  lower, and counts what it excluded. Keyword recall still finds those facts.
+* An unstamped vector of the right width is accepted — a one-time bridge,
+  because refusing them would empty the vector index of every Spine on earth
+  at upgrade, and it repairs itself on the next pass.
+* `reembed_stale()` repairs the Spine in the background after boot, off the
+  event loop, and never on the hash fallback — stamping fallback vectors as a
+  model's would make the mismatch undetectable.
+* **The embedder padded vectors with zeros.** A 768-dimension model against a
+  configured 1024 was zero-filled to length and then compared by cosine
+  against real ones. The dimension is now measured from the model at boot
+  (`probe_dim`); the padding is gone.
+
+Seen: a real Spine stored a fact stamped `ollama:bge-m3:1024` with the
+dimension measured; reopening it under a different embedder reported
+`indexed_vectors: 0, vectors_from_another_embedder: 1` instead of quietly
+comparing them. `tests/test_a_vector_carries_its_embedder.py` (16).
+
+Left alone deliberately, and worth its own pass: `store_record` rebuilds a
+record field by field and silently drops `scope`, `origin` and `pinned` —
+rule 7i's scope field among them.
+
+#### Pictures can be worked from, and capability gates who may be asked
+
+Qwen-Image 2.1 landed on 20 September: the first open-weight model whose
+*editing* surface is ahead of the closed ones — ten reference pictures,
+region edits, a real alpha channel. Zaram ships none of it and never will;
+`imaging/` already had the seam, so this is a provider and a gate.
+
+* `ImageRequest` gained `references` and `transparent`; `ImageCapabilities`
+  says what each generator can actually do.
+* **Capability is a gate, never a ranking.** A generator handed a reference
+  picture it cannot read does not fail — it draws from the prompt alone and
+  returns something confident and unrelated. So one that cannot is *out of
+  the running*, not last in it, and the refusal names the missing ability
+  rather than a missing key.
+* `QwenImages` on fal.ai, with the edit endpoint used only when there is
+  something to edit. References travel as data through the gate — never a
+  path, which would let a request body choose a file, and never a URL, which
+  would make drawing a fetch nobody declared.
+* **Self-hosting is refused on licence, not on hardware.** The weights are
+  Qwen Research License: research and evaluation, no commercial use without a
+  separate agreement. A freelancer drawing a client's logo is commercial use.
+* Reachable from the composer that already exists: attachments on a drawing
+  request are read as the pictures to work from, and *"on a transparent
+  background"* in the prompt asks for an alpha channel — rule 7h, rather than
+  a switch on every message.
+* **Work from this** on a picture card attaches it to the next message. Shown
+  only when something connected can read a reference, because an offer that
+  ends in a refusal is worse than no offer.
+
+`tests/test_a_picture_can_be_worked_from.py` (26). Not exercised against a
+live key — that needs a fal.ai account, and the body is asserted as it would
+be sent rather than sent.
+
+#### Not done, and why
+
+**Gemma is not installed yet.** The pull has been running most of the day at
+~270 KB/s against Ollama's CDN, twice dropped with a TLS handshake timeout,
+and is a little over a fifth in. Nothing in the product is blocked on it —
+the manifest recommends it, this machine simply does not have it — and the
+comparison against `qwen3-14b-16k` is owed once it lands.
 
 ### 23 September — a deck puts a table where it belongs, and a picture survives being exported.
 

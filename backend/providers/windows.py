@@ -74,6 +74,14 @@ _KNOWN: Tuple[Tuple[str, int], ...] = (
     ("qwen3-coder", 131072),
     ("qwen2.5-coder", 32768),
     ("qwen2.5", 32768),
+    # The point releases before the base family, because "qwen3" is a prefix of
+    # all of them and first match wins. Qwen3 shipped at 32K; everything from
+    # 3.5 onwards is 256K, so matching them on the old entry understates the
+    # window by a factor of eight and truncates recall that would have fitted.
+    ("qwen3.5", 262144),
+    ("qwen3.6", 262144),
+    ("qwen3.7", 262144),
+    ("qwen3.8", 262144),
     ("qwen3", 32768),
     ("qwq", 32768),
     ("mixtral", 32768),
@@ -83,6 +91,8 @@ _KNOWN: Tuple[Tuple[str, int], ...] = (
     ("codestral", 32768),
     ("gemma-3", 32768),
     ("gemma3", 32768),
+    ("gemma-4", 262144),
+    ("gemma4", 262144),
     ("phi-4", 16384),
     ("gpt-oss", 131072),
     ("gpt-4o", 128000),
