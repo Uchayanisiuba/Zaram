@@ -300,50 +300,23 @@ class MemoryRuntimeImpl(MemoryRuntime):
         `scope` defaults to `global` (rule 7i): a fact captured with no project
         in play is not about a project, and inventing one would be a value
         nobody entered. The engine passes the current project when there is one.
+
+        Builds the record and hands it to :meth:`store_record`, which is the
+        one path a fact takes into the Spine. There were two, and they did not
+        agree about what a fact carries.
         """
-        start = time.time()
-        try:
-            embedding = self._embedder.embed(content) if content else None
-            record = MemoryRecord(
-                content=content,
-                memory_type=memory_type,
-                metadata=metadata or {},
-                embedding=embedding,
-                # Which embedder made it. A vector with no maker recorded is
-                # one nothing can decide about later; see `embedded_by`.
-                embedded_by=self._embedder.signature() if embedding else None,
-                session_id=session_id,
-                user_id=user_id,
-                tags=tags or [],
-                importance=importance,
-                scope=scope or GLOBAL_SCOPE,
-                origin=_as_origin(origin),
-            )
-            record_id = await self._store.put(record)
-            await self._index.add(record)
-            self._stats["stores"] += 1
-            if self._event_bus:
-                self._event_bus.publish(ZaramEvent(
-                    source_runtime="memory",
-                    event_type="memory.stored",
-                    priority="normal",
-                    data={
-                        "record_id": record_id,
-                        "memory_type": memory_type.value,
-                        "session_id": session_id,
-                        "user_id": user_id,
-                        "tags": tags or [],
-                        "scope": record.scope,
-                        "origin": record.origin.value,
-                    },
-                ))
-            return record_id
-        except Exception as e:
-            self._stats["errors"] += 1
-            print(f"[MemoryRuntime] Store failed: {e}")
-            raise
-        finally:
-            self._stats["total_latency_ms"] += (time.time() - start) * 1000
+        record = MemoryRecord(
+            content=content,
+            memory_type=memory_type,
+            metadata=metadata or {},
+            session_id=session_id,
+            user_id=user_id,
+            tags=tags or [],
+            importance=importance,
+            scope=scope or GLOBAL_SCOPE,
+            origin=_as_origin(origin),
+        )
+        return await self.store_record(record)
 
     async def promotion_candidates(self) -> list[MemoryRecord]:
         """Project facts that have proved useful across several projects.
@@ -443,6 +416,21 @@ class MemoryRuntimeImpl(MemoryRuntime):
             importance=original.importance,
             source=original.source,
             pinned=original.pinned,
+            # What the fact is *about* and where it came from survive being
+            # corrected. Without these the replacement defaulted to `global`
+            # and `conversation`, so fixing a rate on a client's contract moved
+            # the fact out of that project and into the store that is never
+            # shared (rule 7i's boundary), and re-attributed a passage from the
+            # user's own document to something they had merely said (rule 7b).
+            # Rule 4 promises that correcting a fact changes the answers; it
+            # does not license changing who may see it.
+            scope=original.scope,
+            origin=original.origin,
+            # Promotion evidence is about the fact, not its wording. Rule 7i
+            # asks whether something has been useful across three different
+            # projects, and resetting the tally on every correction means a
+            # fact that gets refined is one that can never be promoted.
+            recalled_in=list(original.recalled_in or []),
             # When the world changed, not when we were told. Defaulting to now
             # is the honest fallback: the user did not state a date, so the
             # earliest moment Zaram can vouch for is this one.
@@ -592,22 +580,15 @@ class MemoryRuntimeImpl(MemoryRuntime):
         record = await self._store.get(record_id)
         if not record:
             return False
-        updated = MemoryRecord(
-            id=record.id,
-            content=record.content,
-            memory_type=record.memory_type,
-            metadata=record.metadata,
-            embedding=record.embedding,
-            created_at=record.created_at,
-            updated_at=time.time(),
-            access_count=record.access_count,
-            last_accessed=record.last_accessed,
-            tags=record.tags,
-            session_id=record.session_id,
-            user_id=record.user_id,
-            importance=importance,
-            source=record.source,
-        )
+        # `replace`, because this changes one number and must change nothing
+        # else. Rebuilt field by field, it dropped nine — and this path runs
+        # unattended: `reinforce` raises importance on recall and `apply_decay`
+        # lowers it on a timer, so a fact the user had corrected came back
+        # standing, a fact scoped to a project became `global`, and the
+        # embedder stamp went to `None`, which puts the vector back in the
+        # class nothing can decide about. Nobody asked for any of it; a
+        # background task adjusting a float rewrote the fact's permissions.
+        updated = replace(record, importance=importance, updated_at=time.time())
         await self._store.put(updated)
         await self._index.add(updated)
         return True
@@ -769,32 +750,69 @@ class MemoryRuntimeImpl(MemoryRuntime):
         return await self._store.get(record_id)
 
     async def store_record(self, record: MemoryRecord) -> str:
-        embedding = record.embedding
-        embedded_by = record.embedded_by
-        if embedding is None and record.content:
-            embedding = self._embedder.embed(record.content)
-            embedded_by = self._embedder.signature()
-        stored_record = MemoryRecord(
-            id=record.id,
-            content=record.content,
-            memory_type=record.memory_type,
-            metadata=record.metadata,
-            embedding=embedding,
-            embedded_by=embedded_by,
-            created_at=record.created_at,
-            updated_at=record.updated_at,
-            access_count=record.access_count,
-            last_accessed=record.last_accessed,
-            tags=record.tags,
-            session_id=record.session_id,
-            user_id=record.user_id,
-            importance=record.importance,
-            source=record.source,
-        )
-        record_id = await self._store.put(stored_record)
-        await self._index.add(stored_record)
-        self._stats["stores"] += 1
-        return record_id
+        """Store a record as it was given. **Every field on it survives.**
+
+        This used to rebuild the record field by field, and an enumeration is
+        the wrong shape for the job: it has to be revisited every time the
+        record gains a field, and nothing fails when it is not. Eight had been
+        missed — `scope`, `origin`, `pinned`, `superseded_by`, `superseded_at`,
+        `valid_from`, `valid_until` and `recalled_in`.
+
+        Two of those are rules. A fact stored through this path landed in
+        `global` whatever project it belonged to, which is rule 7i's scope
+        field — and the multiplayer boundary — decided by an omission; and a
+        correction stored through it came back standing, because the tombstone
+        that says it was superseded was dropped on the way in. Both are silent:
+        the write succeeds, the record is there, and only the parts that
+        governed who may see it are gone.
+
+        `replace` carries whatever is there, so a field added tomorrow is
+        stored without this method being touched.
+        """
+        start = time.time()
+        try:
+            embedding = record.embedding
+            embedded_by = record.embedded_by
+            if embedding is None and record.content:
+                embedding = self._embedder.embed(record.content)
+                # Which embedder made it. A vector with no maker recorded is
+                # one nothing can decide about later; see `embedded_by`.
+                embedded_by = self._embedder.signature()
+            stored_record = replace(
+                record,
+                embedding=embedding,
+                embedded_by=embedded_by,
+                # Neither is validated by the dataclass, and both govern who
+                # may see the fact, so normalise on the way in rather than
+                # trusting every caller to have constructed them correctly.
+                scope=record.scope or GLOBAL_SCOPE,
+                origin=_as_origin(record.origin),
+            )
+            record_id = await self._store.put(stored_record)
+            await self._index.add(stored_record)
+            self._stats["stores"] += 1
+            if self._event_bus:
+                self._event_bus.publish(ZaramEvent(
+                    source_runtime="memory",
+                    event_type="memory.stored",
+                    priority="normal",
+                    data={
+                        "record_id": record_id,
+                        "memory_type": stored_record.memory_type.value,
+                        "session_id": stored_record.session_id,
+                        "user_id": stored_record.user_id,
+                        "tags": stored_record.tags,
+                        "scope": stored_record.scope,
+                        "origin": stored_record.origin.value,
+                    },
+                ))
+            return record_id
+        except Exception as e:
+            self._stats["errors"] += 1
+            print(f"[MemoryRuntime] Store failed: {e}")
+            raise
+        finally:
+            self._stats["total_latency_ms"] += (time.time() - start) * 1000
 
     async def remember(
         self,

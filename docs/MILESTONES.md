@@ -22,6 +22,47 @@ publishing step over rather than finding another route. `CLAUDE.md`,
 
 *The latest work is first. Earlier sessions follow below.*
 
+### 24 September (later) — a fact goes into the Spine whole.
+
+Picked up from the previous session's own handoff, which recorded
+`store_record` dropping `scope`, `origin` and `pinned` and left it alone to
+keep the embedder change narrow. Reading it found eight fields rather than
+three, and **two more methods on the same file with the same defect**, both
+worse than the one that was reported.
+
+The shape is one mistake repeated: *a record rebuilt field by field from
+another record.* It has to be revisited every time `MemoryRecord` gains a
+field, nothing fails when it is not, and the fields that go missing are the
+ones added most recently — which here means the ones that carry the rules.
+
+| Where | Dropped | What that did |
+|---|---|---|
+| `store_record` | 8 — `scope`, `origin`, `pinned`, `superseded_by`, `superseded_at`, `valid_from`, `valid_until`, `recalled_in` | A fact landed in `global` whatever project it belonged to; a corrected fact came back standing |
+| `update_importance` | 9 — those, plus `embedded_by` | **Runs unattended.** `reinforce` on recall, `apply_decay` on a timer — a background task nudging a float rewrote the fact's permissions and blanked yesterday's embedder stamp |
+| `correct()`'s replacement | `scope`, `origin`, `recalled_in` | Rule 4's own path breaking rule 7i: fixing a rate on a client's contract moved the fact out of that project and into the store that is never shared, and re-attributed a passage from the user's document to something they had merely said |
+
+`ConversationHistory.store_record` and `EpisodicMemory.store_record` were a
+fourth instance wearing different clothes — they unpacked the record into
+`store()`, which *builds a new one*, so the id the caller held was not the id
+of the fact that had been written. Both now delegate to the runtime, and
+`store()` itself builds a record and hands it to `store_record`: **one path a
+fact takes into the Spine.** There were two and they did not agree about what
+a fact carries.
+
+Every rebuild is now `dataclasses.replace`, so a field added tomorrow is
+carried by code written today.
+
+The test is the part worth keeping. Asserting "these eight fields survive" is
+the same enumeration restated somewhere it will go equally stale, so
+`test_every_field_the_caller_set_comes_back` walks `dataclasses.fields` and
+asserts that **nothing the caller set changed**, with the two the runtime is
+allowed to fill in named explicitly. Checked against the old code: 8 of the
+12 tests fail, which is what earns them.
+
+`backend/tests/test_a_stored_record_keeps_every_field.py` (12). Measured with
+**no Ollama and no GPU** — this is the cloud session, so the suite takes the
+branch that runs when no models are discovered.
+
 ### 24 September — the models are current, a vector says who made it, and a picture can be worked from.
 
 Three pieces, and the middle one is a bug that had been live since Settings

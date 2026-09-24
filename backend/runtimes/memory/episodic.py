@@ -62,15 +62,13 @@ class EpisodicMemory:
         return await self._runtime.store_record(record)
 
     async def store_record(self, record: "MemoryRecord") -> str:
-        return await self._runtime.store(
-            content=record.content,
-            memory_type=record.memory_type,
-            metadata=record.metadata,
-            session_id=record.session_id,
-            user_id=record.user_id,
-            tags=record.tags,
-            importance=record.importance,
-        )
+        """Store the record the caller built, not a copy of some of it.
+
+        Same fix as `ConversationHistory.store_record`: unpacking into
+        `store()` built a new record with a new id and dropped `source`,
+        `scope`, `origin` and `pinned`.
+        """
+        return await self._runtime.store_record(record)
 
     async def get_recent_events(
         self,
