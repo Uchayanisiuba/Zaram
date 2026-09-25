@@ -22,6 +22,95 @@ publishing step over rather than finding another route. `CLAUDE.md`,
 
 *The latest work is first. Earlier sessions follow below.*
 
+### 25 September — the second pack, and it starts with the word "no".
+
+`CLAUDE.md` has been waiting for this one: *"Build two packs by hand before
+building the pack system. The abstraction cannot be designed from imagination
+— only from two real examples and the friction between them."* The business
+layer is pack one. `packs/opportunities` is pack two, and it is deliberately
+differently shaped — pack one works on documents the user already has, this
+one on documents that arrive from outside on a timer.
+
+Design: `docs/PACK-OPPORTUNITIES.md`. Three things are worth carrying forward.
+
+**The scope was set by the funders, not by caution.** Grants.gov's own API
+documentation says write operations are unsupported and that applications
+cannot be submitted through it; the EU Funding & Tenders Portal has a search
+API and no submission endpoint anywhere. They built the discovery half
+deliberately and did not build the other half deliberately. Rules 6, 9 and the
+mutative tier land on the same line independently, which is usually a sign the
+line is real. So the pack automates discovery, eligibility and the first
+draft, and stops at a review queue a person presses send on. **There is no
+`apply` tool and `test_the_opportunities_pack_is_wired.py` asserts its
+absence against a real boot** — an absence worth a test, because a tool named
+for a capability that does not exist is one a model will narrate having used.
+
+**Jobs and grants are one pipeline with the weights moved.** For jobs,
+discovery is easy and every application reads the same, so the work is the
+draft. For grants it inverts: the bottleneck is *eligibility*, because most
+people do not know what they can apply for and finding out the hard way costs
+a fortnight each time. One pack, two project types (`ProjectType.JOBS`,
+`ProjectType.GRANTS`). Two packs sharing a pipeline would have been two copies
+of it inside a month — and that friction is exactly what the pack *system*
+needed a second example to see.
+
+**Eligibility is a gate, never a ranking.** `CLAUDE.md` says it for model
+capability — *"a binary precondition, never a score"* — and this is the fourth
+domain that error could have arrived in, with the highest cost yet. It is
+written down before the matcher rather than after the fourth recurrence:
+`assess()` returns a verdict, and `test_nothing_in_the_report_is_a_score`
+walks the dataclass and fails if a float ever appears on the report or its
+findings. There is nothing in it that *could* be compared against a floor.
+
+Beside it, the failure with no symptom: **unknown is not no.** A criterion
+with no fact behind it becomes a question, never an exclusion. Treating
+missing as failing makes a tidier list by hiding opportunities on facts nobody
+was asked for, and the user never finds out — so it has its own tests rather
+than a line in someone else's. The questions are gathered once per batch, not
+once per call.
+
+`requirements.py` reads criteria deterministically and is biased hard: it
+finds few and invents none. A sentence is only considered when it is *about*
+eligibility, which is what stops "our offices are in Germany" becoming a
+residency requirement. Every requirement carries the clause it was read from,
+`Requirement.source` has no default, and both are the same decision
+`obligations.Obligation.source` already made.
+
+#### Measured here, and the honest gaps
+
+`tests/test_the_opportunity_gate_filters.py` (30) and
+`tests/test_the_opportunities_pack_is_wired.py` (3). **No Ollama, no GPU** —
+the cloud session. Full suite 4040 passed; the 62 failures and 15 errors are
+identical to the same suite on the unmodified tree in this container, except
+one that was only the new files not yet being tracked by git.
+
+The wiring test was checked by removing the registration line from
+`bootstrapper.py` and watching it fail, then restoring it. `npm
+run check:reachability` does not list the pack.
+
+**Every built-in `FieldMap` is UNVERIFIED and each says so in its own
+docstring.** This container's egress policy blocks `boards-api.greenhouse.io`,
+`api.lever.co`, `ec.europa.eu` and `api.simpler.grants.gov` — all four were
+tried — so not one adapter has met a live response. They are a starting shape,
+not a claim, and each carries the one `curl` that checks it. What *is* proven
+is the behaviour that matters more: a map pointed at a field that does not
+exist yields an empty field rather than a crash, because the poller runs
+unattended and a stack trace at 06:00 is a feed that silently stopped.
+
+Written into the source rather than only here: **UKRI's Gateway to Research is
+not a feed of open calls.** It lists funding already *awarded*. An integration
+against it looks entirely reasonable, returns thousands of well-formed
+records, matches the user against grants that closed years ago, and passes
+every test anybody would write for it.
+
+#### Not built, deliberately
+
+The poller, the matcher, the reuse library and the drafter — steps 2 to 4 of
+the order in the design doc. Step 1 is useful on its own (*"what am I actually
+eligible for?"*), and a `find_opportunities` tool that cannot yet search would
+be the thing `CLAUDE.md` already forbids: *"a search nobody wired is not a
+capability, and listing it would promise something the machine cannot do."*
+
 ### 24 September (later) — a fact goes into the Spine whole.
 
 Picked up from the previous session's own handoff, which recorded

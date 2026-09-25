@@ -574,6 +574,24 @@ class KernelBootstrapper:
             DrawTools(lambda capability, payload: run_sync(images_runtime.execute(capability, payload))),
         )
 
+        # The opportunities pack: `check_eligibility` and `read_criteria`, so
+        # that "can I actually apply for this?" is a call the model can make
+        # instead of a judgement it makes up. Deterministic, no network, no
+        # model in the path — which is the point: a refusal the user disputes
+        # has to reproduce, or rule 4's correction loop has nothing to bite on.
+        #
+        # Neither tool sends anything or changes anything, so both are
+        # generative tier and need no write mode, no undo and no confirmation.
+        # There is deliberately no `apply` tool beside them and there will not
+        # be one; `docs/PACK-OPPORTUNITIES.md` has the reasoning, and it is
+        # the funders' line as much as ours.
+        from packs.opportunities import SERVER_ID as OPPORTUNITY_SERVER, OpportunityTools
+
+        self.mcp_runtime.register_builtin(
+            ServerConfig(server_id=OPPORTUNITY_SERVER),
+            OpportunityTools(),
+        )
+
         # **Registering it is not reaching it, and that distinction is the
         # whole reason this line exists.** The runtime was registered here for
         # a fortnight while `planner.py` contained no occurrence of "mcp", so

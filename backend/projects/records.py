@@ -51,6 +51,16 @@ class ProjectType(str, Enum):
     CODING = "coding"
     THREE_D = "3d"
     MCP = "mcp"
+    #: Both activate `packs.opportunities`, which is one pipeline — the
+    #: difference is where the bottleneck sits, not what the code does. For
+    #: jobs, discovery is easy and every application reads the same, so the
+    #: work is the draft. For grants it inverts: the work is *eligibility*,
+    #: because most people do not know what they can apply for and finding out
+    #: the hard way costs a fortnight each time. Two types rather than one so
+    #: the weighting has somewhere to live; one pack rather than two so the
+    #: pipeline does not get copied. `docs/PACK-OPPORTUNITIES.md`.
+    JOBS = "jobs"
+    GRANTS = "grants"
 
 
 class UnknownProject(KeyError):
