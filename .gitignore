@@ -253,6 +253,7 @@ backend/mcp-servers.json
 # Isolated venv for third-party MCP servers. Deliberately not the backend
 # venv: these pull the official MCP SDK, and the installer must not.
 .mcp-venv/
+.mcp-comfy-venv/
 backend/tests/_flux_sample.png
 
 # Aider's own session files. The config and the ignore list are checked in;
