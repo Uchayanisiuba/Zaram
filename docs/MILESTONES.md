@@ -18,9 +18,69 @@ publishing step over rather than finding another route. `CLAUDE.md`,
 
 ---
 
-## Current state — 24 September 2026
+## Current state — 27 September 2026
 
 *The latest work is first. Earlier sessions follow below.*
+
+### 27 September — Zaram drove somebody else's MCP server, and the gate held.
+
+Measured end to end against a scratch `ZARAM_DATA_DIR`, with the official
+`comfy-mcp` (39 tools) attached to a local ComfyUI 0.37.0 on `G:`. The
+sequencing line *"the client comes before any server Zaram ships"* now has a
+number behind it: a server Zaram maintains nothing of, reached from a
+conversation, in an afternoon.
+
+| Step | Result |
+|---|---|
+| Server attached, tools offered | `notice: 42 attached tools` — `code, comfyui, draw, jobs, web` |
+| Model chose a read tool | `comfyui/system_stats  verdict=allow  reason=ran` |
+| Tool returned real data | ComfyUI's live stats, `isError: false` |
+| Model answered from it | from the tool's own numbers, not from training |
+| Model chose a **write** tool | `comfyui/run_workflow  verdict=refuse` |
+
+The refusal is the part worth keeping, because it is the tier table doing its
+job on somebody else's server with no special-casing: *"run_workflow changes
+something, and this server is read-only because nothing here can undo it. Mark
+the server as backed by an app with its own undo to permit it."* Selection was
+ordering; the gate ran afterwards on what the model actually chose.
+
+**A trap found on the way, and it is a product bug rather than a note.**
+`comfy-mcp` was attached, healthy, and **entirely invisible to the model**:
+`DEFAULT_TOOL_BUDGET` was 8 and eight slots were already spoken for by the
+servers beside it, so not one of its 39 tools was ever shown. Asked whether it
+could reach ComfyUI, Zaram said no — truthfully, from what it could see, and
+wrongly about the machine. Nothing anywhere said a server had been silently
+dropped.
+
+Half of that is closed: `ZARAM_TOOL_BUDGET` makes the budget measurable by the
+person whose context is filling up, with nonsense ignored rather than fatal and
+a value below one refused, because zero is not a smaller budget — it is every
+attached server switched off. `tests/test_the_tool_budget_is_measurable.py`.
+
+**The other half is open and is the real fix**: the tools notice says how many
+tools are available and never how many did not fit. It should name the shortfall
+— *"39 from comfyui did not fit"* — and Settings should be able to show a server
+as attached but not offered. Until it does, the honest summary is that Zaram can
+attach a large server and quietly not use it. This is the "disabled capabilities
+are visible, not silent" rule in `CLAUDE.md` applied to tools, and it is unbuilt.
+
+**Two facts a future session will otherwise re-derive.** `comfy-mcp` is a thin
+wrapper over `comfy-cli` and fails with a one-line summary — `Error executing
+tool system_stats` — whose cause is only in its stderr: `comfy` not on PATH.
+Zaram spawns it without the venv's `Scripts` directory on PATH, so the fix is
+`env: {"COMFY_BIN": …}` on the server entry rather than mutating PATH. And
+`comfy-cli` pulls `posthog` and `mixpanel`, so an attached third-party server
+can carry its own telemetry — egress Zaram's own log cannot see. Rule 3 says
+every byte that leaves is logged *including bytes sent by tools*; a stdio child
+process is the hole in that, and naming it here is not the same as closing it.
+
+**Not measured, and it is the reason no video came out of this.** The card had
+**0.02 GB free of 12 GB** — the maintainer's desktop held ~10.7 GB, and
+`qwen3-14b-16k` was itself running 7% GPU / 93% CPU and timing out at 120s. All
+five `african-myths` workflows validate clean against the live server
+(`valid: true`, zero errors, zero warnings, `spends_credits: false`), so the
+render is gated on free VRAM and on a per-tool grant for `run_workflow`, not on
+anything unbuilt.
 
 ### 24 September — the models are current, a vector says who made it, and a picture can be worked from.
 
