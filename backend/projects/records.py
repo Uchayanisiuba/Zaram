@@ -51,6 +51,15 @@ class ProjectType(str, Enum):
     CODING = "coding"
     THREE_D = "3d"
     MCP = "mcp"
+    #: The job hunt — postings read into facts, closing dates as obligations,
+    #: letters written from what the last ones said. `backend/packs/jobs`.
+    #:
+    #: A type rather than a flag because it is what activates the pack, and a
+    #: project rather than a global setting because a hunt has a beginning and
+    #: an end: the facts about *which* roles, *which* studios and *what was
+    #: sent* belong to it, and scoping them globally would mix one hunt's
+    #: rejections into the next one's letters.
+    JOB_HUNT = "job_hunt"
 
 
 class UnknownProject(KeyError):

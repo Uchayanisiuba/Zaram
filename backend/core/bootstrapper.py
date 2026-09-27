@@ -1,4 +1,5 @@
 # backend/core/bootstrapper.py
+from core.async_bridge import run_sync
 from .event_bus import EventBus
 from .registry import RuntimeRegistry
 from .execution_engine import ExecutionEngine
@@ -572,6 +573,52 @@ class KernelBootstrapper:
         self.mcp_runtime.register_builtin(
             ServerConfig(server_id=DRAW_SERVER),
             DrawTools(lambda capability, payload: run_sync(images_runtime.execute(capability, payload))),
+        )
+
+        # The job-hunt pack: `record_job_posting`, so a posting the model
+        # found on a Monday-morning run becomes facts, a closing date and a
+        # follow-up rather than prose in a transcript nobody queries in March.
+        #
+        # The Spine and the obligation store are reached through callables
+        # built here, for the reason the draw pack gives: the pack holds no
+        # opinion about how either is reached, and its own rules — the
+        # refusals, what it files, the wording — stay testable without a
+        # database or an embedder.
+        #
+        # Registered whether or not a project is open. Scope is decided per
+        # call from the `project_id` the model passes, which is rule 7i: a
+        # posting filed outside a hunt is a global fact about a role that was
+        # seen, and inventing a project for it would be a value nobody entered.
+        from packs.jobs import SERVER_ID as JOBS_SERVER, JobTools
+
+        memory_runtime = self.memory_runtime
+
+        def _remember_fact(content: str, scope: str) -> None:
+            from runtimes.memory.contracts import MemoryType, Origin
+
+            run_sync(
+                memory_runtime.store(
+                    content,
+                    MemoryType.SEMANTIC,
+                    scope=scope,
+                    # Zaram read this off a posting the person did not write,
+                    # so it is neither their word nor Zaram's invention. 7b
+                    # says recall must be able to say which, and "from a job
+                    # posting" reads very differently from "you said this".
+                    origin=Origin.USER_DOCUMENT,
+                    tags=["job-posting"],
+                )
+            )
+
+        def _record_obligations(entries):
+            from obligations import ObligationRecords
+            from obligations.records import default_db_path
+
+            return ObligationRecords(default_db_path()).record(list(entries))
+
+        self.mcp_runtime.register_builtin(
+            ServerConfig(server_id=JOBS_SERVER),
+            JobTools(remember=_remember_fact, record_obligations=_record_obligations),
         )
 
         # **Registering it is not reaching it, and that distinction is the

@@ -238,3 +238,30 @@ Closing date: the 9th of November
         posting = parse_posting(self.PROSE, today=date(2026, 9, 27))
 
         assert posting.closes == date(2026, 11, 9)
+
+
+class TestTheEvidenceString:
+    """`raw` is read back as prose, so it is trimmed like prose.
+
+    It reaches a fact — "Northwind states the pay as …" — and from there a
+    document. "states the pay as Salary: £60,000 per annum.." is the label and
+    the line's punctuation leaking into a sentence somebody sends.
+    """
+
+    def test_the_label_is_not_part_of_the_figure(self):
+        salary = parse_posting("Role\nSalary: £60,000 - £75,000 per annum.").salary
+
+        assert salary.raw == "£60,000 - £75,000 per annum"
+
+    def test_only_the_sentence_holding_the_figure_is_kept(self):
+        posting = parse_posting(
+            "Role\nWe are a small studio. The rate is £550 per day. Apply soon."
+        )
+
+        assert posting.salary.raw == "The rate is £550 per day"
+
+    def test_the_fact_reads_as_a_sentence(self):
+        facts = parse_posting("Role\nCompany: Northwind\nSalary: £550 per day.").facts()
+        pay = [f for f in facts if "pay" in f]
+
+        assert pay == ["Northwind states the pay as £550 per day."]

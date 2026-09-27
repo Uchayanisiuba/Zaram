@@ -179,6 +179,20 @@ _WORKPLACE: Sequence[Tuple[str, str]] = (
     (r"\bremote\b|\bwork\s+from\s+home\b|\bwfh\b", Workplace.REMOTE),
 )
 
+#: Words that make a line a job title rather than a sentence from the body.
+#:
+#: Used **only** to decide whether a posting is identifiable at all, never to
+#: change the title that was read. It is pack knowledge — this is the job-hunt
+#: pack, and knowing that "rigger" names a role and "hiring" does not is
+#: exactly the domain knowledge `CLAUDE.md` says a pack is made of.
+_ROLE_WORDS = re.compile(
+    r"\b(artist|animator|engineer|developer|designer|director|producer|"
+    r"generalist|technical|rigger|modeller|modeler|supervisor|lead|manager|"
+    r"programmer|architect|analyst|writer|editor|researcher|scientist|"
+    r"consultant|specialist|coordinator|intern|td)\b",
+    re.IGNORECASE,
+)
+
 _MONTHS = {
     "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
     "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12,
@@ -291,9 +305,7 @@ def _salary(text: str) -> Optional[Salary]:
     symbol = groups.get("sym") or ""
     code = (groups.get("code_before") or groups.get("code_after") or "").upper()
     low_raw, high_raw = groups.get("low"), groups.get("high")
-    line_start = text.rfind("\n", 0, match.start()) + 1
-    line_end = text.find("\n", match.end())
-    raw = text[line_start : line_end if line_end != -1 else len(text)].strip()
+    raw = _evidence(text, match.start(), match.end())
 
     low = _amount(low_raw)
     high = _amount(high_raw) if high_raw else None
@@ -306,6 +318,36 @@ def _salary(text: str) -> Optional[Salary]:
         high=high,
         period=_first(raw, _PERIODS) or _first(text, _PERIODS),
     )
+
+
+#: Labels that precede a figure and are not part of it. Stripped because the
+#: evidence string is read back as a sentence — "states the pay as Salary:
+#: £60,000 per annum." is the label leaking into prose.
+_PAY_LABELS = re.compile(
+    r"^(?:salary|pay|pay\s+range|rate|day\s+rate|compensation|package)\s*[:\-\u2014]\s*",
+    re.IGNORECASE,
+)
+
+
+def _evidence(text: str, start: int, end: int) -> str:
+    """The sentence a figure sits in, trimmed to what a person would quote.
+
+    The line is too much — a prose posting puts the rate and the working
+    arrangement in one sentence and the next sentence on the same line — and
+    the match alone is too little, because "£550" without "per day" is a
+    different claim. The sentence is the unit that carries the claim.
+    """
+    line_start = text.rfind("\n", 0, start) + 1
+    line_end = text.find("\n", end)
+    line = text[line_start : line_end if line_end != -1 else len(text)]
+
+    within_start = start - line_start
+    within_end = end - line_start
+    opens = line.rfind(". ", 0, within_start)
+    closes = line.find(". ", within_end)
+    sentence = line[opens + 2 if opens != -1 else 0 : closes if closes != -1 else len(line)]
+
+    return _PAY_LABELS.sub("", sentence.strip()).strip().rstrip(".").strip()
 
 
 def _date(text: str, today: Optional[date] = None) -> Optional[date]:
@@ -402,10 +444,22 @@ _TITLE_ENDS = re.compile(
 
 
 def _trim_title(line: str) -> str:
+    """A role title is a phrase. A sentence is an advertisement.
+
+    The first line of a posting is the title on every board worth reading —
+    but not on a page that opens with prose, and taking a paragraph whole put
+    120 characters of ad copy in the subject line of a covering letter. Cut at
+    the first sentence boundary, then refuse anything still too long to be a
+    job title.
+    """
     cut = _TITLE_ENDS.search(line)
     if cut:
         line = line[: cut.start()]
-    return line.strip(" .,:;-–—").strip()[:120]
+    sentence = re.search(r"\.\s", line)
+    if sentence:
+        line = line[: sentence.start()]
+    line = line.strip(" .,:;-–—").strip()
+    return "" if len(line.split()) > 12 else line[:120]
 
 
 def _url(text: str, *, prefer: str = "") -> str:
@@ -429,9 +483,19 @@ def parse_posting(text: str, *, source_url: str = "", today: Optional[date] = No
     )
     posted_line = _labelled(cleaned, "posted", "date posted", "published")
 
+    title = _title(cleaned)
+    company = _labelled(
+        cleaned, "company", "employer", "studio", "organisation", "organization"
+    )
+    # A line that names no role, with no company beside it, is not a posting
+    # this can be recognised by later. Saying so is better than filing a
+    # record that recall will surface and nobody will be able to place.
+    if company == "" and not _ROLE_WORDS.search(title):
+        title = ""
+
     return Posting(
-        title=_title(cleaned),
-        company=_labelled(cleaned, "company", "employer", "studio", "organisation", "organization"),
+        title=title,
+        company=company,
         location=_labelled(cleaned, "location", "based in", "where"),
         workplace=_first(cleaned, _WORKPLACE) or None,
         salary=_salary(cleaned),
