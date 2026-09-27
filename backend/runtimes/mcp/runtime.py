@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import time
 from pathlib import Path
 from typing import Set, Any, Callable, Dict, List, Optional, Sequence
@@ -70,7 +71,29 @@ CALL = "mcp.call"
 #: correctness, it is about what is left for recall. Eight is roughly two
 #: servers' worth of the useful ones, and it is a starting number to be
 #: re-measured, not a constant anybody proved.
-DEFAULT_TOOL_BUDGET = 8
+#:
+#: `ZARAM_TOOL_BUDGET` overrides it, because a number nobody can vary is a
+#: number nobody will re-measure. A server with 39 tools — Comfy Org's
+#: `comfy-mcp` is one — is entirely invisible to the model at eight, and
+#: whether raising it costs more in recall than it buys in reach is a
+#: measurement somebody has to be able to take on their own machine.
+#: Nonsense is ignored rather than crashing a boot over an env var.
+def _budget_from_environment(default: int = 8) -> int:
+    raw = os.getenv("ZARAM_TOOL_BUDGET", "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        logger.warning("ZARAM_TOOL_BUDGET=%r is not a number; using %d", raw, default)
+        return default
+    if value < 1:
+        logger.warning("ZARAM_TOOL_BUDGET=%d is below one; using %d", value, default)
+        return default
+    return value
+
+
+DEFAULT_TOOL_BUDGET = _budget_from_environment()
 
 
 class McpRuntime:
