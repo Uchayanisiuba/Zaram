@@ -29,7 +29,7 @@
  * "don't stop for each change" can never become "empty the mailbox".
  */
 import { ArrowRight, Check, Circle, CircleDot, MinusCircle } from 'lucide-react';
-import type { ChatPlanItem } from '../../stores/chatStore';
+import type { ChatPlanItem, ChatToolCall } from '../../stores/chatStore';
 
 const STATUS: Record<string, { Icon: typeof Check; color: string; label: string }> = {
   done: { Icon: Check, color: 'var(--color-green, #4ade80)', label: 'done' },
@@ -38,16 +38,56 @@ const STATUS: Record<string, { Icon: typeof Check; color: string; label: string 
   skipped: { Icon: MinusCircle, color: 'var(--color-amber, #d97706)', label: 'skipped' },
 };
 
+/** What a call did, in as few words as carry the claim.
+ *
+ * The tool's name and what it was aimed at, which is the pair that makes the
+ * row checkable — `read_lines` on `readiness.py:156-181` can be opened and
+ * "read a file" cannot. `target` is model-written and already bounded by the
+ * backend; it is rendered as text, never as markup.
+ */
+function evidenceOf(call: ChatToolCall): string {
+  const name = call.label || call.tool || call.server;
+  return call.target ? `${name} ${call.target}` : name;
+}
+
+/** The colour a call's verdict earns.
+ *
+ * A refusal must read as a refusal here too. A step that says `done` above two
+ * calls the gate turned down is the exact shape of a status claim that is
+ * false, and this card is the one place both facts are on screen together.
+ */
+const VERDICT_COLOUR: Record<string, string> = {
+  refuse: 'var(--color-red, #fca5a5)',
+  confirm: 'var(--color-amber, #d97706)',
+};
+
 export default function PlanCard({
   items,
   awaitingGo = false,
   onGo,
+  toolCalls = [],
 }: {
   items: ChatPlanItem[];
   awaitingGo?: boolean;
   onGo?: (level: 'ask' | 'full') => void;
+  /** Every call this reply made. Those carrying a `planStep` are nested under
+   *  the step they were made for; the rest are left to the interleaved rows,
+   *  which is where a reply with no plan shows its working. */
+  toolCalls?: ChatToolCall[];
 }) {
   if (!items.length) return null;
+  // **The join, and it is the whole point of this card now.** A checklist on
+  // its own is a list of claims; the same list with what was actually run
+  // under each line is a record. Grouped here rather than on the way in so the
+  // card stays drawable from a stored message — history has the calls and the
+  // plan, and nothing else has to have kept an index.
+  const evidence = new Map<number, ChatToolCall[]>();
+  for (const call of toolCalls) {
+    if (call.planStep == null) continue;
+    const at = evidence.get(call.planStep);
+    if (at) at.push(call);
+    else evidence.set(call.planStep, [call]);
+  }
   const done = items.filter((i) => i.status === 'done').length;
   return (
     <div
@@ -65,18 +105,45 @@ export default function PlanCard({
         {items.map((item, i) => {
           const { Icon, color, label } = STATUS[item.status] ?? STATUS.todo;
           return (
-            <li key={i} className="flex items-start gap-1.5 text-xs" data-status={item.status}>
-              <Icon size={11} className="mt-0.5 shrink-0" style={{ color }} aria-label={label} />
-              <span
-                style={{
-                  color: item.status === 'done' ? 'var(--color-text-faint)' : 'var(--color-text)',
-                  textDecoration: item.status === 'skipped' ? 'line-through' : 'none',
-                }}
-              >
-                {item.text}
-              </span>
-              {item.reason && (
-                <span style={{ color: 'var(--color-text-faint)' }}>— {item.reason}</span>
+            <li key={i} className="text-xs" data-status={item.status}>
+              <div className="flex items-start gap-1.5">
+                <Icon size={11} className="mt-0.5 shrink-0" style={{ color }} aria-label={label} />
+                <span
+                  style={{
+                    color: item.status === 'done' ? 'var(--color-text-faint)' : 'var(--color-text)',
+                    textDecoration: item.status === 'skipped' ? 'line-through' : 'none',
+                  }}
+                >
+                  {item.text}
+                </span>
+                {item.reason && (
+                  <span style={{ color: 'var(--color-text-faint)' }}>— {item.reason}</span>
+                )}
+              </div>
+              {/* Indented to the step's text, not to the bullet: the evidence
+                  belongs to the claim above it and the alignment is what says
+                  so without a second heading. */}
+              {(evidence.get(i) ?? []).length > 0 && (
+                <ul
+                  className="mt-0.5 mb-0.5 flex flex-col gap-0.5"
+                  style={{ marginLeft: '1.05rem', listStyle: 'none', padding: 0 }}
+                  data-testid={`plan-evidence-${i}`}
+                >
+                  {(evidence.get(i) ?? []).map((call, j) => (
+                    <li
+                      key={j}
+                      className="text-[11px]"
+                      style={{
+                        color: VERDICT_COLOUR[call.verdict] ?? 'var(--color-text-faint)',
+                      }}
+                      data-verdict={call.verdict}
+                    >
+                      {evidenceOf(call)}
+                      {call.verdict === 'refuse' && ' — refused'}
+                      {call.verdict === 'confirm' && ' — waiting for you'}
+                    </li>
+                  ))}
+                </ul>
               )}
             </li>
           );

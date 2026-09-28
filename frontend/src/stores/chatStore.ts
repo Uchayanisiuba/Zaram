@@ -172,6 +172,18 @@ export interface ChatToolCall {
   label?: string;
   doing?: string;
   stepId?: string;
+  /** **Which checklist step this call was made for**, by index, or absent.
+   *
+   *  What turns a run of rows into a record of work: the card nests each call
+   *  under the step it belongs to, so 'Add the game loop' carries the two
+   *  calls that did it rather than sitting above twenty anonymous rows. The
+   *  backend decides it from the checklist at the moment of the call; nothing
+   *  here recomputes it, because the model rewrites the plan as it goes and a
+   *  second opinion could disagree with the one that was true at the time.
+   *
+   *  Absent on a reply with no plan, which is most of them, and absent once
+   *  every step is ticked — work done after the last claim belongs to none. */
+  planStep?: number;
   /** How long a finished step took, measured by the backend, in seconds. */
   seconds?: number | null;
   /** How much of the reply's text (markers stripped) had arrived when this
@@ -645,6 +657,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
               ...(event.appUrl ? { appUrl: event.appUrl } : {}),
               ...(event.grantable ? { grantable: true } : {}),
               ...(event.stepId ? { stepId: event.stepId } : {}),
+              // `!= null` rather than truthy: step 0 is the first step of
+              // every plan and is the one most calls belong to.
+              ...(event.planStep != null ? { planStep: event.planStep } : {}),
             });
             set({ streamingToolCalls: [...toolCalls] });
             break;

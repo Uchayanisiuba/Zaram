@@ -414,6 +414,34 @@ class ExecutionEngine:
     def _plan_items(self, session_id: str) -> list:
         return list(self._checklists.get(session_id) or [])
 
+    def _open_plan_step(self, session_id: str) -> int | None:
+        """The index of the checklist step the model is working on, or `None`.
+
+        `doing` wins, because the model said so. Falling back to the first
+        `todo` is the honest second guess: a model that ticks one step and
+        starts the next without marking it `doing` is the common case, and
+        attributing its calls to the step it is plainly on beats attributing
+        them to nothing.
+
+        `None` once everything is ticked. A call made after the last step is
+        finished belongs to no step, and filing it under the final one would
+        put work under a claim that was already closed.
+        """
+        items = self._plan_items(session_id)
+        if not items:
+            return None
+        statuses = [
+            str((item or {}).get("status") or "todo").lower()
+            if isinstance(item, dict)
+            else "todo"
+            for item in items
+        ]
+        for wanted in ("doing", "todo"):
+            for i, status in enumerate(statuses):
+                if status == wanted:
+                    return i
+        return None
+
     def _seed_plan(self, session_id: str, items: list) -> None:
         if items:
             self._checklists[session_id] = list(items)
@@ -1814,6 +1842,11 @@ class ExecutionEngine:
                 return
 
             call_mark = f"{current_step() or session_id}:call:{made + 1}"
+            # Read once per call, before it runs: the call may itself be a
+            # `plan` that rewrites the list, and this row belongs to the step
+            # that was open when it was asked for, not to whatever the model
+            # reorganised afterwards.
+            plan_step = self._open_plan_step(session_id)
             called_at = time.monotonic()
             with running_step(call_mark):
                 result = run_sync(runtime.execute(MCP_CALL, {
@@ -1843,6 +1876,7 @@ class ExecutionEngine:
                     call.server, call.tool, "refuse", reason,
                     target=call_target(call.tool, call.arguments),
                     step_id=call_mark,
+                    plan_step=plan_step,
                 )
                 yield from self._answer_without_the_tool(
                     original_prompt, call, reason, model, system_prompt, spoken,
@@ -1864,6 +1898,7 @@ class ExecutionEngine:
                     call.server, call.tool, "confirm", reason,
                     target=call_target(call.tool, call.arguments),
                     step_id=call_mark,
+                    plan_step=plan_step,
                     # Carried so the row can offer the one thing that settles
                     # it. Read off the gate's answer rather than guessed from
                     # the tool's name a second time.
@@ -1892,6 +1927,7 @@ class ExecutionEngine:
                     call.server, call.tool, "refuse", error,
                     target=call_target(call.tool, call.arguments),
                     step_id=call_mark,
+                    plan_step=plan_step,
                 )
                 payload: Any = {"error": error}
             else:
@@ -1910,6 +1946,7 @@ class ExecutionEngine:
                     call.server, call.tool, "allow", "ran",
                     target=call_target(call.tool, call.arguments),
                     step_id=call_mark,
+                    plan_step=plan_step,
                     output=output_excerpt(payload),
                     diff=str(change.get("diff") or ""),
                     commit=str(change.get("commit") or ""),

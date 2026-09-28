@@ -261,6 +261,16 @@ export type ChatEvent =
       image: string;
       /** The URL an app was started on, or `''`. */
       appUrl: string;
+      /** **Which checklist step this call was made for**, by index, or
+       *  absent when the reply had no plan or nothing was open.
+       *
+       *  The join between what Zaram said it would do and what it ran.
+       *  Without it the reply shows a list of claims and, separately, a run
+       *  of anonymous rows, and the reader has to guess which belongs to
+       *  which — the difference between watching it work and being told it
+       *  worked. Decided by the backend from the checklist at the moment of
+       *  the call, never recomputed here. */
+      planStep?: number;
       /** The mark this call's egress entries carry, or `''`. */
       stepId: string;
     }
@@ -820,6 +830,10 @@ function parseLine(line: string): ChatEvent | null {
         appUrl: typeof data.app_url === 'string' ? data.app_url : '',
         grantable: data.grantable === true,
         stepId: typeof data.step_id === 'string' ? data.step_id : '',
+        // Absent on the common case — most replies have no plan — so the key
+        // is omitted rather than defaulted. `0` is a real step and must not be
+        // confused with "no step", which is why this tests the type.
+        ...(typeof data.plan_step === 'number' ? { planStep: data.plan_step } : {}),
       };
 
     case 'step_start':

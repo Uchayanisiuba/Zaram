@@ -218,6 +218,13 @@ describe('the open-project offer keeps what makes it pressable', () => {
   });
 });
 
+/** The committed reply. `Array.prototype.at` needs a newer lib than this
+ *  project targets, and `vitest` transpiling it happily is exactly how a
+ *  green suite ships a build that does not typecheck. */
+function committed(messages: { error?: string; text?: string }[]) {
+  return messages[messages.length - 1];
+}
+
 describe('a reply that stops part-way names what actually went wrong', () => {
   beforeEach(() => {
     vi.useRealTimers();
@@ -247,7 +254,7 @@ describe('a reply that stops part-way names what actually went wrong', () => {
 
     await useChatStore.getState().send('build me a tetris game');
 
-    const last = useChatStore.getState().messages.at(-1);
+    const last = committed(useChatStore.getState().messages);
     expect(last?.error).toContain('RangeError');
     expect(last?.error).toContain('Invalid string length');
     expect(last?.error).not.toContain('talking to the backend');
@@ -264,7 +271,7 @@ describe('a reply that stops part-way names what actually went wrong', () => {
 
     await useChatStore.getState().send('anything');
 
-    expect(useChatStore.getState().messages.at(-1)?.text).toBe('half an answer');
+    expect(committed(useChatStore.getState().messages)?.text).toBe('half an answer');
   });
 
   /** An error with no message must not degrade to "[object Object]", which is
@@ -278,7 +285,7 @@ describe('a reply that stops part-way names what actually went wrong', () => {
 
     await useChatStore.getState().send('anything');
 
-    const message = useChatStore.getState().messages.at(-1)?.error ?? '';
+    const message = committed(useChatStore.getState().messages)?.error ?? '';
     expect(message).toContain('ECONNRESET');
     expect(message).not.toContain('[object Object]');
   });

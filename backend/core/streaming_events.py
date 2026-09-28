@@ -438,6 +438,7 @@ class StreamEvent:
         app_url: str = "",
         grantable: bool = False,
         step_id: str = "",
+        plan_step: int | None = None,
     ) -> StreamEvent:
         """One tool call, and what the gate said about it.
 
@@ -462,6 +463,19 @@ class StreamEvent:
                 "verdict": verdict,
                 "reason": reason,
                 "target": target,
+                # **Which checklist step this call was made for**, by index,
+                # or absent when there is no plan or nothing is open.
+                #
+                # The join between what Zaram said it would do and what it
+                # actually ran. Without it the card shows a list of claims and,
+                # separately, a run of anonymous rows, and a person reading it
+                # has to guess which belongs to which — which is the difference
+                # between watching it work and being told it worked.
+                #
+                # Absent rather than `-1` or `null`: most replies have no plan,
+                # and a field that is present-but-meaningless on the common
+                # case is a field the next reader has to test twice.
+                **({"plan_step": plan_step} if plan_step is not None else {}),
                 # The head of what came back, for the step's output pane.
                 # Empty for a call that did not run. See `output_excerpt`.
                 "output": output,

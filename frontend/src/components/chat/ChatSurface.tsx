@@ -1256,7 +1256,12 @@ export default function ChatSurface({ navigate }: Props) {
                       what produced the reply rather than as an afterthought
                       about it. */}
                   {msg.plan ? (
-                    <PlanCard items={msg.plan.items} awaitingGo={msg.plan.awaitingGo} onGo={goPlan} />
+                    <PlanCard
+                      items={msg.plan.items}
+                      awaitingGo={msg.plan.awaitingGo}
+                      onGo={goPlan}
+                      toolCalls={msg.toolCalls}
+                    />
                   ) : null}
                   {/* The rows are drawn between the paragraphs of the body above
                       (`Interleaved`), where they happened, and no longer here. */}
@@ -1386,7 +1391,11 @@ export default function ChatSurface({ navigate }: Props) {
                       the surface shows nothing at all for the seconds the model
                       spends reading. */}
                   {streamingPlan ? (
-                    <PlanCard items={streamingPlan.items} awaitingGo={streamingPlan.awaitingGo} />
+                    <PlanCard
+                      items={streamingPlan.items}
+                      awaitingGo={streamingPlan.awaitingGo}
+                      toolCalls={streamingToolCalls}
+                    />
                   ) : null}
                   {/* Rows that arrived before any text: the body above is not
                       mounted until there is text, so they are drawn here until
