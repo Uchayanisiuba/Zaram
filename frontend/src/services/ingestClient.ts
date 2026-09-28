@@ -72,6 +72,16 @@ export interface IngestSource {
    *  and withdrawing it never touches the disk. The backend answers this; it is
    *  deliberately not inferred from the folder's name. */
   staged: boolean;
+  /** True when this source is Zaram's own manual, indexed at start into the
+   *  built-in Zaram domain. The backend answers this from the id the manual
+   *  recorded; it is deliberately not inferred from the folder's name, because
+   *  a folder somebody happens to call `zaram-manual` is not this one.
+   *
+   *  Optional because absent must mean *not* the manual: a payload from a
+   *  backend that predates the field, or a record restored from before it,
+   *  then shows the person their own folder rather than hiding it. Unknown
+   *  erring towards the user's material is the safe direction here. */
+  builtin?: boolean;
 }
 
 /** One event from the ingest stream. Progress is per file, never a percentage:

@@ -95,15 +95,15 @@ describe('EmptyConversation', () => {
 });
 
 describe('the rest of what Zaram does', () => {
-  it('sits behind one line and unfolds to all six', async () => {
+  it('sits behind one line and unfolds to all of them', async () => {
     render(<EmptyConversation onPick={vi.fn()} />);
 
     await waitFor(() => expect(document.querySelectorAll('[data-testid="starter-task"]')).toHaveLength(3));
     const more = screen.getByTestId('starter-more');
-    expect(more.textContent).toContain('3 more');
+    expect(more.textContent).toContain('4 more');
 
     fireEvent.click(more);
-    await waitFor(() => expect(document.querySelectorAll('[data-testid="starter-task"]')).toHaveLength(6));
+    await waitFor(() => expect(document.querySelectorAll('[data-testid="starter-task"]')).toHaveLength(7));
     expect(screen.getByText(/Turn web search on/)).toBeTruthy();
     expect(screen.getByText(/Attach your mail/)).toBeTruthy();
     expect(screen.getByText(/Attach GitHub/)).toBeTruthy();

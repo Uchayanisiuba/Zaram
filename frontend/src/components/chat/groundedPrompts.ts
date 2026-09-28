@@ -58,7 +58,15 @@ export function groundedPrompts(
   }
 
   const source = [...(input.sources ?? [])]
-    .filter((s) => s.total > 0)
+    // **Never Zaram's own manual.** These prompts are about the person's own
+    // folder, and `manual.ensure_indexed` re-reads the manual at every start,
+    // so it is the most recently scanned source on any fresh machine. That put
+    // "What is in zaram-manual, in a few lines?" at the top of the first screen
+    // a new user sees — a question about a folder they have never heard of,
+    // named by its directory on disk, which recall then could not answer
+    // because the pages say "Zaram" and never that. Rule 9's referential
+    // failure, offered before the person had typed anything.
+    .filter((s) => s.total > 0 && !s.builtin)
     .sort((a, b) => b.scanned_at - a.scanned_at)[0];
   if (source) {
     out.push({

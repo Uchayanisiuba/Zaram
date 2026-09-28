@@ -66,7 +66,21 @@ from .contracts import (
 logger = logging.getLogger(__name__)
 
 #: How long to wait for a picture. Free tiers queue; a minute is not unusual.
+#:
+#: This is the budget for the **last** provider that can draw, where giving up
+#: early costs the picture outright.
 TIMEOUT_SECONDS = 180.0
+
+#: How long to wait when another provider could draw this instead.
+#:
+#: Being wrong here costs one hand-on, so the wait is shorter: a queued free
+#: tier should not hold a request for three minutes while a second free
+#: endpoint sits unasked. Measured on the maintainer's machine, 28 September
+#: 2026 — NIM queued, 181 seconds, no picture, Together never tried.
+#:
+#: Long enough to be a fair attempt rather than a formality: NIM answers a
+#: schnell request in well under a minute when it is not queued.
+FIRST_TIMEOUT_SECONDS = 45.0
 
 #: What the log names as the sender.
 SOURCE = "images"
@@ -106,7 +120,12 @@ def _image_grant(host: str) -> Availability:
     return AVAILABLE
 
 
-def _send_json(url: str, body: Dict[str, Any], headers: Dict[str, str]) -> Any:
+def _send_json(
+    url: str,
+    body: Dict[str, Any],
+    headers: Dict[str, str],
+    timeout: Optional[float] = None,
+) -> Any:
     """POST through the gate as an image, and parse the JSON that comes back."""
     from core.egress import DataClass, get_gate
 
@@ -115,7 +134,7 @@ def _send_json(url: str, body: Dict[str, Any], headers: Dict[str, str]) -> Any:
         method="POST",
         body=json.dumps(body),
         headers={"Content-Type": "application/json", "Accept": "application/json", **headers},
-        timeout=TIMEOUT_SECONDS,
+        timeout=TIMEOUT_SECONDS if timeout is None else timeout,
         source=SOURCE,
         data_class=DataClass.IMAGE,
     )
@@ -196,6 +215,10 @@ class CloudImageProvider:
     def _parse(self, payload: Any, seed: int) -> List[GeneratedImage]:
         raise NotImplementedError
 
+    #: Overridden per attempt by `RoutedImageProvider`, which knows whether
+    #: anything else could draw this. `None` means the full budget.
+    timeout: Optional[float] = None
+
     def generate(
         self,
         request: ImageRequest,
@@ -212,7 +235,10 @@ class CloudImageProvider:
         # disagree about batching and a loop is the same on all of them.
         for i in range(request.count):
             payload = _send_json(
-                self._url(request), self._body(request, seed + i), self._headers(conn.api_key)
+                self._url(request),
+                self._body(request, seed + i),
+                self._headers(conn.api_key),
+                self.timeout,
             )
             images = self._parse(payload, seed + i)
             if not images:
@@ -639,6 +665,27 @@ class RoutedImageProvider:
         if callable(unload):
             unload()
 
+    def _candidates(self, request: Optional[ImageRequest] = None) -> List[Any]:
+        """Who may draw this, best first — the pick, then the cloud rest.
+
+        Only ever *one* local entry, and only when it is the pick. A cloud
+        attempt that fails must not fall through to Flux: `_make_room` reads
+        `vram_needed_bytes`, which answers `None` on a cloud pick because a
+        cloud provider holds no card, so the VRAM preflight did not run.
+        Loading 8.4 GB after that is the 12 September freeze by another road.
+        """
+        first = self._pick(request)
+        if first is None:
+            return []
+        rest = [
+            provider
+            for provider in self._cloud
+            if provider is not first
+            and provider.availability().ok
+            and _can_serve(provider, request)
+        ]
+        return [first, *rest]
+
     def generate(
         self,
         request: ImageRequest,
@@ -647,9 +694,48 @@ class RoutedImageProvider:
         # Picked *for this request*: a generator that cannot take the
         # reference pictures in it is not a slower answer, it is a different
         # picture drawn from the words alone.
-        chosen = self._pick(request)
-        if chosen is None:
+        candidates = self._candidates(request)
+        if not candidates:
             raise RuntimeError(
                 _missing(self, request) if self._pick() is not None else "nothing can draw"
             )
-        return chosen.generate(request, on_progress)
+
+        # **A provider that fails hands the picture on.** NIM's free tier
+        # queues — its own timeout constant says so — and a request that waited
+        # three minutes and returned nothing, while a second free endpoint sat
+        # unasked, is a failure the person cannot act on and did not cause.
+        #
+        # Each attempt is its own egress on its own host, checked and logged by
+        # the gate exactly like the first, so the record shows both tries
+        # rather than a substitution nobody can see.
+        failures: List[str] = []
+        for at, provider in enumerate(candidates):
+            # The last one standing gets the full budget; anything before it is
+            # bounded by what a hand-on costs. Set on the attempt and restored
+            # after, so a provider object shared between requests never keeps
+            # one request's deadline.
+            last = at == len(candidates) - 1
+            previous = getattr(provider, "timeout", None)
+            if hasattr(provider, "timeout"):
+                provider.timeout = None if last else FIRST_TIMEOUT_SECONDS
+            try:
+                drawn = provider.generate(request, on_progress)
+            except Exception as exc:  # noqa: BLE001 - the next one may work
+                failures.append(f"{provider.name}: {exc}")
+                logger.info("Images: %s could not draw (%s)", provider.name, exc)
+                continue
+            finally:
+                if hasattr(provider, "timeout"):
+                    provider.timeout = previous
+            # **Only a raised failure hands on, never an empty answer.**
+            # `CloudImageProvider.generate` already raises "answered without a
+            # picture" when `_parse` recognises nothing, so an empty list from
+            # a provider that did not raise is a provider saying something
+            # else, and sweeping past it would substitute a different
+            # generator for one that answered. Whatever it returned is what
+            # this request asked for.
+            if failures:
+                logger.info("Images: drawn by %s after %d failed", provider.name, len(failures))
+            return drawn
+
+        raise RuntimeError("; ".join(failures) or "nothing can draw")

@@ -6101,10 +6101,32 @@ async def list_ingest_sources():
     interface can warn that withdrawing it deletes documents. Answered here
     rather than inferred from the folder's name in the frontend — a source
     called "uploads" somewhere on the user's disk is not this one.
+
+    `builtin` says whether it is Zaram's own manual, and it is here for the
+    same reason and a sharper one. The empty conversation offers a prompt about
+    *"the person's own folder"* and picks the most recently scanned source —
+    which on a fresh machine is always the manual, because `ensure_indexed`
+    re-reads it at start whenever its pages change. So the first thing a new
+    user was offered was **"What is in zaram-manual, in a few lines?"**: a
+    question about a folder they have never heard of, named by its directory on
+    disk. Reported 28 September 2026 with a screenshot, and it did not answer.
+
+    Told apart by the id the manual itself recorded, never by the name — a
+    folder somebody happens to call `zaram-manual` is not this one, which is
+    the rule the paragraph above already states for `staged`.
     """
+    # Imported here rather than at module scope, like every other `manual`
+    # caller in this file: the package reads the pages off disk, and a route
+    # module that cannot be imported without them is a boot that fails for a
+    # reason nothing on screen could explain.
+    from core.paths import data_dir as _data_dir
+    from manual import is_builtin_source
+
+    data_dir = _data_dir()
     sources = ingest_service.records.sources()
     for source in sources:
         source["staged"] = ingest_service.is_staged_source(source["root"])
+        source["builtin"] = is_builtin_source(data_dir, source["id"])
     return {"sources": sources}
 
 

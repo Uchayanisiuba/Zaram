@@ -30,12 +30,15 @@ describe('starterTasks', () => {
     expect(starterTasks(NOTHING).every((t) => !t.ready)).toBe(true);
   });
 
-  it('offers the six use cases, in a fixed order, whatever is ready', () => {
+  it('offers every use case, in a fixed order, whatever is ready', () => {
     const order = (c: Capabilities) => starterTasks(c).map((t) => t.needs);
-    // Six since 19 September 2026 (F2); the first three are what a fresh
-    // install sees, the rest sit behind one line.
-    expect(order(NOTHING)).toHaveLength(6);
-    expect(order(NOTHING).slice(0, 3)).toEqual(['model', 'documents', 'model']);
+    // Seven since 28 September 2026; the first three are what a fresh install
+    // sees, the rest sit behind one line. The manual row leads deliberately:
+    // it is the only one lit on a machine with nothing but a model, and it
+    // replaced a grounded prompt that named Zaram own manual folder and could
+    // not be answered.
+    expect(order(NOTHING)).toHaveLength(7);
+    expect(order(NOTHING).slice(0, 3)).toEqual(['model', 'model', 'documents']);
     // A list that reshuffles as folders are indexed teaches nobody where
     // anything is.
     expect(order(EVERYTHING)).toEqual(order(NOTHING));

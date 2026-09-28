@@ -86,6 +86,22 @@ export interface OfferedTask extends StarterTask {
 
 const TASKS: StarterTask[] = [
   {
+    // **The one row that is lit on every machine.** The manual is indexed at
+    // start into the built-in Zaram domain, so this needs a model and nothing
+    // else — no folder, no key, no attached server. It is also the question a
+    // new person actually has, and answering it locally with a citation is the
+    // product's whole claim in one click.
+    //
+    // The wording matches a heading in two pages (`01-what-zaram-is.md` and
+    // `07-models-and-keys.md`), which is what makes recall land on it. That is
+    // not a detail: the prompt this replaces failed precisely because it named
+    // a folder whose name appears nowhere in the text.
+    prompt: 'What leaves my computer, and what does not?',
+    outcome: "Answered from Zaram's own manual, on this machine, with the page it came from.",
+    needs: 'model',
+    configure: { label: 'Add a model or a key', node: 'settings' },
+  },
+  {
     prompt: 'Turn these notes into a proposal I can send:\n\n',
     outcome: 'A document in Work, written from your words — not a chat reply.',
     needs: 'model',
