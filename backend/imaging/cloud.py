@@ -513,11 +513,24 @@ class RoutedImageProvider:
     `unload`) are delegated to the *local* one only, because a cloud provider
     holds no card and must not be preflighted as if it did.
 
-    **Which one goes first is the user's** — `ImageLocality` in Settings.
-    Local by default; set to cloud, Flux is never loaded and the card stays
-    with the chat model, and local is only reached for when no cloud provider
-    can draw. Either way the other is the fallback and the record names who
-    answered.
+    **Which one goes first is the user's** — `ImageLocality` in Settings —
+    and the two settings are not mirror images of each other.
+
+    *Local* prefers Flux and falls through to a connected cloud provider when
+    it cannot draw. That fallback costs nothing and keeps a picture possible on
+    a machine with no weights and no card.
+
+    *Cloud means the card is never touched.* No fallback to Flux, at all. This
+    read "Flux is never loaded" and then took it back in the next clause, and
+    `_pick` implemented the clause — so a person who chose cloud **to keep
+    their card** got 8.4 GB of Flux the moment a provider was missing or
+    queued, underneath a resident chat model. Two reasons it cannot work that
+    way: `ImagesRuntime._make_room` reads `vram_needed_bytes`, which is `None`
+    on a cloud pick, so **no VRAM preflight runs** and the fallback would load
+    most of the card unmeasured; and a capability disabled by the user must not
+    come back silently. When nothing connected can draw, `availability()`
+    already has the sentence naming the missing key and the missing image
+    grant, and that is what the person gets.
     """
 
     def __init__(
@@ -553,9 +566,10 @@ class RoutedImageProvider:
     # The preferred one first; the other is the fallback, always.
     def _pick(self, request: Optional[ImageRequest] = None) -> Any:
         if self._prefer() == "cloud":
-            return self._first_cloud(request) or (
-                self._local if self._local_ok(request) else None
-            )
+            # No `or self._local`. See the class docstring: the preflight that
+            # would have measured the card does not run on a cloud pick, and a
+            # person who turned the card off does not get it back by accident.
+            return self._first_cloud(request)
         return (
             self._local
             if self._local_ok(request)

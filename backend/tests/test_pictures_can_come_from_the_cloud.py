@@ -238,11 +238,40 @@ class TestLocalFirst:
         router.generate(ImageRequest(prompt="x"))
         assert local.drew == 1
 
-    def test_cloud_first_still_falls_back_to_local_when_no_cloud_can_draw(self, gate, connections):
+    def test_choosing_cloud_never_falls_back_to_the_card(self, gate, connections):
+        """**Reversed 28 September 2026, and the old assertion was the bug.**
+
+        This used to read `test_cloud_first_still_falls_back_to_local_when_no_
+        cloud_can_draw` and assert `local.drew == 1`. It described the crash the
+        maintainer then hit: NIM connected, NIM queued and timed out, and Zaram
+        loaded 8.4 GB of Flux underneath a resident 12B chat model on a 12 GB
+        card — after being told, in Settings, to use the cloud.
+
+        Two reasons the fallback cannot stand, and the first is mechanical.
+        `ImagesRuntime._make_room` preflights the card by reading
+        `vram_needed_bytes`, which `RoutedImageProvider` answers `None` for on a
+        cloud pick, correctly, since a cloud provider holds no card. So on a
+        cloud preference **no VRAM preflight runs**, and falling back to local
+        loads most of the card with nothing having measured it.
+
+        The second is the rule: a capability the person switched off does not
+        come back silently. They get `availability()`'s sentence — which names
+        the missing key and the missing image grant — instead of a frozen
+        desktop.
+
+        Preferring *local* is unchanged and still falls through to cloud: that
+        fallback costs nothing and keeps a picture possible on a machine with no
+        weights.
+        """
         local = _Local(ok=True)
         router = RoutedImageProvider(local, prefer=lambda: "cloud")
-        router.generate(ImageRequest(prompt="x"))
-        assert local.drew == 1
+
+        with pytest.raises(RuntimeError):
+            router.generate(ImageRequest(prompt="x"))
+        assert local.drew == 0, "the card was never touched"
+
+        # And the refusal says what to do about it, rather than failing bare.
+        assert not router.availability().ok
 
     def test_the_preference_is_stored_and_read_back(self, tmp_path):
         from core.user_settings import ImageLocality, UserSettings
