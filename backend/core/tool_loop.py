@@ -593,6 +593,76 @@ def tool_instructions(tools: Sequence[Mapping[str, Any]]) -> str:
     return "\n".join(lines)
 
 
+#: Statuses `plan` accepts, in the order a step travels through them.
+_PLAN_OPEN = ("todo", "doing")
+
+
+def current_plan(turns: Sequence[ToolTurn]) -> list[dict] | None:
+    """The checklist as the model last wrote it, or `None` if it wrote none.
+
+    Derived from the turns rather than kept as state, deliberately: the `plan`
+    tool already sends the whole list every time — *"Send the whole list each
+    time"* — so the most recent call **is** the record, and a second copy could
+    disagree with it. `PlanCard` reads the same event for the same reason.
+    """
+    for turn in reversed(turns):
+        if turn.call.server == "code" and turn.call.tool == "plan":
+            items = (turn.call.arguments or {}).get("items")
+            if isinstance(items, list) and items:
+                return [item for item in items if isinstance(item, dict)]
+    return None
+
+
+def _plan_reminder(turns: Sequence[ToolTurn]) -> list[str]:
+    """Put the model's own checklist back in front of it.
+
+    **The plan was write-once, and nothing here ever mentioned it again.** The
+    tool's description says *"Mark a step done when its tool call has
+    returned"*, and a model working through a nine-step task simply forgets: it
+    writes the list, starts working, and never revisits it. So `PlanCard`
+    rendered a list of `todo` items that stayed `todo` while the work visibly
+    happened, and a long task looked identical to a short one.
+
+    That is not a model failing to follow an instruction it was given once. It
+    is an instruction given once, at the start, and never repeated — which is
+    the same mistake as putting the tool rules in the tail of a prompt instead
+    of the head. Re-sending the list costs a few dozen tokens a round and is
+    bounded by the same budget as everything else here.
+
+    Shown only while something is still open. A finished checklist re-sent every
+    round is noise, and worse, it invites the model to keep editing a list that
+    is already right.
+    """
+    plan = current_plan(turns)
+    if not plan:
+        return []
+    open_steps = [
+        item for item in plan if str(item.get("status") or "todo").lower() in _PLAN_OPEN
+    ]
+    if not open_steps:
+        return []
+
+    lines = []
+    for item in plan:
+        status = str(item.get("status") or "todo").lower()
+        text = str(item.get("text") or "").strip()
+        if text:
+            lines.append(f"  [{status}] {text}")
+    if not lines:
+        return []
+
+    return [
+        "This is your checklist for this task, as you last wrote it:",
+        "",
+        *lines,
+        "",
+        "If any of those steps is now finished, call `plan` again with the whole "
+        "list and the statuses corrected before you do anything else. The person "
+        "is watching this list to see how far you have got.",
+        "",
+    ]
+
+
 def result_prompt(
     original: str, turns: Sequence[ToolTurn], *, may_call_again: bool
 ) -> str:
@@ -640,7 +710,16 @@ def result_prompt(
             "",
         ]
 
+    # Before the closing instruction, never after it: this module's ordering
+    # guarantee is that the last thing the model reads is the true one, and the
+    # closing line is what decides whether it may call again.
     if may_call_again:
+        # Before the closing instruction, never after it: this module's
+        # ordering guarantee is that the last thing the model reads is the true
+        # one, and the closing line is what decides whether it may call again.
+        # Only when it may — a model being told to answer now has no round left
+        # in which to tick anything, and asking would waste the last word.
+        blocks += _plan_reminder(turns)
         blocks.append(
             "Now either answer the original question using what you have, or "
             "call one more tool if you still cannot answer it. Say which tools "

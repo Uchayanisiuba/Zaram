@@ -316,6 +316,26 @@ let inFlight: AbortController | null = null;
 const newId = () =>
   `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 
+/** One readable line for a thrown value, whatever kind of thing it is.
+ *
+ * `String(err)` on a plain object yields "[object Object]", which is the same
+ * dead end as the sentence this replaced. A real `Error` already knows how to
+ * name itself, and its `name` is kept because "RangeError" and "TypeError"
+ * point at different bugs — the first is what a reply too large for the
+ * model's window looks like from in here.
+ */
+function describeThrown(err: unknown): string {
+  if (err instanceof Error) {
+    return err.message ? `${err.name}: ${err.message}` : err.name;
+  }
+  if (typeof err === 'string' && err.trim()) return err.trim();
+  try {
+    return JSON.stringify(err) ?? 'an error with nothing to say for itself';
+  } catch {
+    return 'an error with nothing to say for itself';
+  }
+}
+
 export const useChatStore = create<ChatState>((set, get) => ({
   messages: [],
   streamingText: '',
@@ -728,10 +748,26 @@ export const useChatStore = create<ChatState>((set, get) => ({
         }
       }
     } catch (err) {
+      // **Whatever this was, say what it was.** The fallback here used to read
+      // "Something went wrong talking to the backend", which was wrong about
+      // the subject — a throw in this loop is the renderer's, not the
+      // backend's — and silent about the cause, because nothing logged `err`
+      // before discarding it. Four unrelated failures wore one sentence and
+      // left no trace, which is how the Tetris reply of 28 September 2026 was
+      // unreadable to the person who hit it and to the session asked to fix
+      // it. Naming the error costs a line and is the difference between a
+      // report and a shrug.
       const message =
         err instanceof ChatTransportError
           ? err.message
-          : 'Something went wrong talking to the backend.';
+          : `The reply stopped: ${describeThrown(err)}`;
+
+      // The person reads the sentence above; whoever has to fix it reads this.
+      // A renderer failure belongs in the browser console, which is the one
+      // place it is already expected to be.
+      if (!(err instanceof ChatTransportError)) {
+        console.error('[chatStore] the reply stopped and this is why:', err);
+      }
 
       // A failure before any text is a connection problem and belongs at the
       // top of the surface. A failure part-way through belongs on the message,

@@ -25,7 +25,14 @@ import type { ChatEvent } from '@/services/chatClient';
 
 const streamChat = vi.fn();
 
-vi.mock('@/services/chatClient', () => ({
+// **The real `ChatTransportError` is kept.** A factory that exported only
+// `streamChat` left the class `undefined`, so `err instanceof
+// ChatTransportError` in the store threw *inside its own catch block* — the
+// error handler was the thing that failed. Harmless while no test made the
+// store catch anything; the moment one did, every failure path in this file
+// died on the same line.
+vi.mock('@/services/chatClient', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/services/chatClient')>()),
   streamChat: (...args: unknown[]) => streamChat(...args),
 }));
 
@@ -208,5 +215,71 @@ describe('the open-project offer keeps what makes it pressable', () => {
     await sending;
     const reply = [...useChatStore.getState().messages].reverse().find((m) => m.role === 'assistant');
     expect(reply?.notices[0]).toMatchObject({ path: 'C:/code/my-app', name: 'my-app' });
+  });
+});
+
+describe('a reply that stops part-way names what actually went wrong', () => {
+  beforeEach(() => {
+    vi.useRealTimers();
+    streamChat.mockReset();
+    useChatStore.setState({ messages: [], isStreaming: false, streamingText: '', connectionError: null });
+  });
+
+  /** The bug, exactly as it reached a person.
+   *
+   * A long reply — a Tetris game, 28 September 2026 — stopped mid-document and
+   * said *"Something went wrong talking to the backend."* The backend was
+   * answering `/health` every two seconds either side of it. The sentence was
+   * the fallback for any error that is not a `ChatTransportError`, so it was
+   * wrong about the subject and silent about the cause, and nothing logged the
+   * error before discarding it.
+   *
+   * A `RangeError` is used deliberately: that is what a reply too large for the
+   * model's window looks like from inside this loop, and it is the case that
+   * was indistinguishable from a dropped socket.
+   */
+  it('names the thrown error instead of blaming the backend', async () => {
+    async function* stream(): AsyncGenerator<ChatEvent> {
+      yield { type: 'token', content: '<!DOCTYPE html>' } as ChatEvent;
+      throw new RangeError('Invalid string length');
+    }
+    streamChat.mockImplementation(() => stream());
+
+    await useChatStore.getState().send('build me a tetris game');
+
+    const last = useChatStore.getState().messages.at(-1);
+    expect(last?.error).toContain('RangeError');
+    expect(last?.error).toContain('Invalid string length');
+    expect(last?.error).not.toContain('talking to the backend');
+  });
+
+  /** The partial answer is still committed, which is what makes the message
+   * readable at all — "it wrote this much, then broke" beats an empty bubble. */
+  it('keeps the text that did arrive', async () => {
+    async function* stream(): AsyncGenerator<ChatEvent> {
+      yield { type: 'token', content: 'half an answer' } as ChatEvent;
+      throw new TypeError('x is not a function');
+    }
+    streamChat.mockImplementation(() => stream());
+
+    await useChatStore.getState().send('anything');
+
+    expect(useChatStore.getState().messages.at(-1)?.text).toBe('half an answer');
+  });
+
+  /** An error with no message must not degrade to "[object Object]", which is
+   * the same dead end the old sentence was. */
+  it('says something useful even when the thrown value is not an Error', async () => {
+    async function* stream(): AsyncGenerator<ChatEvent> {
+      yield { type: 'token', content: 'x' } as ChatEvent;
+      throw { code: 'ECONNRESET' };
+    }
+    streamChat.mockImplementation(() => stream());
+
+    await useChatStore.getState().send('anything');
+
+    const message = useChatStore.getState().messages.at(-1)?.error ?? '';
+    expect(message).toContain('ECONNRESET');
+    expect(message).not.toContain('[object Object]');
   });
 });
