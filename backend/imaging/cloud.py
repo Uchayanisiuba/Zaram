@@ -10,6 +10,11 @@ card for Flux still has a person on it who wants a picture:
   models; a second route for someone without an NVIDIA account.
 * **fal.ai** — paid, cents per image, no training on API data; the rung for
   "it must work every time".
+* **Pollinations** — no key, no account, no card, and last in the order: the
+  rung that answers when nothing is connected. Added 28 September 2026 because
+  the two free rungs above stopped covering that case — NIM queues past three
+  minutes on the maintainer's machine, measured three times, and Together now
+  asks for a card. Its own shape and its own disclosure are on the class.
 
 What every one of them shares, and what this module is really about:
 
@@ -139,6 +144,25 @@ def _send_json(
         data_class=DataClass.IMAGE,
     )
     return json.loads(raw.decode("utf-8"))
+
+
+def _send_raw(url: str, timeout: Optional[float] = None) -> bytes:
+    """GET through the gate as an image, and return the bytes unchanged.
+
+    The JSON path beside this cannot serve a provider that answers with the
+    picture itself. Same gate, same data class, same log line — the only
+    difference is that nothing is parsed on the way back.
+    """
+    from core.egress import DataClass, get_gate
+
+    return get_gate().request(
+        url,
+        method="GET",
+        headers={"Accept": "image/*"},
+        timeout=TIMEOUT_SECONDS if timeout is None else timeout,
+        source=SOURCE,
+        data_class=DataClass.IMAGE,
+    )
 
 
 def _png_from_data_uri_or_b64(value: str) -> bytes:
@@ -427,6 +451,73 @@ class QwenImages(CloudImageProvider):
         return FalImages._parse(self, payload, seed)
 
 
+class PollinationsImages(CloudImageProvider):
+    """A picture with no key, no account and no card.
+
+    The rung that answers on a machine with nothing connected — see the module
+    docstring for why that case stopped being covered, and for what the free
+    tier costs.
+
+    Two shapes here are unlike the others and both are the provider's, not a
+    choice: the request is a **GET with the prompt in the path**, and the
+    answer is **the image bytes themselves** rather than JSON carrying base64.
+    So `generate` is overridden whole instead of supplying `_body` and
+    `_parse`.
+    """
+
+    provider_id = "pollinations"
+    name = "flux · Pollinations"
+    endpoint = "https://image.pollinations.ai/prompt/"
+    key_hint = ""
+
+    def availability(self) -> Availability:
+        """No key to check — only whether pictures may go to this host.
+
+        The base class asks for a stored key first and would refuse forever,
+        since there is never one to store. The grant is the whole gate here,
+        and it is the same grant every other destination needs: rule 5 is
+        untouched, a host nobody allowed is still denied.
+        """
+        return _image_grant(self.host)
+
+    def describe(self) -> str:
+        # The disclosure rides with the name, so it reaches the reply that
+        # says who drew the picture rather than only a settings page.
+        return (
+            f"{self.name} · cloud · {self.host} · no key; watermarked; "
+            "the prompt travels in the URL"
+        )
+
+    def generate(
+        self,
+        request: ImageRequest,
+        on_progress: Optional[Callable[[ImageProgress], None]] = None,
+    ) -> List[GeneratedImage]:
+        from urllib.parse import quote
+
+        seed = request.seed if request.seed is not None else secrets.randbelow(2**31)
+        out: List[GeneratedImage] = []
+        for i in range(request.count):
+            # `quote` with no safe characters: a prompt is arbitrary user text
+            # and a slash in it would otherwise become another path segment.
+            # **No `nologo`.** It is a paid parameter — measured 28 September
+            # 2026, the same request returns **402 Payment Required** with it
+            # and 200 without — so asking for it on the free rung fails the
+            # draw outright rather than merely being ignored. The picture
+            # carries a small `pollinations.ai` mark instead, which is what
+            # this rung costs and is said in `describe()`.
+            url = (
+                f"{self.endpoint}{quote(request.prompt, safe='')}"
+                f"?width={int(request.width)}&height={int(request.height)}"
+                f"&seed={seed + i}&model=flux&referrer=zaram"
+            )
+            raw = _send_raw(url, self.timeout)
+            if not raw:
+                raise RuntimeError(f"{self.name} answered without a picture")
+            out.append(_image(raw, seed + i))
+        return out[: request.count]
+
+
 #: Every cloud provider, in the order they are tried.
 #:
 #: Qwen first among the fal entries: it is the only one that edits, and a
@@ -452,6 +543,10 @@ CLOUD_PROVIDERS: List[CloudImageProvider] = [
     TogetherImages(),
     NimImages(),
     FalImages(),
+    # Last, and it is the one that always answers. Anyone with a key gets the
+    # provider they chose or paid for; this is what a machine with nothing
+    # connected falls to, which is the case Zaram was failing outright.
+    PollinationsImages(),
 ]
 
 
