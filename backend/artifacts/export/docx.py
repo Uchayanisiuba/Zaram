@@ -116,6 +116,29 @@ class DocxExporter:
             if not block.text.strip():
                 continue
 
+            # The design blocks come first, because they are *qualified*
+            # paragraphs and headings — a statement is a `p` and a divider is an
+            # `h2`, so the tag checks below would claim them and render them as
+            # ordinary prose. Falling through to that is exactly the right
+            # behaviour for a role this exporter has not learned; it is the wrong
+            # behaviour for the four it has.
+            if block.role == "statement":
+                _add_statement(word, block)
+                continue
+            if block.role == "metric":
+                # Consecutive metrics are one row on the page, and Word has no
+                # row: a `.docx` is a single column of paragraphs. So each
+                # becomes a value and a label, stacked, and the group reads as a
+                # short list of figures rather than as a grid that is not there.
+                _add_metric(word, block)
+                continue
+            if block.role == "callout":
+                _add_callout(word, block)
+                continue
+            if block.role == "divider":
+                _add_divider(word, block)
+                continue
+
             if block.tag in ("h1", "h2", "h3"):
                 # h3 is a real sub-level. Collapsing it into Heading 2 flattens
                 # the outline, and Word's navigation pane and the PDF bookmark
@@ -173,6 +196,171 @@ class DocxExporter:
         word.save(buffer)
         return buffer.getvalue()
 
+
+
+def _add_statement(word, block) -> None:
+    """The sentence, larger, with the accent rule down its left.
+
+    Word has no paragraph border in `python-docx`'s API, so the rule is written
+    as `w:pBdr` XML — the same technique `word_theme` uses for table borders and
+    for the same reason: Word has the property and the library has no accessor.
+
+    **Not "Intense Quote".** The built-in style is the tempting answer and it is
+    refused: it ships italic, centred and in the template's accent, which is
+    three decisions Zaram did not make and any of which moves with the user's
+    template.
+    """
+    from docx.shared import Pt, RGBColor
+
+    paragraph = word.add_paragraph()
+    fmt = paragraph.paragraph_format
+    fmt.space_before = Pt(14)
+    fmt.space_after = Pt(14)
+    fmt.left_indent = Pt(12)
+    fmt.keep_together = True
+    _paragraph_border(paragraph, "left", theme.ACCENT, 18)
+
+    for run in block.runs:
+        added = _add_styled_run(paragraph, run, size=Pt(theme.STATEMENT_PT))
+        if added is not None:
+            added.font.color.rgb = RGBColor.from_string(theme.INK.upper())
+
+
+def _add_metric(word, block) -> None:
+    """One figure, and the word that says what it counts.
+
+    The split is read off `Run.bold`, which `html._metric_block` set
+    deliberately. Nothing is parsed and nothing is guessed, so a value of
+    "GBP 11,160" with a label of "total fee" survives — where splitting the
+    rendered text on a space would not.
+    """
+    from docx.shared import Pt, RGBColor
+
+    value = "".join(run.text for run in block.runs if run.bold).strip()
+    label = "".join(run.text for run in block.runs if not run.bold).strip()
+
+    figure = word.add_paragraph()
+    figure.paragraph_format.space_before = Pt(10)
+    figure.paragraph_format.space_after = Pt(0)
+    figure.paragraph_format.keep_with_next = True
+    run = figure.add_run(value or label)
+    run.font.name = theme.WORD_SANS
+    run.font.size = Pt(theme.METRIC_PT)
+    run.font.bold = True
+    run.font.color.rgb = RGBColor.from_string(theme.ACCENT.upper())
+
+    if not label or not value:
+        # A metric with only one half is still worth printing — the caller wrote
+        # something. An empty label paragraph under it is not.
+        return
+
+    caption = word.add_paragraph()
+    caption.paragraph_format.space_before = Pt(0)
+    caption.paragraph_format.space_after = Pt(12)
+    run = caption.add_run(label.upper())
+    run.font.name = theme.WORD_SANS
+    run.font.size = Pt(theme.METRIC_LABEL_PT)
+    run.font.bold = True
+    run.font.color.rgb = RGBColor.from_string(theme.MUTED.upper())
+    _track(run, theme.TRACKING_PT)
+
+
+def _add_callout(word, block) -> None:
+    """A tinted panel with a bar down its left.
+
+    The bar is the signal and the fill is the nicety, which is the judgement the
+    stylesheet makes for the same reason: print paths drop shading in some
+    greyscale modes, and a callout that loses its tint still has its rule.
+    """
+    from docx.shared import Pt
+
+    warn = block.tone == "warn"
+
+    paragraph = word.add_paragraph()
+    fmt = paragraph.paragraph_format
+    fmt.space_before = Pt(12)
+    fmt.space_after = Pt(12)
+    fmt.left_indent = Pt(10)
+    fmt.right_indent = Pt(6)
+    fmt.keep_together = True
+    _paragraph_border(paragraph, "left", theme.CAUTION if warn else theme.ACCENT, 18)
+    _shade(paragraph, theme.WASH_WARN if warn else theme.WASH)
+
+    for run in block.runs:
+        added = _add_styled_run(paragraph, run, size=Pt(theme.BODY_PT - 0.5))
+        if added is not None:
+            added.font.name = theme.WORD_SANS
+
+
+def _add_divider(word, block) -> None:
+    """A section opener on its own page.
+
+    It stays a Heading 2, so Word's navigation pane and the PDF bookmark tree
+    still see a section. Losing that to make it *look* like a divider would
+    trade a real affordance for an appearance.
+    """
+    from docx.shared import Pt
+
+    if any(p.text.strip() for p in word.paragraphs):
+        # No break before the first thing in the document: a proposal that opens
+        # on a divider should not open on a blank page.
+        word.add_page_break()
+    heading = word.add_heading(block.text.strip(), level=2)
+    for run in heading.runs:
+        run.font.size = Pt(theme.TITLE_PT)
+        run.font.name = theme.WORD_SERIF
+        run.font.all_caps = False
+    _paragraph_border(heading, "bottom", theme.ACCENT, 16)
+
+
+def _paragraph_border(paragraph, edge: str, colour: str, size: int) -> None:
+    """Write one `w:pBdr` edge, sized in eighths of a point.
+
+    Additive: an existing `w:pBdr` is reused rather than replaced, so a
+    paragraph inside a styled template keeps whatever else that style drew.
+    """
+    from docx.oxml.ns import qn
+    from docx.oxml import OxmlElement
+
+    properties = paragraph._p.get_or_add_pPr()  # noqa: SLF001 — no accessor exists
+    borders = properties.find(qn("w:pBdr"))
+    if borders is None:
+        borders = OxmlElement("w:pBdr")
+        properties.append(borders)
+    element = OxmlElement("w:" + edge)
+    element.set(qn("w:val"), "single")
+    element.set(qn("w:sz"), str(size))
+    element.set(qn("w:space"), "6")
+    element.set(qn("w:color"), colour.upper())
+    borders.append(element)
+
+
+def _shade(paragraph, colour: str) -> None:
+    """Fill a paragraph. Also absent from `python-docx`'s API."""
+    from docx.oxml.ns import qn
+    from docx.oxml import OxmlElement
+
+    properties = paragraph._p.get_or_add_pPr()  # noqa: SLF001
+    shading = OxmlElement("w:shd")
+    shading.set(qn("w:val"), "clear")
+    shading.set(qn("w:color"), "auto")
+    shading.set(qn("w:fill"), colour.upper())
+    properties.append(shading)
+
+
+def _track(run, points: float) -> None:
+    """Letterspacing on one run, in twentieths of a point.
+
+    `word_theme._tracking` does this for a *style*. A metric's label is not a
+    style, because there is one per figure and Word would need a named style per
+    document to carry it.
+    """
+    from docx.oxml.ns import qn
+    from docx.oxml import OxmlElement
+
+    spacing = OxmlElement("w:spacing")
+    spacing.set(qn("w:val"), str(int(round(points * 20))))
+    run._element.get_or_add_rPr().append(spacing)  # noqa: SLF001
 
 
 def _add_picture(word, image) -> None:
@@ -275,7 +463,14 @@ def _bookmark_name(anchor: str) -> str:
     return cleaned[:_MAX_BOOKMARK]
 
 
-def _add_styled_run(paragraph, run: _reader.Run, size=None) -> None:
+def _add_styled_run(paragraph, run: _reader.Run, size=None):
+    """Add one run, and hand it back.
+
+    It returned `None` until 28 September 2026, which made every
+    `added = _add_styled_run(...)` a silently dead branch — the shape the
+    reachability guard states it cannot see. The design blocks need the run
+    itself, to set a face or a colour the generic path has no opinion about.
+    """
     word_run = paragraph.add_run(run.text)
     word_run.italic = run.italic or None
     word_run.bold = run.bold or None
@@ -283,6 +478,7 @@ def _add_styled_run(paragraph, run: _reader.Run, size=None) -> None:
         word_run.font.name = "Consolas"
     if size is not None:
         word_run.font.size = size
+    return word_run
 
 
 def _add_bookmark(paragraph, name: str, bookmark_id: int) -> None:

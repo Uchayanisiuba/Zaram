@@ -296,6 +296,83 @@ class PageBreak:
     """
 
 
+@dataclass(frozen=True)
+class Statement:
+    """The one sentence a reader takes away, set large and given room.
+
+    **This block exists because the vocabulary was the ceiling.** A model asked
+    for a proposal writes markdown, and markdown has headings, paragraphs,
+    lists and tables — no way at all to say "this line is the point". So every
+    sentence arrived as a paragraph of equal weight, the deck exporter turned
+    all of them into bullets, and the output was flat no matter how good the
+    writing was. Nothing was wrong with the composer, exactly as
+    `theme.py` records about the Word exporter; the *design* had nowhere to
+    come from.
+
+    It is a paragraph with a role, not a new tag. `export/_reader.py`'s own
+    note explains why that matters — a new tag in the block stream makes every
+    existing consumer render something unintended — and it buys the
+    degradation for free: an exporter that has never heard of a statement
+    writes a paragraph, which is true and readable rather than missing.
+    """
+
+    text: Any = ""
+
+
+@dataclass(frozen=True)
+class Metric:
+    """A number worth reading before the sentence explaining it.
+
+    Each pair is ``(value, label)`` — `("18", "days")`, `("£11,160", "total
+    fee")`. The value is what a reader scans for and the label is what makes it
+    mean something, which is why they are stored apart rather than as one
+    string: a `.xlsx` wants them in two columns, a slide wants them at two
+    sizes, and splitting "18 days" back out on a space is the kind of guess
+    that fails on "£11,160 total fee".
+
+    Bounded at four. Not a style preference: five numbers in a row on a 16:9
+    slide are narrower than the space their labels need, and the block that
+    silently overflows is worse than the one that refuses.
+    """
+
+    items: Sequence[tuple] = ()
+
+
+@dataclass(frozen=True)
+class Callout:
+    """Something the reader must not skip — a condition, a dependency, a date.
+
+    ``tone`` is ``"note"`` or ``"warn"`` and nothing else. Two tones rather
+    than a palette, because a document that colour-codes five severities is a
+    document nobody decodes, and because the second one has to earn its
+    difference: `warn` is amber, not red. A generated document should be able
+    to say "check this" without looking like an error message.
+    """
+
+    text: Any = ""
+    tone: str = "note"
+
+
+@dataclass(frozen=True)
+class Divider:
+    """A section opener: the title alone, with the page or slide to itself.
+
+    It is an `h2` carrying a role, so a reader, a table of contents and the
+    Word navigation pane all see a heading — which is what it is. What the role
+    adds is the *break*: a new page in a document, a slide of its own in a
+    deck. Without it a fourteen-slide deck is fourteen undifferentiated content
+    slides, which is the structural half of looking bland and the half no
+    colour scheme reaches.
+
+    **It carries no subtitle, deliberately.** A kicker would have to survive
+    the round trip through `_reader`, and the only encodings available there
+    would degrade to the title and the kicker run together with no separator —
+    a worse document in every exporter that had not been taught the trick.
+    """
+
+    text: Any = ""
+
+
 #: Everything `render_document` accepts as a member of ``blocks``.
 #:
 #: `str` and `Claim` stay first and stay supported unchanged: every existing

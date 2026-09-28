@@ -63,7 +63,7 @@ import io
 from dataclasses import dataclass, field
 from typing import List, Optional, Tuple
 
-from . import _reader
+from . import _reader, pptx_theme
 from .. import theme
 from .base import Availability, module_available
 
@@ -72,6 +72,11 @@ from .base import Availability, module_available
 _TITLE_SLIDE = 0
 _TITLE_AND_CONTENT = 1
 _TITLE_ONLY = 5
+#: Used for the slides this exporter composes itself — a statement, a row of
+#: metrics, a section divider. A placeholder layout would have to be deformed to
+#: hold any of them, and geometry that fights a user's applied theme is exactly
+#: what `pptx_theme` declines to write. A blank layout has nothing to fight.
+_BLANK = 6
 
 #: 16:9, in inches. The height is the template's own 7.5; only the width moves,
 #: so every placeholder the layouts define keeps its vertical position.
@@ -94,6 +99,25 @@ _TABLE_PT = 12.0
 #: recoverable by the person editing the deck afterwards.
 _MAX_BULLETS = 8
 
+#: Deck sizes for the design blocks. `theme.py`'s are print sizes, and the note
+#: on `_TITLE_PT` above gives the rule this follows: the faces and the colours
+#: are shared, the scale is this format's own.
+_STATEMENT_PT = 28.0
+_METRIC_PT = 54.0
+_METRIC_LABEL_PT = 12.0
+_CALLOUT_PT = 20.0
+_DIVIDER_PT = 40.0
+
+
+#: Roles that earn a slide of their own rather than becoming a bullet.
+#: `divider` is absent on purpose — it opens a section as well as getting a
+#: slide, so `_outline` handles it beside the headings instead.
+_DESIGNED_ROLES = {"statement", "metric", "callout"}
+
+
+def _is_metric(item: object) -> bool:
+    return isinstance(item, _reader.Block) and item.role == "metric"
+
 
 @dataclass
 class _Section:
@@ -101,12 +125,33 @@ class _Section:
 
     heading: str
     bullets: List[str] = field(default_factory=list)
+    #: True when the heading came from a `Divider` rather than from an ordinary
+    #: `<h2>`. A divider gets a slide to itself before its content, which is the
+    #: structural half of a deck not looking flat — fourteen content slides in a
+    #: row read as one undifferentiated block however well each is typeset.
+    divider: bool = False
     #: Tables and pictures, each with the block position it opened at, so a
     #: chart written above a fee table is still above it on the slides.
     extras: List[Tuple[int, object]] = field(default_factory=list)
 
     def ordered_extras(self) -> List[object]:
-        return [item for _, item in sorted(self.extras, key=lambda pair: pair[0])]
+        """Everything that gets its own slide, in the order it was written.
+
+        Consecutive metrics are merged into one list, because a row of figures
+        is one slide and four slides each holding a single number is the deck
+        this change exists to stop making. Merging here rather than in
+        `_outline` keeps the grouping next to the reason for it, and keeps
+        `extras` a plain record of position.
+        """
+        merged: List[object] = []
+        for _, item in sorted(self.extras, key=lambda pair: pair[0]):
+            if _is_metric(item) and merged and isinstance(merged[-1], list):
+                merged[-1].append(item)
+            elif _is_metric(item):
+                merged.append([item])
+            else:
+                merged.append(item)
+        return merged
 
 
 class PptxExporter:
@@ -128,6 +173,10 @@ class PptxExporter:
         deck = Presentation()
         deck.slide_width = Inches(_WIDESCREEN_IN[0])
         deck.slide_height = Inches(_WIDESCREEN_IN[1])
+        # Before any slide is added, not after: a layout copies the colour scheme
+        # onto its placeholders as it is instantiated, so a theme written later
+        # reaches the master and misses every slide already built from it.
+        pptx_theme.apply(deck)
 
         title, sections, leading = self._outline(doc)
 
@@ -144,10 +193,21 @@ class PptxExporter:
         # goes straight after the cover rather than inventing a section header
         # nobody wrote.
         for item in leading:
-            self._extra_slide(deck, item)
+            self._extra_slide(deck, item, section=title)
 
         for section in sections:
-            for index, chunk in enumerate(self._chunk(section.bullets)):
+            if section.divider:
+                self._divider_slide(deck, section.heading)
+            # A divider with no prose under it has already had its slide. The
+            # rule below — an empty heading is still a section marker — was
+            # written before dividers existed, and a divider *is* that marker;
+            # honouring both produced two consecutive slides with one title and
+            # nothing on the second. Found by reading the output, which is the
+            # only place it was visible.
+            chunks = self._chunk(section.bullets)
+            if section.divider and not any(chunk for chunk in chunks):
+                chunks = []
+            for index, chunk in enumerate(chunks):
                 slide = deck.slides.add_slide(deck.slide_layouts[_TITLE_AND_CONTENT])
                 slide.shapes.title.text = (
                     section.heading if index == 0 else f"{section.heading} (cont.)"
@@ -165,7 +225,7 @@ class PptxExporter:
                 self._style(slide.placeholders[1], size=_BULLET_PT, colour=theme.INK)
 
             for item in section.ordered_extras():
-                self._extra_slide(deck, item)
+                self._extra_slide(deck, item, section=section.heading)
 
         buffer = io.BytesIO()
         deck.save(buffer)
@@ -196,7 +256,12 @@ class PptxExporter:
         #: `blocks`, because a table at the very end opens after the last one.
         section_at: List[int] = []
 
-        for block in doc.blocks:
+        #: Design blocks that will each get a slide, paired with the position
+        #: they were read at — the same `(position, item)` shape `extras` already
+        #: carries for tables and pictures, so they sort into one order together.
+        designed: List[Tuple[int, object]] = []
+
+        for index, block in enumerate(doc.blocks):
             section_at.append(len(sections) - 1)
             if block.in_sources:
                 continue
@@ -209,9 +274,23 @@ class PptxExporter:
                 title = text
                 continue
 
+            if block.role == "divider":
+                # A divider opens a section *and* gets a slide, which is why it
+                # is handled before the heading branch below rather than by it.
+                current = _Section(heading=text, divider=True)
+                sections.append(current)
+                continue
+
             if block.tag in ("h1", "h2", "h3"):
                 current = _Section(heading=text)
                 sections.append(current)
+                continue
+
+            if block.role in _DESIGNED_ROLES:
+                # Not a bullet. This is the whole point: a statement flattened
+                # into a bullet is a statement with its emphasis removed, which
+                # is the failure the block type was added to fix.
+                designed.append((index, block))
                 continue
 
             if current is None:
@@ -221,9 +300,8 @@ class PptxExporter:
 
         section_at.append(len(sections) - 1)
 
-        extras: List[Tuple[int, object]] = [
-            (table.after_block, table) for table in doc.tables
-        ]
+        extras: List[Tuple[int, object]] = list(designed)
+        extras += [(table.after_block, table) for table in doc.tables]
         extras += [
             (image.after_block, image)
             for image in doc.images
@@ -245,12 +323,204 @@ class PptxExporter:
         return title, sections, leading
 
     @staticmethod
-    def _extra_slide(deck, item: object) -> None:
-        """A table or a picture, whichever this is."""
-        if isinstance(item, _reader.Image):
+    def _extra_slide(deck, item: object, *, section: str = "") -> None:
+        """Whatever this is, on a slide of its own.
+
+        ``section`` is the heading the item was written under, used only where
+        the item itself supplies no title. A table in a section called "What it
+        costs" is a slide called "What it costs"; calling it "Table" is what a
+        renderer says when nobody asked a person.
+        """
+        if isinstance(item, list):
+            PptxExporter._metric_slide(deck, item)
+        elif isinstance(item, _reader.Image):
             PptxExporter._picture_slide(deck, item)
+        elif isinstance(item, _reader.Block):
+            if item.role == "statement":
+                PptxExporter._statement_slide(deck, item)
+            elif item.role == "callout":
+                PptxExporter._callout_slide(deck, item)
+            else:
+                # A role this exporter has not learned still reaches a reader.
+                # Silence would be a slide the author cannot see is missing.
+                PptxExporter._statement_slide(deck, item)
         else:
-            PptxExporter._table_slide(deck, item)
+            PptxExporter._table_slide(deck, item, section=section)
+
+    # -- the composed slides -------------------------------------------------
+    #
+    # Each of these draws its own shapes on `_BLANK` rather than filling a
+    # placeholder. That is the one place this exporter writes geometry, and
+    # `pptx_theme`'s note says why it is allowed here and nowhere else: a
+    # placeholder is something a user's own theme can re-apply, so deforming one
+    # is a fight; a blank slide is not.
+
+    @staticmethod
+    def _statement_slide(deck, block) -> None:
+        """One sentence, centred, with nothing to read but it."""
+        from pptx.util import Inches, Pt
+        from pptx.enum.text import PP_ALIGN, MSO_ANCHOR
+
+        slide = deck.slides.add_slide(deck.slide_layouts[_BLANK])
+        box = slide.shapes.add_textbox(
+            Inches(1.4), Inches(1.8), deck.slide_width - Inches(2.8), Inches(3.9)
+        )
+        frame = box.text_frame
+        frame.word_wrap = True
+        frame.vertical_anchor = MSO_ANCHOR.MIDDLE
+        paragraph = frame.paragraphs[0]
+        paragraph.alignment = PP_ALIGN.LEFT
+        paragraph.text = block.text.strip()
+        PptxExporter._style(box, size=_STATEMENT_PT, colour=theme.INK, bold=False)
+        for line in frame.paragraphs:
+            line.line_spacing = 1.25
+
+        # The accent rule, which is what ties this slide to the same block on the
+        # page. A shape rather than a border: PowerPoint has no left border on a
+        # text box, and a 1-inch-wide rectangle is exactly what the CSS draws.
+        PptxExporter._accent_bar(slide, Inches(1.0), Inches(1.9), Inches(0.045), Inches(3.7), theme.ACCENT)
+
+    @staticmethod
+    def _metric_slide(deck, blocks) -> None:
+        """A row of figures, each under nothing and over its own label.
+
+        The value/label split is read off `Run.bold` — set deliberately by
+        `html._metric_block` — so nothing here parses a string. Columns are
+        divided evenly across the usable width, which is why the count is
+        bounded: five on a 16:9 slide gives each label less room than its words.
+        """
+        from pptx.util import Inches, Pt
+        from pptx.enum.text import PP_ALIGN, MSO_ANCHOR
+
+        pairs = []
+        for block in blocks[:4]:
+            value = "".join(r.text for r in block.runs if r.bold).strip()
+            label = "".join(r.text for r in block.runs if not r.bold).strip()
+            if value or label:
+                pairs.append((value or label, label if value else ""))
+        if not pairs:
+            return
+
+        slide = deck.slides.add_slide(deck.slide_layouts[_BLANK])
+        margin = Inches(1.0)
+        usable = deck.slide_width - margin * 2
+        width = int(usable / len(pairs))
+
+        for position, (value, label) in enumerate(pairs):
+            box = slide.shapes.add_textbox(
+                margin + width * position, Inches(2.5), width - Inches(0.3), Inches(2.2)
+            )
+            frame = box.text_frame
+            frame.word_wrap = True
+            frame.vertical_anchor = MSO_ANCHOR.TOP
+
+            figure = frame.paragraphs[0]
+            figure.text = value
+            figure.alignment = PP_ALIGN.LEFT
+            PptxExporter._run_style(figure, _METRIC_PT, theme.ACCENT, bold=True,
+                                    face=theme.WORD_SANS)
+
+            if not label:
+                continue
+            caption = frame.add_paragraph()
+            caption.text = label.upper()
+            caption.alignment = PP_ALIGN.LEFT
+            caption.space_before = Pt(4)
+            PptxExporter._run_style(caption, _METRIC_LABEL_PT, theme.MUTED, bold=True,
+                                    face=theme.WORD_SANS)
+
+    @staticmethod
+    def _callout_slide(deck, block) -> None:
+        """The panel, at the scale of a room."""
+        from pptx.util import Inches, Pt
+        from pptx.dml.color import RGBColor
+        from pptx.enum.text import MSO_ANCHOR
+
+        warn = block.tone == "warn"
+        slide = deck.slides.add_slide(deck.slide_layouts[_BLANK])
+
+        left, top = Inches(1.1), Inches(2.2)
+        width = deck.slide_width - Inches(2.2)
+        height = Inches(3.1)
+
+        panel = slide.shapes.add_textbox(left, top, width, height)
+        panel.fill.solid()
+        panel.fill.fore_color.rgb = RGBColor.from_string(
+            (theme.WASH_WARN if warn else theme.WASH).upper()
+        )
+        panel.line.fill.background()
+        frame = panel.text_frame
+        frame.word_wrap = True
+        frame.vertical_anchor = MSO_ANCHOR.MIDDLE
+        frame.margin_left = Inches(0.35)
+        frame.margin_right = Inches(0.3)
+        frame.paragraphs[0].text = block.text.strip()
+        PptxExporter._style(panel, size=_CALLOUT_PT, colour=theme.INK, bold=False)
+        for line in frame.paragraphs:
+            line.line_spacing = 1.3
+        for line in frame.paragraphs:
+            for run in line.runs:
+                run.font.name = theme.WORD_SANS
+
+        PptxExporter._accent_bar(
+            slide, left, top, Inches(0.05), height,
+            theme.CAUTION if warn else theme.ACCENT,
+        )
+
+    @staticmethod
+    def _divider_slide(deck, heading: str) -> None:
+        """A section opener: the title, a rule, and deliberately nothing else."""
+        from pptx.util import Inches
+        from pptx.enum.text import PP_ALIGN, MSO_ANCHOR
+
+        slide = deck.slides.add_slide(deck.slide_layouts[_BLANK])
+        box = slide.shapes.add_textbox(
+            Inches(1.0), Inches(2.9), deck.slide_width - Inches(2.0), Inches(1.4)
+        )
+        frame = box.text_frame
+        frame.word_wrap = True
+        frame.vertical_anchor = MSO_ANCHOR.BOTTOM
+        frame.paragraphs[0].text = heading.strip()
+        frame.paragraphs[0].alignment = PP_ALIGN.LEFT
+        PptxExporter._style(box, size=_DIVIDER_PT, colour=theme.INK, bold=True)
+
+        PptxExporter._accent_bar(
+            slide, Inches(1.05), Inches(4.35), Inches(2.2), Inches(0.045), theme.ACCENT
+        )
+
+    @staticmethod
+    def _accent_bar(slide, left, top, width, height, colour: str) -> None:
+        """A filled rectangle standing in for a CSS border.
+
+        PowerPoint has no left border on a text box, and the rule is what makes
+        a statement on a slide recognisably the same block as the statement on
+        the page. A rectangle with no outline is exactly what the CSS draws.
+        """
+        from pptx.dml.color import RGBColor
+        from pptx.enum.shapes import MSO_SHAPE
+
+        bar = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, left, top, width, height)
+        bar.fill.solid()
+        bar.fill.fore_color.rgb = RGBColor.from_string(colour.upper())
+        bar.line.fill.background()
+        bar.shadow.inherit = False
+
+    @staticmethod
+    def _run_style(paragraph, size: float, colour: str, *, bold: bool, face: str) -> None:
+        """Style every run in one paragraph.
+
+        `_style` works on a shape and covers all of its text, which is what the
+        title and bullet placeholders need. A metric's two paragraphs are two
+        different sizes in one frame, so they are styled one at a time.
+        """
+        from pptx.dml.color import RGBColor
+        from pptx.util import Pt
+
+        for run in paragraph.runs:
+            run.font.size = Pt(size)
+            run.font.bold = bold
+            run.font.name = face
+            run.font.color.rgb = RGBColor.from_string(colour.upper())
 
     @staticmethod
     def _picture_slide(deck, image: _reader.Image) -> None:
@@ -326,7 +596,7 @@ class PptxExporter:
         return [bullets[i : i + _MAX_BULLETS] for i in range(0, len(bullets), _MAX_BULLETS)]
 
     @staticmethod
-    def _table_slide(deck, table: _reader.Table) -> None:
+    def _table_slide(deck, table: _reader.Table, *, section: str = "") -> None:
         from pptx.util import Inches
 
         grid = ([table.header] if table.header else []) + [list(r) for r in table.rows]
@@ -335,7 +605,11 @@ class PptxExporter:
 
         columns = max(len(row) for row in grid)
         slide = deck.slides.add_slide(deck.slide_layouts[_TITLE_ONLY])
-        slide.shapes.title.text = table.caption or "Table"
+        # The caption if the composer wrote one, then the section it sits in,
+        # and "Table" only when there is genuinely nothing to call it. A GFM
+        # table has no caption syntax at all, so the middle case is the common
+        # one rather than the fallback.
+        slide.shapes.title.text = table.caption or section or "Table"
         # Styled like every other section title. Measured and missed the first
         # time: the deck came out themed on four slides and stock on the fifth,
         # which is worse than uniformly stock because it reads as a rendering

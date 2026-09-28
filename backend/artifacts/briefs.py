@@ -173,6 +173,41 @@ def brief_for(request: str) -> Optional[Brief]:
     return BRIEFS[best[1]] if best else None
 
 
+#: The four blocks that carry design, and — the important half — when to reach
+#: for each.
+#:
+#: **Listing the syntax alone would have been worse than not listing it.** A
+#: model given four new fences and no guidance either ignores them or uses all
+#: four in every document, and the second is how a proposal ends up with three
+#: statements and a metric row containing one number. So each line says what the
+#: block is *for* and the bounds are explicit.
+#:
+#: **The last sentence is rule 9 in its most dangerous form.** A block that
+#: wants a figure is a standing invitation to produce one, and an invented
+#: number set 54pt on a slide is the most confident wrong thing this product
+#: could make. "Write [to confirm]" is what `_RULES` already says about a
+#: missing fact; here it has to be said again, because the pull of an empty
+#: metric block is stronger than the pull of an empty sentence.
+_DESIGN = (
+    "Four blocks are available for emphasis, written as fenced code blocks. "
+    "Use them sparingly — a document where everything is emphasised has nothing "
+    "emphasised.\n\n"
+    "```statement\nThe single sentence the reader should leave with.\n```\n"
+    "At most one per document, and only if there is genuinely one such sentence.\n\n"
+    "```metric\n18 | days\n11,160 | total fee\n```\n"
+    "Two to four figures that already appear in the document, each with a short "
+    "label. Not a substitute for a table.\n\n"
+    "```callout\nSomething the reader must not skip.\n```\n"
+    "Use `callout warn` instead for a dependency or a risk that changes what "
+    "happens if it is ignored.\n\n"
+    "```divider\nSection title\n```\n"
+    "Opens a major part of a long document, in place of a `##` heading. Only in "
+    "a document with several distinct parts.\n\n"
+    "Never invent a figure to fill one of these. If a number a block would need "
+    "is not something we have, leave the block out — or write [to confirm] and "
+    "keep it as prose."
+)
+
 #: What every brief ends with — the part that keeps a skeleton honest.
 _RULES = (
     "Write it from what we have discussed and from anything recalled above. "
@@ -201,6 +236,8 @@ def instruction(request: str) -> str:
             "line as `# Title`. Use `##` headings where the content has natural sections, "
             "and lists or tables where they read better than prose. "
             + _RULES
+            + "\n\n"
+            + _DESIGN
         )
     if brief.sections:
         skeleton = "\n".join(f"## {s}" for s in brief.sections)
@@ -211,10 +248,14 @@ def instruction(request: str) -> str:
             f"{skeleton}\n\n"
             "Use lists or tables inside a section where they read better than prose. "
             + _RULES
+            + "\n\n"
+            + _DESIGN
         )
     return (
         head
         + f"Write {brief.name}, in markdown, with its title on the first line as `# Title`. "
         f"{brief.shape} "
         + _RULES
+        + "\n\n"
+        + _DESIGN
     )

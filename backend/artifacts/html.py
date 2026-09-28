@@ -38,6 +38,10 @@ from .contracts import (
     PageBreak,
     RichText,
     TableBlock,
+    Statement,
+    Metric,
+    Callout,
+    Divider,
 )
 from . import theme
 from .invoice import LineItem, Totals, format_money
@@ -138,6 +142,67 @@ def _image_block(block: ImageBlock) -> str:
     )
 
 
+#: How many metrics fit on one row before the labels are narrower than the
+#: words in them. Measured against the 16:9 slide, which is the tighter of the
+#: two destinations — the page could take five.
+_MAX_METRICS = 4
+
+
+def _statement_block(block: Statement) -> str:
+    """The sentence, given room.
+
+    `class` rather than a tag of its own, and `export/_reader.py` explains why
+    at length. The practical consequence is here: this is a `<p>`, so a reader
+    that has never heard of a statement gets a paragraph rather than nothing.
+    """
+    return f'<p class="statement">{_text(block.text)}</p>'
+
+
+def _metric_block(block: Metric) -> str:
+    """A row of numbers, each with the word that says what it counts.
+
+    **The value is wrapped in `<strong>` and that is load-bearing, not
+    styling.** `_reader.Run` already carries `bold`, so on the way back out the
+    exporters can tell the number from its label without parsing, without a new
+    field, and without splitting on a space — which is the guess that fails the
+    moment a value is "£11,160" and a label is "total fee". It degrades the
+    right way too: an exporter that ignores the role writes **18** days, which
+    is a true sentence.
+    """
+    pairs = [tuple(item)[:2] for item in block.items if item][:_MAX_METRICS]
+    cells = "".join(
+        f'<p class="metric"><strong>{_text(value)}</strong>'
+        f"<span>{_text(label)}</span></p>"
+        for value, label in pairs
+    )
+    return f'<div class="metrics">{cells}</div>' if cells else ""
+
+
+def _callout_block(block: Callout) -> str:
+    """A panel the eye stops at.
+
+    An unknown tone falls back to `note` rather than raising. A model that
+    writes `tone="critical"` has made a reasonable guess at a vocabulary nobody
+    published to it, and the right answer to that is the calmer of the two
+    panels — never a traceback, and never an invented third appearance that
+    would make the two-tone rule a lie.
+    """
+    tone = "warn" if str(block.tone).strip().lower() == "warn" else "note"
+    return f'<p class="callout {tone}">{_text(block.text)}</p>'
+
+
+def _divider_block(block: Divider) -> str:
+    """A section opener that takes the page with it.
+
+    The break is `<div class="pagebreak">`, the same element `PageBreak`
+    already emits, so print and the PDF exporter need to learn nothing new.
+    """
+    return (
+        '<div class="pagebreak"></div>'
+        f'<h2 class="divider">{_text(block.text)}</h2>'
+    )
+
+
 def render_block(block: object) -> str:
     """One member of ``blocks`` as HTML.
 
@@ -165,6 +230,14 @@ def render_block(block: object) -> str:
         return _table_block(block)
     if isinstance(block, ImageBlock):
         return _image_block(block)
+    if isinstance(block, Statement):
+        return _statement_block(block)
+    if isinstance(block, Metric):
+        return _metric_block(block)
+    if isinstance(block, Callout):
+        return _callout_block(block)
+    if isinstance(block, Divider):
+        return _divider_block(block)
     if isinstance(block, PageBreak):
         return '<div class="pagebreak"></div>'
     return f"<p>{_esc(str(block))}</p>"
@@ -224,7 +297,7 @@ def render_document(
             "<!DOCTYPE html>",
             '<html lang="en"><head><meta charset="utf-8">',
             f"<title>{_esc(title)}</title>",
-            f"<style>{_STYLE}{_TABLE_STYLE}</style>",
+            f"<style>{_STYLE}{_TABLE_STYLE}{_EMPHASIS_STYLE}</style>",
             "</head><body>",
             # One wrapper so the screen preview can draw a sheet of paper around
             # the content while print leaves the page box to do it.
@@ -474,7 +547,7 @@ def render_invoice(
             "<!DOCTYPE html>",
             '<html lang="en"><head><meta charset="utf-8">',
             f"<title>{_esc(title)}</title>",
-            f"<style>{_STYLE}{_TABLE_STYLE}</style>",
+            f"<style>{_STYLE}{_TABLE_STYLE}{_EMPHASIS_STYLE}</style>",
             "</head><body>",
             '<div class="sheet">',
             _masthead(title, letterhead, "Invoice"),
@@ -526,7 +599,7 @@ def render_spreadsheet(
             "<!DOCTYPE html>",
             '<html lang="en"><head><meta charset="utf-8">',
             f"<title>{_esc(title)}</title>",
-            f"<style>{_STYLE}{_TABLE_STYLE}</style>",
+            f"<style>{_STYLE}{_TABLE_STYLE}{_EMPHASIS_STYLE}</style>",
             "</head><body>",
             f"<h1>{_esc(title)}</h1>",
             table,
@@ -579,7 +652,7 @@ def render_chart(
             "<!DOCTYPE html>",
             '<html lang="en"><head><meta charset="utf-8">',
             f"<title>{_esc(title)}</title>",
-            f"<style>{_STYLE}{_TABLE_STYLE}</style>",
+            f"<style>{_STYLE}{_TABLE_STYLE}{_EMPHASIS_STYLE}</style>",
             "</head><body>",
             f"<h1>{_esc(title)}</h1>",
             f'<img alt="{_esc(title)}" src="data:image/png;base64,{encoded}">',
@@ -651,7 +724,7 @@ def render_image(
             "<!DOCTYPE html>",
             '<html lang="en"><head><meta charset="utf-8">',
             f"<title>{_esc(title)}</title>",
-            f"<style>{_STYLE}{_TABLE_STYLE}</style>",
+            f"<style>{_STYLE}{_TABLE_STYLE}{_EMPHASIS_STYLE}</style>",
             "</head><body>",
             f"<h1>{_esc(title)}</h1>",
             f'<img alt="{_esc(prompt or title)}" src="data:image/png;base64,{encoded}">',
@@ -745,7 +818,9 @@ _PAGE_STYLE = (
 
 _STYLE = (
     f":root{{--ink:{theme.css(theme.INK)};--muted:{theme.css(theme.MUTED)};"
-    f"--rule:{theme.css(theme.RULE)};--accent:{theme.css(theme.ACCENT)}}}"
+    f"--rule:{theme.css(theme.RULE)};--accent:{theme.css(theme.ACCENT)};"
+    f"--wash:{theme.css(theme.WASH)};--wash-warn:{theme.css(theme.WASH_WARN)};"
+    f"--caution:{theme.css(theme.CAUTION)}}}"
     f"body{{font:11.5pt/1.65 {_SERIF};color:var(--ink);"
     "-webkit-font-smoothing:antialiased;margin:0}"
     # Screen: emulate a sheet of paper so the preview reads as a document rather
@@ -886,6 +961,59 @@ _TABLE_STYLE = (
 #:
 #: That difference is why `ArtifactKind.CV` exists at all. Falling through to
 #: `DOCUMENT` produced a proposal's layout with somebody's career inside it.
+# --------------------------------------------------------------------------- #
+# Emphasis — the blocks that carry design rather than prose.
+#
+# Every rule here is print-first, because these are the blocks most likely to
+# look right on screen and fall apart on paper:
+#
+# *Nothing splits.* `break-inside:avoid` on all four. A statement cut across a
+# page boundary reads as a typesetting fault rather than as emphasis, and half a
+# callout is worse than no callout — the reader cannot tell there was more.
+#
+# *The tint has a border.* `--wash` is very pale by design, and pale fills are
+# the first thing a printer driver discards when somebody prints in greyscale or
+# draft. The left bar is the signal; the fill is the nicety. One survives.
+#
+# *`print-color-adjust:exact`.* Without it a browser printing "backgrounds off"
+# — which is the default in several — drops the panel and leaves the text
+# floating with no indication it was ever set apart.
+# --------------------------------------------------------------------------- #
+
+_EMPHASIS_STYLE = (
+    # A statement is text, so it stays in the serif and simply gets larger and
+    # gets room. No quotation marks: it is the document's own voice, and quoting
+    # yourself reads as a testimonial.
+    f"p.statement{{font:{theme.STATEMENT_PT}pt/1.35 {_SERIF};color:var(--ink);"
+    "margin:26px 0;padding:0 0 0 18px;border-left:3px solid var(--accent);"
+    "break-inside:avoid;page-break-inside:avoid}"
+    # Metrics. `flex` with `wrap` rather than a fixed grid, so three sit in
+    # thirds and two sit in halves without the caller declaring a column count —
+    # and so a fourth wrapping onto a second line degrades instead of squashing.
+    "div.metrics{display:flex;flex-wrap:wrap;gap:20px 40px;margin:22px 0 26px;"
+    "break-inside:avoid;page-break-inside:avoid}"
+    "p.metric{margin:0;display:flex;flex-direction:column;gap:2px}"
+    f"p.metric strong{{font:600 {theme.METRIC_PT}pt/1.05 {_SANS};color:var(--accent);"
+    # Numbers must line up when two metrics sit side by side, and lining up is
+    # what tabular figures are for. Without this, a "1" is narrower than a "0"
+    # and two values of the same length are visibly different widths.
+    "font-variant-numeric:tabular-nums;letter-spacing:-.02em}"
+    f"p.metric span{{font:600 {theme.METRIC_LABEL_PT}pt/1.3 {_SANS};color:var(--muted);"
+    "text-transform:uppercase;letter-spacing:.1em}"
+    # Callouts. The left bar is 3pt and full-strength for the reason above.
+    f"p.callout{{font:10.5pt/1.55 {_SANS};margin:20px 0;padding:14px 16px;"
+    "border-left:3px solid var(--accent);background:var(--wash);color:var(--ink);"
+    "break-inside:avoid;page-break-inside:avoid;"
+    "-webkit-print-color-adjust:exact;print-color-adjust:exact}"
+    "p.callout.warn{border-left-color:var(--caution);background:var(--wash-warn)}"
+    # A divider is an h2 that has stopped being a label and become a title. It
+    # inherits h2's uppercase tracking and overrides the scale, so a theme change
+    # to h2 still reaches it.
+    f"h2.divider{{font:600 {theme.TITLE_PT}pt/1.2 {_SERIF};color:var(--ink);"
+    "text-transform:none;letter-spacing:-.01em;margin:0 0 6px;padding-bottom:10px;"
+    "border-bottom:2px solid var(--accent);break-after:avoid;page-break-after:avoid}"
+)
+
 _CV_STYLE = (
     # The name carries the page. No rule under it: a heavy border under a
     # person's name is a letterhead, and a CV is not correspondence.

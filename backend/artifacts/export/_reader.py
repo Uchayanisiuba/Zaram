@@ -30,6 +30,27 @@ from ..html import CLAIM_ATTR, SOURCE_ATTR
 #: Tags that end the current block and start a new one.
 _BLOCK_TAGS = {"h1", "h2", "h3", "p", "li"}
 
+#: The `class` values that mean "this block carries a design", and the only ones
+#: read back off the markup.
+#:
+#: **A closed set, not whatever the class attribute happens to say.** Treating
+#: any class as a role would make every future stylesheet hook into an instruction
+#: to the exporters, which is `markdown_blocks`'s rule — *"nothing may invent
+#: markup the readers would have to learn"* — broken from the other end. Adding
+#: one here is a deliberate edit in the same commit as the renderer that emits it.
+#:
+#: These qualify a block; they never replace its tag. A statement is still a `p`
+#: and a divider is still an `h2`, so **every existing consumer keeps working and
+#: degrades correctly**: an exporter that has not been taught about statements
+#: writes the paragraph, which is true and readable. That is the whole reason
+#: this is a role rather than a sixth member of `_BLOCK_TAGS` — see
+#: `Table.after_block`, which records what a new tag in this stream costs.
+_DESIGN_ROLES = {"statement", "metric", "callout", "divider"}
+
+#: The second class on a callout. One value, because `Callout` defines two tones
+#: and the absent case is the other one.
+_TONES = {"warn"}
+
 #: Inline tags that change how a run is drawn.
 _STYLE_TAGS = {"em": "italic", "i": "italic", "strong": "bold", "b": "bold",
                "code": "code"}
@@ -59,6 +80,11 @@ class Block:
     #: True for everything inside `<section class="sources">`. Exporters render
     #: that region differently — smaller, after a rule — and need to know.
     in_sources: bool = False
+    #: The design this block carries, from `_DESIGN_ROLES`, or "" for ordinary
+    #: prose. Same field and the same reasoning as `Image.role`.
+    role: str = ""
+    #: A callout's tone: "warn", or "" for the ordinary one.
+    tone: str = ""
 
     @property
     def text(self) -> str:
@@ -258,8 +284,14 @@ class _Reader(HTMLParser):
             return
 
         if tag in _BLOCK_TAGS:
+            classes = set((attr.get("class") or "").split())
+            role = next(iter(sorted(classes & _DESIGN_ROLES)), "")
             self._block = Block(
-                tag=tag, anchor=attr.get("id"), in_sources=bool(self._in_sources)
+                tag=tag,
+                anchor=attr.get("id"),
+                in_sources=bool(self._in_sources),
+                role=role,
+                tone=next(iter(sorted(classes & _TONES)), ""),
             )
             self.doc.blocks.append(self._block)
             return

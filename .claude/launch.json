@@ -21,6 +21,18 @@
         "cd frontend && set ZARAM_API_SECRET=dev-secret && npx vite --port 5173 --strictPort"
       ],
       "port": 5173
+    },
+    {
+      "name": "zaram-documents",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "--yes",
+        "serve",
+        ".preview",
+        "-l",
+        "4322"
+      ],
+      "port": 4322
     }
   ]
 }

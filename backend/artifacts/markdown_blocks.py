@@ -42,7 +42,16 @@ import html as html_escape
 from html.parser import HTMLParser
 from typing import Any, List
 
-from .contracts import BulletList, Heading, RichText, TableBlock
+from .contracts import (
+    BulletList,
+    Callout,
+    Divider,
+    Heading,
+    Metric,
+    RichText,
+    Statement,
+    TableBlock,
+)
 
 __all__ = ["blocks_from_markdown", "inline_html"]
 
@@ -102,6 +111,24 @@ def inline_html(markdown: str) -> RichText:
     return RichText("".join(parser.out))
 
 
+#: The fence info strings that mean "this block carries a design".
+#:
+#: **A fenced block, not a directive, and that is the whole reason this is
+#: cheap.** The obvious answer is `::: statement` — MyST and Pandoc fenced divs
+#: — and it needs `mdit-py-plugins`, which is a dependency for syntax models are
+#: no better at emitting. `markdown-it` already parses a fence's info string, so
+#: ```` ```statement ```` costs nothing, is impossible to get subtly wrong, and
+#: a model that has never been told about it simply keeps writing paragraphs.
+#:
+#: The risk it accepts is a code sample whose language is literally one of these
+#: five words. That is a trade worth naming rather than hiding: there is no
+#: language called `statement`, `metric`, `callout` or `divider`, and a document
+#: that genuinely needs one can fence it as `text`.
+#:
+#: The body syntax is deliberately the least a model can get wrong — prose for
+#: three of them, and `value | label` lines for the one that needs two fields.
+_DESIGN_FENCES = {"statement", "metric", "callout", "divider"}
+
 #: Info strings on a whole-document fence that mean "this is the document",
 #: not "this is a code sample". An empty info string counts: a model that
 #: fences its whole reply often labels it with nothing.
@@ -134,6 +161,46 @@ def _unfence(markdown: str) -> str:
     if (fence.info or "").strip().lower() not in _DOCUMENT_FENCES:
         return markdown
     return fence.content
+
+
+def _design_block(info: str, body: str):
+    """One fenced design block, or `None` if the info string is not one.
+
+    Returns `None` rather than raising, because this sits on the path every
+    ordinary code fence takes. A model that writes ```` ```python ```` must keep
+    getting a code paragraph, and the caller decides that by testing the result.
+    """
+    words = info.strip().split()
+    if not words or words[0].lower() not in _DESIGN_FENCES:
+        return None
+    kind, modifiers = words[0].lower(), [w.lower() for w in words[1:]]
+    body = body.strip()
+    if not body:
+        # An empty fence is a model that started a block and said nothing. A
+        # block with no content renders as a rule across an empty page, which
+        # looks like a bug in the document rather than in the reply.
+        return None
+
+    if kind == "statement":
+        return Statement(text=inline_html(" ".join(body.split())))
+    if kind == "divider":
+        return Divider(text=inline_html(body.splitlines()[0].strip()))
+    if kind == "callout":
+        tone = "warn" if "warn" in modifiers else "note"
+        return Callout(text=inline_html(" ".join(body.split())), tone=tone)
+
+    # metric. One pair per line, `value | label`. A line without a separator is
+    # kept as a value with no label rather than dropped — the model wrote a
+    # number and meant it, and a figure with a missing caption is recoverable
+    # where a silently deleted figure is not.
+    items = []
+    for line in body.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        value, _, label = line.partition("|")
+        items.append((inline_html(value.strip()), inline_html(label.strip())))
+    return Metric(items=tuple(items)) if items else None
 
 
 def blocks_from_markdown(
@@ -229,6 +296,11 @@ def blocks_from_markdown(
             continue
 
         if token.type == "fence":
+            designed = _design_block(token.info or "", token.content)
+            if designed is not None:
+                blocks.append(designed)
+                i += 1
+                continue
             # A code block is prose in a monospace face rather than a block type
             # of its own: `_reader` has no `pre`, so inventing one would export
             # as nothing. `code` is in the kept set, so this survives to .docx.
