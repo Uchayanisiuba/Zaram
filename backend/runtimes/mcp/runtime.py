@@ -111,6 +111,20 @@ class McpRuntime:
         self._start_time = time.time()
         self._connections: Dict[str, McpServer] = {}
         self._calls = 0
+        #: What the last shortlist actually contained, by server id, and how
+        #: many tools that server offers. Written by `available_tools`, read by
+        #: `health_check`, and *only* a report — nothing routes on it.
+        #:
+        #: Two numbers rather than one because either alone misleads. A count
+        #: of 39 says nothing about whether any were used; a count of 0 offered
+        #: looks like a broken server rather than a full budget. Together they
+        #: are the sentence somebody needs: "39 tools, 0 offered".
+        #:
+        #: Empty until a question has been asked. That is honest — before the
+        #: first turn nothing has been shortlisted, and inventing a prediction
+        #: of what *would* be offered is a number nobody measured.
+        self._tool_counts: Dict[str, int] = {}
+        self._last_offered: Dict[str, int] = {}
         #: Servers Zaram ships, by id. See `register_builtin`.
         self._builtin: Dict[str, Any] = {}
         #: Injected. See `set_ranker`.
@@ -253,6 +267,10 @@ class McpRuntime:
             "status": "healthy" if self._state == RuntimeState.READY else "degraded",
             "runtime_id": RUNTIME_ID,
             "calls": self._calls,
+            # The budget every stranger's server shares. Reported so the
+            # shortfall below is a number somebody can act on rather than a
+            # mystery — it is what `ZARAM_TOOL_BUDGET` sets.
+            "tool_budget": self._budget,
             "servers": {
                 name: {
                     "transport": cfg.transport,
@@ -263,6 +281,18 @@ class McpRuntime:
                     "reason": "" if cfg.reachable else "http transport is not implemented yet",
                     "writes": cfg.writes.value,
                     "connected": name in self._connections,
+                    # How many tools this server offers, and how many were put
+                    # in front of the model on the last question. `None` before
+                    # anything has been asked — not 0, because "nothing has
+                    # happened yet" and "this server was shut out" are
+                    # different answers and the interface must not show one as
+                    # the other. Same distinction `vram_bytes` draws.
+                    "tools": self._tool_counts.get(name),
+                    "offered": self._last_offered.get(name),
+                    # Zaram's own packs are never trimmed — the budget exists
+                    # for strangers. Said here so the interface does not warn
+                    # about a built-in that was always going to be complete.
+                    "builtin": name in self._builtin,
                 }
                 for name, cfg in configured.items()
             },
@@ -325,6 +355,18 @@ class McpRuntime:
             if self._rank and query.strip()
             else theirs[: self._budget]
         )
+
+        # Recorded here rather than computed later, because *here* is the only
+        # place both numbers are known at once: `found` is everything the
+        # servers offered and `shortlisted` is what survived the budget. A
+        # later reconstruction would have to re-list the tools and could
+        # disagree with what was actually sent.
+        self._tool_counts = {}
+        for tool in found:
+            self._tool_counts[tool.server_id] = self._tool_counts.get(tool.server_id, 0) + 1
+        self._last_offered = {name: 0 for name in self._tool_counts}
+        for tool in shortlisted:
+            self._last_offered[tool.server_id] = self._last_offered.get(tool.server_id, 0) + 1
 
         described = []
         for tool in shortlisted:
