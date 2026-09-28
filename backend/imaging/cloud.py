@@ -434,10 +434,23 @@ class QwenImages(CloudImageProvider):
 #: what decides that — `_pick` gates on `capabilities()` — but trying the more
 #: capable one first means a person with one key gets the better answer
 #: without choosing a model, which is the whole posture of the picker.
+#:
+#: **Together before NIM, 28 September 2026, and it is a measurement rather
+#: than a preference.** NIM was first because it is "the key most users already
+#: pasted for text" — a convenience argument, and the only one it had. Measured
+#: on the maintainer's machine the same day: three requests, **181 seconds
+#: each**, every one ending in a read timeout with no picture. An
+#: unauthenticated probe of the same URL answers 401 in 1.2 s, so the endpoint
+#: and the network are fine and the free tier is simply queueing past any wait
+#: worth having. Together's is documented here as a *standing* free endpoint
+#: and answered the same probe in 0.9 s.
+#:
+#: A convenience argument does not outrank a provider that returns a picture.
+#: Both are free, both need a key, and the one that answers goes first.
 CLOUD_PROVIDERS: List[CloudImageProvider] = [
     QwenImages(),
-    NimImages(),
     TogetherImages(),
+    NimImages(),
     FalImages(),
 ]
 
