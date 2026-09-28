@@ -105,15 +105,14 @@ class ConversationHistory:
         }
 
     async def store_record(self, record: MemoryRecord) -> str:
-        return await self._runtime.store(
-            content=record.content,
-            memory_type=record.memory_type,
-            metadata=record.metadata,
-            session_id=record.session_id,
-            user_id=record.user_id,
-            tags=record.tags,
-            importance=record.importance,
-        )
+        """Store the record the caller built, not a copy of some of it.
+
+        This unpacked the record into `store()`, which builds a *new* one — so
+        the id the caller was holding was not the id that came back, and
+        `source`, `scope`, `origin` and `pinned` were left behind. The runtime's
+        own `store_record` keeps all of it.
+        """
+        return await self._runtime.store_record(record)
 
     async def get_record(self, record_id: str) -> MemoryRecord | None:
         return await self._runtime.get_record(record_id)

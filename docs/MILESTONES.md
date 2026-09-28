@@ -18,9 +18,54 @@ publishing step over rather than finding another route. `CLAUDE.md`,
 
 ---
 
-## Current state — 27 September 2026
+## Current state — 28 September 2026
 
 *The latest work is first. Earlier sessions follow below.*
+
+### 28 September — two sessions built the same vertical from opposite ends, and the project type that was supposed to separate them did nothing.
+
+A cloud session branched from `cca3594` on the 24th and built
+`packs/opportunities`. A local session, on the same base two days later, built
+`packs/jobs`. Neither knew about the other, and the cloud branch was still
+unmerged — so the work existed only on `origin/main-edk7al` while local `main`
+carried a second answer to the same question.
+
+**They turned out to be complementary rather than duplicated**, which is luck
+rather than design and is worth writing down as luck. `packs/opportunities` is
+the finding end — an eligibility gate with no model, no score and no network,
+reading criteria out of a call. `packs/jobs` is the writing end — parsing a
+posting into fields, the closing date as an obligation, the letter. The
+opportunities pack's own docstring argues the split without knowing the other
+half existed: *the bottleneck for jobs is the draft, for grants it is
+eligibility.*
+
+**The expensive part was the project type, and the decision is to have none.**
+Each session added one — `JOB_HUNT` here, `JOBS` and `GRANTS` there — and the
+maintainer's answer to which should win was neither: Zaram should find a role,
+check a grant or post something *because the request said so*, not because
+somebody chose the right label when the project was created.
+
+Reading the code settled it rather than the argument. **`ProjectType` gates
+exactly one thing in the whole backend**: `CODING`, which
+`main._apply_project_root` reads to point the code pack at a repository. Every
+pack's tools — code, draw, web, jobs, opportunities — are registered
+unconditionally in `core.bootstrapper`, so `record_job_posting` and
+`check_eligibility` were already reachable with no project open. `JOB_HUNT`'s
+own docstring said it was "what activates the pack", and that was never true of
+anything but `coding`.
+
+So both vertical members are gone and the class docstring now says what the
+enum does. A label that gates nothing while appearing to gate something is the
+more expensive kind of wrong: it invites the next session to add a sixth, and
+the one after that to ask a user which kind of project they are starting before
+they are allowed to begin.
+
+**What this does not settle.** The two packs still overlap at the edges and
+nothing yet routes a request across both — asking for a role found *and* a
+letter drafted works only because the model happens to choose two servers.
+Whether they eventually become one pack is a question for whoever has used them
+on real postings, not for a session that merged them.
+
 
 ### 27 September — Zaram drove somebody else's MCP server, and the gate held.
 
@@ -81,6 +126,135 @@ five `african-myths` workflows validate clean against the live server
 (`valid: true`, zero errors, zero warnings, `spends_credits: false`), so the
 render is gated on free VRAM and on a per-tool grant for `run_workflow`, not on
 anything unbuilt.
+### 25 September — the second pack, and it starts with the word "no".
+
+`CLAUDE.md` has been waiting for this one: *"Build two packs by hand before
+building the pack system. The abstraction cannot be designed from imagination
+— only from two real examples and the friction between them."* The business
+layer is pack one. `packs/opportunities` is pack two, and it is deliberately
+differently shaped — pack one works on documents the user already has, this
+one on documents that arrive from outside on a timer.
+
+Design: `docs/PACK-OPPORTUNITIES.md`. Three things are worth carrying forward.
+
+**The scope was set by the funders, not by caution.** Grants.gov's own API
+documentation says write operations are unsupported and that applications
+cannot be submitted through it; the EU Funding & Tenders Portal has a search
+API and no submission endpoint anywhere. They built the discovery half
+deliberately and did not build the other half deliberately. Rules 6, 9 and the
+mutative tier land on the same line independently, which is usually a sign the
+line is real. So the pack automates discovery, eligibility and the first
+draft, and stops at a review queue a person presses send on. **There is no
+`apply` tool and `test_the_opportunities_pack_is_wired.py` asserts its
+absence against a real boot** — an absence worth a test, because a tool named
+for a capability that does not exist is one a model will narrate having used.
+
+**Jobs and grants are one pipeline with the weights moved.** For jobs,
+discovery is easy and every application reads the same, so the work is the
+draft. For grants it inverts: the bottleneck is *eligibility*, because most
+people do not know what they can apply for and finding out the hard way costs
+a fortnight each time. One pack, two project types (`ProjectType.JOBS`,
+`ProjectType.GRANTS`). Two packs sharing a pipeline would have been two copies
+of it inside a month — and that friction is exactly what the pack *system*
+needed a second example to see.
+
+**Eligibility is a gate, never a ranking.** `CLAUDE.md` says it for model
+capability — *"a binary precondition, never a score"* — and this is the fourth
+domain that error could have arrived in, with the highest cost yet. It is
+written down before the matcher rather than after the fourth recurrence:
+`assess()` returns a verdict, and `test_nothing_in_the_report_is_a_score`
+walks the dataclass and fails if a float ever appears on the report or its
+findings. There is nothing in it that *could* be compared against a floor.
+
+Beside it, the failure with no symptom: **unknown is not no.** A criterion
+with no fact behind it becomes a question, never an exclusion. Treating
+missing as failing makes a tidier list by hiding opportunities on facts nobody
+was asked for, and the user never finds out — so it has its own tests rather
+than a line in someone else's. The questions are gathered once per batch, not
+once per call.
+
+`requirements.py` reads criteria deterministically and is biased hard: it
+finds few and invents none. A sentence is only considered when it is *about*
+eligibility, which is what stops "our offices are in Germany" becoming a
+residency requirement. Every requirement carries the clause it was read from,
+`Requirement.source` has no default, and both are the same decision
+`obligations.Obligation.source` already made.
+
+#### Measured here, and the honest gaps
+
+`tests/test_the_opportunity_gate_filters.py` (30) and
+`tests/test_the_opportunities_pack_is_wired.py` (3). **No Ollama, no GPU** —
+the cloud session. Full suite 4040 passed; the 62 failures and 15 errors are
+identical to the same suite on the unmodified tree in this container, except
+one that was only the new files not yet being tracked by git.
+
+The wiring test was checked by removing the registration line from
+`bootstrapper.py` and watching it fail, then restoring it. `npm
+run check:reachability` does not list the pack.
+
+**Every built-in `FieldMap` is UNVERIFIED and each says so in its own
+docstring.** This container's egress policy blocks `boards-api.greenhouse.io`,
+`api.lever.co`, `ec.europa.eu` and `api.simpler.grants.gov` — all four were
+tried — so not one adapter has met a live response. They are a starting shape,
+not a claim, and each carries the one `curl` that checks it. What *is* proven
+is the behaviour that matters more: a map pointed at a field that does not
+exist yields an empty field rather than a crash, because the poller runs
+unattended and a stack trace at 06:00 is a feed that silently stopped.
+
+Written into the source rather than only here: **UKRI's Gateway to Research is
+not a feed of open calls.** It lists funding already *awarded*. An integration
+against it looks entirely reasonable, returns thousands of well-formed
+records, matches the user against grants that closed years ago, and passes
+every test anybody would write for it.
+
+#### Not built, deliberately
+
+The poller, the matcher, the reuse library and the drafter — steps 2 to 4 of
+the order in the design doc. Step 1 is useful on its own (*"what am I actually
+eligible for?"*), and a `find_opportunities` tool that cannot yet search would
+be the thing `CLAUDE.md` already forbids: *"a search nobody wired is not a
+capability, and listing it would promise something the machine cannot do."*
+
+### 24 September (later) — a fact goes into the Spine whole.
+
+Picked up from the previous session's own handoff, which recorded
+`store_record` dropping `scope`, `origin` and `pinned` and left it alone to
+keep the embedder change narrow. Reading it found eight fields rather than
+three, and **two more methods on the same file with the same defect**, both
+worse than the one that was reported.
+
+The shape is one mistake repeated: *a record rebuilt field by field from
+another record.* It has to be revisited every time `MemoryRecord` gains a
+field, nothing fails when it is not, and the fields that go missing are the
+ones added most recently — which here means the ones that carry the rules.
+
+| Where | Dropped | What that did |
+|---|---|---|
+| `store_record` | 8 — `scope`, `origin`, `pinned`, `superseded_by`, `superseded_at`, `valid_from`, `valid_until`, `recalled_in` | A fact landed in `global` whatever project it belonged to; a corrected fact came back standing |
+| `update_importance` | 9 — those, plus `embedded_by` | **Runs unattended.** `reinforce` on recall, `apply_decay` on a timer — a background task nudging a float rewrote the fact's permissions and blanked yesterday's embedder stamp |
+| `correct()`'s replacement | `scope`, `origin`, `recalled_in` | Rule 4's own path breaking rule 7i: fixing a rate on a client's contract moved the fact out of that project and into the store that is never shared, and re-attributed a passage from the user's document to something they had merely said |
+
+`ConversationHistory.store_record` and `EpisodicMemory.store_record` were a
+fourth instance wearing different clothes — they unpacked the record into
+`store()`, which *builds a new one*, so the id the caller held was not the id
+of the fact that had been written. Both now delegate to the runtime, and
+`store()` itself builds a record and hands it to `store_record`: **one path a
+fact takes into the Spine.** There were two and they did not agree about what
+a fact carries.
+
+Every rebuild is now `dataclasses.replace`, so a field added tomorrow is
+carried by code written today.
+
+The test is the part worth keeping. Asserting "these eight fields survive" is
+the same enumeration restated somewhere it will go equally stale, so
+`test_every_field_the_caller_set_comes_back` walks `dataclasses.fields` and
+asserts that **nothing the caller set changed**, with the two the runtime is
+allowed to fill in named explicitly. Checked against the old code: 8 of the
+12 tests fail, which is what earns them.
+
+`backend/tests/test_a_stored_record_keeps_every_field.py` (12). Measured with
+**no Ollama and no GPU** — this is the cloud session, so the suite takes the
+branch that runs when no models are discovered.
 
 ### 24 September — the models are current, a vector says who made it, and a picture can be worked from.
 

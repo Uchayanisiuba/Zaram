@@ -34,12 +34,19 @@ DEFAULT_DB_NAME = "projects.db"
 
 
 class ProjectType(str, Enum):
-    """What kind of work this is, which is what activates a pack.
+    """What kind of work this is — which changes one thing, not everything.
 
-    `CLAUDE.md`: "Projects have a type, chosen once at creation, and that choice
-    activates the pack." Chosen at creation because that is the only moment the
-    user actually knows — and because rule 7e forbids asking a question the
-    system could answer from behaviour, which this one cannot be.
+    `CLAUDE.md` says "projects have a type, chosen once at creation, and that
+    choice activates the pack", and in this codebase that is true of exactly one
+    member. `CODING` is read by `main._apply_project_root` to point the code
+    pack at a repository. Every other pack registers its tools unconditionally
+    at boot, so the model reaches them from the *request*, whatever the project
+    is called.
+
+    That is the right shape and the list below is kept short to protect it: a
+    type per vertical would be a wall in front of asking for something, and a
+    label that gates nothing while appearing to gate something is worse than no
+    label. See the note above `GENERAL`.
 
     `general` exists so the question is answerable by someone who does not want
     to decide yet. A required choice at creation would be a wall in front of the
@@ -51,15 +58,22 @@ class ProjectType(str, Enum):
     CODING = "coding"
     THREE_D = "3d"
     MCP = "mcp"
-    #: The job hunt — postings read into facts, closing dates as obligations,
-    #: letters written from what the last ones said. `backend/packs/jobs`.
+    #: **No vertical types, and that is a decision — 28 September 2026.**
     #:
-    #: A type rather than a flag because it is what activates the pack, and a
-    #: project rather than a global setting because a hunt has a beginning and
-    #: an end: the facts about *which* roles, *which* studios and *what was
-    #: sent* belong to it, and scoping them globally would mix one hunt's
-    #: rejections into the next one's letters.
-    JOB_HUNT = "job_hunt"
+    #: Two sessions each added one: `JOB_HUNT` here, `JOBS` and `GRANTS` on a
+    #: cloud branch, two days apart and neither aware of the other. Both are
+    #: dropped, because the question they answer is one the product should not
+    #: ask. Zaram is asked to find a role, check a grant's eligibility or draft
+    #: a letter *in a request*, and it should do it because the request said so
+    #: — not because somebody chose the right label when they made the project.
+    #:
+    #: **The code was already on this side.** Every pack's tools are registered
+    #: unconditionally in `core.bootstrapper`, so `record_job_posting` and
+    #: `check_eligibility` are reachable with no project open at all. `CODING`
+    #: is the only member that changes anything: `main._apply_project_root`
+    #: reads it to set the active repository. A vertical member here would have
+    #: been a label that gated nothing while looking like it gated something,
+    #: which is the more expensive kind of wrong.
 
 
 class UnknownProject(KeyError):

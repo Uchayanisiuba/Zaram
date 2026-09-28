@@ -21,7 +21,10 @@ What is here, and what reaches it
   way in has to be something the model can call inside the loop.
 * `letter.py` — the **output templates**, covering letter and follow-up, as
   `artifacts` blocks so they go through the one document pipeline.
-* `ProjectType.JOB_HUNT` — what activates the pack.
+* No project type. The tools register at boot and the model reaches them
+  from the request — see `projects.records.ProjectType`, which gates only
+  `coding`. This line used to name a `JOB_HUNT` member and claim it
+  activated the pack; it never did, and it was dropped on 28 September 2026.
 
 The **routing exemplars**, the fourth of the four, are not here yet and that
 is said rather than implied: the tool's description is doing that work for

@@ -232,7 +232,28 @@ class TestTheBootCanActuallyReachIt:
         assert "JobTools(" in source
         assert "JOBS_SERVER" in source
 
-    def test_the_project_type_exists_so_the_pack_can_be_activated(self):
+    def test_the_pack_needs_no_project_type_to_be_reachable(self):
+        """`JOB_HUNT` is gone, and this asserts why that cost nothing.
+
+        The type was added on the belief — stated in its own docstring — that it
+        was "what activates the pack". It never was. `ProjectType` gates one
+        thing in this backend: `CODING`, which `main._apply_project_root` reads
+        to point the code pack at a repository. Every pack's tools are
+        registered unconditionally at boot, so the model reaches
+        `record_job_posting` from the *request*, with no project open and
+        whatever the project is called.
+
+        Asserted from both ends, because either alone would pass while the
+        property was broken: no vertical member exists, and the registration
+        that makes the pack reachable is not guarded by one.
+        """
+        import inspect
+
+        from core import bootstrapper
         from projects import ProjectType
 
-        assert ProjectType("job_hunt") is ProjectType.JOB_HUNT
+        assert not {"job_hunt", "jobs", "grants"} & {t.value for t in ProjectType}
+
+        source = inspect.getsource(bootstrapper)
+        registration = source[source.index("JobTools(") - 2000 : source.index("JobTools(")]
+        assert "ProjectType" not in registration
