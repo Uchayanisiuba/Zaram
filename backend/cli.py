@@ -46,7 +46,7 @@ dead-but-tested shape this repository has paid for fifteen times.
 What *was* wrong was treating that as an argument against a name at all. It is
 an argument about packaging. A launcher needs no packaging, and without one the
 usage line read ``Usage: cli.py`` while the way to run it was
-``cd backend && venv\Scripts\python.exe -m cli`` — which is a memory nobody
+``cd backend && venv/Scripts/python.exe -m cli`` — which is a memory nobody
 reaches. Named **ZCode** by the maintainer, 29 September 2026.
 
 ``prog_name`` is passed explicitly at the call. Typer's ``name=`` sets the

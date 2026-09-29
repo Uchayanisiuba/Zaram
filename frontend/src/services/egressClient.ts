@@ -80,6 +80,16 @@ export interface EgressPolicySnapshot {
    */
   classRules: Record<string, Partial<Record<EgressDataClass, PolicyMode>>>;
   hostsSeen: string[];
+  /** Hosts Zaram can draw at, contacted or not.
+   *
+   *  Listed so the image grant has somewhere to be given. A provider refused
+   *  at `availability()` never reaches the gate, so it never enters the log
+   *  and never appears in `hostsSeen` — which left the image refusal's own
+   *  remedy pointing at a row that did not exist.
+   *
+   *  Listing is not permitting: these carry no rule and the default is still
+   *  deny. `needsKey` is false for the one that needs no account at all. */
+  canDrawAt: Array<{ host: string; what: string; needsKey: boolean }>;
   /** Contacted at least once but never ruled on. What the pane should offer. */
   hostsWithoutARule: string[];
 }
@@ -182,6 +192,15 @@ export async function fetchEgressPolicy(): Promise<EgressPolicySnapshot> {
       (raw.class_rules as Record<string, Partial<Record<EgressDataClass, PolicyMode>>>) ?? {},
     hostsSeen: (raw.hosts_seen as string[]) ?? [],
     hostsWithoutARule: (raw.hosts_without_a_rule as string[]) ?? [],
+    // An older backend does not send it, and an empty list is the honest
+    // reading of that rather than a claim that Zaram can draw nowhere.
+    canDrawAt: (Array.isArray(raw.can_draw_at) ? raw.can_draw_at : []).map(
+      (d: Record<string, unknown>) => ({
+        host: String(d.host ?? ''),
+        what: String(d.what ?? ''),
+        needsKey: Boolean(d.needs_key),
+      }),
+    ),
   };
 }
 

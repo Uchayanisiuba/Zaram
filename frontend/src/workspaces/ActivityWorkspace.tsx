@@ -232,7 +232,22 @@ export default function ActivityWorkspace({ onOpenConversation }: ActivityWorksp
     }
   };
 
-  const hosts = policy ? [...new Set([...policy.hostsSeen, ...Object.keys(policy.rules)])].filter((h) => h && h !== '-') : [];
+  // Hosts Zaram can *draw* at are listed whether or not they have been
+  // contacted. Without this, the one provider that needs no account could
+  // never be granted: it is refused before it sends, so it never reaches the
+  // log that this list is built from, and the refusal's own remedy named a
+  // row that was not on the screen.
+  const canDrawAt = policy?.canDrawAt ?? [];
+  const drawsAt = new Set(canDrawAt.map((d) => d.host));
+  const hosts = policy
+    ? [
+        ...new Set([
+          ...policy.hostsSeen,
+          ...Object.keys(policy.rules),
+          ...canDrawAt.map((d) => d.host),
+        ]),
+      ].filter((h) => h && h !== '-')
+    : [];
 
   return (
     <div className="flex-1 flex overflow-hidden">
@@ -324,8 +339,16 @@ export default function ActivityWorkspace({ onOpenConversation }: ActivityWorksp
                   `spine` deliberately has no row. It exists in the policy and
                   nothing sends it yet, so a switch for it would be an
                   invented value on the one surface whose job is to be
-                  trusted. It gets a control when something can trip it. */}
-              {policy?.rules[h] && (
+                  trusted. It gets a control when something can trip it.
+
+                  **And a destination Zaram can draw at gets the row without a
+                  host rule.** The reasoning above is right about an arbitrary
+                  host and inverted for this one: `policy.decide` consults the
+                  class rules whenever the host rule is not `deny`, so here the
+                  control governs precisely the thing it is for. Without this
+                  the image refusal named a screen, the screen had no row, and
+                  the only free way to draw a picture was unreachable. */}
+              {(policy?.rules[h] || drawsAt.has(h)) && (
                 <div className="flex items-center gap-1 mt-1">
                   <span
                     className="text-xs shrink-0 w-10"

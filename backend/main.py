@@ -2382,6 +2382,21 @@ async def egress_verify():
         }
 
 
+def _drawing_destinations():
+    """Image hosts, or `[]` when the imaging module cannot be read.
+
+    Never an exception: the privacy pane is the one surface whose job is to be
+    trusted, and it must render whatever else is broken.
+    """
+    try:
+        from imaging.cloud import drawing_destinations
+
+        return drawing_destinations()
+    except Exception:  # noqa: BLE001
+        logger.debug("Egress: could not list drawing destinations", exc_info=True)
+        return []
+
+
 @app.get("/egress/policy")
 async def egress_policy():
     """Per-source rules, and every host ever contacted.
@@ -2406,6 +2421,15 @@ async def egress_policy():
         "class_rules": gate.policy.class_rules(),
         "hosts_seen": seen,
         "hosts_without_a_rule": [h for h in seen if h not in rules and h != "-"],
+        # **Somewhere to say yes.** Hosts Zaram can draw at, contacted or not.
+        # A provider refused at `availability()` never reaches the gate, so it
+        # never enters the log and never appears above — which made the image
+        # refusal's own remedy, "allow images to image.pollinations.ai under
+        # Activity → Destinations", point at a row that was not there.
+        #
+        # Listing is not permitting. The default is still deny and these carry
+        # no rule; the entry exists so there is a control to press.
+        "can_draw_at": _drawing_destinations(),
     }
 
 

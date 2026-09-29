@@ -103,6 +103,41 @@ SOURCE = "images"
 _BY_WHAT_IT_COSTS = ("pollinations", "together", "nvidia_nim", "fal")
 
 
+def drawing_destinations() -> List[Dict[str, str]]:
+    """Every host Zaram can draw at, whether or not it has been contacted.
+
+    **So there is somewhere to say yes.** `GET /egress/policy` lists hosts
+    *seen*, and a provider refused at `availability()` is never contacted —
+    so Pollinations, the rung that needs no account at all, could never appear
+    on the screen its own remedy sends people to. A remedy pointing at a
+    control that does not exist is worse than no remedy: the person spends the
+    trip finding out.
+
+    Listing them is not permitting them. The default stays deny and the entry
+    exists so a person has something to press — `CLAUDE.md`'s *disabled
+    capabilities are visible, not silent*, applied to a destination rather
+    than a feature. Seeding an actual policy rule was considered and rejected:
+    a rule for a host nobody named is a decision made on somebody's behalf,
+    and rule 7j says a host nobody named is still denied.
+
+    ``needs_key`` is what the interface uses to sort the offer by what it
+    costs the person, and it is why Pollinations reads differently from fal.
+    """
+    out: List[Dict[str, str]] = []
+    for provider in CLOUD_PROVIDERS:
+        host = provider.host
+        if not host or any(d["host"] == host for d in out):
+            continue
+        out.append(
+            {
+                "host": host,
+                "what": provider.name,
+                "needs_key": "" if isinstance(provider, PollinationsImages) else "yes",
+            }
+        )
+    return out
+
+
 def _connection(provider_id: str):
     """The stored connection for a catalogue id, or ``None``."""
     from providers import cloud_config

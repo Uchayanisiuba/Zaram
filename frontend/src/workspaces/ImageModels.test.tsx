@@ -16,7 +16,7 @@
  * renders and calls nothing is how a button does nothing for a fortnight while
  * its unit tests pass. The wiring is the claim.
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 import SettingsWorkspace from './SettingsWorkspace';
