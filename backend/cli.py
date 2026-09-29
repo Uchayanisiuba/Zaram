@@ -4,7 +4,7 @@ Why this exists, and why it is *not* a coding assistant
 ------------------------------------------------------
 `CLAUDE.md`'s rule 7 claims the memory is exportable and outlives the
 provider — *and Zaram itself*. A claim that strong is much stronger when the
-memory can be piped. `zaram recall "the Northwind rate" | jq` is that claim
+memory can be piped. `zcode recall "the Northwind rate" | jq` is that claim
 made operable, and no competitor can answer it: their memory is in their
 client, in their format, and gone when the client is switched.
 
@@ -31,17 +31,28 @@ Two things a person will ask for are therefore **absent on purpose**:
 Naming them here rather than leaving them missing is the point: a person who
 wants them should find the reason, not a gap.
 
-How it is run, and why there is no `zaram` command yet
-------------------------------------------------------
-``python -m cli`` from ``backend/``. There is deliberately **no**
-``[project.scripts]`` entry: the root ``pyproject.toml`` has no
-``build-system``, because Zaram ships as an Electron app with a bundled
-backend and is never ``pip install``-ed. A console script declared there would
-be metadata nothing reads — the same dead-but-tested shape this repository has
-paid for fifteen times.
+How it is run — `zcode`
+-----------------------
+``zcode`` from anywhere, via the launcher at the repository root (`zcode.cmd`
+on Windows, `zcode` elsewhere). Both do the same three things: find the
+bundled interpreter, change to ``backend/``, and run ``-m cli``.
 
-Giving it a real name is a packaging decision that belongs with the installer,
-not with this file.
+**There is still no ``[project.scripts]`` entry, and that reasoning is
+unchanged**: the root ``pyproject.toml`` has no ``build-system``, Zaram ships
+as an Electron app with a bundled backend and is never ``pip install``-ed, so a
+console script declared there would be metadata nothing reads — the same
+dead-but-tested shape this repository has paid for fifteen times.
+
+What *was* wrong was treating that as an argument against a name at all. It is
+an argument about packaging. A launcher needs no packaging, and without one the
+usage line read ``Usage: cli.py`` while the way to run it was
+``cd backend && venv\Scripts\python.exe -m cli`` — which is a memory nobody
+reaches. Named **ZCode** by the maintainer, 29 September 2026.
+
+``prog_name`` is passed explicitly at the call. Typer's ``name=`` sets the
+app's own name and Click still takes the usage line from ``sys.argv[0]``,
+which under ``-m cli`` is the script path. Setting one without the other is
+how it came to introduce itself as a filename.
 
 The credential
 --------------
@@ -77,8 +88,12 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 
+#: What the command calls itself in usage and errors. See the docstring:
+#: Typer's `name=` above is not what Click prints.
+PROGRAM = "zcode"
+
 #: Written to stderr, always. Everything a person reads goes here so that
-#: stdout stays a clean machine-readable stream — `zaram recall x --json | jq`
+#: stdout stays a clean machine-readable stream — `zcode recall x --json | jq`
 #: must not have a table in it.
 err = Console(stderr=True)
 out = Console()
@@ -317,8 +332,13 @@ def projects(as_json: bool = typer.Option(False, "--json")) -> None:
 
 
 def main() -> None:
-    app()
+    app(prog_name=PROGRAM)
 
 
 if __name__ == "__main__":
-    sys.exit(app())
+    # **Through `main`, not around it.** This called `app()` directly, so
+    # `main`'s `prog_name` never applied on the one path anybody uses —
+    # `python -m cli`, which is what the `zcode` launcher runs. Two halves
+    # each correct on their own, with nothing exercising the join, which is
+    # this repository's most expensive recurring shape.
+    sys.exit(main())

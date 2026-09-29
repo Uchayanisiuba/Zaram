@@ -438,6 +438,18 @@ class ImagesRuntime(Runtime):
 
     # ------------------------------------------------------------- the card
 
+    @staticmethod
+    def _cloud_route(provider) -> str:
+        """Kept as a seam so the refusal above reads as one sentence."""
+        route = getattr(provider, "the_cloud_route", None)
+        try:
+            return route() if callable(route) else ""
+        except Exception:  # noqa: BLE001
+            # An offer is the nice part. A provider that cannot describe its
+            # own remedy must not turn a refusal into a traceback.
+            logger.debug("Images: could not name a cloud route", exc_info=True)
+            return ""
+
     async def _make_room(self, say, *, quiet: bool = False) -> Optional[Dict[str, Any]]:
         # ``quiet``: the caller has somewhere else to draw, so a card that
         # cannot take the load is reported back rather than emptied or
@@ -539,9 +551,9 @@ class ImagesRuntime(Runtime):
                 f"only {_gb(free)} GB is free. {named}, and Zaram cannot unload "
                 "it."
             )
-            remedy = (
-                "Unload it from that app, or connect an image provider, and "
-                "ask again."
+            remedy = _with_the_cloud_route(
+                self._provider,
+                "Unload it from that app.",
             )
         else:
             error = (
@@ -549,9 +561,9 @@ class ImagesRuntime(Runtime):
                 f"only {_gb(free)} GB is free — something else on this machine "
                 "is using the rest."
             )
-            remedy = (
-                "Close what is using the card, or connect an image provider, "
-                "and ask again."
+            remedy = _with_the_cloud_route(
+                self._provider,
+                "Close what is using the card.",
             )
         self._note_preflight(
             free_bytes=free,
@@ -608,6 +620,26 @@ def _speaker(sink: Any):
             return False
 
     return say
+
+
+def _with_the_cloud_route(provider, unblock: str) -> str:
+    """What would free the card, then where else this could be drawn.
+
+    **A full card is the moment the offer is worth making**, and until now the
+    sentence said "or connect an image provider" — which names no provider, no
+    cost and no screen, and so is true and useless. Rule 7h asks for the offer
+    at the moment of doubt; this is that moment, and the provider ranks the
+    options by what each costs the person rather than by picture quality.
+    """
+    route = ImagesRuntime._cloud_route(provider)
+    if route:
+        # The route carries its own "and ask again", so `unblock` must not —
+        # otherwise the sentence tells somebody to ask again twice.
+        return f"{unblock} Or draw this one in the cloud — {route}"
+    return (
+        f"{unblock} Or connect an image provider under Settings → Providers, "
+        "and ask again."
+    )
 
 
 def _gb(n: Optional[int]) -> str:

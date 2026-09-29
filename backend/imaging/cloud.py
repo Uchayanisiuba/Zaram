@@ -90,6 +90,18 @@ FIRST_TIMEOUT_SECONDS = 45.0
 #: What the log names as the sender.
 SOURCE = "images"
 
+#: Cloud routes ordered by what setting one up costs **the person**, cheapest
+#: first: a destination to allow (no account at all), then a free key, then a
+#: paid one. Read only by `RoutedImageProvider.the_cloud_route`, which is the
+#: offer made when the card is full and nothing else can draw.
+#:
+#: Deliberately not ordered by picture quality. An offer that names the paid
+#: provider first reads as Zaram selling something, and rule 1 — never buy
+#: inference, the user brings the key — is the same instinct in another
+#: register. An id missing from this tuple sorts last rather than being
+#: dropped, so a provider added later is still offered.
+_BY_WHAT_IT_COSTS = ("pollinations", "together", "nvidia_nim", "fal")
+
 
 def _connection(provider_id: str):
     """The stored connection for a catalogue id, or ``None``."""
@@ -756,6 +768,33 @@ class RoutedImageProvider:
                 "Settings → Providers, then allow images to it under Activity → Destinations."
             )
         return Availability(ok=False, reason=" ".join(r for r in reasons if r), remedy=" ".join(remedies))
+
+    def the_cloud_route(self) -> str:
+        """The cheapest cloud route not yet set up, as one sentence, or ``""``.
+
+        **Rule 7h, at the one moment it applies.** Somebody whose card is full
+        has just been told a picture is impossible; that is when naming the
+        alternative is help rather than an advertisement, and it is why this
+        is not a banner in Settings.
+
+        Ranked by **what setting it up costs the person** — a destination to
+        allow, then a free key, then a paid one — and never by picture
+        quality. Naming the paid provider first would read as Zaram selling
+        something, which rule 1 refuses in a different register.
+
+        Empty when one is already usable: it simply was not picked for this
+        request, and there is nothing to offer.
+        """
+        rank = {pid: i for i, pid in enumerate(_BY_WHAT_IT_COSTS)}
+        for provider in sorted(
+            self._cloud, key=lambda p: rank.get(p.provider_id, len(rank))
+        ):
+            answer = provider.availability()
+            if answer.ok:
+                return ""
+            if answer.remedy:
+                return answer.remedy
+        return ""
 
     @property
     def vram_needed_bytes(self) -> Optional[int]:
