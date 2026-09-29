@@ -317,7 +317,16 @@ class TogetherImages(CloudImageProvider):
     provider_id = "together"
     name = "flux-schnell · Together"
     endpoint = "https://api.together.xyz/v1/images/generations"
-    key_hint = "Add a Together key under Settings → Providers; FLUX.1 schnell is free there."
+    #: **Not "free there" any more.** That is what this said, and the module
+    #: docstring above already records the correction — *"Together now asks for
+    #: a card"* — so the hint was sending somebody to a signup that ends at a
+    #: payment form, while describing it as the free option. A remedy that
+    #: names a cost wrongly is worse than one that names none, because the
+    #: person spends the trip finding out.
+    key_hint = (
+        "Add a Together key under Settings → Providers. Together asks for a card "
+        "at signup; FLUX.1 schnell itself is not charged per image."
+    )
     model = "black-forest-labs/FLUX.1-schnell-Free"
 
     def _body(self, request: ImageRequest, seed: int) -> Dict[str, Any]:
