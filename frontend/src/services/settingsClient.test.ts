@@ -16,6 +16,7 @@ import {
   fetchRoutingSettings,
   fetchImageSetting,
   setImageLocality,
+  setImageModel,
   updateRoutingSettings,
 } from './settingsClient';
 
@@ -242,5 +243,79 @@ describe('where pictures are drawn first', () => {
     expect(lastCall().url).toContain('/images/setting');
     expect(lastCall().body).toEqual({ prefer: 'local' });
     expect(setting.answers).toBe('flux-schnell');
+  });
+});
+
+/**
+ * **What is installed, including what is not being used.**
+ *
+ * Reported 29 September 2026: *"I installed Qwen Image as a replacement, seems
+ * like it didn't replace."* It had not. Discovery took the first usable folder
+ * in sorted order, `flux1-schnell-nf4` sorts before `qwen-image`, and every
+ * surface in the product agreed to say nothing about it.
+ *
+ * So the transport carries the unusable ones too. A list of only what works
+ * would have been exactly as silent as the bug.
+ */
+describe('what is in the image model folder', () => {
+  it('carries the models that cannot be used, with their reason', async () => {
+    fetchMock.mockResolvedValue(
+      json({
+        prefer: 'local',
+        local_ok: true,
+        local: {
+          drawing_with: 'flux1-schnell-nf4',
+          chosen: null,
+          installed: [
+            { name: 'flux1-schnell-nf4', pipeline: 'FluxPipeline', usable: true, why_not: '' },
+            {
+              name: 'qwen-image',
+              pipeline: 'QwenImagePipeline',
+              usable: false,
+              why_not: 'QwenImagePipeline — Zaram draws locally with FLUX only',
+            },
+          ],
+        },
+        cloud: [],
+        answers: 'flux1-schnell-nf4',
+      }),
+    );
+
+    const setting = await fetchImageSetting();
+    expect(setting.local.drawingWith).toBe('flux1-schnell-nf4');
+    expect(setting.local.chosen).toBeNull();
+    expect(setting.local.installed).toHaveLength(2);
+    expect(setting.local.installed[1]).toMatchObject({
+      name: 'qwen-image',
+      usable: false,
+    });
+    expect(setting.local.installed[1].whyNot).toContain('FLUX');
+  });
+
+  it('reports nothing rather than claiming nothing is installed, on an older backend', async () => {
+    // `local` absent means the backend never spoke, which is not the same as
+    // "no models". Rendering it as a claim would be inventing a value — the
+    // thing `CLAUDE.md` forbids on a status surface.
+    fetchMock.mockResolvedValue(json({ prefer: 'local', local_ok: true, cloud: [], answers: null }));
+    const setting = await fetchImageSetting();
+    expect(setting.local.installed).toEqual([]);
+    expect(setting.local.drawingWith).toBeNull();
+  });
+
+  it('sends the pick as the one field, and can clear it back to the first', async () => {
+    // A fresh Response per call: a body reads once, so reusing one object
+    // fails the second assertion for a reason that has nothing to do with
+    // what is being tested.
+    const body = { prefer: 'local', local_ok: true, cloud: [], answers: 'qwen-image' };
+    fetchMock.mockImplementation(async () => json(body));
+
+    await setImageModel('qwen-image');
+    expect(lastCall().url).toContain('/images/setting');
+    expect(lastCall().body).toEqual({ model: 'qwen-image' });
+
+    // The empty string is meaningful: "whichever is first". Omitting the field
+    // cannot say that, which is why the backend reads `''` rather than null.
+    await setImageModel('');
+    expect(lastCall().body).toEqual({ model: '' });
   });
 });

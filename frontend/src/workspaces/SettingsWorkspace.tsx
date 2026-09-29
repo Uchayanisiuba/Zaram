@@ -102,6 +102,7 @@ import {
   fetchRoutingSettings,
   fetchWebSearch,
   fetchImageSetting,
+  setImageModel,
   setImageLocality,
   type ImageSetting,
   forgetEgressPolicyForHost,
@@ -1613,6 +1614,69 @@ export default function SettingsWorkspace() {
                     </li>
                   ))}
                 </ul>
+                {/* **What is in the model folder, including what is not being
+                    used.** Reported 29 September 2026: a second model was
+                    installed to replace the first, nothing used it, and nothing
+                    anywhere said so — discovery took the first usable folder in
+                    sorted order and the first was still the old one. A list of
+                    only what works would have been just as silent. */}
+                {(imageSetting?.local.installed.length ?? 0) > 0 && (
+                  <div className="flex flex-col gap-1" data-testid="image-models">
+                    <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
+                      On this machine
+                    </span>
+                    <ul className="text-xs leading-relaxed flex flex-col gap-1">
+                      {imageSetting!.local.installed.map((m) => {
+                        const drawing = m.name === imageSetting!.local.drawingWith;
+                        return (
+                          <li
+                            key={m.name}
+                            data-testid={`image-model-${m.name}`}
+                            style={{
+                              color: drawing
+                                ? 'var(--color-emerald)'
+                                : m.usable
+                                  ? 'var(--color-text)'
+                                  : 'var(--color-text-muted)',
+                            }}
+                          >
+                            {m.name}
+                            {drawing
+                              ? ' — drawing with this'
+                              : m.whyNot
+                                ? ` — ${m.whyNot}`
+                                : ' — installed, not in use'}
+                          </li>
+                        );
+                      })}
+                    </ul>
+                    {/* Offered only when there is a choice to make. One model
+                        and a picker is a question with one answer. */}
+                    {imageSetting!.local.installed.filter((m) => m.usable).length > 1 && (
+                      <label className="text-xs flex items-center gap-2">
+                        <span style={{ color: 'var(--color-text-muted)' }}>Draw with</span>
+                        <select
+                          data-testid="image-model-pick"
+                          value={imageSetting!.local.chosen ?? ''}
+                          onChange={(e) =>
+                            void run('image-model', async () =>
+                              setImageSettingState(await setImageModel(e.target.value)),
+                            )
+                          }
+                        >
+                          <option value="">Whichever is first</option>
+                          {imageSetting!.local.installed
+                            .filter((m) => m.usable)
+                            .map((m) => (
+                              <option key={m.name} value={m.name}>
+                                {m.name}
+                              </option>
+                            ))}
+                        </select>
+                      </label>
+                    )}
+                  </div>
+                )}
               </div>
             }
           />

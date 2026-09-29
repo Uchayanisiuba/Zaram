@@ -57,6 +57,7 @@ import logging
 import os
 import secrets
 import threading
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, List, Optional
 
@@ -83,6 +84,18 @@ MODEL_DIR_ENV = "ZARAM_IMAGE_MODEL_DIR"
 #: directory is a pipeline" — the same role `model_index.json` played in the
 #: SDXL provider's config check, now doing the whole job.
 PIPELINE_INDEX = "model_index.json"
+
+#: The pipeline classes this provider can actually construct.
+#:
+#: `model_index.json` names the class diffusers will build — `FluxPipeline` for
+#: the model this file is written around. **Matched on the prefix**, so a FLUX
+#: variant (img2img, inpainting, a fork with a ControlNet) is still recognised
+#: while a pipeline from another family is not.
+#:
+#: Read rather than inferred from the folder's name, because the folder's name
+#: is whatever the person typed when they downloaded it. The index is what
+#: diffusers will act on.
+DRIVES = "Flux"
 
 #: The repository the weights come from, named here so the availability remedy
 #: can print something the user can act on rather than "install a model".
@@ -148,34 +161,146 @@ def default_model_dir() -> Path:
     return data_dir() / "models" / "image"
 
 
-def find_model() -> Optional[Path]:
+@dataclass(frozen=True)
+class Installed:
+    """A pipeline directory on disk, and whether it can be drawn with here."""
+
+    #: Where it is.
+    path: Path
+    #: The directory's own name. What a person recognises and picks by.
+    name: str
+    #: The class `model_index.json` names, or ``None`` when it cannot be read.
+    pipeline: Optional[str]
+    #: Every component the index names has its weights beside it.
+    complete: bool
+    #: This provider can construct that class.
+    drivable: bool
+
+    @property
+    def usable(self) -> bool:
+        return self.complete and self.drivable
+
+    def why_not(self) -> str:
+        """One sentence a person can act on. Empty when it is usable.
+
+        Two different absences with two different fixes: a download to finish,
+        or a model that was never going to run here. Collapsing them into "not
+        available" is what sent somebody looking for a corrupt download when
+        what they had was the wrong family.
+
+        **The family is answered before the download**, because finishing a
+        download for a pipeline this cannot construct is an evening spent on a
+        model that will still not draw. The leftover `sdxl-config` in the
+        maintainer's own folder is exactly that — incomplete *and* the wrong
+        family — and only the second fact is worth telling anybody.
+        """
+        if not self.drivable:
+            return f"{self.pipeline or 'an unrecognised pipeline'} — Zaram draws locally with FLUX only"
+        if not self.complete:
+            return "only partly downloaded — its index is here but some weights are not"
+        return ""
+
+
+def pipeline_class(candidate: Path) -> Optional[str]:
+    """What diffusers would construct from this directory, or ``None``.
+
+    A malformed or missing index answers ``None`` rather than raising, for the
+    same reason `_is_complete` does: the caller is deciding whether to offer,
+    and a directory nobody can parse is not something to offer.
+    """
+    import json
+
+    try:
+        index = json.loads((candidate / PIPELINE_INDEX).read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    if not isinstance(index, dict):
+        return None
+    named = index.get("_class_name")
+    return named if isinstance(named, str) and named else None
+
+
+def _describe(candidate: Path) -> Installed:
+    named = pipeline_class(candidate)
+    return Installed(
+        path=candidate,
+        name=candidate.name,
+        pipeline=named,
+        complete=_is_complete(candidate),
+        drivable=bool(named and named.startswith(DRIVES)),
+    )
+
+
+def installed_models() -> List[Installed]:
+    """Every pipeline directory Zaram can see, usable or not, in sorted order.
+
+    **Everything found, not only what can be drawn with.** The failure this
+    exists to end is a model sitting in the folder being silently passed over:
+    somebody installed a second one expecting it to replace the first, and was
+    told nothing at all, because the scan took the first usable directory in
+    sorted order and the first was still the old one.
+
+    Sorted so the order is stable across runs — a directory with two pipelines
+    in it must not draw with a different one each launch.
+    """
+    named = os.getenv(MODEL_ENV)
+    if named:
+        candidate = Path(named).expanduser()
+        return [_describe(candidate)] if (candidate / PIPELINE_INDEX).is_file() else []
+
+    directory = default_model_dir()
+    if not directory.is_dir():
+        return []
+
+    # The directory may itself be a pipeline, or may contain them. Both are
+    # reasonable things for a user to have arranged and neither is worth
+    # refusing over.
+    if (directory / PIPELINE_INDEX).is_file():
+        return [_describe(directory)]
+
+    return [
+        _describe(child)
+        for child in sorted(p for p in directory.iterdir() if p.is_dir())
+        if (child / PIPELINE_INDEX).is_file()
+    ]
+
+
+def find_model(prefer: Optional[str] = None) -> Optional[Path]:
     """The pipeline directory to draw with, or ``None``.
 
     ``None`` is a real answer and not a failure: no image model installed is
     the state most machines are in, and the caller's job is to say so and offer
     rather than to raise.
+
+    **`prefer` is the user's pick by folder name, honoured only while it is
+    still usable.** A model chosen in Settings and later deleted falls back to
+    whatever is installed rather than leaving the person unable to draw — the
+    same posture `default_model` takes when the model it names has gone.
     """
-    named = os.getenv(MODEL_ENV)
-    if named:
-        candidate = Path(named).expanduser()
-        return candidate if _looks_installed(candidate) else None
-
-    directory = default_model_dir()
-    if not directory.is_dir():
+    usable = [model for model in installed_models() if model.usable]
+    if not usable:
         return None
+    if prefer:
+        for model in usable:
+            if model.name == prefer:
+                return model.path
+    return usable[0].path
 
-    # The directory may itself be a pipeline, or may contain them. Both are
-    # reasonable things for a user to have arranged and neither is worth
-    # refusing over.
-    if _looks_installed(directory):
-        return directory
 
-    # Sorted so the choice is stable across runs. A directory with two
-    # pipelines in it must not draw with a different one each launch.
-    for candidate in sorted(p for p in directory.iterdir() if p.is_dir()):
-        if _looks_installed(candidate):
-            return candidate
-    return None
+def _chosen_model() -> Optional[str]:
+    """The folder the user picked in Settings, when they have picked one.
+
+    Imported inside the function and failing to ``None``, because discovery
+    must work in a test and on a machine whose settings file has not been
+    written yet. A preference that cannot be read is no preference, never an
+    error — and never a reason to draw nothing.
+    """
+    try:
+        from core.user_settings import get_user_settings
+
+        return get_user_settings().image_model
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def _looks_installed(candidate: Path) -> bool:
@@ -374,8 +499,18 @@ class FluxProvider:
     @property
     def model(self) -> Optional[Path]:
         if self._model is None:
-            self._model = find_model()
+            self._model = find_model(_chosen_model())
         return self._model
+
+    def rediscover(self) -> None:
+        """Forget which directory was chosen, so the next question asks again.
+
+        Called when somebody picks a different model in Settings. Without it
+        the pick would not take effect until the app restarted, which reads as
+        the picker doing nothing — which is the failure this whole change is
+        about, moved one screen along.
+        """
+        self._model = None
 
     def capabilities(self) -> ImageCapabilities:
         """Words in, picture out.
@@ -419,16 +554,38 @@ class FluxProvider:
                 remedy="pip install bitsandbytes",
             )
         if self.model is None:
+            found = installed_models()
+
+            # **A model that is here and cannot be drawn with is named.** This
+            # is checked before the half-download branch below, because a
+            # complete Qwen pipeline has its index too and would otherwise be
+            # reported as an interrupted download — sending somebody to resume
+            # a fetch that finished, for a model that was never going to run
+            # here. Two absences, two fixes, and the wrong one costs an evening.
+            wrong_family = [m for m in found if m.complete and not m.drivable]
+            if wrong_family:
+                names = ", ".join(
+                    f"{m.name} ({m.pipeline or 'an unrecognised pipeline'})"
+                    for m in wrong_family
+                )
+                return Availability(
+                    ok=False,
+                    reason=(
+                        f"What is installed here is not something Zaram can draw "
+                        f"with: {names}. Locally it draws with FLUX only."
+                    ),
+                    remedy=(
+                        f"Put a FLUX.1 [schnell] pipeline in {default_model_dir()} "
+                        f"(from {SOURCE_REPO}, {SOURCE_SIZE}), or connect a provider "
+                        f"that serves the model you have under Settings → Providers."
+                    ),
+                )
+
             # **Half-installed says so.** An interrupted download leaves the
             # index and the small configs behind, and "no image model is
             # installed" would send a user to start a 13.4 GB fetch they have
             # mostly already done — where resuming costs them the remainder.
-            partial = default_model_dir()
-            half = partial.is_dir() and any(
-                (child / PIPELINE_INDEX).is_file()
-                for child in [partial, *(p for p in partial.iterdir() if p.is_dir())]
-            )
-            if half:
+            if found:
                 return Availability(
                     ok=False,
                     reason=(

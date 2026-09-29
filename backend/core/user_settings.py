@@ -198,6 +198,10 @@ class UserSettings:
         # Local first, as everything is: CLAUDE.md's "local is the fallback
         # for everything" is also its default. The person flips it.
         self._image_locality = ImageLocality.LOCAL
+        #: Which installed pipeline draws, by folder name. ``None`` means "the
+        #: first usable one", which is what every machine with exactly one
+        #: model wants and what nobody should have to choose.
+        self._image_model: Optional[str] = None
         # Whether a model that can think is asked to. On by default, because
         # the thinking is where a 27B earns its keep on a hard question; off
         # is for the person writing an email who does not want to wait 10–40 s
@@ -228,6 +232,26 @@ class UserSettings:
             self._image_locality = ImageLocality(value)
             self._save()
         return self._image_locality
+
+    @property
+    def image_model(self) -> Optional[str]:
+        return self._image_model
+
+    def set_image_model(self, name: Optional[str]) -> Optional[str]:
+        """Which installed pipeline draws, by folder name, or ``None`` for
+        whichever is first.
+
+        **Not validated against what is installed here.** A name is checked at
+        the moment it is used, by `find_model`, which falls back when the
+        folder has gone. Validating at write time would refuse a model on a
+        removable drive that happens to be unplugged, and would make the
+        setting a worse record of what the person actually chose.
+        """
+        cleaned = (name or "").strip() or None
+        with self._lock:
+            self._image_model = cleaned
+            self._save()
+        return self._image_model
 
     # ------------------------------------------------------------------ read
 
@@ -367,6 +391,7 @@ class UserSettings:
             "manner": self._manner,
             "voice": self._voice,
             "image_locality": self._image_locality.value,
+            "image_model": self._image_model,
             "thinking": self._thinking,
         }
 
@@ -495,6 +520,10 @@ class UserSettings:
         where = raw.get("image_locality")
         if where in {p.value for p in ImageLocality}:
             self._image_locality = ImageLocality(where)
+
+        drawer = raw.get("image_model")
+        if isinstance(drawer, str) and drawer.strip():
+            self._image_model = drawer.strip()
         # Anything else is left at the default rather than raising: a
         # preference file written by a newer version must not stop an older one
         # from starting.

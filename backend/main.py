@@ -5,7 +5,7 @@ import logging
 import os
 import time
 from dataclasses import dataclass
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from pathlib import Path
 
@@ -2612,6 +2612,36 @@ async def image_setting():
                 "transparent": caps.transparent,
             })
 
+    # **What is installed here, usable or not.** The half this endpoint never
+    # had: it could say whether this machine can draw and not what with, nor
+    # what else was sitting in the folder being passed over. Reported
+    # 29 September 2026 as "I installed a replacement and it didn't replace" —
+    # it had not, and every surface in the product agreed to say nothing.
+    from imaging.local_flux import installed_models
+
+    chosen = get_user_settings().image_model
+    try:
+        found = installed_models()
+    except Exception:  # noqa: BLE001
+        found = []
+    drawing_with = None
+    local = getattr(provider, "_local", None) if provider is not None else None
+    if local is not None and local.availability().ok:
+        drawing_with = local.describe()
+    local_models = {
+        "drawing_with": drawing_with,
+        "chosen": chosen,
+        "installed": [
+            {
+                "name": m.name,
+                "pipeline": m.pipeline,
+                "usable": m.usable,
+                "why_not": m.why_not(),
+            }
+            for m in found
+        ],
+    }
+
     # What the generator that would answer *now* can do beyond turning words
     # into a picture. The interface reads it to decide which affordances are
     # live: a "work from this picture" button that leads to a refusal is a
@@ -2627,6 +2657,7 @@ async def image_setting():
     return {
         "prefer": settings.image_locality.value,
         "local_ok": local_ok,
+        "local": local_models,
         "cloud": cloud,
         "can": can,
         "answers": provider.describe() if provider is not None and provider.availability().ok else None,
@@ -2634,22 +2665,44 @@ async def image_setting():
 
 
 class ImageSettingUpdate(BaseModel):
-    prefer: str
+    prefer: Optional[str] = None
+    #: Which installed pipeline draws, by folder name. An empty string clears
+    #: the choice back to "whichever is first", which is a thing somebody may
+    #: want and which `None` cannot express when the field is optional.
+    model: Optional[str] = None
 
 
 @app.post("/images/setting")
 async def set_image_setting(update: ImageSettingUpdate):
-    """Choose local or cloud first. Not a permission: a cloud provider still
-    needs its key and its image grant."""
+    """Choose local or cloud first, and which installed model draws locally.
+
+    Neither is a permission: a cloud provider still needs its key and its image
+    grant, and a local model still has to be one this machine can construct.
+    """
     from core.user_settings import ImageLocality, get_user_settings
 
-    try:
-        get_user_settings().set_image_locality(update.prefer)
-    except ValueError:
-        raise HTTPException(
-            status_code=400,
-            detail=f"prefer must be one of: {', '.join(p.value for p in ImageLocality)}",
-        )
+    if update.prefer is not None:
+        try:
+            get_user_settings().set_image_locality(update.prefer)
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail=f"prefer must be one of: {', '.join(p.value for p in ImageLocality)}",
+            )
+
+    if update.model is not None:
+        get_user_settings().set_image_model(update.model)
+        # **Ask the disk again on the next picture.** The provider caches the
+        # directory it discovered, so without this the pick would not take
+        # effect until the app restarted — which reads as the picker doing
+        # nothing, the same silence this whole change exists to end.
+        runtime = getattr(kernel, "images_runtime", None)
+        routed = getattr(runtime, "_provider", None) if runtime else None
+        local = getattr(routed, "_local", None) if routed else None
+        rediscover = getattr(local, "rediscover", None)
+        if callable(rediscover):
+            rediscover()
+
     return await image_setting()
 
 

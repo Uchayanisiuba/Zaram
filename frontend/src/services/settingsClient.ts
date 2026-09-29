@@ -580,6 +580,26 @@ export interface ImageSetting {
   prefer: ImageLocality;
   /** Whether the model on this machine can draw right now. */
   localOk: boolean;
+  /** The image-model folder on this machine: what is in it, and which draws.
+   *
+   *  Every pipeline found, **including the ones that cannot be used**, because
+   *  the failure this reports is a model sitting there being silently passed
+   *  over. A list of only what works would have said nothing wrong and nothing
+   *  useful. */
+  local: {
+    /** The folder answering right now. Null when nothing here can draw. */
+    drawingWith: string | null;
+    /** The folder the person picked, or null for "whichever is first". */
+    chosen: string | null;
+    installed: Array<{
+      name: string;
+      /** The class `model_index.json` names. Null when it cannot be read. */
+      pipeline: string | null;
+      usable: boolean;
+      /** One sentence they can act on. Empty when it is usable. */
+      whyNot: string;
+    }>;
+  };
   /** Every cloud provider that could draw, with why it cannot when it cannot. */
   cloud: Array<{
     id: string;
@@ -602,11 +622,34 @@ export interface ImageSetting {
   answers: string | null;
 }
 
+/** The local model block, tolerant of a backend that does not send it.
+ *
+ *  An older backend omits `local` entirely, and an empty list is the honest
+ *  reading of that — *"nothing was reported"* renders as no models rather than
+ *  as a claim that none are installed. */
+function toLocalModels(raw: unknown): ImageSetting['local'] {
+  const block = (raw ?? {}) as Record<string, unknown>;
+  const installed = Array.isArray(block.installed)
+    ? (block.installed as Array<Record<string, unknown>>)
+    : [];
+  return {
+    drawingWith: typeof block.drawing_with === 'string' ? block.drawing_with : null,
+    chosen: typeof block.chosen === 'string' ? block.chosen : null,
+    installed: installed.map((m) => ({
+      name: String(m.name ?? ''),
+      pipeline: typeof m.pipeline === 'string' ? m.pipeline : null,
+      usable: m.usable === true,
+      whyNot: String(m.why_not ?? ''),
+    })),
+  };
+}
+
 function toImageSetting(raw: Record<string, unknown>): ImageSetting {
   const cloud = Array.isArray(raw.cloud) ? (raw.cloud as Array<Record<string, unknown>>) : [];
   return {
     prefer: raw.prefer === 'cloud' ? 'cloud' : 'local',
     localOk: raw.local_ok === true,
+    local: toLocalModels(raw.local),
     cloud: cloud.map((c) => ({
       id: String(c.id ?? ''),
       name: String(c.name ?? ''),
@@ -632,6 +675,14 @@ export async function fetchImageSetting(): Promise<ImageSetting> {
  *  needs its key and its image grant, and the answer says which can draw. */
 export async function setImageLocality(prefer: ImageLocality): Promise<ImageSetting> {
   return toImageSetting((await send('/images/setting', 'POST', { prefer })) as Record<string, unknown>);
+}
+
+/** Which installed pipeline draws locally, by folder name.
+ *
+ *  `''` clears the choice back to "whichever is first", which is a thing
+ *  somebody may want and which omitting the field cannot express. */
+export async function setImageModel(model: string): Promise<ImageSetting> {
+  return toImageSetting((await send('/images/setting', 'POST', { model })) as Record<string, unknown>);
 }
 
 // ------------------------------------------------------------- kill switch
