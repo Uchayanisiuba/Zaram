@@ -47,13 +47,21 @@ class _Catalog:
 
 @pytest.fixture(autouse=True)
 def _no_loopback(monkeypatch):
-    """No local server answers. A cloud model must not need one."""
+    """No local server answers. A cloud model must not need one.
+
+    **Both verbs, because the three readings do not share one.** `/api/ps` and
+    the OpenAI-compatible probe are `requests.get`; `/api/show` is
+    `requests.post`. Patching `get` alone left the third reading live, so this
+    fixture enforced its own assertion on two routes out of three and a cloud
+    model sized by `/api/show` would have passed the guard written to catch it.
+    """
     import core.context_budget as cb
 
     def refuse(*_a, **_k):
         raise AssertionError("a cloud model must not be sized by a loopback probe")
 
     monkeypatch.setattr(cb.requests, "get", refuse)
+    monkeypatch.setattr(cb.requests, "post", refuse)
 
 
 class TestACloudModelIsSizedByItsProvider:
@@ -87,7 +95,16 @@ class TestACloudModelIsSizedByItsProvider:
         cannot answer."""
         import core.context_budget as cb
 
-        monkeypatch.setattr(cb.requests, "get", lambda *a, **k: (_ for _ in ()).throw(ConnectionError()))
+        # Every reading refused, `/api/show`'s POST included. Patching `get`
+        # alone left that one live: on a machine where the model has a
+        # `num_ctx` in its Modelfile it answers 131,072 with
+        # `source='configured'`, which is correct behaviour and not what this
+        # test is about. The fallback can only be observed when nothing reads.
+        def refuse(*_a, **_k):
+            raise ConnectionError()
+
+        monkeypatch.setattr(cb.requests, "get", refuse)
+        monkeypatch.setattr(cb.requests, "post", refuse)
         catalog = _Catalog(_Info("gemma4:12b", CapabilityLocality.LOCAL, 262144))
         assert cloud_context_length("gemma4:12b", catalog) is None
         assert is_cloud_model("gemma4:12b", catalog) is False

@@ -79,12 +79,36 @@ class TestQualityFloor:
         assert "scan" in reason.lower() or "photo" in reason.lower()
         assert "KB per page" in reason
 
-    def test_the_remedy_names_the_fix_and_its_cost(self):
-        """"Install the extra" on metered data is not a decision anyone can make."""
+    def test_the_remedy_names_the_fix_and_its_cost(self, monkeypatch):
+        """"Install the extra" on metered data is not a decision anyone can make.
+
+        OCR absence is forced, not inherited. This assertion only holds on the
+        branch where the fix *is* an install, and reading that off whatever the
+        developer happens to have installed made the test pass on one machine
+        and fail on the next — which is a broken instrument, not a flake.
+        """
+        import ingest.parsers as parsers
+
+        monkeypatch.setattr(parsers, "ocr_available", lambda: False)
         _, _, remedy = grade(ParseResult(text="", pages=1), size_bytes=1_000_000)
 
         assert "pip install" in remedy
         assert "MB" in remedy
+
+    def test_with_ocr_installed_the_remedy_stops_selling_it(self, monkeypatch):
+        """The other branch, which nothing exercised anywhere.
+
+        Telling somebody to install 321 MB they already have is worse than
+        saying nothing: it is a remedy that cannot work, and it hides the
+        actual cause, which is that the parser ran and failed.
+        """
+        import ingest.parsers as parsers
+
+        monkeypatch.setattr(parsers, "ocr_available", lambda: True)
+        _, _, remedy = grade(ParseResult(text="", pages=1), size_bytes=1_000_000)
+
+        assert "pip install" not in remedy
+        assert remedy, "a failed parser still owes the user a next step"
 
     def test_a_scan_with_a_text_stamp_is_sparse(self):
         """169 characters across four pages — measured, a real signed NDA."""
