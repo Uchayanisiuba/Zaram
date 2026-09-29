@@ -439,8 +439,18 @@ function CreateRow({ onDone }: { onDone: () => void }) {
   const [root, setRoot] = useState('');
   const [busy, setBusy] = useState(false);
 
+  // **A coding project without a folder is not a project yet.** It looks
+  // finished in the list and refuses every tool call, and the person reads
+  // that as Zaram being unable to see their code — reported 29 September 2026
+  // against two projects that had been created exactly this way.
+  //
+  // Required rather than defaulted: there is no folder Zaram could pick that
+  // would not be a guess about where somebody's work lives, and rule "never
+  // render invented values" applies to a path more than to anything else.
+  const needsFolder = type === 'coding' && !root.trim();
+
   const submit = useCallback(async () => {
-    if (!name.trim() || busy) return;
+    if (!name.trim() || needsFolder || busy) return;
     setBusy(true);
     // The folder is sent only for a coding project. Storing one against a
     // business project would be a value the product then ignores — `root` is
@@ -449,7 +459,7 @@ function CreateRow({ onDone }: { onDone: () => void }) {
     const created = await create(name, type, '', type === 'coding' ? root : '');
     setBusy(false);
     if (created) onDone();
-  }, [busy, create, name, onDone, root, type]);
+  }, [busy, create, name, needsFolder, onDone, root, type]);
 
   return (
     <div
@@ -496,13 +506,25 @@ function CreateRow({ onDone }: { onDone: () => void }) {
       {/* Only for coding, and only here at creation — which is where the type is
           chosen, and so the one moment the folder is an obvious question rather
           than a setting to go and find. Rule 7h: offer at the moment of doubt. */}
-      {type === 'coding' && <RepositoryField value={root} onChange={setRoot} />}
+      {type === 'coding' && (
+        <>
+          <RepositoryField value={root} onChange={setRoot} />
+          {needsFolder && (
+            // Said before the button is pressed rather than after, because the
+            // field is already on screen and the answer is one click away.
+            <p className="mt-1.5 text-xs" style={{ color: '#fbbf24' }}>
+              A coding project needs its folder — the code tools have nothing to
+              read without one.
+            </p>
+          )}
+        </>
+      )}
 
       <div className="mt-3 flex gap-2">
         <button
           type="button"
           onClick={() => void submit()}
-          disabled={!name.trim() || busy}
+          disabled={!name.trim() || needsFolder || busy}
           className="inline-flex items-center gap-1 rounded px-2.5 py-1.5 text-xs disabled:opacity-40"
           style={{ background: 'var(--color-glass)', border: '1px solid rgba(255,255,255,.1)' }}
         >
@@ -623,12 +645,24 @@ function RepositoryRow({ project }: { project: Project }) {
   const [draft, setDraft] = useState(project.root);
   const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
+  // **Read back after the save, and shown here.** `setRoot` already puts the
+  // backend's own sentence in the store — "C:\\nope is not a folder on this
+  // machine", which a person can act on — and the workspace renders it several
+  // hundred pixels above this row. So a path with a typo in it looked like a
+  // button that did nothing, which is how this was reported.
+  const [refused, setRefused] = useState('');
 
   const save = useCallback(async () => {
     if (busy) return;
     setBusy(true);
+    setRefused('');
     await setRoot(project.id, draft.trim());
+    const failed = useProjectStore.getState().error;
     setBusy(false);
+    if (failed) {
+      setRefused(failed);
+      return;
+    }
     setEditing(false);
   }, [busy, draft, project.id, setRoot]);
 
@@ -669,6 +703,11 @@ function RepositoryRow({ project }: { project: Project }) {
         </p>
       )}
       <RepositoryField value={draft} onChange={setDraft} label="" />
+      {refused && (
+        <p className="mt-1.5 text-xs" style={{ color: '#fca5a5' }} data-testid="repository-refused">
+          {refused}
+        </p>
+      )}
       <div className="mt-2 flex gap-3 text-xs">
         <button
           type="button"
