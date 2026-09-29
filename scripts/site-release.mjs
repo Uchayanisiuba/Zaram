@@ -56,6 +56,13 @@ set('version', JSON.stringify(version));
 set('sizeMb', `${sizeMb}`);
 set('sha256', JSON.stringify(sha256));
 if (tag) set('releaseTag', JSON.stringify(tag));
+// The day this build went out. `alphaOpens` is the day the alpha programme
+// opened and never moves; without a second field the page dated every later
+// build to the first one. en-GB, day and month, which is how the page reads
+// everywhere else.
+set('buildDate', JSON.stringify(
+  new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', timeZone: 'UTC' }),
+));
 fs.writeFileSync(SITE, text);
 
 console.log(`site-release — ${name}: version ${version}${tag ? ` at ${tag}` : ''}, ${sizeMb} MiB, sha256 ${sha256}`);

@@ -109,7 +109,7 @@
         <h2 class="alpha-title">Download for Windows</h2>
         <p class="alpha-sub">
           <strong data-role="build">v0.1.0</strong> · <span data-role="size">178</span> MB · 64-bit · out
-          <strong data-role="alpha-date">21 September</strong>. Two questions first — a minute, no account —
+          <strong data-role="build-date">29 September</strong>. Two questions first — a minute, no account —
           and the download starts when you send them.
         </p>
         <form class="alpha-form" data-role="signup" data-then="download" novalidate>
@@ -349,7 +349,15 @@
       <p>
         It draws, too. Ask for a picture and it goes to a model that can make one — on your
         own card if you have brought one, or to a provider you chose, with the request shown
-        before it leaves.
+        before it leaves. The reply names which model drew it, the same way a written answer
+        names which model wrote it.
+      </p>
+      <p>
+        When your card is too full to draw, it says so instead of starting a picture that
+        would take an hour. The refusal names the cheapest way round, and the order is by
+        what setting it up costs <em>you</em>: a destination you already have that only needs
+        allowing, then a free key, then a paid one. Never the best picture first — an offer
+        that opens with the paid option is an advertisement.
       </p>
       <p>
         Every other assistant has to send that photograph somewhere to answer you. Here it's a
@@ -401,6 +409,21 @@
         dialog — and a task that stops early can be continued. Wrong in the reply? Press
         <em>Revise</em>, say what's wrong, and the answer is regenerated with the
         correction applied; where it changed files, the files change with it.
+      </p>
+      <p>
+        It also gets a project that won't start, started. Zaram reads the repository's own
+        <code>package.json</code> and offers the scripts that are genuinely in it — the
+        install, the migration, the build, the tests, the dev server — rather than a fixed
+        list of names somebody guessed at. The build before this one could work out exactly
+        which commands were needed, and then hand them back to you as text to paste.
+      </p>
+      <p>
+        <strong>Installing always asks</strong>, and nothing you have already granted can
+        waive that one. Fetching packages runs whatever code those packages ask to run when
+        they arrive, and that code comes from a registry rather than from your project.
+        Anything reaching past this machine — a deploy, a publish, a release — asks on
+        the same terms. There is no shell anywhere in this: each runner is a named program
+        and its arguments, so a stray semicolon has nothing to do.
       </p>
       <p class="aside">
         Measured, not promised: a 27B model on the maintainer's own machine drove the tools
@@ -712,6 +735,14 @@
         <h3>Everything exports</h3>
         <p>The whole Spine, as JSONL and CSV in one zip. The memory is meant to outlive the provider, the order, and Zaram itself.</p>
       </div>
+      <div>
+        <h3>Jobs and grants</h3>
+        <p>Paste a posting or a funding call and it comes back as fields. Eligibility is checked against what Zaram already knows about you — and a criterion with no fact behind it is a question to ask you, never a no applied on your behalf. It drafts the letter. It never submits: the funders' own APIs have no submission endpoint, and that is the right line anyway.</p>
+      </div>
+      <div>
+        <h3>A shut-out tool server says so</h3>
+        <p>Attached, reachable, and allowed to act are three different things. When a server is running but refused, the card names which of the three failed, instead of offering a tool that quietly never fires.</p>
+      </div>
     </div>
   </section>
 
@@ -766,7 +797,7 @@
         <span>Milestones</span>
         <span class="spacer">each build, and what is next</span>
       </div>
-      <div class="panel-body"><span class="line"><span class="dim">15 Sep  </span><span class="cy">alpha.1</span>  memory · recall with sources · the egress log</span><span class="line"><span class="dim">        </span>         documents · code projects · the manual</span><span class="line"><span class="dim">21 Sep  </span><span class="cy">alpha.2</span>  a row for every step, where it happened</span><span class="line"><span class="dim">        </span>         thinking on/off · the model picks its tools</span><span class="line"><span class="dim">        </span>         name a folder and it opens · work that runs</span><span class="line"><span class="dim">        </span>         on its own, never approving itself</span><span class="line"><span class="dim">next    </span>[ ]  a signed installer — no Windows warning</span><span class="line"><span class="dim">        </span>[ ]  five verbs on the summon key</span><span class="line"><span class="dim">        </span>[ ]  word search beside the vectors</span><span class="line"><span class="dim">        </span>[ ]  mail, GitHub, socials as attached tools</span><span class="line"><span class="dim">later   </span>[ ]  your Zaram on a second machine — sync</span></div>
+      <div class="panel-body"><span class="line"><span class="dim">15 Sep  </span><span class="cy">alpha.1</span>  memory · recall with sources · the egress log</span><span class="line"><span class="dim">        </span>         documents · code projects · the manual</span><span class="line"><span class="dim">21 Sep  </span><span class="cy">alpha.2</span>  a row for every step, where it happened</span><span class="line"><span class="dim">        </span>         thinking on/off · the model picks its tools</span><span class="line"><span class="dim">        </span>         name a folder and it opens · work that runs</span><span class="line"><span class="dim">        </span>         on its own, never approving itself</span><span class="line"><span class="dim">29 Sep  </span><span class="cy">alpha.3</span>  a stuck project: installs, its scripts, the app</span><span class="line"><span class="dim">        </span>         pictures out, and a full card that refuses</span><span class="line"><span class="dim">        </span>         jobs and grants · a folder you pick yourself</span><span class="line"><span class="dim">next    </span>[ ]  a signed installer — no Windows warning</span><span class="line"><span class="dim">        </span>[ ]  five verbs on the summon key</span><span class="line"><span class="dim">        </span>[ ]  word search beside the vectors</span><span class="line"><span class="dim">        </span>[ ]  mail, GitHub, socials as attached tools</span><span class="line"><span class="dim">later   </span>[ ]  your Zaram on a second machine — sync</span></div>
       <p class="panel-note">
         Dates are when a build reached testers, not when a feature was finished. Nothing
         on the <em>next</em> list is promised for a date; each lands when it has been
@@ -821,6 +852,7 @@
           <label for="fb-build">Which build</label>
           <select id="fb-build" name="build" required>
             <option value="" disabled selected>Choose one</option>
+            <option value="v0.1.0-alpha.3">v0.1.0-alpha.3 (29 September)</option>
             <option value="v0.1.0-alpha.2">v0.1.0-alpha.2 (21 September)</option>
             <option value="other">Something else / not sure</option>
           </select>
