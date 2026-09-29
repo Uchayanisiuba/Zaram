@@ -1913,9 +1913,26 @@ async def chat(request: ChatRequest):
             folder = named_folder(request.text)
             if folder is not None:
                 yield StreamEvent.notice(
+                    # **The sentence is the grant, so it says what the grant
+                    # is.** This read "read, change and run what is in it, with
+                    # your say-so at each change", and on 29 September 2026 the
+                    # press began granting edits outright — rule 7j, the press
+                    # is the deliberate consent for this destination. That made
+                    # two halves of this sentence untrue at once: there is no
+                    # say-so at each change any more, and running commands was
+                    # never granted here and still is not.
+                    #
+                    # A button whose text overstates what pressing it does is
+                    # the worst place in the product for an invented value,
+                    # because it is the moment consent is given. What it costs
+                    # and what it does not cover are both named, and the undo
+                    # is named with it — a grant stated without its remedy asks
+                    # somebody to agree to something they cannot picture.
                     f"That names a folder on this machine — {folder.path}. "
-                    "Open it as a coding project? Zaram can then read, change "
-                    "and run what is in it, with your say-so at each change.",
+                    "Open it as a coding project? Zaram can then read and "
+                    "change what is in it — each change is a git commit you "
+                    "can revert, and you can withdraw this in Project. "
+                    "Running its commands stays off until you allow it.",
                     kind="project",
                     action="open-project",
                     path=folder.path,
