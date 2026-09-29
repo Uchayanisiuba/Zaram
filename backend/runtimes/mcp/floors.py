@@ -31,7 +31,16 @@ The three things that do have a caller:
    but a person sees every one: never covered by a grant, never by a plan's
    *run without stopping*.
 
-3. **Provenance.** *"tests/test_x.py was created by Zaram 2 steps ago."*
+3. **Running something whose cost is not in this repository.** Installing
+   dependencies executes `postinstall` scripts fetched from a registry — the
+   only runner whose payload comes from the network rather than from the
+   project the person already trusted, and the one the tier table's undo
+   cannot reach: a git commit reverses an edit, nothing reverses a
+   postinstall. Deploy, publish and release join it, because the cost of
+   being wrong lands off this machine. Matched on the runner's *name*, like
+   `decide` in `policy.py` and for the same reason.
+
+4. **Provenance.** *"tests/test_x.py was created by Zaram 2 steps ago."*
    Nobody at the confirm card is shown a file's contents, so
    `run_command pytest` cannot be judged from its text — but the engine
    knows whether it wrote that file moments ago. One line, fixed
@@ -110,6 +119,51 @@ def _is_protected_in_project(candidate: Path) -> bool:
     return False
 
 
+#: How an install runner is named, so a floor can recognise one without
+#: importing the pack that builds them. Defined here rather than in
+#: `packs/code/runners.py` deliberately: the security layer owns the rule and
+#: the pack conforms to it, never the other way round.
+INSTALL_RUNNER_PREFIX = "install:"
+
+#: Runner name endings whose cost lands somewhere other than this machine.
+#: Name-based and one-directional, exactly like `policy.decide` — a runner
+#: this does not recognise is not thereby permitted, it simply still needs the
+#: project's `runs` grant like every other run.
+_OFF_THIS_MACHINE = ("deploy", "publish", "release")
+
+
+def runner_floor(tool_name: str, arguments: Mapping[str, Any]) -> Optional["Floor"]:
+    """The floor under a `run_command` call, or ``None``.
+
+    Separate from `floor_for` below, which reads a *write target*; this reads
+    the runner's name. Both only ever make a verdict stricter.
+    """
+    if tool_name != "run_command":
+        return None
+    named = str(arguments.get("runner") or "").strip().lower()
+    if not named:
+        return None
+
+    if named.startswith(INSTALL_RUNNER_PREFIX):
+        return Floor(
+            "confirm",
+            "Installing dependencies runs whatever the packages ask to run when they "
+            "arrive, and that code comes from the registry rather than from this "
+            "project. Nothing undoes it. This always asks, whatever has been granted.",
+            grantable=False,
+        )
+
+    tail = named.rsplit(":", 1)[-1]
+    if any(word in tail for word in _OFF_THIS_MACHINE):
+        return Floor(
+            "confirm",
+            f"`{named}` sends something beyond this machine, so it is not covered by "
+            "permission to run this project's commands. This always asks.",
+            grantable=False,
+        )
+    return None
+
+
 @dataclass(frozen=True)
 class Floor:
     """What a floor said about one call."""
@@ -132,6 +186,13 @@ def floor_for(
     Runs on Zaram's own write tools only (`write_target`). Relative paths
     resolve against the open project's root, as the writer resolves them.
     """
+    # A run is judged on its runner's name; a write on its target. Checked
+    # first, because `write_target` answers `None` for `run_command` and the
+    # run would otherwise pass with no floor under it at all.
+    running = runner_floor(tool_name, arguments)
+    if running is not None:
+        return running
+
     target = write_target(tool_name, arguments)
     if target is None:
         return None

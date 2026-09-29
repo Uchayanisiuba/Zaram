@@ -58,6 +58,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence
 
 from runtimes.mcp.client import ToolDescriptor
+from runtimes.mcp.floors import INSTALL_RUNNER_PREFIX
 
 logger = logging.getLogger(__name__)
 
@@ -74,12 +75,39 @@ OUTPUT_CAP = 12_000
 MAX_ARGS = 8
 MAX_ARG_CHARS = 120
 
-#: package.json script names that mean "runs until killed". Detected so the
-#: refusal can name them, never offered.
+#: package.json script name *segments* that mean "runs until killed".
+#: Detected so the refusal can name them, never offered to `run_command`.
 _LONG_RUNNING = ("dev", "start", "serve", "watch", "preview", "storybook")
 
-#: Script names worth offering, in the order a person would list them.
+
+def is_long_running(script: str) -> bool:
+    """Whether this script name means "runs until killed".
+
+    **By segment, not by whole name.** This was an exact comparison, which is
+    right while the only candidates are `dev` and `start` and wrong the moment
+    a project namespaces them: Zaram's own `package.json` has `dev:frontend`,
+    `dev:backend`, `dev:desktop` and `dev:app`, and every one of them would
+    have been handed to `run_command` to start a server, wait three minutes,
+    be killed, and report a failure that was really a stopwatch.
+
+    One answer, both callers. `detect` uses it to leave them out and
+    `long_running_scripts` uses it to hand them to `start_app`, which is the
+    tool that can actually run one — so the same fix that stops them being run
+    wrongly is what makes them runnable at all.
+    """
+    return any(part in _LONG_RUNNING for part in script.lower().split(":"))
+
+#: Script names worth offering **first**, in the order a person would list
+#: them. No longer an allow-list — see `detect`. Every other script the project
+#: defines is offered after these, because a hardcoded eight is a guess about
+#: which verbs matter and `db:migrate` is the counter-example that cost an
+#: afternoon.
 _OFFERED_SCRIPTS = ("test", "build", "lint", "typecheck", "check", "format", "e2e", "coverage")
+
+#: How long an install may take. Long enough for a cold `node_modules` on a
+#: slow connection; the ordinary `TIMEOUT_SECONDS` would stop it part-way and
+#: report a failure that is really a stopwatch.
+INSTALL_TIMEOUT_SECONDS = 900
 
 _SAFE_ARG = re.compile(r"^[A-Za-z0-9_./:@=,\-\[\]]+$")
 
@@ -99,6 +127,12 @@ class Runner:
     #: first of these once before it calls a change done, so "done" is a
     #: verdict the project gave and not the model's. See `CHECK_ALIAS`.
     check: bool = False
+    #: Seconds this runner may take, when the default is wrong for it. A cold
+    #: `npm install` on a metered connection is minutes, not the three a test
+    #: suite gets, and a timeout that kills an install leaves a half-populated
+    #: `node_modules` — worse than the wait it avoided. ``None`` means
+    #: `TIMEOUT_SECONDS`.
+    timeout: Optional[int] = None
 
     def to_json(self) -> Dict[str, Any]:
         return {
@@ -178,9 +212,98 @@ def _npm() -> Optional[str]:
     return shutil.which("npm")
 
 
+def _project_venv_python(root: Path) -> Optional[str]:
+    """The interpreter *inside* this project, or ``None``.
+
+    Narrower than `_python_for` on purpose. That one falls back to whatever is
+    on the path so tests can run; installing into a system interpreter because
+    the project has no virtualenv is a different and ruder act, so pip is
+    offered only when the project brought its own.
+    """
+    for candidate in ("venv", ".venv", "env"):
+        for exe in ("Scripts/python.exe", "bin/python"):
+            path = root / candidate / exe
+            if path.is_file():
+                return str(path)
+    return None
+
+
+def install_runners(root: Path) -> List[Runner]:
+    """How this project fetches its dependencies, read from its own files.
+
+    **The hole this fills.** `detect` reads `package.json` → `scripts`, and
+    `install` is not a script — it is an npm subcommand — so there was no
+    runner for it at all. A transcript on 29 September has Zaram diagnosing a
+    broken checkout correctly, down to the tsconfig, and then handing back
+    three commands it had no way to run. The first was `npm install`, and
+    everything after it was blocked by that.
+
+    Each one is derived from a file already in the repository, which is the
+    same principle `detect` uses; none of them is a shell. They are named
+    `install:*` so `runtimes.mcp.floors` can require a confirmation for every
+    one, whatever the project has granted — the payload comes from a registry
+    rather than from the repository, and nothing undoes a `postinstall`.
+    """
+    out: List[Runner] = []
+
+    npm = _npm()
+    if npm and (root / "package.json").is_file():
+        out.append(Runner(
+            name=f"{INSTALL_RUNNER_PREFIX}npm",
+            # `npm install` rather than `npm ci`: this runs when something is
+            # already broken, and `ci` refuses outright when the lockfile and
+            # `package.json` disagree — which is one of the states it would be
+            # called to repair. `--no-fund --no-audit` only quieten output.
+            argv=(npm, "install", "--no-fund", "--no-audit"),
+            description="npm install — fetch this project's Node dependencies",
+            timeout=INSTALL_TIMEOUT_SECONDS,
+        ))
+    yarn = shutil.which("yarn")
+    if yarn and (root / "yarn.lock").is_file():
+        out.append(Runner(
+            name=f"{INSTALL_RUNNER_PREFIX}yarn",
+            argv=(yarn, "install"),
+            description="yarn install — fetch this project's Node dependencies",
+            timeout=INSTALL_TIMEOUT_SECONDS,
+        ))
+    pnpm = shutil.which("pnpm")
+    if pnpm and (root / "pnpm-lock.yaml").is_file():
+        out.append(Runner(
+            name=f"{INSTALL_RUNNER_PREFIX}pnpm",
+            argv=(pnpm, "install"),
+            description="pnpm install — fetch this project's Node dependencies",
+            timeout=INSTALL_TIMEOUT_SECONDS,
+        ))
+
+    venv_python = _project_venv_python(root)
+    if venv_python and (root / "requirements.txt").is_file():
+        out.append(Runner(
+            name=f"{INSTALL_RUNNER_PREFIX}pip",
+            argv=(venv_python, "-m", "pip", "install", "-r", "requirements.txt"),
+            description="pip install -r requirements.txt, into this project's own virtualenv",
+            timeout=INSTALL_TIMEOUT_SECONDS,
+        ))
+
+    if (root / "Cargo.toml").is_file() and shutil.which("cargo"):
+        out.append(Runner(
+            name=f"{INSTALL_RUNNER_PREFIX}cargo",
+            argv=("cargo", "fetch"),
+            description="cargo fetch — download this project's crates",
+            timeout=INSTALL_TIMEOUT_SECONDS,
+        ))
+    if (root / "go.mod").is_file() and shutil.which("go"):
+        out.append(Runner(
+            name=f"{INSTALL_RUNNER_PREFIX}go",
+            argv=("go", "mod", "download"),
+            description="go mod download — download this project's modules",
+            timeout=INSTALL_TIMEOUT_SECONDS,
+        ))
+    return out
+
+
 def detect(root: Path) -> List[Runner]:
     """What this repository can run, read from the files it already has."""
-    runners: List[Runner] = []
+    runners: List[Runner] = list(install_runners(root))
 
     package = root / "package.json"
     if package.is_file():
@@ -190,15 +313,30 @@ def detect(root: Path) -> List[Runner]:
         except (ValueError, OSError):
             scripts = {}
         if npm and isinstance(scripts, dict):
-            for name in _OFFERED_SCRIPTS:
-                if name in scripts:
-                    runners.append(Runner(
-                        name=f"npm:{name}",
-                        argv=(npm, "run", name, "--silent"),
-                        description=f"npm run {name} — `{str(scripts[name])[:80]}`",
-                        flags=name in ("test", "e2e"),
-                        check=name in _CHECK_SCRIPTS,
-                    ))
+            # **Every script the project defines, not eight chosen names.**
+            # `_OFFERED_SCRIPTS` was an allow-list, and a project's own verbs
+            # — `db:migrate`, `seed`, `codegen` — were invisible to the model
+            # while appearing in the file it had just read. The well-known
+            # ones still come first so the list reads the way a person would
+            # write it; the rest follow in a stable order.
+            #
+            # Not a widening of permission. Running any of these still needs
+            # the project's `runs` grant, and the ones whose cost lands off
+            # this machine — deploy, publish, release — are confirmed every
+            # time by `runtimes.mcp.floors.runner_floor`, whatever is granted.
+            ordered = [n for n in _OFFERED_SCRIPTS if n in scripts]
+            ordered += sorted(
+                n for n in scripts
+                if n not in _OFFERED_SCRIPTS and not is_long_running(n)
+            )
+            for name in ordered:
+                runners.append(Runner(
+                    name=f"npm:{name}",
+                    argv=(npm, "run", name, "--silent"),
+                    description=f"npm run {name} — `{str(scripts[name])[:80]}`",
+                    flags=name in ("test", "e2e"),
+                    check=name in _CHECK_SCRIPTS,
+                ))
         # A TypeScript project with no typecheck script still has `tsc`, and
         # the desktop layer was already running it for a diagnostics list
         # nothing read. Offered here, where the model can act on it.
@@ -330,7 +468,7 @@ def long_running_scripts(root: Path) -> List[str]:
         scripts = (json.loads(package.read_text(encoding="utf-8")) or {}).get("scripts") or {}
     except (ValueError, OSError):
         return []
-    return [name for name in _LONG_RUNNING if name in scripts]
+    return [name for name in scripts if is_long_running(name)]
 
 
 class CodeRunner:
@@ -349,7 +487,9 @@ class CodeRunner:
                 f"Run one of the project's own commands and see its output. Available runners: {listed}. "
                 "Use it to run the tests after a change; `check` runs the project's type checker, "
                 "linter or build, whichever it has. A failed run names where it failed and shows the "
-                "code there. Commands that do not exit, like a dev server, cannot be run here."
+                "code there. Commands that do not exit, like a dev server, cannot be run here — "
+                "`start_app` runs exactly those, as a background process you can read the log of. "
+                "An `install:` runner fetches the project's dependencies and always asks first."
             ),
             input_schema={
                 "type": "object",
@@ -379,7 +519,17 @@ class CodeRunner:
         if runner is None:
             long = long_running_scripts(root)
             if wanted.removeprefix("npm:") in long:
-                return {"error": f"{wanted} does not exit on its own, so it cannot be run here"}
+                # Name the tool that *can* run it. The model had `start_app`
+                # all along — `apps.py` builds its runners from exactly this
+                # list — and was left to infer the connection, so a transcript
+                # ends with "you run npm run dev in a terminal".
+                return {
+                    "error": (
+                        f"{wanted} does not exit on its own, so it cannot be run here. "
+                        f"Use start_app with runner {wanted.removeprefix('npm:')!r} to "
+                        "run it as a background process, then read_app_log."
+                    )
+                }
             available = ", ".join(sorted(runners)) or "none"
             return {"error": f"no runner called {wanted!r}. Available: {available}"}
 
@@ -398,17 +548,22 @@ class CodeRunner:
             return {"error": f"at most {MAX_ARGS} arguments"}
 
         argv = [*runner.argv, *args]
+        seconds = runner.timeout or TIMEOUT_SECONDS
+        # Passed only when the runner asks for something other than the
+        # default, so every existing caller — and every test double written
+        # against the old signature — keeps working unchanged.
+        extra = {"timeout": runner.timeout} if runner.timeout else {}
         try:
-            done = self._run(argv, cwd=str(root.resolve()))
+            done = self._run(argv, cwd=str(root.resolve()), **extra)
         except FileNotFoundError:
             return {"error": f"{argv[0]} is not installed or not on the path"}
         except subprocess.TimeoutExpired as expired:
             return {
                 "runner": runner.name,
                 "timed_out": True,
-                "seconds": TIMEOUT_SECONDS,
+                "seconds": seconds,
                 "output": _cap(_text(expired.stdout) + _text(expired.stderr)),
-                "note": f"stopped after {TIMEOUT_SECONDS}s; it had not finished",
+                "note": f"stopped after {seconds}s; it had not finished",
             }
 
         output = _cap((done.stdout or "") + (done.stderr or ""))
@@ -452,7 +607,9 @@ def _cap(text: str) -> str:
     return text[:half] + f"\n… [{dropped:,} characters omitted] …\n" + text[-half:]
 
 
-def _run_process(argv: Sequence[str], *, cwd: str) -> subprocess.CompletedProcess:
+def _run_process(
+    argv: Sequence[str], *, cwd: str, timeout: Optional[int] = None
+) -> subprocess.CompletedProcess:
     env = dict(os.environ)
     # No colour codes in output a model has to read.
     env.setdefault("NO_COLOR", "1")
@@ -466,6 +623,6 @@ def _run_process(argv: Sequence[str], *, cwd: str) -> subprocess.CompletedProces
         text=True,
         encoding="utf-8",
         errors="replace",
-        timeout=TIMEOUT_SECONDS,
+        timeout=TIMEOUT_SECONDS if timeout is None else timeout,
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
