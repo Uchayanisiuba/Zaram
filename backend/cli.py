@@ -122,13 +122,16 @@ def _credential() -> str:
     if not path.exists():
         err.print(
             "[bold]Not paired yet.[/bold] In Zaram, open Settings and issue a "
-            "pairing code, then run:\n\n    zaram pair <code>\n"
+            f"pairing code, then run:\n\n    {PROGRAM} pair <code>\n"
         )
         raise typer.Exit(code=2)
     try:
         return str(json.loads(path.read_text(encoding="utf-8"))["credential"])
     except (ValueError, KeyError, OSError) as exc:
-        err.print(f"[bold]The stored credential is unreadable[/bold] ({exc}). Re-run `zaram pair`.")
+        err.print(
+            f"[bold]The stored credential is unreadable[/bold] ({exc}). "
+            f"Re-run `{PROGRAM} pair`."
+        )
         raise typer.Exit(code=2) from exc
 
 
@@ -140,7 +143,7 @@ def _client() -> Spine:
 #: style. `typer.Exit` is an ordinary `Exception`, so a credential failure
 #: raised inside one of these handlers is caught by it and reported as a
 #: generic error — which swallowed the one message a brand-new user needs,
-#: "not paired yet, run `zaram pair`". Found by a test, not by reading.
+#: "not paired yet, run `zcode pair`". Found by a test, not by reading.
 
 
 def _fail(exc: Exception) -> "typer.Exit":
@@ -270,7 +273,7 @@ def remember(
 
 @app.command()
 def correct(
-    fact_id: str = typer.Argument(..., help="The fact's id, from `zaram recall`."),
+    fact_id: str = typer.Argument(..., help="The fact's id, from `zcode recall`."),
     text: str = typer.Argument(..., help="What it should say instead."),
     as_json: bool = typer.Option(False, "--json"),
 ) -> None:

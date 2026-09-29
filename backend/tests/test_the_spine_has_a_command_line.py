@@ -17,6 +17,7 @@ asserted rather than left to whoever reads the file next.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -158,12 +159,39 @@ def test_an_unreachable_zaram_is_a_sentence_and_a_non_zero_exit(monkeypatch):
 
 
 def test_an_unpaired_cli_says_how_to_pair_rather_than_how_it_failed(monkeypatch, tmp_path):
-    """The first thing a new user hits, so it is the one that must not be a 401."""
+    """The first thing a new user hits, so it is the one that must not be a 401.
+
+    This asserted the literal `"zaram pair"` and so survived the rename to
+    ZCode, holding the defect in place: the message named a command that does
+    not exist, and a new user following it got "'zaram' is not recognized".
+    Found on an installed build, because a checkout cannot show it.
+
+    Asserting against `PROGRAM` is what stops the message and the test
+    drifting apart a second time.
+    """
     monkeypatch.delenv("ZARAM_CLI_TOKEN", raising=False)
     monkeypatch.setattr(zaram_cli, "_token_path", lambda: tmp_path / "nothing.json")
     result = runner.invoke(zaram_cli.app, ["projects"])
     assert result.exit_code == 2
-    assert "zaram pair" in result.stderr
+    assert f"{zaram_cli.PROGRAM} pair" in result.stderr
+    assert "zaram pair" not in result.stderr, "there is no `zaram` command"
+
+
+def test_no_message_offers_a_command_that_does_not_exist(monkeypatch, tmp_path):
+    """Every command this CLI tells you to type must be one it answers to.
+
+    The rename left four strings behind and a test guarding one of them. The
+    general form is cheap: scan the module's own text for anything shaped
+    like an instruction to run the tool, and check the name.
+    """
+    import re
+
+    source = Path(zaram_cli.__file__).read_text(encoding="utf-8")
+    offered = set(re.findall(r"`?\b(zaram|zcode)\s+(?:pair|recall|remember|correct|show|projects)\b", source))
+    assert offered <= {zaram_cli.PROGRAM}, (
+        f"cli.py tells the user to run {sorted(offered - {zaram_cli.PROGRAM})}, "
+        f"but the command is `{zaram_cli.PROGRAM}`"
+    )
 
 
 # --------------------------------------------------------------------------- #
