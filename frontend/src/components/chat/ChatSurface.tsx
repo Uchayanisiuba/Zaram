@@ -216,6 +216,32 @@ export default function ChatSurface({ navigate }: Props) {
       const { useProjectStore } = await import('@/stores/projectStore');
       const project = await useProjectStore.getState().create(name, 'coding', '', path);
       if (!project) return;
+
+      // **This press is the grant, so edits are on.** Rule 7j: consent given
+      // deliberately for a destination is consent, and *"requiring a second,
+      // separate rule afterwards asks the same question twice and reads as the
+      // product being broken"* — which is precisely what happened, reported 29
+      // September 2026 against two coding projects that could not touch a file.
+      //
+      // The press qualifies where a bare project creation does not. The person
+      // wrote a message naming this folder and asking for work on the code, and
+      // then pressed a button whose whole text is about opening that folder as
+      // a coding project. Destination and intent in one act. Someone typing a
+      // path into Project has only said "read here", so `CreateRow` still
+      // leaves this off.
+      //
+      // What it does not weaken: every write is a git commit and `Revert` is
+      // under the reply, the path stays confined to this folder, a folder with
+      // uncommitted work refuses, and the tick is on the project's row where it
+      // can be withdrawn — a remembered consent is only acceptable while it is
+      // visible in the one place it can be taken back.
+      //
+      // **`runs` is deliberately not granted with it.** Running a project's
+      // commands is arbitrary execution, and the tier table asks mutative tools
+      // for undo: a git commit undoes an edit and nothing undoes a command.
+      // That one stays a separate, deliberate tick.
+      await useProjectStore.getState().setWrites(project.id, true);
+
       useChatStore.getState().setProject(project.id);
       const lastAsked = [...useChatStore.getState().messages]
         .reverse()
