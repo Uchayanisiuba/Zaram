@@ -36,6 +36,7 @@ from __future__ import annotations
 import logging
 
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Any, Optional
 
 import requests
@@ -309,6 +310,57 @@ def configured_context_length(
     return value if value > 0 else None
 
 
+@lru_cache(maxsize=1)
+def _provider_ids() -> frozenset[str]:
+    """Every catalogued provider id, lowercased.
+
+    Imported here rather than at module scope, like every other cross-package
+    reach in this file: a budget calculation must not fail to import because
+    the provider catalogue cannot. An empty set is the safe answer if it
+    cannot be read — no prefix resolves, which is the behaviour this had
+    before, rather than a guess about which prefixes are real.
+    """
+    try:
+        from providers.catalogue import PROVIDERS
+
+        ids = {str(entry.id).strip().lower() for entry in PROVIDERS if entry.id}
+    except Exception:  # noqa: BLE001 - see the docstring
+        logger.debug("provider catalogue unreadable; no prefix will resolve", exc_info=True)
+        return frozenset()
+    # Local servers the catalogue does not list as connectable providers but
+    # which the provider layer still qualifies names with.
+    return frozenset(ids | {"ollama", "tabby", "tabbyapi", "llama_cpp", "llamacpp"})
+
+
+def _same_model(served: str, wanted: str) -> bool:
+    """Whether the name a server reports is the model that was asked for.
+
+    The provider layer records models as ``<provider_id>:<name>`` and these
+    servers report the bare one, so an exact comparison failed every qualified
+    name and fell back to 4,096 — measured 29 September 2026 as a sixteen-fold
+    under-budget on a model whose server reports 65,536.
+
+    **A named provider, never a split at the first colon.** Ollama's names
+    *are* ``name:tag``, so cutting there would compare ``qwen2.5:14b`` as
+    ``14b``. A bare suffix test is not enough either, and a test here caught
+    it: ``"qwen2.5:14b".endswith(":14b")`` is true, so a server reporting a
+    model called ``14b`` would have answered for it — the confident wrong
+    budget this module warns is worse than the conservative one.
+
+    So the prefix must be a **catalogued provider id**. ``lm_studio:Qwen…``
+    resolves because `lm_studio` is one; ``qwen2.5:14b`` does not, because
+    `qwen2.5` is a model. The list is the provider catalogue's own, so adding
+    a provider needs nothing here.
+    """
+    served = served.strip().lower()
+    if not served:
+        return False
+    if wanted == served:
+        return True
+    prefix, sep, rest = wanted.partition(":")
+    return bool(sep) and rest == served and prefix in _provider_ids()
+
+
 def local_server_context_length(
     model: Optional[str],
     *,
@@ -354,7 +406,7 @@ def local_server_context_length(
             # which would make every document too large.
             if not served or not window or window <= 0:
                 continue
-            if served.strip().lower() == wanted:
+            if _same_model(served, wanted):
                 return window
     return None
 
