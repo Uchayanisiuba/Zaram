@@ -42,6 +42,13 @@ const CONFIG = {
   // wrong" emails — starts for the people who install it.
   alphaOpens: "21 September",
 
+  // The day *this* build reached testers, which is not the day the alpha
+  // programme opened. Conflating the two put "out 21 September" on the
+  // eyebrow of a build cut on the 29th, because `alphaOpens` was the only
+  // date there was. Written by scripts/site-release.mjs on release, so it
+  // stays true without anybody remembering to change it.
+  buildDate: "29 September",
+
   // Paste the SHA-256 from the release page. Leave empty and the page says the
   // checksum is still pending, rather than showing a blank box.
   sha256: "4f78910bbd714fb97b47a599d357f29f2a6b60610b5c9f94bdd65aad850cc4b2",
@@ -108,10 +115,11 @@ function applyConfig() {
   $all('[data-role="build"]').forEach(el => { el.textContent = build; });
   $all('[data-role="eyebrow"]').forEach(el => {
     el.textContent = live
-      ? `Alpha · Windows · ${build} · out ${CONFIG.alphaOpens}`
+      ? `Alpha · Windows · ${build} · out ${CONFIG.buildDate || CONFIG.alphaOpens}`
       : `Alpha · Windows · ${CONFIG.firstBuild}`;
   });
   $all('[data-role="alpha-date"]').forEach(el => { el.textContent = CONFIG.alphaOpens; });
+  $all('[data-role="build-date"]').forEach(el => { el.textContent = CONFIG.buildDate || CONFIG.alphaOpens; });
 
   const waitlist = document.querySelector('[data-role="waitlist"]');
   const download = document.querySelector('[data-role="download"]');
