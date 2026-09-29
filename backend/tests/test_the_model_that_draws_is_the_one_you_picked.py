@@ -210,3 +210,86 @@ class TestTheChoiceTakesEffect:
         # The person picks the other one. The provider is holding the first.
         provider.rediscover()
         assert provider._model is None
+
+
+class TestFourBitNeedsACard:
+    """Reported 29 September 2026 with a screenshot, after a 214-second wait:
+    *"could not draw that: flux-schnell: No GPU found. A GPU is needed for
+    quantization."*
+
+    `availability` had answered **ok**. Its no-CUDA branch warned that a
+    picture would be slow, which is true of FLUX in bf16 and false of the model
+    Zaram ships: `magespace/FLUX.1-schnell-bnb-nf4` stores its transformer and
+    T5 with ``load_in_4bit``, and bitsandbytes reads those on an NVIDIA GPU and
+    nowhere else. There was no slow path. There was no path.
+
+    Rule 9 in a new place — the invention was a capability.
+    """
+
+    def quantised(self, folder, *, bits: str = "load_in_4bit"):
+        model = make_pipeline(folder / "flux1-schnell-nf4")
+        part = model / "transformer"
+        part.mkdir()
+        (part / "config.json").write_text(
+            json.dumps({"quantization_config": {"quant_method": "bitsandbytes", bits: True}}),
+            encoding="utf-8",
+        )
+        return model
+
+    def test_quantised_weights_are_recognised_from_the_config(self, folder):
+        from imaging.local_flux import needs_a_card
+
+        assert needs_a_card(self.quantised(folder)) is True
+
+    def test_eight_bit_counts_too(self, folder):
+        from imaging.local_flux import needs_a_card
+
+        assert needs_a_card(self.quantised(folder, bits="load_in_8bit")) is True
+
+    def test_an_unquantised_pipeline_does_not(self, folder):
+        from imaging.local_flux import needs_a_card
+
+        assert needs_a_card(make_pipeline(folder / "plain-flux")) is False
+
+    def test_an_unreadable_config_is_not_evidence_of_quantisation(self, folder, tmp_path):
+        """The failure that matters is refusing a pipeline that would have
+        worked, so anything unreadable answers no."""
+        from imaging.local_flux import needs_a_card
+
+        model = make_pipeline(folder / "odd")
+        part = model / "transformer"
+        part.mkdir()
+        (part / "config.json").write_text("{not json", encoding="utf-8")
+        assert needs_a_card(model) is False
+
+    def test_no_card_and_four_bit_refuses_rather_than_promising_a_slow_picture(
+        self, folder, monkeypatch
+    ):
+        import torch
+
+        monkeypatch.setattr("imaging.local_flux._module_present", lambda _n: True)
+        monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+        self.quantised(folder)
+
+        answer = FluxProvider().availability()
+        assert answer.ok is False
+        assert "4-bit" in answer.reason
+        # The remedy names what is actually wrong. "No GPU found" sent somebody
+        # to Device Manager to diagnose a card they already own.
+        assert "CPU-only build" in answer.reason
+        assert "pytorch.org" in answer.remedy
+
+    def test_no_card_and_plain_weights_still_offers_the_slow_picture(
+        self, folder, monkeypatch
+    ):
+        """Refusing this would be the same mistake pointed the other way: an
+        unquantised pipeline genuinely draws on a CPU, slowly."""
+        import torch
+
+        monkeypatch.setattr("imaging.local_flux._module_present", lambda _n: True)
+        monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+        make_pipeline(folder / "plain-flux")
+
+        answer = FluxProvider().availability()
+        assert answer.ok is True
+        assert "tens of minutes" in answer.reason

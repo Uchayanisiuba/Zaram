@@ -220,6 +220,42 @@ def pipeline_class(candidate: Path) -> Optional[str]:
     return named if isinstance(named, str) and named else None
 
 
+def needs_a_card(pipeline: Path) -> bool:
+    """Whether this pipeline's weights can only be read on an NVIDIA GPU.
+
+    bitsandbytes reads 4-bit and 8-bit weights on CUDA and nowhere else, so a
+    quantised pipeline on a machine without a working card is not slow, it is
+    impossible — and the difference decides whether the honest answer is a
+    warning or a refusal.
+
+    Read from the component configs rather than guessed from the folder's name,
+    for the same reason `pipeline_class` is: `flux1-schnell-nf4` says nf4
+    because somebody typed it. ``quantization_config`` is what diffusers acts
+    on.
+
+    Answers ``False`` when nothing can be read. An unreadable config is not
+    evidence of quantisation, and the failure that matters here is refusing a
+    pipeline that would have worked.
+    """
+    import json
+
+    try:
+        components = [p for p in pipeline.iterdir() if p.is_dir()]
+    except OSError:
+        return False
+    for component in components:
+        try:
+            config = json.loads((component / "config.json").read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        quant = config.get("quantization_config")
+        if isinstance(quant, dict) and (
+            quant.get("load_in_4bit") or quant.get("load_in_8bit")
+        ):
+            return True
+    return False
+
+
 def _describe(candidate: Path) -> Installed:
     named = pipeline_class(candidate)
     return Installed(
@@ -610,13 +646,46 @@ class FluxProvider:
         import torch
 
         if not torch.cuda.is_available():
-            # Not a refusal, but a much stronger warning than SDXL needed: a
-            # 12B transformer on a CPU is tens of minutes per image, not the
-            # couple of minutes SDXL took.
+            # **4-bit and no card is a refusal.** This branch used to warn that
+            # a picture would be slow, which is true of FLUX in bf16 and false
+            # of the model Zaram ships: the weights it downloads are
+            # bitsandbytes NF4, and bitsandbytes reads those on an NVIDIA GPU
+            # and nowhere else. The offer was impossible, the person waited
+            # 214 seconds to find that out, and the sentence at the end said
+            # "No GPU found" on a machine with a perfectly good RTX 3060.
+            #
+            # And the remedy names what is actually wrong. A card that torch
+            # cannot see is almost always a CPU-only build of torch, not a
+            # broken card — so this says so, rather than sending somebody to
+            # Device Manager to diagnose hardware they already own.
+            if needs_a_card(self.model):
+                import sys
+
+                build = getattr(torch, "__version__", "unknown")
+                return Availability(
+                    ok=False,
+                    reason=(
+                        f"This model's weights are 4-bit, which can only be read on an "
+                        f"NVIDIA GPU — and the PyTorch installed here ({build}) is a "
+                        f"CPU-only build, so it cannot see one."
+                    ),
+                    remedy=(
+                        "Install a CUDA build of PyTorch — take the command for your "
+                        "CUDA version from pytorch.org/get-started, which looks like "
+                        f"`{Path(sys.executable).name} -m pip install --force-reinstall "
+                        "--index-url https://download.pytorch.org/whl/cu128 torch` "
+                        "(about 2.5 GB, one time)"
+                    ),
+                )
+
+            # An unquantised pipeline genuinely can be drawn on a CPU, and
+            # refusing it would be the same mistake pointed the other way. Still
+            # a much stronger warning than SDXL needed: a 12B transformer on a
+            # CPU is tens of minutes per image, not the couple SDXL took.
             return Availability(
                 ok=True,
                 reason=(
-                    "No CUDA GPU was found. FLUX can be drawn on the CPU, but a "
+                    "No CUDA GPU was found. This model can be drawn on the CPU, but a "
                     "single image will take tens of minutes."
                 ),
             )
