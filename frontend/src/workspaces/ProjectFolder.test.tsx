@@ -23,7 +23,18 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 
-import ProjectWorkspace from './ProjectWorkspace';
+const selectDirectory = vi.fn();
+
+// The bridge, mocked at the seam the component actually calls. The unit tests
+// at the bottom cover `chosenPath`; this covers the wiring, which is the half
+// that broke — `UnfinishedTasks.test.tsx` next door explains why that
+// distinction is the one that matters here.
+vi.mock('@/desktop/desktop-bridge', () => ({
+  isDesktop: true,
+  desktop: { dialog: { selectDirectory: (...a: unknown[]) => selectDirectory(...a) } },
+}));
+
+import ProjectWorkspace, { chosenPath } from './ProjectWorkspace';
 
 const CODING = {
   id: 'ride-hail',
@@ -141,5 +152,88 @@ describe('pointing an existing project at a folder', () => {
     server({ projects: [CODING] });
     render(<ProjectWorkspace />);
     expect(await screen.findByText(/No repository yet/i)).toBeTruthy();
+  });
+});
+
+/** **The Choose button, which was dropping what you picked.**
+ *
+ * Reported 29 September 2026: the dialog opened, a folder was selected, and
+ * nothing arrived — "the only way right now is to copy the text of the
+ * directory and paste it."
+ *
+ * `fileDialogService.selectDirectory` unwraps Electron's reply and returns a
+ * bare path; `RepositoryField` read it as Electron's raw reply,
+ * `answer?.filePaths?.[0]`. A string asked for `.filePaths` gives `undefined`,
+ * so the folder was dropped. Two halves each right against a different
+ * assumption, with nothing exercising the join — which is why this is tested
+ * at the join rather than on either side of it.
+ */
+describe('what the desktop hands back when a folder is chosen', () => {
+  it('takes the bare path the service actually returns', () => {
+    // The shape that shipped, and the one that was being dropped.
+    expect(chosenPath('C:\Ride_app')).toBe('C:\Ride_app');
+  });
+
+  it('still takes Electron’s raw reply, so the service may change its mind', () => {
+    expect(chosenPath({ filePaths: ['C:\Ride_app'] })).toBe('C:\Ride_app');
+    expect(chosenPath({ filePath: 'C:\Ride_app' })).toBe('C:\Ride_app');
+  });
+
+  it('gives nothing for a cancelled dialog', () => {
+    expect(chosenPath(null)).toBe('');
+    expect(chosenPath(undefined)).toBe('');
+  });
+
+  it('never invents a path from a shape it does not understand', () => {
+    // A path guessed from an unrecognised reply is the one value that must
+    // never reach something which resolves every file operation against it.
+    expect(chosenPath({ canceled: true })).toBe('');
+    expect(chosenPath({ filePaths: [] })).toBe('');
+    expect(chosenPath(42)).toBe('');
+  });
+});
+
+describe('pressing Choose', () => {
+  it('puts the folder the dialog returned into the field', async () => {
+    // The bare string the service really returns. Before the fix this was read
+    // as `answer.filePaths[0]`, gave undefined, and the field stayed empty —
+    // a dialog that opened, took a choice, and did nothing with it.
+    selectDirectory.mockResolvedValue('C:\Ride_app');
+    server({ projects: [CODING] });
+    render(<ProjectWorkspace />);
+
+    fireEvent.click(await screen.findByTestId('repository-choose'));
+
+    await waitFor(() =>
+      expect((screen.getByTestId('repository-path') as HTMLInputElement).value).toBe(
+        'C:\Ride_app',
+      ),
+    );
+  });
+
+  it('leaves the field alone when the dialog is cancelled', async () => {
+    selectDirectory.mockResolvedValue(null);
+    server({ projects: [CODING] });
+    render(<ProjectWorkspace />);
+
+    const field = (await screen.findByTestId('repository-path')) as HTMLInputElement;
+    fireEvent.change(field, { target: { value: 'C:\typed' } });
+    fireEvent.click(screen.getByTestId('repository-choose'));
+
+    await waitFor(() => expect(field.value).toBe('C:\typed'));
+  });
+
+  it('does not take the New Folder button away from the dialog', async () => {
+    // `properties: ['openDirectory']` used to land in an Object.assign over the
+    // service default of ['openDirectory','createDirectory'] and replace it —
+    // removing New Folder from the one person who needs it, somebody pointing
+    // a brand-new project at a folder that does not exist yet.
+    selectDirectory.mockResolvedValue('C:\Ride_app');
+    server({ projects: [CODING] });
+    render(<ProjectWorkspace />);
+    fireEvent.click(await screen.findByTestId('repository-choose'));
+
+    await waitFor(() => expect(selectDirectory).toHaveBeenCalled());
+    expect(selectDirectory.mock.calls[0][0]).not.toHaveProperty('properties');
   });
 });

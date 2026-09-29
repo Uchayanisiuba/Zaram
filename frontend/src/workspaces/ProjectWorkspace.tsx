@@ -371,6 +371,36 @@ function countLabel(group: UnclaimedGroup): string {
  * — the backend answers whether it is a folder on this machine, and it is the
  * one that can actually look.
  */
+/** The folder out of whatever the desktop handed back, or `''`.
+ *
+ * **Reported as a dead Choose button, 29 September 2026.** The two halves were
+ * each right against a different assumption and nothing exercised the join:
+ * `fileDialogService.selectDirectory` unwraps Electron's reply and returns a
+ * bare path, and this read it as Electron's raw reply —
+ * `answer?.filePaths?.[0]` — so a string was asked for `.filePaths`, gave
+ * `undefined`, and the chosen folder was dropped. The dialog opened, the
+ * person picked, nothing happened.
+ *
+ * Tolerant of both shapes rather than fixing one side, because the service's
+ * is the better one and is what its siblings already return: a caller wanting
+ * a folder should get a folder. Narrowing it here would fix this caller and
+ * break the next one written against what actually ships.
+ *
+ * A shape it does not understand yields nothing rather than a guess — a path
+ * invented from an unrecognised reply is the one value that must never be
+ * handed to something that resolves every file operation against it.
+ */
+export function chosenPath(answer: unknown): string {
+  if (typeof answer === 'string') return answer.trim();
+  if (answer && typeof answer === 'object') {
+    const paths = (answer as { filePaths?: unknown }).filePaths;
+    if (Array.isArray(paths) && typeof paths[0] === 'string') return paths[0].trim();
+    const single = (answer as { filePath?: unknown }).filePath;
+    if (typeof single === 'string') return single.trim();
+  }
+  return '';
+}
+
 function RepositoryField({
   value,
   onChange,
@@ -381,11 +411,16 @@ function RepositoryField({
   label?: string;
 }) {
   const pick = useCallback(async () => {
+    // **No `properties` override.** Passing `['openDirectory']` here landed in
+    // an `Object.assign` over the service's default of
+    // `['openDirectory', 'createDirectory']` and replaced it, taking the
+    // dialog's New Folder button away — from the one person who most needs it,
+    // somebody pointing a brand-new coding project at a folder that does not
+    // exist yet.
     const answer = await desktop.dialog.selectDirectory({
       title: 'Choose the repository',
-      properties: ['openDirectory'],
     });
-    const chosen = answer?.filePaths?.[0];
+    const chosen = chosenPath(answer);
     if (chosen) onChange(chosen);
   }, [onChange]);
 
