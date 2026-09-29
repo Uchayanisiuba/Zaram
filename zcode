@@ -1,12 +1,50 @@
 #!/usr/bin/env sh
 # ZCode - the Spine from a terminal.
 #
-# Finds the bundled interpreter, changes to backend/, runs -m cli.
-# Put this folder on PATH and `zcode recall "..."` works anywhere.
+# The POSIX half of `zcode.cmd`, kept in step with it. No macOS or Linux build
+# exists yet, so this one serves a checkout today and the packaged layout is
+# written in anyway - the alternative is discovering on the day of the first
+# mac build that the launcher only ever knew one shape.
+#
+#   installed   <install>/zcode
+#               python   <install>/resources/runtime/bin/python3
+#               backend  <install>/resources/app.asar.unpacked/backend
+#
+#   checkout    <repo>/zcode
+#               python   <repo>/backend/venv/bin/python
+#               backend  <repo>/backend
+#
+# Order matches electron/backend/backendLauncher.js: ZARAM_PYTHON, then the
+# bundled runtime, then a development venv. PATH is deliberately not a
+# fallback - some other Python will not have Zaram's dependencies, and that
+# failure arrives late and reads as a broken product rather than a missing
+# runtime.
 set -e
-here="$(cd "$(dirname "$0")/backend" && pwd)"
-py="$here/venv/bin/python"
-[ -x "$py" ] || py="$here/venv/Scripts/python.exe"
-[ -x "$py" ] || py="$(command -v python3 || command -v python)"
-cd "$here"
+
+here="$(cd "$(dirname "$0")" && pwd)"
+
+if [ -f "$here/resources/app.asar.unpacked/backend/cli.py" ]; then
+  home="$here/resources/app.asar.unpacked/backend"
+  default_py="$here/resources/runtime/bin/python3"
+else
+  home="$here/backend"
+  default_py="$home/venv/bin/python"
+fi
+
+py="${ZARAM_PYTHON:-$default_py}"
+
+if [ ! -f "$home/cli.py" ]; then
+  echo "zcode: Zaram's backend is not beside this script." >&2
+  echo "       Looked in $home" >&2
+  exit 127
+fi
+
+if [ ! -x "$py" ]; then
+  echo "zcode: Zaram's Python runtime is missing." >&2
+  echo "       Looked for $py" >&2
+  echo "       Set ZARAM_PYTHON to name an interpreter yourself." >&2
+  exit 127
+fi
+
+cd "$home"
 exec "$py" -m cli "$@"

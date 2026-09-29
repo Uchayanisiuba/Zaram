@@ -73,6 +73,16 @@ files:
   - "!backend/*.sqlite3"
   - "!backend/**/*.sqlite3"
   - "!backend/egress-policy.json"
+  # The eight named personas, removed from the code on 13 August 2026 and
+  # left on disk, where `backend/**/*.json` kept publishing them. Each one
+  # opens "You are Baba, a wise Nigerian elder..." - a rival identity claim,
+  # which is the exact thing `core/identity.py` exists to prevent. Nothing
+  # reads them: `set_personality_source` has no caller outside tests.
+  - "!backend/character.json"
+  - "!backend/characters.json"
+  # pytest scaffolding. It imports starlette.testclient and configures a
+  # test run that never happens on a user's machine.
+  - "!backend/conftest.py"
   # Every other file the backend *writes* into its data directory. In a
   # checkout `core/paths.data_dir()` is `backend/` itself, so each store's
   # file sits beside the source and matches the `*.json` include above.
@@ -152,6 +162,19 @@ extraResources:
       - "!**/*.db"
       - "!**/*.pfx"
       - "!**/*.p12"
+
+# ZCode's launcher, at the install root rather than under `resources`,
+# because the root is the directory the installer puts on PATH.
+#
+# `extraFiles`, not `extraResources`: resources is where the backend's
+# allow-list lives and this is not backend content. One script, ~2 KB.
+#
+# Windows only. The POSIX `zcode` beside it in the checkout waits for a
+# build that can use it; a shell script inside a Windows installer is a
+# file that is native to nothing.
+extraFiles:
+  - from: zcode.cmd
+    to: zcode.cmd
 
 extraMetadata:
   main: electron/main.js

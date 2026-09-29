@@ -1,3 +1,71 @@
+; ZCode on PATH, and the constants for telling Windows the environment moved.
+;
+; Named with a ZCODE_ prefix rather than reusing HWND_BROADCAST and
+; WM_WININICHANGE. An !ifndef guard here looks like the careful choice and is
+; the wrong way round: this file is included *before* WinMessages.nsh, so the
+; guard succeeds, the names get defined, and then WinMessages.nsh line 82
+; does an unguarded !define of HWND_BROADCAST and the build stops. The guard
+; protected this file from a collision it could not have, and caused one it
+; could. Own names cannot collide in either order.
+!define ZCODE_HWND_BROADCAST 0xFFFF
+!define ZCODE_WM_WININICHANGE 0x001A
+
+; Read the full reasoning in the session that added this; the short version is
+; in the three paragraphs below each call.
+!macro customInstall
+  DetailPrint "Making zcode available from your terminal..."
+
+  ; The install directory reaches PowerShell as an environment variable rather
+  ; than as text in the command line. The user chooses this path, and a quote
+  ; or a dollar sign in it must not be able to become script.
+  System::Call 'kernel32::SetEnvironmentVariable(t "ZCODE_DIR", t "$INSTDIR")i.r0'
+
+  ; Idempotent: an upgrade, or a reinstall into the same folder, must not add
+  ; a second copy. The value is read unexpanded and written back with the kind
+  ; it already had, so a PATH built out of %USERPROFILE% stays that way.
+  nsExec::ExecToLog "powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command $\"\
+$$d = $$env:ZCODE_DIR; \
+if ($$d) { \
+  $$k = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey('Environment'); \
+  $$c = [string]$$k.GetValue('Path', '', [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames); \
+  try { $$t = $$k.GetValueKind('Path') } catch { $$t = [Microsoft.Win32.RegistryValueKind]::ExpandString }; \
+  $$p = @($$c -split ';' | Where-Object { $$_ -ne '' }); \
+  if ($$p -notcontains $$d) { $$k.SetValue('Path', (($$p + $$d) -join ';'), $$t) }; \
+  $$k.Close() \
+}$\""
+  Pop $0
+  ${If} $0 == 0
+    ; New terminals read the environment when they start; this tells Explorer
+    ; and anything else listening that it changed, so a shell opened a moment
+    ; from now sees zcode without a sign-out. Already-open shells never will,
+    ; whatever we do here.
+    SendMessage ${ZCODE_HWND_BROADCAST} ${ZCODE_WM_WININICHANGE} 0 "STR:Environment" /TIMEOUT=5000
+    DetailPrint "zcode is on your PATH. Open a new terminal and run: zcode --help"
+  ${Else}
+    ; Not fatal. Zaram works; one convenience does not. Saying so beats a
+    ; silent failure the user discovers by typing a command that is not there.
+    DetailPrint "Could not update PATH. Run zcode from $INSTDIR, or add that folder to PATH yourself."
+  ${EndIf}
+!macroend
+
+!macro customRemoveFromPath
+  System::Call 'kernel32::SetEnvironmentVariable(t "ZCODE_DIR", t "$INSTDIR")i.r0'
+  nsExec::ExecToLog "powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command $\"\
+$$d = $$env:ZCODE_DIR; \
+if ($$d) { \
+  $$k = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment', $$true); \
+  if ($$k) { \
+    $$c = [string]$$k.GetValue('Path', '', [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames); \
+    try { $$t = $$k.GetValueKind('Path') } catch { $$t = [Microsoft.Win32.RegistryValueKind]::ExpandString }; \
+    $$p = @($$c -split ';' | Where-Object { $$_ -ne '' -and $$_ -ne $$d }); \
+    $$k.SetValue('Path', ($$p -join ';'), $$t); \
+    $$k.Close() \
+  } \
+}$\""
+  Pop $0
+  SendMessage ${ZCODE_HWND_BROADCAST} ${ZCODE_WM_WININICHANGE} 0 "STR:Environment" /TIMEOUT=5000
+!macroend
+
 ; Uninstall behaviour for Zaram.
 ;
 ; The default NSIS uninstaller removes the program and leaves everything under
@@ -24,6 +92,12 @@
 
 !macro customUnInstall
   ${ifNot} ${isUpdated}
+    ; PATH first, and only when this is a real uninstall. electron-builder
+    ; runs the old uninstaller as part of installing a new version, so an
+    ; unguarded removal here would strip the entry on every upgrade.
+    DetailPrint "Removing zcode from your PATH..."
+    !insertmacro customRemoveFromPath
+
     ; Nothing to ask about if nothing was ever written. A dialog offering to
     ; delete data that does not exist teaches the user their answer does not
     ; matter.
