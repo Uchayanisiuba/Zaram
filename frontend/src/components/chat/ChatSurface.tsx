@@ -45,6 +45,12 @@ import MicButton from './MicButton';
 import CitationSummary from './CitationChips';
 import { splitQuotedNotice } from './quotedNotice';
 import MessageActions from './MessageActions';
+import QuoteButton, {
+  promptWithQuote,
+  QUOTABLE,
+  QuoteChip,
+  useQuotableSelection,
+} from './QuoteSelection';
 import { AnsweredBy } from './AnsweredBy';
 import SpeakButton from './SpeakButton';
 import ReasoningPanel from './ReasoningPanel';
@@ -314,6 +320,12 @@ export default function ChatSurface({ navigate }: Props) {
   // on send or by its own dismiss. Working state, like the attachments: it
   // is about the message being composed, not the conversation.
   const [revising, setRevising] = useState<{ question: string; reply: string } | null>(null);
+  //: A part of a reply the next question is about. Asked for 3 October
+  //: 2026. Grounding rather than convenience: the passage goes into the
+  //: prompt, so there is no reference left for recall to resolve — which
+  //: is rule 9's failure mode removed rather than guarded.
+  const [quote, setQuote] = useState<string | null>(null);
+  const { quotable, clear: clearSelection } = useQuotableSelection();
   // Files already sent with an earlier question this session. They leave the
   // composer the moment they are sent — they belong to the message, and that
   // is where the person looks for them — but the backend scopes attachments
@@ -755,6 +767,13 @@ export default function ChatSurface({ navigate }: Props) {
     const text = inputText.trim();
     if (!text || isStreaming) return;
     setInputText('');
+    // The quoted passage goes in front of the question, as a markdown
+    // blockquote with a blank line after it — without the blank line
+    // markdown folds the question into the quote and the model reads its
+    // own words and the person's as one passage. Taken down with the send,
+    // like the correction chip: the next message is a fresh one.
+    const quoted = quote;
+    setQuote(null);
     // **The chips move into the message.** This used to keep them in the
     // composer so a follow-up would still read the file — right about the
     // scope, wrong about where to show it. Every other assistant puts the
@@ -773,7 +792,7 @@ export default function ChatSurface({ navigate }: Props) {
     const revise = revising;
     setRevising(null);
     void send(
-      text,
+      quoted ? promptWithQuote(quoted, text) : text,
       {
         ...(ids.length > 0 ? { attachmentIds: ids } : {}),
         ...(revise ? { revise } : {}),
@@ -1074,6 +1093,10 @@ export default function ChatSurface({ navigate }: Props) {
                     </div>
                   )}
                   <div
+                    // Only the reply is quotable. Quoting your own question
+                    // back at Zaram is not something anybody wants, and
+                    // `Ask again` already exists for re-sending it.
+                    {...(msg.role === 'assistant' ? { [QUOTABLE]: '' } : {})}
                     className={
                       msg.role === 'user'
                         ? 't-body whitespace-pre-wrap surface'
@@ -1102,6 +1125,13 @@ export default function ChatSurface({ navigate }: Props) {
                         did not ask for their asterisks to become emphasis,
                         and a message that reformats itself after sending
                         reads as the product editing them. */}
+                    {/* Quotable, so a selection inside a reply offers to
+                        ask about that part. Both ends of the selection must
+                        be inside one of these — a drag that finishes in the
+                        composer offers nothing. The user's own message is not
+                        marked: quoting your own question back at Zaram is not
+                        a thing anybody wants, and `Ask again` already exists
+                        for re-sending it. */}
                     {msg.role === 'assistant' ? (
                       <Interleaved
                         text={stripMarkers(msg.text)}
@@ -1493,6 +1523,15 @@ export default function ChatSurface({ navigate }: Props) {
         <TokenUsageBar />
         {/* What is in scope for the next message, above the box you type it
             in. Below the composer would put the evidence after the question. */}
+        <QuoteButton
+          quotable={quotable}
+          onQuote={(text) => {
+            setQuote(text);
+            clearSelection();
+            inputRef.current?.focus();
+          }}
+        />
+        {quote && <QuoteChip quote={quote} onDrop={() => setQuote(null)} />}
         {revising && (
           <div
             className="flex items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 mb-2 text-xs"
@@ -1574,7 +1613,9 @@ export default function ChatSurface({ navigate }: Props) {
                 ? 'Listening on this machine…'
                 : revising
                   ? 'What should change?'
-                  : 'Ask Zaram anything…'
+                  : quote
+                    ? 'What about this part?'
+                    : 'Ask Zaram anything…'
             }
             aria-label="Message Zaram"
             disabled={isStreaming}
