@@ -429,11 +429,21 @@
       <h2>A coding agent that is not a second product.</h2>
       <p>
         Open a folder as a coding project and the same conversation can read the files,
-        change them, run the app, look at it, and say what it saw. The change lands as a
-        commit, so <strong>the undo is git</strong> — Revert is on the card, not in a
-        dialog — and a task that stops early can be continued. Wrong in the reply? Press
-        <em>Revise</em>, say what's wrong, and the answer is regenerated with the
-        correction applied; where it changed files, the files change with it.
+        change them, run the app, and <strong>check its own work</strong> — open the page
+        in a browser, click through to the state that was broken, read what is actually on
+        screen, and say whether the change worked. The change lands as a commit, so
+        <strong>the undo is git</strong> — Revert is on the card, not in a dialog — and a
+        task that stops early can be continued. Wrong in the reply? Press <em>Revise</em>,
+        say what's wrong, and the answer is regenerated with the correction applied; where
+        it changed files, the files change with it.
+      </p>
+      <p>
+        Driving the app is <strong>its own permission</strong>, off until you turn it on.
+        Running your project's tests and pressing whatever happens to be on its page are
+        different things to agree to: the second is how a development build pointed at
+        something live gets a button pressed. It uses a browser of its own, on localhost
+        only, carrying none of your sign-ins — and you can watch the page it is on and
+        the last thing it pressed, live, under the reply.
       </p>
       <p>
         It also gets a project that won't start, started. Zaram reads the repository's own
@@ -465,6 +475,13 @@
       Zaram doesn't pretend the cloud is off-limits — it's often the right tool, and it's
       your key. What it refuses to do is let you use one without knowing the arrangement.
       Every model in the picker carries one of three labels:
+    </p>
+    <p class="policy-lede">
+      And there are a lot of models — OpenRouter alone offers 549. So you type to find
+      one: the name, the provider, what it's good at, or just <em>free</em>. The free ones
+      wear a badge, and every row says in four words what that model does with what you
+      send. <strong>Something has to be paying for free</strong>, and this is the picker
+      that tells you what.
     </p>
     <ul class="policy-list">
       <li>
@@ -822,7 +839,7 @@
         <span>Milestones</span>
         <span class="spacer">each build, and what is next</span>
       </div>
-      <div class="panel-body"><span class="line"><span class="dim">15 Sep  </span><span class="cy">alpha.1</span>  memory · recall with sources · the egress log</span><span class="line"><span class="dim">        </span>         documents · code projects · the manual</span><span class="line"><span class="dim">21 Sep  </span><span class="cy">alpha.2</span>  a row for every step, where it happened</span><span class="line"><span class="dim">        </span>         thinking on/off · the model picks its tools</span><span class="line"><span class="dim">        </span>         name a folder and it opens · work that runs</span><span class="line"><span class="dim">        </span>         on its own, never approving itself</span><span class="line"><span class="dim">29 Sep  </span><span class="cy">alpha.3</span>  a stuck project: installs, its scripts, the app</span><span class="line"><span class="dim">        </span>         pictures out, and a full card that refuses</span><span class="line"><span class="dim">        </span>         jobs and grants · a folder you pick yourself</span><span class="line"><span class="dim">        </span>         zcode · the Spine from any terminal</span><span class="line"><span class="dim">next    </span>[ ]  a signed installer — no Windows warning</span><span class="line"><span class="dim">        </span>[ ]  five verbs on the summon key</span><span class="line"><span class="dim">        </span>[ ]  word search beside the vectors</span><span class="line"><span class="dim">        </span>[ ]  mail, GitHub, socials as attached tools</span><span class="line"><span class="dim">later   </span>[ ]  your Zaram on a second machine — sync</span></div>
+      <div class="panel-body"><span class="line"><span class="dim">15 Sep  </span><span class="cy">alpha.1</span>  memory · recall with sources · the egress log</span><span class="line"><span class="dim">        </span>         documents · code projects · the manual</span><span class="line"><span class="dim">21 Sep  </span><span class="cy">alpha.2</span>  a row for every step, where it happened</span><span class="line"><span class="dim">        </span>         thinking on/off · the model picks its tools</span><span class="line"><span class="dim">        </span>         name a folder and it opens · work that runs</span><span class="line"><span class="dim">        </span>         on its own, never approving itself</span><span class="line"><span class="dim">29 Sep  </span><span class="cy">alpha.3</span>  a stuck project: installs, its scripts, the app</span><span class="line"><span class="dim">        </span>         pictures out, and a full card that refuses</span><span class="line"><span class="dim">        </span>         jobs and grants · a folder you pick yourself</span><span class="line"><span class="dim">        </span>         zcode · the Spine from any terminal</span><span class="line"><span class="dim">3 Oct   </span><span class="cy">alpha.4</span>  type to find a model · the free ones marked</span><span class="line"><span class="dim">        </span>         and what each one does with what you send</span><span class="line"><span class="dim">        </span>         it opens your app, clicks through and checks</span><span class="line"><span class="dim">        </span>         its own work — and you watch it happen</span><span class="line"><span class="dim">next    </span>[ ]  a signed installer — no Windows warning</span><span class="line"><span class="dim">        </span>[ ]  five verbs on the summon key</span><span class="line"><span class="dim">        </span>[ ]  word search beside the vectors</span><span class="line"><span class="dim">        </span>[ ]  mail, GitHub, socials as attached tools</span><span class="line"><span class="dim">later   </span>[ ]  your Zaram on a second machine — sync</span></div>
       <p class="panel-note">
         Dates are when a build reached testers, not when a feature was finished. Nothing
         on the <em>next</em> list is promised for a date; each lands when it has been
@@ -877,6 +894,7 @@
           <label for="fb-build">Which build</label>
           <select id="fb-build" name="build" required>
             <option value="" disabled selected>Choose one</option>
+            <option value="v0.1.0-alpha.4">v0.1.0-alpha.4 (3 October)</option>
             <option value="v0.1.0-alpha.3">v0.1.0-alpha.3 (29 September)</option>
             <option value="v0.1.0-alpha.2">v0.1.0-alpha.2 (21 September)</option>
             <option value="other">Something else / not sure</option>
