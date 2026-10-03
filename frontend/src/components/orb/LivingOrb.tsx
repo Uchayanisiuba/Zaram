@@ -177,6 +177,15 @@ const STATE_CONFIG: Record<OrbState, StateConfig> = {
   },
 };
 
+/** How long the orb takes to settle into a new state's colour and glow.
+ *
+ *  Long enough to read as a change of mood rather than a flash, short enough
+ *  that the orb still answers promptly when Zaram starts thinking —
+ *  `UI-SPEC`: calm over delight, and the orb reports state rather than
+ *  performing. Not tied to `pulseSeconds`, which is the breath within a
+ *  state and a different quantity. */
+const STATE_FADE_MS = 600;
+
 const LivingOrb = ({
   size = 'xl',
   className = '',
@@ -197,8 +206,16 @@ const LivingOrb = ({
   // movement rather than less information. See `stillness.ts`.
   const reduced = useIsReducedMotion();
 
-  /** Amplify existing glow via brightness � no new colors */
-  const orbBrightness = emphasis ? ' brightness(1.4)' : '';
+  /** Amplify existing glow via brightness — no new colors.
+   *
+   *  **`brightness(1)` rather than nothing when off**, and that is the fix
+   *  rather than a tidy-up. CSS interpolates a `filter` only when both sides
+   *  are the same list of functions in the same order; `drop-shadow(...)` on
+   *  one side and `drop-shadow(...) brightness(1.4)` on the other are not,
+   *  so the browser falls back to swapping them at the halfway point. Which
+   *  is a snap, however long a transition is set. Keeping the function
+   *  present at its identity value makes the two sides interpolable. */
+  const orbBrightness = emphasis ? ' brightness(1.4)' : ' brightness(1)';
 
   // Map size to pixel dimensions (matching Project A sizes)
   const sizeMap = { xs: 80, sm: 104, md: 192, lg: 320, xl: 560 };
@@ -247,6 +264,11 @@ const LivingOrb = ({
           inset: 0,
           background: `radial-gradient(circle, ${cfg.glowColor} 0%, ${cfg.glowColor2} 22%, transparent 36%)`,
           filter: 'blur(18px)',
+          // The second layer that snapped. Same cause as the globe's filter
+          // below — set in `style`, so changed in one frame. The gradient's
+          // shape is identical across every state and only its two colours
+          // differ, which is the case a browser can interpolate.
+          transition: `background ${STATE_FADE_MS}ms ease-out`,
         }}
         animate={{
           scale: frames(scaleKeyframes, reduced),
@@ -377,7 +399,27 @@ const LivingOrb = ({
           // every call site via ORB_BEHAVIOUR, so without this the orb would
           // be brightness-amplified 1.4× in the one state whose whole point is
           // that it is dim.
-          filter: `${cfg.filter}${state === 'swapping' ? '' : orbBrightness}`,
+          filter: `${cfg.filter}${state === 'swapping' ? ' brightness(1)' : orbBrightness}`,
+          // **The glow eases between states instead of jumping.** Reported
+          // 3 October 2026: *"sometimes the glow seems to snap to a higher
+          // brightness, I have noticed this happening when Zaram is
+          // thinking."* It did, and on every state change — `filter` is set
+          // in `style`, which Framer writes as plain inline CSS with no
+          // tween, so idle→thinking went from a 28px shadow at 0.45 to a
+          // 40px one at 0.65 in a single frame, with `brightness(1.4)`
+          // arriving at the same moment.
+          //
+          // A CSS transition rather than moving it into `animate`: `animate`
+          // is already carrying the pulse loop on this element, and a second
+          // declarative animation on the same node competing for `filter`
+          // is how the pulse would start fighting the state change.
+          //
+          // Kept under reduced motion deliberately. This component's own
+          // note says colour still transitions there, because *"reduced
+          // motion means less movement rather than less information"* — and
+          // a brightness that jumps is more jarring than one that fades, not
+          // less.
+          transition: `filter ${STATE_FADE_MS}ms ease-out`,
           '--sheen-seconds': `${SHEEN_SECONDS[state]}s`,
         } as React.CSSProperties}
         animate={{

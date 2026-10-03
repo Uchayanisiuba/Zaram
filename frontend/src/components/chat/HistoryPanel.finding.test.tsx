@@ -136,7 +136,7 @@ describe('search', () => {
       vi.advanceTimersByTime(300);
     });
     expect(searchConversations).toHaveBeenCalled();
-    expect(searchConversations.mock.calls.at(-1)?.[0]).toBe('IK solver');
+    expect(searchConversations.mock.calls[searchConversations.mock.calls.length - 1]?.[0]).toBe('IK solver');
   });
 
   it('goes back to the plain list when cleared', async () => {
