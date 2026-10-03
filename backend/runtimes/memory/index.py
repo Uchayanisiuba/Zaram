@@ -221,6 +221,15 @@ class HybridMemoryIndex(MemoryIndex):
     #: nothing measured how relevant it is.
     KEYWORD_ONLY_SCORE = 0.4
 
+    #: Reciprocal rank fusion's damping term: `1 / (RRF_K + rank)`.
+    #:
+    #: 60 is the value from the original paper and the one every
+    #: implementation uses. It decides how steeply the first few positions
+    #: beat the rest — smaller makes rank 1 dominate, larger flattens the
+    #: list — and it is not tuned here because tuning it would mean measuring
+    #: it, and nothing yet measures ordering separately from recall.
+    RRF_K = 60
+
     def __init__(self, embedding_dim: int = 384, signature: str = ""):
         self._vector_index = VectorMemoryIndex(embedding_dim, signature)
         self._keyword_index: dict[str, set[str]] = {}
@@ -344,6 +353,46 @@ class HybridMemoryIndex(MemoryIndex):
             keyword_scores = {rid: min(c / len(query_tokens), 1.0) for rid, c in counts.items()}
 
         all_ids = set(vector_scores.keys()) | set(keyword_scores.keys())
+
+        # **Order by rank fusion; return the similarity unchanged.**
+        #
+        # `CLAUDE.md` asks for RRF and says exactly how far to take it: *"take
+        # it for ordering. It does not answer membership or citation, and
+        # wiring it into either would reintroduce the defect by a new route."*
+        # So these two lines are the whole of it — a position per source,
+        # fused, used to sort and to cut; the number that leaves this function
+        # is the same honest similarity it always was, because the citation
+        # floor is a cosine and must keep being compared against one.
+        #
+        # **What it fixes is the truncation.** `results[:max_results]` cut the
+        # list on a magnitude that mixed two scales: a cosine for a record the
+        # embedder found, and `0.4 × normalised BM25` for one only the lexical
+        # side did. The best rare-token match in the Spine therefore entered
+        # at 0.40 and could be cut from beneath a pile of mediocre vector
+        # matches at 0.45 — which is the rank-43 failure this codebase has
+        # already paid for, in miniature, on the one query type BM25 was added
+        # for. An invoice number is exactly the thing a dense embedding is
+        # worst at and a lexical index is best at.
+        #
+        # RRF removes the class rather than guarding it. Its output is on no
+        # source's scale, so there is no blended magnitude that *could* be
+        # compared against a floor measured as a cosine — a rule you cannot
+        # break beats a rule you must remember.
+        def _positions(scores: dict[str, float]) -> dict[str, int]:
+            ordered = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)
+            return {rid: rank for rank, (rid, _) in enumerate(ordered, start=1)}
+
+        dense_rank = _positions(vector_scores)
+        lexical_rank = _positions(keyword_scores)
+
+        def _fused(rid: str) -> float:
+            total = 0.0
+            for ranks in (dense_rank, lexical_rank):
+                rank = ranks.get(rid)
+                if rank is not None:
+                    total += 1.0 / (self.RRF_K + rank)
+            return total
+
         results = []
         for rid in all_ids:
             v_score = vector_scores.get(rid, 0.0)
@@ -363,7 +412,12 @@ class HybridMemoryIndex(MemoryIndex):
             if combined > 0.05:
                 results.append((rid, combined))
 
-        results.sort(key=lambda x: x[1], reverse=True)
+        # The fused rank orders and cuts; the similarity travels untouched.
+        # `combined` is the tiebreak so the order is deterministic — two
+        # records appearing at the same rank in the one list that found them
+        # would otherwise come back in set order, which changes between runs
+        # and makes a recall measurement unrepeatable.
+        results.sort(key=lambda pair: (_fused(pair[0]), pair[1]), reverse=True)
         return results[: query.max_results]
 
     async def rebuild(self, records: list[MemoryRecord] | None = None) -> None:
