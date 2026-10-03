@@ -47,6 +47,9 @@ def _conversation_dict(conversation) -> dict:
         "created_at": conversation.created_at,
         "updated_at": conversation.updated_at,
         "message_count": conversation.message_count,
+        # Kept at the top of the list. The one thing recency ordering
+        # cannot express — see `Conversation.pinned`.
+        "pinned": conversation.pinned,
     }
 
 
@@ -73,7 +76,12 @@ class StartConversation(BaseModel):
 
 
 class RenameConversation(BaseModel):
-    title: str
+    #: Optional, so one route can rename, pin, or both. A `None` means
+    #: *leave it alone*, which is what lets the pin toggle send only the
+    #: pin — a client that had to resend the title would overwrite one
+    #: the person had just edited in another window.
+    title: Optional[str] = None
+    pinned: Optional[bool] = None
 
 
 @router.get("")
@@ -83,6 +91,15 @@ async def list_conversations(
         description=(
             "Omit for every conversation. Pass an empty string for the ones "
             "belonging to no project — two different questions."
+        ),
+    ),
+    q: Optional[str] = Query(
+        default=None,
+        description=(
+            "Find conversations whose title or messages contain this. "
+            "Searches message text as well as titles, because a title is "
+            "the first thing somebody typed and is often not what they "
+            "remember about the conversation."
         ),
     ),
     limit: int = Query(default=50, ge=1, le=500),
@@ -95,6 +112,12 @@ async def list_conversations(
     everything" quietly becomes "show me the unscoped ones".
     """
     records = _records()
+    if q and q.strip():
+        # Search ignores `project_id` on purpose: somebody who types a word
+        # is looking for a conversation, and silently hiding the matches
+        # outside the project they happen to have open is the kind of empty
+        # result that reads as "Zaram did not keep it".
+        return [_conversation_dict(c) for c in records.search(q, limit=limit)]
     return [_conversation_dict(c) for c in records.list(project_id=project_id, limit=limit)]
 
 
@@ -125,10 +148,21 @@ async def read_conversation(conversation_id: str) -> dict:
 
 
 @router.patch("/{conversation_id}")
-async def rename_conversation(conversation_id: str, body: RenameConversation) -> dict:
+async def update_conversation(conversation_id: str, body: RenameConversation) -> dict:
+    """Rename a conversation, pin it, or both.
+
+    Each field is applied only when it was sent, so a pin toggle does not
+    have to resend a title — and cannot overwrite one the person edited in
+    another window a second earlier.
+    """
     records = _records()
     try:
-        return _conversation_dict(records.rename(conversation_id, body.title))
+        conversation = records.get(conversation_id)
+        if body.title is not None:
+            conversation = records.rename(conversation_id, body.title)
+        if body.pinned is not None:
+            conversation = records.set_pinned(conversation_id, body.pinned)
+        return _conversation_dict(conversation)
     except UnknownConversation:
         raise HTTPException(status_code=404, detail="No such conversation")
     except ValueError as exc:

@@ -107,6 +107,14 @@ class Conversation:
     #: in".
     updated_at: float
     message_count: int = 0
+    #: Kept at the top of the list until the person unpins it.
+    #:
+    #: The one thing recency ordering cannot express. `updated_at` answers
+    #: *"the one I was just in"*, which is right nearly always and wrong for
+    #: the conversation somebody returns to for weeks — a running thread about
+    #: a project drops below a morning's worth of one-line questions and is
+    #: then found by scrolling. Asked for 3 October 2026.
+    pinned: bool = False
 
 
 def title_from(text: str) -> str:
@@ -171,7 +179,8 @@ class ConversationRecords:
                     title       TEXT NOT NULL DEFAULT '',
                     project_id  TEXT NOT NULL DEFAULT '',
                     created_at  REAL NOT NULL,
-                    updated_at  REAL NOT NULL
+                    updated_at  REAL NOT NULL,
+                    pinned      INTEGER NOT NULL DEFAULT 0
                 )
                 """
             )
@@ -200,6 +209,19 @@ class ConversationRecords:
                 "CREATE INDEX IF NOT EXISTS idx_conversations_updated "
                 "ON conversations(updated_at DESC)"
             )
+            # Added after the table shipped, so an existing database needs the
+            # column rather than the definition above. `CREATE TABLE IF NOT
+            # EXISTS` is silent about a table that exists and differs, which
+            # is how a schema change becomes `no such column` on somebody
+            # else's machine and nowhere else.
+            columns = {
+                row["name"]
+                for row in conn.execute("PRAGMA table_info(conversations)").fetchall()
+            }
+            if "pinned" not in columns:
+                conn.execute(
+                    "ALTER TABLE conversations ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0"
+                )
 
     # ----------------------------------------------------------------- write
 
@@ -343,7 +365,60 @@ class ConversationRecords:
         if not changed:
             raise UnknownConversation(conversation_id)
 
+    def set_pinned(self, conversation_id: str, pinned: bool) -> "Conversation":
+        """Keep a conversation at the top of the list, or stop.
+
+        A toggle rather than a list of pinned ids, so the state lives on the
+        thing it describes and cannot drift out of step with a conversation
+        that was deleted.
+        """
+        with self._lock, self._connect() as conn:
+            changed = conn.execute(
+                "UPDATE conversations SET pinned = ? WHERE id = ?",
+                (1 if pinned else 0, conversation_id),
+            ).rowcount
+        if not changed:
+            raise UnknownConversation(conversation_id)
+        return self.get(conversation_id)
+
     # ------------------------------------------------------------------ read
+
+    def search(self, text: str, *, limit: int = 50) -> List["Conversation"]:
+        """Conversations whose title or messages contain `text`.
+
+        **Both, and the messages are the half that matters.** A title is the
+        first thing somebody typed, which is often `hello` — searching only
+        titles would find the conversations that were already easy to
+        recognise and miss every one that is not. What a person remembers is
+        something they said in the middle of it.
+
+        `LIKE` rather than FTS5: this is a few thousand short rows on one
+        machine, and a second index is a second thing to keep in step with
+        the messages table for a query that is already instant. If somebody
+        has a hundred thousand conversations it should be revisited, with a
+        measurement rather than a guess.
+        """
+        needle = f"%{(text or '').strip()}%"
+        if needle == "%%":
+            return []
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT c.*, COUNT(m.id) AS message_count
+                FROM conversations c
+                LEFT JOIN messages m ON m.conversation_id = c.id
+                WHERE c.id IN (
+                    SELECT id FROM conversations WHERE title LIKE ?
+                    UNION
+                    SELECT conversation_id FROM messages WHERE text LIKE ?
+                )
+                GROUP BY c.id
+                ORDER BY c.pinned DESC, c.updated_at DESC
+                LIMIT ?
+                """,
+                (needle, needle, max(1, int(limit))),
+            ).fetchall()
+        return [_conversation_from(row) for row in rows]
 
     def list(
         self, *, project_id: Optional[str] = None, limit: int = 50
@@ -354,6 +429,11 @@ class ConversationRecords:
         belonging to no project. Two different questions, and the signature
         keeps them apart — collapsing them is how "show me everything" quietly
         becomes "show me the unscoped ones".
+
+        Pinned first, then recency. `updated_at` answers *"the one I was just
+        in"*, which is right nearly always and wrong for the thread somebody
+        returns to for weeks — it drops below a morning of one-line questions
+        and is then found by scrolling.
         """
         where, params = "", []
         if project_id is not None:
@@ -368,7 +448,7 @@ class ConversationRecords:
                 LEFT JOIN messages m ON m.conversation_id = c.id
                 {where}
                 GROUP BY c.id
-                ORDER BY c.updated_at DESC
+                ORDER BY c.pinned DESC, c.updated_at DESC
                 LIMIT ?
                 """,
                 (*params, max(1, int(limit))),
@@ -420,6 +500,9 @@ def _conversation_from(row: sqlite3.Row) -> Conversation:
         created_at=row["created_at"],
         updated_at=row["updated_at"],
         message_count=int(row["message_count"]) if "message_count" in keys else 0,
+        # Tolerant of a row written before the column existed, for the
+        # same reason the project id is: an older database must open.
+        pinned=bool(row["pinned"]) if "pinned" in keys else False,
     )
 
 

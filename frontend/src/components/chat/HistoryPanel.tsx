@@ -33,15 +33,18 @@
  * it is known. CLAUDE.md: *"Never render invented values."*
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { MessageSquare, Trash2, X } from 'lucide-react';
+import { MessageSquare, Pin, PinOff, Search, Trash2, X } from 'lucide-react';
 
 import { useIsReducedMotion } from '@/hooks/useReducedMotion';
 import { useChatStore } from '@/stores/chatStore';
 import {
   deleteConversation,
   fetchConversations,
+  pinConversation,
+  searchConversations,
   type ConversationSummary,
 } from '@/services/conversationsClient';
+import { useProjectStore } from '@/stores/projectStore';
 
 /** Long enough that crossing the edge does not open it; short enough that
  *  reaching for it does not feel gated. */
@@ -68,14 +71,49 @@ function dayLabel(updatedAt: number): string {
 }
 
 /** Group in order, keeping the store's recency sort inside each bucket. */
-function groupByDay(rows: ConversationSummary[]): Array<[string, ConversationSummary[]]> {
-  const groups: Array<[string, ConversationSummary[]]> = [];
-  for (const row of rows) {
-    const label = dayLabel(row.updatedAt);
-    const last = groups[groups.length - 1];
-    if (last && last[0] === label) last[1].push(row);
-    else groups.push([label, [row]]);
+/**
+ * The list, arranged the way somebody looks for something in it.
+ *
+ * Asked for 3 October 2026 from a screenshot of this panel beside Claude's.
+ * The screenshot is the argument: a flat list by date reading `hello`,
+ * `hello`, `hello`, `it should also accept negatives`, twice. Nothing in it
+ * is findable.
+ *
+ * **Project before date.** Grouping by day answers "when", and nobody looks
+ * for a conversation by when. They look by what it was about, and the
+ * nearest thing the record already holds is the project it was in — rule
+ * 7i's field, on the conversation since it shipped and never read by this
+ * panel. Within a project, recency, which is the ordering that was right all
+ * along at the wrong level.
+ *
+ * **Pinned first, as its own group.** The one thing recency cannot say.
+ *
+ * `Elsewhere` last rather than first: conversations outside any project are
+ * the ones least likely to be looked for, and putting them at the top is how
+ * a quick question pushes a month of project work below the fold.
+ */
+function groupByProject(
+  rows: ConversationSummary[],
+  nameFor: (id: string) => string,
+): Array<[string, ConversationSummary[]]> {
+  const pinned = rows.filter((r) => r.pinned);
+  const rest = rows.filter((r) => !r.pinned);
+
+  const byProject = new Map<string, ConversationSummary[]>();
+  for (const row of rest) {
+    const label = row.projectId ? nameFor(row.projectId) : '';
+    const list = byProject.get(label);
+    if (list) list.push(row);
+    else byProject.set(label, [row]);
   }
+
+  const groups: Array<[string, ConversationSummary[]]> = [];
+  if (pinned.length) groups.push(['Pinned', pinned]);
+  for (const [label, list] of byProject) {
+    if (label) groups.push([label, list]);
+  }
+  const loose = byProject.get('');
+  if (loose?.length) groups.push(['Elsewhere', loose]);
   return groups;
 }
 
@@ -86,6 +124,8 @@ export default function HistoryPanel() {
   const [pinned, setPinned] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
+  const [query, setQuery] = useState('');
+  const projects = useProjectStore((s) => s.projects);
 
   const openTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -102,12 +142,13 @@ export default function HistoryPanel() {
       // for history is looking for something they may not remember the scope
       // of, and `undefined` asks a different question from `''` — see
       // `fetchConversations`.
-      setRows(await fetchConversations());
+      const text = query.trim();
+      setRows(text ? await searchConversations(text) : await fetchConversations());
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'History could not be read.');
     }
-  }, []);
+  }, [query]);
 
   // Loaded when it opens rather than on mount: an ambient panel that fetches
   // on every page load spends a request on a surface nobody asked for.
@@ -123,6 +164,44 @@ export default function HistoryPanel() {
     // Deliberately keyed on the conversation alone: `open` and `load` are
     // read, not depended on — a peek must not refetch the list.
   }, [currentId]);
+
+  // Searching asks the backend, so it waits for a pause in typing rather
+  // than firing per keystroke — the list is on this machine and the query is
+  // cheap, but a request per character is still a request per character.
+  useEffect(() => {
+    if (!open) return;
+    const timer = setTimeout(() => void load(), 180);
+    return () => clearTimeout(timer);
+  }, [query, open, load]);
+
+  const nameFor = useCallback(
+    (id: string) => projects.find((p) => p.id === id)?.name ?? id,
+    [projects],
+  );
+
+  const onPin = useCallback(
+    async (row: ConversationSummary, e: React.MouseEvent) => {
+      // The row beneath is a button that resumes the conversation; pinning
+      // it must not also open it.
+      e.stopPropagation();
+      // Moved locally first, then confirmed. A pin that waits for a round
+      // trip before the row moves reads as a press that did nothing.
+      setRows((current) =>
+        (current ?? []).map((c) => (c.id === row.id ? { ...c, pinned: !c.pinned } : c)),
+      );
+      try {
+        await pinConversation(row.id, !row.pinned);
+      } catch {
+        // Put it back. A list that silently disagrees with the database is
+        // worse than one that visibly refused.
+        setRows((current) =>
+          (current ?? []).map((c) => (c.id === row.id ? { ...c, pinned: row.pinned } : c)),
+        );
+        setNote('That could not be pinned.');
+      }
+    },
+    [],
+  );
 
   const clearTimers = () => {
     if (openTimer.current) clearTimeout(openTimer.current);
@@ -329,6 +408,43 @@ export default function HistoryPanel() {
           </div>
         </header>
 
+        {/* Searches message text as well as titles, which is the half that
+            matters: a title is the first thing somebody typed and is often
+            `hello`. Not scoped to the open project either — somebody typing
+            a word is looking for a conversation, and hiding the matches
+            outside whichever project happens to be open is the empty result
+            that reads as "Zaram did not keep it". */}
+        <div className="px-2.5 pt-2 pb-1">
+          <div
+            className="flex items-center gap-1.5 rounded-md px-2 py-1"
+            style={{
+              background: 'var(--color-glass)',
+              border: '1px solid var(--color-border-subtle)',
+            }}
+          >
+            <Search size={11} style={{ color: 'var(--color-text-faint)' }} aria-hidden />
+            <input
+              type="text"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search what was said"
+              aria-label="Search conversations"
+              data-testid="history-search"
+              className="flex-1 bg-transparent text-[11.5px] outline-none"
+              style={{ color: 'var(--color-text)' }}
+            />
+            {query && (
+              <button
+                type="button"
+                aria-label="Clear the search"
+                onClick={() => setQuery('')}
+              >
+                <X size={10} style={{ color: 'var(--color-text-faint)' }} />
+              </button>
+            )}
+          </div>
+        </div>
+
         <div className="flex-1 overflow-y-auto px-1.5 py-1.5">
           {error && (
             <p className="text-xs px-2 py-2" style={{ color: 'var(--color-red)' }}>
@@ -343,17 +459,22 @@ export default function HistoryPanel() {
             </p>
           )}
 
+          {/* "Nothing matched" and "nothing exists" are different answers
+              and must not share a sentence — one is a search to change, the
+              other is a product that has not been used yet. */}
           {rows !== null && rows.length === 0 && (
             <p
               className="text-xs px-2 py-2 leading-snug"
               style={{ color: 'var(--color-text-muted)' }}
             >
-              Nothing here yet. Conversations are kept on this machine as you have them.
+              {query.trim()
+                ? `Nothing matched “${query.trim()}”. The search reads what was said, not only the titles.`
+                : 'Nothing here yet. Conversations are kept on this machine as you have them.'}
             </p>
           )}
 
           {rows !== null &&
-            groupByDay(rows).map(([label, group]) => (
+            groupByProject(rows, nameFor).map(([label, group]) => (
               <div key={label} className="mb-2">
                 <p
                   className="text-xs uppercase tracking-wider px-2 pt-1.5 pb-1"
@@ -386,10 +507,35 @@ export default function HistoryPanel() {
                       <span
                         className="flex-1 text-[11.5px] truncate"
                         style={{ color: active ? 'var(--color-text)' : 'var(--color-text-muted)' }}
-                        title={row.title || 'Untitled'}
+                        title={`${row.title || 'Untitled'} — ${dayLabel(row.updatedAt)}`}
                       >
                         {row.title || 'Untitled'}
                       </span>
+                      {/* A pinned row keeps its control visible — the
+                          state has to be readable without hovering, or the
+                          only way to know what is pinned is the group it
+                          happens to be in. */}
+                      <button
+                        type="button"
+                        aria-label={
+                          row.pinned
+                            ? `Unpin ${row.title || 'this conversation'}`
+                            : `Pin ${row.title || 'this conversation'}`
+                        }
+                        data-testid={`pin-${row.id}`}
+                        className={
+                          row.pinned
+                            ? ''
+                            : 'opacity-0 group-hover:opacity-100 focus:opacity-100'
+                        }
+                        onClick={(e) => void onPin(row, e)}
+                      >
+                        {row.pinned ? (
+                          <Pin size={11} style={{ color: 'var(--color-cyan)' }} />
+                        ) : (
+                          <PinOff size={11} style={{ color: 'var(--color-text-faint)' }} />
+                        )}
+                      </button>
                       <button
                         type="button"
                         aria-label={`Delete ${row.title || 'this conversation'}`}

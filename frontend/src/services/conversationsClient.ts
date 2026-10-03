@@ -81,6 +81,13 @@ export interface ConversationSummary {
    *  person means by "the one I was just in". Renaming does not count. */
   updatedAt: number;
   messageCount: number;
+  /** Kept at the top of the list until the person unpins it.
+   *
+   *  The one thing recency ordering cannot express. `updatedAt` answers
+   *  "the one I was just in", which is right nearly always and wrong for the
+   *  thread somebody returns to for weeks — it drops below a morning of
+   *  one-line questions and is then found by scrolling. */
+  pinned: boolean;
 }
 
 export interface StoredMessage {
@@ -114,6 +121,7 @@ function toSummary(row: Record<string, unknown>): ConversationSummary {
     createdAt: Number(row.created_at ?? 0),
     updatedAt: Number(row.updated_at ?? 0),
     messageCount: Number(row.message_count ?? 0),
+    pinned: row.pinned === true,
   };
 }
 
@@ -160,6 +168,41 @@ export async function fetchConversation(id: string): Promise<StoredConversation>
     ...toSummary(row),
     messages: (messages as Array<Record<string, unknown>>).map(toMessage),
   };
+}
+
+/**
+ * Conversations whose title **or messages** contain `text`.
+ *
+ * Messages are the half that matters. A title is the first thing somebody
+ * typed and is often `hello`; searching only titles would find the
+ * conversations that were already recognisable and miss every one that is
+ * not.
+ *
+ * Deliberately not scoped to a project: somebody typing a word is looking
+ * for a conversation, and hiding matches outside whichever project happens
+ * to be open is the empty result that reads as "Zaram did not keep it".
+ */
+export async function searchConversations(
+  text: string,
+  limit = 50,
+): Promise<ConversationSummary[]> {
+  const params = new URLSearchParams({ limit: String(limit), q: text });
+  const rows = (await get(`/conversations?${params}`)) as Array<Record<string, unknown>>;
+  return rows.map(toSummary);
+}
+
+/** Keep a conversation at the top of the list, or stop.
+ *
+ *  Sends only `pinned`, never the title: a client that resent the title
+ *  would overwrite one the person had just edited in another window. */
+export async function pinConversation(
+  id: string,
+  pinned: boolean,
+): Promise<ConversationSummary> {
+  const row = (await send(`/conversations/${encodeURIComponent(id)}`, 'PATCH', {
+    pinned,
+  })) as Record<string, unknown>;
+  return toSummary(row);
 }
 
 export async function startConversation(projectId = ''): Promise<ConversationSummary> {
