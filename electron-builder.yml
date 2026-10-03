@@ -109,6 +109,17 @@ files:
   - "!backend/image_output"
   - "!backend/temp"
   - "!backend/uploads"
+  # Screenshots of the person's own pages, and the Spine copies taken before
+  # a migration. `look_at_app` writes the first and the migration writes the
+  # second, both under `data_dir()` — which in a checkout is `backend/`, so a
+  # developer's machine has both sitting here. Neither could ship today,
+  # because the allow-list carries no `.png` and excludes every `.db`; this
+  # says so on purpose rather than by omission, for the same reason
+  # `!backend/models` does. A build must never carry somebody's screenshot
+  # of their own application, or a copy of their whole knowledge base,
+  # because somebody added an extension to the list above.
+  - "!backend/screens"
+  - "!backend/backups"
   # Model weights the user brought. `default_model_dir()` is
   # `data_dir()/models/image`, and in a checkout `data_dir()` is `backend/` —
   # so a developer with an SDXL checkpoint has 6.9 GB sitting here. Nothing

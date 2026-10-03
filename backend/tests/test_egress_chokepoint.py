@@ -60,6 +60,16 @@ LOCAL_ONLY = {
     # as a fact about the code, and the module is one function long so the
     # exemption cannot quietly cover a second call.
     "core/ask_in_process.py": "httpx over ASGITransport into this process's own app; no socket",
+    # Driving the app Zaram just changed, over Chrome's DevTools protocol.
+    # Two calls, both to the browser this process started on this machine:
+    # `/json/list` on a hardcoded `127.0.0.1:<port>`, and the WebSocket
+    # that listing hands back. The second one is *checked* against
+    # `_LOOPBACK_WS` before it opens rather than trusted — the exemption
+    # has to be a fact about the code, and "Chrome would not return a
+    # remote address" is an intention. The page the browser is pointed at
+    # is separately held to `_LOOPBACK`, so nothing here can reach the open
+    # web even by the browser's own request.
+    "packs/code/driving.py": "Chrome DevTools on 127.0.0.1:<port>, loopback enforced on both calls",
 }
 
 #: Directories that are not shipped product code.

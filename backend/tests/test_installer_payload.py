@@ -154,6 +154,19 @@ class TestNothingPrivateIsCarried:
             # `default_model_dir()` is `data_dir()/models/image`, which in a
             # checkout is under `backend/`.
             "backend/models/image/sd_xl_base_1.0.safetensors",
+            # Found 3 October 2026 by the full suite, which is the only run
+            # that scans every file on disk. `look_at_app` had left a
+            # screenshot of the maintainer's own application under
+            # `backend/screens/`, and a migration had left copies of the
+            # Spine, the egress log and the conversations under
+            # `backend/backups/`. Neither directory was named here, so the
+            # only thing keeping them out was that the allow-list carries no
+            # `.png` — one extension away from shipping somebody's
+            # screenshot, and the backups were one `!backend/**/*.db` away
+            # from their whole knowledge base.
+            "backend/screens/5aa2354fd2e4/20261001-082714.png",
+            "backend/backups/spine.db",
+            "backend/backups/conversations.db-wal",
         ],
     )
     def test_it_is_excluded(self, patterns, path):

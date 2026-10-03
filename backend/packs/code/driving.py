@@ -55,6 +55,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import shutil
 import subprocess
 import tempfile
@@ -117,6 +118,16 @@ STALE_REF = (
 )
 
 NO_BROWSER = "No Chrome or Edge is installed, so there is no browser to drive."
+
+#: The debugging socket Chrome hands back must be on this machine.
+#:
+#: It always is — the list it comes from was fetched from `127.0.0.1` and
+#: Chrome answers with its own address. But `tests/test_egress_chokepoint.py`
+#: requires an exemption to be *a fact about the code, rather than an
+#: intention*, and "Chrome would not do that" is an intention. So the URL is
+#: checked before the socket opens, and the only bytes this module can move
+#: are between two processes on one machine.
+_LOOPBACK_WS = re.compile(r"^wss?://(?:localhost|127\.0\.0\.1)(?::\d+)?(?:/.*)?$")
 
 #: Named separately from `runners.HOW_TO_PERMIT` because the control is a
 #: different one. A refusal that points at the wrong switch is worse than a
@@ -411,6 +422,13 @@ class DrivingTools:
     def _run(self, session: BrowserSession, work) -> Any:
         """Open a conversation, do one thing, close it. See `_Protocol`."""
         ws_url = self._page_socket(session)
+        if not _LOOPBACK_WS.match(ws_url):
+            # Refuses rather than rewrites, the same posture `vrmSafety`
+            # takes: a sanitised URL is a guess about what was meant.
+            raise RuntimeError(
+                "the browser handed back a debugging socket that is not on "
+                "this machine, and Zaram will not open it"
+            )
 
         async def go() -> Any:
             import aiohttp
