@@ -29,7 +29,7 @@ import os
 import sys
 import textwrap
 
-from runtimes.mcp.child_env import PASSES, child_environment
+from runtimes.mcp.child_env import IMPOSED, PASSES, child_environment
 from runtimes.mcp.client import McpServer
 
 _ECHO_ENV = textwrap.dedent(
@@ -56,18 +56,23 @@ class TestThePureFunction:
     def test_the_credential_never_crosses(self):
         parent = {"PATH": "/bin", "ZARAM_API_SECRET": "s3", "ZARAM_DATA_DIR": "/d", "OPENAI_API_KEY": "k"}
         child = child_environment(parent, None)
-        assert child == {"PATH": "/bin"}
+        # `| IMPOSED` rather than a subset check: whole-dict equality is
+        # what makes this test catch a *new* variable crossing, which is
+        # the defect it exists for. The opt-outs are named here so they
+        # stay deliberate — see `IMPOSED`, which is a request to the
+        # child and never an enforcement.
+        assert child == {"PATH": "/bin", **IMPOSED}
 
     def test_the_block_always_crosses_and_wins(self):
         parent = {"PATH": "/bin", "TOKEN_FROM_SHELL": "no", "HOME": "/h"}
         child = child_environment(parent, {"GITHUB_TOKEN": "gh", "HOME": "/server"})
-        assert child == {"PATH": "/bin", "HOME": "/server", "GITHUB_TOKEN": "gh"}
+        assert child == {"PATH": "/bin", "HOME": "/server", "GITHUB_TOKEN": "gh", **IMPOSED}
 
     def test_names_are_matched_without_case_and_kept_as_spelled(self):
         # Windows hands `SystemRoot` in that spelling and Node reads it by
         # that name; the comparison folds, the key does not.
         child = child_environment({"SystemRoot": r"C:\Windows", "systemdrive": "C:"}, None)
-        assert child == {"SystemRoot": r"C:\Windows", "systemdrive": "C:"}
+        assert child == {"SystemRoot": r"C:\Windows", "systemdrive": "C:", **IMPOSED}
 
     def test_nothing_on_the_list_is_a_credential(self):
         for name in PASSES:

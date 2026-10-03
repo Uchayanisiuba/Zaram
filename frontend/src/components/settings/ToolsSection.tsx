@@ -484,6 +484,26 @@ export default function ToolsSection({ Row }: ToolsSectionProps) {
               Whether a server may write is decided here, from a checked list of
               applications whose own undo covers what their server does.
             </div>
+            {/* **The limit, said plainly, because it is real.** `CLAUDE.md`:
+                *never claim absolute security; state what is verifiable.* An
+                attached server is a separate program with its own sockets, so
+                `EgressGate` — which intercepts what Zaram sends — cannot see
+                a request the server makes on its own. Saying "every byte is
+                logged" here would be the one claim the product cannot keep.
+                Zaram asks every server not to phone home (`DO_NOT_TRACK` and
+                the vendor-specific opt-outs, in `child_env.py`), which is a
+                request that most embedded analytics honour and none of them
+                is obliged to. Blocking it properly needs an outbound firewall
+                rule per child, which needs administrator rights, breaks every
+                server that legitimately fetches something, and fails *open*
+                when it cannot be applied — a guard that silently does nothing
+                is worse than a limit somebody can read. */}
+            <div className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
+              A server runs as its own program. Zaram logs every call it makes{' '}
+              <em>into</em> one, and asks each not to send usage data of its
+              own — but it cannot log what another program sends. Attach
+              servers you would run anyway.
+            </div>
             <div className="flex items-center gap-2">
               <button
                 type="button"

@@ -68,6 +68,53 @@ PASSES: FrozenSet[str] = frozenset(name.upper() for name in (
     "UV_CACHE_DIR", "UV_PYTHON", "PIP_CACHE_DIR", "CARGO_HOME", "RUSTUP_HOME",
     "GOPATH", "GOCACHE", "JAVA_HOME", "DOTNET_ROOT",
 ))
+
+#: Set on every child, asking it not to phone home.
+#:
+#: **This is a request, and the module is explicit about that rather than
+#: quietly implying more.** A stdio server is a separate program with its own
+#: sockets, and `EgressGate` intercepts what *Zaram* sends — so a server with
+#: an analytics SDK in it can make a request this process never sees, and rule
+#: 3 is unenforceable for that byte. No environment variable changes that.
+#: What these do is turn off the SDKs that honour them, which is most of the
+#: ones that get embedded by accident: PostHog, Mixpanel, Sentry, the Next.js
+#: and Astro and Gatsby telemetry, `uv`, Homebrew. `DO_NOT_TRACK=1` is a small
+#: cross-vendor convention rather than a standard, and it is worth sending for
+#: the same reason a cookie banner gets the privacy-preserving answer: it
+#: costs nothing and it is the correct one.
+#:
+#: **The remaining gap is stated in the interface, not papered over.**
+#: `CLAUDE.md`: *never claim absolute security; state what is verifiable.* A
+#: product that said "every byte is logged" while a child process had its own
+#: socket would be making the one claim it cannot keep. What is true is that
+#: every byte **Zaram** sends is logged, every call Zaram makes *into* a
+#: server is logged, and what the server does on its own is the server's.
+#:
+#: Why not actually block it: an outbound firewall rule per child needs
+#: administrator rights on Windows, breaks every server that legitimately
+#: fetches something, and fails *open* when it cannot be applied — which is
+#: the shape `electron-builder.yml` already records as the reason its payload
+#: became an allow-list. A guard that silently does nothing is worse than a
+#: limitation somebody can read.
+#:
+#: Applied **before** the server's own `env` block, so a person who
+#: deliberately writes `DO_NOT_TRACK=0` for a server that needs it gets what
+#: they asked for. Their block is the more specific claim, unchanged from 15
+#: September.
+IMPOSED: Dict[str, str] = {
+    "DO_NOT_TRACK": "1",
+    # The vendor-specific ones, because `DO_NOT_TRACK` is young and these are
+    # what the SDKs actually read today.
+    "POSTHOG_DISABLED": "1",
+    "SENTRY_DSN": "",
+    "NEXT_TELEMETRY_DISABLED": "1",
+    "ASTRO_TELEMETRY_DISABLED": "1",
+    "GATSBY_TELEMETRY_DISABLED": "1",
+    "SCARF_ANALYTICS": "false",
+    "DOTNET_CLI_TELEMETRY_OPTOUT": "1",
+    "HOMEBREW_NO_ANALYTICS": "1",
+    "UV_NO_ANALYTICS": "1",
+}
 # fmt: on
 
 
@@ -81,11 +128,17 @@ def child_environment(
     `env` block from `mcp-servers.json`, or `None`. Pure, so a test can hand
     it a dictionary with a secret in it and read what came out without
     spawning anything.
+
+    Three layers, in order: what the allow-list lets through, the telemetry
+    opt-outs Zaram asks for, and the server's own block — which wins, because
+    the person wrote it for this server.
     """
     child: Dict[str, str] = {}
     for name, value in parent.items():
         if name.upper() in PASSES:
             child[name] = value
+    # Asked for, never enforced. See `IMPOSED`.
+    child.update(IMPOSED)
     if declared:
         for name, value in declared.items():
             child[str(name)] = str(value)
