@@ -115,3 +115,79 @@ test('staticServer: the packaged prefix list is not narrower than the dev one', 
     `reachable in development and 200-with-a-document once packaged: ${missing.join(', ')}`,
   );
 });
+
+/**
+ * Creating a project through the packaged origin: the exact call that failed.
+ *
+ * Reported 3 October 2026 against the installed alpha.3 — pick the repository
+ * folder, press Create, nothing happens — with `projects.db` in the installed
+ * data directory holding zero rows and untouched since the day it was made.
+ *
+ * In development the renderer talks to Vite's proxy; in a packaged build it
+ * talks to this server. That difference is where a create can work on the
+ * maintainer's machine and never once work on an install, so the packaged
+ * path gets the POST exercised end to end rather than inferred from the
+ * prefix list: the method, the JSON body, the credential header, and a JSON
+ * reply coming back parseable.
+ *
+ * `res.json()` is the assertion that matters. An unlisted prefix answers 200
+ * with index.html, and the store's `await res.json()` then throws on `<` —
+ * which, before the fix in `projectStore.send`, rejected out of the store and
+ * left the Create button disabled forever with nothing on screen.
+ */
+test('staticServer: POST /projects carries its body, its credential, and returns JSON', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'zaram-static-'));
+  fs.writeFileSync(path.join(dir, 'index.html'), '<html>app</html>');
+
+  let seen = null;
+  const fetchImpl = async (url, init) => {
+    seen = { url, method: init.method, headers: init.headers, body: init.body?.toString() };
+    const payload = JSON.stringify({ id: 'ride-share', name: 'Ride Share', type: 'coding' });
+    return {
+      status: 200,
+      headers: { forEach: () => {} },
+      body: new ReadableStream({
+        start(c) {
+          c.enqueue(new TextEncoder().encode(payload));
+          c.close();
+        },
+      }),
+    };
+  };
+
+  // The real packaged prefix list, not a hand-written one. A test that
+  // invents its own prefixes cannot notice `/projects` going missing from
+  // the list the product actually ships.
+  const { renderer } = createConfig({ isPackaged: true, env: {} });
+  const apiProxyPrefixes = renderer.apiProxyPrefixes;
+  const server = createStaticServer({
+    staticDir: dir,
+    backendBaseUrl: 'http://127.0.0.1:9',
+    apiPrefixes: apiProxyPrefixes,
+    fetchImpl,
+  });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const port = server.address().port;
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/projects`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Zaram-Auth': 'the-credential' },
+      body: JSON.stringify({ name: 'Ride Share', type: 'coding', note: '', root: 'C:\RideShare' }),
+    });
+
+    // Parseable, which an index.html fall-through is not.
+    const created = await res.json();
+    assert.strictEqual(created.id, 'ride-share');
+
+    assert.ok(seen, 'the request never reached the backend');
+    assert.strictEqual(seen.method, 'POST');
+    assert.strictEqual(seen.url, 'http://127.0.0.1:9/projects');
+    // The folder has to survive the hop. A body dropped here is a project
+    // created with no root, which is the "Zaram cannot see my code" report.
+    assert.strictEqual(JSON.parse(seen.body).root, 'C:\RideShare');
+    assert.strictEqual(seen.headers['x-zaram-auth'], 'the-credential');
+  } finally {
+    await new Promise((r) => server.close(r));
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

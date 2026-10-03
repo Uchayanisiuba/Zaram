@@ -487,13 +487,21 @@ function CreateRow({ onDone }: { onDone: () => void }) {
   const submit = useCallback(async () => {
     if (!name.trim() || needsFolder || busy) return;
     setBusy(true);
-    // The folder is sent only for a coding project. Storing one against a
-    // business project would be a value the product then ignores — `root` is
-    // read only for `coding` — and a field that is accepted and never used is
-    // worse than one that was not offered.
-    const created = await create(name, type, '', type === 'coding' ? root : '');
-    setBusy(false);
-    if (created) onDone();
+    try {
+      // The folder is sent only for a coding project. Storing one against a
+      // business project would be a value the product then ignores — `root` is
+      // read only for `coding` — and a field that is accepted and never used is
+      // worse than one that was not offered.
+      const created = await create(name, type, '', type === 'coding' ? root : '');
+      if (created) onDone();
+    } finally {
+      // **Always, even though the store no longer throws.** This is the belt
+      // for the next action that does: an uncleared `busy` disables the only
+      // button that could retry, which is exactly how "press Create and
+      // nothing happens" was reported on 3 October 2026. The form stays open
+      // and filled in, so the retry costs no typing.
+      setBusy(false);
+    }
   }, [busy, create, name, needsFolder, onDone, root, type]);
 
   return (

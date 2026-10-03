@@ -133,6 +133,44 @@ async function readError(res: Response, fallback: string): Promise<string> {
   }
 }
 
+/**
+ * A request that reports instead of throwing.
+ *
+ * Returns the `Response` when the backend answered and liked it, or the
+ * sentence to show when it did not — a refusal, or a request that never
+ * completed at all.
+ *
+ * **Why this exists.** `load` had a try/catch and eight siblings did not, so
+ * a dropped connection rejected out of the store and into whichever component
+ * was awaiting. Reported 3 October 2026 as a Create button that did nothing:
+ * `CreateRow` set `busy` before awaiting, the rejection skipped
+ * `setBusy(false)`, and the button disabled itself permanently with no
+ * message, because `set({ error })` was never reached.
+ *
+ * Returning the sentence rather than throwing is the part that lasts. A
+ * convention that every action needs a `try` is a convention the ninth action
+ * forgets; there is no `try` to forget when there is no throw.
+ */
+async function send(
+  url: string,
+  init: RequestInit,
+  fallback: string,
+): Promise<Response | string> {
+  let res: Response;
+  try {
+    res = await fetch(url, init);
+  } catch (e) {
+    // Naming the cause matters here. "That project could not be created"
+    // alone sends somebody back to check what they typed, when the true
+    // answer is that Zaram's backend did not answer at all — which is a
+    // different problem with a different fix.
+    const why = e instanceof Error ? e.message : String(e);
+    return `${fallback} Zaram's backend did not answer (${why}).`;
+  }
+  if (!res.ok) return await readError(res, fallback);
+  return res;
+}
+
 export const useProjectStore = create<ProjectStore>((set, get) => ({
   projects: [],
   unclaimed: [],
@@ -177,16 +215,30 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
 
   create: async (name, type, note = '', root = '') => {
     set({ error: null });
-    const res = await fetch(`${API}/projects`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, type, note, root }),
-    });
-    if (!res.ok) {
-      set({ error: await readError(res, 'That project could not be created.') });
+    const res = await send(
+      `${API}/projects`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, type, note, root }),
+      },
+      'That project could not be created.',
+    );
+    if (typeof res === 'string') {
+      set({ error: res });
       return null;
     }
-    const project: Project = await res.json();
+    let project: Project;
+    try {
+      project = (await res.json()) as Project;
+    } catch {
+      // Answered 2xx and sent something unreadable. `load()` is the honest
+      // recovery: if the project is really there it appears in the list, and
+      // the message is still shown because this call cannot say that it is.
+      await get().load();
+      set({ error: 'That project could not be created.' });
+      return null;
+    }
     // Reload rather than pushing the response: the list carries counts this
     // response does not, and a row that renders without them would flicker.
     await get().load();
@@ -194,13 +246,17 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
   },
 
   rename: async (id, name) => {
-    const res = await fetch(`${API}/projects/${encodeURIComponent(id)}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name }),
-    });
-    if (!res.ok) {
-      set({ error: await readError(res, 'That project could not be renamed.') });
+    const res = await send(
+      `${API}/projects/${encodeURIComponent(id)}`,
+      {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name }),
+      },
+      'That project could not be renamed.',
+    );
+    if (typeof res === 'string') {
+      set({ error: res });
       return;
     }
     await get().load();
@@ -208,15 +264,19 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
 
   setRoot: async (id, root) => {
     set({ error: null });
-    const res = await fetch(`${API}/projects/${encodeURIComponent(id)}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ root }),
-    });
-    if (!res.ok) {
-      // The backend's own sentence — "C:\nope is not a folder on this machine"
-      // is something a person can act on, and a 400 is not.
-      set({ error: await readError(res, 'That folder could not be set.') });
+    // The backend's own sentence — "C:\nope is not a folder on this machine"
+    // is something a person can act on, and a 400 is not.
+    const res = await send(
+      `${API}/projects/${encodeURIComponent(id)}`,
+      {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ root }),
+      },
+      'That folder could not be set.',
+    );
+    if (typeof res === 'string') {
+      set({ error: res });
       return;
     }
     await get().load();
@@ -224,13 +284,17 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
 
   setWrites: async (id, writes) => {
     set({ error: null });
-    const res = await fetch(`${API}/projects/${encodeURIComponent(id)}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ writes }),
-    });
-    if (!res.ok) {
-      set({ error: await readError(res, 'That could not be changed.') });
+    const res = await send(
+      `${API}/projects/${encodeURIComponent(id)}`,
+      {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ writes }),
+      },
+      'That could not be changed.',
+    );
+    if (typeof res === 'string') {
+      set({ error: res });
       return;
     }
     await get().load();
@@ -238,13 +302,17 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
 
   setRuns: async (id, runs) => {
     set({ error: null });
-    const res = await fetch(`${API}/projects/${encodeURIComponent(id)}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ runs }),
-    });
-    if (!res.ok) {
-      set({ error: await readError(res, 'That could not be changed.') });
+    const res = await send(
+      `${API}/projects/${encodeURIComponent(id)}`,
+      {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ runs }),
+      },
+      'That could not be changed.',
+    );
+    if (typeof res === 'string') {
+      set({ error: res });
       return;
     }
     await get().load();
@@ -287,13 +355,17 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
   },
 
   setType: async (id, type) => {
-    const res = await fetch(`${API}/projects/${encodeURIComponent(id)}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type }),
-    });
-    if (!res.ok) {
-      set({ error: await readError(res, 'That project type could not be changed.') });
+    const res = await send(
+      `${API}/projects/${encodeURIComponent(id)}`,
+      {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type }),
+      },
+      'That project type could not be changed.',
+    );
+    if (typeof res === 'string') {
+      set({ error: res });
       return;
     }
     await get().load();
@@ -304,13 +376,17 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
     // name. Every file and every fact in this group points at this exact
     // string; slugifying the name here would create a *different* project and
     // adopt nothing, which is the one failure this whole path exists to end.
-    const res = await fetch(`${API}/projects/${encodeURIComponent(id)}/adopt`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, type }),
-    });
-    if (!res.ok) {
-      set({ error: await readError(res, `${id} could not be adopted.`) });
+    const res = await send(
+      `${API}/projects/${encodeURIComponent(id)}/adopt`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, type }),
+      },
+      `${id} could not be adopted.`,
+    );
+    if (typeof res === 'string') {
+      set({ error: res });
       return;
     }
     await get().load();
@@ -319,12 +395,13 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
   remove: async (id, contents) => {
     // `contents` is required by the signature rather than defaulted, so a
     // caller cannot delete facts by forgetting an argument.
-    const res = await fetch(
+    const res = await send(
       `${API}/projects/${encodeURIComponent(id)}?contents=${contents}`,
       { method: 'DELETE' },
+      'That project could not be deleted.',
     );
-    if (!res.ok) {
-      set({ error: await readError(res, 'That project could not be deleted.') });
+    if (typeof res === 'string') {
+      set({ error: res });
       return;
     }
     await get().load();

@@ -237,3 +237,75 @@ describe('pressing Choose', () => {
     expect(selectDirectory.mock.calls[0][0]).not.toHaveProperty('properties');
   });
 });
+
+/**
+ * Reported 3 October 2026: Create is pressed, and nothing happens at all.
+ *
+ * Not a refusal — a refusal is a 400 and the screen says so. This is the
+ * case where the request never completes: the backend is still starting, the
+ * connection drops, the body is not JSON. `create` rejected, `setBusy(false)`
+ * never ran, and the button disabled itself permanently with no message.
+ *
+ * The assertions are the person's experience rather than the mechanism: the
+ * button must come back, and the screen must say something. A different fix
+ * that delivers both still passes.
+ */
+describe('when the create request never completes', () => {
+  function serverThatDropsThePost() {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (init?.method === 'POST') throw new TypeError('Failed to fetch');
+        if (String(input).includes('/plans')) {
+          return new Response(JSON.stringify({ plans: [], kept_for_days: 7 }), { status: 200 });
+        }
+        return new Response(JSON.stringify({ projects: [], unclaimed: [] }), { status: 200 });
+      }),
+    );
+  }
+
+  async function fillInACodingProject() {
+    const name = await openCreate();
+    fireEvent.change(name, { target: { value: 'Ride hail' } });
+    fireEvent.click(screen.getByRole('button', { name: /^coding$/i }));
+    fireEvent.change(screen.getByTestId('repository-path'), {
+      target: { value: 'C:\\Ride_app' },
+    });
+    return screen.getByRole('button', { name: /^create$/i }) as HTMLButtonElement;
+  }
+
+  it('leaves the button pressable instead of disabling it forever', async () => {
+    serverThatDropsThePost();
+    const create = await fillInACodingProject();
+    expect(create.disabled).toBe(false);
+
+    fireEvent.click(create);
+
+    // The whole bug: `busy` never cleared, so this stayed true and no further
+    // press could do anything.
+    await waitFor(() => expect(create.disabled).toBe(false));
+  });
+
+  it('says something, rather than failing silently', async () => {
+    serverThatDropsThePost();
+    const create = await fillInACodingProject();
+    fireEvent.click(create);
+
+    // Any sentence will do; what must not happen is nothing. A button that
+    // does nothing and says nothing reads as a broken product.
+    await waitFor(() => {
+      const said = screen.queryByText(/could not|failed|try again|not be created/i);
+      expect(said).toBeTruthy();
+    });
+  });
+
+  it('keeps the form open so the typing is not lost', async () => {
+    serverThatDropsThePost();
+    const create = await fillInACodingProject();
+    fireEvent.click(create);
+
+    await waitFor(() => expect(create.disabled).toBe(false));
+    expect((screen.getByLabelText('Project name') as HTMLInputElement).value).toBe('Ride hail');
+    expect((screen.getByTestId('repository-path') as HTMLInputElement).value).toBe('C:\\Ride_app');
+  });
+});
