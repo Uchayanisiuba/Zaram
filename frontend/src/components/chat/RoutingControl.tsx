@@ -39,6 +39,11 @@ import { Brain, Check, Cloud, HardDrive, RefreshCw, Shuffle } from 'lucide-react
 
 import { describeDataPolicy } from '@/components/settings/AdvancedModelField';
 import {
+  FreeBadge,
+  ModelSearchBox,
+  matchesQuery,
+} from '@/components/settings/ModelSearchList';
+import {
   fetchModels,
   fetchRoutingSettings,
   rescanModels,
@@ -108,6 +113,9 @@ export default function RoutingControl() {
   const [failed, setFailed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [rescanning, setRescanning] = useState(false);
+  //: What has been typed into the model search. Held here rather than in the
+  //: box so one field narrows both sections — see the panel below.
+  const [query, setQuery] = useState('');
   const root = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -228,6 +236,11 @@ export default function RoutingControl() {
   const chats = (models ?? []).filter((m) => m.category === 'llm');
   const local = chats.filter((m) => m.locality === 'local');
   const cloud = chats.filter((m) => m.locality !== 'local');
+  // Filtered copies rather than a filtered `chats`, so each section keeps the
+  // unfiltered count it needs for its own empty sentence and the search box
+  // can report how many of the whole set survived.
+  const shownLocal = local.filter((m) => matchesQuery(m, query));
+  const shownCloud = cloud.filter((m) => matchesQuery(m, query));
 
   // Auto needs something to choose between. With one candidate all three modes
   // resolve to the same model, and a preference that cannot change the answer
@@ -352,10 +365,22 @@ export default function RoutingControl() {
             })}
           </div>
 
+          {/* One field, both lists. OpenRouter alone can return several
+              hundred models, and the two sections are a split by *meaning*,
+              not a way of making the list shorter — so narrowing has to cross
+              them or it does not help. */}
+          <ModelSearchBox
+            query={query}
+            onQuery={setQuery}
+            total={local.length + cloud.length}
+            shown={shownLocal.length + shownCloud.length}
+          />
+
           <Section
             title="On this machine"
             empty="No chat model is installed here."
-            models={local}
+            noMatch={query.trim() === '' ? null : query.trim()}
+            models={shownLocal}
             pinned={pinned}
             busy={busy}
             loading={loading}
@@ -369,7 +394,8 @@ export default function RoutingControl() {
                 ? 'No cloud chat model was returned.'
                 : 'No cloud provider is connected.'
             }
-            models={cloud}
+            noMatch={query.trim() === '' ? null : query.trim()}
+            models={shownCloud}
             pinned={pinned}
             busy={busy}
             loading={loading}
@@ -403,6 +429,7 @@ export default function RoutingControl() {
 function Section({
   title,
   empty,
+  noMatch,
   models,
   pinned,
   busy,
@@ -412,6 +439,11 @@ function Section({
 }: {
   title: string;
   empty: string;
+  /** The query, when one is active. Separates "nothing matched what you
+   *  typed" from "there is nothing here" — the same distinction the two
+   *  `empty` sentences already draw, applied to the search. Merging them
+   *  would tell somebody with a typo that they have no cloud provider. */
+  noMatch: string | null;
   models: DiscoveredModel[];
   pinned: string | null;
   busy: boolean;
@@ -424,7 +456,9 @@ function Section({
       <p className="text-xs uppercase tracking-wide text-slate-500 mb-1">{title}</p>
       {loading && <p className="text-xs text-slate-600">Looking…</p>}
       {!loading && models.length === 0 && (
-        <p className="text-xs text-slate-600">{empty}</p>
+        <p className="text-xs text-slate-600">
+          {noMatch === null ? empty : `Nothing here matches “${noMatch}”.`}
+        </p>
       )}
       {!loading &&
         models.map((model) => {
@@ -444,9 +478,15 @@ function Section({
                 style={{ color: chosen ? 'var(--color-cyan-light)' : 'transparent' }}
                 aria-hidden
               />
-              <span className="min-w-0">
-                <span className="block text-xs text-slate-300 truncate">
-                  {model.displayName}
+              <span className="min-w-0 flex-1">
+                <span className="flex items-center gap-1.5">
+                  <span className="truncate text-xs text-slate-300">
+                    {model.displayName}
+                  </span>
+                  {/* The mark the chip never had. Findable at a glance in a
+                      list of hundreds; the data-policy line below is what
+                      stops it being the offer without the deal. */}
+                  {model.isFree === true && <FreeBadge />}
                 </span>
                 {/* Both notes are the reason a person would choose differently,
                     so they sit under the name rather than in a tooltip. The

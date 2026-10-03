@@ -401,3 +401,87 @@ describe('the thinking control — 20 September 2026', () => {
     expect(screen.getByTestId('thinking-chip').textContent).toContain('Thinking on');
   });
 });
+
+/**
+ * Searching the chip, and the free mark it never had.
+ *
+ * Asked for on 3 October 2026: OpenRouter returns several hundred models and
+ * scrolling them in a panel this size is not a picker. The chip also marked
+ * nothing as free, while Settings did — two renderings of one decision that
+ * had drifted apart.
+ */
+describe('finding a model among many', () => {
+  /** Enough to cross the threshold the box renders above. */
+  const CROWD = [
+    ...MODELS,
+    model({ id: 'or:a', displayName: 'nvidia/nemotron-3-nano', provider: 'openrouter', locality: 'cloud', isFree: true, dataPolicy: 'logged_and_trained_on', fitsResident: null, sizeBytes: null }),
+    model({ id: 'or:b', displayName: 'nvidia/nemotron-3-super', provider: 'openrouter', locality: 'cloud', fitsResident: null, sizeBytes: null }),
+    model({ id: 'or:c', displayName: 'moonshot/kimi-k2', provider: 'openrouter', locality: 'cloud', fitsResident: null, sizeBytes: null }),
+    model({ id: 'or:d', displayName: 'openai/gpt-astra', provider: 'openrouter', locality: 'cloud', fitsResident: null, sizeBytes: null }),
+    model({ id: 'ol:e', displayName: 'llama3:8b' }),
+    model({ id: 'ol:f', displayName: 'mistral:7b' }),
+    model({ id: 'ol:g', displayName: 'phi4:14b' }),
+  ];
+
+  it('leaves a short list alone', async () => {
+    await openPanel();
+    await screen.findByText('qwen2.5:7b');
+    // Four models, one of them an embedder that is never offered. A search
+    // field over three rows is chrome.
+    expect(screen.queryByTestId('model-search-input')).toBeNull();
+  });
+
+  it('narrows both lists from one field', async () => {
+    fetchModels.mockResolvedValue(CROWD);
+    await openPanel();
+    await screen.findByText('qwen2.5:7b');
+
+    const box = screen.getByTestId('model-search-input');
+    await userEvent.type(box, 'nemotron');
+
+    // The local list emptied, the cloud list kept its two.
+    await waitFor(() => expect(screen.queryByText('qwen2.5:7b')).toBeNull());
+    expect(screen.getByText('nvidia/nemotron-3-nano')).toBeTruthy();
+    expect(screen.getByText('nvidia/nemotron-3-super')).toBeTruthy();
+    expect(screen.queryByText('moonshot/kimi-k2')).toBeNull();
+  });
+
+  it('says nothing matched rather than claiming no provider is connected', async () => {
+    // The trap: the cloud section's empty sentence is "No cloud provider is
+    // connected", which is a fact about the machine. Showing it because
+    // somebody mistyped would send them to Settings to fix nothing.
+    fetchModels.mockResolvedValue(CROWD);
+    await openPanel();
+    await screen.findByText('qwen2.5:7b');
+
+    await userEvent.type(screen.getByTestId('model-search-input'), 'zzzz');
+
+    await waitFor(() => expect(screen.queryByText('qwen2.5:7b')).toBeNull());
+    expect(screen.queryByText(/No cloud provider is connected/i)).toBeNull();
+    expect(screen.getAllByText(/Nothing here matches/i).length).toBeGreaterThan(0);
+  });
+
+  it('marks the free one, and still names what it costs', async () => {
+    fetchModels.mockResolvedValue(CROWD);
+    await openPanel();
+    const badge = await screen.findByTestId('free-badge');
+    const row = badge.closest('button');
+    expect(row).not.toBeNull();
+    // The badge is the affordance; this is the deal. Never one without the
+    // other — `CLAUDE.md` calls "free" alone the offer without the deal.
+    expect(within(row as HTMLElement).getByText(/logged and trained on/i)).toBeTruthy();
+  });
+
+  it('still picks the model that was searched for', async () => {
+    fetchModels.mockResolvedValue(CROWD);
+    await openPanel();
+    await screen.findByText('qwen2.5:7b');
+
+    await userEvent.type(screen.getByTestId('model-search-input'), 'kimi');
+    await userEvent.click(await screen.findByText('moonshot/kimi-k2'));
+
+    await waitFor(() =>
+      expect(updateRoutingSettings).toHaveBeenCalledWith({ defaultModel: 'moonshot/kimi-k2' }),
+    );
+  });
+});

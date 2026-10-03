@@ -122,6 +122,7 @@ import {
   type WebSearchStatus,
 } from '@/services/settingsClient';
 import { pastedKey } from '@/lib/pastedKey';
+import ModelSearchList from '@/components/settings/ModelSearchList';
 
 // --------------------------------------------------------------- primitives
 
@@ -989,62 +990,38 @@ export default function SettingsWorkspace() {
               </div>
 
               {models !== null && (
-                <select
-                  aria-label="Which model answers"
-                  className="px-2 py-1.5 rounded-lg text-xs max-w-full"
-                  style={{
-                    background: 'transparent',
-                    border: '1px solid var(--color-border-subtle)',
-                    color: 'var(--color-text)',
-                  }}
+                /* Embedders are not offered. `bge-m3` is a model, is
+                   discovered like one, and answers `/api/generate` with a
+                   400 — so listing it here is offering a choice whose only
+                   outcome is a failed reply. `/readiness` already excludes
+                   them from its chat-model count; this was the surface that
+                   did not. */
+                <ModelSearchList
+                  models={models.filter((model) => model.category !== 'embedding')}
                   value={routingSettings?.defaultModel ?? ''}
-                  onChange={(event) =>
+                  matchOn="id"
+                  busy={busy === 'routing'}
+                  decideLabel="Zaram decides"
+                  empty="No chat model was found. Use “Look for models” above."
+                  /* The two notes the old `<option>` label carried as ` · `
+                     fragments, now on their own lines. The third — free — is
+                     the badge, and the fourth — unknown terms — is already in
+                     the data-policy line the list renders for cloud rows. */
+                  noteFor={(model) => {
+                    const fit = describeFit(model);
+                    // Said as what it cannot do, not as a grade: the model is
+                    // fine, it is the job it cannot do. A model that cannot
+                    // take tools answers "I have written the proposal" and
+                    // writes nothing.
+                    const tools = model.supportsTools ? null : 'cannot use tools';
+                    return [fit, tools].filter(Boolean).join(' · ') || null;
+                  }}
+                  onChoose={(id) =>
                     void run('routing', async () =>
-                      setRoutingSettings(
-                        await updateRoutingSettings({ defaultModel: event.target.value }),
-                      ),
+                      setRoutingSettings(await updateRoutingSettings({ defaultModel: id })),
                     )
                   }
-                >
-                  <option value="">Zaram decides</option>
-                  {/* Embedders are not offered. `bge-m3` is a model, is
-                      discovered like one, and answers `/api/generate` with a
-                      400 — so listing it here is offering a choice whose only
-                      outcome is a failed reply. `/readiness` already excludes
-                      them from its chat-model count; this was the surface that
-                      did not. */}
-                  {groupModelsByLocality(
-                    models.filter((model) => model.category !== 'embedding'),
-                  ).map((group) => (
-                    <optgroup key={group.key} label={group.label}>
-                      {group.models.map((model) => (
-                        <option key={model.id} value={model.id}>
-                          {model.displayName}
-                          {/* Free is said with its price, in the same breath:
-                              the free tier is paid for in prompts, and a label
-                              that says "free" alone is the offer without the
-                              deal. `CLAUDE.md`: naming the deal is a primary
-                              feature of the picker. */}
-                          {model.isFree ? ' · free, prompts are logged' : ''}
-                          {model.dataPolicy ? '' : ' · terms unknown'}
-                          {/* On the label, because a native `option` cannot be
-                              styled portably and the text is the one carrier
-                              that always survives. Same shape as the terms
-                              note beside it. */}
-                          {model.fitsResident === false ? ' · too large for this machine' : ''}
-                          {/* The one that matters for a task rather than a
-                              chat. A model that cannot take tools answers
-                              "I have written the proposal" and writes
-                              nothing — it cannot call a thing — and until
-                              this line the picker gave no way to tell. Said
-                              as what it cannot do, not as a grade: the model
-                              is fine, it is the job it cannot do. */}
-                          {model.supportsTools ? '' : ' · cannot use tools'}
-                        </option>
-                      ))}
-                    </optgroup>
-                  ))}
-                </select>
+                />
               )}
 
               {/* **The case that actually bit.** Marking the option is enough
@@ -1136,46 +1113,34 @@ export default function SettingsWorkspace() {
                         say so when a question needs one rather than answering without it.
                       </p>
                     ) : (
-                      <select
-                        aria-label={copy.label}
-                        className="px-2 py-1.5 rounded-lg text-xs max-w-full"
-                        style={{
-                          background: 'transparent',
-                          border: '1px solid var(--color-border-subtle)',
-                          color: 'var(--color-text)',
-                        }}
+                      <ModelSearchList
+                        models={eligible}
                         value={stored}
-                        disabled={busy === 'routing'}
-                        onChange={(event) =>
+                        matchOn="id"
+                        busy={busy === 'routing'}
+                        decideLabel={copy.unassigned}
+                        /* Marked, never filtered — see `eligibleForSlot`.
+                           "Built for code" is a reason to pick one, not a
+                           reason the others are wrong, so it reads as a note
+                           and not as a grade. */
+                        noteFor={(model) =>
+                          [
+                            slot === 'code' && model.specialisation === 'code'
+                              ? 'built for code'
+                              : null,
+                            describeFit(model),
+                          ]
+                            .filter(Boolean)
+                            .join(' · ') || null
+                        }
+                        onChoose={(id) =>
                           void run('routing', async () =>
                             setRoutingSettings(
-                              await updateRoutingSettings({
-                                taskModels: { [slot]: event.target.value },
-                              }),
+                              await updateRoutingSettings({ taskModels: { [slot]: id } }),
                             ),
                           )
                         }
-                      >
-                        <option value="">{copy.unassigned}</option>
-                        {groupModelsByLocality(eligible).map((group) => (
-                          <optgroup key={group.key} label={group.label}>
-                            {group.models.map((model) => (
-                              <option key={model.id} value={model.id}>
-                                {model.displayName}
-                                {/* Marked, never filtered — see
-                                    `eligibleForSlot`. */}
-                                {slot === 'code' && model.specialisation === 'code'
-                                  ? ' · built for code'
-                                  : ''}
-                                {model.dataPolicy ? '' : ' · terms unknown'}
-                                {model.fitsResident === false
-                                  ? ' · too large for this machine'
-                                  : ''}
-                              </option>
-                            ))}
-                          </optgroup>
-                        ))}
-                      </select>
+                      />
                     ))}
                 </Row>
               );
