@@ -277,8 +277,43 @@ def repo_map(root: Path, question: str, *, budget_tokens: int) -> str:
         "",
         "## The open project",
         "",
-        "Files in the repository and the definitions in each, most relevant to "
-        "the question first. Use `read_lines` to see any of them.",
+        # **Named, because "this project" has to resolve to something.**
+        #
+        # Reported 3 October 2026, with a screenshot. A coding project open on
+        # a real Unreal plugin, the question *"do an audit on this project"*,
+        # and a confident, well-structured audit of **a portfolio website** —
+        # a different piece of work entirely, reconstructed from six recalled
+        # facts. Measured afterwards: with the scope set to this project,
+        # recall returned six facts and every one was `global`, including the
+        # whole HTML of a site Zaram had generated months earlier, at a
+        # relevance of 0.51 against a question it has nothing to do with.
+        #
+        # `CLAUDE.md` wrote this failure down before it happened. *"Write that
+        # up as a proposal" is referential, and similarity recall over five
+        # referential words retrieves nothing: the model filled the gap with a
+        # whole invented client.* "Do an audit on this project" is those five
+        # referential words, and the gap got filled the same way.
+        #
+        # The header said `## The open project` and then listed paths. It
+        # never said **which** project, so the one thing in the prompt that
+        # could have resolved the pronoun was missing, while six concrete
+        # paragraphs about other work sat below it — and the recall block is
+        # appended *last*, which is the most salient position there is.
+        f"`{root}` — this is what \"this project\", \"the repo\" and \"the "
+        "code\" refer to.",
+        "",
+        "Files in it and the definitions in each, most relevant to the "
+        "question first. Use `read_lines` to see any of them.",
+        "",
+        # Rule 9 at the point where it actually fails. The refusal path is
+        # *"say so and ask"* rather than produce something plausible, and a
+        # document audit is the worst case for it — unlike a wrong chat reply,
+        # which the next turn corrects, a wrong audit reads as finished work.
+        "Anything recalled below is from the user's memory and may be about "
+        "other work. A question about *this* project is answered from these "
+        "files: read them. Do not describe a file you have not read, and if "
+        "nothing here answers the question, say that instead of filling the "
+        "gap from memory.",
         "",
     ]
     footer = []
