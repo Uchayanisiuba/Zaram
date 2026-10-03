@@ -31,6 +31,15 @@ const repo = 'https://github.com/Uchayanisiuba/Zaram';
 /** What each build brought, in the site's own words — the same list the
  *  Milestones panel carries. Add the next tag above the last. */
 const BROUGHT = {
+  'v0.1.0-alpha.4': [
+    '**Type to find a model.** OpenRouter alone offers 549 of them, and the last build made you scroll all of it. Now you type — the name, the provider, what it is good at, or just “free” — on the settings page and in the conversation, and the list narrows as you go.',
+    '**The free ones are marked, and so is the deal.** A green *Free* badge where a model costs nothing, and four words on every row saying what it does with what you send: *not kept*, *kept 30 days*, *trains on this*. Every free tier is paid for in data by somebody, and this is the product that tells you which.',
+    '**Zaram checks its own work.** Ask it to fix something in a coding project and it can open the page in a browser, click through to the state that was broken, read what is actually on screen and say whether the change worked — rather than reporting that it edited a file and leaving the checking to you. Localhost only, in a browser of its own carrying none of your sign-ins.',
+    '**And you can watch it do that.** The page it is driving, and the last thing it pressed, live under the reply.',
+    '**Driving asks separately.** Running your project’s tests and pressing whatever happens to be on its page are different things to agree to — the second one is how a dev build pointed at something live gets a button pressed. So it is its own switch, off by default, beside the other two. While it was being split, the gate turned out to be letting the browser open under no permission at all, because the tool is called `open_in_browser` and something in that name read as *browse*. Fixed, and the test now asserts the verdict for every tool by name.',
+    '**A create that fails says so.** Pointing a new coding project at a folder and pressing Create could leave the button dead and the screen silent if the backend was still starting. It now says what went wrong and lets you press it again.',
+    '**Nothing of yours is in the installer**, and nothing of yours can reach the repository by accident — every database the app writes is ignored by kind rather than by path, wherever it lands, and a test asks git itself about each one.',
+  ],
   'v0.1.0-alpha.3': [
     '**A project that won’t start, started.** Zaram reads the repository’s own `package.json` and offers the scripts that are actually in it — the install, the migration, the build, the tests, the dev server. The last build could work out which commands you needed and then hand them back as text to paste; this one runs them.',
     '**Installing always asks**, whatever you have granted. Fetching packages runs whatever code those packages ask to run on arrival, and that code comes from a registry rather than from your project. Anything that reaches past this machine — a deploy, a publish, a release — asks on the same terms. There is still no shell: a runner is a named program and its arguments.',
