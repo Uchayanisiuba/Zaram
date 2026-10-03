@@ -181,7 +181,22 @@ def chunk(text: str, size: int = CHUNK_CHARS, overlap: int = CHUNK_OVERLAP) -> l
 #: same. So patterns are added only when they are unambiguous.
 _DEFINITIONS: tuple[re.Pattern[str], ...] = (
     re.compile(r"^[ \t]{0,4}(?:async[ \t]+)?def[ \t]+(?P<name>\w+)"),
-    re.compile(r"^[ \t]{0,4}(?:export[ \t]+)?(?:abstract[ \t]+)?class[ \t]+(?P<name>\w+)"),
+    # The optional `WHATEVER_API` is Unreal's dllexport macro, and it sits
+    # exactly where the class name goes: `class KEYLINE_API FKeylineIK`.
+    # Without this the capture was the *macro*, so an Unreal plugin's
+    # repository map listed `KEYLINE_API` once per header instead of the
+    # class names — found 3 October 2026 on a real one, beside the larger
+    # defect that the map was all build output.
+    #
+    # Narrow on purpose. It skips one token, only when that token ends in
+    # `_API`, which is the convention Unreal and several others share and
+    # which no real class is named. `class API_Gateway` still captures
+    # `API_Gateway`, because the macro form requires the suffix at the end
+    # of the token rather than anywhere in it.
+    re.compile(
+        r"^[ \t]{0,4}(?:export[ \t]+)?(?:abstract[ \t]+)?class[ \t]+"
+        r"(?:[A-Z][A-Z0-9_]*_API[ \t]+)?(?P<name>\w+)"
+    ),
     re.compile(
         r"^[ \t]{0,4}(?:export[ \t]+)?(?:default[ \t]+)?(?:async[ \t]+)?"
         r"function[ \t]+(?P<name>\w+)"

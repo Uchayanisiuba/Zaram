@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import os
 import re
+import subprocess
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -60,6 +61,12 @@ MAX_SCAN_BYTES = 400_000
 
 #: The most files the map will ever name, before the budget is applied.
 MAX_FILES = 400
+
+#: How long `git ls-files` may take before the walk is used instead. It is
+#: one process reading an index and is normally milliseconds; the bound is
+#: here so a repository on a stalled network drive degrades to a slower
+#: answer rather than hanging a reply.
+GIT_TIMEOUT_SECONDS = 5.0
 
 #: Definitions kept per file. A file with a hundred functions is shown its
 #: first twelve and a count; the model can `read_lines` for the rest.
@@ -91,33 +98,118 @@ def _tokens(text: str) -> set:
     return out
 
 
+#: Lower-cased once, because the comparison below was case-sensitive and the
+#: directory it most needed to match is capitalised.
+#:
+#: Unreal writes its packaged output to `Build/`. `SKIP_DIRS` holds `build`.
+#: On Windows the *filesystem* does not care and Python's `in` does, so the
+#: whole of a build tree walked straight in — found 3 October 2026 on a real
+#: repository, where it was the entire map.
+_SKIP_LOWER = frozenset(d.lower() for d in SKIP_DIRS)
+
+
+def _git_listed(root: Path) -> Optional[List[str]]:
+    """What git says the project's files are, or ``None`` if git cannot say.
+
+    **Asked of git rather than guessed from a list of directory names**, for
+    the reason `test_no_store_is_one_add_from_being_published.py` gives about
+    `.gitignore`: reading it ourselves re-implements the thing that is already
+    correct, and a hand-maintained skip list is a denylist — it fails open on
+    the next repository that names its build output something new.
+
+    Found 3 October 2026 on a real repository. An Unreal plugin with 1,410
+    files on disk and **47 that are actually the project**; the rest is
+    packaged output under `Build/` and a test bed, both of them named in the
+    author's own `.gitignore`. The map showed 37 files, all 37 from `Build/`,
+    triplicated across three packaged copies — no source, no `Docs/`, no
+    `README.md`. Asked to audit the project, the model said it had not been
+    given the project, **and it was right**.
+
+    Two defects stacked to produce that. `Build` did not match `build`, so the
+    tree was walked; and `_walk` stops at `MAX_FILES` in alphabetical order,
+    so the budget was spent before the walk reached `Docs/`, `Keyline/` or
+    `README.md`. The second is the membership-versus-ordering error again, in
+    a new place: which files the model may see was decided by which directory
+    sorts first.
+
+    `--cached --others --exclude-standard` is tracked files plus untracked
+    ones that are not ignored — the honest answer to *"what is this project"*.
+    Tracked alone would hide a file written five minutes ago, which on a
+    coding project is the file most likely to be the question.
+
+    Returns ``None`` rather than an empty list when git cannot answer, because
+    *"not a git repository"* and *"a repository with no files"* are different
+    answers and only one of them should fall back to walking.
+    """
+    try:
+        done = subprocess.run(
+            ["git", "ls-files", "--cached", "--others", "--exclude-standard", "-z"],
+            cwd=str(root),
+            capture_output=True,
+            timeout=GIT_TIMEOUT_SECONDS,
+        )
+    except (OSError, subprocess.SubprocessError):
+        # No git on the machine, or it would not start. The walk still works.
+        return None
+    if done.returncode != 0:
+        return None
+    names = [n for n in done.stdout.decode("utf-8", "replace").split("\0") if n]
+    return names
+
+
+def _symbols_in(path: Path) -> Tuple[str, ...]:
+    """The definitions one file declares. Lifted out of `_walk` so the git
+    path and the walk read files the same way rather than twice."""
+    symbols: List[str] = []
+    try:
+        if path.stat().st_size > MAX_SCAN_BYTES:
+            return ()
+        with path.open("r", encoding="utf-8", errors="replace") as handle:
+            for line in handle:
+                for pattern in _DEFINITIONS:
+                    match = pattern.match(line)
+                    if match:
+                        symbols.append(match.group("name"))
+                        break
+    except OSError:
+        # One unreadable file must not lose the map, for the reason one
+        # unreadable file does not end a search.
+        return ()
+    return tuple(symbols)
+
+
 def _walk(root: Path) -> Tuple[FileSymbols, ...]:
     resolved = root.resolve()
-    found: List[FileSymbols] = []
+
+    listed = _git_listed(resolved)
+    if listed is not None:
+        found: List[FileSymbols] = []
+        for relative in sorted(listed):
+            path = resolved / relative
+            if path.suffix.lower() not in CodeParser.suffixes:
+                continue
+            if not path.is_file():
+                # `--others` can name something deleted between the listing
+                # and here, and a submodule appears as a directory.
+                continue
+            found.append(
+                FileSymbols(relative, _symbols_in(path), relative.count("/"))
+            )
+            if len(found) >= MAX_FILES:
+                break
+        return tuple(found)
+
+    found = []
     for dirpath, dirnames, filenames in os.walk(resolved):
         dirnames[:] = sorted(
-            d for d in dirnames if d not in SKIP_DIRS and not d.startswith(".")
+            d for d in dirnames if d.lower() not in _SKIP_LOWER and not d.startswith(".")
         )
         for filename in sorted(filenames):
             path = Path(dirpath) / filename
             if path.suffix.lower() not in CodeParser.suffixes:
                 continue
             relative = path.relative_to(resolved).as_posix()
-            symbols: List[str] = []
-            try:
-                if path.stat().st_size <= MAX_SCAN_BYTES:
-                    with path.open("r", encoding="utf-8", errors="replace") as handle:
-                        for line in handle:
-                            for pattern in _DEFINITIONS:
-                                match = pattern.match(line)
-                                if match:
-                                    symbols.append(match.group("name"))
-                                    break
-            except OSError:
-                # One unreadable file must not lose the map, for the reason
-                # one unreadable file does not end a search.
-                pass
-            found.append(FileSymbols(relative, tuple(symbols), relative.count("/")))
+            found.append(FileSymbols(relative, _symbols_in(path), relative.count("/")))
             if len(found) >= MAX_FILES:
                 return tuple(found)
     return tuple(found)
