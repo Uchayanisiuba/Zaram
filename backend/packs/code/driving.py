@@ -118,6 +118,23 @@ STALE_REF = (
 
 NO_BROWSER = "No Chrome or Edge is installed, so there is no browser to drive."
 
+#: How much of an element's own label may appear in the phrase on the row.
+ACTED_LABEL_CHARS = 60
+
+
+def _said(label: str) -> str:
+    """One element's name, safe to put on a row.
+
+    **Page content is third-party text.** `call_target` bounds the model's
+    arguments for the same reason and states it: a newline in a label breaks
+    one row into two and lets a single call appear to be two. Rendered as
+    text by the surface, never as markup, exactly like every other target.
+    """
+    clean = "".join(ch for ch in (label or "") if ch.isprintable()).strip()
+    if len(clean) > ACTED_LABEL_CHARS:
+        clean = clean[: ACTED_LABEL_CHARS - 1].rstrip() + "\u2026"
+    return clean
+
 NOT_OPEN = f"No page is open. Use `{OPEN_IN_BROWSER}` with a localhost URL first."
 
 #: Recorded in the page itself rather than collected over a held-open
@@ -200,8 +217,11 @@ def _centre_js(ref: str) -> str:
         " if (!el) return 'null';"
         " el.scrollIntoView({block: 'center', inline: 'center'});"
         " const r = el.getBoundingClientRect();"
+        " const label = el.getAttribute('aria-label') || (el.innerText || '').trim()"
+        " || el.getAttribute('placeholder') || el.value || el.tagName.toLowerCase();"
         " return JSON.stringify({x: Math.round(r.left + r.width / 2),"
         " y: Math.round(r.top + r.height / 2),"
+        " name: String(label).replace(/\\s+/g, ' ').trim().slice(0, 120),"
         " disabled: !!(el.disabled || el.getAttribute('aria-disabled') === 'true')}); })()"
         % (REF_ATTRIBUTE, ref)
     )
@@ -282,6 +302,10 @@ class DrivingTools:
         self._sessions: Dict[str, BrowserSession] = {}
         self._lock = threading.Lock()
         self._browser = browser
+        #: The label of the element the last click or type resolved to,
+        #: for the phrase on the row. Set inside the protocol call and
+        #: read immediately after it, on the same thread.
+        self._last_name = ""
         import atexit
 
         atexit.register(self.close_all)
@@ -512,6 +536,7 @@ class DrivingTools:
         }
         if opened:
             result["opened"] = opened
+            result["acted"] = f"opened {opened}"
         if len(result["elements"]) >= MAX_ELEMENTS:
             result["note"] = (
                 "only the first %d interactive elements are listed; narrow what you "
@@ -529,6 +554,7 @@ class DrivingTools:
                 if where in (None, "null"):
                     return {"error": STALE_REF.format(ref=ref)}
                 spot = json.loads(where)
+                self._last_name = str(spot.get("name") or "")
                 if spot.get("disabled"):
                     # Said rather than clicked into the void. A disabled
                     # control swallows the event, and the model would read the
@@ -560,6 +586,10 @@ class DrivingTools:
             return out
         page = self._summarise(out)
         page["clicked"] = ref
+        # What a person watching needs. "clicked e5" is Zaram's own
+        # bookkeeping and tells a reader nothing about what was pressed.
+        named = _said(self._last_name)
+        page["acted"] = f"clicked {named}" if named else f"clicked {ref}"
         return page
 
     def _type(self, session: BrowserSession, ref: str, text: str) -> Dict[str, Any]:
@@ -572,6 +602,7 @@ class DrivingTools:
                 if where in (None, "null"):
                     return {"error": STALE_REF.format(ref=ref)}
                 spot = json.loads(where)
+                self._last_name = str(spot.get("name") or "")
                 for kind in ("mousePressed", "mouseReleased"):
                     await cdp.call(
                         "Input.dispatchMouseEvent",
@@ -599,6 +630,11 @@ class DrivingTools:
             return out
         page = self._summarise(out)
         page["typed_into"] = ref
+        named = _said(self._last_name)
+        shown = _said(text)
+        page["acted"] = (
+            f"typed {shown!r} into {named}" if named else f"typed {shown!r} into {ref}"
+        )
         return page
 
     def _console(self, session: BrowserSession) -> Dict[str, Any]:

@@ -349,3 +349,56 @@ class TestWhatTheTierTableSays:
         assert MUTATIVE < TOOL_NAMES
         assert OPEN_IN_BROWSER not in MUTATIVE
         assert READ_APP_PAGE not in MUTATIVE
+
+
+class TestWhatAWatcherSees:
+    """The phrase on the row, which is the whole point of a live pane.
+
+    Asked for on 3 October 2026: a card for the app, openable, with the
+    steps underneath. The card already existed for `start_app`; what it had
+    no way to say was *what Zaram just did*, because the argument is a ref.
+    `clicked e5` is Zaram's own bookkeeping and tells a reader nothing.
+    """
+
+    def test_a_click_says_what_was_pressed(self, opened, served):
+        page = opened.call(READ_APP_PAGE, {}, ROOT)
+        out = opened.call(CLICK_IN_APP, {"ref": ref_for(page, "Press me")}, ROOT)
+        assert out["acted"] == "clicked Press me"
+
+    def test_typing_says_what_went_where(self, opened, served):
+        page = opened.call(READ_APP_PAGE, {}, ROOT)
+        ref = next(e["ref"] for e in page["elements"] if e["tag"] == "input")
+        out = opened.call(TYPE_IN_APP, {"ref": ref, "text": "C:/RideShare"}, ROOT)
+        assert "C:/RideShare" in out["acted"]
+        # The field by its own label, not by its ref.
+        assert "repository folder" in out["acted"].lower()
+
+    def test_opening_says_where(self, opened, served):
+        out = opened.call(OPEN_IN_BROWSER, {"url": served}, ROOT)
+        assert out["acted"] == f"opened {served}"
+
+    def test_every_action_reports_the_page_it_is_on(self, opened, served):
+        """What makes the card follow Zaram around the app.
+
+        Without a URL on each call the panel would keep showing wherever the
+        dev server first landed, which is wrong the moment anything
+        navigates.
+        """
+        page = opened.call(READ_APP_PAGE, {}, ROOT)
+        out = opened.call(CLICK_IN_APP, {"ref": ref_for(page, "Press me")}, ROOT)
+        assert out["url"].startswith("http://127.0.0.1:")
+
+    def test_a_label_cannot_break_the_row_it_is_on(self):
+        """Page content is third-party text.
+
+        A newline in an element's label would break one row into two and let
+        a single call appear to be two — the reason `call_target` bounds the
+        model's arguments, applied to the page's own words.
+        """
+        from packs.code.driving import ACTED_LABEL_CHARS, _said
+
+        assert "\n" not in _said("two\nlines")
+        assert "\r" not in _said("two\r\nlines")
+        assert len(_said("x" * 500)) <= ACTED_LABEL_CHARS
+        # Still says something, rather than being emptied by the cleaning.
+        assert _said("  Create  ") == "Create"

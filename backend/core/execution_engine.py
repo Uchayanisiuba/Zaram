@@ -1942,16 +1942,32 @@ class ExecutionEngine:
                 # the tool name so a stranger's server that returns a `diff`
                 # gets a diff pane too.
                 change = payload if isinstance(payload, dict) else {}
+                # **What happened, in preference to what was asked for.**
+                # A driving call's arguments are a ref — `e5` — which is
+                # Zaram's own bookkeeping and tells a reader nothing. The
+                # tool reports what it actually pressed, by the element's own
+                # name, and that is the thing worth putting on the row.
+                # Page content, so the tool bounds it; see `driving._said`.
+                # Imported here, like `active_root` below: the engine must not
+                # fail to import because a pack does.
+                from packs.code import driving
+
+                acted = str(change.get("acted") or "") if isinstance(change, dict) else ""
                 yield StreamEvent.tool_call(
                     call.server, call.tool, "allow", "ran",
-                    target=call_target(call.tool, call.arguments),
+                    target=acted or call_target(call.tool, call.arguments),
                     step_id=call_mark,
                     plan_step=plan_step,
                     output=output_excerpt(payload),
                     diff=str(change.get("diff") or ""),
                     commit=str(change.get("commit") or ""),
                     image=str(change.get("image") or ""),
-                    app_url=str(change.get("url") or "") if call.tool in ("start_app", "get_app_status") else "",
+                    # The driving tools report the page they are on, so the
+                    # card follows Zaram around the app instead of showing
+                    # wherever the dev server first landed.
+                    app_url=str(change.get("url") or "")
+                    if call.tool in ("start_app", "get_app_status") or call.tool in driving.TOOL_NAMES
+                    else "",
                 )
 
             if call.server == "web" and call.tool == "search" and isinstance(payload, dict):

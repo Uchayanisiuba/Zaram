@@ -21,6 +21,17 @@ import { useProjectStore } from '../../stores/projectStore';
 
 const API = import.meta.env.VITE_ZARAM_API ?? '';
 
+/** The tools that report a page Zaram is *driving* rather than a server it
+ *  started. Both carry a URL and the card has to tell them apart; the tool
+ *  name is the fact, and the URL is not — they are the same URL. */
+const DRIVING_TOOLS = new Set([
+  'open_in_browser',
+  'read_app_page',
+  'click_in_app',
+  'type_in_app',
+  'read_app_console',
+]);
+
 export default function AppCard({ call }: { call: ChatToolCall }) {
   const projectId = useChatStore((s) => s.projectId);
   const stopApp = useProjectStore((s) => s.stopApp);
@@ -69,7 +80,19 @@ export default function AppCard({ call }: { call: ChatToolCall }) {
     >
       {call.appUrl && (
         <div className="flex items-center gap-2 px-3 py-1.5 text-xs" style={{ color: 'var(--color-text-muted)' }}>
-          <span>{phase === 'stopped' ? 'stopped' : 'running at'}</span>
+          {/* **A driven page is not a started server, and the card says
+              which.** Both carry a URL, and reading "running at" over a page
+              Zaram is clicking through describes the wrong half of what is
+              happening — the dev server is incidental by then, and the live
+              thing is the browser. Told apart by the tool that reported it,
+              never by guessing from the URL: they are the same URL. */}
+          <span>
+            {phase === 'stopped'
+              ? 'stopped'
+              : DRIVING_TOOLS.has(call.tool)
+                ? 'driving'
+                : 'running at'}
+          </span>
           <a
             href={call.appUrl}
             onClick={onOpen(call.appUrl)}

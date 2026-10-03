@@ -340,7 +340,22 @@ export default function ToolCalls({
   // And every change to a file, likewise never folded — see `ChangeCard`.
   const changes = calls.filter((c) => c.verdict === 'allow' && Boolean(c.diff));
   // A started app and what Zaram saw of it — see `AppCard`.
-  const apps = calls.filter((c) => c.verdict === 'allow' && (Boolean(c.image) || Boolean(c.appUrl)));
+  //
+  // **One card for the app, however many times it was driven.** Every
+  // driving call reports the page it is on, which is what lets the card
+  // follow Zaram around — and would also give a card per click, so a reply
+  // that pressed six buttons would be six copies of the same panel. The app
+  // is one app: `DrivingTools` keeps one browser per project for the same
+  // reason. So the card is the *latest* page, and the individual actions
+  // stay where they already are, as rows in the fold.
+  //
+  // A screenshot is different and each one is kept: it is a deliberate look
+  // at a moment, and the second is not a duplicate of the first.
+  const shots = calls.filter((c) => c.verdict === 'allow' && Boolean(c.image));
+  const here = [...calls]
+    .reverse()
+    .find((c) => c.verdict === 'allow' && Boolean(c.appUrl) && !c.image);
+  const apps = here ? [here, ...shots] : shots;
   const expanded = open || active;
 
   return (
