@@ -492,11 +492,13 @@ class KernelBootstrapper:
             CodeRunner,
             CodeTools,
             DrivingTools,
+            TerminalTools,
             CodeWriter,
             LibraryTools,
             active_root,
             drives_granted,
             runs_granted,
+            shell_granted,
             writes_granted,
         )
         from runtimes.mcp.config import ServerConfig, WriteMode
@@ -537,6 +539,13 @@ class KernelBootstrapper:
                 # and pressing whatever is on its page are different
                 # risks, and a person can want one without the other.
                 drives_granted=drives_granted,
+                # A terminal in the project folder, for the commands a
+                # manifest cannot name. Its own grant, off by default —
+                # `runners.py` still handles everything a project
+                # declares, and this is the separate capability for
+                # setting a project up in the first place.
+                shell=TerminalTools(),
+                shell_granted=shell_granted,
             ),
         )
 

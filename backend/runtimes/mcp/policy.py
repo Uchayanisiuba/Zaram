@@ -41,6 +41,7 @@ paid for three times.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Dict, Mapping, Optional, Set
@@ -97,6 +98,55 @@ _LOOKS_READ_ONLY = (
 _LOOKS_DESTRUCTIVE = ("delete", "remove", "drop", "destroy", "purge", "truncate", "rm")
 
 
+#: Shortest word that may match a token by its prefix.
+#:
+#: Longer words are distinctive enough that `delete_user`, `deleteAll` and
+#: `deletion` all mean the same thing. Short ones are not: `rm` must be a
+#: token of its own, or it matches `terminal`.
+_PREFIX_MATCH_FROM = 5
+
+
+def _words_in(tool_name: str) -> set:
+    """A tool name as the words it is made of.
+
+    `run_in_terminal`, `runInTerminal` and `run-in-terminal` are the same
+    three words, and a server author picks which spelling. Splitting on
+    separators *and* on a lower-to-upper transition covers every convention
+    in use without needing to know which one this server chose.
+    """
+    spaced = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", tool_name)
+    return {w for w in re.split(r"[^A-Za-z0-9]+", spaced.lower()) if w}
+
+
+def _matches(tool_name: str, words: tuple) -> bool:
+    """Whether any of `words` is a word in `tool_name`.
+
+    **This was a substring test, and `rm` is why it is not any more.**
+    Found 3 October 2026 by a terminal tool that asked for confirmation
+    however much had been granted: `"rm" in "run_in_terminal"` is true,
+    because *terminal* contains the letters r and m next to each other. So
+    did `format_code`, `transform_mesh`, `confirm_order` and `warm_cache` —
+    every one of them permanently destructive, and `destructive` is the one
+    verdict a grant cannot satisfy. Rule 7j's confirm-once was broken for a
+    whole class of ordinary tool names, silently, and the symptom is a
+    dialog the user has already dismissed a hundred times.
+
+    It is the second time today a word list matched inside a word: this
+    morning `open_in_browser` was read as read-only because it contains
+    `_browse`. Same defect, opposite direction, same afternoon — which is
+    why both lists are fixed here rather than only the one that failed.
+    """
+    present = _words_in(tool_name)
+    for word in words:
+        if word in present:
+            return True
+        if len(word) >= _PREFIX_MATCH_FROM and any(
+            token.startswith(word) for token in present
+        ):
+            return True
+    return False
+
+
 def _annotation_says_destructive(annotations: Optional[Mapping[str, Any]]) -> bool:
     """Read the server's own hints, in the one direction they may be believed."""
     if not annotations:
@@ -120,10 +170,9 @@ def looks_read_only(tool_name: str, annotations: Optional[Mapping[str, Any]] = N
     """
     if _annotation_says_destructive(annotations):
         return False
-    name = tool_name.lower()
-    if any(word in name for word in _LOOKS_DESTRUCTIVE):
+    if _matches(tool_name, _LOOKS_DESTRUCTIVE):
         return False
-    return any(name.startswith(word) or f"_{word}" in name for word in _LOOKS_READ_ONLY)
+    return _matches(tool_name, _LOOKS_READ_ONLY)
 
 
 def looks_destructive(tool_name: str, annotations: Optional[Mapping[str, Any]] = None) -> bool:
@@ -138,7 +187,7 @@ def looks_destructive(tool_name: str, annotations: Optional[Mapping[str, Any]] =
     """
     if _annotation_says_destructive(annotations):
         return True
-    return any(word in tool_name.lower() for word in _LOOKS_DESTRUCTIVE)
+    return _matches(tool_name, _LOOKS_DESTRUCTIVE)
 
 
 def decide(

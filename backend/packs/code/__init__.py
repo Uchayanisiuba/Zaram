@@ -11,12 +11,14 @@ from .active import (
     drives_granted,
     runs_granted,
     set_active_root,
+    shell_granted,
     writes_granted,
 )
 from .apps import AppTools
 from .driving import DrivingTools
 from .libraries import LibraryTools
 from .runners import CodeRunner
+from .terminal import TerminalTools
 from .tools import SERVER_ID, CodeTools, OutsideTheProject
 from .writes import CodeWriter
 
@@ -26,12 +28,14 @@ __all__ = [
     "DrivingTools",
     "CodeTools",
     "CodeRunner",
+    "TerminalTools",
     "CodeWriter",
     "LibraryTools",
     "OutsideTheProject",
     "active_root",
     "drives_granted",
     "runs_granted",
+    "shell_granted",
     "set_active_root",
     "writes_granted",
 ]

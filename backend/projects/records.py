@@ -116,6 +116,13 @@ class Project:
     #: project's own named commands, and a dev build pointed at a
     #: production database is where the difference bites.
     drives: bool = False
+    #: Whether Zaram may use a terminal in the project folder — the
+    #: commands a manifest cannot name: creating a virtualenv, installing
+    #: dependencies, scaffolding. Separate from `runs`, which only offers
+    #: what the project already declares, and the widest of the four:
+    #: `runners.py` exists precisely because an arbitrary command line is
+    #: not a named program. Off until the person turns it on.
+    shell: bool = False
 
     @property
     def scope(self) -> str:
@@ -184,7 +191,8 @@ class ProjectRecords:
                     root       TEXT NOT NULL DEFAULT '',
                     writes     INTEGER NOT NULL DEFAULT 0,
                     runs       INTEGER NOT NULL DEFAULT 0,
-                    drives     INTEGER NOT NULL DEFAULT 0
+                    drives     INTEGER NOT NULL DEFAULT 0,
+                    shell      INTEGER NOT NULL DEFAULT 0
                 )
                 """
             )
@@ -204,6 +212,10 @@ class ProjectRecords:
             if "writes" not in columns:
                 conn.execute(
                     "ALTER TABLE projects ADD COLUMN writes INTEGER NOT NULL DEFAULT 0"
+                )
+            if "shell" not in columns:
+                conn.execute(
+                    "ALTER TABLE projects ADD COLUMN shell INTEGER NOT NULL DEFAULT 0"
                 )
             if "drives" not in columns:
                 conn.execute(
@@ -401,6 +413,17 @@ class ProjectRecords:
         logger.info("Project %s: driving the app %s", project_id, "allowed" if allowed else "withdrawn")
         return self.get(project_id)
 
+    def set_shell(self, project_id: str, allowed: bool) -> Project:
+        """Allow, or withdraw, a terminal in the project folder."""
+        with self._lock, self._connect() as conn:
+            changed = conn.execute(
+                "UPDATE projects SET shell = ? WHERE id = ?", (1 if allowed else 0, project_id)
+            ).rowcount
+        if not changed:
+            raise UnknownProject(project_id)
+        logger.info("Project %s: the terminal %s", project_id, "allowed" if allowed else "withdrawn")
+        return self.get(project_id)
+
     def set_note(self, project_id: str, note: str) -> Project:
         with self._lock, self._connect() as conn:
             changed = conn.execute(
@@ -448,6 +471,7 @@ def _from_row(row: sqlite3.Row) -> Project:
         writes=bool(row["writes"]) if "writes" in row.keys() else False,
         runs=bool(row["runs"]) if "runs" in row.keys() else False,
         drives=bool(row["drives"]) if "drives" in row.keys() else False,
+        shell=bool(row["shell"]) if "shell" in row.keys() else False,
     )
 
 

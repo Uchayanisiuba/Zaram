@@ -43,7 +43,7 @@ from typing import Any, Callable, Dict, List, Optional
 from ingest.service import SKIP_DIRS
 from runtimes.mcp.client import ToolDescriptor
 
-from . import apps, driving, libraries, repo_map, runners, writes
+from . import apps, driving, libraries, repo_map, runners, terminal, writes
 from .apps import AppTools
 from .driving import DrivingTools
 from .libraries import LibraryTools
@@ -105,6 +105,8 @@ class CodeTools:
         app: Optional["AppTools"] = None,
         driving: Optional["DrivingTools"] = None,
         drives_granted: Callable[[], bool] = lambda: False,
+        shell: Optional["TerminalTools"] = None,
+        shell_granted: Callable[[], bool] = lambda: False,
     ) -> None:
         self._root_for = root_for
         #: `None` means this instance cannot write, structurally. See `writes.py`.
@@ -143,6 +145,13 @@ class CodeTools:
         #: `runs` are split for the same reason.
         self._driving = driving
         self._drives_granted = drives_granted
+        #: A terminal in the project folder — the commands a manifest
+        #: cannot name. The widest of the four grants and the one
+        #: `runners.py` was written to avoid, so it is separate from
+        #: `runs` and off until the person turns it on. See
+        #: `terminal.py` for why it is a capability rather than a hole.
+        self._shell = shell
+        self._shell_granted = shell_granted
 
     def mutative_tools(self) -> set:
         """Tools the name guess would wave through and should not.
@@ -156,11 +165,19 @@ class CodeTools:
         `_browse`, which is in the read-only word list, so launching a
         browser process read as looking at something.
         """
-        return set(driving.TOOL_NAMES) - {driving.READ_APP_PAGE, driving.READ_APP_CONSOLE}
+        return (
+            (set(driving.TOOL_NAMES) - {driving.READ_APP_PAGE, driving.READ_APP_CONSOLE})
+            # Every terminal tool, including the read: the output of a
+            # shell in somebody's project is not public, and
+            # `read_terminal` would be waved through on its name.
+            | set(terminal.TOOL_NAMES)
+        )
 
     def how_to_permit(self, tool_name: str) -> str:
         """Appended to a `CONFIRM` reason by the runtime, so the sentence a
         person reads names the control that would allow the call."""
+        if tool_name in terminal.TOOL_NAMES:
+            return terminal.HOW_TO_PERMIT
         if tool_name in driving.TOOL_NAMES:
             return driving.HOW_TO_PERMIT
         if tool_name == RUN_COMMAND or tool_name in apps.TOOL_NAMES:
@@ -215,6 +232,8 @@ class CodeTools:
             granted |= {apps.START_APP, apps.STOP_APP, apps.LOOK_AT_APP}
         if self._driving is not None and self._drives_granted():
             granted |= set(driving.TOOL_NAMES)
+        if self._shell is not None and self._shell_granted():
+            granted |= set(terminal.TOOL_NAMES)
         return granted
 
     # -- the McpServer interface, so the runtime needs no special case --
@@ -239,6 +258,8 @@ class CodeTools:
             tools.extend(self._app.descriptors(SERVER_ID, self._root_for()))
         if self._driving is not None:
             tools.extend(self._driving.descriptors(SERVER_ID))
+        if self._shell is not None:
+            tools.extend(self._shell.descriptors(SERVER_ID))
         return tools
 
     def _read_tools(self) -> List[ToolDescriptor]:
@@ -400,6 +421,8 @@ class CodeTools:
                 return self._app.call(name, arguments, root)
             if self._driving is not None and name in driving.TOOL_NAMES:
                 return self._driving.call(name, arguments, root)
+            if self._shell is not None and name in terminal.TOOL_NAMES:
+                return self._shell.call(name, arguments, root)
         except OutsideTheProject as refusal:
             # Reported, not raised. The engine turns an exception into a failed
             # call; this is a refusal with a reason, which is a different thing

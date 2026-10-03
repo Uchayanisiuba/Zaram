@@ -4150,6 +4150,9 @@ def _project_json(project) -> Dict[str, Any]:
         # And whether it may drive the app in a browser — open the page,
         # click, type. Separate from `runs`, which starts it.
         "drives": project.drives,
+        # And whether it may use a terminal in the folder. The widest of
+        # the four, and the only one that is not a named program.
+        "shell": project.shell,
     }
 
 
@@ -4189,6 +4192,9 @@ class ProjectUpdateRequest(BaseModel):
     #: clicking, typing. Separate from `runs`, which only starts it: see
     #: `Project.drives` and `packs/code/driving.py`.
     drives: bool | None = None
+    #: Allow or withdraw a terminal in the project folder. See
+    #: `Project.shell` and `packs/code/terminal.py`.
+    shell: bool | None = None
 
 
 @app.get("/projects/{project_id}/runners")
@@ -4583,6 +4589,8 @@ async def update_project(project_id: str, body: ProjectUpdateRequest):
             project = project_records.set_runs(project_id, body.runs)
         if body.drives is not None:
             project = project_records.set_drives(project_id, body.drives)
+        if body.shell is not None:
+            project = project_records.set_shell(project_id, body.shell)
     except UnknownProject:
         raise HTTPException(status_code=404, detail=f"No project called {project_id!r}.")
     except ValueError as exc:
@@ -6012,6 +6020,7 @@ def _open_code_project(project_id: str | None) -> None:
         writes=project.writes,
         runs=project.runs,
         drives=project.drives,
+        shell=project.shell,
     )
 
 
