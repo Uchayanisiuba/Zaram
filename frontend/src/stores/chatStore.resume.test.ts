@@ -161,3 +161,37 @@ describe('what it still refuses to restore', () => {
     expect(useChatStore.getState().messages[0].sources).toEqual([]);
   });
 });
+
+describe('the project follows the conversation', () => {
+  /** Rule 7i. Opening a Keyline conversation while Ride Share is selected
+   *  leaves the next question scoped to Ride Share, so facts captured from it
+   *  land under a project the exchange is not about. */
+  it('switches to the project the conversation belongs to', async () => {
+    useChatStore.setState({ projectId: 'ride-share' });
+    fetchConversation.mockResolvedValue({ ...stored([message()]), projectId: 'keyline' });
+    await useChatStore.getState().resumeConversation('conv_1');
+    expect(useChatStore.getState().projectId).toBe('keyline');
+  });
+
+  it('clears the project when the conversation belongs to none', async () => {
+    // The same fault pointing the other way: continuing an unscoped thread
+    // with a project selected captures its facts under that project.
+    useChatStore.setState({ projectId: 'ride-share' });
+    fetchConversation.mockResolvedValue({ ...stored([message()]), projectId: '' });
+    await useChatStore.getState().resumeConversation('conv_1');
+    expect(useChatStore.getState().projectId).toBeNull();
+  });
+
+  it('remembers the switch across a relaunch', async () => {
+    fetchConversation.mockResolvedValue({ ...stored([message()]), projectId: 'keyline' });
+    await useChatStore.getState().resumeConversation('conv_1');
+    expect(localStorage.getItem('zaram.activeProject')).toBe('keyline');
+  });
+
+  it('and forgets it when the conversation had none', async () => {
+    localStorage.setItem('zaram.activeProject', 'ride-share');
+    fetchConversation.mockResolvedValue({ ...stored([message()]), projectId: '' });
+    await useChatStore.getState().resumeConversation('conv_1');
+    expect(localStorage.getItem('zaram.activeProject')).toBeNull();
+  });
+});

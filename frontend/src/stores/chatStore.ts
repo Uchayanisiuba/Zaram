@@ -1004,6 +1004,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
               : null,
         })),
         conversationId: stored.id,
+        // **Follow the conversation into its project — rule 7i.**
+        //
+        // Asked for 3 October 2026, and it is a scoping fault rather than a
+        // convenience: opening a Keyline conversation while Ride Share is
+        // selected leaves the next question scoped to Ride Share, so facts
+        // captured from it land under a project the exchange is not about.
+        // 7i's *"default to the current project"* means the project this
+        // conversation belongs to, not whichever one was last clicked.
+        //
+        // `''` clears it, deliberately. Resuming a conversation that belongs
+        // to no project while one is selected is the same fault pointing the
+        // other way, and an empty project header is true of that thread.
+        projectId: stored.projectId || null,
         streamingText: '',
         streamingReasoning: '',
         streamingSources: [],
@@ -1021,6 +1034,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
         // this one.
         sessionId: `session-${newId()}`,
       });
+      // Persisted like any other project change. It is a working context —
+      // somebody who reopened a Keyline thread this evening is still on
+      // Keyline tomorrow morning — and leaving it only in memory would make
+      // the scope disagree with itself across a relaunch.
+      try {
+        if (stored.projectId) localStorage.setItem(PROJECT_KEY, stored.projectId);
+        else localStorage.removeItem(PROJECT_KEY);
+      } catch {
+        // The scope still applies to this session; only persistence is lost.
+      }
     } catch (error) {
       set({
         connectionError:
