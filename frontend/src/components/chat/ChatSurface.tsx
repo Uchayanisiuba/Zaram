@@ -61,6 +61,8 @@ import Interleaved from './Interleaved';
 import StreamingReply from './StreamingReply';
 import CitationPanel from './CitationPanel';
 import CodePreviewPanel from './CodePreviewPanel';
+import BrowserPanel from '@/components/browser/BrowserPanel';
+import { useBrowserStore } from '@/stores/browserStore';
 import {
   extractPreviewable,
   filenameFor,
@@ -130,6 +132,10 @@ export default function ChatSurface({ navigate }: Props) {
   // per-message so only one preview is open at a time — two of these would
   // stack in the same fixed region and the lower one would be unreachable.
   const [codePreview, setCodePreview] = useState<PreviewableBlock | null>(null);
+  // The browser pane. Opened by something happening rather than by a menu
+  // item — see `stores/browserStore`.
+  const browserOpen = useBrowserStore((s) => s.open);
+  const browserPending = useBrowserStore((s) => s.pendingUrl);
 
   const messages = useChatStore((s) => s.messages);
   const streamingText = useChatStore((s) => s.streamingText);
@@ -1752,6 +1758,19 @@ export default function ChatSurface({ navigate }: Props) {
       </motion.div>
         </>
       )}
+
+      {/* The browser pane. Not a seventh node: it is opened by something
+          happening — a reply that started a dev server, or the address on
+          an app card being pressed — which is how a tool surface grows
+          without the navigation growing. */}
+      <AnimatePresence>
+        {browserOpen && (
+          <BrowserPanel
+            initialUrl={browserPending}
+            onClose={() => useBrowserStore.getState().hide()}
+          />
+        )}
+      </AnimatePresence>
 
       {/* Markup written in a reply, brought forward over the orb — the same
           treatment a citation and a generated document already get. */}

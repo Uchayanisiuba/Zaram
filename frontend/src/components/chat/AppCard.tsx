@@ -13,6 +13,7 @@
  * nothing in the URL is the model's.
  */
 import { onOpen } from '@/lib/openInBrowser';
+import { useBrowserStore } from '@/stores/browserStore';
 import { useEffect, useState } from 'react';
 import { ExternalLink, Square } from 'lucide-react';
 import type { ChatToolCall } from '../../stores/chatStore';
@@ -93,9 +94,29 @@ export default function AppCard({ call }: { call: ChatToolCall }) {
                 ? 'driving'
                 : 'running at'}
           </span>
+          {/* **Opens in Zaram's own pane when there is one.**
+              Until 3 October 2026 this went straight to the system browser,
+              which was the only honest option: a page rendered in-app would
+              have had script running beside the Spine and egress the gate
+              could not see. Both are now answered — the pane is a separate
+              session with its own partition, and `webRequest` reports every
+              request it makes. Opening the thing you are building in the
+              window you are building it in is the point.
+
+              `onOpen` stays as the fallback. Without a desktop host there
+              is no pane, and a dead link on a card reads as a broken
+              product -- which is the failure that put `openInBrowser` here
+              in the first place. */}
           <a
             href={call.appUrl}
-            onClick={onOpen(call.appUrl)}
+            onClick={(event) => {
+              if (window.zaram?.browser) {
+                event.preventDefault();
+                useBrowserStore.getState().show(call.appUrl);
+                return;
+              }
+              onOpen(call.appUrl!)(event);
+            }}
             rel="noreferrer"
             className="flex items-center gap-1"
             style={{ color: 'var(--color-cyan-light)', fontFamily: 'var(--font-mono)' }}

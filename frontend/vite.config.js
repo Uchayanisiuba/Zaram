@@ -121,6 +121,11 @@ export default defineConfig(({ command }) => ({
       '/memory': { target: BACKEND, changeOrigin: true },
       '/egress': { target: BACKEND, changeOrigin: true },
       '/artifacts': { target: BACKEND, changeOrigin: true },
+      // What is listening on this machine, for the browser pane's new tab.
+      // Added because `proxied.test.ts` refused the commit without it: an
+      // unproxied path reaches the dev server rather than the backend and
+      // comes back as HTML, which parses as "syntax error at character 0".
+      '/local-servers': { target: BACKEND, changeOrigin: true },
       '/tools': { target: BACKEND, changeOrigin: true },
       '/pairing': { target: BACKEND, changeOrigin: true },
       '/letterhead': { target: BACKEND, changeOrigin: true },
