@@ -3912,6 +3912,52 @@ def _artifact_json(artifact, *, include_html: bool = False) -> Dict[str, Any]:
     return payload
 
 
+@app.get("/local-servers")
+async def local_servers() -> dict:
+    """What is listening on this machine, for the browser pane's new tab.
+
+    Asked for 3 October 2026: *"when the user opens a new tab, I want them
+    to see all the running servers ... Zaram's front end, back end etc. I
+    want them to see Ride Share's own, or any other project of theirs."*
+
+    **Read-only, and that is the whole contract.** It starts nothing and
+    stops nothing: a list that could also run things is the mutative tier
+    and would need confirm, undo and a sandbox, none of which a list has.
+
+    Loopback only. A listener bound to a routable interface is reported at
+    its loopback address, because a panel that could hand the browser a
+    public address turns a stray click into an egress.
+
+    Nothing here is recalled, indexed or sent anywhere. The shape of
+    somebody's machine is exactly the kind of fact rule 8 keeps out of an
+    outbound query.
+    """
+    from core.local_servers import KnownProject, running_servers
+
+    try:
+        projects = [
+            KnownProject(id=p.id, name=p.name, root=p.root)
+            for p in project_records.list()
+            if p.root
+        ]
+    except Exception:
+        # A project store that will not answer costs the labels, not the
+        # list. An unlabelled server is still one the person can open.
+        projects = []
+
+    found = running_servers(
+        projects=projects,
+        zaram_ports=[LISTEN_PORT],
+        zaram_root=str(Path(__file__).resolve().parent.parent),
+    )
+    return {
+        "servers": [s.to_dict() for s in found],
+        # Counted here rather than in the renderer so the collapsed row can
+        # say how many without the renderer re-deriving the rule.
+        "hidden": sum(1 for s in found if s.origin == "other"),
+    }
+
+
 @app.get("/artifacts")
 async def list_artifacts(
     project_id: str = "",
