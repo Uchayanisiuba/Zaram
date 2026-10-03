@@ -22,6 +22,7 @@ import ModelSearchList, {
   SEARCH_APPEARS_ABOVE,
   groupForSearch,
   matchesQuery,
+  shortDataPolicy,
 } from './ModelSearchList';
 import type { DiscoveredModel } from '@/services/settingsClient';
 
@@ -285,5 +286,45 @@ describe('choosing', () => {
       />,
     );
     expect(screen.getByText('free/one')).toBeTruthy();
+  });
+});
+
+describe('the deal, at list length', () => {
+  it('says it in a few words rather than a sentence', () => {
+    // `describeDataPolicy` writes a sentence, which is right where one model
+    // is in question and a wall where five hundred are. Seen on screen with
+    // the maintainer's own 549 models: every row repeating "Terms unknown.
+    // Zaram will not route here on its own — choosing it is your decision,
+    // and Activity records what went." The tests passed and it was unusable.
+    expect(shortDataPolicy('logged_and_trained_on').length).toBeLessThan(40);
+    expect(shortDataPolicy(null).length).toBeLessThan(40);
+  });
+
+  it('still names what a free tier costs', () => {
+    // The short form is shorter, never softer. `CLAUDE.md`: naming the deal
+    // is a primary feature of the picker.
+    expect(shortDataPolicy('logged_and_trained_on')).toMatch(/train/i);
+  });
+
+  it('does not turn unknown into a reassuring blank', () => {
+    // `DataPolicy` refuses to make unknown a member precisely because it
+    // would start looking like a choice. Silence here would do the same.
+    expect(shortDataPolicy(null)).toMatch(/unknown/i);
+    expect(shortDataPolicy('something-nobody-has-heard-of')).toMatch(/unknown/i);
+  });
+
+  it('keeps the whole sentence within reach', () => {
+    render(
+      <ModelSearchList
+        models={[model({ id: 'cloudy', locality: 'cloud', dataPolicy: 'logged_and_trained_on' })]}
+        value=""
+        matchOn="id"
+        onChoose={vi.fn()}
+        decideLabel="Zaram decides"
+      />,
+    );
+    const short = screen.getByText(shortDataPolicy('logged_and_trained_on'));
+    // Shortened on the row, whole on hover — nothing is dropped.
+    expect(short.getAttribute('title')).toMatch(/logs prompts/i);
   });
 });

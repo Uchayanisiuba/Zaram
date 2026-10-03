@@ -108,6 +108,36 @@ export function groupForSearch(models: DiscoveredModel[]): ModelGroupView[] {
 }
 
 /**
+ * The deal in four words, for a row in a list of hundreds.
+ *
+ * `describeDataPolicy` writes a sentence, which is right where one model is
+ * in question — `AdvancedModelField` resolves a typed name and has room to
+ * explain. On a list it is a wall: 549 models on this machine, every row
+ * repeating *"Terms unknown. Zaram will not route here on its own — choosing
+ * it is your decision, and Activity records what went."* The tests passed
+ * and the screen was unusable, which is why it was looked at.
+ *
+ * So the row gets the short form and the sentence becomes its `title`.
+ * Nothing is dropped: `CLAUDE.md` requires the deal to be named beside the
+ * model, and "trains on your prompts" names it. What it must never become is
+ * silence, or a reassuring blank for the unknown case — `DataPolicy`'s own
+ * docstring refuses to make unknown a member precisely because it would
+ * start looking like a choice.
+ */
+export function shortDataPolicy(policy: string | null): string {
+  switch (policy) {
+    case 'never_leaves_device':
+      return 'nothing is sent';
+    case 'your_key_no_training':
+      return 'your key · not trained on';
+    case 'logged_and_trained_on':
+      return 'logged · trains on your prompts';
+    default:
+      return 'terms unknown';
+  }
+}
+
+/**
  * The free mark.
  *
  * Emerald because it is Zaram's own token for a good state, and because the
@@ -295,10 +325,15 @@ export default function ModelSearchList({
                     {note && <span className="block text-xs text-amber-400/80">{note}</span>}
                     {/* The deal, in words, under the badge. See the module
                         docstring: the badge makes a free tier findable and
-                        this is what stops it being an advertisement. */}
+                        this is what stops it being an advertisement.
+                        Short on the row and whole on hover, because a list
+                        of several hundred cannot carry a sentence each. */}
                     {group.policy && (
-                      <span className="block text-xs text-slate-500">
-                        {describeDataPolicy(model.dataPolicy)}
+                      <span
+                        className="block text-xs text-slate-500"
+                        title={describeDataPolicy(model.dataPolicy)}
+                      >
+                        {shortDataPolicy(model.dataPolicy)}
                       </span>
                     )}
                   </span>
