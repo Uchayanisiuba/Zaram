@@ -327,4 +327,9 @@ async def test_every_tool_the_pack_ships_is_offered_from_the_real_boot(tmp_path)
         "write_file", "edit_file", "run_command",
         "find_symbol", "read_library_docs",
         "start_app", "stop_app", "get_app_status", "read_app_log", "look_at_app",
+        # Slice 9. Added here in the same commit as the capability, because
+        # the whole point of this test is that building a thing and reaching
+        # it are two events and this repository keeps only managing the first.
+        "open_in_browser", "read_app_page", "click_in_app", "type_in_app",
+        "read_app_console", "close_browser",
     }, sorted(names)

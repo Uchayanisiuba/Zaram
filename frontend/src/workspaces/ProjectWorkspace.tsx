@@ -856,6 +856,21 @@ function EditsRow({ project }: { project: Project }) {
           Zaram may run this project&apos;s commands — {runnerList}
         </span>
       </label>
+      {/* **The grant widened, so the words widened with it.** Driving the app
+          sits under this toggle rather than asking per click, because rule 7j
+          is explicit that a dialog per action is a product nobody opens
+          twice — but a grant that quietly grows is worse than a second
+          dialog, and `projects: the offer says what pressing it actually
+          grants` exists for exactly this. Shown only once the grant is on:
+          before that it is a description of something that is not happening.
+          The browser is Zaram's own, with none of your sign-ins in it. */}
+      {project.runs && (
+        <span className="pl-6 leading-snug" style={{ color: 'var(--color-text-faint)' }}>
+          That includes starting the app and driving it in a browser of its own —
+          opening the page, clicking, typing — to check a change. Localhost only,
+          and it carries none of your sign-ins.
+        </span>
+      )}
     </div>
   );
 }

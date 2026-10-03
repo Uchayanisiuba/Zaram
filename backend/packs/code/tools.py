@@ -43,8 +43,9 @@ from typing import Any, Callable, Dict, List, Optional
 from ingest.service import SKIP_DIRS
 from runtimes.mcp.client import ToolDescriptor
 
-from . import apps, libraries, repo_map, runners, writes
+from . import apps, driving, libraries, repo_map, runners, writes
 from .apps import AppTools
+from .driving import DrivingTools
 from .libraries import LibraryTools
 from .runners import RUN_COMMAND, CodeRunner
 from .writes import TOOL_NAMES, CodeWriter
@@ -102,6 +103,7 @@ class CodeTools:
         runs_granted: Callable[[], bool] = lambda: False,
         library: Optional["LibraryTools"] = None,
         app: Optional["AppTools"] = None,
+        driving: Optional["DrivingTools"] = None,
     ) -> None:
         self._root_for = root_for
         #: `None` means this instance cannot write, structurally. See `writes.py`.
@@ -118,6 +120,12 @@ class CodeTools:
         #: Running the app and looking at it. Under the same grant as running
         #: its commands — a dev server is a command that does not exit.
         self._app = app
+        #: Driving the app rather than only looking at it. Under the
+        #: same grant as running, because starting a dev server and
+        #: pressing a button in the dev server it started are one
+        #: consent reaching one step further — and a dialog per click
+        #: is the product nobody opens twice.
+        self._driving = driving
 
     def how_to_permit(self, tool_name: str) -> str:
         """Appended to a `CONFIRM` reason by the runtime, so the sentence a
@@ -172,6 +180,8 @@ class CodeTools:
             granted.add(RUN_COMMAND)
         if self._app is not None and self._runs_granted():
             granted |= {apps.START_APP, apps.STOP_APP, apps.LOOK_AT_APP}
+        if self._driving is not None and self._runs_granted():
+            granted |= set(driving.TOOL_NAMES)
         return granted
 
     # -- the McpServer interface, so the runtime needs no special case --
@@ -194,6 +204,8 @@ class CodeTools:
             tools.extend(self._library.descriptors(SERVER_ID))
         if self._app is not None:
             tools.extend(self._app.descriptors(SERVER_ID, self._root_for()))
+        if self._driving is not None:
+            tools.extend(self._driving.descriptors(SERVER_ID))
         return tools
 
     def _read_tools(self) -> List[ToolDescriptor]:
@@ -353,6 +365,8 @@ class CodeTools:
                 return self._library.call(name, arguments, root)
             if self._app is not None and name in apps.TOOL_NAMES:
                 return self._app.call(name, arguments, root)
+            if self._driving is not None and name in driving.TOOL_NAMES:
+                return self._driving.call(name, arguments, root)
         except OutsideTheProject as refusal:
             # Reported, not raised. The engine turns an exception into a failed
             # call; this is a refusal with a reason, which is a different thing

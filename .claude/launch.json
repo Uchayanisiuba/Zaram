@@ -33,6 +33,15 @@
         "4322"
       ],
       "port": 4322
+    },
+    {
+      "name": "zaram-backend",
+      "runtimeExecutable": "cmd",
+      "runtimeArgs": [
+        "/c",
+        "cd backend && set ZARAM_API_SECRET=dev-secret && venv\\Scripts\\python.exe main.py"
+      ],
+      "port": 8420
     }
   ]
 }

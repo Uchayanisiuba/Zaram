@@ -490,8 +490,8 @@ class KernelBootstrapper:
             SERVER_ID as CODE_SERVER,
             AppTools,
             CodeRunner,
-            AppTools,
             CodeTools,
+            DrivingTools,
             CodeWriter,
             LibraryTools,
             active_root,
@@ -526,6 +526,12 @@ class KernelBootstrapper:
                         else None
                     ),
                 ),
+                # Driving what `AppTools` started: open the page, read it as
+                # structure, click, type, read the console. Needs no vision
+                # model and no new dependency — the browser is the one
+                # `find_browser()` already locates, spoken to over the
+                # DevTools protocol with the `aiohttp` already pinned.
+                driving=DrivingTools(),
             ),
         )
 
