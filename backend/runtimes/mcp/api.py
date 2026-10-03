@@ -84,7 +84,23 @@ def _describe(cfg: ServerConfig) -> Dict[str, Any]:
     ``reachable`` is carried rather than inferred from ``transport`` so the
     surface can say *why* an http server shows no tools, instead of rendering an
     empty list that reads as a broken server.
+
+    ``tools``, ``offered`` and ``pinnedTools`` are the same distinction one
+    layer out. The runtime has recorded how many tools each server offers and
+    how many survived the context budget since 20 September, on
+    ``/tools/health`` — and **nothing in the interface has ever called it**, so
+    a server with 39 tools showed 8 and said nothing about the other 31. The
+    model then truthfully reported it could not do the thing while the server
+    sat there healthy. `CLAUDE.md`: *a disabled capability is visible, not
+    silent.* Carried here rather than left on a second endpoint because the
+    surface that renders the server is the surface that has to say it.
+
+    ``None`` for the counts before anything has been asked — not 0, because
+    *"nothing has happened yet"* and *"this server was shut out"* are different
+    answers and the interface must not show one as the other. The same
+    distinction ``vram_bytes`` draws by returning ``None`` rather than zero.
     """
+    counts = _counts_for(cfg.server_id)
     return {
         "id": cfg.server_id,
         "command": list(cfg.command),
@@ -97,7 +113,47 @@ def _describe(cfg: ServerConfig) -> Dict[str, Any]:
         # the sentence to show beside a server that may write, because "why is
         # this one allowed to change things" is the question a person has.
         "knownHost": known_host_reason(cfg.command),
+        # How many this server offers, and how many reached the model last
+        # time. When `offered` is below `tools`, the difference is what the
+        # context budget dropped.
+        "tools": counts[0],
+        "offered": counts[1],
+        # The budget those two are measured against, so the sentence the
+        # interface writes can name the number rather than being vague.
+        "toolBudget": counts[2],
+        # Zaram's own packs are never trimmed — the budget exists for
+        # strangers. Said here so the interface does not warn about a built-in
+        # that was always going to be complete.
+        "builtin": counts[3],
+        # Which tools the person chose to keep in front of the model whatever
+        # the budget would otherwise do. A pin is visibility, never
+        # permission: `grantedTools` above is the separate answer to what a
+        # tool may *do*.
+        "pinnedTools": sorted(cfg.pinned_tools),
     }
+
+
+def _counts_for(server_id: str) -> tuple:
+    """`(offered by the server, reached the model, the budget, is a built-in)`.
+
+    All four from the live runtime, which is the only place they are known at
+    once. Before the kernel is up there is no runtime and every one is
+    ``None`` — the store-backed endpoints must keep working while the backend
+    is still starting, and a count invented here would be exactly the
+    *"status indicator over hardcoded data"* `CLAUDE.md` calls worse than no
+    indicator.
+    """
+    if _MCP_RUNTIME is None:
+        return (None, None, None, False)
+    try:
+        return (
+            _MCP_RUNTIME._tool_counts.get(server_id),
+            _MCP_RUNTIME._last_offered.get(server_id),
+            _MCP_RUNTIME._budget,
+            server_id in _MCP_RUNTIME._builtin,
+        )
+    except Exception:  # noqa: BLE001 - a count must never fail the listing
+        return (None, None, None, False)
 
 
 class AttachRequest(BaseModel):
@@ -211,6 +267,56 @@ async def grant_tool(server_id: str, request: GrantRequest) -> Dict[str, Any]:
 
     store.grant(server_id, request.tool)
     return {"server": server_id, "grantedTools": sorted(store.load()[server_id].granted_tools)}
+
+
+@router.get("/servers/{server_id}/tools")
+async def list_server_tools(server_id: str) -> Dict[str, Any]:
+    """Every tool one server offers, so the pin control has names to show.
+
+    Not the shortlist. The person is here precisely because the shortlist is
+    smaller than the server, and offering them the eight that already fit
+    would be answering a question they did not ask.
+
+    503 while the kernel is starting, for the reason `/health` gives: *"not
+    ready yet"* and *"this server offers nothing"* are different answers.
+    """
+    if _MCP_RUNTIME is None:
+        raise HTTPException(status_code=503, detail="tool layer not initialized")
+    if server_id not in _store().load():
+        raise HTTPException(status_code=404, detail=f"no server called {server_id!r}")
+    return {"server": server_id, "tools": await _MCP_RUNTIME.tools_on(server_id)}
+
+
+class PinRequest(BaseModel):
+    """Which of a server's tools always reach the model.
+
+    The whole set, not one name: the control is a list of checkboxes, and
+    unticking the last one means *none*, which an add-only endpoint cannot
+    say.
+    """
+
+    tools: List[str] = Field(default_factory=list)
+
+
+@router.put("/servers/{server_id}/pins")
+async def pin_tools(server_id: str, request: PinRequest) -> Dict[str, Any]:
+    """Keep these tools in front of the model, whatever the budget would do.
+
+    **Visibility, never permission.** A pinned tool is gated exactly like any
+    other — the risk tier and `grantedTools` decide what it may do, and this
+    decides only whether the model gets to see it. Keeping those two apart is
+    the whole reason there are two fields: a control that quietly granted what
+    it revealed would make the budget a permission surface, which the tier
+    table forbids for a different reason.
+
+    It is also the one membership decision a person is allowed to make
+    directly. A *score* may order candidates and may never decide what is in
+    the running; a pin is not a score, it is somebody naming a tool.
+    """
+    cfg = _store().pin(server_id, set(request.tools))
+    if cfg is None:
+        raise HTTPException(status_code=404, detail=f"no server called {server_id!r}")
+    return {"server": server_id, "pinnedTools": sorted(cfg.pinned_tools)}
 
 
 @router.post("/servers/{server_id}/allow-for-session")

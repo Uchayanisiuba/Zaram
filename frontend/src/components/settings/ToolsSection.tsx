@@ -35,7 +35,10 @@ import {
   attachServers,
   detachServer,
   fetchServers,
+  fetchServerTools,
+  pinTools,
   ToolsError,
+  type ServerTool,
   type ToolServer,
 } from '../../services/toolsClient';
 
@@ -69,7 +72,18 @@ function writesLabel(server: ToolServer): string {
   return server.writes === 'host_undo' ? 'Can change things' : 'Reads only';
 }
 
-function ServerRow({ server, onDetach }: { server: ToolServer; onDetach: () => void }) {
+function ServerRow({
+  server,
+  onDetach,
+  onPinned,
+}: {
+  server: ToolServer;
+  onDetach: () => void;
+  /** Reload the list, so the pin that was just set is the one on screen.
+   *  The counts come from the backend and a local guess at them would be the
+   *  invented value `CLAUDE.md` calls worse than no indicator. */
+  onPinned: () => void;
+}) {
   const [confirming, setConfirming] = useState(false);
 
   return (
@@ -151,6 +165,183 @@ function ServerRow({ server, onDetach }: { server: ToolServer; onDetach: () => v
       {server.grantedTools.length > 0 && (
         <div className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
           Allowed: {server.grantedTools.join(', ')}
+        </div>
+      )}
+
+      <ToolBudgetRow server={server} onPinned={onPinned} />
+    </div>
+  );
+}
+
+/**
+ * What the context budget dropped, and which tools to keep instead.
+ *
+ * **The numbers existed for a fortnight with no caller.** The runtime has
+ * recorded how many tools each server offers and how many survived the budget
+ * since 20 September, on `/tools/health`, and nothing in the interface ever
+ * asked. So attaching a 39-tool server — Comfy Org's `comfy-mcp` is one —
+ * showed 8 and said nothing about the other 31, and the model then truthfully
+ * reported that it could not do the thing while the server sat there healthy.
+ * `CLAUDE.md`: *a disabled capability is visible, not silent.* Exactly the
+ * base rate that file names — complete, tested, unreachable.
+ *
+ * **Saying it is only half.** A product that reports "31 tools omitted" and
+ * offers no way to choose which is a complaint rather than a control, the same
+ * way a refusal that does not name the switch reads as a broken product. So
+ * the sentence opens a list, and a pin keeps that tool in front of the model
+ * whatever the budget would otherwise do.
+ *
+ * **A pin is visibility, never permission.** Being seen by the model is not
+ * being allowed to act; the risk tier and the grant still decide that, and
+ * they are a different field. A control that quietly granted what it revealed
+ * would turn the budget into a permission surface.
+ */
+function ToolBudgetRow({
+  server,
+  onPinned,
+}: {
+  server: ToolServer;
+  onPinned: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [names, setNames] = useState<ServerTool[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  // Zaram's own packs are never trimmed, so a built-in is not short of
+  // anything and must not carry a warning about it.
+  const short =
+    !server.builtin &&
+    server.tools !== null &&
+    server.offered !== null &&
+    server.offered < server.tools;
+
+  const load = useCallback(async () => {
+    setError(null);
+    try {
+      setNames(await fetchServerTools(server.id));
+    } catch (caught) {
+      // Never an empty list on a failed fetch: "this server offers nothing"
+      // and "Zaram could not ask" are different answers.
+      setNames(null);
+      setError((caught as Error).message);
+    }
+  }, [server.id]);
+
+  const toggleOpen = useCallback(() => {
+    setOpen((was) => !was);
+    if (!open && names === null) void load();
+  }, [open, names, load]);
+
+  const togglePin = useCallback(
+    async (name: string) => {
+      if (busy) return;
+      setBusy(true);
+      const next = server.pinnedTools.includes(name)
+        ? server.pinnedTools.filter((n) => n !== name)
+        : [...server.pinnedTools, name];
+      try {
+        await pinTools(server.id, next);
+        onPinned();
+      } catch (caught) {
+        setError((caught as Error).message);
+      } finally {
+        setBusy(false);
+      }
+    },
+    [busy, server.id, server.pinnedTools, onPinned],
+  );
+
+  // Nothing to say: no question has gone through yet, or every tool fits.
+  // `null` is deliberately not 0 here — see `ToolServer.tools`.
+  if (!short && server.pinnedTools.length === 0) return null;
+
+  const omitted =
+    server.tools !== null && server.offered !== null ? server.tools - server.offered : 0;
+
+  return (
+    <div className="flex flex-col gap-1">
+      {short && (
+        <button
+          type="button"
+          className="text-xs text-left"
+          style={{ color: 'var(--color-amber)' }}
+          onClick={toggleOpen}
+          data-testid={`budget-shortfall-${server.id}`}
+        >
+          {omitted} of {server.tools} tools did not reach the model — there is
+          room for {server.toolBudget ?? 'a few'} at once, shared with every
+          other attached server.
+          {server.pinnedTools.length > 0
+            ? ` You are keeping ${server.pinnedTools.length} of them. `
+            : ' '}
+          {open ? 'Hide' : 'Choose which to keep'}
+        </button>
+      )}
+
+      {!short && server.pinnedTools.length > 0 && (
+        <button
+          type="button"
+          className="text-xs text-left"
+          style={{ color: 'var(--color-text-muted)' }}
+          onClick={toggleOpen}
+          data-testid={`budget-pinned-${server.id}`}
+        >
+          Keeping {server.pinnedTools.length} tool
+          {server.pinnedTools.length === 1 ? '' : 's'} in front of the model.{' '}
+          {open ? 'Hide' : 'Change'}
+        </button>
+      )}
+
+      {open && (
+        <div className="flex flex-col gap-1 pl-3">
+          {error && (
+            <span className="text-xs" style={{ color: 'var(--color-red)' }}>
+              {error}
+            </span>
+          )}
+          {!error && names === null && (
+            <span className="text-xs" style={{ color: 'var(--color-text-faint)' }}>
+              Asking the server what it offers…
+            </span>
+          )}
+          {names?.map((tool) => (
+            <label
+              key={tool.name}
+              className="flex cursor-pointer items-start gap-2 text-xs"
+            >
+              <input
+                type="checkbox"
+                checked={server.pinnedTools.includes(tool.name)}
+                disabled={busy}
+                onChange={() => void togglePin(tool.name)}
+                data-testid={`pin-${server.id}-${tool.name}`}
+                aria-label={`Keep ${tool.name} in front of the model`}
+              />
+              <span style={{ color: 'var(--color-text-muted)' }}>
+                <span className="font-mono">{tool.name}</span>
+                {tool.description && (
+                  /* The server author's own words, carried rather than
+                     paraphrased — and third-party text, which is why nothing
+                     here renders it as markup. */
+                  <span style={{ color: 'var(--color-text-faint)' }}>
+                    {' — '}
+                    {tool.description.slice(0, 90)}
+                    {tool.description.length > 90 ? '…' : ''}
+                  </span>
+                )}
+              </span>
+            </label>
+          ))}
+          {names?.length === 0 && !error && (
+            <span className="text-xs" style={{ color: 'var(--color-text-faint)' }}>
+              This server listed no tools.
+            </span>
+          )}
+          <span className="text-xs" style={{ color: 'var(--color-text-faint)' }}>
+            Keeping a tool here only means the model gets to see it. What it is
+            allowed to <em>do</em> is still asked for separately.
+          </span>
         </div>
       )}
     </div>
@@ -248,7 +439,12 @@ export default function ToolsSection({ Row }: ToolsSectionProps) {
       )}
 
       {servers?.map((server) => (
-        <ServerRow key={server.id} server={server} onDetach={() => void remove(server.id)} />
+        <ServerRow
+          key={server.id}
+          server={server}
+          onDetach={() => void remove(server.id)}
+          onPinned={() => void reload()}
+        />
       ))}
 
       {servers !== null && servers.length === 0 && !adding && (

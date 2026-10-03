@@ -94,6 +94,21 @@ class ServerConfig:
     url: str = ""
     writes: WriteMode = WriteMode.READ_ONLY
     granted_tools: Set[str] = field(default_factory=set)
+    #: Tools the person chose to keep in front of the model, whatever the
+    #: context budget would otherwise do with them.
+    #:
+    #: **This is a membership decision, and the only one allowed to be.**
+    #: `CLAUDE.md` is emphatic that a blend may order candidates and must
+    #: never decide what is in the running — that error has cost this
+    #: codebase three times. A pin is not a score: it is the user naming a
+    #: tool, which is the same kind of act as granting one, and a product
+    #: that tells somebody *"31 tools were omitted"* and gives them no way
+    #: to choose which is a complaint rather than a control.
+    #:
+    #: It cannot widen anything. A pinned tool is still gated exactly like
+    #: any other — being visible to the model is not being permitted, and
+    #: `granted_tools` is the separate field that answers that question.
+    pinned_tools: Set[str] = field(default_factory=set)
 
     @property
     def transport(self) -> str:
@@ -118,6 +133,8 @@ class ServerConfig:
         out["writes"] = self.writes.value
         if self.granted_tools:
             out["grantedTools"] = sorted(self.granted_tools)
+        if self.pinned_tools:
+            out["pinnedTools"] = sorted(self.pinned_tools)
         return out
 
     @classmethod
@@ -148,6 +165,7 @@ class ServerConfig:
             url=str(raw.get("url") or ""),
             writes=writes,
             granted_tools=set(raw.get("grantedTools") or []),
+            pinned_tools=set(raw.get("pinnedTools") or []),
         )
 
 
@@ -195,3 +213,22 @@ class ServerStore:
             return
         cfg.granted_tools.add(tool_name)
         self.save(servers)
+
+    def pin(self, server_id: str, tool_names: Set[str]) -> Optional[ServerConfig]:
+        """Set which of a server's tools always reach the model.
+
+        The whole set is sent rather than one name at a time: the control
+        is a list of checkboxes, and a person unticking the last one means
+        *none*, which an add-only endpoint cannot express.
+
+        Returns the updated config, or ``None`` for a server that is not
+        configured — the caller turns that into a 404 rather than
+        pretending it worked.
+        """
+        servers = self.load()
+        cfg = servers.get(server_id)
+        if cfg is None:
+            return None
+        cfg.pinned_tools = {str(name) for name in tool_names if str(name).strip()}
+        self.save(servers)
+        return cfg

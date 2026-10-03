@@ -345,16 +345,50 @@ class McpRuntime:
         # pack reached fourteen tools and the interface said "7 attached".
         ours = [t for t in found if t.server_id in self._builtin]
         theirs = [t for t in found if t.server_id not in self._builtin]
+
+        # **What the person pinned goes in first, and is never ranked.**
+        # Attaching a server with 39 tools — Comfy Org's `comfy-mcp` is
+        # one — put 8 in front of the model and dropped 31 silently, so
+        # the model truthfully reported that it could not do the thing
+        # while the server sat there healthy. `CLAUDE.md` says a disabled
+        # capability is visible rather than silent, and the numbers below
+        # are how the interface says it; this is the other half, because a
+        # product that reports *"31 tools omitted"* and offers no way to
+        # choose which is a complaint rather than a control.
+        #
+        # A pin is a **membership** decision, and the only one allowed to
+        # be one. The rule it must not break is that a *score* may order
+        # candidates and may never decide what is in the running — this
+        # codebase has paid for that error three times. A pin is not a
+        # score: it is the user naming a tool, the same kind of act as
+        # granting one. And it widens nothing, because being visible to
+        # the model is not being permitted; the gate runs afterwards on
+        # whatever was actually chosen.
+        pinned_names = {
+            f"{cfg.server_id}:{name}"
+            for cfg in self._configs().values()
+            for name in cfg.pinned_tools
+        }
+        pinned = [t for t in theirs if t.qualified_name in pinned_names]
+        rest = [t for t in theirs if t.qualified_name not in pinned_names]
+
+        # The budget is what is left after the pins. Pinning more than the
+        # budget is the person's call and is honoured — they named each
+        # one, which is a stronger signal than a cap chosen by
+        # measurement, and `max(0, …)` means the ranker is simply asked
+        # for nothing rather than for a negative number.
+        room = max(0, self._budget - len(pinned))
         # An empty query means "the same set as last time": the listing order
         # cut to the budget, with no ranking to move it. The engine asks this
         # way on every turn that is not about tools, so the tool rules are the
         # same bytes each turn and stay in the server's prompt cache
         # (`docs/PLAN.md` A3).
-        shortlisted = ours + (
-            self._rank(query, theirs, self._budget)
-            if self._rank and query.strip()
-            else theirs[: self._budget]
+        chosen = (
+            self._rank(query, rest, room)
+            if self._rank and query.strip() and room
+            else rest[:room]
         )
+        shortlisted = ours + pinned + chosen
 
         # Recorded here rather than computed later, because *here* is the only
         # place both numbers are known at once: `found` is everything the
@@ -386,6 +420,45 @@ class McpRuntime:
                 }
             )
         return described
+
+    async def tools_on(self, server_id: str) -> List[Dict[str, Any]]:
+        """Every tool one server offers, by name — not the shortlist.
+
+        Needed because the budget's remedy is for a person to say *which* 31
+        of 39 they could do without, and they cannot choose from a count.
+        `available_tools` answers a different question — what goes in front of
+        the model for this request — and reusing it here would hand back the
+        eight that already fit, which is the set the person is trying to
+        change.
+
+        Unranked and uncut, deliberately. This is a list to read, not a
+        prompt, so the budget has no business in it.
+
+        The name and description are **third-party text** and are carried
+        marked, exactly as `available_tools` carries them: whoever wrote the
+        server wrote these words, and a scan finding travels with them rather
+        than the text being dropped.
+        """
+        cfg = self._configs().get(server_id)
+        if cfg is None:
+            return []
+        server = await self._connect(cfg)
+        if server is None:
+            return []
+        try:
+            found = await asyncio.to_thread(server.list_tools)
+        except Exception as exc:  # noqa: BLE001 - a listing must not 500
+            logger.warning("could not list tools on %s: %s", server_id, exc)
+            return []
+        return [
+            {
+                "name": tool.name,
+                "qualified_name": tool.qualified_name,
+                "description": tool.description,
+                "suspicions": [s.value for s in scan(f"{tool.name} {tool.description}")],
+            }
+            for tool in found
+        ]
 
     # ------------------------------------------------------------------ call
 

@@ -47,6 +47,33 @@ export interface ToolServer {
    *  beside one that may write, because "why is this allowed to change
    *  things" is the question a person actually has. */
   knownHost: string | null;
+  /** How many tools this server offers, and how many reached the model on the
+   *  last question. When `offered` is below `tools`, the difference is what
+   *  the context budget dropped.
+   *
+   *  **`null` means nothing has been asked yet, and is not 0.** "No question
+   *  has gone through" and "this server was shut out" are different answers,
+   *  and rendering one as the other is the invented value `CLAUDE.md` calls
+   *  worse than no indicator. The backend has reported both numbers since 20
+   *  September and nothing here read them, so a 39-tool server showed 8 and
+   *  said nothing about the other 31 — while the model truthfully answered
+   *  that it could not do the thing. */
+  tools: number | null;
+  offered: number | null;
+  /** The budget those two are measured against, so the sentence can name the
+   *  number rather than being vague. */
+  toolBudget: number | null;
+  /** Zaram's own packs are never trimmed; the budget exists for strangers. So
+   *  a built-in with fewer offered than found is a bug rather than a
+   *  shortfall, and the row must not warn about it. */
+  builtin: boolean;
+  /** Tools the person pinned, which reach the model whatever the budget would
+   *  otherwise do.
+   *
+   *  **Visibility, never permission.** `grantedTools` above is the separate
+   *  answer to what a tool may *do*; a pinned tool is still gated exactly
+   *  like any other. */
+  pinnedTools: string[];
 }
 
 export class ToolsError extends Error {
@@ -72,6 +99,9 @@ async function readOrThrow(response: Response): Promise<Record<string, unknown>>
 }
 
 const str = (value: unknown): string => (typeof value === 'string' ? value : '');
+/** A count, or null for "not asked yet" — never coerced to 0. See `tools`. */
+const count = (value: unknown): number | null =>
+  typeof value === 'number' && Number.isFinite(value) ? value : null;
 const strings = (value: unknown): string[] =>
   Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string') : [];
 
@@ -87,7 +117,68 @@ function toServer(raw: Record<string, unknown>): ToolServer {
     writes: raw.writes === 'host_undo' ? 'host_undo' : 'read_only',
     grantedTools: strings(raw.grantedTools),
     knownHost: typeof raw.knownHost === 'string' && raw.knownHost ? raw.knownHost : null,
+    tools: count(raw.tools),
+    offered: count(raw.offered),
+    toolBudget: count(raw.toolBudget),
+    builtin: raw.builtin === true,
+    pinnedTools: strings(raw.pinnedTools),
   };
+}
+
+/** One tool a server offers, as the pin control needs to list it.
+ *
+ *  `name` and `description` are **third-party text** — whoever wrote the
+ *  server wrote them — so `suspicions` travels with them rather than the text
+ *  being dropped. Carried marked, never trusted; the backend scans and the
+ *  gate decides. */
+export interface ServerTool {
+  name: string;
+  qualifiedName: string;
+  description: string;
+  suspicions: string[];
+}
+
+/**
+ * Every tool one server offers, by name — not the shortlist.
+ *
+ * The person is here precisely because the shortlist is smaller than the
+ * server, so handing back the eight that already fit would answer a question
+ * they did not ask.
+ */
+export async function fetchServerTools(serverId: string): Promise<ServerTool[]> {
+  const raw = await readOrThrow(
+    await fetch(`${API_BASE}/tools/servers/${encodeURIComponent(serverId)}/tools`),
+  );
+  const list = Array.isArray(raw.tools) ? raw.tools : [];
+  return list.map((entry) => {
+    const t = entry as Record<string, unknown>;
+    return {
+      name: str(t.name),
+      qualifiedName: str(t.qualified_name),
+      description: str(t.description),
+      suspicions: strings(t.suspicions),
+    };
+  });
+}
+
+/**
+ * Keep these tools in front of the model, whatever the budget would do.
+ *
+ * The whole set each time, not one name: the control is a list of checkboxes,
+ * and unticking the last one means *none*, which an add-only call cannot say.
+ *
+ * **Visibility, never permission.** A pinned tool is gated exactly like any
+ * other — `grantToolAlways` is the separate thing that answers what it may do.
+ */
+export async function pinTools(serverId: string, tools: string[]): Promise<string[]> {
+  const raw = await readOrThrow(
+    await fetch(`${API_BASE}/tools/servers/${encodeURIComponent(serverId)}/pins`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tools }),
+    }),
+  );
+  return strings(raw.pinnedTools);
 }
 
 export async function fetchServers(signal?: AbortSignal): Promise<ToolServer[]> {
