@@ -1321,22 +1321,58 @@ class IntentPlanner:
             # `answer` is left empty because the planner cannot know it yet;
             # the engine fills it from the first step's output. The empty
             # string is the signal that there is something to fill.
-            plan_steps = [
-                ExecutionStep(
-                    capability_id="reasoning.generate",
-                    input_data={"prompt": _document_body_prompt(prompt)},
-                    depends_on=[],
-                ),
-                ExecutionStep(
-                    # The *user's* words, not the rewritten instruction: the
-                    # runtime reads them to decide whether "spreadsheet" or
-                    # "invoice" was asked for, and the instruction below would
-                    # match none of them.
-                    capability_id="document.generate",
-                    input_data={"prompt": prompt, "answer": ""},
-                    depends_on=[0],
-                ),
-            ]
+            #
+            # **Three steps when a repository is open, and the first one is
+            # why.** Reported 3 October 2026: *"do an audit on this project"*
+            # with a coding project open on a real Unreal plugin produced a
+            # confident audit of an unrelated portfolio website. "Audit" reads
+            # as a document request and this branch is first in the chain, so
+            # the plan was `reasoning.generate` → `document.generate` with no
+            # listing step at all — which meant **no tools and no repository
+            # map**, because both arrive on `mcp.list_tools`. The body was
+            # therefore written from recalled memory, and the only memory
+            # anywhere near a referential five-word question was about other
+            # work.
+            #
+            # Rule 9 is the one that makes this urgent rather than untidy:
+            # *"a document produced from unresolved context is confident,
+            # plausible and wrong — and unlike a chat reply, it leaves the
+            # building."* A wrong reply is corrected on the next turn; a wrong
+            # audit reads as finished work.
+            #
+            # So the body step gets what every other coding turn already
+            # gets. It is the same pair the tool branch below builds, with the
+            # document step on the end, and it costs nothing on the far more
+            # common case of a document that is not about code: with no
+            # coding project open the listing is not added at all.
+            body = ExecutionStep(
+                capability_id="reasoning.generate",
+                input_data={"prompt": _document_body_prompt(prompt)},
+                depends_on=[],
+            )
+            document = ExecutionStep(
+                # The *user's* words, not the rewritten instruction: the
+                # runtime reads them to decide whether "spreadsheet" or
+                # "invoice" was asked for, and the instruction below would
+                # match none of them.
+                capability_id="document.generate",
+                input_data={"prompt": prompt, "answer": ""},
+                depends_on=[0],
+            )
+            if self._coding_project_is_open():
+                body.depends_on = [0]
+                document.depends_on = [1]
+                plan_steps = [
+                    ExecutionStep(
+                        capability_id="mcp.list_tools",
+                        input_data={"query": prompt},
+                        depends_on=[],
+                    ),
+                    body,
+                    document,
+                ]
+            else:
+                plan_steps = [body, document]
         elif (
             _names_a_page(prompt)
             and not has_images
