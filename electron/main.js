@@ -21,6 +21,8 @@ const { createFileAssociations } = require('./native/fileAssociations');
 const { createDeepLinks } = require('./native/deepLinks');
 const { createGlobalShortcuts } = require('./native/globalShortcuts');
 const { createAmbientSurface } = require('./native/ambient');
+const { createBrowserService } = require('./services/browserService');
+const { createBrowserBackend } = require('./services/browserBackend');
 
 const isDev = !app.isPackaged;
 
@@ -42,6 +44,8 @@ let staticServer = null;
 let tray = null;
 let shortcuts = null;
 let ambient = null;
+let browser = null;
+let browserBackend = null;
 let apiSecret = null;
 let updater = null;
 let logStream = null;
@@ -324,6 +328,9 @@ async function bootstrap() {
     // A getter, because the ambient surface is constructed below with the
     // other native capabilities and this runs first.
     getAmbient: () => ambient,
+    // Same reason as the ambient getter above: the pane is constructed with
+    // the other native capabilities, after this runs.
+    getBrowser: () => browser,
     getApiSecret: () => apiSecret,
   });
 
@@ -423,6 +430,31 @@ async function bootstrap() {
   // the panel window is created hidden so that summoning it is a `show()`
   // rather than a renderer boot. Proximity is the point, and a surface that
   // takes a second to appear is one people stop reaching for.
+  // The browser pane.
+  //
+  // **Its requests are reported from here and nowhere else.** `EgressGate`
+  // intercepts what the *backend* sends, and a BrowserView fetches from its
+  // own Chromium process -- so rule 3 stops being satisfied by the backend
+  // alone the moment the product has a browser in it. CLAUDE.md names this
+  // same hole for a VRM's `uri` fetches; this is its second instance,
+  // closed in the one place that can see it.
+  browserBackend = createBrowserBackend({
+    baseUrl: config.backend.baseUrl,
+    getSecret: () => apiSecret,
+    logger: logger.child ? logger.child('browser') : logger,
+  });
+  browserBackend.refresh();
+
+  browser = createBrowserService({
+    logger: logger.child ? logger.child('browser') : logger,
+    getWindow: () => windows && windows.getMain && windows.getMain(),
+    emit: (payload) => pushToRenderer(MAIN_EVENTS.browserTabs, payload),
+    // Read per call rather than captured: somebody who turns browsing on in
+    // Settings should not have to reopen the tab for it to take effect.
+    isBrowseAllowed: () => browserBackend.isBrowseAllowed(),
+    reportEgress: (entry) => browserBackend.record(entry),
+  });
+
   ambient = createAmbientSurface({
     config,
     shortcuts,

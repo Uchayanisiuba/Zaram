@@ -2445,7 +2445,7 @@ async def egress_policy():
     decision about a destination the user has actually encountered rather than
     asking them to type hostnames from memory.
     """
-    from core.egress import get_gate
+    from core.egress import DataClass, get_gate
 
     gate = get_gate()
     rules = gate.policy.rules()
@@ -2470,7 +2470,83 @@ async def egress_policy():
         # Listing is not permitting. The default is still deny and these carry
         # no rule; the entry exists so there is a control to press.
         "can_draw_at": _drawing_destinations(),
+        # The standing answer per data class — today only `browse`, which is
+        # the one decision that replaced forty-one per-host rules.
+        #
+        # Sent as its own key for the reason `class_rules` is: `rules` is
+        # already rendered and parsed, and quietly changing its shape is how
+        # a privacy pane comes to show nothing at all. The browser pane reads
+        # this to know whether it may open a page that is not on this
+        # machine.
+        "class_defaults": {
+            c.value: m.value
+            for c in DataClass
+            if (m := gate.policy.class_default(c)) is not None
+        },
     }
+
+
+class BrowsedRequest(BaseModel):
+    """One request the browser pane made."""
+
+    host: str
+    path: str = ""
+    #: The page that pulled this in, for a sub-resource. Empty for the page
+    #: the person themselves opened.
+    initiator: str = ""
+    tab_id: str = ""
+
+
+@app.post("/egress/browse")
+async def record_browsed(body: BrowsedRequest) -> dict:
+    """Write one of the browser pane's requests to the egress log.
+
+    **This exists because `EgressGate` cannot see these.** The gate
+    intercepts what the *backend* sends; a `BrowserView` is a separate
+    Chromium process fetching directly, so nothing it does passes through
+    Python at all. Rule 3 says *every byte that leaves is logged* — the
+    moment the product has a browser in it, the backend alone stops
+    satisfying that, and the only place that can see these requests is the
+    Electron session that makes them. This is the route it reports to.
+
+    It records; it does not decide. Whether the page may be opened was
+    settled before the request was made — `electron/services/browserPolicy.js`
+    for the shape, `DataClass.BROWSE` for the standing answer — and a
+    recorder that could also refuse would be a second gate disagreeing with
+    the first.
+
+    **No query string is accepted.** The caller strips it, and this takes a
+    path rather than a URL so that it cannot be sent one: a query carries
+    what somebody searched for, and the log is read on screen and pasted
+    into support threads.
+    """
+    from core.egress import get_gate
+
+    host = (body.host or "").strip().lower()
+    if not host:
+        raise HTTPException(status_code=400, detail="A browsed request needs a host.")
+
+    path = (body.path or "/").split("?", 1)[0].split("#", 1)[0]
+    meta = {"dataClass": "browse"}
+    if body.initiator:
+        # Which page pulled this in, so a row for an ad network reads as
+        # "this came from the site you opened" rather than as something
+        # Zaram decided to contact on its own.
+        meta["initiator"] = body.initiator.split("?", 1)[0][:200]
+    if body.tab_id:
+        meta["tab"] = body.tab_id[:40]
+
+    get_gate().log.append(
+        host=host,
+        method="GET",
+        url=f"https://{host}{path}",
+        body=None,
+        decision="allow",
+        reason="browsing is allowed for this class",
+        source="browser-pane",
+        meta=meta,
+    )
+    return {"recorded": True}
 
 
 @app.get("/egress/killswitch")

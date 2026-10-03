@@ -47,6 +47,22 @@ const api = {
     // summon key was pressed — read once, then; never between summons.
     onSelection: (listener) => subscribe(MAIN_EVENTS.ambientSelection, listener),
   },
+  // The browser pane. The renderer owns the chrome and the layout; main
+  // owns the view. `setBounds` is how the two agree where the page goes.
+  browser: {
+    open: () => invoke(Channels.browser.open),
+    select: (id) => invoke(Channels.browser.select, id),
+    // Resolves to the policy's decision: `{ ok, allow, reason }`. A refusal
+    // is an answer the address bar renders, not an error it swallows.
+    navigate: (id, url) => invoke(Channels.browser.navigate, id, url),
+    close: (id) => invoke(Channels.browser.close, id),
+    setBounds: (bounds) => invoke(Channels.browser.setBounds, bounds),
+    act: (id, what) => invoke(Channels.browser.act, id, what),
+    show: () => invoke(Channels.browser.show),
+    hide: () => invoke(Channels.browser.hide),
+    state: () => invoke(Channels.browser.state),
+    onTabs: (listener) => subscribe(MAIN_EVENTS.browserTabs, listener),
+  },
   window: {
     minimize: () => invoke(Channels.window.minimize),
     maximize: () => invoke(Channels.window.maximize),

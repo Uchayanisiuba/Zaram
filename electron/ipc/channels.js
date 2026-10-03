@@ -122,6 +122,23 @@ backend: {
     vscodeGetGitStatus: 'vscode:get-git-status',
     desktopGetSources: 'desktop:get-sources',
   },
+  // The browser pane.
+  //
+  // A BrowserView sits *above* the renderer rather than inside it, so the
+  // renderer owns the chrome -- tab strip, address bar -- and tells main
+  // where the content goes. That is what `setBounds` is, and it is why no
+  // channel here paints anything.
+  browser: {
+    open: 'browser:open',
+    select: 'browser:select',
+    navigate: 'browser:navigate',
+    close: 'browser:close',
+    setBounds: 'browser:set-bounds',
+    act: 'browser:act',
+    show: 'browser:show',
+    hide: 'browser:hide',
+    state: 'browser:state',
+  },
 };
 
 /** Main process -> renderer push events (subscribed via ipcRenderer.on). */
@@ -138,12 +155,26 @@ const MAIN_EVENTS = {
   executionEvent: 'runtime:execution-event',
   workspaceEvent: 'workspace:event',
   vscodeEvent: 'vscode:event',
+  // The pane's tabs, pushed whenever one navigates, loads, or is closed.
+  // Pushed rather than polled: a page's title arrives whenever it arrives,
+  // and a tab strip that lagged a reload by a poll interval would read as
+  // the browser being slow.
+  browserTabs: 'browser:tabs',
   // The selection read on the summon key, delivered to the ambient panel.
   ambientSelection: 'ambient:selection',
 };
 
 /** Channels the renderer is permitted to invoke through the preload bridge. */
 const RENDERER_INVOKABLE = [
+  Channels.browser.open,
+  Channels.browser.select,
+  Channels.browser.navigate,
+  Channels.browser.close,
+  Channels.browser.setBounds,
+  Channels.browser.act,
+  Channels.browser.show,
+  Channels.browser.hide,
+  Channels.browser.state,
   Channels.app.getInfo,
   Channels.app.getVersion,
   Channels.app.getPlatform,

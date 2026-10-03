@@ -260,6 +260,27 @@ function registerHandlers(ipcMain, ctx) {
       }
     });
   }
+
+  // --------------------------------------------------------------- browser
+  //
+  // Resolved on each call rather than captured, for the reason the ambient
+  // getter above gives: handlers are registered before the pane exists, so
+  // reading it once here would bind `null` forever and every tab would
+  // silently do nothing -- the dead-switch shape this project keeps finding.
+  const browser = () => (typeof ctx.getBrowser === 'function' ? ctx.getBrowser() : null);
+
+  handle(Channels.browser.open, () => browser()?.create() ?? null);
+  handle(Channels.browser.select, (id) => browser()?.select(String(id)));
+  // Returns the policy's whole decision, refusals included. The renderer
+  // needs to tell "browsing is off" from "that is not an address" apart to
+  // say anything useful, and a boolean cannot.
+  handle(Channels.browser.navigate, (id, url) => browser()?.navigate(String(id), String(url)) ?? null);
+  handle(Channels.browser.close, (id) => browser()?.close(String(id)));
+  handle(Channels.browser.setBounds, (bounds) => browser()?.setBounds(bounds || {}));
+  handle(Channels.browser.act, (id, what) => browser()?.act(String(id), String(what)));
+  handle(Channels.browser.show, () => browser()?.show());
+  handle(Channels.browser.hide, () => browser()?.hide());
+  handle(Channels.browser.state, () => browser()?.state() ?? { tabs: [], activeId: null });
 }
 
 module.exports = { registerHandlers };
