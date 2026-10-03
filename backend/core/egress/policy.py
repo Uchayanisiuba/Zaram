@@ -80,11 +80,31 @@ class DataClass(str, Enum):
         hard stop here — *"the first time facts recalled from the Spine go to a
         destination that has not had them before"* — and a class is what makes
         that expressible rather than aspirational.
+
+    ``BROWSE``
+        A page fetched because somebody is browsing, or asked Zaram to look at
+        one. Its own class because **the unit of consent has to match the unit
+        of the act**, and browsing's unit is not a host.
+
+        Added 3 October 2026, from a screenshot: the per-source pane held
+        **41 rules and every one said Always**. That is a control somebody
+        clicks through, which is worse than no control because it looks like
+        protection — and rule 7j names the failure in advance, *"forty dialogs
+        a day is a product nobody opens on day two"*, with the note that it
+        *"happened to the maintainer, on their own build"*. It happened again.
+
+        Per-host is not merely tiring here, it is incoherent. One news page is
+        sixty requests to companies the person never chose, so a per-host
+        question about browsing is a question about ad networks. The
+        deliberate act — turning browsing on — *is* rule 5's explicit
+        decision, and rule 3 carries it afterwards: every page is still
+        logged, and the log is where you look instead of deciding beforehand.
     """
 
     PROMPT = "prompt"
     IMAGE = "image"
     SPINE = "spine"
+    BROWSE = "browse"
 
 
 #: Classes a plain host rule covers. Exactly one, and the fact that it is a set
@@ -98,6 +118,24 @@ class DataClass(str, Enum):
 #: the same shape as the residency relaxation in `ProviderManager`: the
 #: permission filter is the one thing that never loosens.
 _INHERITS_HOST_RULE: frozenset["DataClass"] = frozenset({DataClass.PROMPT})
+
+#: Classes that may carry one standing answer for every host at once.
+#:
+#: **Exactly one, and `SPINE` is deliberately not in it.** A class-wide
+#: default is the thing that makes browsing bearable — one decision instead of
+#: a rule per ad network — and it is the thing that must never be available
+#: for the user's own facts. `CLAUDE.md` keeps a hard stop there by name:
+#: *"the first time facts recalled from the Spine go to a destination that has
+#: not had them before."* A standing allow for `SPINE` would be that stop
+#: deleted, in one setting, and it would be the most damaging control in the
+#: product.
+#:
+#: `PROMPT` is also left out, and that is not an oversight. A standing allow
+#: for prompts across every host would mean any code path that acquired a URL
+#: could send the user's words to it — the per-host rule is what makes
+#: "I connected this provider" mean that provider. Browsing earns the
+#: exception because its destinations are not chosen by anybody.
+_MAY_DEFAULT_CLASS_WIDE: frozenset["DataClass"] = frozenset({DataClass.BROWSE})
 
 
 @dataclass(frozen=True)
@@ -179,6 +217,13 @@ class EgressPolicy:
         #: existing policy file stays valid and keeps meaning exactly what it
         #: meant: permission for chat, and for nothing else.
         self._class_rules: dict[str, dict[DataClass, Mode]] = {}
+        #: class → mode, for every host at once. Only the classes in
+        #: `_MAY_DEFAULT_CLASS_WIDE` may appear here, and `set_class_default`
+        #: refuses the rest — the restriction is enforced where the write
+        #: happens rather than described, because a standing allow for
+        #: `SPINE` is the one setting that would delete a rule `CLAUDE.md`
+        #: keeps by name.
+        self._class_defaults: dict[DataClass, Mode] = {}
         #: One switch that denies everything, whatever the per-host rules say.
         #:
         #: It lives *here* rather than in the API layer or the chat path so
@@ -216,6 +261,17 @@ class EgressPolicy:
             # the `except` below falls back to *no rules at all* — safe for the
             # request and terrible for the user, who would silently lose every
             # decision they had made.
+            # Read before the per-host classes, and just as defensively:
+            # an unknown name or a class that is not allowed to default is
+            # skipped rather than raising, so a hand-edited or newer file
+            # cannot both seal the app and lose every decision made.
+            self._class_defaults = {}
+            for name, mode in (raw.get("classDefaults") or {}).items():
+                if name in {d.value for d in DataClass} and mode in {m.value for m in Mode}:
+                    cls = DataClass(name)
+                    if cls in _MAY_DEFAULT_CLASS_WIDE:
+                        self._class_defaults[cls] = Mode(mode)
+
             self._class_rules = {}
             for host, by_class in (raw.get("classes") or {}).items():
                 if not isinstance(by_class, dict):
@@ -250,6 +306,9 @@ class EgressPolicy:
                         for h, by_class in sorted(self._class_rules.items())
                         if by_class
                     },
+                    "classDefaults": {
+                        c.value: m.value for c, m in sorted(self._class_defaults.items())
+                    },
                     "kill_switch": self._kill_switch,
                 },
                 f,
@@ -262,6 +321,38 @@ class EgressPolicy:
     def kill_switch(self) -> bool:
         """Whether everything outbound is currently refused."""
         return self._kill_switch
+
+    def class_default(self, data_class: DataClass) -> Mode | None:
+        """The standing answer for this class, or ``None`` if there is none."""
+        return self._class_defaults.get(DataClass(data_class))
+
+    def set_class_default(self, data_class: DataClass, mode: Mode | None) -> None:
+        """One answer for a whole class, across every host.
+
+        ``None`` removes it and the per-host rules decide again.
+
+        **Refuses any class outside `_MAY_DEFAULT_CLASS_WIDE`**, and refuses
+        it here rather than relying on callers: this is the only write that
+        could turn the Spine's hard stop into a setting, so the check belongs
+        where it cannot be routed around. A caller asking for one gets a
+        `ValueError` and a sentence saying why, not a silent no-op — a
+        permission call that quietly does nothing is how somebody believes
+        they granted something they did not.
+        """
+        cls = DataClass(data_class)
+        if cls not in _MAY_DEFAULT_CLASS_WIDE:
+            raise ValueError(
+                f"{cls.value} cannot have one answer for every host. "
+                "Rule 7j keeps a hard stop the first time this kind of data "
+                "reaches a destination that has not had it before, and a "
+                "standing allow would delete it. Set a rule per destination."
+            )
+        with self._lock:
+            if mode is None:
+                self._class_defaults.pop(cls, None)
+            else:
+                self._class_defaults[cls] = Mode(mode)
+            self._save()
 
     def decide(
         self, host: str, data_class: DataClass = DataClass.PROMPT
@@ -309,6 +400,23 @@ class EgressPolicy:
         mode = self._class_rules.get(host_l, {}).get(cls)
         if mode is not None:
             return self._describe(mode, host, cls)
+
+        # **The standing answer, after the host's own rules and before the
+        # default deny.** This is what turns forty-one decisions into one.
+        #
+        # Deliberately *below* both checks above, which is what keeps it an
+        # answer rather than an override: a host the person blocked stays
+        # blocked, and a per-host rule for this class still wins. Those two
+        # together are the exception list — "never this one", "always that
+        # one" — and they are now a thing somebody opts into rather than a
+        # wall they have to clear before the product works.
+        #
+        # Only `BROWSE` can reach here; `set_class_default` refuses anything
+        # else, so no path exists by which the Spine's hard stop becomes a
+        # checkbox.
+        standing = self._class_defaults.get(cls)
+        if standing is not None:
+            return self._describe(standing, host, cls)
 
         if host_mode is None:
             return DEFAULT_DECISION
