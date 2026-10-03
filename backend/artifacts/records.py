@@ -246,6 +246,35 @@ class ArtifactRecords:
             )
             return cursor.rowcount > 0
 
+    def set_conversation(
+        self, artifact_id: str, conversation_id: str, conversation_title: str = ""
+    ) -> bool:
+        """File a generated file under the conversation that produced it.
+
+        **Written after the reply rather than during it, and that is the fix
+        rather than a shortcut.** The chat path knows the durable conversation
+        id; the execution engine, several layers down, is handed the *session*
+        id and passes that — so every artifact ever generated was filed under
+        an id no conversation has. Measured 3 October 2026: of 50 artifacts,
+        27 were filed under `''` and 23 under a `session-…` id, and none under
+        a conversation. The column, its index and the `?conversation_id=`
+        query that reads it were all correct and had never been given a value
+        that matched.
+
+        Threading the real id down through `route()` into the engine was the
+        other candidate and is the worse one: five signatures gain a parameter
+        that only one leaf uses, and the leaf still has to be told which of
+        two ids it is holding. Attribution belongs where the durable id is
+        known, which is here.
+        """
+        with self._lock, self._connect() as conn:
+            cursor = conn.execute(
+                "UPDATE artifacts SET conversation_id = ?, conversation_title = ? "
+                "WHERE id = ?",
+                (conversation_id, conversation_title, artifact_id),
+            )
+            return cursor.rowcount > 0
+
     def forget_at_path(self, path: str) -> int:
         """Drop the record for a file that has been cleared from staging.
 

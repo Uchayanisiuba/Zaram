@@ -65,6 +65,13 @@ def _message_dict(message) -> dict:
         # "local" — the same three-valued discipline `locality_of` keeps.
         "model": message.model,
         "locality": message.locality,
+        # What the reply *did*. Camel-cased because these cross to the
+        # renderer as the `ChatToolCall` and `ChatPlan` shapes it already
+        # builds for a live reply, and a restored message that needed a
+        # different mapping would be a second place deciding one thing.
+        "toolCalls": [dict(c) for c in message.tool_calls],
+        "plan": message.plan,
+        "artifactIds": list(message.artifact_ids),
     }
 
 

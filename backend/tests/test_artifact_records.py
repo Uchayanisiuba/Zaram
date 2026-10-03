@@ -223,6 +223,31 @@ class TestTheRecordStoreHasNoGeneralMutation:
     MUTABLE_COLUMNS = {
         "REMEMBER_OVERRIDE",
         "PROJECT_ID",
+        # Which conversation produced this file — added 3 October 2026, and
+        # this list is why it had to be argued.
+        #
+        # **It is provenance, which is the one thing this list is supposed to
+        # keep immutable, and it is allowed anyway because it is provenance
+        # being written for the first time rather than edited.** Measured that
+        # day: of 50 artifacts in the maintainer's store, none was filed under
+        # a conversation that exists — 27 under `''` and 23 under a
+        # `session-…` id, because the chat path hands the execution engine the
+        # *session* id and the engine passes that straight through. The column
+        # and the `?conversation_id=` query that reads it were both correct
+        # and had never been given a value that matched.
+        #
+        # `set_conversation` is written once, by the chat path, at the moment
+        # the durable id is known. The narrower guarantee this list actually
+        # protects — that a provenance record cannot be *rewritten* to say the
+        # file came from somewhere else — is not weakened by a field going
+        # from empty to true, and the alternative was threading the id down
+        # through five signatures to a leaf that still had to be told which of
+        # two ids it was holding.
+        "CONVERSATION_ID",
+        # Written in the same statement and for the same reason: a
+        # conversation id without its title makes Work render a link with no
+        # label, which is the empty heading `groupByProject` already refuses.
+        "CONVERSATION_TITLE",
         # Where the file is now, written when a staged image is kept.
         # `set_location` moves both together and must: the output folder
         # increments on collision, so a kept `blue.png` can land as

@@ -21,7 +21,7 @@ import {
   type TokenUsage,
   type ChatTiming,
 } from '@/services/chatClient';
-import type { Artifact } from '@/services/artifactsClient';
+import { listArtifacts, type Artifact } from '@/services/artifactsClient';
 import { stripCitationMarkers } from '@/lib/markers';
 import { useSystemStore } from '@/stores/systemStore';
 import { useSessionStatusStore } from '@/stores/sessionStatusStore';
@@ -274,13 +274,26 @@ interface ChatState {
   clear: () => void;
   /** Reopen a stored conversation, replacing what is on screen.
    *
-   *  The transcript comes back as text and attribution and nothing else.
-   *  **Sources, artifacts and reasoning are not restored, and that is not an
-   *  oversight** — a citation is a claim that *this* answer used *that* fact,
-   *  and the fact may since have been corrected or deleted (rule 4). Rendering
-   *  yesterday's citation against today's Spine would show provenance that no
-   *  longer holds, which is worse than showing none. Reasoning is the model's
-   *  working, never part of what it said. */
+   *  The transcript comes back as text, attribution, and what the reply
+   *  *did* — its checklist, its tool calls, and the files it produced.
+   *
+   *  **Citations are still not restored, and that is not an oversight** — a
+   *  citation is a claim that *this* answer used *that* fact, and the fact
+   *  may since have been corrected or deleted (rule 4). Rendering yesterday's
+   *  citation against today's Spine would show provenance that no longer
+   *  holds, which is worse than showing none. Reasoning stays out too: it is
+   *  the model's working, never part of what it said.
+   *
+   *  **The rest used to be excluded by the same sentence, and should not have
+   *  been — corrected 3 October 2026.** The argument above is about claims
+   *  that can stop being true. A tool ran or it did not; a checklist had the
+   *  steps it had; a file is on disk. Nothing about them goes stale, so there
+   *  was never a reason to drop them — they were simply never written down.
+   *  See `conversations/turn_notes.py`.
+   *
+   *  Restoring citations *as history* — re-resolved against the Spine, with
+   *  deleted facts shown as deleted — is the better answer to the half that
+   *  remains, and is a larger piece of work than this one. Not started. */
   resumeConversation: (conversationId: string) => Promise<void>;
 }
 
@@ -290,6 +303,26 @@ interface ChatState {
  *  someone who spent yesterday on Harbour Lane is still on it this morning, and
  *  making them re-select it every launch is how facts end up captured under the
  *  wrong scope — or under none. */
+/** The files a conversation produced, by id.
+ *
+ *  Read fresh from the artifact store rather than copied into the transcript
+ *  when the reply was written: a file can be renamed, re-filed or moved to
+ *  trash afterwards, and a transcript holding its own copy would be a second
+ *  place that disagrees about where somebody's file is.
+ *
+ *  **Never fatal.** A transcript is text and must open even when this does
+ *  not answer — losing the file cards is a smaller failure than refusing to
+ *  show somebody their conversation, and an empty map renders exactly as a
+ *  reply that made no files. */
+async function artifactsForConversation(conversationId: string): Promise<Map<string, Artifact>> {
+  try {
+    const listing = await listArtifacts({ conversationId });
+    return new Map((listing.artifacts ?? []).map((a) => [a.id, a]));
+  } catch {
+    return new Map();
+  }
+}
+
 const PROJECT_KEY = 'zaram.activeProject';
 
 function loadProject(): string | null {
@@ -927,14 +960,24 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     try {
       const stored = await fetchConversation(conversationId);
+      // The files these replies made, fetched once for the whole transcript
+      // rather than once per message. Ids are stored on the message; the
+      // records are the artifact store's and may have been renamed, re-filed
+      // or trashed since, so they are read fresh and matched up below.
+      const byId = await artifactsForConversation(conversationId);
       set({
         messages: stored.messages.map((m) => ({
           id: m.id,
           role: m.role,
           text: m.text,
           sources: [],
-          artifacts: [],
+          // An id whose artifact is gone drops out rather than rendering a
+          // card for a file that is not there — the same refusal the live
+          // card makes with `exists`.
+          artifacts: m.artifactIds.map((id) => byId.get(id)).filter((a): a is Artifact => !!a),
           notices: [],
+          ...(m.toolCalls.length ? { toolCalls: m.toolCalls } : {}),
+          ...(m.plan ? { plan: m.plan } : {}),
           timestamp: m.createdAt * 1000,
           // Restored where it was recorded. `locality` is '' for a model the
           // backend could not place, and that stays absent rather than

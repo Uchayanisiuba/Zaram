@@ -297,6 +297,7 @@ app.include_router(providers_router)
 # these routes are reachable can be true.
 from conversations import ConversationRecords, default_db_path as conversations_db_path  # noqa: E402
 from conversations.api import router as conversations_router, set_records  # noqa: E402
+from conversations.turn_notes import TurnNotes  # noqa: E402
 
 set_records(ConversationRecords(conversations_db_path()))
 app.include_router(conversations_router)
@@ -856,7 +857,12 @@ def _collect_answer(chunk: str, answer: list[str]) -> None:
             answer.append(content)
 
 
-def _record_reply(conversation_id: str, text: str, choice: "_ModelChoice") -> None:
+def _record_reply(
+    conversation_id: str,
+    text: str,
+    choice: "_ModelChoice",
+    notes: "TurnNotes | None" = None,
+) -> None:
     """Store the assistant's reply, with what answered and where it ran.
 
     An empty reply is not recorded. A stream that produced no tokens — refused,
@@ -884,9 +890,32 @@ def _record_reply(conversation_id: str, text: str, choice: "_ModelChoice") -> No
             text,
             model=str(inference.get("model") or choice.model or ""),
             locality=str(inference.get("locality") or ""),
+            tool_calls=notes.tool_calls if notes else None,
+            plan=notes.plan if notes else None,
+            artifact_ids=notes.artifact_ids if notes else None,
         )
     except Exception as exc:
         logging.getLogger(__name__).warning("Chat: could not record the reply: %s", exc)
+
+
+def _attribute_artifacts(conversation_id: str, notes: "TurnNotes | None") -> None:
+    """File this turn's generated files under this conversation.
+
+    Separate from `_record_reply` and called even when there is no reply text
+    to store: a turn that produced a spreadsheet and then failed before
+    saying anything still produced the spreadsheet, and Work asking "which
+    conversation made this" deserves the answer either way.
+    """
+    if not conversation_id or notes is None or not notes.artifact_ids:
+        return
+    try:
+        title = _conversation_title(conversation_id)
+        for artifact_id in notes.artifact_ids:
+            artifact_service.records.set_conversation(artifact_id, conversation_id, title)
+    except Exception as exc:
+        logging.getLogger(__name__).warning(
+            "Chat: could not attribute artifacts to %s: %s", conversation_id, exc
+        )
 
 
 async def _vision_refusal(model: str | None) -> str:
@@ -1945,6 +1974,10 @@ async def chat(request: ChatRequest):
         _name_urls(request.text)
 
         answer: list[str] = []
+        # What this reply *did*, read off the frames it is already sending.
+        # See `conversations/turn_notes.py` for why this is assembled here
+        # rather than posted back by the renderer that already has it.
+        notes = TurnNotes()
         async for chunk in chat_router.route(
             final_prompt, model, system_prompt, request.session_id,
             project_id=request.project_id or None,
@@ -1956,12 +1989,19 @@ async def chat(request: ChatRequest):
             approve_level=request.approve_level,
         ):
             _collect_answer(chunk, answer)
+            # After `_collect_answer`, so a tool row's `at` counts the text
+            # that had arrived *including* this frame if it was a token --
+            # the same order the renderer reads them in.
+            notes.see(chunk, answer_len=sum(len(part) for part in answer))
             yield chunk
 
         # After the loop rather than in a `finally`. A stream the user
         # aborted has a partial answer, and storing half a reply as though
         # it were the whole one is worse than storing nothing.
-        _record_reply(conversation_id, "".join(answer), choice)
+        _record_reply(conversation_id, "".join(answer), choice, notes)
+        # Unconditional, unlike the reply: a turn that produced a file and
+        # then said nothing still produced the file.
+        _attribute_artifacts(conversation_id, notes)
 
     return StreamingResponse(
         _stream_with_attribution(),

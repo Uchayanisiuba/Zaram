@@ -40,12 +40,13 @@ from __future__ import annotations
 
 import logging
 import os
+import json
 import sqlite3
 import threading
 import time
 import uuid
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import List, Optional, Sequence
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +92,33 @@ class Message:
     #: check.*
     model: str = ""
     locality: str = ""
+    #: What this reply *did*, beside what it said. Asked for 3 October 2026,
+    #: when the maintainer noticed that reopening a conversation lost the
+    #: plan, the tool calls and the files — *"users should be able to go back
+    #: to previous conversations and access them"*.
+    #:
+    #: **These are records of what happened, which is why they are stored and
+    #: citations are not.** `chatStore.resumeConversation` already refuses to
+    #: restore sources, on the good ground that a citation is a live claim
+    #: that *this* answer used *that* fact, and the fact may since have been
+    #: corrected or deleted (rule 4) — so yesterday's citation rendered
+    #: against today's Spine shows provenance that no longer holds. None of
+    #: that applies here. A tool ran or it did not; a plan had the steps it
+    #: had; a file is on disk. Nothing about them becomes false later, so the
+    #: argument for dropping them was never made — they were simply never
+    #: written down.
+    tool_calls: tuple = ()
+    #: The model's checklist for this turn, or ``None`` where there was none,
+    #: which is most turns. Stored whole rather than as rows: it is read back
+    #: in one piece by one component and has no life of its own.
+    plan: Optional[dict] = None
+    #: The files this reply produced, in the order they arrived.
+    #:
+    #: Ids rather than records. The artifact is the artifact store's, and it
+    #: can be renamed, re-filed or moved to trash after this message is
+    #: written — copying it here would make the transcript the second place
+    #: that disagrees about where somebody's file is.
+    artifact_ids: tuple = ()
 
 
 @dataclass(frozen=True)
@@ -195,7 +223,10 @@ class ConversationRecords:
                     text            TEXT NOT NULL,
                     created_at      REAL NOT NULL,
                     model           TEXT NOT NULL DEFAULT '',
-                    locality        TEXT NOT NULL DEFAULT ''
+                    locality        TEXT NOT NULL DEFAULT '',
+                    tool_calls      TEXT NOT NULL DEFAULT '[]',
+                    plan            TEXT NOT NULL DEFAULT '',
+                    artifact_ids    TEXT NOT NULL DEFAULT '[]'
                 )
                 """
             )
@@ -222,6 +253,23 @@ class ConversationRecords:
                 conn.execute(
                     "ALTER TABLE conversations ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0"
                 )
+            # Same again for the three added to `messages` on 3 October. An
+            # existing transcript keeps its rows and gains the defaults, so
+            # conversations held before this lose nothing and gain nothing —
+            # what they did was never recorded and cannot be recovered now.
+            message_columns = {
+                row["name"]
+                for row in conn.execute("PRAGMA table_info(messages)").fetchall()
+            }
+            for column, definition in (
+                ("tool_calls", "TEXT NOT NULL DEFAULT '[]'"),
+                ("plan", "TEXT NOT NULL DEFAULT ''"),
+                ("artifact_ids", "TEXT NOT NULL DEFAULT '[]'"),
+            ):
+                if column not in message_columns:
+                    conn.execute(
+                        f"ALTER TABLE messages ADD COLUMN {column} {definition}"
+                    )
 
     # ----------------------------------------------------------------- write
 
@@ -263,6 +311,9 @@ class ConversationRecords:
         *,
         model: str = "",
         locality: str = "",
+        tool_calls: Optional[Sequence[dict]] = None,
+        plan: Optional[dict] = None,
+        artifact_ids: Optional[Sequence[str]] = None,
     ) -> Message:
         """Add one message and bump the conversation's activity time.
 
@@ -300,11 +351,15 @@ class ConversationRecords:
                 created_at=now,
                 model=model,
                 locality=locality,
+                tool_calls=tuple(tool_calls or ()),
+                plan=plan,
+                artifact_ids=tuple(artifact_ids or ()),
             )
             conn.execute(
                 "INSERT INTO messages "
-                "(id, conversation_id, seq, role, text, created_at, model, locality) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                "(id, conversation_id, seq, role, text, created_at, model, "
+                "locality, tool_calls, plan, artifact_ids) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     message.id,
                     message.conversation_id,
@@ -314,6 +369,9 @@ class ConversationRecords:
                     message.created_at,
                     message.model,
                     message.locality,
+                    _as_json(list(message.tool_calls), "[]"),
+                    _as_json(message.plan, "") if message.plan else "",
+                    _as_json(list(message.artifact_ids), "[]"),
                 ),
             )
 
@@ -516,7 +574,42 @@ def _message_from(row: sqlite3.Row) -> Message:
         created_at=row["created_at"],
         model=row["model"],
         locality=row["locality"],
+        tool_calls=tuple(_from_json(_column(row, "tool_calls"), []) or []),
+        plan=_from_json(_column(row, "plan"), None),
+        artifact_ids=tuple(_from_json(_column(row, "artifact_ids"), []) or []),
     )
+
+
+def _column(row: sqlite3.Row, name: str):
+    """One field, or ``None`` where the database predates it.
+
+    A `sqlite3.Row` raises `IndexError` for a column it does not have, and
+    this reader runs against rows selected before the 3 October migration in
+    any process that opened the file first.
+    """
+    try:
+        return row[name]
+    except (IndexError, KeyError):
+        return None
+
+
+def _as_json(value, empty: str) -> str:
+    try:
+        return json.dumps(value)
+    except (TypeError, ValueError):
+        # Something unserialisable reached the recorder. The transcript is
+        # worth more than the annotation: store the message without it rather
+        # than lose the reply to a bookkeeping error.
+        return empty
+
+
+def _from_json(raw, fallback):
+    if not raw:
+        return fallback
+    try:
+        return json.loads(raw)
+    except (TypeError, ValueError):
+        return fallback
 
 
 def default_db_path() -> str:

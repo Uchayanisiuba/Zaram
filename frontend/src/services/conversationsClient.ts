@@ -11,6 +11,11 @@
  * their own correction loop, and conflating the two is the failure 7d was
  * written from.
  */
+// Type-only, so this adds no import at runtime and cannot close a cycle with
+// the store that reads this client. The shapes live with the renderer that
+// draws them; the backend writes them to match.
+import type { ChatPlan, ChatToolCall } from '@/stores/chatStore';
+
 const API_BASE = import.meta.env.VITE_ZARAM_API ?? '';
 
 /** Marks a request as coming from Zaram's own interface.
@@ -107,6 +112,23 @@ export interface StoredMessage {
    *  resolve, and this inherits that: *"runs on this machine" would be a
    *  confident false claim on the one thing the user is most likely to check.* */
   locality: string;
+  /** What this reply *did* — the tool calls, the checklist, and the files it
+   *  produced.
+   *
+   *  Assembled by the backend from the frames it already sent
+   *  (`conversations/turn_notes.py`) in exactly the shapes below, so a
+   *  restored message needs no mapping that a live one does not. Empty on
+   *  every message written before 3 October 2026: what those replies did was
+   *  never recorded and cannot be recovered now.
+   *
+   *  **Citations are deliberately not here.** See `resumeConversation`. */
+  toolCalls: ChatToolCall[];
+  plan: ChatPlan | null;
+  /** Ids, not records. The artifact store owns the file, and it can be
+   *  renamed, re-filed or trashed after this message is written — copying the
+   *  record here would make the transcript a second place that disagrees
+   *  about where somebody's file is. */
+  artifactIds: string[];
 }
 
 export interface StoredConversation extends ConversationSummary {
@@ -134,7 +156,26 @@ function toMessage(row: Record<string, unknown>): StoredMessage {
     createdAt: Number(row.created_at ?? 0),
     model: String(row.model ?? ''),
     locality: String(row.locality ?? ''),
+    // Defaulted rather than asserted: a message stored before these columns
+    // existed has none of them, and a restored transcript must not fail on
+    // the rows it was written to recover.
+    toolCalls: Array.isArray(row.toolCalls) ? (row.toolCalls as ChatToolCall[]) : [],
+    plan: isPlan(row.plan) ? row.plan : null,
+    artifactIds: Array.isArray(row.artifactIds) ? (row.artifactIds as string[]).map(String) : [],
   };
+}
+
+/** A stored plan, or something that is not one.
+ *
+ *  Checked rather than cast. This comes off disk and is rendered by a card
+ *  that maps `items`, so a hand-edited database must fail here and show no
+ *  plan rather than throw inside the transcript it was opened to read. */
+function isPlan(value: unknown): value is ChatPlan {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    Array.isArray((value as ChatPlan).items)
+  );
 }
 
 /**
