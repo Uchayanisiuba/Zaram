@@ -290,3 +290,36 @@ avatar-source/animations/Breathing\ Idle.fbx
 avatar-source/animations/Idle\ 03.fbx
 avatar-source/animations/Sad\ Idle.fbx
 .preview/
+
+# ---------------------------------------------------------------------------
+# Every store, wherever it is written — not one line per database per path.
+#
+# Found 3 October 2026 by `git status` after a dev run, not by reading this
+# file. `backend/backups/` had appeared holding copies of the Spine, the
+# egress log, the conversations and five more, and `backend/screens/` held a
+# screenshot of a page. Neither was ignored, so one `git add -A` would have
+# published the maintainer's own data to a public repository.
+#
+# The cause is the same shape the installer's payload had: **the rules above
+# name databases by path**, so `backend/spine.db*` covers one location and
+# says nothing about a copy of the same file one directory along. A denylist
+# by location fails open — the next directory somebody writes a database into
+# is not covered, and nobody finds out.
+#
+# So these are by kind, at any depth. The specific lines above stay: they
+# document which store is which and why each one matters, which a glob
+# cannot.
+backend/**/*.db
+backend/**/*.db-journal
+backend/**/*.db-wal
+backend/**/*.db-shm
+backend/**/*.sqlite
+backend/**/*.sqlite3
+
+# Copies of the stores, made by the backend before a migration. The whole
+# Spine, by definition.
+backend/backups/
+
+# Screenshots of the user's own pages, taken by `look_at_app`. In a checkout
+# `data_dir()` is `backend/`, so they land here rather than under AppData.
+backend/screens/
