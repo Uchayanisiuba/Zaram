@@ -811,6 +811,72 @@ while the steps are watched in Project — sequentially on the local model, and
 in parallel the moment a key is pasted, with the egress log saying which was
 which.
 
+### 11 — drive it, not only look at it. Built 3 October 2026.
+
+`packs/code/driving.py`: `open_in_browser`, `read_app_page`, `click_in_app`,
+`type_in_app`, `read_app_console`, `close_browser`. Chrome's DevTools
+Protocol over a WebSocket to the browser `find_browser()` already locates —
+no Playwright, no bundled Chromium, nothing added to the installer, since
+`aiohttp` is already pinned. Loopback only, a fresh `--user-data-dir` every
+time so it carries none of the person's sessions, and elements returned as
+structure with refs rather than as pixels, so it needs no vision model and
+works on a machine that has none. `tests/test_zaram_can_drive_its_own_app.py`
+drives a real page in a real browser.
+
+**Asked for after watching a bug get found that way.** `look_at_app` takes
+one screenshot of one URL, which is enough to check a layout and not enough
+to check a *behaviour* — the interesting states are three interactions deep,
+and there is no URL you can screenshot to reach them.
+
+#### It has its own grant, and that was the second attempt
+
+It shipped under `runs`, with the words beside that toggle widened to say so.
+The maintainer's call the same day was that it should be separate, and they
+are right. **These are not the same risk.** Running the project's detected
+commands is `npm test` and `tsc` — bounded, named, worst case a failing
+build. Driving the app is pressing whatever is on the page, and the hazard is
+not Zaram clicking around a toy: it is a dev build pointed at a production
+database, where *"Delete account"* does. Somebody can reasonably want the
+first and not the second, and a grant that cannot express that is a grant
+that gets refused whole.
+
+It is also the shape `CLAUDE.md` already uses twice — *"permitting cloud
+models does not permit mutation, and permitting file edits does not permit
+cloud"*. `drives` is a third column on `Project` beside `writes` and `runs`,
+a third `ContextVar` in `active.py`, a third box under the folder in Project,
+and `tests/test_driving_has_its_own_grant.py` asserts the four
+independences rather than the existence of the grant: each is reachable
+alone and none implies another.
+
+#### And the gate was waving one of them through
+
+Found the same day, by printing the gate's verdict for each of the pack's
+tool names instead of trusting the grant test that had just gone green.
+
+`looks_read_only` is a substring guess over a word list, and its own comment
+says why: *"a server author picks the names"*. Here it fired on **Zaram's
+own** name. `open_in_browser` contains `_browser`, which contains `_browse`,
+which is in the read-only list — so launching a browser process was
+classified as looking at something, and it ran under no grant at all. The
+probe started a real Chrome against the real dev server with `drives=False`
+and `runs=False`. True under the old shape too: `runs` never covered it
+either.
+
+The fix is a built-in reporting `mutative_tools()`, which the runtime turns
+into one `not_read_only` flag on `decide`. One-directional like everything
+else on that path — a built-in may move a tool from *runs freely* to *needs
+the grant*, and can never declare one read-only, so a mistake there makes
+the gate stricter.
+
+**The first fix was wrong and the reason is the useful part.**
+`readOnlyHint: False` was the obvious route, since `decide` already believes
+it in the strict direction only — but `_annotation_says_destructive` reads
+the same hint, so every driving tool became *destructive* and asked on every
+single call however much had been granted. That is rule 7j's forty dialogs a
+day, which is the product nobody opens twice. **Needing the grant and asking
+every time are different verdicts**, and the hint conflates them. Caught by
+running the probe again rather than by reading the diff.
+
 ## The unknown that decides how good this feels
 
 **Whether the local model can drive it.** `docs/AIDER.md` records the binding

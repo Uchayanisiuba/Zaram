@@ -44,7 +44,7 @@ import logging
 import os
 import time
 from pathlib import Path
-from typing import Set, Any, Callable, Dict, List, Optional, Sequence
+from typing import Set, Any, Callable, Dict, List, Mapping, Optional, Sequence
 
 from core.contracts import Capability, CapabilityLocality, RuntimeMetadata, RuntimeState
 from core.untrusted import Provenance, scan
@@ -432,6 +432,7 @@ class McpRuntime:
                 | self._session_granted(session_id, server_id)
             ),
             annotations=input_data.get("annotations"),
+            not_read_only=self._builtin_says_not_read_only(server_id, tool_name),
         )
 
         if decision.verdict is Verdict.REFUSE:
@@ -534,6 +535,47 @@ class McpRuntime:
             if text:
                 parts.append(str(text))
         return "".join(parts)
+
+    def _builtin_says_not_read_only(self, server_id: str, tool_name: str) -> bool:
+        """Let a built-in say a tool is not read-only, whatever it is called.
+
+        `looks_read_only` is a substring guess over a word list, and its own
+        comment says why: *"a server author picks the names"*. On 3 October
+        2026 that fired on **Zaram's own** name. `open_in_browser` contains
+        `_browser`, which contains `_browse`, which is in the read-only
+        list — so launching a browser process read as looking at something
+        and ran under no grant at all. Not a hypothetical: the call was
+        made against a real dev server with every grant off, and a Chrome
+        started.
+
+        Asked of the server object, the same way `_builtin_grants` is and
+        for the same reason: it is Zaram's own code rather than a
+        stranger's, and it narrows rather than widens.
+
+        **Not read-only is not the same as destructive**, and the first
+        attempt at this conflated them. `readOnlyHint: False` was the
+        obvious route — `decide` already believes it, in the strict
+        direction only — but `_annotation_says_destructive` reads that
+        same hint, so every driving tool became destructive and asked on
+        every call however much had been granted. That is rule 7j's forty
+        dialogs a day, which is the product nobody opens twice. So this
+        suppresses the name guess and nothing else: the grant still
+        applies, and a tool the person allowed stops asking.
+
+        One-directional, like everything else on this path. A built-in may
+        only move a tool from "runs freely" to "needs the grant". It
+        cannot declare a tool read-only, so a mistake here cannot widen
+        anything, and a server that answers nothing leaves the guess
+        exactly as it was.
+        """
+        server = self._builtin_server(server_id)
+        report = getattr(server, "mutative_tools", None)
+        if not callable(report):
+            return False
+        try:
+            return tool_name in {str(name) for name in report()}
+        except Exception:  # noqa: BLE001 - must fail towards asking
+            return True
 
     def _builtin_grants(self, server_id: str) -> Set[str]:
         """Tools a built-in reports as granted for the request in flight.

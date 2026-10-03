@@ -47,6 +47,13 @@ export interface Project {
    *  builds, linters — never a shell. Off by default, separate from `writes`
    *  because it is a different thing to consent to. */
   runs: boolean;
+  /** Whether Zaram may drive the app in a browser — open the page, click,
+   *  type. Off by default and separate from `runs` for the same reason
+   *  `runs` is separate from `writes`: running the project's named
+   *  commands is bounded, and pressing whatever happens to be on a page
+   *  is not. A dev build pointed at a production database is where the
+   *  difference bites. */
+  drives: boolean;
   /** How many generated files are assigned to it. */
   artifacts: number;
   /** How many facts are scoped to it, or **-1 when the Spine could not say**.
@@ -110,6 +117,8 @@ interface ProjectStore {
   setWrites: (id: string, writes: boolean) => Promise<void>;
   /** Allow or withdraw running the project's detected commands. */
   setRuns: (id: string, runs: boolean) => Promise<void>;
+  /** Allow or withdraw driving the app in a browser. */
+  setDrives: (id: string, drives: boolean) => Promise<void>;
   /** The names of the commands `setRuns` would allow, detected from the
    *  repository — so the control can say what it grants. Empty on any failure;
    *  this is a label, never a gate. */
@@ -308,6 +317,24 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ runs }),
+      },
+      'That could not be changed.',
+    );
+    if (typeof res === 'string') {
+      set({ error: res });
+      return;
+    }
+    await get().load();
+  },
+
+  setDrives: async (id, drives) => {
+    set({ error: null });
+    const res = await send(
+      `${API}/projects/${encodeURIComponent(id)}`,
+      {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ drives }),
       },
       'That could not be changed.',
     );

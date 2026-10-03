@@ -4147,6 +4147,9 @@ def _project_json(project) -> Dict[str, Any]:
         "writes": project.writes,
         # And whether it may run the project's detected commands. Same rules.
         "runs": project.runs,
+        # And whether it may drive the app in a browser — open the page,
+        # click, type. Separate from `runs`, which starts it.
+        "drives": project.drives,
     }
 
 
@@ -4182,6 +4185,10 @@ class ProjectUpdateRequest(BaseModel):
     #: Allow or withdraw running the project's detected commands — tests,
     #: builds, linters. See `Project.runs` and `packs/code/runners.py`.
     runs: bool | None = None
+    #: Allow or withdraw driving the app in a browser — opening the page,
+    #: clicking, typing. Separate from `runs`, which only starts it: see
+    #: `Project.drives` and `packs/code/driving.py`.
+    drives: bool | None = None
 
 
 @app.get("/projects/{project_id}/runners")
@@ -4574,6 +4581,8 @@ async def update_project(project_id: str, body: ProjectUpdateRequest):
             project = project_records.set_writes(project_id, body.writes)
         if body.runs is not None:
             project = project_records.set_runs(project_id, body.runs)
+        if body.drives is not None:
+            project = project_records.set_drives(project_id, body.drives)
     except UnknownProject:
         raise HTTPException(status_code=404, detail=f"No project called {project_id!r}.")
     except ValueError as exc:
@@ -6002,6 +6011,7 @@ def _open_code_project(project_id: str | None) -> None:
         project.root if project.type is ProjectType.CODING and project.root else None,
         writes=project.writes,
         runs=project.runs,
+        drives=project.drives,
     )
 
 

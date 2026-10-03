@@ -495,6 +495,7 @@ class KernelBootstrapper:
             CodeWriter,
             LibraryTools,
             active_root,
+            drives_granted,
             runs_granted,
             writes_granted,
         )
@@ -532,6 +533,10 @@ class KernelBootstrapper:
                 # `find_browser()` already locates, spoken to over the
                 # DevTools protocol with the `aiohttp` already pinned.
                 driving=DrivingTools(),
+                # Its own grant, not `runs`. Running a project's commands
+                # and pressing whatever is on its page are different
+                # risks, and a person can want one without the other.
+                drives_granted=drives_granted,
             ),
         )
 

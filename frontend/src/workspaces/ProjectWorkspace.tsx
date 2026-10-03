@@ -795,6 +795,7 @@ function RepositoryRow({ project }: { project: Project }) {
 function EditsRow({ project }: { project: Project }) {
   const setWrites = useProjectStore((s) => s.setWrites);
   const setRuns = useProjectStore((s) => s.setRuns);
+  const setDrives = useProjectStore((s) => s.setDrives);
   const fetchRunners = useProjectStore((s) => s.fetchRunners);
   const [busy, setBusy] = useState(false);
   const [runners, setRunners] = useState<string[] | null>(null);
@@ -824,6 +825,13 @@ function EditsRow({ project }: { project: Project }) {
     await setRuns(project.id, !project.runs);
     setBusy(false);
   }, [busy, project.id, project.runs, setRuns]);
+
+  const toggleDrives = useCallback(async () => {
+    if (busy) return;
+    setBusy(true);
+    await setDrives(project.id, !project.drives);
+    setBusy(false);
+  }, [busy, project.id, project.drives, setDrives]);
 
   const runnerList =
     runners === null ? '…' : runners.length ? runners.join(', ') : 'none detected';
@@ -856,19 +864,37 @@ function EditsRow({ project }: { project: Project }) {
           Zaram may run this project&apos;s commands — {runnerList}
         </span>
       </label>
-      {/* **The grant widened, so the words widened with it.** Driving the app
-          sits under this toggle rather than asking per click, because rule 7j
-          is explicit that a dialog per action is a product nobody opens
-          twice — but a grant that quietly grows is worse than a second
-          dialog, and `projects: the offer says what pressing it actually
-          grants` exists for exactly this. Shown only once the grant is on:
-          before that it is a description of something that is not happening.
-          The browser is Zaram's own, with none of your sign-ins in it. */}
-      {project.runs && (
+      {/* **Its own box, not words bolted onto the one above.** Driving
+          shipped under `runs` with this toggle's sentence widened to say
+          so, and that was the wrong call: `npm test` is bounded and named,
+          while pressing whatever is on a page is not, and the hazard is a
+          dev build pointed at a production database. Somebody can want
+          the first and not the second, and a grant that cannot express
+          that is one that gets refused whole.
+
+          Still one box rather than a dialog per click — rule 7j is
+          explicit that forty dialogs a day is a product nobody opens on
+          day two. The line below it names what driving costs rather than
+          asking for trust, which is the same thing the sentence beside
+          `runs` does with the runner names. */}
+      <label className="flex cursor-pointer items-center gap-2">
+        <input
+          type="checkbox"
+          checked={project.drives}
+          disabled={busy}
+          onChange={() => void toggleDrives()}
+          data-testid="drives-allowed"
+          aria-label={`Zaram may drive the app for ${project.name}`}
+        />
+        <span style={{ color: project.drives ? 'var(--color-text-muted)' : 'var(--color-text-faint)' }}>
+          Zaram may drive the app in a browser — open the page, click, type
+        </span>
+      </label>
+      {project.drives && (
         <span className="pl-6 leading-snug" style={{ color: 'var(--color-text-faint)' }}>
-          That includes starting the app and driving it in a browser of its own —
-          opening the page, clicking, typing — to check a change. Localhost only,
-          and it carries none of your sign-ins.
+          Localhost only, in a browser of Zaram&apos;s own that carries none of
+          your sign-ins. It presses what is on the page, so point it at a
+          development build rather than anything live.
         </span>
       )}
     </div>

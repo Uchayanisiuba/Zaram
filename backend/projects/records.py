@@ -110,6 +110,12 @@ class Project:
     #: different thing to consent to than editing, and rule 7j's unit is the
     #: data class.
     runs: bool = False
+    #: Whether Zaram may drive the app in a browser — open the page,
+    #: click, type. Separate from `runs`, which starts it: pressing
+    #: whatever is on a page is a different question from running the
+    #: project's own named commands, and a dev build pointed at a
+    #: production database is where the difference bites.
+    drives: bool = False
 
     @property
     def scope(self) -> str:
@@ -177,7 +183,8 @@ class ProjectRecords:
                     note       TEXT NOT NULL DEFAULT '',
                     root       TEXT NOT NULL DEFAULT '',
                     writes     INTEGER NOT NULL DEFAULT 0,
-                    runs       INTEGER NOT NULL DEFAULT 0
+                    runs       INTEGER NOT NULL DEFAULT 0,
+                    drives     INTEGER NOT NULL DEFAULT 0
                 )
                 """
             )
@@ -197,6 +204,10 @@ class ProjectRecords:
             if "writes" not in columns:
                 conn.execute(
                     "ALTER TABLE projects ADD COLUMN writes INTEGER NOT NULL DEFAULT 0"
+                )
+            if "drives" not in columns:
+                conn.execute(
+                    "ALTER TABLE projects ADD COLUMN drives INTEGER NOT NULL DEFAULT 0"
                 )
             if "runs" not in columns:
                 conn.execute(
@@ -379,6 +390,17 @@ class ProjectRecords:
         logger.info("Project %s: running commands %s", project_id, "allowed" if allowed else "withdrawn")
         return self.get(project_id)
 
+    def set_drives(self, project_id: str, allowed: bool) -> Project:
+        """Allow, or withdraw, driving the project's app in a browser."""
+        with self._lock, self._connect() as conn:
+            changed = conn.execute(
+                "UPDATE projects SET drives = ? WHERE id = ?", (1 if allowed else 0, project_id)
+            ).rowcount
+        if not changed:
+            raise UnknownProject(project_id)
+        logger.info("Project %s: driving the app %s", project_id, "allowed" if allowed else "withdrawn")
+        return self.get(project_id)
+
     def set_note(self, project_id: str, note: str) -> Project:
         with self._lock, self._connect() as conn:
             changed = conn.execute(
@@ -425,6 +447,7 @@ def _from_row(row: sqlite3.Row) -> Project:
         root=row["root"] if "root" in row.keys() else "",
         writes=bool(row["writes"]) if "writes" in row.keys() else False,
         runs=bool(row["runs"]) if "runs" in row.keys() else False,
+        drives=bool(row["drives"]) if "drives" in row.keys() else False,
     )
 
 

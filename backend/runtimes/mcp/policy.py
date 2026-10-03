@@ -147,6 +147,7 @@ def decide(
     mode: WriteMode,
     granted_tools: Optional[Set[str]] = None,
     annotations: Optional[Mapping[str, Any]] = None,
+    not_read_only: bool = False,
 ) -> Decision:
     """Whether this call runs, asks, or is refused.
 
@@ -154,13 +155,22 @@ def decide(
     what makes 7j's "then remember" real: the second call to a tool somebody
     has already permitted does not ask again, which is the difference between
     a product opened twice and one opened once.
+
+    `not_read_only` overrides the name guess below and nothing else. It is
+    how a caller that *knows* — one of Zaram's own built-ins, never a
+    stranger's server — says that a tool whose name reads like a look is
+    not one. Deliberately separate from `readOnlyHint: False`, which also
+    marks a tool destructive and so makes it ask however much is granted:
+    needing the grant and asking every single time are different verdicts,
+    and merging them costs 7j's confirm-once. See
+    `McpRuntime._builtin_says_not_read_only` for the case that found it.
     """
     granted = granted_tools or set()
     destructive = looks_destructive(tool_name, annotations)
 
     # Reading is always permitted. It is the tier that needs no undo, no
     # sandbox and no rollback, which is the whole reason read-only ships first.
-    if looks_read_only(tool_name, annotations):
+    if not not_read_only and looks_read_only(tool_name, annotations):
         return Decision(Verdict.ALLOW, "reads only")
 
     if mode is WriteMode.READ_ONLY:

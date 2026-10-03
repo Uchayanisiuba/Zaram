@@ -1,4 +1,4 @@
-"""Driving the app, not only looking at it — slice 9 of the code pack.
+"""Driving the app, not only looking at it — slice 11 of the code pack.
 
 `look_at_app` takes one screenshot of one URL. That is enough to check a
 layout and not enough to check a *behaviour*, because the interesting states
@@ -117,6 +117,12 @@ STALE_REF = (
 )
 
 NO_BROWSER = "No Chrome or Edge is installed, so there is no browser to drive."
+
+#: Named separately from `runners.HOW_TO_PERMIT` because the control is a
+#: different one. A refusal that points at the wrong switch is worse than a
+#: vague one — the person turns something on, asks again, and is refused
+#: again with the same sentence.
+HOW_TO_PERMIT = "Allow Zaram to drive the app for this project in Project, then ask again."
 
 #: How much of an element's own label may appear in the phrase on the row.
 ACTED_LABEL_CHARS = 60

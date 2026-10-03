@@ -44,6 +44,7 @@ const CODING = {
   root: '',
   writes: false,
   runs: false,
+  drives: false,
   facts: 0,
   artifacts: 0,
 };
@@ -307,5 +308,74 @@ describe('when the create request never completes', () => {
     await waitFor(() => expect(create.disabled).toBe(false));
     expect((screen.getByLabelText('Project name') as HTMLInputElement).value).toBe('Ride hail');
     expect((screen.getByTestId('repository-path') as HTMLInputElement).value).toBe('C:\\Ride_app');
+  });
+});
+
+describe('the three grants are three boxes', () => {
+  /**
+   * Driving shipped on 3 October under `runs`, with the sentence beside that
+   * box widened to say so. The maintainer's call the same day was that it
+   * should be its own grant, and they are right: `npm test` is bounded and
+   * named, while pressing whatever is on a page is not — the hazard being a
+   * dev build pointed at a production database. Somebody can want the first
+   * and not the second.
+   *
+   * So what is worth asserting is not that a third box exists. It is that
+   * each box sends **its own field** and nothing else: a toggle that quietly
+   * patched two grants would be the widening this split undoes, wearing a
+   * checkbox.
+   */
+  const WITH_FOLDER = { ...CODING, root: 'E:\Keyline' };
+
+  it('renders all three, off', async () => {
+    server({ projects: [WITH_FOLDER] });
+    render(<ProjectWorkspace />);
+    for (const id of ['edits-allowed', 'runs-allowed', 'drives-allowed']) {
+      const box = await screen.findByTestId(id);
+      expect((box as HTMLInputElement).checked).toBe(false);
+    }
+  });
+
+  it('each box patches only its own grant', async () => {
+    const sent = server({ projects: [WITH_FOLDER] });
+    render(<ProjectWorkspace />);
+
+    for (const [id, field] of [
+      ['edits-allowed', 'writes'],
+      ['runs-allowed', 'runs'],
+      ['drives-allowed', 'drives'],
+    ] as const) {
+      sent.length = 0;
+      fireEvent.click(await screen.findByTestId(id));
+      await waitFor(() => expect(sent.length).toBeGreaterThan(0));
+      const patch = sent.find((s) => s.body && field in s.body);
+      expect(patch, `${id} sent no ${field}`).toBeTruthy();
+      expect(Object.keys(patch!.body)).toEqual([field]);
+    }
+  });
+
+  it('says nothing about driving while the box is off', async () => {
+    server({ projects: [WITH_FOLDER] });
+    render(<ProjectWorkspace />);
+    await screen.findByTestId('drives-allowed');
+    expect(screen.queryByText(/carries none of/i)).toBeNull();
+  });
+
+  it('says what driving costs once the box is on', async () => {
+    // Named rather than asked for on trust, the same way the sentence beside
+    // `runs` names the runners it would run.
+    server({ projects: [{ ...WITH_FOLDER, drives: true }] });
+    render(<ProjectWorkspace />);
+    await waitFor(() => expect(screen.getByText(/carries none of/i)).toBeTruthy());
+    expect(screen.getByText(/Localhost only/i)).toBeTruthy();
+  });
+
+  it('the runs sentence no longer claims driving', async () => {
+    // The widened copy, gone. It said running the commands "includes …
+    // driving it in a browser", which is what the split makes untrue.
+    server({ projects: [{ ...WITH_FOLDER, runs: true }] });
+    render(<ProjectWorkspace />);
+    await screen.findByTestId('runs-allowed');
+    expect(screen.queryByText(/That includes starting the app and driving it/i)).toBeNull();
   });
 });

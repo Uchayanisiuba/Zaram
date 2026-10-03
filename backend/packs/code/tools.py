@@ -104,6 +104,7 @@ class CodeTools:
         library: Optional["LibraryTools"] = None,
         app: Optional["AppTools"] = None,
         driving: Optional["DrivingTools"] = None,
+        drives_granted: Callable[[], bool] = lambda: False,
     ) -> None:
         self._root_for = root_for
         #: `None` means this instance cannot write, structurally. See `writes.py`.
@@ -120,16 +121,48 @@ class CodeTools:
         #: Running the app and looking at it. Under the same grant as running
         #: its commands — a dev server is a command that does not exit.
         self._app = app
-        #: Driving the app rather than only looking at it. Under the
-        #: same grant as running, because starting a dev server and
-        #: pressing a button in the dev server it started are one
-        #: consent reaching one step further — and a dialog per click
-        #: is the product nobody opens twice.
+        #: Driving the app rather than only looking at it, under a grant
+        #: of its own.
+        #:
+        #: It shipped under `runs` on 3 October with the toggle's words
+        #: widened to say so, and the maintainer's call the same day was
+        #: that it should be separate. They are right, and the reason is
+        #: worth keeping rather than just the decision: **these are not
+        #: the same risk.** Running the project's detected commands is
+        #: `npm test` and `tsc` — bounded, named, worst case a failing
+        #: build. Driving the app is pressing whatever is on the page,
+        #: and the hazard is not Zaram clicking around a toy: it is a dev
+        #: build pointed at a production database, where "Delete account"
+        #: does. Somebody can reasonably want the first and not the
+        #: second, and a grant that cannot express that gets refused
+        #: whole.
+        #:
+        #: It is also the shape `CLAUDE.md` already uses twice —
+        #: *"permitting cloud models does not permit mutation, and
+        #: permitting file edits does not permit cloud"*. `writes` and
+        #: `runs` are split for the same reason.
         self._driving = driving
+        self._drives_granted = drives_granted
+
+    def mutative_tools(self) -> set:
+        """Tools the name guess would wave through and should not.
+
+        Read by the runtime, which turns it into the `readOnlyHint: False`
+        the policy already believes. Only tools whose names mislead need
+        to be here — `click_in_app` and `type_in_app` are already caught,
+        and listing them anyway costs nothing and survives a rename.
+
+        `open_in_browser` is the one that was wrong. Its name contains
+        `_browse`, which is in the read-only word list, so launching a
+        browser process read as looking at something.
+        """
+        return set(driving.TOOL_NAMES) - {driving.READ_APP_PAGE, driving.READ_APP_CONSOLE}
 
     def how_to_permit(self, tool_name: str) -> str:
         """Appended to a `CONFIRM` reason by the runtime, so the sentence a
         person reads names the control that would allow the call."""
+        if tool_name in driving.TOOL_NAMES:
+            return driving.HOW_TO_PERMIT
         if tool_name == RUN_COMMAND or tool_name in apps.TOOL_NAMES:
             return runners.HOW_TO_PERMIT
         return writes.HOW_TO_PERMIT
@@ -180,7 +213,7 @@ class CodeTools:
             granted.add(RUN_COMMAND)
         if self._app is not None and self._runs_granted():
             granted |= {apps.START_APP, apps.STOP_APP, apps.LOOK_AT_APP}
-        if self._driving is not None and self._runs_granted():
+        if self._driving is not None and self._drives_granted():
             granted |= set(driving.TOOL_NAMES)
         return granted
 

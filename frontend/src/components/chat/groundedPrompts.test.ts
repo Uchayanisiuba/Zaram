@@ -31,6 +31,7 @@ const project = (over: Partial<Project>): Project =>
     scope: 'project:p1',
     root: '',
     runs: false,
+    drives: false,
     artifacts: 0,
     facts: 11,
     ...over,
