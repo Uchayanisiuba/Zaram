@@ -29,6 +29,65 @@ landed; the rest are listed here with enough of the reasoning that nobody
 has to re-derive it. **This block is the re-entry point** — none of the
 items below were declined, and none were dropped.
 
+#### 4 October, overnight — what landed, and the one thing still broken
+
+**The model browser does not work in the running app, and I did not find
+out why.** The maintainer's screenshot shows it saying *"Zaram could not
+read its model list"*, which is `fetchModelCatalogue`'s catch branch. What
+has been ruled out, each by measurement rather than reasoning:
+
+* The route exists in the running backend — it restarted at 05:19, after
+  the route landed at 03:08.
+* `MANIFEST_PATH` is absolute, derived from `__file__`, so a working
+  directory cannot break it.
+* `/providers` is in the Vite dev proxy *and* in `apiProxyPrefixes`.
+* The route answers 200 under the test client, with the manifest's rows.
+
+Two facts found while looking that are worth keeping. **Auth runs before
+routing** — `/providers/definitely-not-a-route` returns 401, not 404, so a
+status code cannot distinguish a missing route from an unauthenticated
+one and that diagnostic is useless here. And **the running backend is the
+system Python**, `AppData\Local\Programs\Python\Python311\python.exe
+main.py`, not `backend/venv`. That is not obviously the cause and it is
+the next thing to check: a route that imports fine under the venv can
+raise at import time under a different interpreter, and the route's
+failure mode would be exactly this.
+
+The next diagnostic is the backend's own log while the panel is open, or
+the same call with the live credential — not another guess.
+
+**Landed, all committed and green:**
+
+* The permission card — Deny, this conversation, this project, always.
+  `grant_scope` comes from the gate so the card cannot offer a switch
+  that settles nothing, and `setShell` now exists: the backend has had
+  `set_shell` and a `shell` column since the terminal landed and no
+  interface could reach it.
+* Three.js previews. `APP_CSP` refused every remote sub-resource, which
+  was right — the fix is the refusal becoming an offer, per host and per
+  preview, with the egress recorded before the reload. Verified in a real
+  browser: blocked by default, and `THREE r160` rendering a cube once
+  allowed.
+* The context window is a setting rather than a hand-written Modelfile.
+* `cleanup()` in `electron/main.js` could never run:
+  `stopPresenceFrameTimer` was declared inside `bootstrap()` and called
+  from the top level, so every shutdown threw before `backend.stop()` and
+  the Python backend was left holding port 8420.
+* `/local-servers` joined the packaged prefix list, caught by the guard.
+
+**Not started, and asked for:** voices browsable and downloadable the way
+models are, with several to choose from — the maintainer sent a
+comparison naming Breeze TTS 2, Fish Audio S2 and Chatterbox. Note that
+`CLAUDE.md` currently says *TTS is Kokoro-82M and only Kokoro*, with the
+reasoning (VRAM, licence, platform coverage) — Chatterbox is named there
+and excluded as gaming-GPU and English-only. Widening that is a decision
+about the dependency stack, not a UI change, and it should be taken
+deliberately rather than inside a voice picker.
+
+Also not started: the model browser's richer presentation (capability
+badges, a README panel, quantisation choices) from the LM Studio
+reference.
+
 #### Done
 
 * **A reopened conversation keeps its plan, its tools and its files.**
