@@ -1,12 +1,17 @@
 /**
  * Downloading the model the first-run screen offered.
  *
- * **Nothing here names a model, and that is the design rather than an
- * omission.** The backend recomputes the recommendation from the same manifest
- * and the same measured budget that produced the offer, so what is fetched is
- * what was quoted. A name sent from here would be a second answer to the same
- * question, and the first time the two disagreed the user would be charged
- * gigabytes for a model nobody offered them.
+ * **With no name this fetches the offer, and that part is unchanged.** The
+ * backend recomputes the recommendation from the same manifest and the same
+ * measured budget that produced it, so what is fetched is what was quoted.
+ *
+ * **A name may be passed now, because the model browser lets somebody
+ * choose.** The guarantee that refused one before is intact: a name
+ * *selects a manifest row*, it does not describe it. The size quoted and
+ * logged still comes from the manifest, and a name that is not on the list
+ * is refused with a 400 before a byte moves. What was being protected was
+ * never "no name in the body" — it was that the thing downloaded is the
+ * thing the user was quoted a price for.
  *
  * NDJSON, read line by line, on the pattern `ingestClient` already uses. A
  * second streaming format would be a second set of split-chunk bugs.
@@ -36,9 +41,14 @@ export interface PullEvent {
 export async function pullRecommendedModel(
   onEvent: (event: PullEvent) => void,
   signal?: AbortSignal,
+  /** A row chosen in the catalogue. Omitted, the backend fetches its own
+   *  offer, which is what the first-run screen does. */
+  name?: string,
 ): Promise<void> {
   const response = await fetch(`${API_BASE}/providers/pull`, {
     method: 'POST',
+    headers: name ? { 'Content-Type': 'application/json' } : undefined,
+    body: name ? JSON.stringify({ name }) : undefined,
     signal,
   });
 

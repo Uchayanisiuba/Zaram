@@ -123,6 +123,7 @@ import {
 } from '@/services/settingsClient';
 import { pastedKey } from '@/lib/pastedKey';
 import ModelSearchList from '@/components/settings/ModelSearchList';
+import ModelBrowser from '@/components/models/ModelBrowser';
 
 // --------------------------------------------------------------- primitives
 
@@ -523,6 +524,8 @@ export default function SettingsWorkspace() {
   const [killSwitch, setKillSwitchState] = useState<boolean | null>(null);
   const [policy, setPolicy] = useState<EgressPolicy | null>(null);
   const [models, setModels] = useState<DiscoveredModel[] | null>(null);
+  // Folded by default -- see the "Get a model" row.
+  const [showBrowser, setShowBrowser] = useState(false);
   const [search, setSearch] = useState<WebSearchStatus | null>(null);
   const [imageSetting, setImageSettingState] = useState<ImageSetting | null>(null);
   const [exportManifest, setExportManifest] = useState<ExportManifest | null>(null);
@@ -1063,6 +1066,45 @@ export default function SettingsWorkspace() {
                   )
                 }
               />
+            </div>
+          </Row>
+
+          {/* **Getting a model, as opposed to choosing between the ones you
+              have.** The row above is a picker over what is installed; with
+              nothing installed it has nothing to offer and says so, which is
+              a dead end on the one screen that should lead somewhere.
+
+              Folded by default. Somebody who already has a model is not
+              shopping, and an open catalogue would be the loudest thing in
+              Settings for the majority who never need it — motion and
+              attention both have a budget. */}
+          <Row
+            label="Get a model"
+            value={showBrowser ? "browsing" : "from Zaram\u2019s list"}
+            state="neutral"
+            detail={
+              'Downloads come from Ollama\u2019s registry and are recorded in Activity ' +
+              'like anything else that leaves. Zaram only offers models from its own ' +
+              'dated list, and tells you the size before you start.'
+            }
+          >
+            <div className="flex flex-col gap-3">
+              <Button
+                busy={false}
+                onClick={() => setShowBrowser((on) => !on)}
+              >
+                <Download size={12} />
+                {showBrowser ? 'Hide the list' : 'Download a model'}
+              </Button>
+              {showBrowser && (
+                <div style={{ maxHeight: 420 }}>
+                  <ModelBrowser
+                    onInstalled={() =>
+                      void run('models', async () => setModels(await fetchModels()))
+                    }
+                  />
+                </div>
+              )}
             </div>
           </Row>
 
