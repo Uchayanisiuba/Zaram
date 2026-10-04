@@ -603,6 +603,15 @@ class OpenAICompatibleEngine(LLMEngine):
         # so an ordinary reply's body is byte-for-byte what it always was.
         if tools:
             body["tools"] = list(tools)
+        # The same control Ollama spells `num_predict`, under the name
+        # every OpenAI-compatible server uses. Sent to cloud providers as
+        # well as to TabbyAPI and LM Studio: `max_tokens` is in the
+        # original API and is the one field here that is safe everywhere,
+        # unlike `enable_thinking` just below. A cap honoured by one
+        # runtime is not a cap.
+        reply_cap = _requested_reply_cap()
+        if reply_cap:
+            body["max_tokens"] = reply_cap
         # The person's *Thinking* control — `docs/PLAN.md` E2b. TabbyAPI reads
         # a top-level `enable_thinking` into the template (Qwen3's template
         # then emits an empty think block); LM Studio ignores what it does not
@@ -988,3 +997,16 @@ class OpenAICompatibleEngine(LLMEngine):
             yield CLOSE_TAG
         # A stream that ended without `[DONE]` still hands over its calls.
         yield from _flush_calls()
+
+
+def _requested_reply_cap() -> int:
+    """The shared reader, imported late so this module keeps importing
+    when `core` is not on the path — the same shape its neighbours here
+    use for `_thinking_wanted`."""
+    try:
+        from core.context_budget import requested_reply_cap
+
+        return requested_reply_cap()
+    except Exception:
+        return 0
+

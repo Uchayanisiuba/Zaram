@@ -3233,6 +3233,14 @@ class RoutingPreferenceUpdate(BaseModel):
     #: here, so an unrecognised value resolves to the default for every
     #: caller instead of only for this route.
     context_policy: str | None = None
+    #: What happens when a conversation outgrows the window: ``trim``
+    #: or ``stop``. Validated in the store, so an unrecognised value
+    #: resolves to the default for every caller rather than only here.
+    overflow_policy: str | None = None
+    #: The longest a single reply may run, or ``0`` for no cap. A
+    #: different quantity from the context window, which is the whole
+    #: pool; this bounds the reply alone.
+    max_reply_tokens: int | None = None
     #: A window for **one model**, as ``{"model": name, "tokens": n}``.
     #: Per-model rather than global because a single number is wrong for
     #: every model but the one it was chosen for, which is what made this
@@ -3352,6 +3360,13 @@ async def set_routing_preference(update: RoutingPreferenceUpdate):
 
     if update.context_policy is not None:
         settings.set_context_policy(update.context_policy)
+
+    if update.overflow_policy is not None:
+        settings.set_overflow_policy(update.overflow_policy)
+
+    if update.max_reply_tokens is not None:
+        # Bounded in the store, so the ceiling holds for every caller.
+        settings.set_max_reply_tokens(update.max_reply_tokens)
 
     if update.context_override is not None:
         # Read defensively: this is a dictionary off the wire, and a

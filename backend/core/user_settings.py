@@ -91,6 +91,23 @@ MAX_CONTEXT_TOKENS = 131_072
 #: which is the migration.
 CONTEXT_POLICIES = frozenset({"fit", "server"})
 
+#: What happens when a conversation outgrows the window.
+#:
+#: ``trim`` - drop the oldest whole turns and say so, which is what Zaram
+#: has always done and is the right default: a long conversation keeps
+#: working, and the drop is announced rather than silent.
+#: ``stop`` - refuse the turn instead, and say the conversation has
+#: outgrown this model.
+#:
+#: **`stop` is not pedantry, it is rule 9 applied to memory.** Trimming
+#: is safe for chat, where the recent end is what matters. It is not safe
+#: for an answer grounded in something said at the start -- a document
+#: pasted an hour ago, a constraint agreed in the first message. The
+#: model does not know what was cut, so it answers confidently from a
+#: premise that is no longer there, and *"generation must fail rather
+#: than invent"* is the rule that covers exactly this.
+OVERFLOW_POLICIES = frozenset({"trim", "stop"})
+
 #: A cap on remembered per-model windows. Not a limit anybody will reach by
 #: choosing - it bounds what a settings *file* can make this dictionary,
 #: for the reason the character fields are bounded.
@@ -261,6 +278,23 @@ class UserSettings:
         #: Global was the bug: one figure is wrong for every model but the
         #: one it was chosen for, which is what made this a chore.
         self._context_overrides: Dict[str, int] = {}
+        #: See `OVERFLOW_POLICIES`. `trim` is what Zaram did before there
+        #: was a choice, so it stays the default.
+        self._overflow_policy = "trim"
+        #: The longest a single reply may run, or ``0`` for *as much as
+        #: the window reserves*.
+        #:
+        #: **Separate from the context window, and the pair is easy to
+        #: confuse.** The window is the whole pool - prompt, history and
+        #: reply together. This is a ceiling on the reply alone, and a
+        #: small one cuts a model off mid-sentence however much room is
+        #: left. LM Studio keeps them as two controls for that reason and
+        #: so does this.
+        #:
+        #: ``0`` rather than a number, because Zaram already reserves a
+        #: quarter of the window for the reply. A default here would
+        #: compete with an arithmetic that is already right.
+        self._max_reply_tokens = 0
         self._manner = ""
         self._voice = ""
         # Local first, as everything is: CLAUDE.md's "local is the fallback
@@ -463,6 +497,9 @@ class UserSettings:
             "thinking": self._thinking,
             "context_policy": self._context_policy,
             "context_overrides": dict(self._context_overrides),
+            "overflow_policy": self._overflow_policy,
+            "overflow_policies": sorted(OVERFLOW_POLICIES),
+            "max_reply_tokens": self._max_reply_tokens,
         }
 
     # ----------------------------------------------------------------- write
@@ -547,6 +584,32 @@ class UserSettings:
             self._context_policy = value if value in CONTEXT_POLICIES else "fit"
             self._save()
         return self._context_policy
+
+    def set_overflow_policy(self, value: str) -> str:
+        """What to do when the conversation outgrows the window.
+
+        Anything unrecognised resolves to ``trim``, the posture every
+        reader here keeps: a settings value that will not parse must not
+        be able to stop a model answering.
+        """
+        with self._lock:
+            self._overflow_policy = value if value in OVERFLOW_POLICIES else "trim"
+            self._save()
+        return self._overflow_policy
+
+    def set_max_reply_tokens(self, value: int) -> int:
+        """The longest a single reply may run. ``0`` lifts the cap.
+
+        Bounded by the same ceiling a context window is, which is
+        generous rather than meaningful here - a reply cannot exceed the
+        window it is generated inside, and the engine clamps it to what
+        the window actually reserves. This only stops a hand-edited file
+        asking for something absurd.
+        """
+        with self._lock:
+            self._max_reply_tokens = max(0, min(int(value), MAX_CONTEXT_TOKENS))
+            self._save()
+        return self._max_reply_tokens
 
     def set_context_override(self, model: str, tokens: int) -> Dict[str, int]:
         """Remember a window **for one model**, or forget it.
@@ -690,6 +753,14 @@ class UserSettings:
         policy = raw.get("context_policy")
         if isinstance(policy, str) and policy in CONTEXT_POLICIES:
             self._context_policy = policy
+
+        overflow = raw.get("overflow_policy")
+        if isinstance(overflow, str) and overflow in OVERFLOW_POLICIES:
+            self._overflow_policy = overflow
+
+        reply_cap = raw.get("max_reply_tokens")
+        if isinstance(reply_cap, int):
+            self._max_reply_tokens = max(0, min(reply_cap, MAX_CONTEXT_TOKENS))
 
         overrides = raw.get("context_overrides")
         if isinstance(overrides, dict):

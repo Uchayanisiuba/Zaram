@@ -163,6 +163,8 @@ describe('routing updates leave untouched fields alone', () => {
       // assertion is exact on purpose and that is why it caught them.
       context_policy: null,
       context_override: null,
+      overflow_policy: null,
+      max_reply_tokens: null,
       // The other fields behind the same endpoint, and the same rule: a client
       // setting the preference must not clear somebody's per-task assignments
       // or their routing model as a side effect of not mentioning them.

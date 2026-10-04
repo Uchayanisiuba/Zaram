@@ -6,6 +6,8 @@ from collections.abc import Iterator
 from functools import lru_cache
 from typing import Callable, Optional
 
+from core.context_budget import requested_reply_cap
+
 from core.reasoning import CLOSE_TAG, OPEN_TAG
 from core.tool_loop import marker_for_native_call
 
@@ -578,6 +580,16 @@ class OllamaEngine(LLMEngine):
         window = _requested_context_tokens(payload["model"])
         if window:
             payload["options"] = {"num_ctx": window}
+        # **A different setting from the window, and the pair is easy to
+        # confuse.** `num_ctx` is the whole pool — prompt, history and
+        # reply together. `num_predict` is a ceiling on the reply alone,
+        # and a small one cuts a model off mid-sentence however much room
+        # is left. Absent unless asked, because Zaram already reserves a
+        # quarter of the window for the reply and a default here would
+        # compete with arithmetic that is already right.
+        cap = requested_reply_cap()
+        if cap:
+            payload.setdefault("options", {})["num_predict"] = cap
         # Only when there are some. Ollama reads the presence of the key as a
         # vision request on some builds, and a text-only model handed an empty
         # list answers oddly rather than failing, which is the worst of both.

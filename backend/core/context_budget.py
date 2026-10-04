@@ -1136,3 +1136,29 @@ def read_model_window(
     # did not answer is still one Zaram can send `num_ctx` to, and saying
     # otherwise would hide the control from the case it was built for.
     return ModelWindow(None, None, None, True, "")
+
+
+def requested_reply_cap() -> int:
+    """The longest a single reply may run, or ``0`` for no cap.
+
+    **One reader for every engine**, which is the model-neutrality rule
+    applied to a setting rather than to a capability. The same control
+    has a different field name per runtime — Ollama calls it
+    ``num_predict`` inside ``options``, an OpenAI-compatible server calls
+    it ``max_tokens`` at the top level — and that difference belongs in
+    each engine's own body-builder, not in two copies of the same
+    settings read. A cap honoured by whichever runtime the maintainer
+    happens to use is not a cap.
+
+    **Every failure resolves to ``0``.** A settings store that will not
+    load must not be able to cut a reply short, which is the same posture
+    `_requested_context_tokens` keeps and for the same reason: the
+    damaging direction here is acting, not abstaining.
+    """
+    try:
+        from core.user_settings import get_user_settings
+
+        return max(0, int(get_user_settings().to_dict().get("max_reply_tokens") or 0))
+    except Exception:
+        return 0
+

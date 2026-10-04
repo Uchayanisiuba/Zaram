@@ -125,6 +125,7 @@ import { pastedKey } from '@/lib/pastedKey';
 import ModelSearchList from '@/components/settings/ModelSearchList';
 import ModelBrowser from '@/components/models/ModelBrowser';
 import ContextWindowField from '@/components/settings/ContextWindowField';
+import OverflowField from '@/components/settings/OverflowField';
 
 // --------------------------------------------------------------- primitives
 
@@ -1116,6 +1117,40 @@ export default function SettingsWorkspace() {
                   setRoutingSettings(
                     await updateRoutingSettings({ contextOverride: { model, tokens } }),
                   ),
+                )
+              }
+            />
+          </Row>
+
+          {/* **The other half of the same subject**, and placed next to it
+              rather than elsewhere because the two numbers are easy to
+              confuse: the window above is the whole pool, this is what
+              happens when the pool runs out and how long one reply may
+              run. */}
+          <Row
+            label="When it runs out"
+            value={
+              routingSettings?.overflowPolicy === 'stop'
+                ? 'stop and say so'
+                : 'drop the oldest'
+            }
+            state="neutral"
+            detail={
+              'A long conversation eventually exceeds any window. Zaram drops whole exchanges, oldest first, and never a reply whose question went with it.'
+            }
+          >
+            <OverflowField
+              policy={routingSettings?.overflowPolicy ?? 'trim'}
+              cap={routingSettings?.maxReplyTokens ?? 0}
+              busy={busy === 'routing'}
+              onChoosePolicy={(overflowPolicy) =>
+                void run('routing', async () =>
+                  setRoutingSettings(await updateRoutingSettings({ overflowPolicy })),
+                )
+              }
+              onChooseCap={(maxReplyTokens) =>
+                void run('routing', async () =>
+                  setRoutingSettings(await updateRoutingSettings({ maxReplyTokens })),
                 )
               }
             />

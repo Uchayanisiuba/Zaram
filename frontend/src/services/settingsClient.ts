@@ -425,7 +425,25 @@ export interface RoutingSettings {
   contextOverrides: Record<string, number>;
   /** The policies this backend accepts, read rather than hardcoded. */
   contextPolicies: ContextPolicy[];
+  /** **What happens when a conversation outgrows the window.**
+   *
+   *  `trim` drops the oldest whole turns and says so, which is what
+   *  Zaram has always done and the right default. `stop` refuses the
+   *  turn instead — not pedantry but rule 9 applied to memory: an
+   *  answer grounded in something said at the start is wrong once that
+   *  has been cut, and the model cannot know it was. */
+  overflowPolicy: OverflowPolicy;
+  overflowPolicies: OverflowPolicy[];
+  /** The longest a single reply may run, or `0` for no cap.
+   *
+   *  A different quantity from the context window and easy to confuse
+   *  with it: the window is the whole pool, this bounds the reply
+   *  alone. Honoured on every runtime — `num_predict` on Ollama,
+   *  `max_tokens` everywhere else. */
+  maxReplyTokens: number;
 }
+
+export type OverflowPolicy = 'trim' | 'stop';
 
 export type ContextPolicy = 'fit' | 'server';
 
@@ -433,6 +451,7 @@ export type ContextPolicy = 'fit' | 'server';
  *  own list in `context_policies`; this is what makes an unrecognised
  *  value resolve to the default rather than render as a dead button. */
 const POLICIES: readonly ContextPolicy[] = ['fit', 'server'];
+const OVERFLOW: readonly OverflowPolicy[] = ['trim', 'stop'];
 
 function toRoutingSettings(raw: Record<string, unknown>): RoutingSettings {
   const tasks = raw.task_models;
@@ -476,6 +495,15 @@ function toRoutingSettings(raw: Record<string, unknown>): RoutingSettings {
             ),
           ) as Record<string, number>)
         : {},
+    overflowPolicy: OVERFLOW.includes(raw.overflow_policy as OverflowPolicy)
+      ? (raw.overflow_policy as OverflowPolicy)
+      : 'trim',
+    overflowPolicies: Array.isArray(raw.overflow_policies)
+      ? (raw.overflow_policies.filter((p): p is OverflowPolicy =>
+          OVERFLOW.includes(p as OverflowPolicy),
+        ) as OverflowPolicy[])
+      : [...OVERFLOW],
+    maxReplyTokens: typeof raw.max_reply_tokens === 'number' ? raw.max_reply_tokens : 0,
     contextPolicies: Array.isArray(raw.context_policies)
       ? (raw.context_policies.filter((p): p is ContextPolicy =>
           POLICIES.includes(p as ContextPolicy),
@@ -507,6 +535,10 @@ export async function updateRoutingSettings(update: {
   /** A window for one model. `tokens: 0` forgets that model's entry,
    *  which is what clearing the field means to the person doing it. */
   contextOverride?: { model: string; tokens: number };
+  /** What to do when the conversation outgrows the window. */
+  overflowPolicy?: OverflowPolicy;
+  /** The longest a single reply may run. `0` lifts the cap. */
+  maxReplyTokens?: number;
 }): Promise<RoutingSettings> {
   const raw = (await send('/routing/preference', 'POST', {
     routing_preference: update.routingPreference ?? null,
@@ -516,6 +548,8 @@ export async function updateRoutingSettings(update: {
     thinking: update.thinking ?? null,
     context_policy: update.contextPolicy ?? null,
     context_override: update.contextOverride ?? null,
+    overflow_policy: update.overflowPolicy ?? null,
+    max_reply_tokens: update.maxReplyTokens ?? null,
   })) as Record<string, unknown>;
   // The POST answers with the same payload the GET does, `task_slots`
   // included, so replacing state with what came back cannot blank the list of

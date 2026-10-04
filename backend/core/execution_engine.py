@@ -797,6 +797,12 @@ class ExecutionEngine:
             # capabilities are visible, not silent.
             if memory_notice is not None:
                 yield memory_notice
+                # **Nothing is generated after this one.** The overflow
+                # policy said stop, and a refusal followed by an answer
+                # would be the worst of both — the warning read as advice
+                # and the reply still built on a history that was cut.
+                if memory_notice.data.get("kind") == "context_overflow":
+                    return
         system_prompt = (system_prompt or "") + recall_block
 
         # Said before the answer, not after it, and for the same reason the
@@ -3356,6 +3362,40 @@ class ExecutionEngine:
                 self._front_cut.popitem(last=False)
         else:
             dropped = previous_cut
+
+        # **The turn is refused rather than trimmed, when that is the
+        # choice — and this is checked before anything else.**
+        #
+        # It sat below the `if not kept` branch first, which meant the
+        # *worst* overflow was the one `stop` did not catch: a
+        # conversation where not one prior turn fits returned early with
+        # a "answering this on its own" notice and then answered. Found
+        # by a test whose fixture happened to be that case, which is the
+        # argument for fixtures built from the extreme rather than the
+        # typical.
+        #
+        # Carried on the notice's `kind` rather than in a third return
+        # value: eight tests unpack this as a pair, and a signature
+        # change to move one boolean would be the tail wagging the dog.
+        if dropped and _overflow_policy() == "stop":
+            logger.info(
+                "Engine: refusing rather than trimming; %d turn(s) would not "
+                "fit a %d-token share of a %s %d-token window",
+                dropped,
+                cap,
+                "measured" if budget.measured else "assumed",
+                budget.total_tokens,
+            )
+            return system_prompt, StreamEvent.notice(
+                f"This conversation has outgrown {model or 'this model'}: "
+                f"{dropped} earlier "
+                f"{'exchange' if dropped == 1 else 'exchanges'} would have to "
+                "be dropped to make room for a reply, and Zaram has been asked "
+                "to stop rather than answer from a shortened history. Start a "
+                "new conversation, or switch to a model with a larger window.",
+                kind="context_overflow",
+            )
+
         if not kept:
             # Every turn was too long to fit. Saying nothing is right: a
             # heading with nothing under it claims a continuity that is not
@@ -4303,3 +4343,24 @@ class ExecutionEngine:
             event_type=event_type,
             data=data,
         ))
+
+
+def _overflow_policy() -> str:
+    """What to do when a conversation outgrows the window, or ``trim``.
+
+    Read per request for the reason every settings reader in this
+    codebase is: somebody who changes it should see the next reply use
+    it, not the next launch.
+
+    **Every failure resolves to ``trim``**, which is what Zaram did
+    before there was a choice. A settings store that will not load must
+    not be able to make the product refuse to answer — failing closed is
+    right for egress and wrong here, where the closed position is
+    silence.
+    """
+    try:
+        from core.user_settings import get_user_settings
+
+        return str(get_user_settings().to_dict().get("overflow_policy") or "trim")
+    except Exception:
+        return "trim"
