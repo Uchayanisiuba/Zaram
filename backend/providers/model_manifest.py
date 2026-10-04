@@ -163,3 +163,120 @@ def smaller_than(
             continue
         return candidate
     return None
+
+
+@dataclass(frozen=True)
+class CatalogueEntry:
+    """One model in the browser, and how it stands on *this* machine.
+
+    Separate from `Recommendation` deliberately. That record is the
+    manifest's half and says so — *"whether it fits is a fact about the
+    machine, measured by the caller"* — and merging the two would put a
+    machine-dependent field on the thing that is read from a file. This is
+    the caller's half, and it is the one the browser renders.
+    """
+
+    model: Recommendation
+    #: Whether this is in the tier the manifest aims at *this* machine —
+    #: what `recommend_for` would have returned.
+    #:
+    #: **Not the same question as `fits`, and conflating them was a real
+    #: bug.** `max_budget_gb` is a tier's ceiling: which machines it is
+    #: *aimed at*, not what its models require. Read as a requirement it
+    #: made `qwen3:0.6b` — half a gigabyte — report "does not fit" on a
+    #: 9 GB budget, because 9 is not `<= 3`. A small model runs anywhere; it
+    #: is simply not what you would be told to download.
+    recommended: bool
+    #: **Three-valued, and the third value is the point.** `True` fits,
+    #: `False` does not, and `None` means the machine could not be
+    #: measured — Apple and DirectML report no VRAM, and `hardware.py`
+    #: returns `None` rather than zero for exactly this reason. Rendering
+    #: `None` as "does not fit" would grey out the whole catalogue on a Mac;
+    #: rendering it as "fits" would promise something unmeasured.
+    fits: Optional[bool]
+    #: Already pulled, so the row offers a choice rather than a download.
+    installed: bool
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            **self.model.to_dict(),
+            "recommended": self.recommended,
+            "fits": self.fits,
+            "installed": self.installed,
+        }
+
+
+def catalogue_for(
+    budget_bytes: Optional[int],
+    *,
+    installed: Sequence[str] = (),
+    path: str = MANIFEST_PATH,
+) -> List[CatalogueEntry]:
+    """Every model the manifest knows, graded against this machine.
+
+    The browser's list, as opposed to `recommend_for`'s single tier.
+    Asked for 4 October 2026 with a screenshot of LM Studio's model
+    browser: the maintainer wants to *see* the options and choose, not be
+    handed one.
+
+    **Models that do not fit are listed, not hidden.** `CLAUDE.md` says the
+    pack catalogue shows unavailable packs *"greyed out and honestly graded
+    against the user's hardware, licence and installed apps"*, and the same
+    argument holds here — a list that silently omits the 27B leaves someone
+    wondering whether Zaram knows it exists, and a person who is about to
+    buy a card has a reason to look. Hiding it would also make the
+    *"disabled capabilities are visible, not silent"* rule false on the one
+    screen where capability is the subject.
+
+    **A model in several tiers is listed once, at the lowest.** `qwen3:8b`
+    appears in the 9 GB tier and again in the 18 GB one; the first is what
+    it actually needs, and showing it twice would read as two models.
+    """
+    data = _load(path)
+    if not data:
+        return []
+
+    generated = str(data.get("generated") or "")
+    tiers = data.get("tiers")
+    if not isinstance(tiers, list):
+        return []
+
+    budget_gb = None if budget_bytes is None else budget_bytes / GB
+    have = {str(name).strip() for name in installed}
+
+    # What the manifest would recommend for this machine, by name. The
+    # browser marks these rather than recomputing the tier rule, so the
+    # badge cannot disagree with the offer first run makes.
+    suggested = {r.name for r in recommend_for(budget_bytes, path=path)}
+
+    seen: Dict[str, CatalogueEntry] = {}
+    for tier in tiers:
+        if not isinstance(tier, dict):
+            continue
+        for model in _models_in(tier, generated):
+            if model.name in seen:
+                # Already listed under a lower tier. One row per model: a
+                # name in two tiers is one thing to download.
+                continue
+            # **Fit is arithmetic, not tier membership.** A model fits when
+            # its weights fit the budget beside the embedder, which is the
+            # same sum the residency gate does. `None` when the machine
+            # could not be measured — rendering that as "does not fit"
+            # would grey out the entire catalogue on a Mac, and as "fits"
+            # would promise something nobody measured.
+            fits: Optional[bool]
+            if budget_bytes is None:
+                fits = None
+            else:
+                fits = model.size_bytes <= budget_bytes
+            seen[model.name] = CatalogueEntry(
+                model=model,
+                recommended=model.name in suggested,
+                fits=fits,
+                installed=model.name in have,
+            )
+
+    # Smallest first. The browser is read by somebody deciding what to
+    # spend a download on, and the cheapest option is the one they are
+    # most likely to take on a metered connection.
+    return sorted(seen.values(), key=lambda entry: entry.model.size_bytes)

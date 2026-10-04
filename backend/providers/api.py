@@ -146,16 +146,69 @@ async def get_model(model_id: str) -> dict:
     return _payload(manager, model)
 
 
-@router.post("/pull")
-async def pull_recommended_model():
-    """Fetch the model the first-run screen offered, streaming its progress.
+class PullChoice(BaseModel):
+    """Which row of the browser to download. Absent means the offer."""
 
-    **Which model is decided here, not sent.** `/readiness` computed the offer
-    from the manifest and the measured budget; this recomputes it the same way,
-    so the thing downloaded is the thing the user was quoted a price for. A
-    name in a request body would be a second source of truth for the same
-    question, and the first time they disagreed the user would be charged
-    gigabytes for a model nobody offered.
+    name: Optional[str] = None
+
+
+@router.get("/recommendations")
+async def model_catalogue() -> dict:
+    """Every model the manifest knows, graded against this machine.
+
+    The browser's list. `/readiness` offers exactly one model — *the first
+    of the tier* — which is right for a first run and wrong for somebody
+    who wants to choose. Asked for 4 October 2026 with a screenshot of LM
+    Studio's model browser.
+
+    **Models that do not fit are listed, greyed rather than hidden.** The
+    same argument the pack catalogue already makes: a list that silently
+    omits the 27B leaves a person wondering whether Zaram knows it exists,
+    and *"disabled capabilities are visible, not silent"* would be false
+    on the one screen whose subject is capability.
+
+    The budget is read only if discovery has already run. Forcing a scan
+    here would send a request to every connected provider as a side effect
+    of opening a list, which is the shape rule 7g refuses.
+    """
+    from .model_manifest import catalogue_for
+
+    budget_bytes = None
+    installed: List[str] = []
+    if _PROVIDERS_RUNTIME is not None:
+        try:
+            manager = _PROVIDERS_RUNTIME.manager
+            budget_bytes = manager.resident_budget_bytes()
+            installed = [m.name for m in manager.list_models() if getattr(m, "name", "")]
+        except Exception:
+            logger.debug("catalogue: could not read the manager", exc_info=True)
+
+    entries = catalogue_for(budget_bytes, installed=installed)
+    return {
+        "models": [e.to_dict() for e in entries],
+        # So the screen can say what it measured, and say `null` honestly
+        # when it could not. A budget rendered as 0 would read as "no room"
+        # on a machine nobody measured.
+        "budget_bytes": budget_bytes,
+        "generated": entries[0].model.generated if entries else "",
+    }
+
+
+@router.post("/pull")
+async def pull_recommended_model(body: Optional[PullChoice] = None):
+    """Fetch a model, streaming its progress.
+
+    **With no body this is the first-run offer, recomputed here rather
+    than sent.** `/readiness` computed it from the manifest and the
+    measured budget; this recomputes it the same way, so the thing
+    downloaded is the thing the user was quoted a price for.
+
+    **With a name it is the browser's chosen row, and the guarantee is
+    unchanged.** The name selects; it does not describe. It must appear in
+    `catalogue_for`, and the size that is quoted and logged comes from the
+    manifest either way — so a request still cannot charge somebody
+    gigabytes for a model nobody offered. A name that is not in the
+    manifest is a 400 before a byte moves.
 
     NDJSON, on the same pattern as `/ingest` and `/chat`, because the frontend
     already parses it. The egress entry is written by `stream_pull` before the
@@ -179,6 +232,26 @@ async def pull_recommended_model():
         except Exception:
             logger.debug("pull: could not measure the resident budget", exc_info=True)
 
+    chosen = None
+    wanted = (body.name or "").strip() if body is not None else ""
+    if wanted:
+        from .model_manifest import catalogue_for
+
+        chosen = next(
+            (e.model for e in catalogue_for(budget_bytes) if e.model.name == wanted),
+            None,
+        )
+        if chosen is None:
+            # Refused before the egress entry is written, so a rejected
+            # request leaves no trace of a download that never started.
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Zaram only downloads models from its own list. "
+                    f"{wanted!r} is not on it."
+                ),
+            )
+
     try:
         log = get_gate().log
     except Exception:
@@ -191,7 +264,10 @@ async def pull_recommended_model():
     def _stream():
         try:
             for event in stream_pull(
-                budget_bytes=budget_bytes, adapter=OllamaAdapter(), log=log
+                budget_bytes=budget_bytes,
+                adapter=OllamaAdapter(),
+                log=log,
+                choice=chosen,
             ):
                 yield json.dumps(event) + "\n"
         except PullUnavailable as exc:

@@ -62,8 +62,13 @@ def stream_pull(
     adapter: Any,
     log: Any = None,
     source: str = "first-run",
+    choice: Optional[Any] = None,
 ) -> Iterator[Dict[str, Any]]:
-    """Pull the recommended model, yielding progress a screen can render.
+    """Pull a model, yielding progress a screen can render.
+
+    `choice` is a `Recommendation` the caller picked out of the manifest —
+    the model browser's row. Left out, the first-run offer is recomputed
+    here, which is the original behaviour and still the one first run uses.
 
     Events are plain: ``stage`` in a person's words, ``completed`` and
     ``total`` in bytes when the wire carries them, and exactly one terminal
@@ -76,7 +81,20 @@ def stream_pull(
     about it. Passed in rather than reached for, so this stays decidable
     without a process-wide gate.
     """
-    recommended = model_to_offer(budget_bytes)
+    # **The caller may choose, but only from the manifest.**
+    #
+    # This route refused a name in the body, and the reason was good: *"a
+    # name in a request body would be a second source of truth for the
+    # same question, and the first time they disagreed the user would be
+    # charged gigabytes for a model nobody offered."* The guarantee that
+    # protects, though, was never "no name in the body" — it was that the
+    # thing downloaded is the thing the user was quoted a price for.
+    #
+    # A `Recommendation` built by the caller *from the manifest* keeps
+    # that intact: the name and the size both come from the file, and the
+    # request only selects a row. A name that is not in the manifest never
+    # reaches here — the route refuses it with a 400.
+    recommended = choice if choice is not None else model_to_offer(budget_bytes)
 
     if log is not None:
         # Before the first byte. See the module docstring: a record written
