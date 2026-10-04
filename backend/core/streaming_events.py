@@ -437,6 +437,7 @@ class StreamEvent:
         image: str = "",
         app_url: str = "",
         grantable: bool = False,
+        grant_scope: str = "",
         step_id: str = "",
         plan_step: int | None = None,
     ) -> StreamEvent:
@@ -495,6 +496,13 @@ class StreamEvent:
                 # product that looks broken. The gate decides this, not the
                 # interface, because the rule lives with the verdict.
                 "grantable": grantable,
+                # Which of the open project's switches would cover this
+                # tool — `shell`, `drives`, `runs`, `writes` — so the
+                # permission card can offer *for this project* as a press
+                # instead of a sentence pointing at Settings. Empty when
+                # the server has no opinion, and the card then shows one
+                # rung fewer rather than a control that settles nothing.
+                "grant_scope": grant_scope,
                 # The mark every egress entry this call wrote carries
                 # (`core/egress/step_context.py`), so the working pane can
                 # ask the log what this call sent. Empty when unmarked.

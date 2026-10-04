@@ -173,6 +173,29 @@ class CodeTools:
             | set(terminal.TOOL_NAMES)
         )
 
+    def grant_scope(self, tool_name: str) -> str:
+        """Which of the project's grants would cover this tool.
+
+        One of ``shell``, ``drives``, ``runs``, ``writes`` — the four
+        columns on the project row — so the permission card can offer *for
+        this project* as a press rather than as a sentence pointing at
+        Settings.
+
+        **The machine-readable half of `how_to_permit`, and it is derived
+        from the same branch deliberately.** That method already decides
+        this and then renders it as prose; a second mapping would be a
+        second opinion about which switch covers which tool, and the first
+        time they disagreed the card would turn on a grant that does not
+        settle the call.
+        """
+        if tool_name in terminal.TOOL_NAMES:
+            return "shell"
+        if tool_name in driving.TOOL_NAMES:
+            return "drives"
+        if tool_name == RUN_COMMAND or tool_name in apps.TOOL_NAMES:
+            return "runs"
+        return "writes"
+
     def how_to_permit(self, tool_name: str) -> str:
         """Appended to a `CONFIRM` reason by the runtime, so the sentence a
         person reads names the control that would allow the call."""

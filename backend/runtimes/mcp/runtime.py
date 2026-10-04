@@ -155,6 +155,22 @@ class McpRuntime:
             if name.startswith(prefix)
         }
 
+    def _grant_scope(self, server_id: str, tool_name: str) -> str:
+        """Which project switch covers this tool, asked of the server.
+
+        Read off the built-in rather than guessed from the name here, for
+        the reason `grantable` is: this runtime has already been bitten
+        once by a second opinion about what a tool is — `open_in_browser`
+        read as read-only because its name contains `_browse`.
+        """
+        scope = getattr(self._builtin_server(server_id), "grant_scope", None)
+        if not callable(scope):
+            return ""
+        try:
+            return str(scope(tool_name) or "")
+        except Exception:  # noqa: BLE001 - a hint must never fail a verdict
+            return ""
+
     def register_builtin(self, config: ServerConfig, server: Any) -> None:
         """Attach a server Zaram ships, in process.
 
@@ -545,6 +561,14 @@ class McpRuntime:
                 "grantable": not looks_destructive(
                     tool_name, input_data.get("annotations")
                 ),
+                # Which of the open project's switches covers this tool, so
+                # the permission card can offer *for this project* as a
+                # press. Empty for a server that has no opinion — an
+                # attached MCP server is not inside anybody's project, and
+                # a card offering a project grant that settles nothing is
+                # the button-that-changes-nothing this file already
+                # refuses elsewhere.
+                "grant_scope": self._grant_scope(server_id, tool_name),
             }
 
         server = await self._connect(cfg)

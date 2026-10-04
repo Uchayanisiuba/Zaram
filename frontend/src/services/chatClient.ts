@@ -254,6 +254,10 @@ export type ChatEvent =
        *  has been granted — so the row must not offer a button that would
        *  change nothing. Decided by the gate, never by the interface. */
       grantable?: boolean;
+      /** Which of the open project’s switches would cover this tool.
+       *  `''` when the server has no opinion — an attached MCP server is
+       *  not inside anybody’s project. */
+      grantScope?: string;
       /** The commit a write made, or `''`. What `Revert` reverses. */
       commit: string;
       /** A screenshot `look_at_app` took — a file name in the project's
@@ -829,6 +833,7 @@ function parseLine(line: string): ChatEvent | null {
         image: typeof data.image === 'string' ? data.image : '',
         appUrl: typeof data.app_url === 'string' ? data.app_url : '',
         grantable: data.grantable === true,
+        grantScope: typeof data.grant_scope === 'string' ? data.grant_scope : '',
         stepId: typeof data.step_id === 'string' ? data.step_id : '',
         // Absent on the common case — most replies have no plan — so the key
         // is omitted rather than defaulted. `0` is a real step and must not be

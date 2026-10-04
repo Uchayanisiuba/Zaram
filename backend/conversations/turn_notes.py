@@ -170,6 +170,8 @@ class TurnNotes:
                 call[key] = _clip(data.get(wire)) if wire == "diff" else data[wire]
         if data.get("grantable"):
             call["grantable"] = True
+        if data.get("grant_scope"):
+            call["grantScope"] = data["grant_scope"]
         # `is not None` rather than truthy: step 0 is the first step of every
         # plan and is the one most calls belong to.
         if data.get("plan_step") is not None:

@@ -1903,6 +1903,7 @@ class ExecutionEngine:
                     # it. Read off the gate's answer rather than guessed from
                     # the tool's name a second time.
                     grantable=bool(result.get("grantable")),
+                    grant_scope=str(result.get("grant_scope") or ""),
                 )
                 yield from self._answer_without_the_tool(
                     original_prompt, call, reason, model, system_prompt, spoken,

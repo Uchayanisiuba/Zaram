@@ -163,6 +163,12 @@ export interface ChatToolCall {
   /** On a `confirm`: whether allowing this tool would settle it. See
    *  `ChatEvent`. */
   grantable?: boolean;
+  /** Which of the open project’s switches covers this tool — `shell`,
+   *  `drives`, `runs`, `writes` — so the permission card can offer *for
+   *  this project* as a press rather than a sentence pointing at
+   *  Settings. Absent when the server has no opinion, and the card then
+   *  shows one rung fewer rather than a control that settles nothing. */
+  grantScope?: string;
   /** **A plan step rather than a tool call** — a web search, a page read,
    *  a drawing, recall — rendered on the same row so there is one place the
    *  work lives. `label` is the past-tense phrase ("Searched the web"),
@@ -689,6 +695,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
               ...(event.image ? { image: event.image } : {}),
               ...(event.appUrl ? { appUrl: event.appUrl } : {}),
               ...(event.grantable ? { grantable: true } : {}),
+              ...(event.grantScope ? { grantScope: event.grantScope } : {}),
               ...(event.stepId ? { stepId: event.stepId } : {}),
               // `!= null` rather than truthy: step 0 is the first step of
               // every plan and is the one most calls belong to.

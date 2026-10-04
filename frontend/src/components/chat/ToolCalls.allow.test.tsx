@@ -45,11 +45,30 @@ beforeEach(() => {
 
 describe('allowing a held tool', () => {
   it('offers to allow the tool the gate is holding, for this conversation or always', () => {
+    // **The wording moved to the card on 4 October 2026, and the
+    // heading moved with it.** The row used to read "Allow <tool>" and
+    // compose its own sentence; the card leads with the *gate’s* reason,
+    // which already names what the tool does and what would permit it.
+    // A second phrasing here would be a second opinion about what was
+    // refused. The rungs and what they call are unchanged.
     render(<ToolCalls calls={[held()]} onAllowed={vi.fn()} />);
-    expect(screen.getByText(/Allow imap_send_email/)).toBeTruthy();
-    expect(screen.getByTestId('allow-tool-session').textContent).toBe('for this conversation');
-    expect(screen.getByTestId('allow-tool').textContent).toBe('always');
-    expect(screen.getByText(/stops asking about it/)).toBeTruthy();
+    expect(screen.getByTestId('permission-card')).toBeTruthy();
+    expect(screen.getByTestId('allow-tool-session').textContent).toBe(
+      'Allow for this conversation',
+    );
+    expect(screen.getByTestId('allow-tool').textContent).toBe('Always');
+    expect(screen.getByText(/stops Zaram asking/)).toBeTruthy();
+  });
+
+  it('offers a way to say no, which not pressing anything did not', () => {
+    // Not pressing is indistinguishable from not noticing. Deny sends
+    // nothing -- the gate already refused the call and the reply went on
+    // without it -- so it clears the question rather than answering it.
+    render(<ToolCalls calls={[held()]} onAllowed={vi.fn()} />);
+    fireEvent.click(screen.getByTestId('deny-tool'));
+    expect(screen.queryByTestId('permission-card')).toBeNull();
+    expect(grantTool).not.toHaveBeenCalled();
+    expect(allowToolForSession).not.toHaveBeenCalled();
   });
 
   it('the conversation rung allows for this session and asks again — 20 September 2026', async () => {
@@ -68,6 +87,16 @@ describe('allowing a held tool', () => {
   it('never offers to allow a deletion, because the gate would still ask', () => {
     render(<ToolCalls calls={[held({ tool: 'imap_delete_email', grantable: false })]} onAllowed={vi.fn()} />);
     expect(screen.queryByTestId('allow-tool')).toBeNull();
+    expect(screen.queryByTestId('allow-tool-session')).toBeNull();
+  });
+
+  it('but still shows the card, because the question was still asked', () => {
+    // The card has nothing to offer but Deny, and says why: Zaram asks
+    // about this one every time however much is allowed.
+    render(<ToolCalls calls={[held({ tool: 'imap_delete_email', grantable: false })]} onAllowed={vi.fn()} />);
+    expect(screen.getByTestId('permission-card')).toBeTruthy();
+    expect(screen.getByTestId('deny-tool')).toBeTruthy();
+    expect(screen.getByText(/every time/)).toBeTruthy();
   });
 
   it('offers nothing on a call that ran or was refused', () => {

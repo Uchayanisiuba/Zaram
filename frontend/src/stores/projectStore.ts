@@ -54,6 +54,13 @@ export interface Project {
    *  is not. A dev build pointed at a production database is where the
    *  difference bites. */
   drives: boolean;
+  /** Whether Zaram may run terminal commands in this project.
+   *
+   *  A capability rather than a hole, and separate from `runs` for the
+   *  reason `runners.py` exists: a named build command is bounded and a
+   *  shell is not. Off by default, and the maintainer's decision was that
+   *  granting it is per project rather than per call. */
+  shell: boolean;
   /** How many generated files are assigned to it. */
   artifacts: number;
   /** How many facts are scoped to it, or **-1 when the Spine could not say**.
@@ -119,6 +126,16 @@ interface ProjectStore {
   setRuns: (id: string, runs: boolean) => Promise<void>;
   /** Allow or withdraw driving the app in a browser. */
   setDrives: (id: string, drives: boolean) => Promise<void>;
+  /** Whether Zaram may run terminal commands in this project.
+   *
+   *  **The backend has had `set_shell` and a `shell` column since the
+   *  terminal landed, and nothing here could turn it on.** The other
+   *  three grants had setters; this one did not, so the one grant the
+   *  maintainer had explicitly decided should be per project — *"once
+   *  the user grants it permission the permission is per project"* —
+   *  was reachable only by editing the database. Found 4 October 2026
+   *  while building the permission card that needed it. */
+  setShell: (id: string, shell: boolean) => Promise<void>;
   /** The names of the commands `setRuns` would allow, detected from the
    *  repository — so the control can say what it grants. Empty on any failure;
    *  this is a label, never a gate. */
@@ -335,6 +352,24 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ drives }),
+      },
+      'That could not be changed.',
+    );
+    if (typeof res === 'string') {
+      set({ error: res });
+      return;
+    }
+    await get().load();
+  },
+
+  setShell: async (id, shell) => {
+    set({ error: null });
+    const res = await send(
+      `${API}/projects/${encodeURIComponent(id)}`,
+      {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ shell }),
       },
       'That could not be changed.',
     );
