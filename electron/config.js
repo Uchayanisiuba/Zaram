@@ -99,6 +99,12 @@ function createConfig(options) {
         '/ingest',
         '/knowledge',
         '/letterhead',
+        // The browser pane's new tab. Added 4 October 2026 because this
+        // guard refused the commit without it — which is the whole point
+        // of the list being explicit: in development Vite proxies it, so
+        // the only build where it would have broken is the one a stranger
+        // installs.
+        '/local-servers',
         '/manual',
         '/memory',
         '/models',

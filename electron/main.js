@@ -162,6 +162,31 @@ function detectZaramWorkspace(appPath) {
   return appPath || 'C:\\Zaram';
 }
 
+//: The presence frame pump, and the handle `cleanup` needs to stop it.
+//
+// **Module scope, because `cleanup` is not inside `bootstrap` — fixed 4
+// October 2026.** Both of these were declared *inside* `bootstrap()` and
+// `cleanup()` called `stopPresenceFrameTimer()` from the top level, so
+// every shutdown threw `stopPresenceFrameTimer is not defined` and
+// `cleanup` aborted on that line — before `backend.stop()`,
+// `shortcuts.unregisterAll()` and `ambient.destroy()`. The Python backend
+// was never stopped on quit, which is how an orphaned process ends up
+// holding port 8420 after the app has gone.
+//
+// Found by booting the real main process with its own `--user-data-dir`:
+// the smoke line said bootstrap reached the end, and the next line was an
+// uncaught exception. Nothing in the suite could see it, because the two
+// tests that run the real binary were failing for an unrelated reason —
+// the single-instance lock, held by the app the maintainer had open.
+let presenceFrameTimer = null;
+
+function stopPresenceFrameTimer() {
+  if (presenceFrameTimer) {
+    clearInterval(presenceFrameTimer);
+    presenceFrameTimer = null;
+  }
+}
+
 function cleanup() {
   if (quitting) return;
   quitting = true;
@@ -371,14 +396,6 @@ async function bootstrap() {
     }
 
     // --- Presence Runtime bridge (desktop runtime -> renderer IPC) ---
-  let presenceFrameTimer = null;
-
-  function stopPresenceFrameTimer() {
-    if (presenceFrameTimer) {
-      clearInterval(presenceFrameTimer)
-      presenceFrameTimer = null
-    }
-  }
 
   // `getMainWindow()`, not `_mainWindow` — which `WindowManager` has never had.
   //
