@@ -88,6 +88,114 @@ Also not started: the model browser's richer presentation (capability
 badges, a README panel, quantisation choices) from the LM Studio
 reference.
 
+#### 4 October, afternoon — the token work is finished; what is left
+
+**Done and committed this session**, each verified on screen rather than
+by test alone:
+
+* The context window is **decided per model, not typed once**. The stored
+  setting is an intent; the figure is resolved against *(this model, this
+  card)* at call time. Nothing to re-pick on a model switch or download.
+* The global number and the `fixed` policy were **removed the same day
+  they landed**, on the maintainer's question. One typed figure is right
+  for the model it was chosen for and wrong for every other, which is the
+  chore the whole change exists to end.
+* Reads through `read_model_window`, so **every runtime**, not Ollama
+  alone. The first version reported *"usually 4,096"* for the TabbyAPI
+  model that actually answers on this machine, holding 65,536.
+* **Overflow policy** — trim (default) or stop — and a **reply cap**
+  honoured on both runtimes. That completes LM Studio's four token
+  controls.
+* The model browser **says which of two things went wrong** instead of
+  blaming the backend for an empty list.
+* `CLAUDE.md` gained *"build for the set of models, never for one"*, at
+  the maintainer's instruction.
+
+**The model browser route is not broken.** Called over HTTP against a
+live backend it answers **200 with seven models**, correctly graded
+against this machine's 12 GB. The screenshot that started that hunt was
+the message, not the route: `fetchModelCatalogue` cannot throw and
+returned the same empty catalogue for a failed request and an empty
+list, so one sentence stood for two causes. Fixed. A session was spent
+on the wrong one, which is the cost of a diagnostic that names a cause
+it has not established.
+
+---
+
+### Open work, in the order it is worth doing
+
+**1. Voices — and the shape of this changed today.** It was recorded as
+*blocked on a dependency decision*. It is not, and the measurement says
+so: **Kokoro 0.9.4 is installed and speaking**, and `/voice/voices`
+returns `[]` because listing the pack means asking huggingface.co, which
+rule 7g forbids. `main.py` already carries that comment.
+
+So the fix is the pattern this repo already has: a **dated local voice
+manifest** in the bundle, exactly like `models.manifest.json`, naming
+Kokoro's 54 voices with their character so a person can choose. No
+network, no new dependency, no rule touched, and it is most of what was
+asked for — *"multiple voice options… with all the models and details
+about them."* Build that.
+
+What **is** still a dependency decision, and should stay separate: adding
+a second TTS engine. `CLAUDE.md` says Kokoro and only Kokoro and gives
+the reasoning — VRAM, licence, platform coverage — and names Chatterbox
+among the excluded. That is a deliberate decision to revisit on its own
+terms, not inside a voice picker.
+
+**2. The model browser's richer presentation.** Capability badges, a
+README panel, quantisation choices, from the LM Studio reference. The
+route and the grading are done; this is the screen.
+
+**3. Image generation: release and load, legibly.** Asked for directly —
+Zaram should release the chat model's hold on the card, load the image
+model, and switch back when the questions stop being about pictures,
+*"finding creative ways to engage the user through the switches."* The
+pieces exist (`image_model` in settings, `/providers/release`); the
+sequencing and the telling do not.
+
+**4. Getting the most out of the local model.** The capability list sent
+with the Three.js request — voxel scene, endless runner, Yahoo Finance,
+Excel, GIMP/SVG. Three.js previewing is done and verified; the rest is
+untested against `qwen3.8`.
+
+**5. Playback and review on the HTML surface.**
+
+**6. GitHub and email, end to end.** Sign in to GitHub and push to the
+user's own account; draft and reply to email; an automation that runs at
+an interval and carries something like a job or grant application
+through. Draft-and-hold, never send unprompted — rule 6. Needs a
+**repo-push egress data class** (7) before any of it ships.
+
+**8. The Agents and Automation question, still unanswered.**
+`RunsOnItsOwnSection` exists and lives in Settings. The maintainer's
+doubt — *"I don't know if 'runs on its own' should be in settings"* — is
+a real one and `CLAUDE.md` answers half of it: agents get no menu item,
+because an icon whose only job is to prompt setup is an advertisement in
+the navigation. That argues for staying in Settings. It does **not**
+answer where a *running* automation reports from, which is Activity's
+question and is not built.
+
+**9. A BROWSE switch in Settings.** `POST /egress/browse` exists and the
+pane uses it; nothing in Settings turns it off.
+
+**10. A terminal surface.** The permission card for it shipped; there is
+no component that shows a terminal.
+
+**11. Tabby: manifest entries and model sizing.** The manifest knows
+Ollama models only, so a TabbyAPI model is invisible to the browser and
+unsized by the fit gate — and it is the model that answers here.
+
+**12. Citations as history.**
+
+**13. The broader design pass.** One measured typography fix landed; the
+*"sophisticated, premium, thought-through"* brief is otherwise open.
+
+**14. Cut alpha.4.** Last tag is `v0.1.0-alpha.3`.
+
+**Standing blocker, unchanged and above all of these:** a stranger still
+cannot install this. Packaging is the milestone, not more capability.
+
 #### Done
 
 * **A reopened conversation keeps its plan, its tools and its files.**
