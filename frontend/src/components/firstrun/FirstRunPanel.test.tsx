@@ -293,3 +293,32 @@ describe('the first-run screen', () => {
     expect(offerButton('something_later')).toBeDisabled();
   });
 });
+
+describe('choosing a different model', () => {
+  /** The single offer is the first-run path and stays first — `CLAUDE.md`
+   *  says start with the smallest capable model and never block on a
+   *  download, and a catalogue in front of somebody who has not sent a
+   *  message yet is a decision they have no basis to make.
+   *
+   *  But one offer with no alternative reads as a product that has decided
+   *  for you. One press away, never in the way. */
+  it('offers the catalogue behind the suggestion', async () => {
+    render(<FirstRunPanel report={engineWithoutModel} onExplore={() => {}} onConnected={() => {}} />);
+    offerButton('pull_model').click();
+    expect(await screen.findByTestId('toggle-model-browser')).toBeInTheDocument();
+  });
+
+  it('shows the single offer first, not the list', async () => {
+    render(<FirstRunPanel report={engineWithoutModel} onExplore={() => {}} onConnected={() => {}} />);
+    offerButton('pull_model').click();
+    expect(await screen.findByTestId('model-pull')).toBeInTheDocument();
+    expect(screen.queryByTestId('model-browser')).toBeNull();
+  });
+
+  it('and the row still has to be opened before anything downloads', () => {
+    // A gigabyte-scale fetch beginning on a curious click is the one thing
+    // a metered connection cannot forgive.
+    render(<FirstRunPanel report={engineWithoutModel} onExplore={() => {}} onConnected={() => {}} />);
+    expect(screen.queryByTestId('toggle-model-browser')).toBeNull();
+  });
+});

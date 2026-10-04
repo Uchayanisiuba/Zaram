@@ -42,6 +42,7 @@ import { useState } from 'react';
 
 import CloudKeyForm from './CloudKeyForm';
 import ModelPull from './ModelPull';
+import ModelBrowser from '@/components/models/ModelBrowser';
 import type { ReadinessOffer, ReadinessReport } from '@/services/readinessClient';
 
 interface FirstRunPanelProps {
@@ -88,6 +89,9 @@ function canBeCarriedOut(kind: string): boolean {
 
 export default function FirstRunPanel({ report, onExplore, onConnected }: FirstRunPanelProps) {
   const [openOffer, setOpenOffer] = useState<string | null>(null);
+  // Whether the catalogue is showing instead of the single offer. Starts
+  // closed: the offer is the first-run path and the list is the escape.
+  const [browsing, setBrowsing] = useState(false);
   return (
     <section
       aria-label="Setting Zaram up"
@@ -138,7 +142,39 @@ export default function FirstRunPanel({ report, onExplore, onConnected }: FirstR
                         second press — a gigabyte-scale fetch beginning on a
                         curious click is the one thing a metered connection
                         cannot forgive. */}
-                    <ModelPull onFinished={onConnected} />
+                    {browsing ? (
+                      <div style={{ maxHeight: 360 }}>
+                        <ModelBrowser onInstalled={onConnected} />
+                      </div>
+                    ) : (
+                      <ModelPull onFinished={onConnected} />
+                    )}
+                    {/* **One press to accept, one more to choose.**
+
+                        The offer above is the whole first-run design and it
+                        stays first: `CLAUDE.md` says to start with the
+                        smallest capable model and never to block on a
+                        download, and a catalogue opened in front of somebody
+                        who has not sent a message yet is a decision they have
+                        no basis to make.
+
+                        But a single offer with no alternative reads as a
+                        product that has decided for you, and the maintainer
+                        asked for the choice — *"users are able to click on the
+                        download models button and select relevant models for
+                        their PC"*. So the list is one press away and never in
+                        the way. */}
+                    <button
+                      type="button"
+                      data-testid="toggle-model-browser"
+                      onClick={() => setBrowsing((on) => !on)}
+                      className="mt-2 text-xs underline-offset-2 hover:underline"
+                      style={{ color: 'var(--color-text-muted)' }}
+                    >
+                      {browsing
+                        ? 'Back to the suggested one'
+                        : 'Or choose a different model'}
+                    </button>
                   </div>
                 )}
               </li>
