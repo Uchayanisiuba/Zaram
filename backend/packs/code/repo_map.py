@@ -256,7 +256,11 @@ def repo_map(root: Path, question: str, *, budget_tokens: int) -> str:
 
     ranked = _rank(table, question)
     lines: List[str] = []
-    spent = 0
+    # **The header is charged first.** It is fixed and never trimmed — it
+    # is the line that makes "this project" resolve — so the files are
+    # what gives way when the path is long.
+    header = _header(root)
+    spent = estimate_tokens("\n".join(header))
     shown = 0
     for entry in ranked:
         block = [entry.path]
@@ -273,7 +277,31 @@ def repo_map(root: Path, question: str, *, budget_tokens: int) -> str:
         shown += 1
 
     dropped = len(table) - shown
-    header = [
+    footer = []
+    if dropped > 0:
+        footer = ["", f"({dropped} more files not shown; `list_files` or `search_code` will find them)"]
+    return "\n".join(header + lines + footer) + "\n"
+
+
+
+def _header(root: Path) -> List[str]:
+    """The lines above the file list, which the budget pays for.
+
+    **Built before the files rather than after them, and charged
+    against the same budget — fixed 4 October 2026.** It used to be
+    assembled at the end, so its cost was never counted and the map
+    could exceed `budget_tokens` by however long the project's path
+    happened to be. A budget that excludes its own fixed overhead is
+    not a budget, and the overhead here is unbounded: the root is an
+    absolute path, and a deeply nested one costs more than several
+    files.
+
+    Caught by `test_the_budget_trims_and_says_so`, which asks for 200
+    tokens and got 231 — under pytest the root is a long temporary
+    path, which is the same shape as a real project nested a few
+    folders deep. The header is never trimmed; the files are.
+    """
+    return [
         "",
         "## The open project",
         "",
@@ -316,7 +344,3 @@ def repo_map(root: Path, question: str, *, budget_tokens: int) -> str:
         "gap from memory.",
         "",
     ]
-    footer = []
-    if dropped > 0:
-        footer = ["", f"({dropped} more files not shown; `list_files` or `search_code` will find them)"]
-    return "\n".join(header + lines + footer) + "\n"

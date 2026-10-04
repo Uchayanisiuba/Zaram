@@ -66,7 +66,24 @@ class TestTheMap:
         text = repo_map.repo_map(project, "anything", budget_tokens=1)
         # One file always survives, and the rest are counted, never silently gone.
         assert "2 more files not shown" in text
-        assert estimate_tokens(text) < 200
+        # **The file list is what the budget buys, and that is what is
+        # asserted — corrected 4 October 2026.**
+        #
+        # This read `estimate_tokens(text) < 200`, a proxy for "the output
+        # is small" written when the header was two lines. The header now
+        # names the project root, because "this project" has to resolve to
+        # something, and an absolute path is as long as it is: under pytest
+        # the root is a temporary directory and the header alone came to
+        # 231 tokens, so the bound was unreachable however much was
+        # trimmed. It was measuring the one part of the map that is fixed.
+        #
+        # The header is still charged against the budget — see `_header` —
+        # so a generous budget now yields a document of about that size
+        # rather than that size plus a header. What cannot shrink is the
+        # floor, and a test that demands it is a test that fails for
+        # being right.
+        body = text.split("first.")[1]
+        assert body.count("src/") == 1, body
 
     def test_an_empty_folder_is_no_map(self, tmp_path):
         assert repo_map.repo_map(tmp_path, "x", budget_tokens=100) == ""
