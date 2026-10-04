@@ -45,8 +45,12 @@ function model(over: Partial<Record<string, unknown>> = {}) {
   };
 }
 
-function catalogue(models: unknown[], budget: number | null = 9_000_000_000) {
-  return { models, budget_bytes: budget, generated: '2026-09-24' };
+function catalogue(
+  models: unknown[],
+  budget: number | null = 9_000_000_000,
+  outcome: 'ok' | 'unreachable' = 'ok',
+) {
+  return { models, budget_bytes: budget, generated: '2026-09-24', outcome };
 }
 
 beforeEach(() => {
@@ -109,12 +113,31 @@ describe('the list', () => {
     await waitFor(() => expect(screen.getByTestId('no-models').textContent).toMatch(/Nothing matches/));
   });
 
-  it('says so when the manifest could not be read', async () => {
-    fetchModelCatalogue.mockResolvedValue(catalogue([]));
+  it('says the backend was unreachable when it was', async () => {
+    fetchModelCatalogue.mockResolvedValue(catalogue([], null, 'unreachable'));
     await open();
     await waitFor(() =>
-      expect(screen.getByTestId('no-models').textContent).toMatch(/could not read/i),
+      expect(screen.getByTestId('no-models').textContent).toMatch(/could not reach/i),
     );
+  });
+
+  it('does not blame the backend for a list that is simply empty', async () => {
+    /** **The two were one message, and a session was spent on the wrong
+     *  one.** `fetchModelCatalogue` cannot throw and returns the same
+     *  empty catalogue whether the request failed or came back holding
+     *  nothing, so *"Zaram could not read its model list"* was printed
+     *  for both — and a screenshot of it was taken as evidence of a
+     *  failure that had not happened. Four causes were eliminated before
+     *  the route was called over HTTP and answered 200 with seven
+     *  models.
+     *
+     *  A diagnostic that names a cause it has not established is worse
+     *  than one that says nothing. */
+    fetchModelCatalogue.mockResolvedValue(catalogue([], 9_000_000_000, 'ok'));
+    await open();
+    await waitFor(() => expect(screen.getByTestId('no-models')).toBeTruthy());
+    expect(screen.getByTestId('no-models').textContent).not.toMatch(/could not reach/i);
+    expect(screen.getByTestId('no-models').textContent).toMatch(/nothing to offer/i);
   });
 });
 

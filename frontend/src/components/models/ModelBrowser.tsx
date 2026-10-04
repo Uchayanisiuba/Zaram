@@ -58,9 +58,11 @@ export default function ModelBrowser({ onInstalled }: Props) {
   const [query, setQuery] = useState('');
   const [pulling, setPulling] = useState<Pulling>(null);
   const [failure, setFailure] = useState('');
+  const [reached, setReached] = useState(true);
 
   const load = useCallback(async () => {
     const catalogue = await fetchModelCatalogue();
+    setReached(catalogue.outcome === 'ok');
     setModels(catalogue.models);
     setBudget(catalogue.budget_bytes);
     setGenerated(catalogue.generated);
@@ -282,9 +284,11 @@ export default function ModelBrowser({ onInstalled }: Props) {
           className="py-8 text-center text-sm"
           style={{ color: 'var(--color-text-muted)' }}
         >
-          {models.length === 0
-            ? 'Zaram could not read its model list. Everything already installed still works.'
-            : `Nothing matches “${query}”.`}
+          {models.length > 0
+            ? `Nothing matches “${query}”.`
+            : reached
+              ? 'Zaram’s list has nothing to offer for this machine. Everything already installed still works.'
+              : 'Zaram could not reach its own backend, so there is no list to show. Everything already installed still works.'}
         </p>
       )}
 

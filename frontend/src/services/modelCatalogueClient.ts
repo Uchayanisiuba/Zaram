@@ -33,6 +33,21 @@ export interface CatalogueModel {
 
 export interface ModelCatalogue {
   models: CatalogueModel[];
+  /** **Why the list is empty, when it is.** `'unreachable'` means the
+   *  request did not come back with a catalogue; `'empty'` means it did
+   *  and held nothing.
+   *
+   *  Separated 4 October 2026 after a whole session was spent on the
+   *  wrong one. The browser said *"Zaram could not read its model
+   *  list"* for both cases, because this function cannot throw and
+   *  returns the same empty catalogue either way — so a screenshot of
+   *  that message was evidence for a failure that had not happened. Four
+   *  causes were eliminated by measurement before the route was finally
+   *  called over HTTP and answered 200 with seven models.
+   *
+   *  A diagnostic that names a cause it did not establish is worse than
+   *  one that says nothing, and this one cost more than the feature. */
+  outcome: 'ok' | 'unreachable';
   /** Room for a chat model beside the embedder, or `null` when unmeasured.
    *  Never 0 — that would read as "no room" on a machine nobody measured. */
   budget_bytes: number | null;
@@ -44,17 +59,27 @@ export interface ModelCatalogue {
  *  **Never throws.** A browser that failed to open because the backend was
  *  slow is worse than one that opens empty and says so. */
 export async function fetchModelCatalogue(): Promise<ModelCatalogue> {
+  const unreachable: ModelCatalogue = {
+    models: [],
+    budget_bytes: null,
+    generated: '',
+    outcome: 'unreachable',
+  };
   try {
     const response = await fetch(`${API_BASE}/providers/recommendations`);
-    if (!response.ok) return { models: [], budget_bytes: null, generated: '' };
+    if (!response.ok) return unreachable;
     const body = await response.json();
     return {
       models: Array.isArray(body.models) ? body.models : [],
       budget_bytes: typeof body.budget_bytes === 'number' ? body.budget_bytes : null,
       generated: String(body.generated ?? ''),
+      // Reached and answered. An empty `models` here is the manifest
+      // having nothing to offer, which is a different fact and gets a
+      // different sentence.
+      outcome: 'ok',
     };
   } catch {
-    return { models: [], budget_bytes: null, generated: '' };
+    return unreachable;
   }
 }
 
