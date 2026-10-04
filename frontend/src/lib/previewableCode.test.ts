@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
+  appCsp,
   extractPreviewable,
   filenameFor,
   savePreviewable,
@@ -267,5 +268,89 @@ describe('saving a page written in a reply', () => {
       URL.createObjectURL = originalCreate;
       URL.revokeObjectURL = originalRevoke;
     }
+  });
+});
+
+describe('letting a preview load a library', () => {
+  /**
+   * Asked for 4 October 2026: Zaram should be able to preview Three.js.
+   * A page saying `<script src="https://cdn.jsdelivr.net/npm/three">`
+   * rendered as a black rectangle, because `default-src 'none'` refuses
+   * every remote sub-resource — correctly, since such a request carries
+   * the user's IP and `EgressGate` cannot see it.
+   *
+   * The fix is not a looser policy. It is rule 5: default deny, then an
+   * explicit per-item decision, per host and per preview.
+   */
+  it('still refuses everything by default', () => {
+    // The property that must not drift. Called with nothing, this is the
+    // policy every preview starts under.
+    expect(appCsp()).toBe(APP_CSP);
+    expect(appCsp()).toContain("default-src 'none'");
+    expect(appCsp()).not.toContain('https://');
+  });
+
+  it('names an allowed host in script-src', () => {
+    const csp = appCsp(['cdn.jsdelivr.net']);
+    expect(csp).toMatch(/script-src[^;]*https:\/\/cdn\.jsdelivr\.net/);
+  });
+
+  it('lets it supply styles, fonts and images too', () => {
+    // A library that loads is no use if its stylesheet does not. These are
+    // the same grant: the person allowed that host to supply part of the
+    // page.
+    const csp = appCsp(['cdn.jsdelivr.net']);
+    for (const directive of [/style-src[^;]*jsdelivr/, /font-src[^;]*jsdelivr/, /img-src[^;]*jsdelivr/]) {
+      expect(csp).toMatch(directive);
+    }
+  });
+
+  it('does not let the page talk back', () => {
+    // `connect-src` falls to `default-src 'none'` and stays there. A
+    // library fetched by `<script src>` is a thing the person agreed to
+    // load; `fetch()` to the same host is the page talking, which is a
+    // different act and was not what was allowed.
+    const csp = appCsp(['cdn.jsdelivr.net']);
+    expect(csp).not.toContain('connect-src');
+    expect(csp).toContain("default-src 'none'");
+  });
+
+  it('refuses a host that is not a hostname', () => {
+    // The host arrives from a CSP violation report, which is text the
+    // *page* influenced. A page that could write `*` into the policy
+    // would have talked its way out of the sandbox.
+    // Asserted as *the policy is unchanged*, not as "the string is
+    // absent". `data:` is already legitimately in `img-src` and
+    // `font-src`, so absence is the wrong property — it fails on the one
+    // input that matters and passes for the wrong reason on the rest.
+    for (const nasty of ['*', "' 'unsafe-inline", 'foo.com; script-src *', 'data:', '', '  ']) {
+      expect(appCsp([nasty])).toBe(APP_CSP);
+    }
+  });
+
+  it('refuses a bare word, which cannot be a CDN', () => {
+    expect(appCsp(['localhost'])).toBe(APP_CSP);
+  });
+
+  it('is bounded, so a page cannot grow the policy without limit', () => {
+    const many = Array.from({ length: 40 }, (_, i) => `h${i}.example.com`);
+    const csp = appCsp(many);
+    expect((csp.match(/https:\/\//g) ?? []).length).toBeLessThanOrEqual(8 * 4);
+  });
+
+  it('a document never gets the allowance, however it is called', () => {
+    // An invoice has no reason to reach anywhere, and granting it one
+    // would be surface bought for nothing.
+    const wrapped = wrapForPreview('<p>hi</p>', 'document', ['cdn.jsdelivr.net']);
+    expect(wrapped).not.toContain('jsdelivr');
+    expect(wrapped).toContain(DOCUMENT_CSP);
+  });
+
+  it('an app preview with no allowance is unchanged', () => {
+    expect(wrapForPreview('<p>hi</p>', 'app')).toContain(APP_CSP);
+  });
+
+  it('an app preview with one carries it', () => {
+    expect(wrapForPreview('<p>hi</p>', 'app', ['cdn.jsdelivr.net'])).toContain('jsdelivr');
   });
 });

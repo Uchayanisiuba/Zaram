@@ -75,10 +75,51 @@ export const DOCUMENT_CSP =
  *  and what the refusal produced was a UI that rendered perfectly and did
  *  nothing when you pressed equals. Same error as `sandbox=""`: grading by the
  *  name of the capability instead of by its consequence here. */
-export const APP_CSP =
-  "<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; " +
-  "script-src 'unsafe-inline' 'unsafe-eval'; style-src 'unsafe-inline'; " +
-  "img-src data:; font-src data:;\">";
+export const APP_CSP = appCsp();
+
+/** The same policy, optionally letting named hosts in.
+ *
+ * **Nothing is allowed by default, and that has not changed.** Called
+ * with no hosts this is byte-for-byte the policy above, which is the one
+ * every preview starts under.
+ *
+ * **Why hosts can be named at all — 4 October 2026.** A page that says
+ * `<script src="https://cdn.jsdelivr.net/npm/three">` renders as a black
+ * rectangle, and the maintainer asked for Three.js previews directly.
+ * The refusal was not a bug: a remote sub-resource is a request carrying
+ * the user's IP and the moment they opened the page, and `EgressGate`
+ * cannot see it because that intercepts what the *backend* sends.
+ *
+ * So the fix is not to open the policy — it is to ask. The frame already
+ * reports what it was refused (`ERROR_REPORTER`), the panel already names
+ * the host, and rule 5 says default deny with an explicit per-item
+ * decision. The person presses allow for that host, the preview reloads
+ * under a policy naming it, and the egress is recorded. One host, one
+ * preview, one decision — not a standing allow-list somebody has to
+ * audit later.
+ *
+ * `connect-src` is deliberately **not** widened. A library fetched by
+ * `<script src>` is a thing the person agreed to load; `fetch()` from
+ * inside the page to the same host is the page talking back, which is a
+ * different act and was not what was allowed.
+ */
+export function appCsp(hosts: readonly string[] = []): string {
+  // Normalised and bounded. A host arrives from a CSP violation report,
+  // which is text the *page* influenced, so it is matched against a
+  // hostname shape rather than pasted into a policy. A page that could
+  // write `*` into this would have talked its way out of the sandbox.
+  const named = [...new Set(hosts)]
+    .filter((h) => /^[a-z0-9.-]+$/i.test(h) && h.includes('.'))
+    .slice(0, 8)
+    .map((h) => `https://${h}`);
+  const extra = named.length ? ' ' + named.join(' ') : '';
+  return (
+    '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; ' +
+    `script-src \'unsafe-inline\' \'unsafe-eval\'${extra}; ` +
+    `style-src \'unsafe-inline\'${extra}; ` +
+    `img-src data:${extra}; font-src data:${extra};">`
+  );
+}
 
 /** Injected ahead of the page so a failure is reported rather than silent.
  *
@@ -230,7 +271,15 @@ export const FRAME_STYLE = `<style>
  *  own inline script, still with no way to reach the network. Two policies
  *  rather than one permissive policy for both, because an invoice gaining the
  *  ability to execute would be surface bought for nothing. */
-export function wrapForPreview(source: string, mode: 'document' | 'app' = 'document'): string {
+export function wrapForPreview(
+  source: string,
+  mode: 'document' | 'app' = 'document',
+  /** Hosts the person has allowed for *this* preview. Empty by default;
+   *  see `appCsp`. A document never gets these — an invoice has no
+   *  reason to reach anywhere, and granting it one would be surface
+   *  bought for nothing. */
+  allowedHosts: readonly string[] = [],
+): string {
   if (mode !== 'app') return DOCUMENT_CSP + FRAME_STYLE + source;
   // Three things ahead of the page, and the order of all three is load-bearing.
   // The reporter is first so it is listening while everything after it runs —
@@ -238,7 +287,7 @@ export function wrapForPreview(source: string, mode: 'document' | 'app' = 'docum
   // ones thrown during setup, and it would not be able to report a shim that
   // failed to install. The shim is next because it has to be in place before
   // the page's *first* line: the storage read that broke Tetris was line one.
-  return APP_CSP + FRAME_STYLE + ERROR_REPORTER + SEALED_STORAGE + source;
+  return appCsp(allowedHosts) + FRAME_STYLE + ERROR_REPORTER + SEALED_STORAGE + source;
 }
 
 /** The languages worth offering a preview for, and the label each gets. */

@@ -41,6 +41,7 @@ import { createPortal } from 'react-dom';
 import { motion } from 'framer-motion';
 import { X, Info, Download } from 'lucide-react';
 import { useLayoutStore } from '@/stores/layoutStore';
+import { recordBrowsed } from '@/services/egressClient';
 import { useChatModeStore } from '@/stores/chatModeStore';
 import { useViewport } from '@/hooks/useViewport';
 import {
@@ -110,10 +111,15 @@ export default function CodePreviewPanel({
   const frameRef = useRef<HTMLIFrameElement | null>(null);
   const [scriptError, setScriptError] = useState<string | null>(null);
   const [reachedFor, setReachedFor] = useState<string[]>([]);
+  // Hosts the person has allowed, for **this preview only**. Not
+  // persisted and not a standing list: a page that wanted three.js once
+  // is not a reason to let every future page reach that CDN silently.
+  const [allowedHosts, setAllowedHosts] = useState<string[]>([]);
 
   useEffect(() => {
     setScriptError(null);
     setReachedFor([]);
+    setAllowedHosts([]);
     const onMessage = (event: MessageEvent) => {
       if (!frameRef.current || event.source !== frameRef.current.contentWindow) return;
       const data = event.data as {
@@ -139,6 +145,28 @@ export default function CodePreviewPanel({
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
   }, [block.code]);
+
+  /** Hosts refused that the person has not yet decided about. */
+  const waiting = reachedFor.filter((host) => !allowedHosts.includes(host));
+
+  /** Let this preview load from one host, and record that it did.
+   *
+   *  The entry is written **before** the reload, for the reason
+   *  `stream_pull` writes its own before the first byte: a record
+   *  written afterwards is a record of the fetches that succeeded.
+   *  Rule 3 is about what leaves, not about what came back. */
+  async function allowHost(host: string) {
+    try {
+      await recordBrowsed(host, `/ (preview: ${block.label})`);
+    } catch {
+      // A log that will not write must not stop the person seeing
+      // their page; the failure is visible in Activity as an absence,
+      // which is the honest outcome of a backend that is not there.
+    }
+    setAllowedHosts((current) =>
+      current.includes(host) ? current : [...current, host],
+    );
+  }
 
   // Said in the user's terms rather than the browser's. "Blocked:
   // style-src-elem blocked https://fonts.googleapis.com/css2?family=…" is a
@@ -243,7 +271,12 @@ export default function CodePreviewPanel({
           <iframe
             ref={frameRef}
             title={`${block.label} preview`}
-            srcDoc={wrapForPreview(block.code, 'app')}
+            // Keyed on the allowance so the frame is rebuilt rather than
+            // merely re-attributed: a CSP in a `<meta>` is read when the
+            // document parses, and swapping `srcDoc` without a new element
+            // leaves the old policy in force.
+            key={allowedHosts.join(',')}
+            srcDoc={wrapForPreview(block.code, 'app', allowedHosts)}
             // `allow-scripts` and nothing else. Adding `allow-same-origin`
             // beside it would not widen the sandbox, it would dissolve it —
             // the frame could reach in and remove this very attribute. See
@@ -266,9 +299,47 @@ export default function CodePreviewPanel({
           }}
         >
           <Info size={12} className="mt-[3px] shrink-0" />
-          <span className="text-xs leading-snug">
-            {status || "Runs here only — no network, and no access to your files or Zaram's data."}
-          </span>
+          <div className="min-w-0 flex-1">
+            <span className="text-xs leading-snug">
+              {status || "Runs here only — no network, and no access to your files or Zaram's data."}
+            </span>
+            {/* **The refusal becomes an offer — 4 October 2026.**
+
+                A page saying `<script src="https://cdn.jsdelivr.net/npm/
+                three">` renders as a black rectangle, and the line above
+                explained why without doing anything about it. The
+                maintainer asked for Three.js previews, and the shape the
+                product already has for this is rule 5: default deny, then
+                an explicit per-item decision.
+
+                Per host and per preview. Allowing jsdelivr for this page
+                is not a standing permission for every future one — a list
+                nobody audits is how this would quietly become the open
+                policy it replaced. */}
+            {waiting.length > 0 && (
+              <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                {waiting.map((host) => (
+                  <button
+                    key={host}
+                    type="button"
+                    data-testid={`allow-host-${host}`}
+                    onClick={() => void allowHost(host)}
+                    className="rounded-md px-2 py-1 text-[11px]"
+                    style={{
+                      border: '1px solid var(--color-cyan)',
+                      color: 'var(--color-cyan-light)',
+                    }}
+                  >
+                    Load from {host}
+                  </button>
+                ))}
+                <span className="text-[11px]">
+                  This asks {waiting.length === 1 ? 'that host' : 'those hosts'} for part of
+                  the page, and is recorded in Activity.
+                </span>
+              </div>
+            )}
+          </div>
         </div>
       </motion.div>
     </motion.div>,

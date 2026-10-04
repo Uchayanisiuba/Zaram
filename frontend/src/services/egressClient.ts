@@ -326,3 +326,33 @@ export async function applyRetention(days: number): Promise<RetentionResult> {
     body: JSON.stringify({ days }),
   });
 }
+
+/**
+ * Record that something was fetched from a host on the user's behalf.
+ *
+ * **For requests `EgressGate` cannot see.** The gate intercepts what the
+ * *backend* sends; a preview frame and the browser pane fetch directly
+ * from the renderer and from Chromium, so nothing they do passes through
+ * Python at all. Rule 3 — *every byte that leaves is logged* — stops being
+ * satisfied by the backend alone the moment the product renders somebody
+ * else's page. `CLAUDE.md` names this hole already, for a VRM's `uri`
+ * fetches.
+ *
+ * It records; it does not decide. Whether the fetch may happen was settled
+ * before this was called.
+ *
+ * **Never throws.** A log that will not write must not stop the person
+ * seeing their page — the failure shows up in Activity as an absence,
+ * which is the honest outcome of a backend that is not there.
+ */
+export async function recordBrowsed(host: string, path = '/'): Promise<void> {
+  try {
+    await fetch(`${API_BASE}/egress/browse`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ host, path }),
+    });
+  } catch {
+    /* see the note above */
+  }
+}
