@@ -431,6 +431,94 @@ unsized by the fit gate — and it is the model that answers here.
 **Standing blocker, unchanged and above all of these:** a stranger still
 cannot install this. Packaging is the milestone, not more capability.
 
+#### 4 October, late — local servers start themselves, and a hostname was costing two seconds a call
+
+**Asked for:** *"a permanent fix so Tabby always launches when installed … and
+confirm we have access to Ollama and Tabby in the section of Settings where users
+download LLMs."*
+
+**Built, and each part seen working rather than only tested:**
+
+* `providers/model_servers.py` — finds, probes, starts. Ollama and TabbyAPI are
+  table entries; a third is one class. Tabby's checkout is found by what it
+  *contains* (`main.py`, `endpoints/`, a config), and its Python environment beside
+  it, with no configuration. Seen: the real Tabby, stopped, was brought back by
+  Zaram's launcher in 17 s and was still serving after the launching process
+  exited.
+* **Boot order.** Ollama is brought up *before* the kernel boots, Tabby after,
+  without blocking it; once Tabby answers, Zaram rescans so its Qwen appears.
+  Seen on the real app: both servers stopped, backend killed, Electron respawned
+  it, and Zaram started Ollama (8 s) and then Tabby two seconds after the kernel
+  reported ready.
+* **Settings → Get a model** now shows each server: installed / running / *and
+  whether Zaram holds its models* — read from Zaram's own catalogue, because a
+  server saying it has a model does not mean Zaram can use it. Start button,
+  per-server *Starts with Zaram* switch, and a location field (validated when
+  given) for installs Zaram does not find.
+* `/providers/model-servers` (read), `.../{id}/start`, `PUT .../{id}`.
+
+**The finding that mattered more than the feature.** Testing this exposed a
+3-minute boot that was **not** Ollama being down. The memory embedder reached
+Ollama as `localhost`: **2,105 ms per embedding against 73 ms through
+`127.0.0.1`** (measured on the live server). Ollama's own log showed one request
+every ~2 s, each taking ~60 ms server-side, so nothing on either end said it was
+slow. It was the boot stall, and it was also two extra seconds on every chat turn
+that recalls from memory. Fixed in three defaults; a regression test fails at
+~2,000 ms per call if it returns. Recorded under *Technical decisions* in
+`CLAUDE.md`. **Worth a measurement on the next session's first minute:** nothing
+else in the product has been timed against this, and recall latency is the
+product's headline claim.
+
+**Boot is now ~17 s, from ~3 min, and speech no longer sits in front of the first
+screen.** Stack-sampling a scratch boot (`faulthandler.dump_traceback`) put the
+remaining wait in **`voice/providers/kokoro.py` `initialize`**: `import kokoro` --
+torch, spaCy, ten to thirty seconds -- ran synchronously *on the event loop* inside
+`kernel.boot()`, for everyone with the voice extra installed, used or not. The
+maintainer's call, *"perhaps we should delay Kokoro"*, was taken as: warm it in the
+background after boot. Built and **measured on a scratch backend**:
+
+| | before | after |
+|---|---|---|
+| first screen (kernel ready) | after the import | **1.2 s** (speech reads `initializing`) |
+| `/health` during start-up | unanswered while the import ran | answers throughout |
+| an utterance asked for at 1.2 s | n/a (boot had not finished) | waits, then speaks at ~28 s |
+| a warm utterance | -- | 0.3-0.5 s |
+
+Three things came with it, and the third was found by measuring the first two:
+
+* `initializing` is a **third state**. `systemStore.ts` turned "not available" into
+  `'not-installed'`, so a voice that was merely loading would have told its owner it
+  was not installed; four places in Settings read it the same way. Fixed in all of
+  them, with a mutation-tested test.
+* An utterance that arrives while it loads **waits** (up to 90 s) instead of failing
+  as "unavailable" -- but only while a start-up is actually in progress, so a provider
+  nobody initialised does not hang.
+* **The first utterance of every session froze the whole backend.** With the import
+  off the loop, speaking early showed a `/health` that went unanswered for ~25 s:
+  `generate_audio` called `_ensure_pipeline` (~300 MB of weights) directly from a
+  coroutine. Pre-existing -- it has always done this -- and fixed the same way, behind
+  a lock so two first utterances build one pipeline. After the fix no health poll
+  went unanswered.
+
+*Not done:* the **weights** are still loaded at the first utterance, not at boot. Warming
+them too would make that first utterance ~0.5 s but costs ~1-2 GB of RAM for people who
+never speak; `CLAUDE.md` says speech follows the avatar renderer, so the right trigger is
+*the avatar being chosen*, which the backend does not know. A frontend call on choosing the
+avatar is the shape of it.
+
+**Not done, and said plainly:**
+
+* *Stopping.* Zaram never stops a server it started — deliberate, argued in the
+  module and in `CLAUDE.md` — so there is no Stop button, only *Release the card*.
+* *A server's own configuration* (Tabby's `config.yml`) is not edited or checked.
+* *LM Studio* is detected only as "something else on port 1234". Adding it as a
+  startable runtime is one table entry once its CLI is looked at.
+* *Linux and macOS* detection is written and untested: this was built and run on
+  Windows only.
+* The 92-file checkpoint commit (`485d764`) is still to be split into one commit
+  per feature; `git reset` to its parent and the per-hunk assignment recorded in
+  the session are the way.
+
 #### Done
 
 * **A reopened conversation keeps its plan, its tools and its files.**

@@ -92,6 +92,11 @@ class SpeechRuntime(Runtime):
         # Active synthesis tracking for pause/resume/stop
         self._active_syntheses: Dict[str, Dict[str, Any]] = {}
 
+        #: The background start-up, while there is one. Held so that shutdown can end it:
+        #: the provider's own shutdown takes the lock start-up holds during the import,
+        #: so quitting would otherwise wait out a load nobody wants any more.
+        self._startup_task: Optional["asyncio.Future[None]"] = None
+
         # Executive event handlers
         self._unsubscribe_executive_speak = None
         self._unsubscribe_executive_pause = None
@@ -127,9 +132,43 @@ class SpeechRuntime(Runtime):
     def get_state(self) -> RuntimeState:
         return self._state
 
+    def start_in_background(self) -> "asyncio.Future[None]":
+        """Start up without making anyone wait for it.
+
+        **Speech is warmed after boot, not inside it -- 4 October 2026.** Loading Kokoro
+        is ten to twenty seconds, and it sat on the path to the first screen for every
+        person with the voice extra installed, whether or not they ever used voice. The
+        alternative that costs nothing at the first utterance is to do it behind the first
+        screen: the state is `initializing` straight away (set here, synchronously, so
+        there is no instant at which it reads as anything else) and `ready` when it ends.
+
+        An utterance that arrives first waits for it -- see `KokoroProvider.generate_audio`.
+        A failure is recorded as an error state and logged rather than raised, because
+        there is no caller left to catch it and an unhandled exception in a background
+        task is how a failure becomes silent.
+        """
+        self._state = RuntimeState.INITIALIZING
+        self._startup_task = asyncio.ensure_future(self._initialize_guarded())
+        return self._startup_task
+
+    async def _initialize_guarded(self) -> None:
+        try:
+            await self.initialize()
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001 - see `start_in_background`
+            logger.exception("Speech Runtime failed to start")
+            self._state = RuntimeState.ERROR
+
     async def initialize(self) -> None:
         self._state = RuntimeState.INITIALIZING
         logger.info("Speech Runtime initializing...")
+
+        # Subscribed *before* the slow part, not after it. Start-up is now behind the
+        # first screen, so a speak request can arrive while the engine is still loading;
+        # subscribing afterwards would drop it silently. The handler synthesises through
+        # the provider, which waits for a start-up in progress.
+        self._subscribe_executive_events()
 
         # Register default Kokoro connector
         kokoro = KokoroConnector()
@@ -140,9 +179,6 @@ class SpeechRuntime(Runtime):
         if self._active_connector_id:
             connector = self._connectors[self._active_connector_id]
             await connector.initialize()
-
-        # Subscribe to Executive events
-        self._subscribe_executive_events()
 
         self._state = RuntimeState.READY
 
@@ -170,6 +206,17 @@ class SpeechRuntime(Runtime):
     async def shutdown(self) -> None:
         self._state = RuntimeState.STOPPING
         logger.info("Speech Runtime shutting down...")
+
+        # End a start-up still in progress. The worker thread running the import cannot be
+        # interrupted and finishes on its own; what matters is that the coroutine, and the
+        # lock it holds, are released.
+        startup = self._startup_task
+        if startup is not None and not startup.done():
+            startup.cancel()
+            try:
+                await startup
+            except (asyncio.CancelledError, Exception):  # noqa: BLE001 - ending it is the point
+                pass
 
         # Unsubscribe from executive events. These are tokens, not callables —
         # calling them raised TypeError on every kernel shutdown, which left the

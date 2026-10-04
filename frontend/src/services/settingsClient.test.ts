@@ -18,6 +18,9 @@ import {
   setImageLocality,
   setImageModel,
   updateRoutingSettings,
+  fetchModelServers,
+  startModelServer,
+  updateModelServer,
 } from './settingsClient';
 
 const json = (body: unknown, status = 200) =>
@@ -326,5 +329,87 @@ describe('what is in the image model folder', () => {
     // cannot say that, which is why the backend reads `''` rather than null.
     await setImageModel('');
     expect(lastCall().body).toEqual({ model: '' });
+  });
+});
+
+describe('the model servers', () => {
+  const row = (over: Record<string, unknown> = {}) => ({
+    id: 'tabbyapi', label: 'TabbyAPI', port: 1234, state: 'running', installed: true,
+    path: 'C:\tabby', model_count: 1, models: ['Big-27B'], can_start: false,
+    problem: '', auto_start: true, fields: ['path', 'python'], failure: '', log_path: '',
+    zaram_sees: 1, ...over,
+  });
+
+  it('reads what the backend reports', async () => {
+    fetchMock.mockResolvedValue(json([row()]));
+    const [server] = await fetchModelServers();
+    expect(server).toMatchObject({
+      id: 'tabbyapi', state: 'running', modelCount: 1, models: ['Big-27B'],
+      autoStart: true, zaramSees: 1, fields: ['path', 'python'],
+    });
+    expect(lastCall().url).toBe('/providers/model-servers');
+  });
+
+  it('treats a state it does not know as unknown, not as running', async () => {
+    /** A newer backend may add a state. Drawing it as `running` would be a green
+     *  tick for something Zaram does not understand. */
+    fetchMock.mockResolvedValue(json([row({ state: 'quantum' })]));
+    expect((await fetchModelServers())[0].state).toBe('unknown');
+  });
+
+  it('keeps "not asked" apart from "none"', async () => {
+    /** `null` is *not asked*; zero is *Zaram holds none of them*. Collapsing them
+     *  would either hide the gap this exists to show or invent one. */
+    fetchMock.mockResolvedValue(json([row({ zaram_sees: null }), row({ zaram_sees: 0 })]));
+    const [notAsked, none] = await fetchModelServers();
+    expect(notAsked.zaramSees).toBeNull();
+    expect(none.zaramSees).toBe(0);
+  });
+
+  it('reads auto-start as on unless it is exactly false', async () => {
+    fetchMock.mockResolvedValue(json([row({ auto_start: undefined }), row({ auto_start: false })]));
+    const [absent, off] = await fetchModelServers();
+    expect(absent.autoStart).toBe(true);
+    expect(off.autoStart).toBe(false);
+  });
+
+  it('survives a backend that sends nothing it recognises', async () => {
+    fetchMock.mockResolvedValue(json({ not: 'a list' }));
+    expect(await fetchModelServers()).toEqual([]);
+  });
+
+  it('starts a server with a POST, and encodes the id into the path', async () => {
+    fetchMock.mockResolvedValue(json(row({ state: 'starting' })));
+    const server = await startModelServer('tabby api/../x');
+    expect(lastCall().init.method).toBe('POST');
+    expect(lastCall().url).toBe('/providers/model-servers/tabby%20api%2F..%2Fx/start');
+    expect(server.state).toBe('starting');
+  });
+
+  it('carries the backend sentence when a start is refused', async () => {
+    fetchMock.mockResolvedValue(json({ detail: 'Something other than TabbyAPI is already using port 1234.' }, 409));
+    await expect(startModelServer('tabbyapi')).rejects.toMatchObject({
+      status: 409, message: 'Something other than TabbyAPI is already using port 1234.',
+    });
+  });
+
+  it('sends only what was changed', async () => {
+    fetchMock.mockResolvedValue(json(row({ auto_start: false })));
+    await updateModelServer('tabbyapi', { autoStart: false });
+    expect(lastCall().init.method).toBe('PUT');
+    expect(lastCall().body).toEqual({ auto_start: false });
+  });
+
+  it('sends an empty string to clear a field, which is not the same as omitting it', async () => {
+    /** Omitting leaves it alone; `""` clears it. Dropping empty strings on the way
+     *  out would make it impossible to say *go back to looking*. */
+    fetchMock.mockResolvedValue(json(row()));
+    await updateModelServer('tabbyapi', { path: '' });
+    expect(lastCall().body).toEqual({ path: '' });
+  });
+
+  it('is refused with the reason when the location is not an install', async () => {
+    fetchMock.mockResolvedValue(json({ detail: 'That folder does not look like a TabbyAPI checkout.' }, 400));
+    await expect(updateModelServer('tabbyapi', { path: 'C:\nope' })).rejects.toBeInstanceOf(SettingsError);
   });
 });

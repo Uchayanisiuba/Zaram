@@ -222,9 +222,16 @@ class TestTheThreeFilesThatShouldNeverHaveShipped:
         callers = [
             p
             for p in BACKEND.rglob("*.py")
-            if "set_personality_source(" in p.read_text(encoding="utf-8", errors="ignore")
+            # The cheap tests first, and the virtualenv excluded: this read every Python
+            # file under `backend/`, `venv/` included, which is tens of thousands of
+            # files and about three minutes of every full run -- and a file inside
+            # site-packages is not Zaram's code, so it could neither satisfy nor
+            # violate a rule about what Zaram wires.
+            if "venv" not in p.parts
+            and "site-packages" not in p.parts
             and "tests" not in p.parts
             and p.name != "registry.py"
+            and "set_personality_source(" in p.read_text(encoding="utf-8", errors="ignore")
         ]
         assert not callers, (
             f"{[str(p) for p in callers]} wires a personality source; the named "

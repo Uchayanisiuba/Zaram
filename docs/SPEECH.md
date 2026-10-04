@@ -476,3 +476,35 @@ offered rather than greyed out.
 suite.** Worth a guard that fails when the speech acceptance tests skip on a
 machine that has both extras — otherwise the next silent skip costs another
 session.
+
+---
+
+## Start-up: speech loads behind the first screen — 4 October 2026
+
+Kokoro is **not** loaded inside boot. `import kokoro` pulls in torch and spaCy and takes
+ten to thirty seconds; it used to run synchronously on the event loop inside
+`kernel.boot()`, for everyone with the voice extra installed, so the first screen waited
+for a feature most sessions never use and the whole backend answered nothing meanwhile.
+
+What happens now, and the properties each part exists to keep:
+
+* **`SpeechRuntime.start_in_background()`** sets the state to `initializing`
+  *synchronously* and finishes in a task. There is no instant at which it reads as
+  anything else, because a gap there is where a status check would say "not installed".
+* **The import runs in a worker thread** (`KokoroProvider._load_package`). Delaying it is
+  worthless if it still blocks the loop wherever it runs.
+* **The weights load is also off the loop** (`_pipeline_for`), behind a lock. It is
+  loaded at the *first utterance*, not at boot, and used to freeze the backend for as
+  long as it took.
+* **An utterance that arrives during start-up waits** (up to 90 s) rather than failing as
+  "unavailable" — the voice is installed and a moment from ready, and saying otherwise
+  would be false. It waits only while a start-up is *in progress*; a provider nobody
+  initialised fails at once.
+* **`executive:speak` is subscribed before the slow part**, so a request that arrives
+  while the engine loads is queued behind it, not dropped.
+* **The interface has a third state, `loading`**, distinct from `not-installed`.
+
+Warming the *weights* at the avatar being chosen, rather than at the first utterance, is
+the remaining gap: the first spoken reply costs the load. It is not done because the
+backend does not know which renderer is showing and warming for everyone costs 1–2 GB of
+RAM for people who never speak.

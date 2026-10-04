@@ -197,6 +197,12 @@ def _default_pipeline_factory(
 # --------------------------------------------------------------------------- #
 # Provider
 # --------------------------------------------------------------------------- #
+#: The longest an utterance waits for a start-up already in progress. Generous on purpose:
+#: the import is ~10-20 s and a cold disk is slower, and the alternative to waiting is
+#: telling somebody their installed voice is unavailable.
+STARTUP_WAIT_SECONDS = 90.0
+
+
 class KokoroProvider(VoiceProvider):
     name = "kokoro"
 
@@ -220,6 +226,16 @@ class KokoroProvider(VoiceProvider):
         self._kokoro: Any = None
         self._voices: Dict[str, Dict[str, Any]] = {}
         self._initialized = False
+        #: True from the moment `initialize()` begins until it ends, whichever way.
+        #: Distinct from `_initialized`, and the distinction is what lets an utterance
+        #: that arrives *during* start-up wait for it, while one that arrives at a
+        #: provider nobody ever initialised fails at once instead of waiting for
+        #: something that is not coming.
+        self._initializing = False
+        self._ready = asyncio.Event()
+        #: Serialises building the pipeline. It is built in a worker thread now, and two
+        #: first utterances arriving together must not each build one.
+        self._pipeline_lock = asyncio.Lock()
         self._available = False
         self._last_health: Dict[str, Any] = {}
         self._request_counter = 0
@@ -365,6 +381,25 @@ class KokoroProvider(VoiceProvider):
         self._pipeline = self._build_pipeline(wanted)
         return self._pipeline
 
+    async def _pipeline_for(self, voice: str) -> Any:
+        """The pipeline and voice file for ``voice``, loaded off the event loop.
+
+        **The second blocking call on this path.** `_ensure_pipeline` loads ~300 MB of
+        weights and `_ensure_voice` may fetch a voice file, and `generate_audio` called
+        both directly from a coroutine -- so the *first utterance of every session froze
+        the whole backend* for as long as the load took: measured 4 October 2026 as a
+        `/health` that did not answer for ~25 s while Kokoro loaded. Found by the same
+        sampling that found the import, and it was there before: the import was only the
+        larger half of the stall at boot.
+
+        Serialised, so two utterances arriving together build one pipeline rather than
+        two, and the loser reuses the winner's.
+        """
+        async with self._pipeline_lock:
+            pipeline = await asyncio.to_thread(self._ensure_pipeline, self._lang_for_voice(voice))
+            await asyncio.to_thread(self._ensure_voice, voice)
+        return pipeline
+
     def _ensure_voice(self, voice: str) -> None:
         """Ask the gate before the torch pipeline fetches a voice nobody asked for.
 
@@ -471,58 +506,78 @@ class KokoroProvider(VoiceProvider):
         voices_ok = bool(self._voices)
         return bool(kokoro_ok and cache_ok and (model_ok or voices_ok))
 
+    def _load_package(self) -> None:
+        """Import Kokoro and list its voices: the slow, synchronous part of start-up.
+
+        **Its own method so that it can run in a worker thread.** `import kokoro` pulls in
+        torch and spaCy and takes ten to twenty seconds, and it used to sit inside an
+        `async def` with nothing awaited -- so it ran *on the event loop*, and for that
+        long the whole backend answered nothing, `/health` included. Found 4 October 2026
+        by sampling the stack of a slow boot, after a measured ~3-minute start-up turned
+        out to be mostly a hostname and the remainder to be this.
+        """
+        # 1. Kokoro import (optional dependency)
+        try:
+            import kokoro  # lazy import
+
+            self._kokoro = kokoro
+        except Exception as exc:
+            self._kokoro = None
+            self._log.warning(
+                "Kokoro package unavailable: %s (speech disabled, chat unaffected)",
+                exc,
+                extra={"provider": self.name},
+            )
+
+        # 2. Voice discovery (no hard-coded names)
+        if self._kokoro is not None and self.config.voice_discovery_enabled:
+            try:
+                names: List[str] = []
+                for code in self._discoverable_langs():
+                    names.extend(self._discoverer.discover(self.config.repo_id, code))
+                self._voices = {n: self._voice_metadata(n) for n in names}
+            except Exception as exc:
+                self._voices = {}
+                self._log.warning(
+                    "Voice discovery failed: %s", exc, extra={"provider": self.name}
+                )
+
     # --- VoiceProvider interface ---
     async def initialize(self) -> None:
         async with self._lock:
             if self._initialized:
                 return
-            self._log.info("Initializing Kokoro provider", extra={"provider": self.name})
-
-            # 1. Kokoro import (optional dependency)
+            self._initializing = True
             try:
-                import kokoro  # lazy import
+                self._log.info("Initializing Kokoro provider", extra={"provider": self.name})
 
-                self._kokoro = kokoro
-            except Exception as exc:
-                self._kokoro = None
-                self._log.warning(
-                    "Kokoro package unavailable: %s (speech disabled, chat unaffected)",
-                    exc,
-                    extra={"provider": self.name},
+                # 1-2. The import and the voice list, off the event loop.
+                await asyncio.to_thread(self._load_package)
+
+                # 3. Cache directory
+                self._cache.ensure()
+
+                # 4. Optional eager model load (heavy; off by default)
+                if self._kokoro is not None and self.config.load_model_eagerly:
+                    try:
+                        await asyncio.to_thread(self._ensure_pipeline)
+                    except Exception as exc:
+                        self._log.warning(
+                            "Eager model load failed: %s", exc, extra={"provider": self.name}
+                        )
+
+                self._initialized = True
+                self._last_health = await self.health_check()
+                self._available = bool(self._last_health.get("available", False))
+                self._log.info(
+                    "Kokoro provider initialized",
+                    extra={"provider": self.name, "voices": len(self._voices), "available": self._available},
                 )
-
-            # 2. Voice discovery (no hard-coded names)
-            if self._kokoro is not None and self.config.voice_discovery_enabled:
-                try:
-                    names: List[str] = []
-                    for code in self._discoverable_langs():
-                        names.extend(self._discoverer.discover(self.config.repo_id, code))
-                    self._voices = {n: self._voice_metadata(n) for n in names}
-                except Exception as exc:
-                    self._voices = {}
-                    self._log.warning(
-                        "Voice discovery failed: %s", exc, extra={"provider": self.name}
-                    )
-
-            # 3. Cache directory
-            self._cache.ensure()
-
-            # 4. Optional eager model load (heavy; off by default)
-            if self._kokoro is not None and self.config.load_model_eagerly:
-                try:
-                    self._ensure_pipeline()
-                except Exception as exc:
-                    self._log.warning(
-                        "Eager model load failed: %s", exc, extra={"provider": self.name}
-                    )
-
-            self._initialized = True
-            self._last_health = await self.health_check()
-            self._available = bool(self._last_health.get("available", False))
-            self._log.info(
-                "Kokoro provider initialized",
-                extra={"provider": self.name, "voices": len(self._voices), "available": self._available},
-            )
+            finally:
+                # Released whichever way it ended, so a failed start-up cannot leave an
+                # utterance waiting on something that is not coming.
+                self._initializing = False
+                self._ready.set()
 
     async def generate_audio(self, text: str, voice: str = "", **kwargs: Any) -> Optional[Any]:
         request_id = kwargs.get("request_id") or self._next_request_id()
@@ -533,6 +588,22 @@ class KokoroProvider(VoiceProvider):
         if not text or not text.strip():
             self._log.warning("Empty text; skipping synthesis", extra=extra)
             return AudioResult(success=False, request_id=request_id, voice=selected, error="empty_text")
+
+        # Speech is warmed in the background after boot, so the first reply of a session
+        # can arrive while the engine is still loading. It waits for it -- a few seconds at
+        # worst -- rather than failing as "unavailable", which would be a false report about a
+        # voice that is installed and a moment from ready. Only while a start-up is actually
+        # in progress: a provider nobody initialised has nothing to wait for.
+        if self._initializing and not self._initialized:
+            try:
+                await asyncio.wait_for(self._ready.wait(), timeout=STARTUP_WAIT_SECONDS)
+            except asyncio.TimeoutError:
+                return AudioResult(
+                    success=False,
+                    request_id=request_id,
+                    voice=selected,
+                    error="Speech is still starting up. Try again in a moment.",
+                )
 
         # Unknown voice -> fall back to the configured default (never crash).
         if self._voices and selected not in self._voices:
@@ -548,8 +619,7 @@ class KokoroProvider(VoiceProvider):
             # The front end the *selected* voice needs, not the configured
             # one. They agree for the default and differ the moment a user
             # picks a voice from another language in Settings.
-            pipeline = self._ensure_pipeline(self._lang_for_voice(selected))
-            self._ensure_voice(selected)
+            pipeline = await self._pipeline_for(selected)
         except Exception as exc:
             self._log.error(
                 "Kokoro unavailable: %s", exc, extra={**extra, "failure": type(exc).__name__}

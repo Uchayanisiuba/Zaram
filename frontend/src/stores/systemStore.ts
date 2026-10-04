@@ -73,7 +73,12 @@ export function cloudModelConnected(routing: RoutingState | null): boolean {
  *  is greyed out with no explanation is the silent-failure pattern, and the
  *  user has no way to know whether it is broken, unfinished, or simply not
  *  installed. Null means the backend has not reported yet. */
-export type SpeechAvailability = 'available' | 'not-installed' | null;
+/** `loading` is the speech engine starting in the background after launch. It is
+ *  a third answer, not a flavour of `not-installed`: Kokoro is warmed after boot
+ *  rather than inside it (4 October 2026), so for a few seconds the engine is
+ *  neither available nor absent, and reporting it as absent would tell somebody
+ *  whose voice is installed that it is not. */
+export type SpeechAvailability = 'available' | 'loading' | 'not-installed' | null;
 
 /** Whether Zaram can draw a picture on this machine, and what to say if not.
  *
@@ -220,7 +225,11 @@ export const useSystemStore = create<SystemState>((set, get) => ({
       set({
         backendOnline: data?.kernel === 'online',
         polled: true,
-        speech: connector?.available ? 'available' : 'not-installed',
+        speech: connector?.available
+          ? 'available'
+          : data?.speech?.state === 'initializing'
+            ? 'loading'
+            : 'not-installed',
         images: img
           ? {
               canDraw: Boolean(img.can_draw),

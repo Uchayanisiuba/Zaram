@@ -53,6 +53,11 @@ LOCAL_ONLY = {
     # one machine -- and the backend logs every one of those calls as egress
     # to the paired client. Written down here as a fact about the code.
     "zaram_mcp.py": "Zaram's own API on 127.0.0.1:8420, loopback enforced",
+    # Asks Ollama and TabbyAPI on their own ports whether they are up and what they
+    # hold, so Settings can say what Zaram can reach. `_get_json` refuses any host
+    # that is not loopback and answers as though nothing were there, which
+    # `test_a_probe_of_another_machine_is_refused_not_made` asserts by trying one.
+    "providers/model_servers.py": "Ollama and TabbyAPI on their own loopback ports, loopback enforced",
     # A trigger's unattended run is `POST /chat` dispatched through
     # `httpx.ASGITransport(app=app)`: the client calls this process's own
     # ASGI app and no socket is opened. The loopback `base_url` exists only

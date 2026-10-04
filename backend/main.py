@@ -338,9 +338,57 @@ chat_router = None
 spine_maintenance = None
 
 
+_model_server_tasks: set = set()
+
+
+def _bring_up_model_servers(providers_runtime) -> None:
+    """Start any other installed local model server, then rescan once it is up.
+
+    Not awaited: TabbyAPI takes ~20 s to answer, and the first screen must not
+    wait on a model server. The rescan is the half that makes it matter -- Zaram
+    probes for models at boot, so a server that comes up afterwards would run
+    and still not appear in the list, which is exactly how a started Tabby
+    showed no Qwen on 4 October 2026.
+
+    Every installed server is asked, not Tabby by name: which servers exist is
+    `providers.model_servers.SERVERS`' business, and adding one there is the
+    whole change.
+    """
+    from providers import model_servers
+
+    async def one(server_id: str) -> None:
+        try:
+            status = await asyncio.to_thread(model_servers.ensure_started, server_id)
+            if status.get("state") == "starting":
+                await model_servers.refresh_when_up(server_id, providers_runtime.manager.refresh)
+        except Exception:  # noqa: BLE001 - never a reason for the product to fail
+            logging.getLogger(__name__).debug("could not bring %s up", server_id, exc_info=True)
+
+    for server_id in model_servers.SERVERS:
+        task = asyncio.ensure_future(one(server_id))
+        _model_server_tasks.add(task)
+        task.add_done_callback(_model_server_tasks.discard)
+
+
 @app.on_event("startup")
 async def startup_event():
     global chat_router, spine_maintenance
+
+    # **Ollama first, and before the kernel, because that is where the wait is.**
+    # With it installed and stopped, `kernel.boot()` embeds the router's exemplars
+    # and probes every provider against a port that is not there; on Windows a
+    # closed loopback port hangs for seconds per attempt, and a backend that took
+    # minutes to answer its first health check was measured on 4 October 2026.
+    # Waiting a couple of seconds for a server the person already installed is
+    # the cheaper side of that trade, and it is bounded: a server that has not
+    # answered in 15 s is left to come up behind us. Never raises, and never
+    # starts anything under test or when switched off (`providers/model_servers.py`).
+    try:
+        from providers import model_servers
+
+        await asyncio.to_thread(model_servers.ensure_started, "ollama", wait_seconds=15)
+    except Exception:  # noqa: BLE001 - a convenience must not stop the product booting
+        logging.getLogger(__name__).debug("local server start skipped", exc_info=True)
 
     print("[Startup] Booting Zaram Kernel...")
     await kernel.boot()
@@ -353,6 +401,7 @@ async def startup_event():
     providers_runtime = getattr(kernel, "providers_runtime", None)
     if providers_runtime is not None:
         set_providers_runtime(providers_runtime)
+        _bring_up_model_servers(providers_runtime)
 
     # `/providers/resident` shows why the preload did not happen, in the
     # models runtime's own words. Handed over rather than looked up from the
@@ -376,7 +425,7 @@ async def startup_event():
 
     # Speech Runtime is now initialized via KernelBootstrapper
     speech_runtime = kernel.speech_runtime
-    print("[Startup] Speech Runtime initialized via Kernel.")
+    print("[Startup] Speech Runtime starting in the background.")
 
     # Initialize the Chat Router with the new engine and the legacy fallback
     def legacy_gen(req_text: str, model: str, system_prompt: str = "", persona: str = "zaram_prime"):

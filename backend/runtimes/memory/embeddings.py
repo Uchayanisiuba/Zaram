@@ -13,7 +13,7 @@ _KEEP_ALIVE = "30m"
 #: does the real work cannot disagree about it — a probe that measured a
 #: different Ollama from the one being used would report a dimension for a
 #: model nothing is going to call.
-DEFAULT_OLLAMA_URL = "http://localhost:11434"
+DEFAULT_OLLAMA_URL = "http://127.0.0.1:11434"
 
 
 class EmbeddingService:

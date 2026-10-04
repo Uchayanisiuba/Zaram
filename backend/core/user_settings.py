@@ -108,6 +108,20 @@ CONTEXT_POLICIES = frozenset({"fit", "server"})
 #: than invent"* is the rule that covers exactly this.
 OVERFLOW_POLICIES = frozenset({"trim", "stop"})
 
+#: The fields a local model server's settings may carry, and nothing else.
+#:
+#: `auto_start` is whether Zaram starts the server when it opens. `path` is
+#: where the person installed it, for when it is not where Zaram looks, and
+#: `python` is the interpreter it runs under, for servers that are run from a
+#: checkout. Anything else in a file is dropped on the way in: these values are
+#: later *executed*, so the set of things that can reach that path is closed.
+MODEL_SERVER_FIELDS = frozenset({"auto_start", "path", "python"})
+
+#: A bound on how many servers a settings file can describe. Not a limit anyone
+#: reaches by choosing -- it bounds what a hand-edited file can make this.
+MAX_MODEL_SERVERS = 16
+MAX_MODEL_SERVER_PATH = 500
+
 #: A cap on remembered per-model windows. Not a limit anybody will reach by
 #: choosing - it bounds what a settings *file* can make this dictionary,
 #: for the reason the character fields are bounded.
@@ -281,6 +295,11 @@ class UserSettings:
         #: See `OVERFLOW_POLICIES`. `trim` is what Zaram did before there
         #: was a choice, so it stays the default.
         self._overflow_policy = "trim"
+        #: Local model servers Zaram may start, by id -> `MODEL_SERVER_FIELDS`.
+        #: Empty means *every server is on its defaults*, and the default is to
+        #: start one that is installed and not running -- see
+        #: `providers/model_servers.py` for why that is the default.
+        self._model_servers: Dict[str, Dict[str, Any]] = {}
         #: The longest a single reply may run, or ``0`` for *as much as
         #: the window reserves*.
         #:
@@ -498,6 +517,7 @@ class UserSettings:
             "context_policy": self._context_policy,
             "context_overrides": dict(self._context_overrides),
             "overflow_policy": self._overflow_policy,
+            "model_servers": {k: dict(v) for k, v in self._model_servers.items()},
             "overflow_policies": sorted(OVERFLOW_POLICIES),
             "max_reply_tokens": self._max_reply_tokens,
         }
@@ -584,6 +604,50 @@ class UserSettings:
             self._context_policy = value if value in CONTEXT_POLICIES else "fit"
             self._save()
         return self._context_policy
+
+    def model_server(self, server_id: str) -> Dict[str, Any]:
+        """One server's settings, or ``{}`` for a server on its defaults."""
+        with self._lock:
+            return dict(self._model_servers.get(server_id, {}))
+
+    def set_model_server(
+        self,
+        server_id: str,
+        *,
+        auto_start: Optional[bool] = None,
+        path: Optional[str] = None,
+        python: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Change one server's settings; ``None`` leaves a field alone.
+
+        An empty string for ``path`` or ``python`` clears it, which is what
+        emptying the box means to the person doing it. The id is not
+        validated here -- the store does not know which servers exist -- but
+        whatever is stored can only be one of `MODEL_SERVER_FIELDS`.
+        """
+        rid = (server_id or "").strip()
+        if not rid or len(rid) > 40:
+            return {}
+        with self._lock:
+            entry = dict(self._model_servers.get(rid, {}))
+            if auto_start is not None:
+                entry["auto_start"] = bool(auto_start)
+            for name, value in (("path", path), ("python", python)):
+                if value is None:
+                    continue
+                value = value.strip()[:MAX_MODEL_SERVER_PATH]
+                if value:
+                    entry[name] = value
+                else:
+                    entry.pop(name, None)
+            if entry:
+                if rid not in self._model_servers and len(self._model_servers) >= MAX_MODEL_SERVERS:
+                    return {}
+                self._model_servers[rid] = entry
+            else:
+                self._model_servers.pop(rid, None)
+            self._save()
+            return dict(entry)
 
     def set_overflow_policy(self, value: str) -> str:
         """What to do when the conversation outgrows the window.
@@ -753,6 +817,26 @@ class UserSettings:
         policy = raw.get("context_policy")
         if isinstance(policy, str) and policy in CONTEXT_POLICIES:
             self._context_policy = policy
+
+        runtimes = raw.get("model_servers")
+        if isinstance(runtimes, dict):
+            # Read defensively, because these values are later executed. A key
+            # that is not a short string, a field outside the closed set, or a
+            # value of the wrong type is dropped rather than coerced.
+            cleaned: Dict[str, Dict[str, Any]] = {}
+            for rid, entry in list(runtimes.items())[:MAX_MODEL_SERVERS]:
+                if not (isinstance(rid, str) and 0 < len(rid) <= 40 and isinstance(entry, dict)):
+                    continue
+                keep: Dict[str, Any] = {}
+                if isinstance(entry.get("auto_start"), bool):
+                    keep["auto_start"] = entry["auto_start"]
+                for field_name in ("path", "python"):
+                    value = entry.get(field_name)
+                    if isinstance(value, str) and value.strip():
+                        keep[field_name] = value.strip()[:MAX_MODEL_SERVER_PATH]
+                if keep:
+                    cleaned[rid] = keep
+            self._model_servers = cleaned
 
         overflow = raw.get("overflow_policy")
         if isinstance(overflow, str) and overflow in OVERFLOW_POLICIES:

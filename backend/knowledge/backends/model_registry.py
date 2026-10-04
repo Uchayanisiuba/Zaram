@@ -24,7 +24,7 @@ class ModelRegistry:
     the list of available models without downloading anything.
     """
 
-    def __init__(self, base_url: str = "http://localhost:11434", refresh_interval_hours: int = 24):
+    def __init__(self, base_url: str = "http://127.0.0.1:11434", refresh_interval_hours: int = 24):
         self._base_url = base_url.rstrip("/")
         self._refresh_interval = refresh_interval_hours * 3600
         self._models: dict[str, ModelInfo] = {}

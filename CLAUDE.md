@@ -1112,6 +1112,21 @@ spent rebuilding the former is an hour not spent on the latter.
   a trap: taking it would have replaced a wrong `None` with a confident wrong
   number, which is the worse failure — a caller can check for `None`.
 
+- **Reach a local server by address, never by the name `localhost`.** Found
+  4 October 2026 and measured against the live Ollama: **2,105 ms per embedding
+  through `localhost`, 73 ms through `127.0.0.1`.** On Windows the name resolves
+  to IPv6 first; Ollama listens on IPv4 only; the refused attempt takes about two
+  seconds before the fallback succeeds. The server was never slow -- each request
+  took ~60 ms *on its side* -- so no log on either end said anything, and it hid
+  behind a product that merely felt sluggish: the memory embedder defaulted to
+  `localhost`, so a cold boot embedded the router's 66 exemplars at two seconds
+  each (a backend that took ~3 minutes to answer its first health check), and
+  every chat turn that recalled from the Spine paid two extra seconds to embed
+  the question. That is the *fastest AI a person has used* claim, undone by a
+  hostname. `tests/test_local_model_servers_start_and_report.py` holds a test that
+  fails at ~2,000 ms per call if it returns. CORS origins are a different thing --
+  a browser origin is a name -- and are not covered by this.
+
 - **Do not build a memory engine from scratch.** Evaluate Letta or equivalent.
   Benchmark against LoCoMo / LongMemEval, not by feel.
 - **Design the Spine as federatable from day one** — tenancy seams present even
@@ -1380,6 +1395,38 @@ answer it rather than the other way round. Bounded on the way in and again at
 the prompt — an unbounded manner is the cheapest attack on the guarantee, since
 it needs no cleverness, only length. Full reasoning under the embodiment section
 above.
+
+**Zaram starts the local model servers the person has installed — 4 October
+2026, by the maintainer's instruction: *"make Tabby always launch when it is
+installed."*** A person who installed Ollama or TabbyAPI has already chosen it,
+and a Zaram that shows an empty model list until they remember to start a server
+in another window reads as the product being broken (rule 7j's argument, applied
+to starting rather than to asking). So an installed server that is not running is
+started when Zaram opens, **on by default and switchable per server in Settings**.
+`providers/model_servers.py` is the whole mechanism; five decisions in it are
+deliberate and should not be re-argued from the code alone:
+
+* *It never installs, downloads or updates anything.* Starting a program the
+  person already has is a different act from acquiring one.
+* ***It never stops what it started.*** The symmetry -- start on open, stop on
+  close -- is the wrong one: stopping is the destructive direction, and the same
+  TabbyAPI may be serving another client. A server Zaram started outlives it;
+  what it holds on the card is given back by the explicit *Release* control.
+* *It never starts over a different server.* LM Studio and TabbyAPI both default
+  to port 1234, so a server is **identified**, not merely detected (TabbyAPI says
+  `owned_by: tabbyAPI`), and Zaram will neither start Tabby on top of LM Studio
+  nor report LM Studio's models as Tabby's.
+* *It does not start during tests*, so a test run can never launch an 11 GB model
+  server on a developer's machine.
+* *A runtime is a table entry.* There is no model name in the file -- asserted on
+  its code, not its prose -- so a third server is one class and one row. This is
+  the *build for the set, never for one* rule applied to servers.
+
+Starting a server does not make its models appear: Zaram probes for models at
+boot, so one that comes up afterwards is invisible until something asks again,
+which is exactly how a started Tabby showed no Qwen. The start path therefore
+rescans once the server answers, and Settings says plainly when a server is up
+and Zaram holds none of its models.
 
 **Never hide the model.** The temptation, once the assistant stops naming
 somebody else's, is to have it name none. That forfeits routing legibility and

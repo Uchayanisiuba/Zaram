@@ -162,3 +162,66 @@ describe('an oversized model is not an ordinary cold start', () => {
     expect(useSystemStore.getState().oversizedModel).toBeNull();
   });
 });
+
+
+describe('speech that is still starting is not speech that is not installed', () => {
+  /**
+   * Kokoro is warmed in the background after boot rather than inside it (4 October
+   * 2026), so for a few seconds after launch the engine is neither available nor
+   * absent. The store used to read "not available" as "not installed", which would
+   * have told somebody whose voice is installed that it is not -- the failure this
+   * product keeps finding in its own indicators, *one signal standing for two
+   * answers*. These pin the three-way split.
+   */
+  const health = (speech: unknown) => ({
+    ok: true,
+    json: async () => ({ kernel: 'online', routing: {}, speech }),
+  });
+
+  async function speechAfter(speech: unknown) {
+    const original = globalThis.fetch;
+    globalThis.fetch = (async () => health(speech)) as unknown as typeof fetch;
+    try {
+      useSystemStore.setState({ speech: null });
+      await useSystemStore.getState().refresh();
+      return useSystemStore.getState().speech;
+    } finally {
+      globalThis.fetch = original;
+    }
+  }
+
+  it('is available when the connector says so', async () => {
+    expect(
+      await speechAfter({ state: 'ready', active_connector_health: { available: true } }),
+    ).toBe('available');
+  });
+
+  it('is loading while the speech runtime is initialising', async () => {
+    expect(
+      await speechAfter({ state: 'initializing', active_connector_health: { available: false } }),
+    ).toBe('loading');
+  });
+
+  it('is loading even before the connector has reported anything', async () => {
+    // The first seconds: the runtime exists and says it is starting, and there is
+    // no connector health yet. Absent connector health must not decide it.
+    expect(await speechAfter({ state: 'initializing' })).toBe('loading');
+  });
+
+  it('is not installed when the engine is up and the connector cannot use it', async () => {
+    expect(
+      await speechAfter({ state: 'ready', active_connector_health: { available: false } }),
+    ).toBe('not-installed');
+  });
+
+  it('is not installed when an older backend reports nothing about speech', async () => {
+    expect(await speechAfter(undefined)).toBe('not-installed');
+  });
+
+  it('prefers available over loading if a backend somehow says both', async () => {
+    // A working voice must never be shown as starting because of a stale state.
+    expect(
+      await speechAfter({ state: 'initializing', active_connector_health: { available: true } }),
+    ).toBe('available');
+  });
+});

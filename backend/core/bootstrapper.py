@@ -386,7 +386,10 @@ class KernelBootstrapper:
         from runtimes.speech.runtime import SpeechRuntime
         self.speech_runtime = SpeechRuntime(self.event_bus)
         self.registry.register(self.speech_runtime)
-        await self.speech_runtime.initialize()
+        # Not awaited: Kokoro's import is ten to twenty seconds and was holding up the
+        # first screen for everyone with the voice extra installed. It starts now and
+        # finishes behind the first screen; its state reads `initializing` until it does.
+        self.speech_runtime.start_in_background()
         register_runtime_for_health(self.speech_runtime)
 
         # --- Documents Runtime ---

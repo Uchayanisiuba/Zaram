@@ -129,6 +129,7 @@ import VoiceBrowser from '@/components/voices/VoiceBrowser';
 import PurgeMemory from '@/components/memory/PurgeMemory';
 import ContextWindowField from '@/components/settings/ContextWindowField';
 import OverflowField from '@/components/settings/OverflowField';
+import ModelServers from '@/components/settings/ModelServers';
 
 /** How many destinations with no rule are drawn when the list is opened. The rest
  *  are in Activity; a pane that renders every host ever met is the log again. */
@@ -1266,6 +1267,14 @@ export default function SettingsWorkspace() {
             }
           >
             <div className="flex flex-col gap-3">
+              {/* **Above the download, because it answers the question that
+                  comes first: can Zaram reach the places models come from?**
+                  A server that is stopped, or running and not yet picked up,
+                  is why the list below can look empty — and until 4 October
+                  2026 nothing here said so. */}
+              <ModelServers
+                onRescan={() => void run('models', async () => setModels(await fetchModels()))}
+              />
               <Button
                 busy={false}
                 onClick={() => setShowBrowser((on) => !on)}
@@ -1710,12 +1719,23 @@ export default function SettingsWorkspace() {
         <Section title="Speech" icon={<Volume2 size={14} style={{ color: 'var(--color-indigo-light)' }} />}>
           <Row
             label="Speech synthesis"
-            value={speech === null ? 'unknown' : speech === 'available' ? 'available' : 'not installed'}
-            state={speech === 'available' ? 'good' : speech === null ? 'neutral' : 'absent'}
+            value={
+              speech === null
+                ? 'unknown'
+                : speech === 'available'
+                  ? 'available'
+                  : speech === 'loading'
+                    ? 'starting'
+                    : 'not installed'
+            }
+            state={speech === 'available' ? 'good' : speech === null || speech === 'loading' ? 'neutral' : 'absent'}
             detail={
               speech === null
                 ? 'Waiting for the backend to report.'
-                : speech === 'available'
+                : speech === 'loading'
+                  ? 'Kokoro is loading in the background, so the first screen did not wait for it. ' +
+                    'This takes a few seconds after launch.'
+                  : speech === 'available'
                   ? 'Kokoro is installed and runs on the CPU, so it does not compete with the local model for VRAM. Replies are spoken when the avatar is showing — one decision, made by choosing a face.'
                   : 'Speaking is an optional pack — get it under Packs below, or the moment you choose ' +
                     'the avatar. Chat is unaffected without it.'
@@ -2084,13 +2104,17 @@ export default function SettingsWorkspace() {
               <Row
                 label="Voice"
                 value={
-                  speech !== 'available'
-                    ? 'not installed'
-                    : character.voice || character.defaultVoice || 'default'
+                  speech === 'loading'
+                    ? 'starting'
+                    : speech !== 'available'
+                      ? 'not installed'
+                      : character.voice || character.defaultVoice || 'default'
                 }
-                state={speech !== 'available' ? 'absent' : 'neutral'}
+                state={speech === 'loading' ? 'neutral' : speech !== 'available' ? 'absent' : 'neutral'}
                 detail={
-                  speech !== 'available'
+                  speech === 'loading'
+                    ? 'Speech is starting up in the background — the voices appear here in a few seconds.'
+                    : speech !== 'available'
                     ? 'Voices come with the speech extra, which is not installed — see Speech ' +
                       'above. A picker over an empty list would be a control that does nothing.'
                     : voices.length === 0
@@ -2158,7 +2182,10 @@ export default function SettingsWorkspace() {
               {/* The moment of doubt: the face was just chosen and it cannot
                   speak yet. Offered here, once, with the cost; the avatar
                   works silently until then. Nothing was asked at install. */}
-              {renderer === 'avatar' && speech !== 'available' && (
+              {/* Not while it is loading: an offer to install a pack that is
+                  already installed and a few seconds from ready is the false
+                  claim this state exists to prevent. */}
+              {renderer === 'avatar' && speech !== 'available' && speech !== 'loading' && (
                 <PackOffer id="voice" lead="The avatar can speak its replies with the Speaking pack." />
               )}
             </div>

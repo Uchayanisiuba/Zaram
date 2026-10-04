@@ -76,6 +76,10 @@ spine.db-wal
 spine.db-shm
 backend/spine.db*
 
+# What the local model servers Zaram starts write while they run: this machine's own
+# request lines, never source, and never something an installer should carry.
+backend/logs/
+
 # The transcripts. Rule 7d's session store -- everything the user and Zaram
 # actually said to each other, which is the most personal thing in the product
 # after the egress log. Never committed.

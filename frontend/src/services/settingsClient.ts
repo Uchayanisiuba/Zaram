@@ -999,6 +999,117 @@ export async function fetchCardStatus(): Promise<CardStatus> {
   return toCardStatus((await get('/providers/resident')) as Record<string, unknown>);
 }
 
+// ----------------------------------------------------- local model servers
+
+/** Where a local model server is, in the one word Settings branches on.
+ *
+ *  `running` is answering; `starting` has been launched and has not answered
+ *  yet; `stopped` is installed and not running; `not_installed` was not found;
+ *  `cannot_start` was found but cannot be run (`problem` says why); `port_taken`
+ *  means *another* program is on its port; `stalled` was launched and has not
+ *  answered in two minutes. */
+export type ModelServerState =
+  | 'running'
+  | 'starting'
+  | 'stopped'
+  | 'not_installed'
+  | 'cannot_start'
+  | 'port_taken'
+  | 'stalled'
+  | 'unknown';
+
+const SERVER_STATES: readonly ModelServerState[] = [
+  'running', 'starting', 'stopped', 'not_installed', 'cannot_start', 'port_taken', 'stalled',
+];
+
+/** Ollama, TabbyAPI, or any other server Zaram knows how to find. Read from the
+ *  backend's own table, so a new one appears here with no change to this file. */
+export interface ModelServer {
+  id: string;
+  label: string;
+  port: number;
+  state: ModelServerState;
+  installed: boolean;
+  path: string | null;
+  /** The models the server itself lists. */
+  modelCount: number;
+  /** A few names, for showing; the count is the whole. */
+  models: string[];
+  canStart: boolean;
+  /** Why it cannot be started, when it cannot. */
+  problem: string;
+  /** Whether Zaram starts it when it opens. On unless turned off. */
+  autoStart: boolean;
+  /** Which of `path` / `python` mean anything for this server. */
+  fields: string[];
+  /** The end of its log, when a launch failed. */
+  failure: string;
+  logPath: string;
+  /** **How many of Zaram's own models came from this server.** `null` means
+   *  *not asked*, which is not zero. Zero beside a non-zero `modelCount` is the
+   *  finding this exists to show: the server is up and Zaram has not picked it up,
+   *  which is exactly how a started TabbyAPI showed no Qwen. */
+  zaramSees: number | null;
+}
+
+function toModelServer(raw: Record<string, unknown>): ModelServer {
+  const text = (v: unknown) => (typeof v === 'string' ? v : '');
+  const state = SERVER_STATES.includes(raw.state as ModelServerState)
+    ? (raw.state as ModelServerState)
+    : 'unknown';
+  return {
+    id: text(raw.id),
+    label: text(raw.label) || text(raw.id),
+    port: typeof raw.port === 'number' ? raw.port : 0,
+    state,
+    installed: raw.installed === true,
+    path: typeof raw.path === 'string' ? raw.path : null,
+    modelCount: typeof raw.model_count === 'number' ? raw.model_count : 0,
+    models: Array.isArray(raw.models) ? raw.models.filter((m): m is string => typeof m === 'string') : [],
+    canStart: raw.can_start === true,
+    problem: text(raw.problem),
+    // Only an exact `false` is off — the same reading the backend makes.
+    autoStart: raw.auto_start !== false,
+    fields: Array.isArray(raw.fields) ? raw.fields.filter((f): f is string => typeof f === 'string') : ['path'],
+    failure: text(raw.failure),
+    logPath: text(raw.log_path),
+    zaramSees: typeof raw.zaram_sees === 'number' ? raw.zaram_sees : null,
+  };
+}
+
+/** Every local model server and whether Zaram can reach it. Read-only: it probes
+ *  loopback ports and starts nothing. */
+export async function fetchModelServers(): Promise<ModelServer[]> {
+  const raw = await get('/providers/model-servers');
+  return Array.isArray(raw) ? raw.map((r) => toModelServer(r as Record<string, unknown>)) : [];
+}
+
+/** Start a server the person has installed. Answers at once with `starting`;
+ *  poll `fetchModelServers`. Zaram rescans its models by itself once the
+ *  server answers, so there is no second button to press. Throws `SettingsError`
+ *  with the reason in a sentence when it cannot. */
+export async function startModelServer(id: string): Promise<ModelServer> {
+  return toModelServer(
+    (await send(`/providers/model-servers/${encodeURIComponent(id)}/start`, 'POST')) as Record<string, unknown>,
+  );
+}
+
+/** Change whether a server starts with Zaram, or where it is installed. An empty
+ *  string clears a field; omitting one leaves it alone. A location that is not an
+ *  install of that server is refused with the reason. */
+export async function updateModelServer(
+  id: string,
+  update: { autoStart?: boolean; path?: string; python?: string },
+): Promise<ModelServer> {
+  return toModelServer(
+    (await send(`/providers/model-servers/${encodeURIComponent(id)}`, 'PUT', {
+      ...(update.autoStart !== undefined ? { auto_start: update.autoStart } : {}),
+      ...(update.path !== undefined ? { path: update.path } : {}),
+      ...(update.python !== undefined ? { python: update.python } : {}),
+    })) as Record<string, unknown>,
+  );
+}
+
 /**
  * Give the card back: unload every model every local server can unload.
  *

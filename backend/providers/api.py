@@ -23,6 +23,7 @@ anything.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from urllib.parse import urlparse
@@ -214,6 +215,123 @@ async def model_catalogue() -> dict:
         "budget_bytes": budget_bytes,
         "generated": entries[0].model.generated if entries else "",
     }
+
+
+# ------------------------------------------------------- local model servers
+
+#: Background tasks are held here, because the event loop keeps only a weak
+#: reference to a task and one nobody else holds can be collected mid-run.
+_background: set = set()
+
+
+class ModelServerUpdate(BaseModel):
+    """What a person may change about one local model server.
+
+    A closed set, and each field reaches a place that eventually *runs*
+    something, so the route is the only way in and it validates `path` before
+    storing it. `None` leaves a field alone; an empty string clears it.
+    """
+
+    auto_start: Optional[bool] = None
+    path: Optional[str] = None
+    python: Optional[str] = None
+
+
+def _models_zaram_sees(port: int) -> Optional[int]:
+    """How many of *Zaram's own* catalogue's models came from the server on ``port``.
+
+    The honest half of "do we have access". A server can be up and listing a
+    model that Zaram has not picked up -- it probes at boot and on a rescan, so
+    anything that starts afterwards is invisible until something asks again --
+    and that gap is the one a person needs told about. ``None`` when there is
+    no catalogue to ask, which is not the same as zero.
+
+    Matched on the endpoint's port, not on a provider id: LM Studio and
+    TabbyAPI both default to 1234 and Zaram files them under different
+    adapters, so the port is the only thing that is the same for what a person
+    means by "the server on 1234".
+    """
+    if _PROVIDERS_RUNTIME is None:
+        return None
+    try:
+        models = _PROVIDERS_RUNTIME.manager.list_models()
+    except Exception:  # noqa: BLE001 - a status must not fail because the catalogue did
+        return None
+    marker = f":{port}"
+    return sum(
+        1
+        for m in models
+        if getattr(m, "available", False) and marker in (getattr(m, "endpoint", "") or "")
+    )
+
+
+def _track(coro) -> None:
+    task = asyncio.ensure_future(coro)
+    _background.add(task)
+    task.add_done_callback(_background.discard)
+
+
+@router.get("/model-servers")
+async def model_servers_status() -> List[dict]:
+    """Ollama, TabbyAPI and any other server Zaram knows how to find.
+
+    For each: whether it is installed, whether it is answering, how many models
+    it lists, and how many of them Zaram itself has. Read-only and cheap, so
+    Settings can poll it while a server starts. It probes only the servers'
+    own loopback ports and starts nothing.
+    """
+    from . import model_servers
+
+    rows = await asyncio.to_thread(model_servers.describe_all)
+    for row in rows:
+        row["zaram_sees"] = _models_zaram_sees(row["port"])
+    return rows
+
+
+@router.post("/model-servers/{server_id}/start")
+async def start_model_server(server_id: str) -> dict:
+    """Start a server the person has installed. Returns at once.
+
+    Answers `starting` rather than waiting, because TabbyAPI takes ~20 s and a
+    request that long reads as a hang. The caller polls the status; and once the
+    server answers, Zaram rescans its models itself, so nobody has to press a
+    second button to make a started server appear.
+    """
+    from . import model_servers
+
+    if server_id not in model_servers.SERVERS:
+        raise HTTPException(status_code=404, detail="Unknown model server")
+    try:
+        row = await asyncio.to_thread(model_servers.start, server_id)
+    except model_servers.ServerStartError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+    if _PROVIDERS_RUNTIME is not None and not row["serving"]:
+        _track(model_servers.refresh_when_up(server_id, _PROVIDERS_RUNTIME.manager.refresh))
+    row["zaram_sees"] = _models_zaram_sees(row["port"])
+    return row
+
+
+@router.put("/model-servers/{server_id}")
+async def update_model_server(server_id: str, body: ModelServerUpdate) -> dict:
+    """Change whether a server starts with Zaram, or where it is installed."""
+    from core.user_settings import get_user_settings
+
+    from . import model_servers
+
+    if server_id not in model_servers.SERVERS:
+        raise HTTPException(status_code=404, detail="Unknown model server")
+    if body.path is not None:
+        problem = await asyncio.to_thread(model_servers.validate_path, server_id, body.path)
+        if problem:
+            raise HTTPException(status_code=400, detail=problem)
+
+    get_user_settings().set_model_server(
+        server_id, auto_start=body.auto_start, path=body.path, python=body.python
+    )
+    row = await asyncio.to_thread(model_servers.describe, server_id)
+    row["zaram_sees"] = _models_zaram_sees(row["port"])
+    return row
 
 
 @router.get("/context-ceiling")

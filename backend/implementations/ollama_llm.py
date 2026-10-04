@@ -31,7 +31,7 @@ class OllamaLLM:
     #: Naming a different model would repeat the mistake with a fresher name.
     default_model: str | None = None
 
-    def __init__(self, base_url: str = "http://localhost:11434"):
+    def __init__(self, base_url: str = "http://127.0.0.1:11434"):
         self.base_url = base_url
 
     def stream_response(
