@@ -194,6 +194,34 @@ async def model_catalogue() -> dict:
     }
 
 
+@router.get("/context-ceiling")
+async def context_ceiling(model: str = "") -> dict:
+    """The largest context this model's own file says it can hold.
+
+    **A separate route rather than a field on the settings payload**, so
+    reading Settings does not make a network call as a side effect. It is
+    loopback and cheap, but rule 7g's posture is that refreshing from
+    anywhere is an action rather than a consequence of looking.
+
+    `ceiling` is the model's declared maximum, `loaded` is what it
+    actually came up with, and they are usually different — that gap is
+    the whole reason `core/context_budget.py` exists. Measured: a model
+    reporting 262,144 loads with 4,096.
+
+    Both are `null` when unreadable, never zero. A ceiling of 0 would read
+    as "this model can hold nothing", which is the false zero `vram_bytes`
+    already refuses.
+    """
+    from core.context_budget import declared_context_length, loaded_context_length
+
+    name = (model or "").strip()
+    return {
+        "model": name,
+        "ceiling": declared_context_length(name),
+        "loaded": loaded_context_length(name),
+    }
+
+
 @router.post("/pull")
 async def pull_recommended_model(body: Optional[PullChoice] = None):
     """Fetch a model, streaming its progress.

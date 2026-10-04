@@ -642,3 +642,59 @@ def budget_for(
     )
 
 
+
+
+def declared_context_length(
+    model: Optional[str],
+    base_url: str = "http://127.0.0.1:11434",
+    timeout: float = 2.0,
+) -> Optional[int]:
+    """The ceiling the model's own file declares, or ``None``.
+
+    **The number this module's docstring warns against using, exposed on
+    purpose and under a name that says which one it is.** Sizing a prompt
+    against it overflows the context, which is why `loaded_context_length`
+    and `configured_context_length` both refuse to read it. But *"how much
+    could this model hold if asked"* is a different question from *"how
+    much will this request have"*, and it is the right number for exactly
+    one job: the ceiling on a control that lets somebody raise `num_ctx`.
+
+    LM Studio does the same thing, and the maintainer asked for it by
+    name — the slider stops at what the file says, because the model's
+    creator wrote that number into it.
+
+    Read from `model_info`, matched on any key ending `.context_length`
+    rather than on `<architecture>.context_length`: the prefix is the
+    architecture, so hardcoding it would need a list of every
+    architecture Ollama supports and would silently answer ``None`` for
+    the next one. Measured 4 October 2026: `gemma4:12b` reports
+    `gemma4.context_length: 262144` while loading with 4,096.
+
+    Never raises, and ``None`` is a real answer — the same three-valued
+    discipline the rest of this module keeps.
+    """
+    if not model:
+        return None
+    if not _is_loopback(base_url):
+        logger.warning("declared context refused for a non-loopback host: %r", base_url)
+        return None
+    try:
+        response = requests.post(
+            f"{base_url}/api/show", json={"model": model}, timeout=timeout
+        )
+        response.raise_for_status()
+        info = response.json().get("model_info")
+    except Exception as exc:
+        logger.debug("declared context unreadable for %r: %s", model, exc)
+        return None
+    if not isinstance(info, dict):
+        return None
+    for key, value in info.items():
+        if isinstance(key, str) and key.endswith(".context_length"):
+            try:
+                number = int(value)
+            except (TypeError, ValueError):
+                continue
+            if number > 0:
+                return number
+    return None
