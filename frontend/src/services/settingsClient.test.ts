@@ -159,6 +159,10 @@ describe('routing updates leave untouched fields alone', () => {
     expect(lastCall().body).toEqual({
       routing_preference: 'prefer_local',
       default_model: null,
+      // The policy that replaced the typed number, 4 October 2026. This
+      // assertion is exact on purpose and that is why it caught them.
+      context_policy: null,
+      context_override: null,
       // The other fields behind the same endpoint, and the same rule: a client
       // setting the preference must not clear somebody's per-task assignments
       // or their routing model as a side effect of not mentioning them.

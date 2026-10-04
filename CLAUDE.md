@@ -1292,6 +1292,57 @@ for patterns; do not link it.
 
 ## Models and routing
 
+**Build for the set of models, never for one — 4 October 2026, by the
+maintainer's instruction: *"any solution, build or feature for Zaram should be
+designed to be scalable across as many LLMs as possible; we shouldn't be coding
+for a specific one."***
+
+This is the architectural half of a rule the dependency stack already states
+commercially — *"neutrality across models is the moat"* — and it binds every
+feature rather than only the choice of framework. The product's claim is that
+the memory outlives the model. A feature that works on the model the maintainer
+happens to run, and silently does less on the next one, breaks that claim in the
+place a user would least expect and would experience as Zaram getting worse for
+no visible reason.
+
+**The test is one question: would this still be right for a model nobody has
+heard of yet?** Three things follow, and the third is the one that gets skipped.
+
+*Read a property; never branch on a name.* A feature keyed to `if model
+.startswith("qwen")` is correct exactly once and wrong for every model added
+afterwards, including the next version of the one it was written for. Where a
+capability has to be known, it is **read from the model** — Ollama's
+`/api/show`, a provider's own metadata, `ModelInfo.supports_vision`,
+`capabilities` — and where it cannot be read, it is `None` and the caller
+falls back deliberately. This is why `declared_context_length` and
+`kv_bytes_per_token` match on key *suffix* (`.context_length`,
+`.attention.head_count_kv`) rather than on `<architecture>.`: the prefix **is**
+the architecture, so hardcoding it would need a list of every architecture that
+exists and would answer `None` for the next one — silently, and only on a
+stranger's machine.
+
+*A model name in a manifest, a test fixture or a recommendation is fine.* The
+rule is about **logic**, not about mentioning models. `models.manifest.json`
+names models because recommending one is its job, and it is dated and falls back
+to whatever is installed. A test fixture copied from a real `/api/show` is
+evidence. What is forbidden is a *decision* that a named model is on one side of
+and an unnamed one is on the wrong side of by default.
+
+*A model that cannot be measured must still work.* This is where the rule is
+actually broken, because the broken version passes every test on the machine it
+was written on. The fallback order that satisfies it is: what the model reports
+about itself; failing that, what its own author configured; failing that, the
+server's or provider's default — never a constant chosen by looking at one
+model. Measured the day this was written: `qwen3-14b-16k` reports a readable
+KV-cache geometry and resolves from the card, while `gemma4:12b`'s
+sliding-window layers make its cache unpriceable, so it resolves from its own
+Modelfile. Two models, two paths, one feature, and neither path names a model.
+
+The failure this prevents has a shape worth recognising: it is the *reachability*
+base rate in a new disguise. A model-specific branch is not dead code — it runs,
+and it is tested, and it is tested with the one model it was written for. "Tests
+green" means as little here as it does there.
+
 **Route with embeddings, not a generative model.** Task classification is a similarity
 problem: embed the query, compare against task exemplars, take the nearest. `bge-m3` is
 already resident for the Spine, so this costs ~10-30ms and zero extra VRAM, and it is

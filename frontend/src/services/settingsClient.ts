@@ -414,7 +414,30 @@ export interface RoutingSettings {
    *  for the same reason `taskSlots` is: a number invented here would
    *  offer a window the backend accepts and then silently reduces. */
   maxContextTokens: number;
+  /** **How the window is decided, which is the setting; the number is
+   *  worked out per model.** `fit` is the default and the reason this is
+   *  not a chore — as much as the model and the card allow, recomputed
+   *  whenever either changes. `server` sends nothing. `fixed` honours
+   *  `contextTokens` for everything.
+   *
+   *  Sent rather than inferred from a figure: `fixed` at 4,096 and
+   *  `server` resolving to 4,096 are the same number and two different
+   *  decisions. */
+  contextPolicy: ContextPolicy;
+  /** A window set for **one model**, by name. Global was the flaw the
+   *  maintainer named: *"I don't want users to need to switch token limits
+   *  every time they switch or download a new model."* */
+  contextOverrides: Record<string, number>;
+  /** The policies this backend accepts, read rather than hardcoded. */
+  contextPolicies: ContextPolicy[];
 }
+
+export type ContextPolicy = 'fit' | 'server' | 'fixed';
+
+/** The vocabulary, for validating what came back. The backend sends its
+ *  own list in `context_policies`; this is what makes an unrecognised
+ *  value resolve to the default rather than render as a dead button. */
+const POLICIES: readonly ContextPolicy[] = ['fit', 'server', 'fixed'];
 
 function toRoutingSettings(raw: Record<string, unknown>): RoutingSettings {
   const tasks = raw.task_models;
@@ -442,6 +465,28 @@ function toRoutingSettings(raw: Record<string, unknown>): RoutingSettings {
     // unbounded. The fallback is the same number the backend uses.
     maxContextTokens:
       typeof raw.max_context_tokens === 'number' ? raw.max_context_tokens : 131_072,
+    // A backend older than the policy sent no field, and `fit` is what it
+    // behaved as before one existed only in the sense that it had no
+    // opinion. Defaulting to the current default keeps one answer rather
+    // than two.
+    contextPolicy: POLICIES.includes(raw.context_policy as ContextPolicy)
+      ? (raw.context_policy as ContextPolicy)
+      : 'fit',
+    // Value by value, as `taskModels` is read, and for the same reason:
+    // this came from a file on disk a person can edit.
+    contextOverrides:
+      raw.context_overrides && typeof raw.context_overrides === 'object'
+        ? (Object.fromEntries(
+            Object.entries(raw.context_overrides as Record<string, unknown>).filter(
+              ([name, tokens]) => name !== '' && typeof tokens === 'number' && tokens > 0,
+            ),
+          ) as Record<string, number>)
+        : {},
+    contextPolicies: Array.isArray(raw.context_policies)
+      ? (raw.context_policies.filter((p): p is ContextPolicy =>
+          POLICIES.includes(p as ContextPolicy),
+        ) as ContextPolicy[])
+      : [...POLICIES],
   };
 }
 
@@ -463,9 +508,15 @@ export async function updateRoutingSettings(update: {
   routerModel?: string;
   /** Ask a thinking model to think, or not. `undefined` leaves it alone. */
   thinking?: boolean;
-  /** Context to ask a local model for, in tokens. `0` hands the choice
-   *  back to the server. `undefined` leaves it alone. */
+  /** Context to ask a local model for, in tokens, under the `fixed`
+   *  policy. `0` hands the choice back to the server. `undefined` leaves
+   *  it alone. */
   contextTokens?: number;
+  /** How the window is decided. `undefined` leaves it alone. */
+  contextPolicy?: ContextPolicy;
+  /** A window for one model. `tokens: 0` forgets that model's entry,
+   *  which is what clearing the field means to the person doing it. */
+  contextOverride?: { model: string; tokens: number };
 }): Promise<RoutingSettings> {
   const raw = (await send('/routing/preference', 'POST', {
     routing_preference: update.routingPreference ?? null,
@@ -474,6 +525,8 @@ export async function updateRoutingSettings(update: {
     router_model: update.routerModel ?? null,
     thinking: update.thinking ?? null,
     context_tokens: update.contextTokens ?? null,
+    context_policy: update.contextPolicy ?? null,
+    context_override: update.contextOverride ?? null,
   })) as Record<string, unknown>;
   // The POST answers with the same payload the GET does, `task_slots`
   // included, so replacing state with what came back cannot blank the list of

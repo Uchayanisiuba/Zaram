@@ -159,8 +159,29 @@ class TestTheRoute:
         return TestClient(main.app)
 
     def test_it_answers_with_both_numbers(self, client):
+        """Five now, not three. `resolved` and `reason` are what the
+        setting actually does, and `cost_per_token` is what makes the
+        window a decision rather than a figure somebody types — added with
+        the policy that replaced the typed number, 4 October 2026.
+
+        The key set is asserted exactly, on purpose: a control that renders
+        `undefined` because a field was renamed is the failure this shape
+        of assertion exists to catch."""
         body = client.get("/providers/context-ceiling", params={"model": ""}).json()
-        assert set(body) == {"model", "ceiling", "loaded"}
+        assert set(body) == {
+            "model",
+            "ceiling",
+            "loaded",
+            "resolved",
+            "reason",
+            "cost_per_token",
+            # Whether Zaram can set this window at all, and who answered.
+            # `num_ctx` is an Ollama request field; an OpenAI-compatible
+            # server fixes its window on load, so there the figure is
+            # reported rather than controlled.
+            "settable",
+            "served_by",
+        }
 
     def test_an_unknown_model_is_null_rather_than_zero(self, client):
         body = client.get(
@@ -168,3 +189,36 @@ class TestTheRoute:
         ).json()
         assert body["ceiling"] is None
         assert body["loaded"] is None
+
+    def test_a_model_nothing_can_read_is_still_settable(self, client):
+        """`settable` is about the *runtime*, not about whether the read
+        succeeded. An Ollama model whose `/api/show` did not answer is
+        still one Zaram can send `num_ctx` to, and saying otherwise would
+        hide the control from exactly the case it was built for."""
+        body = client.get(
+            "/providers/context-ceiling", params={"model": "definitely-not-installed:1b"}
+        ).json()
+        assert body["settable"] is True
+
+    def test_the_reading_is_not_tied_to_one_runtime(self, client):
+        """**The model-neutrality rule, asserted rather than described.**
+        Every reader behind this route spoke Ollama's `/api/show` and
+        nothing else for the first hour of its life, which reported
+        *"whatever the server does, usually 4,096"* for a TabbyAPI model
+        holding 65,536 — the same 32x error `local_server_context_length`
+        was written to fix, reintroduced by a feature that knew one
+        runtime.
+
+        Asserted against the source rather than against a second server
+        this machine may not be running: the route must resolve through
+        `read_model_window`, which is the function that asks whichever
+        runtime has the model."""
+        import inspect
+
+        import providers.api as module
+
+        source = inspect.getsource(module.context_ceiling)
+        assert "read_model_window" in source
+        # And not around it, back to the Ollama-only readers.
+        assert "declared_context_length(" not in source
+        assert "kv_bytes_per_token(" not in source

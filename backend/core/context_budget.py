@@ -698,3 +698,463 @@ def declared_context_length(
             if number > 0:
                 return number
     return None
+
+
+# How many bytes one cached token costs, per element of the cache. Ollama
+# serves an f16 KV cache unless told otherwise, which is two bytes for the
+# key and two for the value.
+_KV_ELEMENT_BYTES = 2
+
+
+def _geometry(info: dict) -> Optional[tuple[int, int]]:
+    """``(total_kv_heads_across_layers, key_plus_value_length)`` or ``None``.
+
+    Read from the same `model_info` block `declared_context_length` reads,
+    and matched on key *suffix* for the same reason: the prefix is the
+    architecture.
+
+    **Returns ``None`` rather than a figure whenever the geometry is
+    ambiguous, and the ambiguous case is real.** `gemma4:12b` reports
+    `key_length_swa` and `value_length_swa` beside the full-length pair
+    and a per-layer `head_count_kv` of `[8,8,8,8,8,1,...]`: most of its
+    layers attend over a sliding window and cache a fraction of the
+    context, and nothing in `model_info` says which layers those are.
+    Measured 4 October 2026, the naive sum overstates gemma4's cost by
+    roughly ten times - so a confident number here would cap a 262,144
+    ceiling at a few thousand tokens and call it a measurement.
+
+    That is rule 9 applied to arithmetic. A caller handed ``None`` falls
+    back deliberately; a caller handed a wrong number cannot.
+    """
+
+    def ends(suffix: str):
+        for key, value in info.items():
+            if isinstance(key, str) and key.endswith(suffix):
+                return value
+        return None
+
+    # Sliding-window attention: the full-length pair is not what most
+    # layers cache, and the apportionment is not stated. Refuse.
+    if ends(".attention.key_length_swa") is not None:
+        return None
+
+    heads = ends(".attention.head_count_kv")
+    key_len = ends(".attention.key_length")
+    value_len = ends(".attention.value_length")
+    blocks = ends(".block_count")
+
+    try:
+        if isinstance(heads, (list, tuple)):
+            # Per-layer, which is the honest sum: one entry per block, and
+            # multiplying a single figure by `block_count` would be wrong
+            # for any model that varies it.
+            total_heads = sum(int(h) for h in heads)
+        else:
+            total_heads = int(heads) * int(blocks)
+        width = int(key_len) + int(value_len)
+    except (TypeError, ValueError):
+        return None
+
+    if total_heads <= 0 or width <= 0:
+        return None
+    return total_heads, width
+
+
+def kv_bytes_per_token(
+    model: Optional[str],
+    base_url: str = "http://127.0.0.1:11434",
+    timeout: float = 2.0,
+) -> Optional[int]:
+    """What one token of context costs this model in graphics memory.
+
+    The number that makes a context window a *decision* rather than a
+    figure somebody types. Measured on the maintainer's machine, 4 October
+    2026: `qwen3-14b-16k` costs **160 KiB per token**, so its own declared
+    ceiling of 40,960 is 6.7 GB of cache on top of ~9 GB of weights, and
+    131,072 would be **21.5 GB** - on a 12 GB card.
+
+    That is why *"default high and clamp to the model's limit"* does not
+    work: the model's limit is almost never the binding constraint, the
+    card is, and clamping to the declared ceiling still produces a window
+    that will not load. It does not fail cleanly either - it spills into
+    system RAM and every reply becomes slow, which reads as the model
+    being bad rather than as a setting being wrong.
+
+    ``None`` when the geometry cannot be read or is ambiguous. Never
+    raises, for the reason every reader in this module keeps.
+    """
+    if not model:
+        return None
+    if not _is_loopback(base_url):
+        logger.warning("kv cost refused for a non-loopback host: %r", base_url)
+        return None
+    try:
+        response = requests.post(
+            f"{base_url}/api/show", json={"model": model}, timeout=timeout
+        )
+        response.raise_for_status()
+        info = response.json().get("model_info")
+    except Exception as exc:
+        logger.debug("kv geometry unreadable for %r: %s", model, exc)
+        return None
+    if not isinstance(info, dict):
+        return None
+    shape = _geometry(info)
+    if shape is None:
+        return None
+    total_heads, width = shape
+    return total_heads * width * _KV_ELEMENT_BYTES
+
+
+# Windows the *control* offers, largest first. These are choices a person
+# makes, so they are the round numbers a model card quotes.
+#
+# **Resolution does not round onto this ladder**, which is what it did
+# first and the reason that was wrong: a card with room for 31,000 tokens
+# resolved to 16,384 and left 48% of the memory unspent. The maintainer
+# ruled that out in one line — *"the solution should give the user at
+# least 50 to 90% of what the LLM and PC can handle in terms of tokens"* —
+# and a power-of-two ladder's worst case is exactly 51%.
+CONTEXT_STEPS = (131_072, 65_536, 32_768, 16_384, 8_192, 4_096, 2_048)
+
+#: Resolved windows are rounded down to a multiple of this. Fine enough to
+#: spend ~99% of the memory and coarse enough that the figure reads as a
+#: setting rather than as a measurement with a remainder.
+CONTEXT_GRANULARITY = 1_024
+
+#: The smallest window worth resolving to. A model given less is not
+#: usable for the jobs a local model does well, and this is also the
+#: answer when nothing fits at all.
+MIN_CONTEXT_TOKENS = 2_048
+
+#: Held back from the cache, over and above the weights and the embedder.
+#:
+#: **Not a percentage**, because what it is reserved for does not scale
+#: with the cache: llama.cpp allocates a compute buffer sized by the
+#: model's dimensions and batch size, and the driver and the desktop take
+#: their own. A fraction would under-reserve on a small card and waste
+#: memory on a large one.
+#:
+#: The failure it exists to prevent is the one the maintainer quoted from
+#: LM Studio's own behaviour: a cache that overruns the card is not
+#: refused, it is **offloaded to system RAM**, and generation speed
+#: collapses mid-conversation. That reads as the model being bad, so the
+#: margin is deliberately on the safe side of the arithmetic.
+COMPUTE_RESERVE_BYTES = 384_000_000
+
+
+def affordable_context_length(
+    bytes_per_token: Optional[int], free_bytes: Optional[int]
+) -> Optional[int]:
+    """The largest window whose cache fits in ``free_bytes``, or ``None``.
+
+    Pure, so the arithmetic is checked without a server.
+
+    **Rounded down to `CONTEXT_GRANULARITY`, not onto a ladder.** The first
+    version answered with a power of two, which is defensible for a
+    control somebody is reading and wasteful as a decision: between two
+    steps it discards up to half the memory, and the maintainer's
+    requirement is 50–90% of what the machine can hold rather than
+    50% of it at worst. A 1,024-token granularity spends ~99% and still
+    reads as a setting.
+
+    ``None`` in either argument gives ``None`` out — an unmeasured machine
+    and an unreadable model are both *unknown*, and neither of them is
+    "nothing fits". The same three-valued discipline `vram_bytes` keeps by
+    refusing to answer ``0``.
+
+    **Unknown and nothing-fits are different answers.** Both inputs read
+    and no window affordable is a conclusion: the weights overrun the
+    card, and `MIN_CONTEXT_TOKENS` is the reply. ``None`` is reserved for
+    not knowing, and sends the caller to the model author's own figure
+    instead.
+    """
+    if not bytes_per_token or bytes_per_token <= 0:
+        return None
+    if free_bytes is None:
+        return None
+
+    usable = free_bytes - COMPUTE_RESERVE_BYTES
+    if usable <= 0:
+        return MIN_CONTEXT_TOKENS
+
+    tokens = int(usable // bytes_per_token)
+    tokens -= tokens % CONTEXT_GRANULARITY
+    return max(tokens, MIN_CONTEXT_TOKENS)
+
+
+@dataclass(frozen=True)
+class ContextChoice:
+    """A resolved window and why it is that number.
+
+    ``tokens`` of ``0`` means *send no `num_ctx` and let the server use its
+    own default* - the honest answer when nothing could be worked out, and
+    distinct from a small window that was chosen.
+
+    ``reason`` is shown to the person. Routing legibility applied to the
+    one setting whose wrong value makes a good model look bad.
+    """
+
+    tokens: int
+    reason: str
+
+
+_SERVER_DEFAULT = "Whatever the server does, usually 4,096 tokens"
+
+
+def resolve_context_window(
+    *,
+    declared: Optional[int],
+    configured: Optional[int],
+    bytes_per_token: Optional[int],
+    free_bytes: Optional[int],
+    override: Optional[int] = None,
+    policy: str = "fit",
+    fixed: Optional[int] = None,
+) -> ContextChoice:
+    """How much context to ask for, decided per model rather than per user.
+
+    **The elegant alternative to a number the user re-picks on every model
+    switch**, asked for 4 October 2026: *"I don't want users to need to
+    switch token limits every time they switch or download a new model."*
+    The stored setting stops being a figure and becomes an intent; the
+    figure is worked out here, for this model, against this card.
+
+    Order, and each step answers a different question:
+
+    1. **An override for this model wins.** A number somebody set
+       deliberately is remembered against the model it was set for, never
+       globally - that is what stops one choice being wrong for every
+       other model.
+    2. ``policy == "server"`` leaves Ollama alone, which is what the whole
+       setting did before this existed.
+    3. ``policy == "fixed"`` honours one number for everything, for
+       somebody who genuinely wants that.
+    4. Otherwise **fit**: the largest step that fits beside the weights,
+       never past what the model says it can hold.
+
+    Every branch is capped by ``declared``. Asking for more context than
+    the model's own file admits to is wrong however it was arrived at, and
+    the cap is silent because there is nothing for the person to decide.
+
+    When the cost per token cannot be worked out - `gemma4`'s
+    sliding-window layers are the measured case - fit falls back to the
+    window the model's **own file** asks for. That is its author's
+    judgement about its own geometry, which beats Zaram's guess and beats
+    4,096.
+    """
+    ceiling = declared if declared and declared > 0 else None
+
+    def capped(tokens: int) -> int:
+        return min(tokens, ceiling) if ceiling else tokens
+
+    if override and override > 0:
+        tokens = capped(override)
+        if ceiling and override > ceiling:
+            return ContextChoice(tokens, f"{_k(tokens)}, the most this model can hold")
+        return ContextChoice(tokens, f"{_k(tokens)}, set for this model")
+
+    if policy == "server":
+        return ContextChoice(0, _SERVER_DEFAULT)
+
+    if policy == "fixed":
+        # **Capped like every other branch, and that is why this goes
+        # through here rather than being read straight out of Settings.**
+        # The first version let the engine return the stored figure
+        # directly, which asked `qwen3-14b-16k` for 131,072 against a
+        # declared ceiling of 40,960 — a number the model cannot hold,
+        # arrived at by the one route that skipped the cap. A rule applied
+        # in three places is a rule broken in one of them.
+        if fixed and fixed > 0:
+            tokens = capped(fixed)
+            if ceiling and fixed > ceiling:
+                return ContextChoice(
+                    tokens, f"{_k(tokens)}, the most this model can hold"
+                )
+            return ContextChoice(tokens, f"{_k(tokens)}, set for every model")
+        # `0` means nobody has typed a number yet, so there is nothing to
+        # honour and the server default is the truth.
+        return ContextChoice(0, _SERVER_DEFAULT)
+
+    fits = affordable_context_length(bytes_per_token, free_bytes)
+    if fits is not None:
+        tokens = capped(fits)
+        if ceiling and fits > ceiling:
+            return ContextChoice(tokens, f"{_k(tokens)}, the most this model can hold")
+        return ContextChoice(
+            tokens, f"{_k(tokens)}, the most this card affords beside the weights"
+        )
+
+    if configured and configured > 0:
+        tokens = capped(configured)
+        return ContextChoice(tokens, f"{_k(tokens)}, what the model's own file asks for")
+
+    return ContextChoice(0, _SERVER_DEFAULT)
+
+
+def _k(tokens: int) -> str:
+    """``32k``, or ``15k`` — the unit a model's own documentation uses, so
+    this figure and the one on its model card compare at a glance.
+
+    Resolved windows are multiples of 1,024 rather than powers of two, so
+    this says `15k` where it used to say `15,360`. The exact number is
+    never hidden from somebody who wants it: the reason line beside it
+    names the source, and the override ladder is explicit.
+    """
+    if tokens >= 1_024 and tokens % 1_024 == 0:
+        return f"{tokens // 1_024}k tokens"
+    return f"{tokens:,} tokens"
+
+
+def room_for_a_cache(model: str) -> Optional[int]:
+    """Room for this model's cache once its weights are in, or ``None``.
+
+    **Measured against the card's total, deliberately, and not against
+    what is free this minute.** `vram_free_bytes` exists and is the better
+    reading for a preload — its own docstring says so and gives the
+    measurement — but it is the wrong one here, and trying it first is how
+    that was found. Probed on the maintainer's machine 4 October 2026 with
+    TabbyAPI resident: **1.2 GB free of 12.3**, which resolves a 14B's
+    window to the smallest step on the ladder. Unload Tabby and the same
+    model deserves 8k.
+
+    A context window that silently shrinks because something else is open,
+    and stays shrunk, is not a setting — it is a reading, and the person
+    would experience it as Zaram getting worse for no reason they can
+    see. So the basis is a property of *(this machine, this model)*: the
+    card's capacity, less what Zaram keeps resident, less the weights.
+
+    The cost of choosing this way is accepted and named: when another
+    process does hold the card, the resolved window is larger than will
+    fit and Ollama spills. That is already true of the weights themselves,
+    it is the condition the orb's swap state exists to show, and it is not
+    something a context setting can fix by being pessimistic forever.
+
+    ``None`` is a real answer and the common one off NVIDIA — Apple and
+    DirectML report no VRAM at all, because Apple shares one pool with the
+    CPU and quoting system RAM would overstate what a model can claim. The
+    resolver then falls back to the window the model's own file asks for,
+    which is its author's judgement about its own geometry rather than
+    Zaram's guess.
+    """
+    try:
+        from providers.discoverers.hardware import HardwareProfiler
+
+        total = HardwareProfiler().profile().vram_bytes
+    except Exception:
+        return None
+    if not total or total <= 0:
+        return None
+
+    weights = _weights_bytes(model)
+    if weights is None:
+        return None
+
+    # What Zaram holds beside a chat model. The embedder measures 0.66 GB
+    # resident on the maintainer's card (CLAUDE.md's residency table); 0.7
+    # rounds against the user rather than for them, which is the direction
+    # to round when the cost of being wrong is the card spilling.
+    embedder = 700_000_000
+
+    # **Not clamped to zero**, and that is the point. A negative result
+    # means the weights alone exceed the card, which is a *measurement*
+    # and not an absence of one — the honest reply to it is the cheapest
+    # cache on the ladder, and clamping to 0 would have made it
+    # indistinguishable from the unknown case that falls back to 128k.
+    return total - embedder - weights
+
+
+def _weights_bytes(model: str) -> Optional[int]:
+    """This model's size on disk, as Ollama reports it, or ``None``."""
+    try:
+        import requests
+
+        reply = requests.get("http://127.0.0.1:11434/api/tags", timeout=2.0)
+        reply.raise_for_status()
+        for entry in reply.json().get("models") or []:
+            if isinstance(entry, dict) and entry.get("name") == model:
+                size = entry.get("size")
+                return int(size) if isinstance(size, (int, float)) and size > 0 else None
+    except Exception:
+        return None
+    return None
+
+
+@dataclass(frozen=True)
+class ModelWindow:
+    """What is known about one model's context, whoever is serving it.
+
+    **Added 4 October 2026, immediately after the model-neutrality rule
+    went into `CLAUDE.md`, because the code written an hour earlier broke
+    it.** Every reader feeding `resolve_context_window` spoke Ollama's
+    `/api/show` and nothing else, so the control was asked about the model
+    that would actually answer on the maintainer's machine —
+    `Qwen3.8-27B-exl3-2.20bpw`, served by TabbyAPI — and every field came
+    back `None`. It resolved to *"whatever the server does, usually
+    4,096"* for a model holding **65,536**: the same 32x error
+    `local_server_context_length` was written to fix, reintroduced by a
+    feature that only knew one runtime.
+
+    ``settable`` is the honest half. Zaram sets a window by sending
+    `num_ctx` on an Ollama request; there is no equivalent on an
+    OpenAI-compatible route, where the window is fixed when that server
+    loads the model. So for those the figure is **reported, not
+    controlled**, and a control that offered to change it would be a
+    switch that settles nothing — which this codebase already refuses to
+    ship for permission scopes and should refuse here for the same reason.
+    """
+
+    declared: Optional[int]
+    configured: Optional[int]
+    bytes_per_token: Optional[int]
+    settable: bool
+    #: Which runtime answered, for a reason line that can say so.
+    served_by: str
+
+
+def read_model_window(
+    model: Optional[str],
+    base_url: str = "http://127.0.0.1:11434",
+    timeout: float = 2.0,
+) -> ModelWindow:
+    """Everything the resolver needs, from whichever runtime has the model.
+
+    **Ollama first, then the other local servers**, which is the order
+    `local_server_context_length` already argues for: Ollama is the common
+    case, and the rest are two HTTP calls to ports usually closed.
+
+    A second server's route reports the window it loaded with, which *is*
+    that model's ceiling until it is restarted — so the same number serves
+    as both ``declared`` and ``configured``, and nothing is invented to
+    fill the other field. The cache cannot be priced there at all, because
+    no OpenAI-compatible route publishes the attention geometry; that is
+    ``None``, and `fit` then uses the server's own figure, which is the
+    right answer rather than a fallback.
+    """
+    if not model:
+        return ModelWindow(None, None, None, True, "")
+
+    declared = declared_context_length(model, base_url, timeout)
+    if declared is not None:
+        return ModelWindow(
+            declared=declared,
+            configured=configured_context_length(model, base_url=base_url, timeout=timeout),
+            bytes_per_token=kv_bytes_per_token(model, base_url, timeout),
+            settable=True,
+            served_by="ollama",
+        )
+
+    served = local_server_context_length(model)
+    if served is not None:
+        return ModelWindow(
+            declared=served,
+            configured=served,
+            bytes_per_token=None,
+            settable=False,
+            served_by="local server",
+        )
+
+    # Unknown, and `settable` stays true: an Ollama model whose `/api/show`
+    # did not answer is still one Zaram can send `num_ctx` to, and saying
+    # otherwise would hide the control from the case it was built for.
+    return ModelWindow(None, None, None, True, "")

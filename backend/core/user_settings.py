@@ -66,6 +66,22 @@ DEFAULT_FILE_NAME = "settings.json"
 #: card, not the model.
 MAX_CONTEXT_TOKENS = 131_072
 
+#: How a local model's context window is decided.
+#:
+#: ``fit`` - as much as this model and this card allow, worked out per
+#: model. The default, and the whole point: nothing to re-pick when the
+#: model changes.
+#: ``server`` - send no ``num_ctx`` and let the server use its own default,
+#: which is what this setting did before a policy existed.
+#: ``fixed`` - honour ``context_tokens`` for everything, for somebody who
+#: genuinely wants one number.
+CONTEXT_POLICIES = frozenset({"fit", "server", "fixed"})
+
+#: A cap on remembered per-model windows. Not a limit anybody will reach by
+#: choosing - it bounds what a settings *file* can make this dictionary,
+#: for the reason the character fields are bounded.
+MAX_CONTEXT_OVERRIDES = 200
+
 
 class SearchScope(str, Enum):
     """When web search is worth doing, once it is switched on.
@@ -219,6 +235,25 @@ class UserSettings:
         #: with is still measured rather than assumed — this says what was
         #: *requested*.
         self._context_tokens = 0
+        #: **How the window is decided, rather than what it is.** Revised
+        #: 4 October 2026 from one sentence: *"I don't want users to need
+        #: to switch token limits every time they switch or download a new
+        #: model."* A single number cannot be right for two models - the
+        #: binding constraint is the card, not the model's limit, and
+        #: measured on the maintainer's machine `qwen3-14b-16k` costs
+        #: 160 KiB per cached token, so 128k of it is 21.5 GB on a 12 GB
+        #: card. So the stored value is an intent and
+        #: `context_budget.resolve_context_window` works out the figure per
+        #: model, per launch.
+        #:
+        #: `fit` is the default and the reason this is not a chore:
+        #: as much as this model and this card allow, recomputed whenever
+        #: either changes, with nothing to re-pick.
+        self._context_policy = "fit"
+        #: A number somebody set **for one model**, keyed by model name.
+        #: Global was the bug: one figure is wrong for every model but the
+        #: one it was chosen for, which is what made this a chore.
+        self._context_overrides: Dict[str, int] = {}
         self._manner = ""
         self._voice = ""
         # Local first, as everything is: CLAUDE.md's "local is the fallback
@@ -420,6 +455,8 @@ class UserSettings:
             "image_model": self._image_model,
             "thinking": self._thinking,
             "context_tokens": self._context_tokens,
+            "context_policy": self._context_policy,
+            "context_overrides": dict(self._context_overrides),
         }
 
     # ----------------------------------------------------------------- write
@@ -512,6 +549,42 @@ class UserSettings:
             self._context_tokens = max(0, min(int(value), MAX_CONTEXT_TOKENS))
             self._save()
         return self._context_tokens
+
+    def set_context_policy(self, value: str) -> str:
+        """How the window is decided. Anything unrecognised is ``fit``.
+
+        Unrecognised resolves to the default rather than raising, which is
+        the posture every reader of this file keeps: a settings value that
+        will not parse must not be able to stop a model answering.
+        """
+        with self._lock:
+            self._context_policy = value if value in CONTEXT_POLICIES else "fit"
+            self._save()
+        return self._context_policy
+
+    def set_context_override(self, model: str, tokens: int) -> Dict[str, int]:
+        """Remember a window **for one model**, or forget it.
+
+        ``0`` removes the entry rather than storing a zero, so "no opinion
+        about this model" and "this model should use the server default"
+        stay different things - the first falls through to the policy and
+        the second is `set_context_policy("server")`.
+        """
+        name = (model or "").strip()
+        if not name:
+            return dict(self._context_overrides)
+        with self._lock:
+            if tokens and tokens > 0:
+                if (
+                    name not in self._context_overrides
+                    and len(self._context_overrides) >= MAX_CONTEXT_OVERRIDES
+                ):
+                    return dict(self._context_overrides)
+                self._context_overrides[name] = min(int(tokens), MAX_CONTEXT_TOKENS)
+            else:
+                self._context_overrides.pop(name, None)
+            self._save()
+        return dict(self._context_overrides)
 
     def set_character(
         self,
@@ -619,6 +692,36 @@ class UserSettings:
         window = raw.get("context_tokens")
         if isinstance(window, int):
             self._context_tokens = max(0, min(window, MAX_CONTEXT_TOKENS))
+
+        # **A number stored before the policy existed does not select
+        # `fixed`.** The first version of this migration did, on the
+        # reasoning that somebody who typed 16,384 meant it - and that
+        # reasoning inverts the actual history. The only way past Ollama's
+        # 4,096 used to be this field, so a number in it is evidence that
+        # the default was wrong, not that one figure was wanted for every
+        # model. The maintainer's own store holds 131,072, which against
+        # `qwen3-14b-16k`'s declared 40,960 is a window that model cannot
+        # hold - preserving it faithfully would preserve a workaround for
+        # the thing being fixed.
+        #
+        # So everyone lands on `fit`, which cannot produce a window past
+        # what the model declares or the card affords; the change can only
+        # be in the safe direction. The number is kept, so choosing
+        # `fixed` restores it rather than asking for it again.
+        policy = raw.get("context_policy")
+        if isinstance(policy, str) and policy in CONTEXT_POLICIES:
+            self._context_policy = policy
+
+        overrides = raw.get("context_overrides")
+        if isinstance(overrides, dict):
+            # Bounded on the way in, as the character is: a settings file is
+            # a file, and a key that is not a string is ignored rather than
+            # coerced.
+            self._context_overrides = {
+                name: max(0, min(int(value), MAX_CONTEXT_TOKENS))
+                for name, value in list(overrides.items())[:MAX_CONTEXT_OVERRIDES]
+                if isinstance(name, str) and name.strip() and isinstance(value, int)
+            }
 
         name = raw.get("assistant_name")
         if isinstance(name, str):

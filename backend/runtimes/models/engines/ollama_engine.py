@@ -3,6 +3,7 @@ import requests
 import json
 import logging
 from collections.abc import Iterator
+from functools import lru_cache
 from typing import Callable, Optional
 
 from core.reasoning import CLOSE_TAG, OPEN_TAG
@@ -553,15 +554,28 @@ class OllamaEngine(LLMEngine):
             # gives the memory back.
             "keep_alive": KEEP_ALIVE,
         }
-        # **What the person asked for, if they asked.**
+        # **As much as this model and this card allow, worked out per
+        # model rather than typed once.**
         #
         # Ollama serves its own default `num_ctx` whatever a model
         # advertises — measured at 4,096 for a model reporting 262,144 —
         # and until 4 October 2026 the only way past it was a Modelfile.
-        # Absent unless set, so the server's default still applies to
-        # everyone who has not chosen: sending a number nobody picked
-        # would spend their VRAM on a KV cache they did not ask for.
-        window = _requested_context_tokens()
+        #
+        # The first version of this read one number out of Settings, and
+        # the maintainer named the flaw the same day: *"I don't want users
+        # to need to switch token limits every time they switch or
+        # download a new model."* One number cannot be right for two
+        # models. It is not even the model's declared limit that binds —
+        # measured, `qwen3-14b-16k` costs 160 KiB per cached token, so its
+        # own ceiling of 40,960 is 6.7 GB of cache on top of 9.3 GB of
+        # weights and will not load on a 12 GB card. `num_ctx` passed what
+        # the card holds does not fail cleanly either; it spills to system
+        # RAM and reads as the model being slow.
+        #
+        # So the resolution is per model and per launch, and `0` still
+        # means *send nothing and let the server decide* — the honest
+        # answer when the cost could not be worked out.
+        window = _requested_context_tokens(payload["model"])
         if window:
             payload["options"] = {"num_ctx": window}
         # Only when there are some. Ollama reads the presence of the key as a
@@ -711,21 +725,82 @@ class OllamaEngine(LLMEngine):
 
 
 
-def _requested_context_tokens() -> int:
-    """How much context the person asked a local model for, or ``0``.
+def _requested_context_tokens(model: str = "") -> int:
+    """How much context to ask for when calling ``model``, or ``0``.
 
     Read per request rather than captured at construction: somebody who
-    raises it in Settings should see the next reply use it, not the next
+    changes it in Settings should see the next reply use it, not the next
     launch. Reading a settings file per request is a disk hit measured in
     microseconds against a generation measured in seconds.
 
     **Every failure resolves to ``0``**, which means *leave the server's
     default alone*. A settings store that will not load must not be able
-    to change how a model is called.
+    to change how a model is called, and neither must an Ollama that will
+    not answer `/api/show`.
+
+    The model's geometry is cached, which is what makes this affordable
+    per request: it is a property of the file on disk and does not change
+    between launches. The *card* can change underneath it — something else
+    claiming VRAM — and that is accepted deliberately rather than
+    re-measured per token: re-pricing the window mid-conversation would
+    move the goalposts under a reply that had already started.
     """
     try:
         from core.user_settings import get_user_settings
 
-        return max(0, int(get_user_settings().to_dict().get("context_tokens") or 0))
+        settings = get_user_settings().to_dict()
     except Exception:
         return 0
+
+    policy = str(settings.get("context_policy") or "fit")
+    overrides = settings.get("context_overrides") or {}
+    override = overrides.get(model) if isinstance(overrides, dict) else None
+    try:
+        fixed = max(0, int(settings.get("context_tokens") or 0))
+    except (TypeError, ValueError):
+        fixed = 0
+
+    # **Every policy resolves through one function**, including `server`,
+    # which looks like it could shortcut to `0` here. It cannot: an
+    # override for this model outranks the policy, so the shortcut would
+    # have quietly ignored a number somebody set for this model only.
+    try:
+        from core.context_budget import (
+            resolve_context_window,
+            room_for_a_cache,
+        )
+
+        return resolve_context_window(
+            override=int(override) if override else None,
+            policy=policy,
+            fixed=fixed,
+            free_bytes=room_for_a_cache(model),
+            **_model_geometry(model),
+        ).tokens
+    except Exception:
+        logger.debug("context window unresolved for %r", model, exc_info=True)
+        return 0
+
+
+@lru_cache(maxsize=32)
+def _model_geometry(model: str) -> dict:
+    """The three readings the resolver needs, cached per model.
+
+    Separated from the resolution so the cache holds only what is a
+    property of the model — the declared ceiling, the window its own file
+    asks for, and the memory one cached token costs. The free memory is
+    read every time, because that is the part that moves.
+
+    **Through `read_model_window`, so this is not an Ollama-only path.**
+    It asks whichever runtime holds the model; the first version asked
+    `/api/show` and nothing else, which resolved a TabbyAPI model holding
+    65,536 tokens down to the 4,096 default.
+    """
+    from core.context_budget import read_model_window
+
+    window = read_model_window(model)
+    return {
+        "declared": window.declared,
+        "configured": window.configured,
+        "bytes_per_token": window.bytes_per_token,
+    }

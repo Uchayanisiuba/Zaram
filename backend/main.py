@@ -3166,6 +3166,7 @@ def _routing_payload() -> dict:
     disappears when you touch it is a bug that costs nothing to design out.
     """
     from core.user_settings import (
+        CONTEXT_POLICIES,
         MAX_CONTEXT_TOKENS,
         RoutingPreference,
         TaskSlot,
@@ -3186,6 +3187,12 @@ def _routing_payload() -> dict:
         # number would offer a window this backend accepts the write for
         # and then silently clamps.
         "max_context_tokens": MAX_CONTEXT_TOKENS,
+        # The vocabulary, for the reason `task_slots` is sent: a client free
+        # to invent its own list of policies could offer one this backend
+        # accepts the write for and then quietly resolves to the default.
+        # `context_policy` and `context_overrides` themselves arrive with
+        # the `to_dict()` spread above.
+        "context_policies": sorted(CONTEXT_POLICIES),
     }
 
 
@@ -3229,6 +3236,15 @@ class RoutingPreferenceUpdate(BaseModel):
     #: per-task assignment behind Advanced for the same reason. The people
     #: who need this know they need it.
     context_tokens: int | None = None
+    #: Which of `CONTEXT_POLICIES`. Validated in the store rather than
+    #: here, so an unrecognised value resolves to the default for every
+    #: caller instead of only for this route.
+    context_policy: str | None = None
+    #: A window for **one model**, as ``{"model": name, "tokens": n}``.
+    #: Per-model rather than global because a single number is wrong for
+    #: every model but the one it was chosen for, which is what made this
+    #: a setting somebody had to keep revisiting. ``0`` forgets the entry.
+    context_override: dict | None = None
 
 
 async def _task_assignment_refusal(slot: str, model: str) -> str:
@@ -3345,6 +3361,23 @@ async def set_routing_preference(update: RoutingPreferenceUpdate):
         # Bounded in the store rather than here, so the ceiling holds for
         # every caller rather than for this route.
         settings.set_context_tokens(update.context_tokens)
+
+    if update.context_policy is not None:
+        settings.set_context_policy(update.context_policy)
+
+    if update.context_override is not None:
+        # Read defensively: this is a dictionary off the wire, and a
+        # missing or non-numeric `tokens` means *forget this model* rather
+        # than an error, which is what clearing the field means to the
+        # person doing it.
+        model = str(update.context_override.get("model") or "").strip()
+        raw = update.context_override.get("tokens")
+        try:
+            tokens = int(raw) if raw is not None else 0
+        except (TypeError, ValueError):
+            tokens = 0
+        if model:
+            settings.set_context_override(model, tokens)
 
     return _routing_payload()
 

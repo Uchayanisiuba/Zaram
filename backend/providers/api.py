@@ -211,15 +211,114 @@ async def context_ceiling(model: str = "") -> dict:
     Both are `null` when unreadable, never zero. A ceiling of 0 would read
     as "this model can hold nothing", which is the false zero `vram_bytes`
     already refuses.
-    """
-    from core.context_budget import declared_context_length, loaded_context_length
 
-    name = (model or "").strip()
+    **`resolved` and `reason` are what the setting actually does**, added
+    4 October 2026 with the policy that replaced the typed number. The
+    control has to be able to show the figure it will use and where that
+    figure came from, because the three sources disagree and the person
+    cannot otherwise tell a window chosen for them from one they chose:
+    measured on the maintainer's machine, `qwen3-14b-16k` resolves to 16k
+    *from the card* while `gemma4:12b` resolves to 128k *from its own
+    file*, and nothing on screen would distinguish those.
+
+    `cost_per_token` is `null` for any model whose cache cannot be priced,
+    which is not an edge case — `gemma4`'s sliding-window layers are
+    exactly it, and sending `0` would let the interface conclude context
+    is free.
+
+    **With no model named, this answers about the one that would answer a
+    question**, and that is a correction rather than a convenience. The
+    control asked with the *explicitly chosen* model, which is `null` for
+    anybody on the first of `CLAUDE.md`'s three tiers — *"Default — Zaram
+    picks"* — so on the common setup the useful half of the panel rendered
+    nothing at all. Seen on screen 4 October 2026 rather than reasoned
+    about: the disclosure opened, and the resolved window and the
+    per-model row were both absent.
+
+    The interface must not fill that gap itself. Picking the first local
+    model in a list would be a plausible guess that is wrong whenever
+    routing would have chosen otherwise, and *"never render invented
+    values"* applies hardest to a figure about memory. The backend is
+    where the answer exists, so the backend gives it, and `model` in the
+    reply names what was actually answered about.
+    """
+    from core.context_budget import (
+        loaded_context_length,
+        read_model_window,
+        resolve_context_window,
+        room_for_a_cache,
+    )
+
+    name = (model or "").strip() or _model_that_would_answer()
+    window = read_model_window(name)
+
+    resolved = None
+    reason = ""
+    if name:
+        from core.user_settings import get_user_settings
+
+        stored = get_user_settings().to_dict()
+        overrides = stored.get("context_overrides") or {}
+        choice = resolve_context_window(
+            declared=window.declared,
+            configured=window.configured,
+            bytes_per_token=window.bytes_per_token,
+            free_bytes=room_for_a_cache(name),
+            # A window Zaram cannot set is not one it may pretend to
+            # override, so the stored figures are not applied there.
+            override=overrides.get(name) if window.settable else None,
+            policy=str(stored.get("context_policy") or "fit")
+            if window.settable
+            else "fit",
+            fixed=stored.get("context_tokens") if window.settable else None,
+        )
+        resolved, reason = choice.tokens, choice.reason
+
     return {
         "model": name,
-        "ceiling": declared_context_length(name),
-        "loaded": loaded_context_length(name),
+        "ceiling": window.declared,
+        "loaded": loaded_context_length(name) or (
+            window.configured if not window.settable else None
+        ),
+        # **Whether Zaram can set this window at all.** `num_ctx` is an
+        # Ollama request field; an OpenAI-compatible server fixes the
+        # window when it loads the model, so there the figure is reported
+        # rather than controlled. Offering a control that settles nothing
+        # is the failure the permission card already refuses to ship.
+        "settable": window.settable,
+        "served_by": window.served_by,
+        # `0` here is meaningful rather than absent: it says *Zaram will
+        # send no `num_ctx` and the server's own default applies*, which
+        # is a different state from a window nobody could work out.
+        "resolved": resolved,
+        "reason": reason,
+        "cost_per_token": window.bytes_per_token,
     }
+
+
+def _model_that_would_answer() -> str:
+    """The provider layer's pick for an ordinary request, or `""`.
+
+    The same question `main._task_model` asks, asked here because this
+    router has the runtime and because the alternative is the interface
+    guessing. `""` rather than a fallback name: a layer that has not
+    started, or a machine with nothing installed, has no answer, and
+    inventing one would put a context figure beside a model that is not
+    going to run.
+    """
+    if _PROVIDERS_RUNTIME is None:
+        return ""
+    try:
+        chosen = _PROVIDERS_RUNTIME.manager.select_model_for_task(
+            requires_vision=False, specialisation=None
+        )
+    except Exception:
+        logger.debug("could not resolve the answering model", exc_info=True)
+        return ""
+    # The **display name**, which is the provider-native one. The catalogue
+    # id would be `ollama:qwen3:8b`, and `/api/show` answers 404 for that —
+    # a 400 this repository has already paid for once elsewhere.
+    return getattr(chosen, "display_name", "") or "" if chosen is not None else ""
 
 
 @router.post("/pull")
