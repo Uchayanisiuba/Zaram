@@ -18,9 +18,127 @@ publishing step over rather than finding another route. `CLAUDE.md`,
 
 ---
 
-## Current state — 28 September 2026
+## Current state — 4 October 2026
 
 *The latest work is first. Earlier sessions follow below.*
+
+### 3–4 October — what was asked for in one sitting, and what of it is done
+
+A long session took eleven separate requests from the maintainer. Six
+landed; the rest are listed here with enough of the reasoning that nobody
+has to re-derive it. **This block is the re-entry point** — none of the
+items below were declined, and none were dropped.
+
+#### Done
+
+* **A reopened conversation keeps its plan, its tools and its files.**
+  Measured before building, and the fault was worse than reported: of 50
+  artifacts in the maintainer's store, **none** was filed under a
+  conversation that exists — 27 under `''`, 23 under an ephemeral
+  `session-` id. The `conversation_id` column, its index, the
+  `?conversation_id=` query and the Work surface reading it were all
+  correct, and nothing had ever written a matching value, because the chat
+  path hands the execution engine the *session* id. The seventeenth
+  complete, tested, unreachable subsystem, and the first found by querying
+  the database rather than by reading code. `conversations/turn_notes.py`.
+* **Reopening a conversation follows it into its project.** Rule 7i: the
+  next question in a reopened Keyline thread was being scoped to whatever
+  project happened to be selected.
+* **A new tab lists what is running** — `core/local_servers.py`, detected
+  from the process table rather than declared from `package.json`.
+  Classified into this install's own, the user's projects', and everything
+  else; the third group is collapsed, because 46 things were listening on
+  the maintainer's machine and 44 were Discord, OneDrive and svchost.
+* **The browser pane.** `BrowserView` on its own partition, policy in
+  `electron/services/browserPolicy.js` with 42 tests, egress reported from
+  `webRequest` to `POST /egress/browse` — because `EgressGate` cannot see a
+  request Chromium makes directly, which is rule 3 ceasing to be satisfied
+  by the backend alone the moment the product has a browser in it.
+* **The pane shares the preview surface**, with maximise, restore and
+  close. It shipped full-screen and that was corrected the next day.
+* **A reply is set in the reading colour.** It was `--color-cyan` at
+  7.88:1 beside a rule at 10.59:1 — the decoration out-contrasted the
+  words. And the padding separating them had never applied: `paddingLeft`
+  followed by `padding: undefined` resets every side, so every reply ever
+  written sat flush against the rule at `0px`.
+
+#### Open, with the reasoning that produced them
+
+**1. Pushing a repository needs its own data class.** The largest egress
+Zaram can perform is the whole of somebody's project, including whatever
+is sitting in it. It cannot ride on `DataClass.BROWSE` or on a generic
+tool grant: own class, own consent, own log entry under rule 3.
+
+**2. GitHub and email arrive as MCP servers, not as integrations.** The
+sequencing already says why — *attaching somebody else's MCP server covers
+more applications in a week than a year of first-party integrations
+would, at no maintenance cost*. The token lives in the server's
+environment, which `child_env.py` already handles and has a test for.
+`git push` goes through the terminal and the OS credential helper, so
+Zaram never holds a credential.
+
+**3. Email is draft-and-hold, never auto-send.** Rule 6, the obligations
+posture (*drafts the response*), and rule 9 — a document from unresolved
+context is *confident, plausible and wrong, and it leaves the building*. A
+job application is that failure with the user's name on it.
+`core/triggers.py` already runs unattended work correctly and already
+holds at the first gated tool; what it lacks is the tools.
+
+**4. Citations restored as history.** `resumeConversation` still refuses
+them, rightly: a citation is a live claim and rule 4 lets the fact be
+deleted. The better answer is to restore them re-resolved against the
+Spine with deleted facts shown as deleted — larger than the fix that
+landed, and not started.
+
+**5. The model manifest holds only Ollama tags.** The maintainer runs
+TabbyAPI on 1234 serving `Qwen3.8-27B-exl3-2.20bpw`, so Zaram cannot
+recommend a single model they can actually load. Needs EXL3 entries and a
+measurement behind them.
+
+**6. A Tabby-served model has no size.** `discoverers/ollama.py` reports
+`size_bytes`; `discoverers/openai_compat.py` does not, so the residency
+gate cannot grade anything served over the OpenAI-compatible port. The
+model id carries `27B` and `2.20bpw`, which is enough to derive ~7.4 GB as
+arithmetic rather than a guess — and `None` when it does not parse, never
+a wrong number.
+
+**7. Finding and downloading a model, in the product.** The maintainer
+sent LM Studio's model browser as the reference: staff picks, capability
+badges, download size, *partial GPU offload possible*. And the first-run
+case from the same screenshots — no model installed, the composer saying
+so, with a control that leads somewhere. This is closest to *the actual
+blocker*: a stranger cannot install this.
+
+**8. Releasing one model to load another, legibly.** Asked for around
+image generation: free the chat model, load the drawing one, and go back
+when the subject changes. `release_resident` and Tabby's unload route both
+exist. The hard half is the interface — CLAUDE.md already says *an
+invisible swap reads as a broken product*, and ~30 s of silence is what an
+unload actually costs.
+
+**9. Getting more out of qwen3.8.** The maintainer's list, taken from what
+the model does elsewhere: a looping CSS/JS animation, a Three.js voxel
+world, a playable endless runner, parsing live financial data, driving
+Excel, and controlling a desktop application through MCP. The claim to
+test is not whether the model can do these — it demonstrably can — but
+whether Zaram's planner, tool budget and preview surface let it. Playback
+and review belong on the same HTML surface.
+
+**10. Purging memory, by range.** Rule 4 and the retention obligation both
+point at it, and `Activity` already argues the case: *a permanent record
+of every question you have asked is its own privacy problem*. Wanted:
+everything, or everything before or after a date.
+
+**11. The design pass.** Typography and rhythm beyond the one measured fix
+above; the interaction vocabulary; a deliberate pass over spacing and
+hierarchy. Calm over delight, and motion has a budget.
+
+Still queued from before this session: the `BROWSE` switch in Settings and
+the per-source pane reworked into an exception list (the backend class
+default landed on 3 October); the terminal's UI surface; and cutting
+alpha.4, whose notes and site copy are written and committed.
+
+## Previous state — 28 September 2026
 
 ### 28 September — two sessions built the same vertical from opposite ends, and the project type that was supposed to separate them did nothing.
 
