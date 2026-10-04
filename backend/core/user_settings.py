@@ -58,6 +58,15 @@ __all__ = [
 DEFAULT_FILE_NAME = "settings.json"
 
 
+#: The largest context window Zaram will ask a local server for.
+#:
+#: Not a model limit — a guard on a number that costs VRAM quadratically
+#: in the wrong direction. 131,072 covers any document somebody is
+#: realistically working on; past that the KV cache is the thing using the
+#: card, not the model.
+MAX_CONTEXT_TOKENS = 131_072
+
+
 class SearchScope(str, Enum):
     """When web search is worth doing, once it is switched on.
 
@@ -193,6 +202,23 @@ class UserSettings:
         # and none of them can change what Zaram says it is — see
         # `core/identity.py` and `tests/test_identity_stays_truthful.py`.
         self._assistant_name = ""
+        #: How much context to ask a local model for, in tokens, or ``0``
+        #: for whatever the server does by default.
+        #:
+        #: **This exists because the maintainer had to use another tool to
+        #: change it** — 4 October 2026. Ollama serves a default `num_ctx`
+        #: regardless of what a model advertises, measured on this machine
+        #: at 4,096 for a model reporting a 262,144-token maximum, and the
+        #: only way to raise it was a Modelfile. Zaram could *read* the
+        #: loaded window (`core/context_budget.py`) and could not set it.
+        #:
+        #: Zero rather than `None` for "unset", and it is the default: a
+        #: number here is sent to the server, and a product that quietly
+        #: raised somebody's KV cache on their behalf would be spending
+        #: their VRAM without asking. The window a model actually loaded
+        #: with is still measured rather than assumed — this says what was
+        #: *requested*.
+        self._context_tokens = 0
         self._manner = ""
         self._voice = ""
         # Local first, as everything is: CLAUDE.md's "local is the fallback
@@ -393,6 +419,7 @@ class UserSettings:
             "image_locality": self._image_locality.value,
             "image_model": self._image_model,
             "thinking": self._thinking,
+            "context_tokens": self._context_tokens,
         }
 
     # ----------------------------------------------------------------- write
@@ -465,6 +492,26 @@ class UserSettings:
                 self._task_models.pop(key, None)
             self._save()
         return dict(self._task_models)
+
+    def set_context_tokens(self, value: int) -> int:
+        """How much context to ask a local model for. ``0`` means the
+        server's own default.
+
+        **Bounded, and the ceiling is a refusal to help somebody hurt
+        themselves quietly.** A KV cache grows with the window, and asking
+        a 12 GB card for 262,144 tokens does not fail cleanly — it spills
+        into system RAM and every reply becomes slow, which reads as the
+        model being bad rather than as a setting being wrong. The cap is
+        high enough for any real document and low enough that the failure
+        mode is reachable only on purpose.
+
+        Negative is zero rather than an error: it means the same thing a
+        person means by clearing the box.
+        """
+        with self._lock:
+            self._context_tokens = max(0, min(int(value), MAX_CONTEXT_TOKENS))
+            self._save()
+        return self._context_tokens
 
     def set_character(
         self,
@@ -568,6 +615,10 @@ class UserSettings:
         # somebody imports a stranger's character is the day this parses hostile
         # input. Anything that is not a string is ignored rather than coerced.
         from core.identity import MAX_MANNER_CHARS, MAX_NAME_CHARS
+
+        window = raw.get("context_tokens")
+        if isinstance(window, int):
+            self._context_tokens = max(0, min(window, MAX_CONTEXT_TOKENS))
 
         name = raw.get("assistant_name")
         if isinstance(name, str):

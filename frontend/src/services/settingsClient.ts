@@ -403,6 +403,17 @@ export interface RoutingSettings {
    *  engines; a cloud provider's own control is not guessed at, so there the
    *  thinking still shows. `docs/PLAN.md` E2b. */
   thinking: boolean;
+  /** How much context to ask a **local** model for, in tokens, or `0`
+   *  for whatever the server does by default.
+   *
+   *  Exists because Ollama serves its own `num_ctx` whatever a model
+   *  advertises — measured at 4,096 for a model reporting 262,144 — and
+   *  the only way past it used to be a hand-written Modelfile. */
+  contextTokens: number;
+  /** The ceiling the backend will clamp to. Read rather than hardcoded,
+   *  for the same reason `taskSlots` is: a number invented here would
+   *  offer a window the backend accepts and then silently reduces. */
+  maxContextTokens: number;
 }
 
 function toRoutingSettings(raw: Record<string, unknown>): RoutingSettings {
@@ -426,6 +437,11 @@ function toRoutingSettings(raw: Record<string, unknown>): RoutingSettings {
         : {},
     taskSlots: Array.isArray(slots) ? slots.filter((s): s is string => typeof s === 'string') : [],
     routerModel: typeof raw.router_model === 'string' ? raw.router_model : null,
+    contextTokens: typeof raw.context_tokens === 'number' ? raw.context_tokens : 0,
+    // A backend that did not send one is older than this field, not
+    // unbounded. The fallback is the same number the backend uses.
+    maxContextTokens:
+      typeof raw.max_context_tokens === 'number' ? raw.max_context_tokens : 131_072,
   };
 }
 
@@ -447,6 +463,9 @@ export async function updateRoutingSettings(update: {
   routerModel?: string;
   /** Ask a thinking model to think, or not. `undefined` leaves it alone. */
   thinking?: boolean;
+  /** Context to ask a local model for, in tokens. `0` hands the choice
+   *  back to the server. `undefined` leaves it alone. */
+  contextTokens?: number;
 }): Promise<RoutingSettings> {
   const raw = (await send('/routing/preference', 'POST', {
     routing_preference: update.routingPreference ?? null,
@@ -454,6 +473,7 @@ export async function updateRoutingSettings(update: {
     task_models: update.taskModels ?? null,
     router_model: update.routerModel ?? null,
     thinking: update.thinking ?? null,
+    context_tokens: update.contextTokens ?? null,
   })) as Record<string, unknown>;
   // The POST answers with the same payload the GET does, `task_slots`
   // included, so replacing state with what came back cannot blank the list of

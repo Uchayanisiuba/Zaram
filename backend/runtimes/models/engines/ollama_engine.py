@@ -553,6 +553,17 @@ class OllamaEngine(LLMEngine):
             # gives the memory back.
             "keep_alive": KEEP_ALIVE,
         }
+        # **What the person asked for, if they asked.**
+        #
+        # Ollama serves its own default `num_ctx` whatever a model
+        # advertises — measured at 4,096 for a model reporting 262,144 —
+        # and until 4 October 2026 the only way past it was a Modelfile.
+        # Absent unless set, so the server's default still applies to
+        # everyone who has not chosen: sending a number nobody picked
+        # would spend their VRAM on a KV cache they did not ask for.
+        window = _requested_context_tokens()
+        if window:
+            payload["options"] = {"num_ctx": window}
         # Only when there are some. Ollama reads the presence of the key as a
         # vision request on some builds, and a text-only model handed an empty
         # list answers oddly rather than failing, which is the worst of both.
@@ -698,3 +709,23 @@ class OllamaEngine(LLMEngine):
             return f"Ollama refused the request for {named}: {detail}"
         return f"Ollama could not answer with {named}: {exc}"
 
+
+
+def _requested_context_tokens() -> int:
+    """How much context the person asked a local model for, or ``0``.
+
+    Read per request rather than captured at construction: somebody who
+    raises it in Settings should see the next reply use it, not the next
+    launch. Reading a settings file per request is a disk hit measured in
+    microseconds against a generation measured in seconds.
+
+    **Every failure resolves to ``0``**, which means *leave the server's
+    default alone*. A settings store that will not load must not be able
+    to change how a model is called.
+    """
+    try:
+        from core.user_settings import get_user_settings
+
+        return max(0, int(get_user_settings().to_dict().get("context_tokens") or 0))
+    except Exception:
+        return 0

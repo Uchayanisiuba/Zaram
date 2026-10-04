@@ -124,6 +124,7 @@ import {
 import { pastedKey } from '@/lib/pastedKey';
 import ModelSearchList from '@/components/settings/ModelSearchList';
 import ModelBrowser from '@/components/models/ModelBrowser';
+import ContextWindowField from '@/components/settings/ContextWindowField';
 
 // --------------------------------------------------------------- primitives
 
@@ -1067,6 +1068,42 @@ export default function SettingsWorkspace() {
                 }
               />
             </div>
+          </Row>
+
+          {/* **How much a local model is asked to hold.**
+
+              Behind Advanced, per the three tiers of control: CLAUDE.md
+              keeps context-length sliders out of the primary path
+              because the target user is not technical, and puts per-task
+              assignment behind Advanced for the same reason.
+
+              It exists because Zaram could read this number and not set
+              it. Ollama serves its own default whatever a model
+              advertises -- 4,096 for one reporting 262,144 -- and the way
+              past it was a Modelfile written in another tool. */}
+          <Row
+            label="How much it holds"
+            value={
+              routingSettings?.contextTokens
+                ? `${Math.round(routingSettings.contextTokens / 1024)}k tokens`
+                : 'server default'
+            }
+            state="neutral"
+            detail={
+              'Local models only. A cloud provider decides its own window, and Zaram does not guess at it.'
+            }
+
+          >
+            <ContextWindowField
+              value={routingSettings?.contextTokens ?? 0}
+              max={routingSettings?.maxContextTokens ?? 131072}
+              busy={busy === 'routing'}
+              onChoose={(tokens) =>
+                void run('routing', async () =>
+                  setRoutingSettings(await updateRoutingSettings({ contextTokens: tokens })),
+                )
+              }
+            />
           </Row>
 
           {/* **Getting a model, as opposed to choosing between the ones you

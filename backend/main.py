@@ -3165,7 +3165,12 @@ def _routing_payload() -> dict:
     own list of slots the moment somebody used one of them. A control that
     disappears when you touch it is a bug that costs nothing to design out.
     """
-    from core.user_settings import RoutingPreference, TaskSlot, get_user_settings
+    from core.user_settings import (
+        MAX_CONTEXT_TOKENS,
+        RoutingPreference,
+        TaskSlot,
+        get_user_settings,
+    )
 
     return {
         **get_user_settings().to_dict(),
@@ -3176,6 +3181,11 @@ def _routing_payload() -> dict:
         # disagree with it — offering a "long documents" row that this backend
         # would accept the write for and then never consult.
         "task_slots": [s.value for s in TaskSlot],
+        # The ceiling, sent rather than hardcoded in the interface, for the
+        # same reason `task_slots` is: a client free to invent its own
+        # number would offer a window this backend accepts the write for
+        # and then silently clamps.
+        "max_context_tokens": MAX_CONTEXT_TOKENS,
     }
 
 
@@ -3210,6 +3220,15 @@ class RoutingPreferenceUpdate(BaseModel):
     #: leaves it unchanged. Applied by the local engines; a cloud provider's
     #: own reasoning control is not guessed at, so its thinking still shows.
     thinking: bool | None = None
+    #: How much context to ask a **local** model for, in tokens, or `0` for
+    #: the server's own default. `None` leaves it unchanged.
+    #:
+    #: Behind Advanced in the interface, per the three tiers of control:
+    #: `CLAUDE.md` keeps context-length sliders out of the primary path
+    #: because the target user is not technical, and the same passage puts
+    #: per-task assignment behind Advanced for the same reason. The people
+    #: who need this know they need it.
+    context_tokens: int | None = None
 
 
 async def _task_assignment_refusal(slot: str, model: str) -> str:
@@ -3321,6 +3340,11 @@ async def set_routing_preference(update: RoutingPreferenceUpdate):
 
     if update.thinking is not None:
         settings.set_thinking(update.thinking)
+
+    if update.context_tokens is not None:
+        # Bounded in the store rather than here, so the ceiling holds for
+        # every caller rather than for this route.
+        settings.set_context_tokens(update.context_tokens)
 
     return _routing_payload()
 
