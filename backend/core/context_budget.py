@@ -910,7 +910,6 @@ def resolve_context_window(
     free_bytes: Optional[int],
     override: Optional[int] = None,
     policy: str = "fit",
-    fixed: Optional[int] = None,
 ) -> ContextChoice:
     """How much context to ask for, decided per model rather than per user.
 
@@ -926,11 +925,9 @@ def resolve_context_window(
        deliberately is remembered against the model it was set for, never
        globally - that is what stops one choice being wrong for every
        other model.
-    2. ``policy == "server"`` leaves Ollama alone, which is what the whole
-       setting did before this existed.
-    3. ``policy == "fixed"`` honours one number for everything, for
-       somebody who genuinely wants that.
-    4. Otherwise **fit**: the largest step that fits beside the weights,
+    2. ``policy == "server"`` leaves the server alone. An off switch for
+       the arithmetic, not a window somebody chose.
+    3. Otherwise **fit**: the largest window that fits beside the weights,
        never past what the model says it can hold.
 
     Every branch is capped by ``declared``. Asking for more context than
@@ -955,25 +952,6 @@ def resolve_context_window(
         return ContextChoice(tokens, f"{_k(tokens)}, set for this model")
 
     if policy == "server":
-        return ContextChoice(0, _SERVER_DEFAULT)
-
-    if policy == "fixed":
-        # **Capped like every other branch, and that is why this goes
-        # through here rather than being read straight out of Settings.**
-        # The first version let the engine return the stored figure
-        # directly, which asked `qwen3-14b-16k` for 131,072 against a
-        # declared ceiling of 40,960 — a number the model cannot hold,
-        # arrived at by the one route that skipped the cap. A rule applied
-        # in three places is a rule broken in one of them.
-        if fixed and fixed > 0:
-            tokens = capped(fixed)
-            if ceiling and fixed > ceiling:
-                return ContextChoice(
-                    tokens, f"{_k(tokens)}, the most this model can hold"
-                )
-            return ContextChoice(tokens, f"{_k(tokens)}, set for every model")
-        # `0` means nobody has typed a number yet, so there is nothing to
-        # honour and the server default is the truth.
         return ContextChoice(0, _SERVER_DEFAULT)
 
     fits = affordable_context_length(bytes_per_token, free_bytes)

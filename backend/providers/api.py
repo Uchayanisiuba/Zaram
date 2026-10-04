@@ -270,7 +270,6 @@ async def context_ceiling(model: str = "") -> dict:
             policy=str(stored.get("context_policy") or "fit")
             if window.settable
             else "fit",
-            fixed=stored.get("context_tokens") if window.settable else None,
         )
         resolved, reason = choice.tokens, choice.reason
 

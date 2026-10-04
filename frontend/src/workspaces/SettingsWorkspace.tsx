@@ -1089,15 +1089,11 @@ export default function SettingsWorkspace() {
                  every model but one -- which is the flaw this row had and
                  the maintainer named: *"I don't want users to need to
                  switch token limits every time they switch or download a
-                 new model."* A model named in the row below shows what it
-                 resolved to and why. */
+                 new model."* Opening Advanced names the model and says
+                 what it resolved to. */
               routingSettings?.contextPolicy === 'server'
                 ? 'server default'
-                : routingSettings?.contextPolicy === 'fixed'
-                  ? routingSettings?.contextTokens
-                    ? `${Math.round(routingSettings.contextTokens / 1024)}k tokens, every model`
-                    : 'server default'
-                  : 'as much as fits'
+                : 'as much as fits'
             }
             state="neutral"
             detail={
@@ -1107,19 +1103,12 @@ export default function SettingsWorkspace() {
           >
             <ContextWindowField
               policy={routingSettings?.contextPolicy ?? 'fit'}
-              value={routingSettings?.contextTokens ?? 0}
-              max={routingSettings?.maxContextTokens ?? 131072}
               overrides={routingSettings?.contextOverrides ?? {}}
               model={routingSettings?.defaultModel ?? ''}
               busy={busy === 'routing'}
               onChoosePolicy={(contextPolicy) =>
                 void run('routing', async () =>
                   setRoutingSettings(await updateRoutingSettings({ contextPolicy })),
-                )
-              }
-              onChooseFixed={(tokens) =>
-                void run('routing', async () =>
-                  setRoutingSettings(await updateRoutingSettings({ contextTokens: tokens })),
                 )
               }
               onChooseForModel={(model, tokens) =>

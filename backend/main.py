@@ -3229,13 +3229,6 @@ class RoutingPreferenceUpdate(BaseModel):
     thinking: bool | None = None
     #: How much context to ask a **local** model for, in tokens, or `0` for
     #: the server's own default. `None` leaves it unchanged.
-    #:
-    #: Behind Advanced in the interface, per the three tiers of control:
-    #: `CLAUDE.md` keeps context-length sliders out of the primary path
-    #: because the target user is not technical, and the same passage puts
-    #: per-task assignment behind Advanced for the same reason. The people
-    #: who need this know they need it.
-    context_tokens: int | None = None
     #: Which of `CONTEXT_POLICIES`. Validated in the store rather than
     #: here, so an unrecognised value resolves to the default for every
     #: caller instead of only for this route.
@@ -3356,11 +3349,6 @@ async def set_routing_preference(update: RoutingPreferenceUpdate):
 
     if update.thinking is not None:
         settings.set_thinking(update.thinking)
-
-    if update.context_tokens is not None:
-        # Bounded in the store rather than here, so the ceiling holds for
-        # every caller rather than for this route.
-        settings.set_context_tokens(update.context_tokens)
 
     if update.context_policy is not None:
         settings.set_context_policy(update.context_policy)

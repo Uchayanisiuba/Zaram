@@ -71,11 +71,25 @@ MAX_CONTEXT_TOKENS = 131_072
 #: ``fit`` - as much as this model and this card allow, worked out per
 #: model. The default, and the whole point: nothing to re-pick when the
 #: model changes.
-#: ``server`` - send no ``num_ctx`` and let the server use its own default,
-#: which is what this setting did before a policy existed.
-#: ``fixed`` - honour ``context_tokens`` for everything, for somebody who
-#: genuinely wants one number.
-CONTEXT_POLICIES = frozenset({"fit", "server", "fixed"})
+#: ``server`` - send no ``num_ctx`` at all. Not a limit somebody sets; an
+#: **off switch for the feature**, for the case where Zaram's arithmetic
+#: is wrong in a way it cannot detect - a quantised KV cache halves the
+#: per-token cost this module assumes, and nothing in `model_info` says
+#: so.
+#:
+#: **``fixed`` was removed the day after it was added**, on the
+#: maintainer's question: *"if this is true do we still need the token
+#: limit options in the settings, perhaps we should remove it."* It
+#: honoured one typed number for every model, which is precisely the
+#: chore `fit` exists to end - a figure right for the model it was chosen
+#: for and wrong for every other. It was also the only branch that
+#: skipped the declared-ceiling cap, and shipped asking a model declaring
+#: 40,960 for 131,072. A mode with no use `fit` does not cover, and a bug
+#: history, is not a setting worth keeping for symmetry.
+#:
+#: An older file naming it fails this check and resolves to ``fit``,
+#: which is the migration.
+CONTEXT_POLICIES = frozenset({"fit", "server"})
 
 #: A cap on remembered per-model windows. Not a limit anybody will reach by
 #: choosing - it bounds what a settings *file* can make this dictionary,
@@ -228,13 +242,6 @@ class UserSettings:
         #: only way to raise it was a Modelfile. Zaram could *read* the
         #: loaded window (`core/context_budget.py`) and could not set it.
         #:
-        #: Zero rather than `None` for "unset", and it is the default: a
-        #: number here is sent to the server, and a product that quietly
-        #: raised somebody's KV cache on their behalf would be spending
-        #: their VRAM without asking. The window a model actually loaded
-        #: with is still measured rather than assumed — this says what was
-        #: *requested*.
-        self._context_tokens = 0
         #: **How the window is decided, rather than what it is.** Revised
         #: 4 October 2026 from one sentence: *"I don't want users to need
         #: to switch token limits every time they switch or download a new
@@ -454,7 +461,6 @@ class UserSettings:
             "image_locality": self._image_locality.value,
             "image_model": self._image_model,
             "thinking": self._thinking,
-            "context_tokens": self._context_tokens,
             "context_policy": self._context_policy,
             "context_overrides": dict(self._context_overrides),
         }
@@ -529,26 +535,6 @@ class UserSettings:
                 self._task_models.pop(key, None)
             self._save()
         return dict(self._task_models)
-
-    def set_context_tokens(self, value: int) -> int:
-        """How much context to ask a local model for. ``0`` means the
-        server's own default.
-
-        **Bounded, and the ceiling is a refusal to help somebody hurt
-        themselves quietly.** A KV cache grows with the window, and asking
-        a 12 GB card for 262,144 tokens does not fail cleanly — it spills
-        into system RAM and every reply becomes slow, which reads as the
-        model being bad rather than as a setting being wrong. The cap is
-        high enough for any real document and low enough that the failure
-        mode is reachable only on purpose.
-
-        Negative is zero rather than an error: it means the same thing a
-        person means by clearing the box.
-        """
-        with self._lock:
-            self._context_tokens = max(0, min(int(value), MAX_CONTEXT_TOKENS))
-            self._save()
-        return self._context_tokens
 
     def set_context_policy(self, value: str) -> str:
         """How the window is decided. Anything unrecognised is ``fit``.
@@ -689,25 +675,18 @@ class UserSettings:
         # input. Anything that is not a string is ignored rather than coerced.
         from core.identity import MAX_MANNER_CHARS, MAX_NAME_CHARS
 
-        window = raw.get("context_tokens")
-        if isinstance(window, int):
-            self._context_tokens = max(0, min(window, MAX_CONTEXT_TOKENS))
-
-        # **A number stored before the policy existed does not select
-        # `fixed`.** The first version of this migration did, on the
-        # reasoning that somebody who typed 16,384 meant it - and that
-        # reasoning inverts the actual history. The only way past Ollama's
-        # 4,096 used to be this field, so a number in it is evidence that
-        # the default was wrong, not that one figure was wanted for every
-        # model. The maintainer's own store holds 131,072, which against
-        # `qwen3-14b-16k`'s declared 40,960 is a window that model cannot
-        # hold - preserving it faithfully would preserve a workaround for
-        # the thing being fixed.
+        # **A `context_tokens` left in an older file is read and
+        # discarded, deliberately.** The only route past Ollama's 4,096
+        # used to be that field, so a number in it is evidence that the
+        # default was wrong rather than that one figure was wanted for
+        # every model - the maintainer's own store held 131,072, which
+        # `qwen3-14b-16k` cannot hold at all. Honouring it would preserve
+        # a workaround for the thing that was fixed.
         #
-        # So everyone lands on `fit`, which cannot produce a window past
-        # what the model declares or the card affords; the change can only
-        # be in the safe direction. The number is kept, so choosing
-        # `fixed` restores it rather than asking for it again.
+        # Everyone lands on `fit`, which cannot produce a window past what
+        # the model declares or the card affords, so the change can only
+        # be in the safe direction. Somebody who wants a particular window
+        # for a particular model sets it against that model.
         policy = raw.get("context_policy")
         if isinstance(policy, str) and policy in CONTEXT_POLICIES:
             self._context_policy = policy

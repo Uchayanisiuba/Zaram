@@ -49,12 +49,9 @@ function field(props: Partial<Props> = {}) {
   return (
     <ContextWindowField
       policy="fit"
-      value={0}
-      max={131_072}
       overrides={{}}
       model="qwen3-14b-16k:latest"
       onChoosePolicy={vi.fn()}
-      onChooseFixed={vi.fn()}
       onChooseForModel={vi.fn()}
       {...props}
     />
@@ -70,12 +67,29 @@ async function open() {
 }
 
 describe('the decision', () => {
-  it('offers the three policies in plain language', async () => {
+  it('offers two choices, and only two', async () => {
+    /** **There were three for a day.** `fixed` honoured one typed number
+     *  for every model, which is the chore `fit` exists to end, and it
+     *  was the only branch that skipped the declared-ceiling cap. A mode
+     *  with no use `fit` does not cover, and a bug history, is not worth
+     *  keeping for symmetry. */
     render(field());
     await open();
     expect(screen.getByTestId('context-policy-fit')).toHaveTextContent('As much as fits');
     expect(screen.getByTestId('context-policy-server')).toBeTruthy();
-    expect(screen.getByTestId('context-policy-fixed')).toBeTruthy();
+    expect(screen.queryByTestId('context-policy-fixed')).toBeNull();
+    expect(screen.queryByTestId('context-fixed')).toBeNull();
+  });
+
+  it('frames the second one as an off switch, not a limit', async () => {
+    // "Leave it to the server" is a different kind of thing from a
+    // window somebody chose, and the label has to carry that or it
+    // reads as the small option.
+    render(field());
+    await open();
+    expect(screen.getByTestId('context-policy-server')).toHaveTextContent(
+      'Leave it to the server',
+    );
   });
 
   it('marks the policy in force', async () => {
@@ -180,30 +194,6 @@ describe('the resolved window', () => {
   });
 });
 
-describe('one size for every model', () => {
-  it('is not drawn under a policy that ignores it', async () => {
-    // A ladder on screen that changes nothing is the shape of a product
-    // that looks broken.
-    render(field({ policy: 'fit' }));
-    await open();
-    expect(screen.queryByTestId('context-fixed')).toBeNull();
-  });
-
-  it('is drawn when it is the policy in force', async () => {
-    render(field({ policy: 'fixed', value: 32_768 }));
-    await open();
-    expect(screen.getByTestId('context-fixed')).toBeTruthy();
-    expect(screen.getByTestId('context-32768')).toHaveAttribute('aria-pressed', 'true');
-  });
-
-  it('never offers past the backend ceiling', async () => {
-    render(field({ policy: 'fixed', max: 32_768 }));
-    await open();
-    expect(screen.queryByTestId('context-131072')).toBeNull();
-    expect(screen.getByTestId('context-32768')).toBeTruthy();
-  });
-});
-
 describe('a window Zaram does not own', () => {
   /** The model that answers on the maintainer's machine is served by
    *  TabbyAPI, which fixes its window when it loads. `num_ctx` is an
@@ -242,7 +232,7 @@ describe('a window Zaram does not own', () => {
 
   it('offers no control over it', async () => {
     fetchContextWindow.mockResolvedValue(tabby);
-    render(field({ model: '', policy: 'fixed', value: 32_768 }));
+    render(field({ model: '' }));
     await open();
     await waitFor(() => expect(screen.getByTestId('context-resolved')).toBeTruthy());
     expect(screen.queryByTestId('context-for-model')).toBeNull();

@@ -755,10 +755,6 @@ def _requested_context_tokens(model: str = "") -> int:
     policy = str(settings.get("context_policy") or "fit")
     overrides = settings.get("context_overrides") or {}
     override = overrides.get(model) if isinstance(overrides, dict) else None
-    try:
-        fixed = max(0, int(settings.get("context_tokens") or 0))
-    except (TypeError, ValueError):
-        fixed = 0
 
     # **Every policy resolves through one function**, including `server`,
     # which looks like it could shortcut to `0` here. It cannot: an
@@ -773,7 +769,6 @@ def _requested_context_tokens(model: str = "") -> int:
         return resolve_context_window(
             override=int(override) if override else None,
             policy=policy,
-            fixed=fixed,
             free_bytes=room_for_a_cache(model),
             **_model_geometry(model),
         ).tokens

@@ -47,24 +47,26 @@ import { useEffect, useState } from 'react';
 import type { ContextPolicy } from '@/services/settingsClient';
 import { cacheCost, fetchContextWindow, type ContextWindow } from '@/services/contextWindowClient';
 
-/** Sizes worth offering for one model, largest first — the same ladder
- *  `CONTEXT_STEPS` resolves onto in the backend, so a window Zaram chose
- *  and a window somebody chose are the same kind of thing. `0` clears the
- *  override and hands the model back to the policy. */
+/** Sizes worth offering **for one model**, largest first. `0` clears the
+ *  override and hands that model back to the policy.
+ *
+ *  This is the only place a number is chosen now. A global one was
+ *  offered for a day and removed: one figure is right for the model it
+ *  was picked for and wrong for every other, which is the whole reason
+ *  `fit` exists. Disagreeing with `fit` is a per-model act, and scoping
+ *  it that way is what makes `fit` safe to default to. */
 const SIZES = [131_072, 65_536, 32_768, 16_384, 8_192] as const;
 
 const POLICY_LABEL: Record<ContextPolicy, string> = {
   fit: 'As much as fits',
-  server: 'Whatever the server does',
-  fixed: 'One size for every model',
+  server: 'Leave it to the server',
 };
 
 /** The second line under each choice. Each says what the choice *costs*,
  *  because that is the part nobody can see. */
 const POLICY_DETAIL: Record<ContextPolicy, string> = {
   fit: 'Zaram works out the most each model can hold on this card, and does it again when you change or download one. Nothing to set.',
-  server: 'Ollama decides, which is usually 4,096 tokens however much the model says it can hold.',
-  fixed: 'The same number asked of every model, reduced only where a model cannot hold it.',
+  server: 'Zaram asks for nothing and the server decides, which is usually 4,096 tokens however much the model says it can hold. Worth choosing only if you manage this yourself.',
 };
 
 function label(tokens: number): string {
@@ -75,9 +77,6 @@ function label(tokens: number): string {
 
 interface Props {
   policy: ContextPolicy;
-  /** The number `fixed` honours. */
-  value: number;
-  max: number;
   /** Windows set against one model each, by name. */
   overrides: Record<string, number>;
   /** The model this screen has **explicitly** selected, or `''`.
@@ -90,19 +89,15 @@ interface Props {
   model?: string;
   busy?: boolean;
   onChoosePolicy: (policy: ContextPolicy) => void;
-  onChooseFixed: (tokens: number) => void;
   onChooseForModel: (model: string, tokens: number) => void;
 }
 
 export default function ContextWindowField({
   policy,
-  value,
-  max,
   overrides,
   model = '',
   busy,
   onChoosePolicy,
-  onChooseFixed,
   onChooseForModel,
 }: Props) {
   const [open, setOpen] = useState(false);
@@ -125,7 +120,7 @@ export default function ContextWindowField({
     return () => {
       live = false;
     };
-  }, [open, model, policy, value, overrides[model], overrides[window_?.model ?? '']]);
+  }, [open, model, policy, overrides[model], overrides[window_?.model ?? '']]);
 
   // **The model that came back, not the one that was asked for.** They
   // differ exactly when nobody chose one, which is the common setup, and
@@ -209,32 +204,6 @@ export default function ContextWindowField({
               </span>
             ) : null}
           </p>
-        )}
-
-        {/* One number for everything, under `fixed` only. Drawn only when
-            chosen: a ladder on screen under a policy that ignores it is a
-            control that does nothing, which is the shape of a product
-            that looks broken. */}
-        {policy === 'fixed' && window_?.settable !== false && (
-          <div className="flex flex-wrap items-center gap-1.5" data-testid="context-fixed">
-            {SIZES.filter((size) => size <= max).map((size) => (
-              <button
-                key={size}
-                type="button"
-                data-testid={`context-${size}`}
-                aria-pressed={value === size}
-                disabled={busy}
-                onClick={() => onChooseFixed(size)}
-                className="rounded-lg px-2.5 py-1 text-xs disabled:opacity-40"
-                style={{
-                  border: `1px solid ${value === size ? 'var(--color-cyan)' : 'var(--color-border)'}`,
-                  color: value === size ? 'var(--color-cyan-light)' : 'var(--color-text-muted)',
-                }}
-              >
-                {label(size)}
-              </button>
-            ))}
-          </div>
         )}
 
         {/* And the escape hatch: one model, one number, remembered against

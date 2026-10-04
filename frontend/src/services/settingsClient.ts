@@ -403,26 +403,21 @@ export interface RoutingSettings {
    *  engines; a cloud provider's own control is not guessed at, so there the
    *  thinking still shows. `docs/PLAN.md` E2b. */
   thinking: boolean;
-  /** How much context to ask a **local** model for, in tokens, or `0`
-   *  for whatever the server does by default.
-   *
-   *  Exists because Ollama serves its own `num_ctx` whatever a model
-   *  advertises — measured at 4,096 for a model reporting 262,144 — and
-   *  the only way past it used to be a hand-written Modelfile. */
-  contextTokens: number;
   /** The ceiling the backend will clamp to. Read rather than hardcoded,
    *  for the same reason `taskSlots` is: a number invented here would
    *  offer a window the backend accepts and then silently reduces. */
   maxContextTokens: number;
-  /** **How the window is decided, which is the setting; the number is
-   *  worked out per model.** `fit` is the default and the reason this is
-   *  not a chore — as much as the model and the card allow, recomputed
-   *  whenever either changes. `server` sends nothing. `fixed` honours
-   *  `contextTokens` for everything.
+  /** **How the window is decided. There is no number to type.**
    *
-   *  Sent rather than inferred from a figure: `fixed` at 4,096 and
-   *  `server` resolving to 4,096 are the same number and two different
-   *  decisions. */
+   *  `fit` is the default and the reason this is not a chore — as much
+   *  as the model and the card allow, worked out per model and again
+   *  whenever either changes. `server` sends no `num_ctx` at all: an off
+   *  switch for the arithmetic, for the case where it is wrong in a way
+   *  it cannot detect, rather than a window somebody chose.
+   *
+   *  A third, `fixed`, honoured one typed figure for every model and was
+   *  removed the day after it landed — it was the chore `fit` exists to
+   *  end, and the only branch that skipped the declared-ceiling cap. */
   contextPolicy: ContextPolicy;
   /** A window set for **one model**, by name. Global was the flaw the
    *  maintainer named: *"I don't want users to need to switch token limits
@@ -432,12 +427,12 @@ export interface RoutingSettings {
   contextPolicies: ContextPolicy[];
 }
 
-export type ContextPolicy = 'fit' | 'server' | 'fixed';
+export type ContextPolicy = 'fit' | 'server';
 
 /** The vocabulary, for validating what came back. The backend sends its
  *  own list in `context_policies`; this is what makes an unrecognised
  *  value resolve to the default rather than render as a dead button. */
-const POLICIES: readonly ContextPolicy[] = ['fit', 'server', 'fixed'];
+const POLICIES: readonly ContextPolicy[] = ['fit', 'server'];
 
 function toRoutingSettings(raw: Record<string, unknown>): RoutingSettings {
   const tasks = raw.task_models;
@@ -460,7 +455,6 @@ function toRoutingSettings(raw: Record<string, unknown>): RoutingSettings {
         : {},
     taskSlots: Array.isArray(slots) ? slots.filter((s): s is string => typeof s === 'string') : [],
     routerModel: typeof raw.router_model === 'string' ? raw.router_model : null,
-    contextTokens: typeof raw.context_tokens === 'number' ? raw.context_tokens : 0,
     // A backend that did not send one is older than this field, not
     // unbounded. The fallback is the same number the backend uses.
     maxContextTokens:
@@ -508,10 +502,6 @@ export async function updateRoutingSettings(update: {
   routerModel?: string;
   /** Ask a thinking model to think, or not. `undefined` leaves it alone. */
   thinking?: boolean;
-  /** Context to ask a local model for, in tokens, under the `fixed`
-   *  policy. `0` hands the choice back to the server. `undefined` leaves
-   *  it alone. */
-  contextTokens?: number;
   /** How the window is decided. `undefined` leaves it alone. */
   contextPolicy?: ContextPolicy;
   /** A window for one model. `tokens: 0` forgets that model's entry,
@@ -524,7 +514,6 @@ export async function updateRoutingSettings(update: {
     task_models: update.taskModels ?? null,
     router_model: update.routerModel ?? null,
     thinking: update.thinking ?? null,
-    context_tokens: update.contextTokens ?? null,
     context_policy: update.contextPolicy ?? null,
     context_override: update.contextOverride ?? null,
   })) as Record<string, unknown>;

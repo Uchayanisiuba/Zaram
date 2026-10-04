@@ -174,7 +174,6 @@ describe('routing updates leave untouched fields alone', () => {
       // null means leave it alone, like every other field here: a
       // client changing the routing preference must not clear somebody’s
       // context window as a side effect.
-      context_tokens: null,
     });
   });
 

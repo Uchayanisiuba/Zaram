@@ -232,33 +232,6 @@ class TestResolvingTheWindow:
         )
         assert choice.tokens == 0
 
-    def test_fixed_is_capped_like_everything_else(self):
-        """**The bug this test was written for.** The engine read the
-        stored figure straight out of Settings under this policy, so
-        `fixed` was the one route that skipped the ceiling: 131,072 asked
-        of a model declaring 40,960. A cap applied in three places is a cap
-        broken in one of them."""
-        choice = resolve_context_window(
-            declared=40_960,
-            configured=16_384,
-            bytes_per_token=QWEN_PER_TOKEN,
-            free_bytes=12 * GB,
-            policy="fixed",
-            fixed=131_072,
-        )
-        assert choice.tokens == 40_960
-
-    def test_fixed_with_no_number_is_the_server_default(self):
-        choice = resolve_context_window(
-            declared=40_960,
-            configured=16_384,
-            bytes_per_token=QWEN_PER_TOKEN,
-            free_bytes=12 * GB,
-            policy="fixed",
-            fixed=0,
-        )
-        assert choice.tokens == 0
-
     def test_the_reason_names_a_source_rather_than_only_a_number(self):
         """Routing legibility, applied to the one setting whose wrong value
         makes a good model look bad. 16k *from the card* and 16k *because
@@ -446,29 +419,47 @@ class TestTheStore:
         settings.set_context_override("   ", 8_192)
         assert settings.to_dict()["context_overrides"] == {}
 
-    def test_a_number_stored_before_the_policy_existed_does_not_select_fixed(
+    def test_a_number_stored_before_the_policy_existed_is_discarded(
         self, tmp_path, monkeypatch
     ):
-        """**The migration, and it was written the other way round first.**
-        The only route past Ollama's 4,096 used to be this field, so a
-        number in it is evidence that the default was wrong rather than
-        that one figure was wanted for every model. The maintainer's own
-        store holds 131,072, which `qwen3-14b-16k` cannot hold at all —
-        preserving it faithfully would preserve a workaround for the thing
-        being fixed. `fit` cannot exceed what the model declares or the
-        card affords, so the change can only be in the safe direction."""
+        """**The global number is gone, and an old file holding one lands
+        on `fit`.**
+
+        It was built on 4 October and removed on 4 October, on the
+        maintainer's question: *"if this is true do we still need the
+        token limit options in the settings, perhaps we should remove
+        it."* The answer was no. The only route past Ollama's 4,096 used
+        to be that field, so a number in it is evidence that the default
+        was wrong rather than that one figure was wanted for every model
+        — the maintainer's own store held 131,072, which `qwen3-14b-16k`
+        cannot hold at all.
+
+        `fit` cannot produce a window past what the model declares or the
+        card affords, so discarding it can only be in the safe direction.
+        """
         import json
 
         import core.user_settings as module
 
         path = tmp_path / "settings.json"
-        path.write_text(json.dumps({"context_tokens": 131_072}), encoding="utf-8")
+        path.write_text(
+            json.dumps({"context_tokens": 131_072, "context_policy": "fixed"}),
+            encoding="utf-8",
+        )
         monkeypatch.setattr(module, "_SETTINGS", None, raising=False)
         stored = module.UserSettings(str(path)).to_dict()
 
         assert stored["context_policy"] == "fit"
-        # Kept, so choosing `fixed` restores it rather than asking again.
-        assert stored["context_tokens"] == 131_072
+        assert "context_tokens" not in stored
+
+    def test_there_are_two_policies_and_only_two(self):
+        """A mode with no use `fit` does not cover, and a bug history, is
+        not kept for symmetry. `fixed` was the only branch that skipped
+        the declared-ceiling cap — it shipped asking a model declaring
+        40,960 for 131,072."""
+        from core.user_settings import CONTEXT_POLICIES
+
+        assert CONTEXT_POLICIES == frozenset({"fit", "server"})
 
     def test_a_policy_someone_chose_survives_a_reload(self, tmp_path, monkeypatch):
         import json
@@ -591,3 +582,126 @@ class TestItIsNotMeasuredAgainstWhatIsFreeRightNow:
             "providers.discoverers.hardware.HardwareProfiler", Profiler, raising=False
         )
         assert module.room_for_a_cache("x:1b") is None
+
+
+class TestWhatReachesOllama:
+    """Folded in from `test_the_context_window_can_be_set.py`, which was
+    deleted when the global number was: ten of its seventeen tests
+    asserted a setting that no longer exists, and two files covering one
+    feature with one of them mostly dead is worse than one file."""
+
+    def test_nothing_is_sent_under_the_server_policy(self, monkeypatch, tmp_path):
+        """**This test used to patch the function and then call its own
+        patch**, so it asserted that a one-line lambda returns what it
+        returns and would have passed against any engine at all — the
+        trap `CLAUDE.md` names as worse than no test, because it reports
+        coverage it does not have."""
+        import core.user_settings as us
+        import runtimes.models.engines.ollama_engine as engine
+
+        store = us.UserSettings(str(tmp_path / "s.json"))
+        store.set_context_policy("server")
+        monkeypatch.setattr(us, "get_user_settings", lambda: store)
+
+        assert engine._requested_context_tokens("anything:1b") == 0
+
+    def test_the_setting_is_read_per_request(self, monkeypatch, tmp_path):
+        """Per request rather than captured at construction: somebody who
+        changes it in Settings should see the next reply use it, not the
+        next launch.
+
+        Driven through a **per-model override**, which is the only number
+        anybody sets now. This is the one assertion that the reader is
+        not memoised across a settings change.
+        """
+        import core.user_settings as us
+        import runtimes.models.engines.ollama_engine as engine
+
+        store = us.UserSettings(str(tmp_path / "s.json"))
+        store.set_context_policy("server")
+        monkeypatch.setattr(us, "get_user_settings", lambda: store)
+
+        assert engine._requested_context_tokens("anything:1b") == 0
+        store.set_context_override("anything:1b", 16_384)
+        assert engine._requested_context_tokens("anything:1b") == 16_384
+
+    def test_a_broken_settings_store_leaves_the_default_alone(self, monkeypatch):
+        """A settings store that will not load must not be able to change
+        how a model is called."""
+        import core.user_settings as us
+        import runtimes.models.engines.ollama_engine as engine
+
+        def explode():
+            raise RuntimeError("no settings")
+
+        monkeypatch.setattr(us, "get_user_settings", explode)
+        assert engine._requested_context_tokens("anything:1b") == 0
+
+    def test_the_payload_carries_num_ctx_only_when_asked(self):
+        """Asserted against the source, because the property is that the
+        key is *absent* by default — and an absent key is the one thing a
+        response-shape test cannot see."""
+        import inspect
+
+        import runtimes.models.engines.ollama_engine as engine
+
+        source = inspect.getsource(engine)
+        assert "if window:" in source
+        assert 'payload["options"] = {"num_ctx": window}' in source
+
+
+class TestTheSettingsRoute:
+    @pytest.fixture()
+    def client(self):
+        from fastapi.testclient import TestClient
+
+        import main
+
+        return TestClient(main.app)
+
+    def test_the_payload_carries_the_policy_rather_than_a_number(self, client):
+        """There is no number in the payload any more, and its absence is
+        asserted: a client still reading `context_tokens` would get
+        `undefined` and render a blank where a decision belongs."""
+        body = client.get("/routing/preference").json()
+        assert body["context_policy"] in {"fit", "server"}
+        assert "context_tokens" not in body
+
+    def test_it_carries_the_vocabulary_rather_than_leaving_it_to_be_invented(
+        self, client
+    ):
+        """The same argument `task_slots` makes: a client free to invent
+        its own list could offer a policy this backend accepts the write
+        for and then resolves to the default."""
+        body = client.get("/routing/preference").json()
+        assert sorted(body["context_policies"]) == ["fit", "server"]
+
+    def test_and_the_ceiling_so_the_interface_need_not_hardcode_one(self, client):
+        """Still sent, because it still bounds a per-model window."""
+        from core.user_settings import MAX_CONTEXT_TOKENS
+
+        body = client.get("/routing/preference").json()
+        assert body["max_context_tokens"] == MAX_CONTEXT_TOKENS
+
+    def test_the_ceiling_is_high_enough_to_be_useful(self):
+        from core.user_settings import MAX_CONTEXT_TOKENS
+
+        assert MAX_CONTEXT_TOKENS >= 131_072
+
+    def test_a_window_can_be_set_for_one_model_over_the_wire(self, client):
+        """End to end, because the store being right is not evidence that
+        the route reaches it — this repository's most expensive recurring
+        failure is a complete, tested thing nothing calls."""
+        client.post(
+            "/routing/preference",
+            json={"context_override": {"model": "probe:1b", "tokens": 8_192}},
+        )
+        body = client.get("/routing/preference").json()
+        assert body["context_overrides"].get("probe:1b") == 8_192
+
+        client.post(
+            "/routing/preference",
+            json={"context_override": {"model": "probe:1b", "tokens": 0}},
+        )
+        after = client.get("/routing/preference").json()
+        assert "probe:1b" not in after["context_overrides"]
