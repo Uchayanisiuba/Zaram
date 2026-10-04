@@ -1109,22 +1109,55 @@ export default function ChatSurface({ navigate }: Props) {
                         : 't-body'
                     }
                     style={{
-                      color:
-                        msg.role === 'user'
-                          ? 'var(--color-text)'
-                          : 'var(--color-cyan)',
-                      // A second, non-colour cue: the assistant's replies are
-                      // indented behind a rule. The user's get a quiet surface
-                      // instead, so the right edge the text is aligned to is
-                      // actually drawn — right-aligned text against nothing
-                      // reads as a layout accident.
+                      // **A reply is read, so it is set in the reading
+                      // colour — changed 3 October 2026.**
+                      //
+                      // This was `--color-cyan` for the assistant, and the
+                      // measurement is the argument: on `--color-surface`
+                      // that is 7.88:1 while the rule beside it is 10.59:1,
+                      // so the decoration out-contrasted the words it was
+                      // marking, in the same hue, ten pixels away. Plain
+                      // text is 15.10:1. A paragraph of saturated cyan is
+                      // tiring at any length a real answer runs to, and the
+                      // maintainer read it as the text crowding the line.
+                      //
+                      // Nothing is lost by it. The comment below already
+                      // called the rule *a second, non-colour cue*; it is
+                      // now the only one it needs to be, which is what a
+                      // speaker marker should have been doing alone.
+                      color: 'var(--color-text)',
+                      // The assistant's replies are indented behind a rule.
+                      // The user's get a quiet surface instead, so the right
+                      // edge the text is aligned to is actually drawn —
+                      // right-aligned text against nothing reads as a layout
+                      // accident.
+                      //
+                      // Dimmed to a third: it marks who is speaking and then
+                      // stops asking to be looked at. A full-strength rule
+                      // beside body text is the brightest thing in a reply,
+                      // which is the wrong thing to be brightest.
                       borderLeft:
                         msg.role === 'assistant'
-                          ? '2px solid var(--color-cyan-light)'
+                          ? '2px solid color-mix(in srgb, var(--color-cyan-light) 34%, transparent)'
                           : undefined,
-                      paddingLeft: msg.role === 'assistant' ? 10 : undefined,
                       borderRadius: msg.role === 'user' ? 12 : undefined,
-                      padding: msg.role === 'user' ? '8px 12px' : undefined,
+                      // **One property, because the pair of them cancelled.**
+                      //
+                      // This was `paddingLeft: 10` followed by `padding:
+                      // undefined`, and the second wiped the first: React
+                      // writes the shorthand after the longhand, and
+                      // `style.padding = ''` resets every side. Measured in
+                      // the running app on 3 October 2026 — the rendered
+                      // inline style carried no padding at all and the
+                      // computed value was `0px`, so every reply Zaram has
+                      // ever written sat flush against the rule. The ten
+                      // pixels were never on screen to be too few.
+                      //
+                      // That is what the maintainer was looking at when they
+                      // said the text was too close to the line. Eighteen is
+                      // the gutter the rule needs to read as a margin; the
+                      // point is that it is now applied.
+                      padding: msg.role === 'user' ? '8px 12px' : '0 0 0 18px',
                     }}
                   >
                     {/* The user's own text is left exactly as typed. They

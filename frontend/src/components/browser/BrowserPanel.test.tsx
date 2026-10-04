@@ -268,3 +268,50 @@ describe('the rectangle', () => {
     for (const key of ['x', 'y', 'width', 'height']) expect(key in bounds).toBe(true);
   });
 });
+
+describe('the surface it comes forward on', () => {
+  /** Corrected 4 October 2026. It shipped full-screen and the maintainer
+   *  asked for it on the same surface that previews generated pages and
+   *  images — a browser that takes the whole window is a second idiom for
+   *  one act, and it hides the conversation that asked for the page. */
+  it('is a card over the conversation, not the whole window', async () => {
+    await open();
+    const card = screen.getByTestId('browser-panel');
+    expect(card.style.maxWidth).toBe('880px');
+  });
+
+  it('maximises, and comes back', async () => {
+    await open();
+    const card = screen.getByTestId('browser-panel');
+    await user().click(screen.getByTestId('maximise-browser'));
+    expect(card.style.maxWidth).toBe('100%');
+    await user().click(screen.getByTestId('maximise-browser'));
+    expect(card.style.maxWidth).toBe('880px');
+  });
+
+  it('keeps all three controls, because two of them in one button guesses', async () => {
+    const onClose = vi.fn();
+    const b = bridge();
+    (window as { zaram?: unknown }).zaram = { browser: b.api };
+    render(<BrowserPanel onClose={onClose} />);
+    await waitFor(() => expect(b.api.state).toHaveBeenCalled());
+    expect(screen.getByTestId('maximise-browser')).toBeTruthy();
+    expect(screen.getByTestId('close-browser')).toBeTruthy();
+    await user().click(screen.getByTestId('close-browser'));
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it('the margin closes it; the page does not', async () => {
+    // The BrowserView sits above the card, so a click on the content never
+    // reaches React at all. Only the backdrop is dismissable.
+    const onClose = vi.fn();
+    const b = bridge();
+    (window as { zaram?: unknown }).zaram = { browser: b.api };
+    render(<BrowserPanel onClose={onClose} />);
+    await waitFor(() => expect(b.api.state).toHaveBeenCalled());
+    await user().click(screen.getByTestId('browser-panel'));
+    expect(onClose).not.toHaveBeenCalled();
+    await user().click(screen.getByTestId('browser-backdrop'));
+    expect(onClose).toHaveBeenCalled();
+  });
+});

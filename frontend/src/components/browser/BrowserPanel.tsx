@@ -31,6 +31,8 @@ import {
   ArrowLeft,
   ArrowRight,
   Plus,
+  Maximize2,
+  Minimize2,
   RotateCw,
   X,
 } from 'lucide-react';
@@ -80,6 +82,9 @@ export default function BrowserPanel({ initialUrl, onClose }: Props = {}) {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [typed, setTyped] = useState('');
   const [refusal, setRefusal] = useState('');
+  // Bigger when a page needs the room. Not persisted: it is a gesture
+  // about the thing on screen now, not a preference about browsing.
+  const [maximised, setMaximised] = useState(false);
 
   const active = tabs.find((t) => (t as { id: string }).id === activeId) as
     | { id: string; url: string; title: string; canGoBack?: boolean; canGoForward?: boolean; loading?: boolean }
@@ -193,29 +198,57 @@ export default function BrowserPanel({ initialUrl, onClose }: Props = {}) {
     );
   }
 
-  // **Portalled and fixed, like every other panel that comes forward.**
-  // `CodePreviewPanel`'s note gives the reason — *"one way to bring
-  // something forward is a thing users learn once"* — and there is a second
-  // reason here that is not a matter of taste: the hole is measured with
-  // `getBoundingClientRect`, which is in window coordinates, and that is
-  // the frame the `BrowserView` is positioned in. An inline panel inside a
-  // scrolling conversation would hand main a rectangle that drifts the
-  // moment anything scrolls.
+  // **The same surface a generated page or image is previewed on — 4
+  // October 2026.** It shipped full-screen the day before, and the
+  // maintainer's correction was immediate: *"have the browser be
+  // implemented on the same surface as the one that previews html files and
+  // generated images"*. They are right, and `CodePreviewPanel`'s own note
+  // says why — *"one way to bring something forward is a thing users learn
+  // once"*. A browser that takes the whole window is a second idiom for the
+  // same act, and it hides the conversation that asked for the page.
   //
-  // No backdrop click-to-close: the page is above this element, so a click
-  // on it never reaches here, and a dismissal that works everywhere except
-  // over the content is worse than none.
+  // Portalled and fixed for a reason that is not taste: the hole is
+  // measured with `getBoundingClientRect`, which is in window coordinates,
+  // and that is the frame the `BrowserView` is positioned in. A panel
+  // inside the scrolling conversation would hand main a rectangle that
+  // drifts the moment anything scrolls.
   return createPortal(
     <motion.div
-      className="fixed inset-0 z-[90] flex flex-col bg-slate-950"
-      data-testid="browser-panel"
+      className="fixed inset-0 z-[90] flex items-center justify-center p-8"
+      data-testid="browser-backdrop"
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       transition={{ duration: 0.18 }}
+      style={{
+        background: 'rgba(2,6,23,0.55)',
+        backdropFilter: 'blur(24px) saturate(1.4)',
+      }}
+      // The page sits above this element, so a click on the content never
+      // reaches here — only the margin around the card closes.
+      onClick={onClose}
       role="dialog"
+      aria-modal="true"
       aria-label="Browser"
     >
+      <motion.div
+        className="flex flex-col overflow-hidden rounded-2xl"
+        data-testid="browser-panel"
+        style={{
+          width: '100%',
+          // Maximised is *bigger*, not full-bleed: the margin is what keeps
+          // it reading as something brought forward over the conversation
+          // rather than a window that replaced it.
+          maxWidth: maximised ? '100%' : 880,
+          height: maximised ? '100%' : 'min(80vh, 100%)',
+          background: 'var(--color-glass)',
+          border: '1px solid var(--color-border)',
+        }}
+        initial={{ scale: 0.98, y: 8 }}
+        animate={{ scale: 1, y: 0 }}
+        transition={{ duration: 0.22 }}
+        onClick={(event) => event.stopPropagation()}
+      >
       {/* Tabs */}
       <div className="flex items-end gap-1 border-b border-slate-800 px-2 pt-2">
         {tabs.map((raw) => {
@@ -304,6 +337,19 @@ export default function BrowserPanel({ initialUrl, onClose }: Props = {}) {
             className="w-full rounded-md border border-slate-800 bg-slate-900 px-3 py-1.5 text-xs text-slate-200 outline-none focus:border-indigo-500"
           />
         </form>
+        {/* Bigger, back to normal, gone. Three states and three controls,
+            because a single toggle that does two of them leaves the person
+            guessing which one a press will give them. */}
+        <button
+          type="button"
+          aria-label={maximised ? 'Back to normal size' : 'Maximise'}
+          title={maximised ? 'Back to normal size' : 'Maximise'}
+          data-testid="maximise-browser"
+          onClick={() => setMaximised((on) => !on)}
+          className="rounded p-1 text-slate-400 transition hover:bg-slate-900"
+        >
+          {maximised ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+        </button>
         {onClose && (
           <button
             type="button"
@@ -330,6 +376,7 @@ export default function BrowserPanel({ initialUrl, onClose }: Props = {}) {
       <div ref={holeRef} className="relative min-h-0 flex-1">
         {showingNewTab && <NewTabPage onOpen={go} />}
       </div>
+      </motion.div>
     </motion.div>,
     document.body,
   );
