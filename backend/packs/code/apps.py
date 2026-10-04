@@ -35,6 +35,7 @@ import re
 import shutil
 import subprocess
 import threading
+import weakref
 import time
 from collections import deque
 from dataclasses import dataclass
@@ -171,6 +172,55 @@ class AppProcess:
         }
 
 
+#: Every live `AppTools`, so the rest of the product can ask what Zaram
+#: started without reaching through the MCP runtime for the code server.
+#:
+#: A `WeakSet` rather than a list: a discarded instance must not keep its
+#: subprocesses' records alive, and the browser pane asking what is running
+#: must not be the thing that stops a boot being collected. There is one of
+#: these per boot in practice; the weakness is about tests, which make
+#: several and then drop them.
+_LIVE: "weakref.WeakSet[AppTools]" = weakref.WeakSet()
+
+
+def launched() -> List[Dict[str, Any]]:
+    """The apps Zaram has running, newest first.
+
+    **The browser pane's new tab reads this and nothing else — 4 October
+    2026.** It first read the machine's process table, which answered a
+    broader question than anybody asked: 46 things were listening on the
+    maintainer's machine and 44 were Discord, OneDrive, Epic Games and
+    svchost. The maintainer's correction was to show *"only the ones
+    launched or opened by Zaram"*, and that is both quieter and more
+    honest — it is the list of things Zaram is responsible for, which is a
+    fact it holds rather than a guess about somebody else's processes.
+
+    It also removes a privacy smell nobody had asked for: a panel that
+    enumerates what you have installed, on screen, in screenshots.
+
+    Each entry carries the project root it belongs to, so the pane can say
+    *Ride Share* rather than *node.exe*.
+    """
+    found: List[Dict[str, Any]] = []
+    for tools in list(_LIVE):
+        for root, app in list(getattr(tools, "_apps", {}).items()):
+            if not app.running or not app.url:
+                # A dead app is not a page anybody can open, and one with
+                # no URL has not announced a port yet.
+                continue
+            found.append(
+                {
+                    "root": root,
+                    "runner": app.runner,
+                    "url": app.url,
+                    "pid": app.process.pid,
+                    "started_at": app.started_at,
+                }
+            )
+    found.sort(key=lambda entry: entry["started_at"], reverse=True)
+    return found
+
+
 class AppTools:
     """One managed app per project folder, and a look at it."""
 
@@ -186,6 +236,9 @@ class AppTools:
         #: one project is a port collision waiting to be reported as a bug.
         self._apps: Dict[str, AppProcess] = {}
         self._lock = threading.Lock()
+        # So `launched()` can answer without reaching through the MCP
+        # runtime for the code server.
+        _LIVE.add(self)
         self._describe = describe_image
         self._screens = screens_dir
         self._browser = browser

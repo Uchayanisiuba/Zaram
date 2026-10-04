@@ -52,7 +52,7 @@ function bridge(over: Record<string, unknown> = {}) {
 }
 
 beforeEach(() => {
-  fetchLocalServers.mockReset().mockResolvedValue({ servers: [], hidden: 0 });
+  fetchLocalServers.mockReset().mockResolvedValue({ servers: [] });
   // jsdom has no ResizeObserver, and the panel uses one to keep the view in
   // step with the hole through resizes React does not re-render for.
   (globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver = class {
@@ -134,39 +134,47 @@ describe('the new tab page', () => {
   it('lists what is running', async () => {
     fetchLocalServers.mockResolvedValue({
       servers: [
-        { port: 5173, url: 'http://127.0.0.1:5173', name: 'Ride Share', pid: 1, process: 'node.exe', origin: 'project', projectId: 'ride-share', webbish: true },
+        { url: 'http://127.0.0.1:5173', name: 'Ride Share', origin: 'project', pid: 1, projectId: '', runner: 'npm run dev', port: 5173 },
       ],
-      hidden: 0,
     });
     await open();
     await waitFor(() => expect(screen.getByTestId('server-5173')).toBeTruthy());
     expect(screen.getByText('Ride Share')).toBeTruthy();
   });
 
-  it('collapses the machine\u2019s other processes behind a count', async () => {
-    // Measured on the maintainer's machine: 46 listening, 44 of them
-    // Discord, OneDrive and svchost. Listing those is a port scan.
+  it('shows Zaram\u2019s own backend beside the apps it started', async () => {
+    // There is no second group any more. The list used to carry the whole
+    // machine with the noise collapsed behind a disclosure -- 46 listeners
+    // on the maintainer's, 44 of them Discord, OneDrive and svchost -- and
+    // tidying a port scan does not stop it being one. Everything here is
+    // Zaram's, which is why every row can be pressed without a caveat.
     fetchLocalServers.mockResolvedValue({
       servers: [
-        { port: 8420, url: 'http://127.0.0.1:8420', name: 'Zaram', pid: 1, process: 'python.exe', origin: 'zaram', projectId: '', webbish: true },
-        { port: 6463, url: 'http://127.0.0.1:6463', name: 'Discord', pid: 2, process: 'Discord.exe', origin: 'other', projectId: '', webbish: false },
+        { url: 'http://127.0.0.1:8420', name: 'Zaram \u2014 backend', origin: 'zaram', pid: 1, projectId: '', runner: '', port: 8420 },
+        { url: 'http://127.0.0.1:5173', name: 'Ride Share', origin: 'project', pid: 2, projectId: 'ride-share', runner: 'npm run dev', port: 5173 },
       ],
-      hidden: 1,
     });
     await open();
     await waitFor(() => expect(screen.getByTestId('server-8420')).toBeTruthy());
-    expect(screen.queryByTestId('server-6463')).toBeNull();
+    expect(screen.getByTestId('server-5173')).toBeTruthy();
+    expect(screen.queryByTestId('show-other-servers')).toBeNull();
+  });
 
-    await user().click(screen.getByTestId('show-other-servers'));
-    expect(screen.getByTestId('server-6463')).toBeTruthy();
+  it('names the runner under the project, so a row says what it is', async () => {
+    fetchLocalServers.mockResolvedValue({
+      servers: [
+        { url: 'http://127.0.0.1:5173', name: 'Ride Share', origin: 'project', pid: 2, projectId: 'ride-share', runner: 'npm run dev', port: 5173 },
+      ],
+    });
+    await open();
+    await waitFor(() => expect(screen.getByText('npm run dev')).toBeTruthy());
   });
 
   it('opening one navigates the current tab', async () => {
     fetchLocalServers.mockResolvedValue({
       servers: [
-        { port: 5173, url: 'http://127.0.0.1:5173', name: 'Ride Share', pid: 1, process: 'node.exe', origin: 'project', projectId: 'r', webbish: true },
+        { url: 'http://127.0.0.1:5173', name: 'Ride Share', origin: 'project', pid: 1, projectId: '', runner: 'npm run dev', port: 5173 },
       ],
-      hidden: 0,
     });
     const b = await open();
     await waitFor(() => expect(screen.getByTestId('server-5173')).toBeTruthy());
@@ -177,7 +185,7 @@ describe('the new tab page', () => {
   it('tells an empty machine apart from an unreadable one honestly', async () => {
     await open();
     await waitFor(() =>
-      expect(screen.getByText(/Nothing is listening|could not be read/i)).toBeTruthy(),
+      expect(screen.getByTestId('nothing-running')).toBeTruthy(),
     );
   });
 });

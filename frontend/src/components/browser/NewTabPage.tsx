@@ -1,23 +1,21 @@
 /**
- * What a new tab offers: the servers running on this machine.
+ * What a new tab offers: the things Zaram has running.
  *
- * Asked for 3 October 2026 with a screenshot of Claude's new-tab page —
- * *"I want them to see all the running servers ... Zaram's front end, back
- * end etc. I want them to see Ride Share's own, or any other project of
- * theirs."*
+ * Asked for 3 October 2026 with a screenshot of Claude's new-tab page, and
+ * narrowed the next day — *"make it such that it only shows the ones
+ * launched or opened by Zaram."*
  *
- * **Detected, not declared.** The backend reads the process table rather
- * than a project's `package.json` scripts, so every row is a port that is
- * actually accepting connections rather than one that could be.
+ * The first version listed everything on the machine, grouped, with the
+ * noise collapsed behind a disclosure. It was tidy and it was still a port
+ * scan: 46 listeners on the maintainer's machine, 44 of them Discord,
+ * OneDrive, Epic Games and svchost. What is here now is the list Zaram can
+ * answer for — the dev servers it started, and its own backend.
  *
- * The third group is collapsed rather than dropped. Measured on the
- * maintainer's machine: 46 things were listening and 44 were Discord,
- * OneDrive, Epic Games and svchost. Listing those is a port scan; hiding
- * them outright would be deciding that nobody wants to open Ollama's port,
- * which is not true.
+ * So there is no second group and no disclosure. Everything shown is
+ * Zaram's, which is why every row can be pressed without a caveat.
  */
 import { useEffect, useState } from 'react';
-import { ChevronDown, Globe, Server } from 'lucide-react';
+import { Globe, Server } from 'lucide-react';
 
 import { fetchLocalServers, type LocalServer } from '@/services/localServersClient';
 
@@ -28,8 +26,6 @@ interface Props {
 
 export default function NewTabPage({ onOpen }: Props) {
   const [servers, setServers] = useState<LocalServer[]>([]);
-  const [hidden, setHidden] = useState(0);
-  const [showAll, setShowAll] = useState(false);
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
@@ -37,7 +33,6 @@ export default function NewTabPage({ onOpen }: Props) {
     fetchLocalServers().then((listing) => {
       if (!live) return;
       setServers(listing.servers);
-      setHidden(listing.hidden);
       setLoaded(true);
     });
     return () => {
@@ -45,63 +40,92 @@ export default function NewTabPage({ onOpen }: Props) {
     };
   }, []);
 
-  const mine = servers.filter((s) => s.origin !== 'other');
-  const rest = servers.filter((s) => s.origin === 'other');
-  const shown = showAll ? [...mine, ...rest] : mine;
-
   return (
-    <div className="h-full w-full overflow-auto bg-slate-950 px-6 py-10 text-slate-200">
-      <div className="mx-auto w-full max-w-xl">
-        {loaded && shown.length === 0 && (
-          <p className="py-10 text-center text-sm text-slate-500">
-            {/* Honest about which of the two it is. "Nothing is running" and
-                "this machine will not say" are different facts, and sharing
-                a sentence makes the second look like the first. */}
-            Nothing is listening on this machine, or the process table could
-            not be read. Type an address above.
+    <div className="h-full w-full overflow-auto px-6 py-10">
+      <div className="mx-auto w-full max-w-lg">
+        {loaded && servers.length === 0 && (
+          <p
+            className="py-10 text-center text-sm"
+            style={{ color: 'var(--color-text-muted)' }}
+            data-testid="nothing-running"
+          >
+            {/* Says what would put something here. "Nothing running" with
+                no next step reads as a broken panel rather than an empty
+                one. */}
+            Zaram has not started anything yet. Ask it to run a project, or
+            type an address above.
           </p>
         )}
 
-        {shown.length > 0 && (
-          <ul className="divide-y divide-slate-800 overflow-hidden rounded-lg border border-slate-800">
-            {shown.map((server) => (
-              <li key={server.port}>
+        {servers.length > 0 && (
+          <ul
+            className="divide-y overflow-hidden rounded-xl"
+            style={{
+              borderColor: 'var(--color-border-subtle)',
+              border: '1px solid var(--color-border-subtle)',
+            }}
+          >
+            {servers.map((server) => (
+              <li key={server.url} style={{ borderColor: 'var(--color-border-subtle)' }}>
                 <button
                   type="button"
                   data-testid={`server-${server.port}`}
                   onClick={() => onOpen(server.url)}
-                  className="flex w-full items-center gap-3 px-4 py-3 text-left transition hover:bg-slate-900"
+                  className="group flex w-full items-center gap-3 px-4 py-3 text-left transition"
+                  style={{ background: 'transparent' }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = 'var(--color-glass)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = 'transparent';
+                  }}
                 >
                   <Server
-                    size={16}
-                    className={server.origin === 'other' ? 'text-slate-600' : 'text-indigo-400'}
+                    size={15}
                     aria-hidden
+                    style={{
+                      color:
+                        server.origin === 'zaram'
+                          ? 'var(--color-text-muted)'
+                          : 'var(--color-cyan-light)',
+                    }}
                   />
-                  <span className="min-w-0 flex-1 truncate text-sm">{server.name}</span>
-                  <span className="shrink-0 font-mono text-xs text-slate-500">:{server.port}</span>
+                  <span className="min-w-0 flex-1">
+                    <span
+                      className="block truncate text-sm"
+                      style={{ color: 'var(--color-text)' }}
+                    >
+                      {server.name}
+                    </span>
+                    {server.runner && (
+                      <span
+                        className="block truncate text-xs"
+                        style={{ color: 'var(--color-text-faint)' }}
+                      >
+                        {server.runner}
+                      </span>
+                    )}
+                  </span>
+                  <span
+                    className="shrink-0 text-xs"
+                    style={{
+                      color: 'var(--color-text-muted)',
+                      fontFamily: 'var(--font-mono)',
+                    }}
+                  >
+                    :{server.port}
+                  </span>
                 </button>
               </li>
             ))}
           </ul>
         )}
 
-        {!showAll && hidden > 0 && (
-          <button
-            type="button"
-            data-testid="show-other-servers"
-            onClick={() => setShowAll(true)}
-            className="mt-3 flex items-center gap-1.5 text-xs text-slate-500 transition hover:text-slate-300"
-          >
-            <ChevronDown size={14} aria-hidden />
-            {/* Says what it is hiding rather than how many rows there are:
-                somebody reading this needs to know it is their own machine's
-                other processes, not more of their projects. */}
-            {hidden} other {hidden === 1 ? 'process' : 'processes'} on this machine
-          </button>
-        )}
-
-        <p className="mt-8 flex items-start gap-2 text-xs leading-relaxed text-slate-500">
-          <Globe size={14} className="mt-0.5 shrink-0" aria-hidden />
+        <p
+          className="mt-8 flex items-start gap-2 text-xs leading-relaxed"
+          style={{ color: 'var(--color-text-muted)' }}
+        >
+          <Globe size={13} className="mt-0.5 shrink-0" aria-hidden />
           <span>
             Pages on this machine open straight away — nothing leaves the
             device, so there is nothing to consent to. Anywhere else is

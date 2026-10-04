@@ -676,6 +676,108 @@ class MemoryRuntimeImpl(MemoryRuntime):
                     gone += 1
         return gone
 
+    async def purge(
+        self,
+        *,
+        before: float | None = None,
+        after: float | None = None,
+        scope: str | None = None,
+        dry_run: bool = True,
+    ) -> dict[str, Any]:
+        """Remove facts in a time range, a scope, or both. Counts first.
+
+        Asked for 3 October 2026 — *"a purge memory button ... purge Zaram's
+        entire memory, or purge/delete in ranges, by date"* — with the right
+        question attached: *"is there a better way to do this, is it wise."*
+
+        **It is wise, and it is already owed rather than new.** Rule 4 says
+        the user can delete any stored fact. `CLAUDE.md`'s third 2026
+        obligation is blunter: *no new store ships without an answer to how
+        long it keeps things and how the user shortens that. A store with no
+        retention answer is an unshipped feature.* And the year's own
+        evidence — conversation logs held discoverable, preservation ordered
+        over deletions — makes a permanent transcript a liability rather
+        than a convenience. Activity already says so in the product.
+
+        Four decisions, and the first is the one that matters
+        ----------------------------------------------------
+        **`dry_run` defaults to `True`.** A purge is not undoable, so the
+        safety is a count the person reads *before* it happens, not a dialog
+        they dismiss. "Delete 1,284 facts, 3 projects" is a sentence somebody
+        can disagree with; "Are you sure?" is not. Any caller that wants the
+        deletion has to say so.
+
+        **Scope belongs beside the date, and is more often what is meant.**
+        Rule 7i already gives every fact `global` or `project:<id>`. *Forget
+        everything about Ride Share* is a more common and more answerable
+        request than *forget everything before October*, and a purge that
+        only took dates would make the common case impossible.
+
+        **Before and after are both offered, and they are different jobs.**
+        `before` is retention — the ordinary one. `after` is mistake
+        recovery: *I pointed it at the wrong folder on Tuesday.* They cost
+        the same once there is a range, and leaving `after` out would be
+        guessing that nobody makes mistakes.
+
+        **Pinned facts go too, if they match.** Pinning resists decay, which
+        is a statement about automatic forgetting. This is the person asking
+        on purpose, and a purge that silently kept things would report a
+        number that was not what happened.
+
+        What this deliberately does not do
+        ----------------------------------
+        It does not soft-delete. Rule 4's promise is that *affected answers
+        change*, and a fact that is hidden rather than removed still answers.
+        Citations that pointed at a purged fact resolve to nothing, which is
+        the designed outcome and is why `resumeConversation` does not restore
+        them.
+
+        It is also **not a tool**. Nothing the model can call reaches this,
+        and that is the single most important property here: a purge
+        reachable from a tool call is a prompt-injection target aimed at the
+        one asset the product exists to keep. A document saying *forget
+        everything* must be text Zaram read, never an instruction it can
+        act on. `test_memory_can_be_purged.py` asserts it against the
+        registry rather than describing it.
+        """
+        if before is not None and after is not None and before <= after:
+            # An empty window is almost certainly a swapped pair, and
+            # silently deleting nothing would read as the button being
+            # broken.
+            raise ValueError(
+                "`before` must be later than `after` — that range holds nothing."
+            )
+
+        records = await self._store.all_records()
+        matched = [
+            record
+            for record in records
+            if (before is None or record.created_at < before)
+            and (after is None or record.created_at > after)
+            and (scope is None or record.scope == scope)
+        ]
+
+        summary: dict[str, Any] = {
+            "matched": len(matched),
+            "deleted": 0,
+            "dry_run": dry_run,
+            # What the person is about to lose, in the terms they think in.
+            # A bare number does not distinguish "1,284 stray notes" from
+            # "1,284 facts about the only client you have".
+            "scopes": sorted({r.scope for r in matched if r.scope}),
+            "oldest": min((r.created_at for r in matched), default=None),
+            "newest": max((r.created_at for r in matched), default=None),
+        }
+        if dry_run:
+            return summary
+
+        gone = 0
+        for record in matched:
+            if await self.forget(record.id):
+                gone += 1
+        summary["deleted"] = gone
+        return summary
+
     async def consolidate(self) -> dict[str, Any]:
         """Consolidate memories by grouping similar episodic memories into semantic memories.
 

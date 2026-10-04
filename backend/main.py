@@ -3704,6 +3704,112 @@ async def revoke_paired_client(client_id: str):
     return {"revoked": client_id}
 
 
+class PurgeMemory(BaseModel):
+    """What to remove, and whether to actually remove it."""
+
+    #: Facts created strictly before this Unix time. Retention — the
+    #: ordinary case.
+    before: Optional[float] = None
+    #: Facts created strictly after it. Mistake recovery: *I pointed it at
+    #: the wrong folder on Tuesday.*
+    after: Optional[float] = None
+    #: ``global`` or ``project:<id>``. Rule 7i's field, and more often what
+    #: somebody means than a date is.
+    scope: Optional[str] = None
+    #: **Defaults to a count rather than a deletion.** A purge cannot be
+    #: undone, so the safety is a number the person reads first. A caller
+    #: that wants the deletion says so.
+    confirm: bool = False
+
+
+@app.post("/memory/purge")
+async def purge_memory(body: PurgeMemory) -> dict:
+    """Count, or remove, the facts in a range or a scope.
+
+    Rule 4 exercised deliberately, and the third 2026 obligation met: *no
+    new store ships without an answer to how long it keeps things and how
+    the user shortens that.*
+
+    **With no `confirm` this deletes nothing** and answers with what would
+    go — how many, which scopes, the oldest and newest. That is the
+    control: "remove 1,284 facts across 3 projects" is a sentence somebody
+    can disagree with, where "Are you sure?" is not.
+
+    **Nothing the model can call reaches this.** It is an HTTP route a
+    person triggers, never a registered tool, because a purge reachable
+    from a tool call is a prompt-injection target aimed at the one asset
+    the product exists to keep — a document saying *forget everything* must
+    stay text Zaram read rather than an instruction it can act on.
+
+    The deletion itself is written to the egress log's sibling record in
+    Activity, not here: what is recorded is that it happened and how much
+    went, never the content, because a log of what was deleted is a copy of
+    the thing somebody just asked to be rid of.
+    """
+    if not kernel.memory_runtime:
+        raise HTTPException(status_code=503, detail="Memory runtime not available")
+
+    if body.before is None and body.after is None and body.scope is None and not body.confirm:
+        # Everything, counted. Allowed — "how much is in here" is the first
+        # question anybody asks before pressing this — but it must be an
+        # explicit count rather than a deletion that happened to match all.
+        pass
+
+    try:
+        summary = await kernel.memory_runtime.purge(
+            before=body.before,
+            after=body.after,
+            scope=body.scope,
+            dry_run=not body.confirm,
+        )
+    except ValueError as exc:
+        # A swapped range is a bad request, not a server fault. Said as a
+        # sentence, because it reaches a person.
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    if body.confirm and summary.get("deleted"):
+        _record_purge(summary, body)
+    return summary
+
+
+def _record_purge(summary: dict, request: "PurgeMemory") -> None:
+    """Note that a purge happened, without copying what went.
+
+    `CLAUDE.md` describes Activity as carrying *pruning that is itself
+    recorded*, and the reason is that a deletion leaving no trace is
+    indistinguishable from data loss — somebody who finds a thinner Spine
+    next week deserves to know whether they did it.
+
+    What is written is the shape and the count. Never the facts: a record
+    of what was deleted is a copy of the thing the person just asked to be
+    rid of, which is the retention liability wearing an audit badge.
+    """
+    try:
+        from core.egress import get_gate
+        from core.egress.log import KIND_RETENTION
+
+        get_gate().log.append(
+            host="-",
+            method="PURGE",
+            url="zaram://memory/purge",
+            body=None,
+            decision="allow",
+            reason=f"the user purged {summary.get('deleted', 0)} facts",
+            source="memory.purge",
+            # The log already has a word for this.
+            kind=KIND_RETENTION,
+            byte_count=0,
+            meta={
+                "deleted": summary.get("deleted", 0),
+                "scope": request.scope or "",
+                "before": request.before,
+                "after": request.after,
+            },
+        )
+    except Exception as exc:
+        logging.getLogger(__name__).warning("Could not record the purge: %s", exc)
+
+
 @app.get("/memory/{record_id}")
 async def get_memory(record_id: str):
     """Fetch one stored fact, so a citation can be inspected.
@@ -3990,23 +4096,21 @@ def _artifact_json(artifact, *, include_html: bool = False) -> Dict[str, Any]:
 
 @app.get("/local-servers")
 async def local_servers() -> dict:
-    """What is listening on this machine, for the browser pane's new tab.
+    """What Zaram has running, for the browser pane's new tab.
 
-    Asked for 3 October 2026: *"when the user opens a new tab, I want them
-    to see all the running servers ... Zaram's front end, back end etc. I
-    want them to see Ride Share's own, or any other project of theirs."*
+    **Only what Zaram started or opened.** This read the machine's process
+    table for a day and the maintainer narrowed it: of 46 listeners on
+    their machine, 44 were Discord, OneDrive, Epic Games and svchost. A
+    panel enumerating somebody's installed software answers a broader
+    question than was asked and lands in every screenshot. The source is
+    now Zaram's own registry of apps it launched, plus this install's
+    backend, which the desktop host spawns.
 
     **Read-only, and that is the whole contract.** It starts nothing and
     stops nothing: a list that could also run things is the mutative tier
     and would need confirm, undo and a sandbox, none of which a list has.
 
-    Loopback only. A listener bound to a routable interface is reported at
-    its loopback address, because a panel that could hand the browser a
-    public address turns a stray click into an egress.
-
-    Nothing here is recalled, indexed or sent anywhere. The shape of
-    somebody's machine is exactly the kind of fact rule 8 keeps out of an
-    outbound query.
+    Loopback only. Nothing here is recalled, indexed or sent anywhere.
     """
     from core.local_servers import KnownProject, running_servers
 
@@ -4018,20 +4122,14 @@ async def local_servers() -> dict:
         ]
     except Exception:
         # A project store that will not answer costs the labels, not the
-        # list. An unlabelled server is still one the person can open.
+        # list. An app named by its folder is still one the person can open.
         projects = []
 
     found = running_servers(
         projects=projects,
-        zaram_ports=[LISTEN_PORT],
-        zaram_root=str(Path(__file__).resolve().parent.parent),
+        backend_url=f"http://127.0.0.1:{LISTEN_PORT}",
     )
-    return {
-        "servers": [s.to_dict() for s in found],
-        # Counted here rather than in the renderer so the collapsed row can
-        # say how many without the renderer re-deriving the rule.
-        "hidden": sum(1 for s in found if s.origin == "other"),
-    }
+    return {"servers": [s.to_dict() for s in found]}
 
 
 @app.get("/artifacts")
