@@ -65,7 +65,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from artifacts.contracts import Artifact
 from artifacts.service import ArtifactService
@@ -116,6 +116,7 @@ class ImagesRuntime(Runtime):
         provider: Optional[ImageProvider] = None,
         event_bus: Optional[EventBus] = None,
         card: Optional[Card] = None,
+        restore: Optional[Callable[[], Awaitable[Any]]] = None,
     ):
         self._service = service
         # Injected, and `None` is a supported state rather than a broken one:
@@ -128,6 +129,17 @@ class ImagesRuntime(Runtime):
         # it always did: unknown is not a reason to refuse, it is a reason
         # not to know, and the log says which.
         self._card = card
+        # Brings the chat model back once the picture is done: the other half
+        # of the swap. Drawing evicts it to make room, and without this the
+        # return trip was the next question's problem — 106 s of nothing
+        # measured for the maintainer's 26B, spent after they pressed Enter
+        # instead of while they looked at the picture. `None` keeps the old
+        # behaviour (the next question reloads it), which is still correct.
+        self._restore = restore
+        # Short names of what this runtime evicted, so the notice can say what
+        # is coming back. Empty means nothing was evicted and nothing to restore.
+        self._evicted: List[str] = []
+        self._restoring: set = set()
         self._state = RuntimeState.UNINITIALIZED
         self._start_time = time.time()
         self._generated = 0
@@ -395,6 +407,7 @@ class ImagesRuntime(Runtime):
                 # Off the loop like the load: dropping eight gigabytes of
                 # tensors and emptying the CUDA cache is not instant.
                 await asyncio.to_thread(self._unload)
+                self._bring_the_chat_model_back(say)
 
         if not drawn:
             return {"success": False, "error": "the image model produced nothing"}
@@ -529,6 +542,14 @@ class ImagesRuntime(Runtime):
                 action="",
             )
             outcome = await asyncio.to_thread(self._card.release)
+            # What actually went, by its own report -- "released" is the word a
+            # server uses for a model it let go of; a model it could not unload
+            # is not coming back because it never left.
+            self._evicted = [
+                _short(name)
+                for name, why in outcome.items()
+                if str(why).startswith("released")
+            ] or self._evicted
             free = await asyncio.to_thread(self._card.free_bytes)
             if free is None or free >= needed:
                 self._note_preflight(
@@ -588,6 +609,40 @@ class ImagesRuntime(Runtime):
             "said": said,
             "held_by": holders,
         }
+
+    def _bring_the_chat_model_back(self, say) -> None:
+        """Reload what drawing evicted, in the background, and say so.
+
+        Only when this runtime evicted something: a card that had room never
+        lost the chat model, and warming it again would be work for nothing.
+        Fire-and-forget on purpose — the picture is the answer, and a reload
+        that fails or is refused (the selected model no longer fits what the
+        driver says is free, the person prefers cloud) must cost nothing. The
+        reload goes through the models runtime's own `warm_local_model`, so
+        every refusal it already applies still applies here.
+        """
+        evicted, self._evicted = self._evicted, []
+        if not evicted or self._restore is None:
+            return
+        say(
+            f"Picture done. Loading {', '.join(evicted)} back onto the card now, "
+            "so your next question does not wait for it.",
+            action="",
+        )
+
+        async def reload() -> None:
+            try:
+                await self._restore()
+            except Exception:  # noqa: BLE001 - an optimisation, never a failure
+                logger.debug("Images: could not bring the chat model back", exc_info=True)
+
+        try:
+            task = asyncio.get_running_loop().create_task(reload())
+        except RuntimeError:  # pragma: no cover - no loop means nothing to schedule on
+            return
+        # Held, or the loop may collect a task nobody references.
+        self._restoring.add(task)
+        task.add_done_callback(self._restoring.discard)
 
     def _note_preflight(self, **verdict: Any) -> None:
         self._last_preflight = {"checked_at": time.time(), **verdict}

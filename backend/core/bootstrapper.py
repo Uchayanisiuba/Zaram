@@ -443,8 +443,17 @@ class KernelBootstrapper:
         # for Flux still has a person on it who wants a picture.
         from imaging.cloud import RoutedImageProvider
 
+        async def bring_the_chat_model_back():
+            # Resolved when asked, not at boot: the models runtime is built in
+            # a different step and may not exist when this closure is made.
+            return await self.registry.get_runtime("models").warm_local_model()
+
         self.images_runtime = ImagesRuntime(
-            artifact_service, RoutedImageProvider(FluxProvider()), self.event_bus, card=card
+            artifact_service,
+            RoutedImageProvider(FluxProvider()),
+            self.event_bus,
+            card=card,
+            restore=bring_the_chat_model_back,
         )
         self.registry.register(self.images_runtime)
         await self.images_runtime.initialize()
