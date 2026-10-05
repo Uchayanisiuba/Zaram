@@ -668,11 +668,14 @@ class MemoryRuntimeImpl(MemoryRuntime):
         exercised deliberately by the user, which is the only way it may be
         exercised — a sidebar tidy-up must not be able to reach it by accident.
         """
-        records = await self._store.all_records()
+        # Superseded rows included: deleting a project is the person asking for
+        # its facts to be gone, and the earlier wording of a corrected fact is
+        # one of them.
+        records = await self._store.all_records(include_superseded=True)
         gone = 0
         for record in records:
             if record.scope == scope:
-                if await self.forget(record.id):
+                if await self.forget(record.id) and not record.is_superseded:
                     gone += 1
         return gone
 
@@ -748,17 +751,26 @@ class MemoryRuntimeImpl(MemoryRuntime):
                 "`before` must be later than `after` — that range holds nothing."
             )
 
-        records = await self._store.all_records()
-        matched = [
+        # **Superseded rows are read too.** Correcting a fact keeps the original,
+        # marked superseded, with its old wording — right for history, and wrong
+        # for a button called *forget*: the text the person wanted gone was still
+        # on disk after "everything" was purged. `matched` stays the facts they
+        # can see; the earlier versions are counted apart so the sentence the
+        # screen reads out is true about both rather than silently inflated.
+        everything = await self._store.all_records(include_superseded=True)
+        in_range = [
             record
-            for record in records
+            for record in everything
             if (before is None or record.created_at < before)
             and (after is None or record.created_at > after)
             and (scope is None or record.scope == scope)
         ]
+        matched = [r for r in in_range if not r.is_superseded]
+        earlier = self._earlier_versions(everything, in_range)
 
         summary: dict[str, Any] = {
             "matched": len(matched),
+            "superseded": len(earlier),
             "deleted": 0,
             "dry_run": dry_run,
             # What the person is about to lose, in the terms they think in.
@@ -775,8 +787,40 @@ class MemoryRuntimeImpl(MemoryRuntime):
         for record in matched:
             if await self.forget(record.id):
                 gone += 1
+        # Reported apart from `deleted` for the same reason `matched` and
+        # `superseded` are: `deleted` is the facts the person could see go.
+        for record in earlier:
+            await self.forget(record.id)
         summary["deleted"] = gone
         return summary
+
+    @staticmethod
+    def _earlier_versions(everything: list, in_range: list) -> list:
+        """Superseded rows that go with this purge: those in range, and the
+        earlier wordings of any fact that is going.
+
+        The second clause is the one that matters. A correction stamps its
+        replacement *now* and leaves the original with its old date, so
+        *forget what I set last week* selects the replacement and not the
+        original — and the previous rate would stay on disk behind it.
+        Followed backwards only (`metadata["corrects"]`): a newer fact that
+        falls outside the range is not the person's to lose by this request.
+        """
+        by_id = {r.id: r for r in everything}
+        going = {r.id for r in in_range}
+        earlier: dict[str, Any] = {r.id: r for r in in_range if r.is_superseded}
+        for record in in_range:
+            previous = (record.metadata or {}).get("corrects")
+            seen: set[str] = set()
+            while previous and previous not in seen:
+                seen.add(previous)
+                ancestor = by_id.get(previous)
+                if ancestor is None:
+                    break
+                if ancestor.id not in going:
+                    earlier[ancestor.id] = ancestor
+                previous = (ancestor.metadata or {}).get("corrects")
+        return list(earlier.values())
 
     async def consolidate(self) -> dict[str, Any]:
         """Consolidate memories by grouping similar episodic memories into semantic memories.

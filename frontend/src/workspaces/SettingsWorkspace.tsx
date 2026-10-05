@@ -126,6 +126,7 @@ import { pastedKey } from '@/lib/pastedKey';
 import ModelSearchList from '@/components/settings/ModelSearchList';
 import ModelBrowser from '@/components/models/ModelBrowser';
 import VoiceBrowser from '@/components/voices/VoiceBrowser';
+import PurgeMemory from '@/components/memory/PurgeMemory';
 import ContextWindowField from '@/components/settings/ContextWindowField';
 import OverflowField from '@/components/settings/OverflowField';
 
@@ -1002,6 +1003,24 @@ export default function SettingsWorkspace() {
                 leave should not cost you anything.
               </p>
             </div>
+          </Row>
+
+          {/* Rule 4 and the retention obligation: how long Zaram keeps things,
+              and how the user shortens it. Next to the export on purpose — the
+              two answer "what happens to my data" from opposite ends, and
+              leaving is only half of owning it. The route is an HTTP call a
+              person makes and never a tool, so a document saying "forget
+              everything" cannot reach it. */}
+          <Row
+            label="Forget what Zaram remembers"
+            state="good"
+            detail={
+              'Remove facts from before a date, from a date onwards, between two dates, or all of ' +
+              'them. You see how many first, and nothing is removed until you press the button ' +
+              'that says the number.'
+            }
+          >
+            <PurgeMemory />
           </Row>
         </Section>
 

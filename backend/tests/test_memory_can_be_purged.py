@@ -253,3 +253,94 @@ class TestNothingTheModelSaysCanTriggerIt:
         import main
 
         assert main.PurgeMemory().confirm is False
+
+
+@pytest.mark.asyncio
+class TestACorrectedFactLeavesNothingBehind:
+    """Correcting a fact keeps the original row, marked superseded, with its old
+    text. That is right for history and wrong for a button called *forget*: the
+    wording the user wanted gone was still on disk after "everything" was
+    purged, and again after a project was deleted. Both walked
+    `all_records()`, which hides superseded rows by default.
+    """
+
+    async def _corrected(self, runtime, scope=GLOBAL):
+        original = await remember(runtime, "the rate is 450 a day", scope=scope)
+        outcome = await runtime.correct(original, "the rate is 500 a day")
+        return original, outcome
+
+    async def _everything_on_disk(self, runtime):
+        return await runtime._store.all_records(include_superseded=True)
+
+    async def test_purging_everything_removes_the_old_wording_too(self, runtime):
+        await self._corrected(runtime)
+        assert len(await self._everything_on_disk(runtime)) == 2  # the premise
+
+        await runtime.purge(dry_run=False)
+
+        assert await self._everything_on_disk(runtime) == []
+
+    async def test_deleting_a_project_removes_the_old_wording_too(self, runtime):
+        await self._corrected(runtime, scope="project:keyline")
+
+        await runtime.forget_scope("project:keyline")
+
+        assert await self._everything_on_disk(runtime) == []
+
+    async def test_the_count_keeps_facts_and_old_versions_apart(self, runtime):
+        """`matched` is what the person can see. The earlier versions are a
+        separate number, so the sentence the screen reads out is true about
+        both rather than silently inflating the first."""
+        await self._corrected(runtime)
+        summary = await runtime.purge()
+        assert summary["matched"] == 1
+        assert summary["superseded"] == 1
+
+    async def test_a_dry_run_still_deletes_nothing(self, runtime):
+        await self._corrected(runtime)
+        await runtime.purge()
+        assert len(await self._everything_on_disk(runtime)) == 2
+
+    async def test_an_older_version_in_range_goes_with_a_newer_one_out_of_it(self, runtime):
+        """The replacement is stamped now; the original keeps its old date. A
+        purge of *before last week* must still take the original, and the
+        count must say there was one."""
+        original, _ = await self._corrected(runtime)
+        import dataclasses
+
+        record = await runtime._store.get(original)
+        await runtime._store.put(dataclasses.replace(record, created_at=time.time() - 30 * DAY))
+
+        summary = await runtime.purge(before=time.time() - 7 * DAY)
+
+        assert summary["matched"] == 0
+        assert summary["superseded"] == 1
+
+    async def test_forgetting_a_recent_fact_takes_its_earlier_wording_with_it(self, runtime):
+        """*Forget what I set last week* selects the replacement, which is
+        stamped now. The original keeps its old date and is outside the range —
+        and the previous rate must not stay on disk behind it."""
+        import dataclasses
+
+        original, _ = await self._corrected(runtime)
+        record = await runtime._store.get(original)
+        await runtime._store.put(dataclasses.replace(record, created_at=time.time() - 60 * DAY))
+
+        summary = await runtime.purge(after=time.time() - 7 * DAY, dry_run=False)
+
+        assert summary["deleted"] == 1
+        assert await self._everything_on_disk(runtime) == []
+
+    async def test_a_newer_fact_outside_the_range_is_not_taken_by_an_older_one_going(self, runtime):
+        """Followed backwards only. Purging the old wording must not reach
+        forward and delete the current fact the person still wants."""
+        import dataclasses
+
+        original, outcome = await self._corrected(runtime)
+        record = await runtime._store.get(original)
+        await runtime._store.put(dataclasses.replace(record, created_at=time.time() - 60 * DAY))
+
+        await runtime.purge(before=time.time() - 7 * DAY, dry_run=False)
+
+        survivors = await self._everything_on_disk(runtime)
+        assert [r.content for r in survivors] == ["the rate is 500 a day"]

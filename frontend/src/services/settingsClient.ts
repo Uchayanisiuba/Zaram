@@ -834,6 +834,59 @@ export async function forgetEgressPolicyForHost(host: string): Promise<void> {
   await send(`/egress/policy/${encodeURIComponent(host)}`, 'DELETE');
 }
 
+// ------------------------------------------------------------------- purge
+//
+// Rule 4, and the third 2026 obligation: a store with no answer to how the user
+// shortens it is an unshipped feature. The route and its tests were complete
+// and no screen called them -- a permanent transcript was removable by hand,
+// one fact at a time, or not at all.
+
+/** A window of time, in Unix seconds. Both bounds are exclusive, as the
+ *  backend's are. Absent on both sides means everything. */
+export interface PurgeRange {
+  before?: number;
+  after?: number;
+}
+
+export interface PurgeSummary {
+  matched: number;
+  /** Earlier wordings of corrected facts that go with this purge. Counted
+   *  apart from `matched`, which is only what the person can see. */
+  superseded: number;
+  deleted: number;
+  dryRun: boolean;
+  scopes: string[];
+  oldest: number | null;
+  newest: number | null;
+}
+
+function toPurgeSummary(raw: Record<string, unknown>): PurgeSummary {
+  return {
+    matched: typeof raw.matched === 'number' ? raw.matched : 0,
+    superseded: typeof raw.superseded === 'number' ? raw.superseded : 0,
+    deleted: typeof raw.deleted === 'number' ? raw.deleted : 0,
+    dryRun: raw.dry_run !== false,
+    scopes: Array.isArray(raw.scopes) ? raw.scopes.map(String) : [],
+    oldest: typeof raw.oldest === 'number' ? raw.oldest : null,
+    newest: typeof raw.newest === 'number' ? raw.newest : null,
+  };
+}
+
+/** What a purge of this range would remove. **Deletes nothing** -- the
+ *  backend's default is a count, and this never asks for more. */
+export async function previewMemoryPurge(range: PurgeRange): Promise<PurgeSummary> {
+  return toPurgeSummary(
+    (await send('/memory/purge', 'POST', { ...range, confirm: false })) as Record<string, unknown>,
+  );
+}
+
+/** Remove the facts in the range. Not undoable; the caller reads the count first. */
+export async function purgeMemory(range: PurgeRange): Promise<PurgeSummary> {
+  return toPurgeSummary(
+    (await send('/memory/purge', 'POST', { ...range, confirm: true })) as Record<string, unknown>,
+  );
+}
+
 // ------------------------------------------------------------------ export
 //
 // Rule 7 — the Spine is exportable in an open format, no lock-in. The exporter
