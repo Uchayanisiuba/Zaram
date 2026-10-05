@@ -39,7 +39,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { motion } from 'framer-motion';
-import { X, Info, Download } from 'lucide-react';
+import { X, Info, Download, Pause, Play, RotateCcw, Code2, Eye, Copy, Check } from 'lucide-react';
 import { useLayoutStore } from '@/stores/layoutStore';
 import { recordBrowsed } from '@/services/egressClient';
 import { useChatModeStore } from '@/stores/chatModeStore';
@@ -115,6 +115,43 @@ export default function CodePreviewPanel({
   // persisted and not a standing list: a page that wanted three.js once
   // is not a reason to let every future page reach that CDN silently.
   const [allowedHosts, setAllowedHosts] = useState<string[]>([]);
+
+  // Playback and review (asked for 4 October 2026). The page keeps running in a
+  // sealed frame, so these are the three things a person does to watch
+  // something that moves: stop it to read, start it again from the top, and look
+  // at the code that is actually running.
+  const [paused, setPaused] = useState(false);
+  const [version, setVersion] = useState(0);
+  const [view, setView] = useState<'page' | 'code'>('page');
+  const [copied, setCopied] = useState(false);
+
+  // Told to the frame rather than done to it: its origin is opaque, so the
+  // parent cannot reach in. `PLAYBACK` is the listener on the other side.
+  useEffect(() => {
+    frameRef.current?.contentWindow?.postMessage(
+      { __zaramPreviewControl: true, action: paused ? 'pause' : 'play' },
+      '*',
+    );
+  }, [paused]);
+
+  async function copyCode() {
+    try {
+      await navigator.clipboard.writeText(block.code);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // No clipboard in a locked-down webview. The code is on screen and
+      // selectable, which is the fallback and not an error worth a banner.
+    }
+  }
+
+  function restart() {
+    // A fresh frame, so the page starts from its first line. Unpaused: a restart
+    // that came up frozen would look like it had not worked.
+    setPaused(false);
+    setVersion((v) => v + 1);
+    setView('page');
+  }
 
   useEffect(() => {
     setScriptError(null);
@@ -248,6 +285,59 @@ export default function CodePreviewPanel({
               closing it to go and find a button is the moment that decision
               gets dropped. `savePreviewable` writes the model's markup, not
               the framed page in the iframe beside it. */}
+          <div
+            className="flex items-center overflow-hidden rounded-lg"
+            style={{ border: '1px solid var(--color-border)' }}
+            role="group"
+            aria-label="What to show"
+          >
+            {(['page', 'code'] as const).map((which) => (
+              <button
+                key={which}
+                type="button"
+                data-testid={`view-${which}`}
+                aria-pressed={view === which}
+                onClick={() => setView(which)}
+                className="flex items-center gap-1.5 px-2 py-1 text-xs"
+                style={{
+                  background: view === which ? 'rgba(255,255,255,0.10)' : 'transparent',
+                  color: view === which ? 'var(--color-text)' : 'var(--color-text-muted)',
+                }}
+              >
+                {which === 'page' ? <Eye size={12} /> : <Code2 size={12} />}
+                {which === 'page' ? 'Page' : 'Code'}
+              </button>
+            ))}
+          </div>
+          {view === 'page' && (
+            <>
+              <button
+                type="button"
+                data-testid="playback-toggle"
+                onClick={() => setPaused((was) => !was)}
+                aria-label={paused ? 'Resume the page' : 'Pause the page'}
+                aria-pressed={paused}
+                title={paused ? 'Resume' : 'Pause — animations and timers hold where they are'}
+                className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs text-slate-400 hover:bg-white/5 hover:text-slate-200"
+                style={{ border: '1px solid var(--color-border)' }}
+              >
+                {paused ? <Play size={12} /> : <Pause size={12} />}
+                {paused ? 'Resume' : 'Pause'}
+              </button>
+              <button
+                type="button"
+                data-testid="playback-restart"
+                onClick={restart}
+                aria-label="Restart the page from the beginning"
+                title="Restart from the beginning"
+                className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs text-slate-400 hover:bg-white/5 hover:text-slate-200"
+                style={{ border: '1px solid var(--color-border)' }}
+              >
+                <RotateCcw size={12} />
+                Restart
+              </button>
+            </>
+          )}
           <button
             onClick={() => savePreviewable(block)}
             aria-label={`Save as ${filenameFor(block)}`}
@@ -267,7 +357,33 @@ export default function CodePreviewPanel({
           </button>
         </div>
 
-        <div className="flex-1 overflow-hidden">
+        {/* The code is the review. A person watching model-written code run is
+            entitled to read it, and the sealed frame is the reason they would
+            otherwise have to take the page on trust. It is the model's markup,
+            exactly as `Save` writes it — not the DOM the frame ended up with. */}
+        {view === 'code' && (
+          <div className="relative flex-1 overflow-auto" data-testid="preview-code">
+            <button
+              type="button"
+              data-testid="copy-code"
+              onClick={() => void copyCode()}
+              aria-label="Copy the code"
+              className="absolute right-3 top-3 flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs text-slate-400 hover:bg-white/5 hover:text-slate-200"
+              style={{ border: '1px solid var(--color-border)', background: 'rgba(0,0,0,0.4)' }}
+            >
+              {copied ? <Check size={12} /> : <Copy size={12} />}
+              {copied ? 'Copied' : 'Copy'}
+            </button>
+            <pre
+              className="m-0 whitespace-pre-wrap break-words px-4 py-3 text-xs leading-relaxed"
+              style={{ fontFamily: 'var(--font-mono)', color: 'var(--color-text)' }}
+            >
+              {block.code}
+            </pre>
+          </div>
+        )}
+
+        <div className="flex-1 overflow-hidden" hidden={view !== 'page'}>
           <iframe
             ref={frameRef}
             title={`${block.label} preview`}
@@ -275,7 +391,7 @@ export default function CodePreviewPanel({
             // merely re-attributed: a CSP in a `<meta>` is read when the
             // document parses, and swapping `srcDoc` without a new element
             // leaves the old policy in force.
-            key={allowedHosts.join(',')}
+            key={`${allowedHosts.join(',')}:${version}`}
             srcDoc={wrapForPreview(block.code, 'app', allowedHosts)}
             // `allow-scripts` and nothing else. Adding `allow-same-origin`
             // beside it would not widen the sandbox, it would dissolve it —
@@ -305,8 +421,8 @@ export default function CodePreviewPanel({
             </span>
             {/* **The refusal becomes an offer — 4 October 2026.**
 
-                A page saying `<script src="https://cdn.jsdelivr.net/npm/
-                three">` renders as a black rectangle, and the line above
+                A page that loads three from the jsdelivr CDN
+                renders as a black rectangle, and the line above
                 explained why without doing anything about it. The
                 maintainer asked for Three.js previews, and the shape the
                 product already has for this is rule 5: default deny, then

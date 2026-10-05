@@ -241,6 +241,105 @@ export const SEALED_STORAGE = `<script>
 })();
 <\/script>`;
 
+/** Pause and resume for a page that moves.
+ *
+ *  Asked for 4 October 2026 as "playback and review on the HTML surface": the
+ *  voxel world, the runner and the CSS loop all move, and a panel that can only
+ *  show them running cannot be paused to read, or restarted to see the opening
+ *  again. The frame has an opaque origin, so the parent cannot reach in — the
+ *  page is handed a listener instead, as the error reporter and the storage shim
+ *  are, and told by `postMessage`.
+ *
+ *  What pausing means here, honestly:
+ *
+ *  * **CSS animations and transitions** stop, by a rule on every element.
+ *  * **`requestAnimationFrame`, `setTimeout` and `setInterval` callbacks are
+ *    held, not dropped**, and released on resume. A game loop is one of those
+ *    three, so the game stops advancing and carries on from where it was. A
+ *    held interval fires once on resume rather than once per missed tick.
+ *  * **It does not stop everything.** A page that animates from a Web Worker, an
+ *    audio element or a video keeps going; a game that measures real time may
+ *    jump forward on resume. The control says "pause", not "freeze", and this is
+ *    the reason.
+ *
+ *  Only the parent is listened to (`event.source === parent`): a sandboxed page
+ *  has no business taking orders from a stranger, and the message carries no
+ *  data a page could use anyway.
+ *
+ *  The body is a function of `win`, so a test can hand it a fake window and
+ *  watch it hold and release callbacks without a browser. */
+export const PLAYBACK = `<script>
+(function (win) {
+  var paused = false;
+  var held = [];
+  var rafNative = win.requestAnimationFrame && win.requestAnimationFrame.bind(win);
+  var timeoutNative = win.setTimeout.bind(win);
+  var intervalNative = win.setInterval.bind(win);
+  var style = null;
+
+  function hold(fn, args) { held.push({ fn: fn, args: args }); }
+
+  if (rafNative) {
+    win.requestAnimationFrame = function (callback) {
+      return rafNative(function (time) {
+        if (paused) { hold(callback, [time]); } else { callback(time); }
+      });
+    };
+  }
+  win.setTimeout = function (callback) {
+    var extra = Array.prototype.slice.call(arguments, 2);
+    if (typeof callback !== 'function') { return timeoutNative.apply(win, arguments); }
+    var delay = arguments[1];
+    return timeoutNative(function () {
+      if (paused) { hold(callback, extra); } else { callback.apply(win, extra); }
+    }, delay);
+  };
+  win.setInterval = function (callback) {
+    var extra = Array.prototype.slice.call(arguments, 2);
+    if (typeof callback !== 'function') { return intervalNative.apply(win, arguments); }
+    var delay = arguments[1];
+    var queued = false;
+    return intervalNative(function () {
+      if (paused) {
+        // One held tick however long the pause: a backlog of every missed beat
+        // released at once would make a paused game lurch.
+        if (!queued) { queued = true; hold(function () { queued = false; callback.apply(win, extra); }, []); }
+      } else { callback.apply(win, extra); }
+    }, delay);
+  };
+
+  function setPaused(next) {
+    if (next === paused) { return; }
+    paused = next;
+    try {
+      if (paused) {
+        style = win.document.createElement('style');
+        style.textContent = '*, *::before, *::after { animation-play-state: paused !important; transition: none !important; }';
+        (win.document.head || win.document.documentElement).appendChild(style);
+      } else if (style && style.parentNode) {
+        style.parentNode.removeChild(style);
+        style = null;
+      }
+    } catch (e) { /* the callbacks matter more than the stylesheet */ }
+    if (!paused) {
+      var release = held; held = [];
+      for (var i = 0; i < release.length; i++) {
+        try { release[i].fn.apply(win, release[i].args); }
+        catch (e) { try { win.parent.postMessage({ __zaramPreview: true, kind: 'error', detail: String(e && e.message || e), uri: '' }, '*'); } catch (x) {} }
+      }
+    }
+  }
+
+  win.addEventListener('message', function (event) {
+    if (event.source !== win.parent) { return; }
+    var data = event.data;
+    if (!data || data.__zaramPreviewControl !== true) { return; }
+    if (data.action === 'pause') { setPaused(true); }
+    else if (data.action === 'play') { setPaused(false); }
+  });
+})(window);
+<\/script>`;
+
 /** The sandbox the app frame runs under.
  *
  *  **`allow-same-origin` must never join this list.** Granted alongside
@@ -287,7 +386,10 @@ export function wrapForPreview(
   // ones thrown during setup, and it would not be able to report a shim that
   // failed to install. The shim is next because it has to be in place before
   // the page's *first* line: the storage read that broke Tetris was line one.
-  return appCsp(allowedHosts) + FRAME_STYLE + ERROR_REPORTER + SEALED_STORAGE + source;
+  // Playback goes last of the three: it wraps the timers the page is about to
+  // use, so it must be in place before the page's first line, and it needs the
+  // reporter already listening for a callback that throws on resume.
+  return appCsp(allowedHosts) + FRAME_STYLE + ERROR_REPORTER + SEALED_STORAGE + PLAYBACK + source;
 }
 
 /** The languages worth offering a preview for, and the label each gets. */

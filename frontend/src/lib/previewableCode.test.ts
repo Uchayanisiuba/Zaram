@@ -354,3 +354,194 @@ describe('letting a preview load a library', () => {
     expect(wrapForPreview('<p>hi</p>', 'app', ['cdn.jsdelivr.net'])).toContain('jsdelivr');
   });
 });
+
+// ------------------------------------------------------------------ playback
+//
+// "Playback and review on the HTML surface" (4 October 2026). The frame is
+// sealed with an opaque origin, so the panel cannot reach in to pause a page;
+// the page is handed a listener instead. These run the injected script against
+// a fake window and watch it hold and release callbacks, because "it contains
+// the word requestAnimationFrame" is not evidence a game stops.
+
+import { PLAYBACK } from './previewableCode';
+
+interface Held {
+  callback: (arg?: unknown) => void;
+}
+
+function fakeWindow() {
+  const raf: Held[] = [];
+  const timeouts: Held[] = [];
+  const intervals: Held[] = [];
+  const listeners: Record<string, Array<(e: unknown) => void>> = {};
+  const parentMessages: unknown[] = [];
+  const appended: Array<{ textContent: string }> = [];
+  const parent = { postMessage: (m: unknown) => parentMessages.push(m) };
+
+  const win: Record<string, unknown> = {
+    parent,
+    document: {
+      createElement: () => ({ textContent: '', parentNode: null }),
+      head: {
+        appendChild: (el: { textContent: string; parentNode: unknown }) => {
+          appended.push(el);
+          el.parentNode = { removeChild: (e: unknown) => appended.splice(appended.indexOf(e as never), 1) };
+        },
+      },
+      documentElement: {},
+    },
+    requestAnimationFrame: (cb: Held['callback']) => (raf.push({ callback: cb }), raf.length),
+    setTimeout: (cb: Held['callback']) => (timeouts.push({ callback: cb }), timeouts.length),
+    setInterval: (cb: Held['callback']) => (intervals.push({ callback: cb }), intervals.length),
+    addEventListener: (type: string, fn: (e: unknown) => void) => {
+      (listeners[type] ||= []).push(fn);
+    },
+  };
+
+  // Run the script exactly as the frame would, with this window as `window`.
+  const body = PLAYBACK.replace(/^<script>/, '').replace(/<\/script>$/, '');
+  new Function('window', body)(win);
+
+  const send = (data: unknown, from: unknown = parent) =>
+    listeners.message?.forEach((fn) => fn({ source: from, data }));
+  const control = (action: string, from: unknown = parent) =>
+    send({ __zaramPreviewControl: true, action }, from);
+  const tick = (list: Held[], arg?: unknown) => list.splice(0).forEach((h) => h.callback(arg));
+
+  return { win, raf, timeouts, intervals, parentMessages, appended, send, control, tick };
+}
+
+type Raf = (cb: (t: number) => void) => number;
+type Timeout = (cb: (...a: unknown[]) => void, ms: number, ...a: unknown[]) => number;
+
+describe('playback: pausing a page that moves', () => {
+  it('is injected for an app and never for a document', () => {
+    expect(wrapForPreview('<p>x</p>', 'app')).toContain(PLAYBACK);
+    expect(wrapForPreview('<p>x</p>')).not.toContain(PLAYBACK);
+  });
+
+  it('is in place before the page’s first line', () => {
+    const wrapped = wrapForPreview('<p id="page">x</p>', 'app');
+    expect(wrapped.indexOf(PLAYBACK)).toBeLessThan(wrapped.indexOf('id="page"'));
+  });
+
+  it('closes its script tag the way the other preludes do, so it cannot end the document', () => {
+    expect(PLAYBACK.endsWith('</script>')).toBe(true);
+    expect(PLAYBACK.slice(0, -9)).not.toContain('</script>');
+  });
+
+  it('lets a running page run: nothing is held until it is told to pause', () => {
+    const f = fakeWindow();
+    const ran: number[] = [];
+    (f.win.requestAnimationFrame as Raf)((t) => ran.push(t));
+    f.tick(f.raf, 16);
+    expect(ran).toEqual([16]);
+  });
+
+  it('holds an animation frame while paused, and runs it when resumed', () => {
+    const f = fakeWindow();
+    const ran: number[] = [];
+    (f.win.requestAnimationFrame as Raf)((t) => ran.push(t));
+    f.control('pause');
+    f.tick(f.raf, 16);
+    expect(ran).toEqual([]); // held, not run and not dropped
+    f.control('play');
+    expect(ran).toEqual([16]); // released
+  });
+
+  it('holds a timeout while paused and runs it on resume', () => {
+    const f = fakeWindow();
+    let fired = 0;
+    (f.win.setTimeout as Timeout)(() => (fired += 1), 100);
+    f.control('pause');
+    f.tick(f.timeouts);
+    expect(fired).toBe(0);
+    f.control('play');
+    expect(fired).toBe(1);
+  });
+
+  it('passes a timeout its extra arguments', () => {
+    const f = fakeWindow();
+    const got: unknown[] = [];
+    (f.win.setTimeout as Timeout)((...a) => got.push(...a), 10, 'x', 'y');
+    f.tick(f.timeouts);
+    expect(got).toEqual(['x', 'y']);
+  });
+
+  it('holds one tick of an interval however many were missed, so a paused game does not lurch', () => {
+    const f = fakeWindow();
+    let fired = 0;
+    (f.win.setInterval as Timeout)(() => (fired += 1), 16);
+    f.control('pause');
+    for (let i = 0; i < 50; i += 1) f.intervals[0].callback();
+    expect(fired).toBe(0);
+    f.control('play');
+    expect(fired).toBe(1);
+  });
+
+  it('resumes an interval that carries on afterwards', () => {
+    const f = fakeWindow();
+    let fired = 0;
+    (f.win.setInterval as Timeout)(() => (fired += 1), 16);
+    f.control('pause');
+    f.intervals[0].callback();
+    f.control('play');
+    f.intervals[0].callback();
+    expect(fired).toBe(2);
+  });
+
+  it('stops CSS animations with a rule, and removes it on resume', () => {
+    const f = fakeWindow();
+    f.control('pause');
+    expect(f.appended).toHaveLength(1);
+    expect(f.appended[0].textContent).toContain('animation-play-state: paused');
+    f.control('play');
+    expect(f.appended).toHaveLength(0);
+  });
+
+  it('does nothing twice: pausing a paused page adds no second rule', () => {
+    const f = fakeWindow();
+    f.control('pause');
+    f.control('pause');
+    expect(f.appended).toHaveLength(1);
+  });
+
+  it('takes orders only from its parent', () => {
+    const f = fakeWindow();
+    const ran: number[] = [];
+    (f.win.requestAnimationFrame as Raf)((t) => ran.push(t));
+    f.control('pause', { someone: 'else' });
+    f.tick(f.raf, 1);
+    expect(ran).toEqual([1]); // not paused by a stranger
+  });
+
+  it('ignores a message that is not a playback control', () => {
+    const f = fakeWindow();
+    const ran: number[] = [];
+    (f.win.requestAnimationFrame as Raf)((t) => ran.push(t));
+    f.send({ action: 'pause' }); // from the parent, but not flagged as a control
+    f.send('pause');
+    f.send(null);
+    f.tick(f.raf, 2);
+    expect(ran).toEqual([2]);
+  });
+
+  it('reports a callback that throws on resume, rather than swallowing it', () => {
+    const f = fakeWindow();
+    (f.win.setTimeout as Timeout)(() => {
+      throw new Error('boom');
+    }, 1);
+    f.control('pause');
+    f.tick(f.timeouts);
+    f.control('play');
+    expect(f.parentMessages).toContainEqual(
+      expect.objectContaining({ __zaramPreview: true, kind: 'error', detail: 'boom' }),
+    );
+  });
+
+  it('reaches nothing outside the frame', () => {
+    for (const reach of ['fetch(', 'XMLHttpRequest', 'WebSocket', 'http', 'top.', 'localStorage']) {
+      expect(PLAYBACK).not.toContain(reach);
+    }
+  });
+});
