@@ -450,6 +450,77 @@ class IntentRouter:
         "illustration of", "logo for", "paint me", "photorealistic",
     }
 
+    #: Formats a **language model writes directly**, and an image model cannot.
+    #:
+    #: Found 4 October 2026 by sending the resident model the sentence a person
+    #: would type -- *"Draw a minimalist fox logo as an SVG"* -- and getting
+    #: nothing back in one second. `draw` was within reach of `logo`, which is
+    #: the whole image rule, so the request went to the image generator, which
+    #: answered "No image model is installed" and ended the reply. The user had
+    #: named the output, and the output was text.
+    #:
+    #: This is *modality as a capability gate, never a ranking*: an image model
+    #: emits raster pictures and cannot emit these, so a request that names one
+    #: is not an image request whatever verb and noun sit beside it. It is the
+    #: same precondition `requires_image_output` already is, read from the other
+    #: side. Kept to graphic formats someone would write "as" or "in": the list
+    #: is a gate and a wide one would be a way to lose real image requests.
+    _TEXT_FORMATS = frozenset({
+        "svg", "html", "css", "ascii", "mermaid", "tikz", "canvas", "graphviz",
+    })
+
+    #: Words that turn a named format into one the person does *not* want:
+    #: *"a picture of a cat, not ASCII"*.
+    _NEGATES_A_FORMAT = frozenset({"not", "no", "without", "instead", "rather", "never"})
+
+    @classmethod
+    def _names_a_text_format(cls, prompt: str) -> bool:
+        """Whether the request asks for its output in a format a language model writes."""
+        words = re.findall(r"[a-z0-9]+", (prompt or "").lower())
+        for index, word in enumerate(words):
+            if word not in cls._TEXT_FORMATS:
+                continue
+            before = words[max(0, index - 2):index]
+            if any(w in cls._NEGATES_A_FORMAT for w in before):
+                continue
+            return True
+        return False
+
+    @classmethod
+    def _wants_an_image(cls, prompt: str) -> bool:
+        """Whether this asks for a picture to be made **and** names no text format.
+
+        The one definition both routing paths use, so the keyword classifier and
+        the semantic override cannot disagree about it -- the pair `image_matched`
+        already was, before one of them learned about formats.
+        """
+        if cls._names_a_text_format(prompt):
+            return False
+        return bool(cls._matches((prompt or "").lower(), cls._IMAGE_KEYWORDS)) or cls._asks_for_a_drawing(prompt)
+
+    @classmethod
+    def _asks_for_text_art(cls, prompt: str) -> bool:
+        """Something visual, asked for **in a format a language model writes**.
+
+        *"Draw a minimalist fox logo as an SVG"*, *"make an SVG image of a fox"*,
+        *"a picture of a sunset using CSS"*. These are code requests. Not image
+        requests -- the generator cannot emit SVG -- and not vision requests
+        either: `image` and `picture` are in the vision vocabulary, so once the
+        image rule stood aside, "make an SVG image of a fox" landed on the rule
+        for *reading* a picture and set `requires_vision`. The same mistake from
+        the other side, found by running the sentences rather than reasoning
+        about them.
+        """
+        if not cls._names_a_text_format(prompt):
+            return False
+        words = re.findall(r"[a-z]+", (prompt or "").lower())
+        making = any(cls._is_one_of(w, cls._MAKING_VERBS) for w in words)
+        # A picture noun counts only when it is a *new* one -- "this image",
+        # "my picture" refer to one that exists, and a question about that is
+        # still a question for a model that can see.
+        picture = cls._mentions_a_new_picture(prompt)
+        return making or picture
+
     #: Verbs that make a thing, for `_asks_for_a_drawing`.
     #:
     #: Every one of them makes documents and spreadsheets too, which is exactly
@@ -877,7 +948,7 @@ class IntentRouter:
         # every phrasing nobody thought to list. Both paths in this class use
         # the same pair, so the keyword classifier and the semantic override
         # cannot disagree about what counts as asking for a picture.
-        image_matched = bool(image_hits) or self._asks_for_a_drawing(prompt)
+        image_matched = self._wants_an_image(prompt)
         signals.append(IntentSignal(
             name="image_phrases",
             weight=0.7,
@@ -887,7 +958,9 @@ class IntentRouter:
 
         # Check for vision keywords
         vision_hits = self._matches(prompt_lower, self._VISION_KEYWORDS)
-        vision_matched = bool(vision_hits)
+        text_art = self._asks_for_text_art(prompt)
+        # A picture asked for in SVG/HTML/CSS is code, not a picture to read.
+        vision_matched = bool(vision_hits) and not text_art
         signals.append(IntentSignal(
             name="vision_keywords",
             weight=0.6,
@@ -942,6 +1015,12 @@ class IntentRouter:
             intent_type = IntentType.IMAGE
             confidence = 0.85
             capabilities = ["image.generate"]
+        elif text_art:
+            # Ahead of vision, which `image` and `picture` would otherwise take.
+            # Confidence is modest because the format word, not a model, decided.
+            intent_type = IntentType.CODE
+            confidence = 0.75
+            capabilities = ["reasoning.generate"]
         elif vision_matched:
             intent_type = IntentType.VISION
             confidence = 0.85
@@ -1087,14 +1166,19 @@ class IntentRouter:
         # bare "draw" is deliberately absent so *"draw up a contract"* stays a
         # document, and nothing here widens what may run — an image request
         # that cannot be served still meets the runtime's refusal.
-        drawing_asked_for = bool(
-            self._matches(prompt.lower(), self._IMAGE_KEYWORDS)
-        ) or self._asks_for_a_drawing(prompt)
+        drawing_asked_for = self._wants_an_image(prompt)
         overridden_from = ""
         if drawing_asked_for and decision.intent != "image":
             overridden_from = decision.intent
             intent_type = IntentType.IMAGE
             capabilities = list(self._SEMANTIC_CAPABILITIES["image"])
+        elif self._asks_for_text_art(prompt) and decision.intent in ("image", "vision"):
+            # The other direction of the same gate: the router, which cannot tell
+            # reading a picture from emitting one, said image or vision for a
+            # request that named SVG, HTML or CSS. Those are written, not drawn.
+            overridden_from = decision.intent
+            intent_type = IntentType.CODE
+            capabilities = list(self._SEMANTIC_CAPABILITIES["code"])
 
         # **Wanting live information is a property of the question, not a rival
         # intent.** This read `decision.intent == "search"` alone, and because

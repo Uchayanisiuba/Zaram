@@ -102,6 +102,9 @@ class DrawTools:
                     "the work needs an image made — a cover, a diagram's illustration, a "
                     "mock-up, a logo — rather than when the person is asking about a "
                     "picture they already have. Returns the saved file's name. "
+                    "NOT for anything asked for as SVG, HTML, CSS, ASCII, Mermaid or other "
+                    "text: those you write yourself, in your reply — an image model cannot "
+                    "produce them and this tool would only refuse. "
                     "If it answers that drawing is unavailable, say so plainly and carry "
                     "on without the picture: never describe an image as though it was made."
                 ),
