@@ -99,12 +99,33 @@ class DataClass(str, Enum):
         deliberate act — turning browsing on — *is* rule 5's explicit
         decision, and rule 3 carries it afterwards: every page is still
         logged, and the log is where you look instead of deciding beforehand.
+
+    ``REPO``
+        A repository, pushed. Added 4 October 2026 from `docs/MILESTONES.md`,
+        which recorded the reasoning before any of the GitHub work: **the
+        largest egress Zaram can perform is the whole of somebody's project,
+        including whatever is sitting in it** — history, a stray `.env`, a
+        client's files — and it cannot ride on `PROMPT` (kilobytes the user just
+        typed), on `IMAGE` (one picture) or on a generic tool grant.
+
+        Its own class, then, with the shape `IMAGE` already has and nothing
+        wider: a host the user connected does **not** inherit it, so
+        connecting github.com for reading a page or an issue asks again, once
+        and by name, before the first push and remembers the answer (rule 7j).
+        It is deliberately *not* in `_MAY_DEFAULT_CLASS_WIDE`: "push anywhere"
+        is the standing allow that must never exist, for the same reason the
+        Spine has none.
+
+        The class is the consent. What it does not do is the pushing: that goes
+        through the terminal and the operating system's credential helper, so
+        Zaram never holds a token (see the milestone's note on GitHub).
     """
 
     PROMPT = "prompt"
     IMAGE = "image"
     SPINE = "spine"
     BROWSE = "browse"
+    REPO = "repo"
 
 
 #: Classes a plain host rule covers. Exactly one, and the fact that it is a set

@@ -65,7 +65,7 @@ export type PolicyMode = 'allow' | 'ask' | 'deny';
  * of something far more personal, so connecting a provider for text is not
  * consent to send it a picture.
  */
-export type EgressDataClass = 'prompt' | 'image' | 'spine';
+export type EgressDataClass = 'prompt' | 'image' | 'spine' | 'browse' | 'repo';
 
 export interface EgressPolicySnapshot {
   /** Always "deny" — stated by the backend rather than assumed here. */

@@ -239,6 +239,14 @@ export default function ActivityWorkspace({ onOpenConversation }: ActivityWorksp
   // row that was not on the screen.
   const canDrawAt = policy?.canDrawAt ?? [];
   const drawsAt = new Set(canDrawAt.map((d) => d.host));
+  // Hosts a `git push` has been asked about. A repository is its own decision
+  // under rule 7j, and unlike pictures the grant is meaningful for a host with
+  // no rule at all — the policy consults the class rule first — so the row is
+  // offered wherever a push has actually reached, allowed or refused. Offering
+  // it for every host would be a control that governs nothing for most of them.
+  const pushedTo = new Set(
+    requests.filter((e) => e.source === 'code.git_push').map((e) => e.host),
+  );
   const hosts = policy
     ? [
         ...new Set([
@@ -375,6 +383,42 @@ export default function ActivityWorkspace({ onOpenConversation }: ActivityWorksp
                           background: imageMode === m ? 'rgba(255,255,255,0.10)' : 'transparent',
                           border: `1px solid ${imageMode === m ? 'var(--color-border)' : 'var(--color-border-subtle)'}`,
                           color: imageMode === m ? 'var(--color-text)' : 'var(--color-text-faint)',
+                          fontFamily: 'var(--font-mono)',
+                        }}
+                      >
+                        {m}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+              {(pushedTo.has(h) || policy?.classRules[h]?.repo) && (
+                <div className="flex items-center gap-1 mt-1" data-testid={`repos-${h}`}>
+                  <span
+                    className="text-xs shrink-0 w-10"
+                    style={{ color: 'var(--color-text-faint)', fontFamily: 'var(--font-mono)' }}
+                  >
+                    repos
+                  </span>
+                  {(['deny', 'ask', 'allow'] as PolicyMode[]).map((m) => {
+                    const repoMode = policy?.classRules[h]?.repo ?? 'deny';
+                    return (
+                      <button
+                        key={m}
+                        disabled={busy}
+                        onClick={() => void changePolicy(h, m, 'repo')}
+                        title={
+                          m === 'deny'
+                            ? 'Never push a repository here'
+                            : m === 'ask'
+                              ? 'Tell me what is being pushed and let me decide each time'
+                              : 'Push without asking. Still logged, and never the commit contents.'
+                        }
+                        className="flex-1 rounded text-xs py-0.5 transition-colors disabled:opacity-40"
+                        style={{
+                          background: repoMode === m ? 'rgba(255,255,255,0.10)' : 'transparent',
+                          border: `1px solid ${repoMode === m ? 'var(--color-border)' : 'var(--color-border-subtle)'}`,
+                          color: repoMode === m ? 'var(--color-text)' : 'var(--color-text-faint)',
                           fontFamily: 'var(--font-mono)',
                         }}
                       >

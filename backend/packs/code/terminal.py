@@ -299,9 +299,17 @@ class TerminalTools:
     sandboxed to, and two projects pointed at one folder are one terminal.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, push_check=None) -> None:
         self._sessions: Dict[str, Session] = {}
         self._lock = threading.Lock()
+        # Asked before a command Zaram is about to run is allowed to contain a
+        # `git push`: returns None to proceed or the sentence to give back.
+        # Injected so tests can answer without git or a gate; the default is
+        # the real one. See `packs/code/publishing.py` for why it exists and
+        # what it does not claim.
+        if push_check is None:
+            from packs.code.publishing import check_push as push_check
+        self._push_check = push_check
 
     # ------------------------------------------------------------ sessions
 
@@ -411,6 +419,12 @@ class TerminalTools:
             command = str(arguments.get("command") or "").strip()
             if not command:
                 return {"error": "No command was given."}
+            # Before the terminal is even started: a refused push must not cost
+            # a shell. Only Zaram's commands pass through here -- what the
+            # person types themselves is theirs and is never asked about.
+            refusal = self._push_check(command, root)
+            if refusal:
+                return {"error": refusal, "command": command, "cwd": str(root)}
             session = self.session_for(root)
             if session is None:
                 return {"error": "A terminal could not be started in this project."}
