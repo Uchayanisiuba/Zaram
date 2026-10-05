@@ -43,7 +43,7 @@ def _session(engine: ExecutionEngine, *, uninterrupted: bool) -> str:
 def test_a_change_in_a_run_the_person_let_go_is_confirmed(engine: ExecutionEngine) -> None:
     s = _session(engine, uninterrupted=True)
     assert engine._runs_uninterrupted(s, "create_pull_request") is True
-    assert engine._runs_uninterrupted(s, "imap_send_email") is True
+    assert engine._runs_uninterrupted(s, "imap_create_draft") is True
     assert engine._runs_uninterrupted(s, "write_file") is True
 
 
@@ -64,6 +64,19 @@ def test_a_removal_is_never_confirmed_by_the_rung(engine: ExecutionEngine, tool:
     """Whatever the plan said, a delete asks. Undo does not help with most of
     them and a person who said "don't stop for each change" did not say
     "empty the mailbox"."""
+    s = _session(engine, uninterrupted=True)
+    assert engine._runs_uninterrupted(s, tool) is False
+
+
+@pytest.mark.parametrize(
+    "tool",
+    ["imap_send_email", "send_message", "reply_all", "forward_message", "publish_post", "git_push"],
+)
+def test_a_send_is_never_confirmed_by_the_rung_either(engine: ExecutionEngine, tool: str) -> None:
+    """Changed 4 October 2026: this file asserted `imap_send_email` ran
+    uninterrupted, which was the old contract and the wrong one. "Don't stop for
+    each change" is consent to the plan's changes, never to words going out in
+    the person's name that they did not read. Drafts still run; sends ask."""
     s = _session(engine, uninterrupted=True)
     assert engine._runs_uninterrupted(s, tool) is False
 

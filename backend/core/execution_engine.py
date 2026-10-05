@@ -494,11 +494,14 @@ class ExecutionEngine:
         from one the model waved through — and that distinction is the entire
         safety of this flag.
         """
-        from runtimes.mcp.policy import looks_destructive
+        from runtimes.mcp.policy import looks_destructive, looks_outbound
 
         if session_id not in self._uninterrupted:
             return False
-        return not looks_destructive(tool_name)
+        # "Run without stopping" is consent to a plan's changes. Never to its
+        # removals, and never to its sends: an email that goes out inside an
+        # unattended run is the user's name on words they did not read.
+        return not (looks_destructive(tool_name) or looks_outbound(tool_name))
 
     def set_notice_source(self, source: Any | None) -> None:
         """Provide a callable returning a one-off notice, or None.

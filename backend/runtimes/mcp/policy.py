@@ -97,6 +97,37 @@ _LOOKS_READ_ONLY = (
 #: being wrong is asymmetric and unrecoverable.
 _LOOKS_DESTRUCTIVE = ("delete", "remove", "drop", "destroy", "purge", "truncate", "rm")
 
+#: Names that mean "this sends something to someone". **A different hazard from
+#: destruction and the same shape**: once it has gone it cannot be called back,
+#: and what goes is the user's words in the user's name. Matching one forces a
+#: fresh confirmation however much has been granted, for the reason the
+#: destructive list does — the cost of being wrong is asymmetric — and for one
+#: more that `CLAUDE.md` gives about generation: *a wrong reply is corrected in
+#: the next turn; a wrong document is sent to a client.* A send is where the
+#: second becomes true.
+#:
+#: Written 4 October 2026 from `docs/MILESTONES.md`'s draft-and-hold rule for
+#: email. Without it, a mail server's `send_message` was an ordinary write: allow
+#: it once and "Zaram will stop asking about this tool" applied to the one tool
+#: that must never stop being asked about — including from an unattended
+#: automation. Drafting is deliberately absent: `create_draft` is held by
+#: definition, which is the whole point of drafting.
+#:
+#: One-directional like its sibling: a name here can only make a tool stricter,
+#: and a send with an unrecognised name is still an unrecognised write, which
+#: `decide` already treats as needing a confirmation.
+_LOOKS_OUTBOUND = (
+    "send", "reply", "forward", "publish", "tweet", "broadcast", "submit",
+)
+
+#: Words that are a send as a verb and a thing as a noun. `post_comment` sends;
+#: `get_post` reads a blog post, and `list_pushes` lists. Counted as outbound
+#: **only when the name has no look-word in it** -- the same one-directional
+#: logic, applied where the vocabulary is genuinely ambiguous. Without this
+#: split every `get_post` would have asked for confirmation, which is the
+#: dialog-a-day failure rule 7j names.
+_OUTBOUND_UNLESS_A_LOOK = ("post", "push", "share", "invite")
+
 
 #: Shortest word that may match a token by its prefix.
 #:
@@ -172,6 +203,9 @@ def looks_read_only(tool_name: str, annotations: Optional[Mapping[str, Any]] = N
         return False
     if _matches(tool_name, _LOOKS_DESTRUCTIVE):
         return False
+    # A name that sends is not a look, whatever else is in it: `fetch_and_send`.
+    if _matches(tool_name, _LOOKS_OUTBOUND):
+        return False
     return _matches(tool_name, _LOOKS_READ_ONLY)
 
 
@@ -188,6 +222,20 @@ def looks_destructive(tool_name: str, annotations: Optional[Mapping[str, Any]] =
     if _annotation_says_destructive(annotations):
         return True
     return _matches(tool_name, _LOOKS_DESTRUCTIVE)
+
+
+def looks_outbound(tool_name: str) -> bool:
+    """Whether this tool sends something to someone.
+
+    Public for the same reason `looks_destructive` is: the engine's "let this
+    plan run without stopping" must not cover a send, and the permission card
+    must not offer to remember one. One word list, three readers.
+    """
+    if _matches(tool_name, _LOOKS_OUTBOUND):
+        return True
+    return _matches(tool_name, _OUTBOUND_UNLESS_A_LOOK) and not _matches(
+        tool_name, _LOOKS_READ_ONLY
+    )
 
 
 def decide(
@@ -235,6 +283,17 @@ def decide(
     # scene" was not consent to empty it.
     if destructive:
         return Decision(Verdict.CONFIRM, f"{tool_name} deletes or overwrites; this always asks")
+
+    # A send stays a question however much has been granted, for the same
+    # reason a delete does. Placed after the read-only refusal so a server that
+    # may not change anything still says so, and before the grant so that
+    # "allow this tool" cannot settle it.
+    if looks_outbound(tool_name):
+        return Decision(
+            Verdict.CONFIRM,
+            f"{tool_name} sends something to someone, and it cannot be called "
+            "back; this always asks. Drafts are held until you send them.",
+        )
 
     if mode is WriteMode.GRANTED or tool_name in granted:
         return Decision(Verdict.ALLOW, "you granted this tool")

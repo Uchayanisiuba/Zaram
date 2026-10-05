@@ -52,7 +52,7 @@ from core.untrusted import Provenance, scan
 from .client import McpServer, ToolDescriptor
 from .config import ServerConfig, ServerStore
 from .floors import floor_for
-from .policy import Verdict, decide, looks_destructive
+from .policy import Verdict, WriteMode, decide, looks_destructive, looks_outbound
 
 logger = logging.getLogger(__name__)
 
@@ -514,7 +514,7 @@ class McpRuntime:
         session_id = str(input_data.get("session") or "")
         decision = decide(
             tool_name=tool_name,
-            mode=cfg.writes,
+            mode=self._effective_mode(server_id, tool_name, cfg),
             granted_tools=(
                 cfg.granted_tools
                 | self._builtin_grants(server_id)
@@ -558,8 +558,9 @@ class McpRuntime:
                 # Whether a grant would settle it. A destructive tool keeps
                 # asking whatever is granted (`decide`), so offering to allow
                 # it would promise something the gate will not honour.
-                "grantable": not looks_destructive(
-                    tool_name, input_data.get("annotations")
+                "grantable": not (
+                    looks_destructive(tool_name, input_data.get("annotations"))
+                    or looks_outbound(tool_name)
                 ),
                 # Which of the open project's switches covers this tool, so
                 # the permission card can offer *for this project* as a
@@ -632,6 +633,41 @@ class McpRuntime:
             if text:
                 parts.append(str(text))
         return "".join(parts)
+
+    def _effective_mode(self, server_id: str, tool_name: str, cfg: ServerConfig) -> WriteMode:
+        """The write mode this one call is judged under.
+
+        **A built-in's own grant has to count under a read-only server.** Found
+        4 October 2026 by sending the resident model "Draw a minimalist fox logo
+        as an SVG": it called `draw_image` and was told *"this server is read-only
+        because nothing here can undo it"*. `DrawTools.granted_tools` names
+        `draw_image`; the server was registered with the default mode, which is
+        `READ_ONLY`; and `decide` refuses a read-only server's write *before* it
+        reads the grants. So a tool its own server declared granted was refused
+        every time -- and so were `record_job_posting` and `check_eligibility`,
+        which shipped in alpha.3 and which the model has never been able to call.
+        A complete, tested, unreachable subsystem, three times over, and nothing
+        found it because no test went through the policy.
+
+        `READ_ONLY` says a stranger's server has no undo, and that is true of a
+        stranger. It says nothing about Zaram's own generative tools, which create
+        a new artifact or a fact and destroy nothing -- the tier the tier table
+        asks nothing of. The server declaring a tool granted *is* that statement,
+        made by Zaram's own code and not by a tool description, so it is honoured
+        here and only here.
+
+        Narrow in both directions. Only a built-in, and only for a tool that
+        server itself reports granted. And `GRANTED` is not a free pass:
+        `decide` still confirms a destructive tool and a send however this
+        answers, so nothing a built-in grants can delete or transmit unasked.
+        """
+        if (
+            cfg.writes is WriteMode.READ_ONLY
+            and server_id in self._builtin
+            and tool_name in self._builtin_grants(server_id)
+        ):
+            return WriteMode.GRANTED
+        return cfg.writes
 
     def _builtin_says_not_read_only(self, server_id: str, tool_name: str) -> bool:
         """Let a built-in say a tool is not read-only, whatever it is called.
