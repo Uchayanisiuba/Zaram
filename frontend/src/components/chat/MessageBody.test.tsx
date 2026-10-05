@@ -150,3 +150,17 @@ describe('a reply rendered as the markdown it already is', () => {
     expect(container.textContent).toBe('Routed to qwen3 — a coding question.');
   });
 });
+
+describe('code is never cut off at the edge — 5 October 2026', () => {
+  // The app hides every scrollbar, so a block that only scrolled sideways
+  // looked clipped. A 150-character line of a game was read as a broken reply.
+  it('folds a long line instead of clipping it, and keeps its indentation', () => {
+    const long = `const noise = ${'perlin3(x, y, z, seed) + '.repeat(8)}0;`;
+    const { container } = render(<MessageBody text={'```js\nfunction f() {\n  ' + long + '\n}\n```'} />);
+    const pre = container.querySelector('pre') as HTMLElement;
+    expect(pre.style.whiteSpace).toBe('pre-wrap');
+    expect(pre.style.overflowWrap).toBe('anywhere');
+    // The text itself is untouched: copying gets the original lines.
+    expect(pre.textContent).toContain('  ' + long);
+  });
+});

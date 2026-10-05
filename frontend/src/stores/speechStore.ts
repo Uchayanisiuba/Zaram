@@ -243,6 +243,13 @@ function playToEnd(audio: HTMLAudioElement): Promise<void> {
   });
 }
 
+/** How long a finished clip may wait for the next before `speaking` is
+ *  released. Long enough for consecutive sentences to join without the state
+ *  flickering; short enough that a code block shows as work, not as talk. */
+export const SPEECH_GAP_MS = 250;
+const WAITING: unique symbol = Symbol('waiting');
+const pause = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
 export const useSpeechStore = create<SpeechStore>((set, get) => ({
   audio: null,
   track: [],
@@ -291,26 +298,15 @@ export const useSpeechStore = create<SpeechStore>((set, get) => ({
         return;
       }
 
-      let pending: Promise<Utterance | { error: string } | null> = synthesise(
-        first,
-        voice,
-        mine,
-      );
+      /** The next clip: the next piece of text, synthesised the moment it
+       *  exists. Started while the current clip plays, so synthesis overlaps
+       *  playback and nothing waits for text before it is heard. */
+      const following = () =>
+        mineQueue.next().then((text) => (text === null || generation !== mine ? null : synthesise(text, voice, mine)));
 
+      let current = await synthesise(first, voice, mine);
       for (;;) {
-        const current = await pending;
         if (generation !== mine) return;
-
-        // Ask for the next piece *before* playing this one. On a live stream it
-        // may not exist yet, and waiting for it here — rather than after
-        // playback — is what lets synthesis overlap the model still generating.
-        const upcoming = await mineQueue.next();
-        if (generation !== mine) return;
-        pending =
-          upcoming === null
-            ? Promise.resolve(null)
-            : synthesise(upcoming, voice, mine);
-
         if (current === null) break;
         if ('error' in current) {
           set({ error: current.error });
@@ -320,6 +316,15 @@ export const useSpeechStore = create<SpeechStore>((set, get) => ({
           break;
         }
 
+        // **Asked for now, not before this clip plays — 5 October 2026.** The
+        // loop used to wait for the *next* sentence to exist before playing
+        // this one, and kept `speaking` raised while it waited. Code is never
+        // spoken, so a reply with two sentences before its code block held the
+        // second sentence back for as long as the block took to write, with the
+        // avatar in its talking pose and silent the whole time — and never
+        // typing, which is what the maintainer kept seeing.
+        const ahead = following();
+
         set({ audio: current.audio, track: current.track });
         // Sound is about to come out, so now it is true. The avatar reads this
         // to open its mouth and reads `audio.currentTime` to decide the shape;
@@ -328,9 +333,20 @@ export const useSpeechStore = create<SpeechStore>((set, get) => ({
         setSpeaking(true);
         await playToEnd(current.audio);
         URL.revokeObjectURL(current.objectUrl);
-
         if (generation !== mine) return;
-        if (upcoming === null) break;
+
+        // Nothing is sounding. If the next clip is not ready almost at once —
+        // the model is writing a block that will not be read aloud — `speaking`
+        // is released, so whatever chat says the system is doing (`coding`,
+        // `thinking`) is drawn while it waits. The grace keeps two sentences
+        // that follow each other from flickering through another state.
+        const next = await Promise.race([ahead, pause(SPEECH_GAP_MS).then((): typeof WAITING => WAITING)]);
+        if (next === WAITING) {
+          setSpeaking(false);
+          current = await ahead;
+        } else {
+          current = next;
+        }
       }
 
       if (generation !== mine) return;

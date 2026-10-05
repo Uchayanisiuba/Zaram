@@ -176,6 +176,9 @@ describe('routing updates leave untouched fields alone', () => {
       // Thinking on/off (E2b, 20 September 2026) sits behind the same
       // endpoint and gets the same null.
       thinking: null,
+      // The middle state of the same switch (5 October 2026): think for code and
+      // pages. Left alone like every other field when not mentioned.
+      thinking_for_code: null,
       // null means leave it alone, like every other field here: a
       // client changing the routing preference must not clear somebody’s
       // context window as a side effect.

@@ -84,6 +84,8 @@ function createConfig(options) {
       // `electron-builder.yml` names what it ships.
       apiProxyPrefixes: [
         '/api',
+        // A multi-file app kept as a folder (`POST /apps/save`).
+        '/apps',
         '/artifacts',
         '/audio',
         '/character',
@@ -92,6 +94,8 @@ function createConfig(options) {
         '/egress',
         '/export',
         '/garage',
+        // Running a page a model wrote before it is shown (`POST /preview/check`).
+        '/preview',
         '/diagnostics',
         '/extras',
         '/health',

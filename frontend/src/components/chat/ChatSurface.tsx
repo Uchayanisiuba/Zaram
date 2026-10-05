@@ -35,7 +35,7 @@ import PlanCard from '@/components/chat/PlanCard';
 import FirstRunPanel from '@/components/firstrun/FirstRunPanel';
 import { useReadiness, setupToOffer } from '@/hooks/useReadiness';
 import { stripCitationMarkers } from '@/lib/markers';
-import { useChatStore } from '@/stores/chatStore';
+import { useChatStore, type AllowedResume } from '@/stores/chatStore';
 import { useSourceStore } from '@/stores/sourceStore';
 import { useOrbStore } from '@/stores';
 import { useSystemStore } from '@/stores/systemStore';
@@ -62,6 +62,9 @@ import Interleaved from './Interleaved';
 import StreamingReply from './StreamingReply';
 import CitationPanel from './CitationPanel';
 import CodePreviewPanel from './CodePreviewPanel';
+import PageCheckLine from './PageCheckLine';
+import { usePageCheckOnReply } from '@/hooks/usePageCheckOnReply';
+import { usePageCheckStore } from '@/stores/pageCheckStore';
 import BrowserPanel from '@/components/browser/BrowserPanel';
 import { useBrowserStore } from '@/stores/browserStore';
 import {
@@ -80,7 +83,7 @@ import { useChatModeStore } from '@/stores/chatModeStore';
 import { useMicStore } from '@/stores/micStore';
 import { PackOffer } from '@/components/settings/PacksSection';
 import { useSpeechStore } from '@/stores/speechStore';
-import { codingActivity, offeredServers } from '@/lib/orbActivity';
+import { codingActivity } from '@/lib/orbActivity';
 import ResizeHandle from '@/components/common/ResizeHandle';
 import { useIsReducedMotion } from '@/hooks/useReducedMotion';
 import { useViewport } from '@/hooks/useViewport';
@@ -133,6 +136,11 @@ export default function ChatSurface({ navigate }: Props) {
   // per-message so only one preview is open at a time — two of these would
   // stack in the same fixed region and the lower one would be unreachable.
   const [codePreview, setCodePreview] = useState<PreviewableBlock | null>(null);
+  // The reply the preview came from, and the question it answered, so a
+  // request made from inside the preview goes back as a revision of it.
+  const [previewFrom, setPreviewFrom] = useState<{ question: string; reply: string } | null>(null);
+  // Where the last multi-file app was saved, or why it was not.
+  const [appSaveNote, setAppSaveNote] = useState<{ at: number; text: string } | null>(null);
   // The browser pane. Opened by something happening rather than by a menu
   // item — see `stores/browserStore`.
   const browserOpen = useBrowserStore((s) => s.open);
@@ -290,12 +298,9 @@ export default function ChatSurface({ navigate }: Props) {
    *  permission changed, so the answer can change, and asking again is how
    *  that happens: recall runs afresh, the gate now lets the tool through,
    *  and the reply is honestly a new one rather than the old one patched. */
-  const askAgainAfterAllowing = useCallback(() => {
-    const lastAsked = [...useChatStore.getState().messages]
-      .reverse()
-      .find((message) => message.role === 'user');
-    if (lastAsked) void send(lastAsked.text);
-  }, [send]);
+  const askAgainAfterAllowing = useCallback((resume?: AllowedResume) => {
+    void useChatStore.getState().askAgainAfterAllowing(resume);
+  }, []);
 
   /** Ask the last question again with the cloud model the offer named.
    *
@@ -610,15 +615,26 @@ export default function ChatSurface({ navigate }: Props) {
     // *during* a reply the moment a fence opens. `streamingText` already
     // re-renders this component on every token, so this costs a regex on text
     // that was going to be laid out anyway.
+    //
+    // **Code being written, never code being thought about** — 5 October
+    // 2026, the maintainer: the avatar types only in the coding state. The
+    // reply's own text and the calls that ran; not the reasoning, and not the
+    // tools merely offered. `plan` is the model writing its checklist, which
+    // is thinking. See `codingActivity`.
     const activity = codingActivity(
       isStreaming,
       streamingText,
-      streamingToolCalls.map((c) => c.server),
-      offeredServers(streamingNotices),
+      streamingToolCalls.filter((c) => c.tool !== 'plan').map((c) => c.server),
     );
     setOrbActivity(activity);
     setActivity(activity);
-  }, [isStreaming, streamingText, streamingToolCalls, streamingNotices, setOrbActivity, setActivity]);
+  }, [isStreaming, streamingText, streamingToolCalls, setOrbActivity, setActivity]);
+
+  // **A page the reply just wrote is run before the person has to** -- only
+  // a reply that finished streaming in this session, which is what the hook
+  // is for. See `usePageCheckOnReply` and `pageCheckStore`.
+  const checkPage = usePageCheckStore((s) => s.check);
+  usePageCheckOnReply(messages, isStreaming, checkPage);
 
   // What the backend already holds for this conversation.
   //
@@ -1003,7 +1019,27 @@ export default function ChatSurface({ navigate }: Props) {
           {engineDown && <EngineDown />}
           {isEmpty ? (
             <EmptyConversation
-              onPick={(prompt) => {
+              onPick={(prompt, action) => {
+                if (action?.kind === 'continue-tasks') {
+                  // The row that offers the waiting work *does* it: open the
+                  // project the tasks belong to -- their tools are scoped to
+                  // one, and a coding task resumed outside its project has no
+                  // folder to read -- and carry on, so each checklist is shown
+                  // and ticked off as it runs. One after another, and the
+                  // queue stops wherever a task waits on the person.
+                  useChatStore.getState().setProject(action.projectId);
+                  void useChatStore.getState().runInOrder(
+                    action.tasks.map((task, i) => ({
+                      text: i === 0 ? prompt : 'Continue',
+                      opts: { continueTask: true, planId: task.id },
+                    })),
+                  );
+                  return;
+                }
+                if (action?.kind === 'reopen') {
+                  void useChatStore.getState().resumeConversation(action.conversationId);
+                  return;
+                }
                 setInputText(prompt);
                 inputRef.current?.focus();
               }}
@@ -1302,9 +1338,16 @@ export default function ChatSurface({ navigate }: Props) {
                         color: 'var(--color-text-muted)',
                       };
                       return (
-                        <div className="mt-1.5 flex items-center gap-1.5">
+                        <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
                           <button
-                            onClick={() => setCodePreview(block)}
+                            onClick={() => {
+                              const asked = messages
+                                .slice(0, msgIndex)
+                                .reverse()
+                                .find((m) => m.role === 'user');
+                              setPreviewFrom({ question: asked?.text ?? '', reply: stripMarkers(msg.text) });
+                              setCodePreview(block);
+                            }}
                             className={control}
                             style={controlStyle}
                           >
@@ -1318,7 +1361,14 @@ export default function ChatSurface({ navigate }: Props) {
                               markup the model wrote, not the framed and
                               policy-wrapped version the preview runs. */}
                           <button
-                            onClick={() => savePreviewable(block)}
+                            onClick={() => {
+                              setAppSaveNote(null);
+                              savePreviewable(block).then(
+                                (where) => where && setAppSaveNote({ at: msgIndex, text: `Saved ${block.files?.length} files to ${where}` }),
+                                (err: unknown) =>
+                                  setAppSaveNote({ at: msgIndex, text: `Not saved: ${err instanceof Error ? err.message : 'the save failed'}` }),
+                              );
+                            }}
                             title={`Save as ${filenameFor(block)}`}
                             className={control}
                             style={controlStyle}
@@ -1326,6 +1376,12 @@ export default function ChatSurface({ navigate }: Props) {
                             <Download size={12} />
                             Save {block.label}
                           </button>
+                          <PageCheckLine reply={msg.text} />
+                          {appSaveNote?.at === msgIndex && (
+                            <span role="status" className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
+                              {appSaveNote.text}
+                            </span>
+                          )}
                         </div>
                       );
                     })()}
@@ -1819,7 +1875,16 @@ export default function ChatSurface({ navigate }: Props) {
           treatment a citation and a generated document already get. */}
       <AnimatePresence>
         {codePreview && (
-          <CodePreviewPanel block={codePreview} onClose={() => setCodePreview(null)} />
+          <CodePreviewPanel
+            block={codePreview}
+            onClose={() => setCodePreview(null)}
+            onAsk={(text) => {
+              // Closed first, so the new page arrives in the conversation
+              // with its own Preview, rather than behind this one.
+              setCodePreview(null);
+              void send(text, previewFrom ? { revise: previewFrom } : {});
+            }}
+          />
         )}
       </AnimatePresence>
 

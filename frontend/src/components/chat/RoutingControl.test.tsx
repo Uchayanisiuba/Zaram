@@ -388,8 +388,30 @@ describe('the thinking control — 20 September 2026', () => {
 
     await userEvent.click(chip);
 
-    expect(updateRoutingSettings).toHaveBeenCalledWith({ thinking: false });
+    // Off is the next state, and "for code" is reached from off — so from on
+    // the press turns it off and clears the middle state.
+    expect(updateRoutingSettings).toHaveBeenCalledWith({ thinking: false, thinkingForCode: false });
     await waitFor(() => expect(screen.getByTestId('thinking-chip').textContent).toContain('Thinking off'));
+  });
+
+  it('has a middle state: off for everyday questions, on for code and pages', async () => {
+    const off = { routingPreference: 'auto', defaultModel: null, thinking: false, thinkingForCode: false };
+    fetchRoutingSettings.mockResolvedValue(off);
+    updateRoutingSettings
+      .mockResolvedValueOnce({ ...off, thinkingForCode: true })
+      .mockResolvedValueOnce({ ...off, thinking: true });
+    render(<RoutingControl />);
+    const chip = await screen.findByTestId('thinking-chip');
+    expect(chip.getAttribute('data-mode')).toBe('off');
+
+    await userEvent.click(chip);
+    expect(updateRoutingSettings).toHaveBeenLastCalledWith({ thinking: false, thinkingForCode: true });
+    await waitFor(() => expect(screen.getByTestId('thinking-chip').textContent).toContain('Thinking for code'));
+    expect(screen.getByTestId('thinking-chip').getAttribute('data-mode')).toBe('code');
+
+    await userEvent.click(screen.getByTestId('thinking-chip'));
+    expect(updateRoutingSettings).toHaveBeenLastCalledWith({ thinking: true, thinkingForCode: false });
+    await waitFor(() => expect(screen.getByTestId('thinking-chip').getAttribute('data-mode')).toBe('on'));
   });
 
   it('puts the state back when the save fails', async () => {

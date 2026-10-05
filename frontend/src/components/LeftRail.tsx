@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Home, Brain, BookOpen, FileText, Layers, ShieldCheck, Settings, Search, FolderOpen, Database, Clock } from 'lucide-react'
+import { Home, Brain, BookOpen, FileText, Layers, ShieldCheck, Settings, Search } from 'lucide-react'
 import ResizeHandle from '@/components/common/ResizeHandle'
 import {
   useLayoutStore,
@@ -59,12 +59,6 @@ const NAV_ITEMS: NavItem[] = surfaceOrder
     icon: NAV_ICONS[id],
     label: NAV_LABELS[id] ?? surfaceLabels[id],
   }))
-
-const RECENT_CONTEXTS = [
-  { icon: <FolderOpen size={24} />, label: 'zaram-core v0.4.2', sub: '2 min ago' },
-  { icon: <Database size={24} />, label: 'Vector store sync', sub: '18 min ago' },
-  { icon: <Clock size={24} />, label: 'Agent: code-review', sub: '1 hr ago' },
-]
 
 interface LeftRailProps {
   workspace: WorkspaceId
@@ -148,42 +142,6 @@ export default function LeftRail({ workspace, onNavigate }: LeftRailProps) {
       ))}
 
       <div style={{ flex: 1 }} />
-
-      {/* Recent context (expanded only) */}
-      {expanded && (
-        <div style={{ animation: 'fade-in 0.2s ease' }}>
-          <div style={{ fontSize: 'var(--text-h2)', fontWeight: 600, letterSpacing: '0.08em', color: 'var(--color-text-secondary)', padding: '4px 8px 8px', textTransform: 'uppercase' }}>
-            Recent
-          </div>
-          {RECENT_CONTEXTS.map((ctx, i) => (
-            <button
-              key={i}
-              style={{
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 4,
-                padding: '6px 8px',
-                borderRadius: 12,
-                background: 'transparent',
-                border: 'none',
-                cursor: 'pointer',
-                color: 'var(--color-text-muted)',
-                width: '100%',
-                textAlign: 'left',
-                transition: 'all 0.15s',
-              }}
-              onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-glass)' }}
-              onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12, fontSize: 'var(--text-h1)', color: 'var(--color-text-muted-light)' }}>
-                {ctx.icon}
-                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 280 }}>{ctx.label}</span>
-              </div>
-              <span style={{ fontSize: 'var(--text-h2)', color: 'var(--color-text-faint)', paddingLeft: 36 }}>{ctx.sub}</span>
-            </button>
-          ))}
-        </div>
-      )}
 
       <div style={{ height: 1, background: 'var(--color-border-subtle)', margin: '8px 0' }} />
 

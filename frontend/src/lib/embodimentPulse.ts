@@ -49,8 +49,8 @@ export interface StatePulse {
  * outside that and both are deliberate. `swapping` is slower and dimmer,
  * because it is the one state where nothing is resident and nothing is being
  * worked on, and making it a busier `thinking` would say the opposite of what
- * is true. `coding` is idle's values outright, because the character types
- * under it and the indicator has nothing left to add — see the entry.
+ * is true. `coding` is thinking's values — see the entry for why it was briefly
+ * idle's and why it is not now.
  */
 export const STATE_PULSE: Record<EmbodimentState, StatePulse> = {
   idle: { colour: 0x6366f1, weight: 0.3, pulse: [1, 1.06, 1], pulseSeconds: 8 },
@@ -72,7 +72,17 @@ export const STATE_PULSE: Record<EmbodimentState, StatePulse> = {
   // The entry stays rather than being folded into `idle`. The state still
   // exists and still fires; giving it a look later is then one line here
   // instead of re-deriving which states there are.
-  coding: { colour: 0x6366f1, weight: 0.3, pulse: [1, 1.06, 1], pulseSeconds: 8 },
+  //
+  // **Reversed again on 5 October 2026, by the maintainer: *"sometimes Zaram
+  // doesn't show its states — currently it's not showing the thinking state,
+  // pls fix."*** The September reasoning held only where there is a body to
+  // carry the activity. With the orb as the renderer there is none, and
+  // `coding` fires whenever Zaram's code tools are offered — most tool turns —
+  // so a reply that was working showed an orb indistinguishable from rest,
+  // above a label that also said rest. An indicator that looks idle while the
+  // system works is the invented value this product forbids, pointed the
+  // other way. So `coding` looks like `thinking`; the avatar still types.
+  coding: { colour: 0xa855f7, weight: 0.45, pulse: [1, 1.05, 1.02, 1.07, 1], pulseSeconds: 1.6 },
   speaking: { colour: 0x10b981, weight: 0.35, pulse: [1, 1.04, 1.08, 1.04, 1], pulseSeconds: 1 },
   swapping: { colour: 0x64748b, weight: 0.3, pulse: [1, 1.03, 1], pulseSeconds: 4 },
 }

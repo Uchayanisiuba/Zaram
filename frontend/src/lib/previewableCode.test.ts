@@ -7,6 +7,7 @@ import {
   wrapForPreview,
   APP_CSP,
   APP_SANDBOX,
+  findStuckLoop,
   DOCUMENT_CSP,
   ERROR_REPORTER,
   SEALED_STORAGE,
@@ -543,5 +544,33 @@ describe('playback: pausing a page that moves', () => {
     for (const reach of ['fetch(', 'XMLHttpRequest', 'WebSocket', 'http', 'top.', 'localStorage']) {
       expect(PLAYBACK).not.toContain(reach);
     }
+  });
+});
+
+describe('a loop that cannot end is found before it runs — 5 October 2026', () => {
+  // The resident model wrote this 23 times in one page; the page froze before
+  // it drew anything, and a frozen frame can take the window with it.
+  it('finds the missing increment, with its line', () => {
+    const page = '<script>\nconst a = 1;\nfunction f(){ for(let i=0;i<16;i)for(let j=0;j<16;j++){ g(i,j); } }\n</script>';
+    expect(findStuckLoop(page)).toEqual({ line: 3, text: 'for(let i=0;i<16;i)' });
+  });
+
+  it('finds it with spaces, var, and no declaration keyword', () => {
+    expect(findStuckLoop('for ( var n = 0 ; n < 5 ; n ) { }')).not.toBeNull();
+    expect(findStuckLoop('for (k = 0; k < 5; k) {}')).not.toBeNull();
+  });
+
+  it.each([
+    'for(let i=0;i<16;i++){}',
+    'for(let i=0;i<16;i+=2){}',
+    'for(let i=16;i>0;i--){}',
+    'for(let i=0;i<16;i=next(i)){}',
+    'for(const x of list){}',
+    'for(let i=0, j=9; i<j; i++, j--){}',
+    'while(true){ if(done) break; }',
+    'for(;;){ tick(); }',
+    'for(let i=0;i<n;j){}',
+  ])('does not flag %s', (code) => {
+    expect(findStuckLoop(code)).toBeNull();
   });
 });

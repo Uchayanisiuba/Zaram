@@ -36,12 +36,16 @@
  * `ArtifactPreview` is unchanged and still runs nothing. An invoice has no use
  * for a script, so granting it one would be surface bought for nothing.
  */
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { motion } from 'framer-motion';
-import { X, Info, Download, Pause, Play, RotateCcw, Code2, Eye, Copy, Check } from 'lucide-react';
+import { X, Info, Download, Pause, Play, RotateCcw, Code2, Eye, Copy, Check, MousePointerClick, Wrench } from 'lucide-react';
+import { changeRequest, describe, explainRequest, fixRequest, readPick, type PickedElement } from '@/lib/askAboutPage';
 import { useLayoutStore } from '@/stores/layoutStore';
 import { recordBrowsed } from '@/services/egressClient';
+import { loadThree, usesThree, vendorPage, type VendoredThree } from '@/lib/previewLibraries';
+import { findStuckLoop } from '@/lib/previewableCode';
+import { stuckLoopIn } from '@/lib/appFiles';
 import { useChatModeStore } from '@/stores/chatModeStore';
 import { useViewport } from '@/hooks/useViewport';
 import {
@@ -79,9 +83,14 @@ function nameThem(hosts: string[]): string {
 export default function CodePreviewPanel({
   block,
   onClose,
+  onAsk,
 }: {
   block: PreviewableBlock;
   onClose: () => void;
+  /** Send a request about this page back to Zaram, as a revision of the reply
+   *  that wrote it. Absent where there is no conversation to send it to, and
+   *  then Select and Fix this are not offered. */
+  onAsk?: (text: string) => void;
 }) {
   // The panel occupies the orb's half of the window. Derived from the same
   // fraction the conversation panel uses, so the two cannot disagree when the
@@ -124,6 +133,72 @@ export default function CodePreviewPanel({
   const [version, setVersion] = useState(0);
   const [view, setView] = useState<'page' | 'code'>('page');
   const [copied, setCopied] = useState(false);
+  // What the last Save of a multi-file app did, in words, with the folder.
+  const [saveNote, setSaveNote] = useState<string | null>(null);
+  // **Select**: point at part of the page and ask Zaram to change it. Off by
+  // default — see `PICKER` for why the page keeps its own clicks until then.
+  const [picking, setPicking] = useState(false);
+  const [picked, setPicked] = useState<PickedElement | null>(null);
+  const [asking, setAsking] = useState('');
+  // three.js from Zaram's own copy, read once when a page needs it. `failed`
+  // falls back to the page as written, which the fault line then explains.
+  const [three, setThree] = useState<VendoredThree | null>(null);
+  const [threeFailed, setThreeFailed] = useState(false);
+  // An app of several files is read as all of them: its modules are inside
+  // `data:` URLs in the joined page, where nothing can read an import.
+  const everything = useMemo(
+    () => (block.files ? block.files.map((f) => f.code).join('\n') : block.code),
+    [block.files, block.code],
+  );
+  const wantsThree = usesThree(everything);
+  useEffect(() => {
+    if (!wantsThree || three) return;
+    let live = true;
+    loadThree()
+      .then((loaded) => live && setThree(loaded))
+      .catch(() => live && setThreeFailed(true));
+    return () => {
+      live = false;
+    };
+  }, [wantsThree, three]);
+  // Memoised: the library is two megabytes, and this panel re-renders on
+  // every token while a reply is still streaming.
+  const vendored = useMemo(
+    () => (three && wantsThree ? vendorPage(block.code, three, block.files ? everything : '') : null),
+    [block.code, block.files, everything, three, wantsThree],
+  );
+  // Nothing is drawn while the library is being read, rather than a first
+  // render that fails on `THREE` and reports a fault that is about to fix
+  // itself.
+  const waitingForThree = wantsThree && !three && !threeFailed;
+  // **A page with a loop that cannot end is not run until the person says so.**
+  // It would freeze the frame, and a frozen frame can freeze the window around
+  // it. Offered *Fix this* first, with the line named. Keyed to the code, so a
+  // corrected page runs without being asked again.
+  const [ranAnyway, setRanAnyway] = useState<string | null>(null);
+  const stuck = useMemo(() => {
+    if (!block.files) {
+      const one = findStuckLoop(block.code);
+      return one ? { line: one.line, text: one.text, file: '' } : null;
+    }
+    const hit = stuckLoopIn(block.files, findStuckLoop);
+    return hit ? { line: hit.line, text: hit.text, file: hit.file } : null;
+  }, [block.code, block.files]);
+  const held = stuck !== null && ranAnyway !== block.code;
+  const frameDoc = useMemo(
+    () =>
+      waitingForThree || held
+        ? ''
+        : wrapForPreview(
+            vendored ? vendored.body : block.code,
+            'app',
+            allowedHosts,
+            // Any non-empty string turns on `data:` in the page's policy, which
+            // an app's modules need as much as a vendored library does.
+            (vendored?.prefix ?? '') || (block.modules ? '<!-- the app\'s modules -->' : ''),
+          ),
+    [waitingForThree, held, vendored, block.code, block.modules, allowedHosts],
+  );
 
   // Told to the frame rather than done to it: its origin is opaque, so the
   // parent cannot reach in. `PLAYBACK` is the listener on the other side.
@@ -136,7 +211,7 @@ export default function CodePreviewPanel({
 
   async function copyCode() {
     try {
-      await navigator.clipboard.writeText(block.code);
+      await navigator.clipboard.writeText(block.files ? block.files.map((f) => `// ${f.path}\n${f.code}`).join('\n\n') : block.code);
       setCopied(true);
       window.setTimeout(() => setCopied(false), 2000);
     } catch {
@@ -166,6 +241,19 @@ export default function CodePreviewPanel({
         uri?: string;
       };
       if (!data || data.__zaramPreview !== true) return;
+      if (data.kind === 'picked') {
+        const found = readPick(data.detail);
+        if (found) {
+          setPicked(found);
+          setAsking('');
+        }
+        return;
+      }
+      if (data.kind === 'pick-cancel') {
+        setPicking(false);
+        setPicked(null);
+        return;
+      }
       if (data.kind === 'blocked') {
         const host = hostOf(data.uri);
         if (!host) return;
@@ -220,16 +308,39 @@ export default function CodePreviewPanel({
   ]
     .filter(Boolean)
     .join(' ');
+  // Said when it happened, because a page that asked a CDN for three.js and
+  // got Zaram's copy instead is a substitution the person should know about.
+  const served = vendored
+    ? `Runs here only — no network. ${vendored.served} stood in for the CDN; nothing was fetched.`
+    : '';
 
   // Registered on the window because focus is inside a sandboxed iframe most of
   // the time, where a React key handler on the panel would never see the event.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
+      if (event.key !== 'Escape') return;
+      // One step back at a time: the question, then picking, then the panel.
+      if (picked) setPicked(null);
+      else if (picking) setPicking(false);
+      else onClose();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  }, [onClose, picked, picking]);
+
+  // The frame is told whenever picking changes, and again whenever it is
+  // rebuilt (Restart, an allowed host), since a new document starts with it off.
+  useEffect(() => {
+    frameRef.current?.contentWindow?.postMessage({ __zaramPreviewControl: true, action: 'pick', on: picking }, '*');
+    if (!picking) setPicked(null);
+  }, [picking]);
+
+  function ask(text: string) {
+    if (!onAsk) return;
+    setPicking(false);
+    setPicked(null);
+    onAsk(text);
+  }
 
   // Rendered into `document.body`. Every `position: fixed` measurement below
   // assumes the viewport is the containing block, and an ancestor carrying
@@ -311,6 +422,24 @@ export default function CodePreviewPanel({
           </div>
           {view === 'page' && (
             <>
+              {onAsk && (
+                <button
+                  type="button"
+                  data-testid="pick-toggle"
+                  onClick={() => setPicking((was) => !was)}
+                  aria-pressed={picking}
+                  title={picking ? 'Stop selecting — the page gets its clicks back' : 'Point at part of the page to ask Zaram to change it'}
+                  className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs hover:bg-white/5"
+                  style={{
+                    border: `1px solid ${picking ? 'var(--color-cyan)' : 'var(--color-border)'}`,
+                    color: picking ? 'var(--color-cyan-light)' : 'var(--color-text-muted)',
+                    background: picking ? 'rgba(34,211,238,0.10)' : 'transparent',
+                  }}
+                >
+                  <MousePointerClick size={12} />
+                  Select
+                </button>
+              )}
               <button
                 type="button"
                 data-testid="playback-toggle"
@@ -339,7 +468,13 @@ export default function CodePreviewPanel({
             </>
           )}
           <button
-            onClick={() => savePreviewable(block)}
+            onClick={() => {
+              setSaveNote(null);
+              savePreviewable(block).then(
+                (where) => where && setSaveNote(`Saved ${block.files?.length} files to ${where}`),
+                (err: unknown) => setSaveNote(`Not saved: ${err instanceof Error ? err.message : 'the save failed'}`),
+              );
+            }}
             aria-label={`Save as ${filenameFor(block)}`}
             title={`Save as ${filenameFor(block)}`}
             className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs text-slate-400 hover:bg-white/5 hover:text-slate-200"
@@ -356,6 +491,17 @@ export default function CodePreviewPanel({
             <X size={15} />
           </button>
         </div>
+
+        {saveNote && (
+          <div
+            role="status"
+            data-testid="save-note"
+            className="px-4 py-1.5 text-xs"
+            style={{ color: 'var(--color-text-muted)', borderBottom: '1px solid var(--color-border)' }}
+          >
+            {saveNote}
+          </div>
+        )}
 
         {/* The code is the review. A person watching model-written code run is
             entitled to read it, and the sealed frame is the reason they would
@@ -374,25 +520,98 @@ export default function CodePreviewPanel({
               {copied ? <Check size={12} /> : <Copy size={12} />}
               {copied ? 'Copied' : 'Copy'}
             </button>
-            <pre
-              className="m-0 whitespace-pre-wrap break-words px-4 py-3 text-xs leading-relaxed"
-              style={{ fontFamily: 'var(--font-mono)', color: 'var(--color-text)' }}
-            >
-              {block.code}
-            </pre>
+            {(block.files ?? [{ path: '', code: block.code }]).map((file) => (
+              <div key={file.path}>
+                {file.path && (
+                  <div
+                    className="px-4 pt-3 text-[11px]"
+                    style={{ fontFamily: 'var(--font-mono)', color: 'var(--color-text-muted)' }}
+                  >
+                    {file.path}
+                  </div>
+                )}
+                <pre
+                  className="m-0 whitespace-pre-wrap break-words px-4 py-3 text-xs leading-relaxed"
+                  style={{ fontFamily: 'var(--font-mono)', color: 'var(--color-text)' }}
+                >
+                  {file.code}
+                </pre>
+              </div>
+            ))}
           </div>
         )}
 
-        <div className="flex-1 overflow-hidden" hidden={view !== 'page'}>
+        <div className="relative flex-1 overflow-hidden" hidden={view !== 'page'}>
+          {picking && !picked && (
+            <div
+              className="pointer-events-none absolute left-1/2 top-2 z-10 -translate-x-1/2 rounded-md px-2.5 py-1 text-[11px]"
+              style={{ background: 'rgba(2,6,23,0.85)', color: 'var(--color-cyan-light)', border: '1px solid var(--color-cyan)' }}
+              data-testid="pick-hint"
+            >
+              Click any part of the page to ask Zaram about it · Esc to stop
+            </div>
+          )}
+          {picked && onAsk && (
+            <AskPopover
+              picked={picked}
+              value={asking}
+              onChange={setAsking}
+              onChangeIt={() => asking.trim() && ask(changeRequest(picked, asking))}
+              onQuick={(words) => ask(changeRequest(picked, words))}
+              onExplain={() => ask(explainRequest(picked))}
+              onCancel={() => setPicked(null)}
+            />
+          )}
+          {held && stuck && (
+            <div
+              className="flex h-full flex-col items-start justify-center gap-3 px-8"
+              style={{ color: 'var(--color-text)' }}
+              data-testid="stuck-loop"
+            >
+              <p className="text-sm">This page has a loop that never ends, so it was not started.</p>
+              <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
+                {stuck.file ? `${stuck.file}, line` : 'Line'} {stuck.line}: <code style={{ fontFamily: 'var(--font-mono)' }}>{stuck.text}</code>
+                {' '}— the counter is never increased, so the page would freeze before drawing anything.
+              </p>
+              <div className="flex gap-2">
+                {onAsk && (
+                  <button
+                    type="button"
+                    data-testid="stuck-fix"
+                    onClick={() => onAsk(fixRequest(`${stuck.file ? `${stuck.file}, ` : ''}line ${stuck.line}: \`${stuck.text}\` never changes its counter, so the page freezes before it draws anything. Check every loop in the page for the same mistake.`))}
+                    className="flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs"
+                    style={{ border: '1px solid var(--color-cyan)', color: 'var(--color-cyan-light)' }}
+                  >
+                    <Wrench size={11} />
+                    Fix this
+                  </button>
+                )}
+                <button
+                  type="button"
+                  data-testid="stuck-run"
+                  onClick={() => setRanAnyway(block.code)}
+                  className="rounded-md px-2.5 py-1 text-xs"
+                  style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-muted)' }}
+                >
+                  Run anyway
+                </button>
+              </div>
+            </div>
+          )}
           <iframe
+            hidden={held}
             ref={frameRef}
+            onLoad={() =>
+              picking &&
+              frameRef.current?.contentWindow?.postMessage({ __zaramPreviewControl: true, action: 'pick', on: true }, '*')
+            }
             title={`${block.label} preview`}
             // Keyed on the allowance so the frame is rebuilt rather than
             // merely re-attributed: a CSP in a `<meta>` is read when the
             // document parses, and swapping `srcDoc` without a new element
             // leaves the old policy in force.
-            key={`${allowedHosts.join(',')}:${version}`}
-            srcDoc={wrapForPreview(block.code, 'app', allowedHosts)}
+            key={`${allowedHosts.join(',')}:${version}:${vendored ? 'lib' : 'raw'}`}
+            srcDoc={frameDoc}
             // `allow-scripts` and nothing else. Adding `allow-same-origin`
             // beside it would not widen the sandbox, it would dissolve it —
             // the frame could reach in and remove this very attribute. See
@@ -417,8 +636,22 @@ export default function CodePreviewPanel({
           <Info size={12} className="mt-[3px] shrink-0" />
           <div className="min-w-0 flex-1">
             <span className="text-xs leading-snug">
-              {status || "Runs here only — no network, and no access to your files or Zaram's data."}
+              {status || served || "Runs here only — no network, and no access to your files or Zaram's data."}
             </span>
+            {scriptError && onAsk && (
+              <div className="mt-1.5">
+                <button
+                  type="button"
+                  data-testid="fix-this"
+                  onClick={() => ask(fixRequest(scriptError, waiting))}
+                  className="flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px]"
+                  style={{ border: '1px solid var(--color-cyan)', color: 'var(--color-cyan-light)' }}
+                >
+                  <Wrench size={11} />
+                  Fix this
+                </button>
+              </div>
+            )}
             {/* **The refusal becomes an offer — 4 October 2026.**
 
                 A page that loads three from the jsdelivr CDN
@@ -460,5 +693,107 @@ export default function CodePreviewPanel({
       </motion.div>
     </motion.div>,
     document.body,
+  );
+}
+
+/**
+ * The question, next to the part of the page it is about.
+ *
+ * Placed under the element when there is room and above it when there is
+ * not, inside the frame's box. The element's own words are shown as text —
+ * they came from the page.
+ */
+function AskPopover({
+  picked,
+  value,
+  onChange,
+  onChangeIt,
+  onQuick,
+  onExplain,
+  onCancel,
+}: {
+  picked: PickedElement;
+  value: string;
+  onChange: (text: string) => void;
+  onChangeIt: () => void;
+  onQuick: (words: string) => void;
+  onExplain: () => void;
+  onCancel: () => void;
+}) {
+  const WIDTH = 320;
+  const below = picked.rect.y + picked.rect.h + 8;
+  const top = below + 170 > (typeof window !== 'undefined' ? window.innerHeight * 0.6 : 400)
+    ? Math.max(8, picked.rect.y - 178)
+    : below;
+  const left = Math.max(8, Math.min(picked.rect.x, (typeof window !== 'undefined' ? window.innerWidth : 1000) - WIDTH - 40));
+  const chip = 'rounded-md px-2 py-0.5 text-[11px] hover:bg-white/10';
+  const chipStyle = { border: '1px solid var(--color-border)', color: 'var(--color-text-muted)' };
+  return (
+    <div
+      className="absolute z-20 flex flex-col gap-2 rounded-xl p-3"
+      style={{
+        top,
+        left,
+        width: WIDTH,
+        background: 'rgba(2,6,23,0.94)',
+        border: '1px solid var(--color-cyan)',
+        boxShadow: '0 12px 32px rgba(0,0,0,0.45)',
+      }}
+      data-testid="ask-popover"
+      onClick={(event) => event.stopPropagation()}
+    >
+      <div className="min-w-0">
+        <div className="truncate text-[11px]" style={{ color: 'var(--color-cyan-light)', fontFamily: 'var(--font-mono)' }} title={picked.selector}>
+          {describe(picked)}
+        </div>
+        {picked.text && (
+          <div className="truncate text-[11px]" style={{ color: 'var(--color-text-faint)' }} title={picked.text}>
+            “{picked.text}”
+          </div>
+        )}
+      </div>
+      <textarea
+        autoFocus
+        rows={2}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' && !event.shiftKey) {
+            event.preventDefault();
+            onChangeIt();
+          }
+        }}
+        placeholder="What should change? e.g. make it bigger, move it to the top, use a darker blue"
+        className="w-full resize-none rounded-lg px-2 py-1.5 text-xs outline-none"
+        style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }}
+        data-testid="ask-input"
+      />
+      <div className="flex flex-wrap items-center gap-1.5">
+        <button type="button" className={chip} style={chipStyle} onClick={() => onQuick('Remove it.')}>
+          Remove it
+        </button>
+        <button type="button" className={chip} style={chipStyle} onClick={() => onQuick('Make it stand out more.')}>
+          Make it stand out
+        </button>
+        <button type="button" className={chip} style={chipStyle} onClick={onExplain} data-testid="ask-explain">
+          What does this do?
+        </button>
+      </div>
+      <div className="flex items-center justify-end gap-2">
+        <button type="button" onClick={onCancel} className="rounded-md px-2 py-1 text-xs" style={{ color: 'var(--color-text-faint)' }}>
+          Cancel
+        </button>
+        <button
+          type="button"
+          onClick={onChangeIt}
+          disabled={!value.trim()}
+          className="rounded-md px-2.5 py-1 text-xs disabled:opacity-40"
+          style={{ border: '1px solid var(--color-cyan)', color: 'var(--color-cyan-light)' }}
+          data-testid="ask-send"
+        >
+          Ask Zaram
+        </button>
+      </div>
+    </div>
   );
 }

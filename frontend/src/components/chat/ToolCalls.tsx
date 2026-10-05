@@ -44,7 +44,7 @@
 import { useState } from 'react';
 import { AnimatePresence } from 'framer-motion';
 import { Check, ChevronRight, CircleAlert, Clock, Loader2, Wrench } from 'lucide-react';
-import type { ChatToolCall } from '../../stores/chatStore';
+import type { AllowedResume, ChatToolCall } from '../../stores/chatStore';
 import PermissionCard from './PermissionCard';
 import ActivityPanel from './ActivityPanel';
 import AppCard from './AppCard';
@@ -145,7 +145,7 @@ export function summarise(calls: ChatToolCall[]): string {
  * so offering it here would promise something the gate will not honour, and a
  * button that changes nothing is worse than no button.
  */
-function AllowTool({ call, onAllowed }: { call: ChatToolCall; onAllowed: () => void }) {
+function AllowTool({ call, onAllowed }: { call: ChatToolCall; onAllowed: (resume?: AllowedResume) => void }) {
   // **Promoted to a card on 4 October 2026.** Everything above is why
   // the rungs exist and still holds; what changed is the weight. This
   // was a row of text links under a tool row, which is the right size
@@ -164,7 +164,7 @@ function CallLine({
   onOpen,
 }: {
   call: ChatToolCall;
-  onAllowed?: () => void;
+  onAllowed?: (resume?: AllowedResume) => void;
   /** Open the working pane on this call — `docs/PLAN.md` C2. */
   onOpen?: (call: ChatToolCall) => void;
 }) {
@@ -268,7 +268,7 @@ export default function ToolCalls({
   /** Called after a held tool has been allowed, so the shell can ask the
    *  question again — the tool is permitted now and the answer changes.
    *  Absent on a replayed history, where allowing settles nothing to retry. */
-  onAllowed?: () => void;
+  onAllowed?: (resume?: AllowedResume) => void;
   /** The reply is still being written, so this is work in progress.
    *
    *  Live work stays open: folding it would hide the only thing on screen

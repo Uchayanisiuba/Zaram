@@ -32,6 +32,16 @@
  *   button cannot turn on a grant that settles nothing.
  * * **Always** — the rung Settings has always had, said here so nobody has
  *   to go and find it mid-task.
+ * * **Run this once** — added 5 October 2026. A yes for *this call*, which
+ *   is the one answer that settles a floor: an install, a delete, a hook.
+ *   Those are not grantable, so before this the card offered only Deny and
+ *   the call could not be approved from the conversation at all. It runs the
+ *   call that was parked with the task — the one on this card — and never
+ *   grants anything. Not offered for a send, nor for a call whose target the
+ *   card cannot show; the backend decides both.
+ *
+ * Every rung that says yes carries the task on from where it stopped,
+ * rather than asking the question again from nothing.
  *
  * **A destructive tool gets no buttons at all.** `grantable` comes from the
  * gate, which keeps asking about deletions however much has been granted —
@@ -45,7 +55,7 @@ import { ShieldQuestion } from 'lucide-react';
 
 import { allowToolForSession, grantTool } from '@/services/toolsClient';
 import { useChatStore } from '@/stores/chatStore';
-import type { ChatToolCall } from '@/stores/chatStore';
+import type { AllowedResume, ChatToolCall } from '@/stores/chatStore';
 import { useProjectStore } from '@/stores/projectStore';
 
 /** What each project switch is called where a person can see it. */
@@ -58,8 +68,9 @@ const SWITCH_LABEL: Record<string, string> = {
 
 interface Props {
   call: ChatToolCall;
-  /** The grant landed, so readiness and the row should be asked again. */
-  onAllowed: () => void;
+  /** The person said yes. With a parked task, `resume` says which task to
+   *  carry on and whether the yes was for this one call. */
+  onAllowed: (resume?: AllowedResume) => void;
 }
 
 export default function PermissionCard({ call, onAllowed }: Props) {
@@ -96,7 +107,7 @@ export default function PermissionCard({ call, onAllowed }: Props) {
       } else {
         await grantTool(call.server, call.tool);
       }
-      onAllowed();
+      onAllowed(call.heldTask ? { planId: call.heldTask, runHeld: false } : undefined);
     } catch {
       // Said on the card rather than thrown away: a grant that failed
       // silently would look like a grant that worked and did nothing.
@@ -105,6 +116,14 @@ export default function PermissionCard({ call, onAllowed }: Props) {
   }
 
   const busy = state === 'working';
+  const canRunOnce = Boolean(call.once && call.heldTask);
+
+  function runOnce() {
+    // Nothing is granted: the backend runs the parked call with this one
+    // yes, and the next call asks for itself.
+    setState('working');
+    onAllowed({ planId: call.heldTask as string, runHeld: true });
+  }
 
   return (
     <div
@@ -156,6 +175,19 @@ export default function PermissionCard({ call, onAllowed }: Props) {
             >
               Deny
             </button>
+
+            {canRunOnce && (
+              <button
+                type="button"
+                data-testid="run-once"
+                disabled={busy}
+                onClick={runOnce}
+                className="rounded-lg px-3 py-1.5 text-xs disabled:opacity-40"
+                style={{ border: '1px solid var(--color-cyan)', color: 'var(--color-cyan-light)' }}
+              >
+                Run this once
+              </button>
+            )}
 
             {call.grantable && (
               <>

@@ -276,6 +276,14 @@ export type ChatEvent =
        *  `''` when the server has no opinion — an attached MCP server is
        *  not inside anybody’s project. */
       grantScope?: string;
+      /** On a `confirm`: the task this call was parked on, so the card can
+       *  carry the task on rather than ask again from nothing. `''` when no
+       *  task was kept. */
+      heldTask?: string;
+      /** On a `confirm`: whether *Run this once* may be offered — a yes for
+       *  this one call. False for a send, and for a call whose target the
+       *  card cannot show. Decided by the backend. */
+      once?: boolean;
       /** The commit a write made, or `''`. What `Revert` reverses. */
       commit: string;
       /** A screenshot `look_at_app` took — a file name in the project's
@@ -329,6 +337,8 @@ export type ChatEvent =
       target: string;
       detail: string;
       seconds: number | null;
+      /** What the step found, for its output pane — for recall, the facts. */
+      output?: string;
     }
   /** What the reply is waiting for, sent *before* generation so the orb can
    *  say why rather than going quiet and letting the user guess.
@@ -432,6 +442,9 @@ export interface ChatRequest {
    *  `full` lets this one plan run without stopping. Chosen for the plan on
    *  screen and never stored — see `PlanCard`. */
   approveLevel?: 'ask' | 'full';
+  /** **Run this once**: with `continueTask`, run the call the task stopped
+   *  on, confirmed for that one call. Never a grant and never stored. */
+  runHeld?: boolean;
   /** **Revise**: `text` is a correction to an earlier reply, and this is
    *  that reply with the question it answered. The backend composes one
    *  prompt from the three and sends it down the ordinary path — recall,
@@ -508,6 +521,7 @@ export async function* streamChat(
         plan_id: req.planId ?? '',
         approve_plan: req.approvePlan ?? false,
         approve_level: req.approveLevel ?? 'ask',
+        run_held: req.runHeld ?? false,
         ...(req.revise ? { revise: { question: req.revise.question, reply: req.revise.reply } } : {}),
       }),
       signal,
@@ -865,6 +879,8 @@ function parseLine(line: string): ChatEvent | null {
         appUrl: typeof data.app_url === 'string' ? data.app_url : '',
         grantable: data.grantable === true,
         grantScope: typeof data.grant_scope === 'string' ? data.grant_scope : '',
+        heldTask: typeof data.held_task === 'string' ? data.held_task : '',
+        once: data.once === true,
         stepId: typeof data.step_id === 'string' ? data.step_id : '',
         // Absent on the common case — most replies have no plan — so the key
         // is omitted rather than defaulted. `0` is a real step and must not be
@@ -892,6 +908,7 @@ function parseLine(line: string): ChatEvent | null {
         target: String(data.target ?? ''),
         detail: String(data.detail ?? ''),
         seconds: typeof data.seconds === 'number' ? data.seconds : null,
+        output: typeof data.output === 'string' ? data.output : '',
       };
 
     case 'timing': {

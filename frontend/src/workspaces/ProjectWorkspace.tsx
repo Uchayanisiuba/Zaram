@@ -485,15 +485,24 @@ function CreateRow({ onDone }: { onDone: () => void }) {
   // render invented values" applies to a path more than to anything else.
   const needsFolder = type === 'coding' && !root.trim();
 
+  // **The folder already has a name, so the project is not asked for one.**
+  // Reported 5 October 2026: a folder was chosen, the form looked complete, and
+  // Create stayed dim with nothing saying why -- the name field above it was
+  // still empty. A coding project is its folder; its last segment is a fact
+  // about the machine rather than a guess, offered as the placeholder and used
+  // when nothing is typed. Typing a name always wins.
+  const suggested = type === 'coding' ? folderName(root) : '';
+  const effectiveName = name.trim() || suggested;
+
   const submit = useCallback(async () => {
-    if (!name.trim() || needsFolder || busy) return;
+    if (!effectiveName || needsFolder || busy) return;
     setBusy(true);
     try {
       // The folder is sent only for a coding project. Storing one against a
       // business project would be a value the product then ignores — `root` is
       // read only for `coding` — and a field that is accepted and never used is
       // worse than one that was not offered.
-      const created = await create(name, type, '', type === 'coding' ? root : '');
+      const created = await create(effectiveName, type, '', type === 'coding' ? root : '');
       if (created) onDone();
     } finally {
       // **Always, even though the store no longer throws.** This is the belt
@@ -503,7 +512,7 @@ function CreateRow({ onDone }: { onDone: () => void }) {
       // and filled in, so the retry costs no typing.
       setBusy(false);
     }
-  }, [busy, create, name, needsFolder, onDone, root, type]);
+  }, [busy, create, effectiveName, needsFolder, onDone, root, type]);
 
   return (
     <div
@@ -518,7 +527,7 @@ function CreateRow({ onDone }: { onDone: () => void }) {
           if (e.key === 'Enter') void submit();
           if (e.key === 'Escape') onDone();
         }}
-        placeholder="What is this project called?"
+        placeholder={suggested || 'What is this project called?'}
         aria-label="Project name"
         className="w-full bg-transparent text-sm outline-none placeholder-slate-500"
       />
@@ -568,7 +577,7 @@ function CreateRow({ onDone }: { onDone: () => void }) {
         <button
           type="button"
           onClick={() => void submit()}
-          disabled={!name.trim() || needsFolder || busy}
+          disabled={!effectiveName || needsFolder || busy}
           className="inline-flex items-center gap-1 rounded px-2.5 py-1.5 text-xs disabled:opacity-40"
           style={{ background: 'var(--color-glass)', border: '1px solid rgba(255,255,255,.1)' }}
         >
@@ -583,9 +592,30 @@ function CreateRow({ onDone }: { onDone: () => void }) {
         >
           Cancel
         </button>
+        {/* Said beside the button that is dim, because a disabled control
+            that does not say why reads as broken. The folder message above
+            covers the folder; this covers the name. */}
+        {!effectiveName && !needsFolder && (
+          <span className="self-center text-xs" style={{ color: '#fbbf24' }} data-testid="create-needs-name">
+            Give it a name to create it.
+          </span>
+        )}
+        {!name.trim() && suggested && (
+          <span className="self-center text-xs" style={{ color: 'var(--color-text-faint)' }} data-testid="create-uses-folder-name">
+            It will be called {suggested}.
+          </span>
+        )}
       </div>
     </div>
   );
+}
+
+/** The last segment of a folder path, either separator, or "". */
+export function folderName(path: string): string {
+  const parts = path.trim().replace(/[\\/]+$/, '').split(/[\\/]/);
+  const last = parts[parts.length - 1] ?? '';
+  // A bare drive ("E:") is not a name anybody would choose.
+  return /^[A-Za-z]:$/.test(last) ? '' : last;
 }
 
 function ProjectRow({ project, onDelete }: { project: Project; onDelete: () => void }) {
@@ -798,6 +828,7 @@ function EditsRow({ project }: { project: Project }) {
   const setRuns = useProjectStore((s) => s.setRuns);
   const setDrives = useProjectStore((s) => s.setDrives);
   const setShell = useProjectStore((s) => s.setShell);
+  const setBuildGrants = useProjectStore((s) => s.setBuildGrants);
   const fetchRunners = useProjectStore((s) => s.fetchRunners);
   const [busy, setBusy] = useState(false);
   const [runners, setRunners] = useState<string[] | null>(null);
@@ -842,11 +873,49 @@ function EditsRow({ project }: { project: Project }) {
     setBusy(false);
   }, [busy, project.id, project.shell, setShell]);
 
+  const allowedAll = project.writes && project.runs && project.drives && project.shell;
+  const toggleAll = useCallback(async () => {
+    if (busy) return;
+    setBusy(true);
+    // Partly on means "turn the rest on": the press is for building, and a
+    // build needs all four.
+    await setBuildGrants(project.id, !allowedAll);
+    setBusy(false);
+  }, [busy, project.id, allowedAll, setBuildGrants]);
+
   const runnerList =
     runners === null ? '…' : runners.length ? runners.join(', ') : 'none detected';
 
   return (
     <div className="mt-1.5 flex flex-col gap-1 pl-7 text-xs">
+      {/* **One press to build, added 5 October 2026.** Building an app needs
+          all four boxes below, and finding them one at a time was the first
+          thing between asking for an app and getting one. It is the four
+          boxes, set together — not a fifth grant — so each stays visible and
+          can be turned off on its own, which is rule 7j's "visible in
+          Settings, and revocable there" on the row that governs it. The
+          sentence says what still asks, because a switch that sounds like
+          "stop asking" and is not would be the invented value at the moment
+          consent is given. */}
+      <label className="flex cursor-pointer items-center gap-2">
+        <input
+          type="checkbox"
+          checked={allowedAll}
+          disabled={busy}
+          onChange={() => void toggleAll()}
+          data-testid="build-allowed"
+          aria-label={`Zaram may build and run ${project.name}`}
+        />
+        <span style={{ color: allowedAll ? 'var(--color-text-muted)' : 'var(--color-text-faint)' }}>
+          Let Zaram build and run this — all four below
+        </span>
+      </label>
+      {allowedAll && (
+        <span className="pl-6 leading-snug" style={{ color: 'var(--color-text-faint)' }}>
+          Installing packages, deleting files and anything sent off this machine
+          still ask, one click each.
+        </span>
+      )}
       <label className="flex cursor-pointer items-center gap-2">
         <input
           type="checkbox"

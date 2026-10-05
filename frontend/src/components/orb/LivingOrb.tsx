@@ -138,16 +138,14 @@ const STATE_CONFIG: Record<OrbState, StateConfig> = {
     ring2Color: 'rgba(34,211,238,0.35)',
     filter: 'drop-shadow(0 0 40px rgba(168,85,247,0.65))',
   },
-  // Idle's chrome, matching `STATE_PULSE.coding` — the orb stays calm while
-  // the character types. The reversal and its reasoning are recorded there;
-  // this entry only has to agree with it, and the glow already does by reading
-  // the same table.
+  // Thinking's chrome, matching `STATE_PULSE.coding` — reversed back on
+  // 5 October 2026; the reasoning is recorded there.
   coding: {
-    glowColor: glowOf('coding', 0.30),
-    glowColor2: 'rgba(168,85,247,0.18)',
-    ring1Color: 'rgba(34,211,238,0.18)',
-    ring2Color: 'rgba(168,85,247,0.28)',
-    filter: 'drop-shadow(0 0 28px rgba(99,102,241,0.45))',
+    glowColor: glowOf('coding', 0.45),
+    glowColor2: 'rgba(99,102,241,0.32)',
+    ring1Color: 'rgba(168,85,247,0.40)',
+    ring2Color: 'rgba(34,211,238,0.35)',
+    filter: 'drop-shadow(0 0 40px rgba(168,85,247,0.65))',
   },
   speaking: {
     glowColor: glowOf('speaking', 0.35),
@@ -279,7 +277,7 @@ const LivingOrb = ({
 
       {/* Thinking multi-color pulse overlay */}
       <AnimatePresence>
-        {state === 'thinking' && (
+        {(state === 'thinking' || state === 'coding') && (
           <motion.div
             className="absolute rounded-full pointer-events-none"
             style={{ inset: -outerGlowOffset, filter: 'blur(20px)' }}

@@ -379,3 +379,94 @@ describe('the three grants are three boxes', () => {
     expect(screen.queryByText(/That includes starting the app and driving it/i)).toBeNull();
   });
 });
+
+describe('one press to build and run', () => {
+  const WITH_FOLDER = { ...CODING, root: 'E:\Keyline', shell: false };
+
+  it('sets all four grants in one request, and says what still asks', async () => {
+    const sent = server({ projects: [WITH_FOLDER] });
+    render(<ProjectWorkspace />);
+
+    fireEvent.click(await screen.findByTestId('build-allowed'));
+
+    await waitFor(() => expect(sent.some((s) => s.body && 'shell' in s.body)).toBe(true));
+    const patches = sent.filter((s) => s.body && 'writes' in s.body);
+    expect(patches).toHaveLength(1);
+    expect(patches[0].body).toEqual({ writes: true, runs: true, drives: true, shell: true });
+  });
+
+  it('is on only when all four are, and turning it off withdraws all four', async () => {
+    const sent = server({ projects: [{ ...WITH_FOLDER, writes: true, runs: true, drives: true, shell: true }] });
+    render(<ProjectWorkspace />);
+    const box = (await screen.findByTestId('build-allowed')) as HTMLInputElement;
+    expect(box.checked).toBe(true);
+    expect(screen.getByText(/still ask, one click each/)).toBeTruthy();
+
+    fireEvent.click(box);
+    await waitFor(() => expect(sent.length).toBeGreaterThan(0));
+    expect(sent.find((s) => s.body && 'writes' in s.body)!.body).toEqual({
+      writes: false, runs: false, drives: false, shell: false,
+    });
+  });
+
+  it('partly on reads as off, and pressing it turns the rest on', async () => {
+    const sent = server({ projects: [{ ...WITH_FOLDER, writes: true }] });
+    render(<ProjectWorkspace />);
+    const box = (await screen.findByTestId('build-allowed')) as HTMLInputElement;
+    expect(box.checked).toBe(false);
+    fireEvent.click(box);
+    await waitFor(() => expect(sent.length).toBeGreaterThan(0));
+    expect(sent.find((s) => s.body && 'writes' in s.body)!.body.shell).toBe(true);
+  });
+});
+
+describe('a folder is enough to name a coding project — 5 October 2026', () => {
+  // Reported: a folder was chosen, the form looked complete, and Create stayed
+  // dim with nothing saying why. The name field above it was empty.
+  async function chooseFolder(path: string) {
+    const sent = server();
+    await openCreate();
+    fireEvent.click(screen.getByRole('button', { name: /^coding$/i }));
+    fireEvent.change(screen.getByTestId('repository-path'), { target: { value: path } });
+    return sent;
+  }
+
+  it('takes the folder’s name, enables Create, and says so', async () => {
+    const sent = await chooseFolder('E:\\Mine_Craft_Test');
+    const create = screen.getByRole('button', { name: /^create$/i }) as HTMLButtonElement;
+    expect(create.disabled).toBe(false);
+    expect(screen.getByTestId('create-uses-folder-name').textContent).toContain('Mine_Craft_Test');
+    expect((screen.getByLabelText('Project name') as HTMLInputElement).placeholder).toBe('Mine_Craft_Test');
+
+    fireEvent.click(create);
+    await waitFor(() => {
+      const post = sent.find((s) => s.body?.root === 'E:\\Mine_Craft_Test');
+      expect(post?.body.name).toBe('Mine_Craft_Test');
+    });
+  });
+
+  it('a name that is typed always wins', async () => {
+    const sent = await chooseFolder('E:\\Mine_Craft_Test');
+    fireEvent.change(screen.getByLabelText('Project name'), { target: { value: 'Block World' } });
+    expect(screen.queryByTestId('create-uses-folder-name')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /^create$/i }));
+    await waitFor(() => expect(sent.find((s) => s.body?.name === 'Block World')?.body.root).toBe('E:\\Mine_Craft_Test'));
+  });
+
+  it('handles a trailing slash and forward slashes', async () => {
+    await chooseFolder('/home/me/block-world/');
+    expect(screen.getByTestId('create-uses-folder-name').textContent).toContain('block-world');
+  });
+
+  it('a bare drive is not a name, so Create says what is missing', async () => {
+    await chooseFolder('E:\\');
+    expect((screen.getByRole('button', { name: /^create$/i }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByTestId('create-needs-name')).toBeTruthy();
+  });
+
+  it('says what is missing when there is neither name nor folder suggestion', async () => {
+    server();
+    await openCreate();
+    expect(screen.getByTestId('create-needs-name').textContent).toContain('Give it a name');
+  });
+});

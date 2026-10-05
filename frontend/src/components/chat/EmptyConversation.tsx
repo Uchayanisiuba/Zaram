@@ -24,12 +24,14 @@ import { useEffect, useState } from 'react';
 import { fetchObligations, countObligations, type ObligationCounts } from '@/services/obligationsClient';
 import { fetchSources, type IngestSource } from '@/services/ingestClient';
 import { fetchReadiness } from '@/services/readinessClient';
+import { listUnfinished, type UnfinishedTask } from '@/services/plansClient';
+import { fetchConversations } from '@/services/conversationsClient';
 import { fetchServers } from '@/services/toolsClient';
 import { fetchWebSearch } from '@/services/settingsClient';
 import type { Project } from '@/stores/projectStore';
 import type { WorkspaceId } from '@/runtime/shortcuts/registry';
 import { useSystemStore } from '@/stores/systemStore';
-import { groundedPrompts, type GroundedPrompt } from './groundedPrompts';
+import { groundedPrompts, type GroundedPrompt, type PickAction } from './groundedPrompts';
 import { starterTasks, fillTo, serverKinds, type Capabilities, type OfferedTask } from './starterTasks';
 
 const API = import.meta.env.VITE_ZARAM_API ?? '';
@@ -53,7 +55,7 @@ export default function EmptyConversation({
   onPick,
   onNavigate,
 }: {
-  onPick: (prompt: string) => void;
+  onPick: (prompt: string, action?: PickAction) => void;
   /** Where a "Configure" row goes. The shell owns navigation. */
   onNavigate?: (id: WorkspaceId) => void;
 }) {
@@ -70,10 +72,12 @@ export default function EmptyConversation({
   useEffect(() => {
     let live = true;
     void (async () => {
-      const [listing, sources, projects, readiness, servers, search] = await Promise.all([
+      const [listing, sources, projects, waiting, conversations, readiness, servers, search] = await Promise.all([
         settled(fetchObligations()),
         settled(fetchSources()),
         settled(fetchProjects()),
+        settled(listUnfinished()),
+        settled(fetchConversations(undefined, 10)),
         settled(fetchReadiness()),
         settled(fetchServers()),
         settled(fetchWebSearch()),
@@ -93,12 +97,20 @@ export default function EmptyConversation({
       };
       setStarters(starterTasks(capabilities));
 
-      if (listing === null && sources === null && projects === null) {
+      if (listing === null && sources === null && projects === null && waiting === null && conversations === null) {
         setPrompts(null);
         return;
       }
       const obligations: ObligationCounts | null = listing ? countObligations(listing) : null;
-      setPrompts(groundedPrompts({ obligations, sources: sources as IngestSource[] | null, projects }));
+      setPrompts(
+        groundedPrompts({
+          obligations,
+          sources: sources as IngestSource[] | null,
+          projects,
+          plans: waiting?.plans ?? null,
+          conversations,
+        }),
+      );
     })();
     return () => {
       live = false;
@@ -109,6 +121,9 @@ export default function EmptyConversation({
   // Three rows at first, as before; the rest of the use cases sit behind
   // one quiet line, so the screen stays calm and the list stays complete.
   const [more, setMore] = useState(false);
+  // The waiting tasks, opened out. Only when there is more than one: with one
+  // there is nothing to choose between and the row just does it.
+  const [listOpen, setListOpen] = useState(false);
   const firstFew = starters.slice(0, fillTo(grounded.length));
   const rest = starters.slice(firstFew.length);
   const shown = more ? starters : firstFew;
@@ -126,7 +141,13 @@ export default function EmptyConversation({
             <li key={p.prompt}>
               <button
                 type="button"
-                onClick={() => onPick(p.prompt)}
+                onClick={() => {
+                  if (p.action?.kind === 'continue-tasks' && p.action.tasks.length > 1) {
+                    setListOpen((v) => !v);
+                    return;
+                  }
+                  onPick(p.prompt, p.action);
+                }}
                 className="group text-left text-sm leading-snug transition-colors"
                 style={{ color: 'var(--color-text-faint)', background: 'none', border: 0, padding: 0, cursor: 'pointer' }}
                 data-testid="grounded-prompt"
@@ -139,6 +160,14 @@ export default function EmptyConversation({
                   {p.reason}
                 </span>
               </button>
+              {p.action?.kind === 'continue-tasks' && p.action.tasks.length > 1 && listOpen && (
+                <WaitingTasks
+                  action={p.action}
+                  onRun={(tasks) =>
+                    onPick(p.prompt, { kind: 'continue-tasks', projectId: p.action!.kind === 'continue-tasks' ? p.action!.projectId : '', tasks })
+                  }
+                />
+              )}
             </li>
           ))}
 
@@ -210,6 +239,55 @@ export default function EmptyConversation({
           {more ? 'Fewer' : rest.length + ' more things Zaram does ›'}
         </button>
       )}
+    </div>
+  );
+}
+
+/** The unfinished tasks of one project, laid out before anything runs: what
+ *  each was asked, how far its checklist got, and a way to run one or all. */
+function WaitingTasks({
+  action,
+  onRun,
+}: {
+  action: Extract<PickAction, { kind: 'continue-tasks' }>;
+  onRun: (tasks: UnfinishedTask[]) => void;
+}) {
+  const linkStyle = {
+    color: 'var(--color-cyan-light)',
+    background: 'none',
+    border: 0,
+    padding: 0,
+    cursor: 'pointer',
+  } as const;
+  return (
+    <div className="mt-2" style={{ paddingLeft: 14 }} data-testid="waiting-tasks">
+      <ul className="flex flex-col gap-1.5">
+        {action.tasks.map((task) => {
+          const done = task.items.filter((i) => i.status === 'done').length;
+          return (
+            <li key={task.id} className="flex items-baseline gap-2 text-xs" data-testid="waiting-task">
+              <span className="min-w-0 truncate" style={{ color: 'var(--color-text-muted)', maxWidth: 420 }} title={task.question}>
+                {task.question}
+              </span>
+              <span className="t-mono shrink-0" style={{ color: 'var(--color-text-faint)' }}>
+                {task.items.length ? `${done} of ${task.items.length} done` : 'not planned yet'}
+              </span>
+              <button type="button" className="t-mono shrink-0" style={linkStyle} onClick={() => onRun([task])} data-testid="run-one-task">
+                Continue
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+      <button
+        type="button"
+        className="t-mono mt-2 text-xs"
+        style={linkStyle}
+        onClick={() => onRun(action.tasks)}
+        data-testid="run-all-tasks"
+      >
+        Run all {action.tasks.length} in order →
+      </button>
     </div>
   );
 }

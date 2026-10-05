@@ -70,7 +70,7 @@ export default function OrbStatusLabel({
             boxShadow: `0 0 8px ${accent}`,
           }}
           animate={
-            reduced || (activity !== 'thinking' && activity !== 'warming')
+            reduced || (activity !== 'thinking' && activity !== 'coding' && activity !== 'warming')
               ? {}
               : { opacity: [1, 0.35, 1] }
           }

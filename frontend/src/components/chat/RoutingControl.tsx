@@ -35,7 +35,8 @@
  * a choice that can only fail.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Brain, Check, Cloud, HardDrive, RefreshCw, Shuffle } from 'lucide-react';
+import { Brain, Check, CircleCheck, Cloud, HardDrive, RefreshCw, Shuffle } from 'lucide-react';
+import { usePageCheckStore } from '@/stores/pageCheckStore';
 
 import { describeDataPolicy } from '@/components/settings/AdvancedModelField';
 import {
@@ -93,6 +94,32 @@ export function slowNote(model: DiscoveredModel): string | null {
   return 'slow — larger than this machine can hold';
 }
 
+/** Whether a page Zaram wrote is run, hidden, before it is shown. One press,
+ *  the current state named, beside the Thinking switch because both trade a
+ *  few seconds for a better first answer. */
+function PageCheckSwitch() {
+  const enabled = usePageCheckStore((s) => s.enabled);
+  const setEnabled = usePageCheckStore((s) => s.setEnabled);
+  return (
+    <button
+      type="button"
+      onClick={() => setEnabled(!enabled)}
+      aria-pressed={enabled}
+      data-testid="page-check-chip"
+      title={
+        enabled
+          ? 'A page Zaram writes is run in a hidden browser with no network, and fixed if it does not start. Press to turn off.'
+          : 'Pages are shown as written. Press to run them first and fix what does not start.'
+      }
+      className="flex items-center gap-1.5 text-slate-500 hover:text-slate-300 transition-colors"
+    >
+      <span className="text-slate-700">·</span>
+      <CircleCheck size={12} aria-hidden className="shrink-0" />
+      <span>{enabled ? 'Page check on' : 'Page check off'}</span>
+    </button>
+  );
+}
+
 export default function RoutingControl() {
   const hasCloudModel = useSystemStore((s) => cloudModelConnected(s.routing));
   const canLeaveDevice = useSystemStore((s) => s.routing?.canLeaveDevice ?? false);
@@ -108,6 +135,9 @@ export default function RoutingControl() {
   // conversation, not per visit to Settings. `null` until fetched, so the
   // chip never shows a value that was not read.
   const [thinking, setThinking] = useState<boolean | null>(null);
+  // The middle state of that switch: off for everyday questions, on when the
+  // request is for code or a page. Only meaningful while `thinking` is off.
+  const [forCode, setForCode] = useState(false);
   const [models, setModels] = useState<DiscoveredModel[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [failed, setFailed] = useState(false);
@@ -127,6 +157,7 @@ export default function RoutingControl() {
         setPreference(settings.routingPreference);
         setPinned(settings.defaultModel);
         setThinking(settings.thinking);
+        setForCode(settings.thinkingForCode);
       } catch {
         // A preference we could not read is not `auto`. Rendering a default
         // never fetched would put an invented value on the control that says
@@ -208,11 +239,13 @@ export default function RoutingControl() {
     routingPreference?: RoutingPreference;
     defaultModel?: string;
     thinking?: boolean;
+    thinkingForCode?: boolean;
   }) {
-    const previous = { preference, pinned, thinking };
+    const previous = { preference, pinned, thinking, forCode };
     if (update.routingPreference) setPreference(update.routingPreference);
     if (update.defaultModel !== undefined) setPinned(update.defaultModel || null);
     if (update.thinking !== undefined) setThinking(update.thinking);
+    if (update.thinkingForCode !== undefined) setForCode(update.thinkingForCode);
     setBusy(true);
     setFailed(false);
     try {
@@ -220,6 +253,7 @@ export default function RoutingControl() {
       setPreference(saved.routingPreference);
       setPinned(saved.defaultModel);
       setThinking(saved.thinking);
+      setForCode(saved.thinkingForCode);
     } catch {
       // Put it back. A control that appears to have worked and did not would
       // leave someone believing their next question stays on this machine
@@ -227,6 +261,7 @@ export default function RoutingControl() {
       setPreference(previous.preference);
       setPinned(previous.pinned);
       setThinking(previous.thinking);
+      setForCode(previous.forCode);
       setFailed(true);
     } finally {
       setBusy(false);
@@ -290,22 +325,38 @@ export default function RoutingControl() {
         // in the title so the choice is informed rather than guessed.
         <button
           type="button"
-          onClick={() => void save({ thinking: !thinking })}
+          // Three states in one press: off, then only for code and pages, then
+          // on. "For code" is what someone wants who turned thinking off to
+          // get quick everyday answers and still wants care when they ask for
+          // a program.
+          onClick={() =>
+            void save(
+              thinking
+                ? { thinking: false, thinkingForCode: false }
+                : forCode
+                  ? { thinking: true, thinkingForCode: false }
+                  : { thinking: false, thinkingForCode: true },
+            )
+          }
           disabled={busy}
           aria-pressed={thinking}
           data-testid="thinking-chip"
+          data-mode={thinking ? 'on' : forCode ? 'code' : 'off'}
           title={
             thinking
               ? 'The model thinks before answering — slower, better on hard questions. Press to turn off.'
-              : 'The model answers directly — fast. Press to let it think first.'
+              : forCode
+                ? 'The model answers directly, except when you ask for code or a page — then it thinks first. Press to think about everything.'
+                : 'The model answers directly — fast. Press to let it think first, for code and pages only.'
           }
           className="flex items-center gap-1.5 text-slate-500 hover:text-slate-300 transition-colors"
         >
           <span className="text-slate-700">·</span>
           <Brain size={12} aria-hidden className="shrink-0" />
-          <span>{thinking ? 'Thinking on' : 'Thinking off'}</span>
+          <span>{thinking ? 'Thinking on' : forCode ? 'Thinking for code' : 'Thinking off'}</span>
         </button>
       )}
+      <PageCheckSwitch />
       {failed && (
         <span className="text-slate-600" title="The change did not save">
           · not saved

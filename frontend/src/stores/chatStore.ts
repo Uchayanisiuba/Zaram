@@ -169,6 +169,10 @@ export interface ChatToolCall {
    *  Settings. Absent when the server has no opinion, and the card then
    *  shows one rung fewer rather than a control that settles nothing. */
   grantScope?: string;
+  /** On a `confirm`: the task this call was parked on, and whether *Run
+   *  this once* may be offered. See `ChatEvent`. */
+  heldTask?: string;
+  once?: boolean;
   /** **A plan step rather than a tool call** — a web search, a page read,
    *  a drawing, recall — rendered on the same row so there is one place the
    *  work lives. `label` is the past-tense phrase ("Searched the web"),
@@ -280,11 +284,31 @@ interface ChatState {
    *  the user. */
   setDomains: (domainIds: string[]) => void;
   cancel: () => void;
+  /** Send several requests one after another, each when the last has ended.
+   *
+   *  Built for *Continue every unfinished task in this project*. It stops the
+   *  moment a turn ends waiting on the person -- a plan held for Go, a
+   *  permission card, an error -- or the person presses Stop, because running
+   *  on would answer a question they have not yet been asked: the next task
+   *  would proceed under a decision nobody made. */
+  runInOrder: (steps: { text: string; opts?: Partial<ChatRequest> }[]) => Promise<void>;
   /** Give up on a reply that is still thinking and ask the same question again
    *  with thinking off, for this message only. Does nothing unless a reply is
    *  in flight. The abandoned attempt is discarded whole — it never commits a
    *  reasoning-only message to the transcript. */
   answerWithoutThinking: () => Promise<void>;
+  /** A held tool has just been allowed, so ask the question again — now, even
+   *  if the reply that said "needs your say-so" is still being written.
+   *
+   *  The permission card appears the moment the gate holds the call, and the
+   *  reply goes on to answer *without* the tool, which on a local model takes
+   *  as long as any other reply. `send` refuses while a reply is streaming, so
+   *  an Allow pressed in that window saved the grant and then asked nothing:
+   *  the screen kept the refusal and the person read it as the press doing
+   *  nothing. The in-flight attempt is discarded whole, as
+   *  `answerWithoutThinking` does, because an answer written without the tool
+   *  is not worth finishing once the tool is permitted. */
+  askAgainAfterAllowing: (resume?: AllowedResume) => Promise<void>;
   clear: () => void;
   /** Reopen a stored conversation, replacing what is on screen.
    *
@@ -371,6 +395,8 @@ function loadDomains(): string[] {
 /** Cancels the in-flight request. Module-level so `cancel()` can reach it
  *  without putting a non-serialisable object in the store. */
 let inFlight: AbortController | null = null;
+/** Bumped by every Stop, so a queue can tell it was the person who ended a turn. */
+let cancelEpoch = 0;
 
 /** The arguments of the last `send`, so "answer without thinking" can ask the
  *  same question again exactly as it was asked — same project, same domains,
@@ -407,6 +433,45 @@ function describeThrown(err: unknown): string {
   } catch {
     return 'an error with nothing to say for itself';
   }
+}
+
+/** Abandon the reply in flight and take its question back off the transcript.
+ *
+ *  The question goes back in when it is sent again; leaving it here would show
+ *  it twice. Only the one this attempt added — never an earlier turn. */
+function abandonTheAttempt(
+  set: (partial: Partial<ChatState> | ((s: ChatState) => Partial<ChatState>)) => void,
+  question: string | null,
+): void {
+  if (inFlight) {
+    discarded.add(inFlight);
+    inFlight.abort();
+    inFlight = null;
+  }
+  set((s) => {
+    const tail = s.messages[s.messages.length - 1];
+    const dropTail = question !== null && tail?.role === 'user' && tail.text === question;
+    return {
+      messages: dropTail ? s.messages.slice(0, -1) : s.messages,
+      streamingText: '',
+      streamingReasoning: '',
+      streamingReasoningSince: null,
+      streamingSources: [],
+      streamingNotices: [],
+      streamingToolCalls: [],
+      streamingPlan: null,
+      streamingImageProgress: null,
+      streamingAnsweredBy: null,
+      isStreaming: false,
+    };
+  });
+}
+
+/** What an answer on the permission card carries on from: the task the held
+ *  call was parked on, and whether the person said yes to that one call. */
+export interface AllowedResume {
+  planId: string;
+  runHeld: boolean;
 }
 
 export const useChatStore = create<ChatState>((set, get) => ({
@@ -723,6 +788,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
               ...(event.appUrl ? { appUrl: event.appUrl } : {}),
               ...(event.grantable ? { grantable: true } : {}),
               ...(event.grantScope ? { grantScope: event.grantScope } : {}),
+              ...(event.heldTask ? { heldTask: event.heldTask } : {}),
+              ...(event.once ? { once: true } : {}),
               ...(event.stepId ? { stepId: event.stepId } : {}),
               // `!= null` rather than truthy: step 0 is the first step of
               // every plan and is the one most calls belong to.
@@ -768,7 +835,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
               verdict: event.success ? 'allow' : 'refuse',
               reason: event.detail,
               target: event.target,
-              output: '',
+              output: event.output ?? '',
               label: event.done,
               stepId: event.stepId,
               seconds: event.seconds,
@@ -958,34 +1025,52 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const last = lastSend;
     if (!last || !get().isStreaming || !inFlight) return;
 
-    discarded.add(inFlight);
-    inFlight.abort();
-    inFlight = null;
-
-    set((s) => {
-      // The question goes back in when it is sent again; leaving it here would
-      // show it twice. Only the one this attempt added — never an earlier turn.
-      const tail = s.messages[s.messages.length - 1];
-      const dropTail = tail?.role === 'user' && tail.text === last.text;
-      return {
-        messages: dropTail ? s.messages.slice(0, -1) : s.messages,
-        streamingText: '',
-        streamingReasoning: '',
-        streamingReasoningSince: null,
-        streamingSources: [],
-        streamingNotices: [],
-        streamingToolCalls: [],
-        streamingPlan: null,
-        streamingImageProgress: null,
-        streamingAnsweredBy: null,
-        isStreaming: false,
-      };
-    });
+    abandonTheAttempt(set, last.text);
 
     await get().send(last.text, { ...last.opts, thinking: false, retry: true }, last.attached);
   },
 
+  askAgainAfterAllowing: async (resume) => {
+    const last = lastSend;
+    if (resume) {
+      // **Carry the task on, rather than ask it again from nothing.** The
+      // held call was parked with the task; continuing runs it first —
+      // confirmed if the person pressed *Run this once*, through the gate if
+      // they granted the tool. The question stays on screen: it is still the
+      // question being answered.
+      if (get().isStreaming && inFlight) abandonTheAttempt(set, null);
+      await get().send(resume.runHeld ? 'Run it once' : 'Continue', {
+        continueTask: true,
+        planId: resume.planId,
+        ...(resume.runHeld ? { runHeld: true } : {}),
+      });
+      return;
+    }
+    if (get().isStreaming && inFlight && last) {
+      abandonTheAttempt(set, last.text);
+      await get().send(last.text, { ...last.opts, retry: true }, last.attached);
+      return;
+    }
+    // Nothing in flight, which is also what a replayed history looks like:
+    // the last thing the person said is the question to ask again.
+    const lastAsked = [...get().messages].reverse().find((message) => message.role === 'user');
+    if (lastAsked) await get().send(lastAsked.text);
+  },
+
+  runInOrder: async (steps) => {
+    const epoch = cancelEpoch;
+    for (const step of steps) {
+      await get().send(step.text, step.opts ?? {});
+      if (cancelEpoch !== epoch || get().connectionError) return;
+      const last = [...get().messages].reverse().find((m) => m.role === 'assistant');
+      if (!last) return;
+      if (last.error || last.plan?.awaitingGo) return;
+      if (last.toolCalls?.some((call) => call.verdict === 'confirm')) return;
+    }
+  },
+
   cancel: () => {
+    cancelEpoch += 1;
     inFlight?.abort();
     inFlight = null;
     set({

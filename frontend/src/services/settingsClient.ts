@@ -403,6 +403,9 @@ export interface RoutingSettings {
    *  engines; a cloud provider's own control is not guessed at, so there the
    *  thinking still shows. `docs/PLAN.md` E2b. */
   thinking: boolean;
+  /** Think for code and pages even when `thinking` is off — the middle state
+   *  of the composer's switch. Only an exact `true` is on. */
+  thinkingForCode: boolean;
   /** The ceiling the backend will clamp to. Read rather than hardcoded,
    *  for the same reason `taskSlots` is: a number invented here would
    *  offer a window the backend accepts and then silently reduces. */
@@ -459,6 +462,7 @@ function toRoutingSettings(raw: Record<string, unknown>): RoutingSettings {
   return {
     // Only an exact `false` is off — the same reading the backend makes.
     thinking: raw.thinking !== false,
+    thinkingForCode: raw.thinking_for_code === true,
     routingPreference: (raw.routing_preference as RoutingPreference) ?? 'auto',
     defaultModel: typeof raw.default_model === 'string' ? raw.default_model : null,
     // Read value by value rather than cast wholesale. This object is written
@@ -530,6 +534,8 @@ export async function updateRoutingSettings(update: {
   routerModel?: string;
   /** Ask a thinking model to think, or not. `undefined` leaves it alone. */
   thinking?: boolean;
+  /** Think for code and pages when everyday thinking is off. */
+  thinkingForCode?: boolean;
   /** How the window is decided. `undefined` leaves it alone. */
   contextPolicy?: ContextPolicy;
   /** A window for one model. `tokens: 0` forgets that model's entry,
@@ -546,6 +552,7 @@ export async function updateRoutingSettings(update: {
     task_models: update.taskModels ?? null,
     router_model: update.routerModel ?? null,
     thinking: update.thinking ?? null,
+    thinking_for_code: update.thinkingForCode ?? null,
     context_policy: update.contextPolicy ?? null,
     context_override: update.contextOverride ?? null,
     overflow_policy: update.overflowPolicy ?? null,

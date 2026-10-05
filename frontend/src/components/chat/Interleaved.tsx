@@ -17,7 +17,7 @@
  * folds to its own line where it sits.
  */
 import type { ReactNode } from 'react';
-import type { ChatToolCall } from '../../stores/chatStore';
+import type { AllowedResume, ChatToolCall } from '../../stores/chatStore';
 import ToolCalls from './ToolCalls';
 
 export interface Segment {
@@ -61,7 +61,7 @@ export default function Interleaved({
   text: string;
   calls: ChatToolCall[];
   active?: boolean;
-  onAllowed?: () => void;
+  onAllowed?: (resume?: AllowedResume) => void;
   /** How a chunk of the reply is drawn: the body, or the typewriter for the
    *  last chunk while streaming. `last` says which chunk this is. */
   renderText: (chunk: string, last: boolean) => ReactNode;

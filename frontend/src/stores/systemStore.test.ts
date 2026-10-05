@@ -225,3 +225,15 @@ describe('speech that is still starting is not speech that is not installed', ()
     ).toBe('available');
   });
 });
+
+describe('a reply that is working never reads as rest — 5 October 2026', () => {
+  // `coding` fell through to the idle line, so a reply working with the code
+  // tools offered read "Local · cloud ready" under an idle-looking orb.
+  it('names coding as coding, busy, and thinking as thinking', () => {
+    const r = routing({ providers: [{ id: 'tabby', locality: 'local' }] });
+    const thinking = describeSystem({ backendOnline: true, routing: r, activity: 'thinking' });
+    const coding = describeSystem({ backendOnline: true, routing: r, activity: 'coding' });
+    expect(coding).toEqual({ label: 'Coding', detail: 'Writing code on this machine.', tone: 'busy' });
+    expect(thinking.label).toBe('Thinking');
+  });
+});

@@ -14,7 +14,7 @@
  */
 import { describe, it, expect } from 'vitest';
 
-import { codingActivity, chatActivity, offeredServers } from './orbActivity';
+import { codingActivity, chatActivity } from './orbActivity';
 import { composeOrbState } from '@/stores/orbStore';
 
 describe('when it says coding', () => {
@@ -81,26 +81,24 @@ describe('what it does not disturb', () => {
   });
 });
 
-describe('the buffered case: tools offered, nothing on screen yet', () => {
-  it('reports coding from the offer alone', () => {
-    // A tool-driven reply is buffered until it finishes, so neither a fence
-    // nor a call reaches the screen while it runs. The offer is the one fact
-    // available, and it is system state: the engine chose to hand the model
-    // a repository.
-    expect(codingActivity(true, '', [], ['code'])).toBe('coding');
+describe('the avatar types only while code is being written — 5 October 2026', () => {
+  it('an offer of the code tools is still thinking', () => {
+    // They are offered on most tool turns; counting the offer had the avatar
+    // typing through ordinary thinking, before any code existed. The
+    // signature no longer takes offers at all, so this is the reply and the
+    // calls alone.
+    expect(codingActivity(true, '', [])).toBe('thinking');
+    expect(codingActivity.length).toBe(2);
   });
 
-  it('an offer of some other server is not coding', () => {
-    expect(codingActivity(true, '', [], ['blender'])).toBe('thinking');
+  it('a fence in the reasoning is not in the reply, so it is thinking', () => {
+    // The caller passes the reply text only; the model drafting code while it
+    // thinks is thinking.
+    expect(codingActivity(true, 'Let me plan the game first.')).toBe('thinking');
   });
 
-  it('reads the servers off the tools notices only', () => {
-    expect(
-      offeredServers([
-        { kind: 'search', servers: ['code'] },
-        { kind: 'tools', servers: ['code', 'blender'] },
-        { kind: 'tools' },
-      ]),
-    ).toEqual(['code', 'blender']);
+  it('becomes coding the moment a code tool actually runs', () => {
+    expect(codingActivity(true, '', ['code'])).toBe('coding');
   });
+
 });

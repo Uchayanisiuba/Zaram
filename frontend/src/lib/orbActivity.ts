@@ -34,14 +34,19 @@ const OPENS_A_CODE_BLOCK = /(^|\n)\s*```/;
  *   repository, whatever model was asked.
  * - **the reply is writing code.** An opened fence in the text so far is the
  *   literal thing the maintainer asked to see embodied — Zaram writing code.
- * - **the code tools were put in front of the model.** Added 12 September
- *   2026, for the buffered case: a reply that may call a tool is held back
- *   until it finishes, so no fence and no call reaches the screen while it
- *   runs, and the orb sat on `thinking` for the whole of a coding run. The
- *   offer is system state — the engine chose to hand the model a repository
- *   — and it is the only fact available until the buffer lands.
  *
- * Any is enough. The fence check runs on the accumulated reply rather than
+ * **Not the offer, and not the thinking — 5 October 2026, by the maintainer:
+ * *"the avatar never types in the thinking state, only in the coding
+ * state."*** A third signal, added 12 September, counted the code tools
+ * merely being *offered* — and they are offered on most tool turns, so the
+ * avatar typed through ordinary thinking, before any code existed. The
+ * buffered case it was written for is still covered: each call reaches the
+ * screen as a row the moment it runs, so `coding` starts when a code tool
+ * does. The model's own `plan` call is left out by the caller — writing down
+ * intentions is thinking — and so is a fence inside the reasoning, which is
+ * the model thinking about code rather than writing it.
+ *
+ * Either is enough. The fence check runs on the accumulated reply rather than
  * per token, for the reason every other rule in this codebase does: a fence
  * arrives split across tokens, and a per-token test would never see one.
  *
@@ -53,22 +58,11 @@ export function codingActivity(
   isStreaming: boolean,
   replySoFar: string,
   toolServers: readonly string[] = [],
-  offeredServers: readonly string[] = [],
 ): 'coding' | 'thinking' | 'idle' {
   // The base answer first, so "streaming means thinking, otherwise idle" is
   // stated in exactly one place and this function only ever narrows it.
   const base = chatActivity(isStreaming);
   if (base === 'idle') return base;
-  if (toolServers.includes('code') || offeredServers.includes('code')) return 'coding';
+  if (toolServers.includes('code')) return 'coding';
   return OPENS_A_CODE_BLOCK.test(replySoFar ?? '') ? 'coding' : base;
-}
-
-/** The servers named by the "tools" notices of the reply in flight. */
-export function offeredServers(notices: readonly { kind: string; servers?: string[] }[]): string[] {
-  const out = new Set<string>();
-  for (const n of notices) {
-    if (n.kind !== 'tools') continue;
-    for (const s of n.servers ?? []) out.add(s);
-  }
-  return [...out];
 }

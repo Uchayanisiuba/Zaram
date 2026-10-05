@@ -136,6 +136,11 @@ interface ProjectStore {
    *  was reachable only by editing the database. Found 4 October 2026
    *  while building the permission card that needed it. */
   setShell: (id: string, shell: boolean) => Promise<void>;
+  /** All four at once — edit, run, drive, terminal — in one request.
+   *
+   *  The *build and run* switch. One request rather than four, so the row
+   *  never shows a project half-granted because the third of four failed. */
+  setBuildGrants: (id: string, allowed: boolean) => Promise<void>;
   /** The names of the commands `setRuns` would allow, detected from the
    *  repository — so the control can say what it grants. Empty on any failure;
    *  this is a label, never a gate. */
@@ -316,6 +321,24 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ writes }),
+      },
+      'That could not be changed.',
+    );
+    if (typeof res === 'string') {
+      set({ error: res });
+      return;
+    }
+    await get().load();
+  },
+
+  setBuildGrants: async (id, allowed) => {
+    set({ error: null });
+    const res = await send(
+      `${API}/projects/${encodeURIComponent(id)}`,
+      {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ writes: allowed, runs: allowed, drives: allowed, shell: allowed }),
       },
       'That could not be changed.',
     );

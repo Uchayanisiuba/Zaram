@@ -145,3 +145,13 @@ describe('what one step sent — 19 September 2026', () => {
     expect(document.querySelector('[data-focus="true"]')).toBeNull();
   });
 });
+
+describe('its size', () => {
+  it('fits what it holds, capped at the old height, rather than a fixed sheet', () => {
+    // One recalled-facts row used to sit at the top of a window-sized sheet.
+    render(<ActivityPanel calls={[call()]} onClose={() => {}} />);
+    const sheet = document.querySelector('[data-testid="activity-panel"] > div') as HTMLElement;
+    expect(sheet.style.height).toBe('');
+    expect(sheet.style.maxHeight).toBe('min(80vh, 100%)');
+  });
+});

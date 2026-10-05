@@ -120,6 +120,11 @@ export default defineConfig(({ command }) => ({
       '/readiness': { target: BACKEND, changeOrigin: true },
       '/memory': { target: BACKEND, changeOrigin: true },
       '/egress': { target: BACKEND, changeOrigin: true },
+      // A multi-file app kept as a folder, and a page run before it is shown.
+      // Without these two the interface gets index.html with a 200 and reports
+      // a JSON parse error that names neither route.
+      '/apps': { target: BACKEND, changeOrigin: true },
+      '/preview': { target: BACKEND, changeOrigin: true },
       '/artifacts': { target: BACKEND, changeOrigin: true },
       // What is listening on this machine, for the browser pane's new tab.
       // Added because `proxied.test.ts` refused the commit without it: an

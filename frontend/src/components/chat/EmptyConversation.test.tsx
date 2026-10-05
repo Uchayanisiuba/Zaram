@@ -21,10 +21,13 @@ vi.mock('@/services/obligationsClient', () => ({
 vi.mock('@/services/ingestClient', () => ({ fetchSources: vi.fn(async () => []) }));
 vi.mock('@/services/readinessClient', () => ({ fetchReadiness: vi.fn(async () => ({ canChat: false })) }));
 vi.mock('@/services/toolsClient', () => ({ fetchServers: vi.fn(async () => []) }));
+vi.mock('@/services/conversationsClient', () => ({ fetchConversations: vi.fn(async () => []) }));
+vi.mock('@/services/plansClient', () => ({ listUnfinished: vi.fn(async () => ({ plans: [], finished: [], kept_for_days: 7 })) }));
 
 import { fetchSources } from '@/services/ingestClient';
 import { fetchReadiness } from '@/services/readinessClient';
 import { fetchServers } from '@/services/toolsClient';
+import { listUnfinished } from '@/services/plansClient';
 import EmptyConversation from './EmptyConversation';
 
 const lit = () =>
@@ -107,5 +110,85 @@ describe('the rest of what Zaram does', () => {
     expect(screen.getByText(/Turn web search on/)).toBeTruthy();
     expect(screen.getByText(/Attach your mail/)).toBeTruthy();
     expect(screen.getByText(/Attach GitHub/)).toBeTruthy();
+  });
+});
+
+describe('the row about what is unfinished', () => {
+  const now = () => Date.now() / 1000;
+  const seed = (plans: object[]) => {
+    globalThis.fetch = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ projects: [{ id: 'ride-share', name: 'Ride Share', facts: 0 }] }),
+    })) as never;
+    vi.mocked(listUnfinished).mockResolvedValue({ plans, finished: [], kept_for_days: 7 } as never);
+  };
+  const task = (id: string, over: object = {}) => ({
+    id,
+    question: `question ${id}`,
+    project_id: 'ride-share',
+    finished: false,
+    steps: [],
+    items: [],
+    created_at: now() - 1000,
+    updated_at: now() - 60,
+    ...over,
+  });
+
+  it('is first, names the project, and with one task just does it', async () => {
+    seed([task('plan-1')]);
+    const onPick = vi.fn();
+    render(<EmptyConversation onPick={onPick} />);
+
+    const row = await screen.findByText('What are the unfinished tasks in Ride Share?');
+    expect(document.querySelector('[data-testid="grounded-prompt"]')).toBe(row.closest('button'));
+    expect(screen.getByText(/1 unfinished task · last touched today/)).toBeTruthy();
+
+    fireEvent.click(row);
+    expect(screen.queryByTestId('waiting-tasks')).toBeNull();
+    expect(onPick).toHaveBeenCalledTimes(1);
+    const [prompt, action] = onPick.mock.calls[0];
+    expect(prompt).toBe('What are the unfinished tasks in Ride Share?');
+    expect(action.kind).toBe('continue-tasks');
+    expect(action.tasks.map((t: { id: string }) => t.id)).toEqual(['plan-1']);
+  });
+
+  it('with several, lays them all out first and runs nothing until one is chosen', async () => {
+    seed([
+      task('new', { created_at: now() - 100, items: [{ text: 'a', status: 'done' }, { text: 'b', status: 'todo' }] }),
+      task('old', { created_at: now() - 900 }),
+    ]);
+    const onPick = vi.fn();
+    render(<EmptyConversation onPick={onPick} />);
+
+    fireEvent.click(await screen.findByText('What are the unfinished tasks in Ride Share?'));
+
+    expect(onPick).not.toHaveBeenCalled();
+    const rows = screen.getAllByTestId('waiting-task').map((li) => li.textContent);
+    // Oldest first, with how far each got -- or that it never was planned.
+    expect(rows[0]).toContain('question old');
+    expect(rows[0]).toContain('not planned yet');
+    expect(rows[1]).toContain('question new');
+    expect(rows[1]).toContain('1 of 2 done');
+
+    fireEvent.click(screen.getByTestId('run-all-tasks'));
+    expect(onPick).toHaveBeenCalledTimes(1);
+    expect(onPick.mock.calls[0][1].tasks.map((t: { id: string }) => t.id)).toEqual(['old', 'new']);
+  });
+
+  it('can run just one of several', async () => {
+    seed([task('old', { created_at: now() - 900 }), task('new', { created_at: now() - 100 })]);
+    const onPick = vi.fn();
+    render(<EmptyConversation onPick={onPick} />);
+
+    fireEvent.click(await screen.findByText('What are the unfinished tasks in Ride Share?'));
+    fireEvent.click(screen.getAllByTestId('run-one-task')[1]);
+
+    expect(onPick.mock.calls[0][1].tasks.map((t: { id: string }) => t.id)).toEqual(['new']);
+  });
+
+  it('is absent when nothing is unfinished', async () => {
+    render(<EmptyConversation onPick={vi.fn()} />);
+    await waitFor(() => expect(document.querySelectorAll('[data-testid="starter-task"]').length).toBeGreaterThan(0));
+    expect(screen.queryByText(/unfinished tasks in/)).toBeNull();
   });
 });

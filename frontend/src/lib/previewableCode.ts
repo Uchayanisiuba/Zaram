@@ -31,6 +31,8 @@
  * "execute".
  */
 
+import { bundleApp, extractAppFiles, type AppFile } from './appFiles';
+
 /** For a generated **document** — an invoice, a report, a CV.
  *
  *  Blocks every remote sub-resource the document might name. `sandbox=""`
@@ -103,7 +105,7 @@ export const APP_CSP = appCsp();
  * inside the page to the same host is the page talking back, which is a
  * different act and was not what was allowed.
  */
-export function appCsp(hosts: readonly string[] = []): string {
+export function appCsp(hosts: readonly string[] = [], libraries = false): string {
   // Normalised and bounded. A host arrives from a CSP violation report,
   // which is text the *page* influenced, so it is matched against a
   // hostname shape rather than pasted into a policy. A page that could
@@ -115,7 +117,11 @@ export function appCsp(hosts: readonly string[] = []): string {
   const extra = named.length ? ' ' + named.join(' ') : '';
   return (
     '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; ' +
-    `script-src \'unsafe-inline\' \'unsafe-eval\'${extra}; ` +
+    // `data:` only when Zaram serves a library as a module (see
+    // `previewLibraries.ts`): an import map can only point at a URL, and a
+    // page that may already run inline script and `eval` gains nothing from
+    // a module written into a data URL.
+    `script-src \'unsafe-inline\' \'unsafe-eval\'${libraries ? ' data:' : ''}${extra}; ` +
     `style-src \'unsafe-inline\'${extra}; ` +
     `img-src data:${extra}; font-src data:${extra};">`
   );
@@ -340,6 +346,155 @@ export const PLAYBACK = `<script>
 })(window);
 <\/script>`;
 
+/** Pointing at part of the page — 5 October 2026.
+ *
+ *  Off until the panel's **Select** is pressed, because a page owns its own
+ *  clicks: a block game places a block on right-click, and a picker that
+ *  always took the right button would break the thing it is meant to help
+ *  change. While on, the pointer outlines what is under it and a click or a
+ *  right-click picks it; nothing reaches the page until Select is pressed
+ *  again or Escape is.
+ *
+ *  Listeners go on the window in the capture phase, ahead of anything the
+ *  page registers, so a picking click never also fires the page's own
+ *  handler. What is reported is a description — tag, a short selector, the
+ *  visible text, the start of the markup — and the parent treats all of it as
+ *  page-controlled text (`askAboutPage.readPick`). */
+export const PICKER = `<script>
+(function (win, doc) {
+  var on = false, box = null, current = null;
+  function ensureBox() {
+    if (box) { return box; }
+    box = doc.createElement('div');
+    var s = box.style;
+    s.position = 'fixed'; s.pointerEvents = 'none'; s.zIndex = '2147483647';
+    s.border = '2px solid #22d3ee'; s.background = 'rgba(34,211,238,0.12)';
+    s.borderRadius = '3px'; s.boxSizing = 'border-box'; s.display = 'none';
+    (doc.body || doc.documentElement).appendChild(box);
+    return box;
+  }
+  function outline(el) {
+    var r = el.getBoundingClientRect(), b = ensureBox();
+    b.style.display = 'block';
+    b.style.left = r.left + 'px'; b.style.top = r.top + 'px';
+    b.style.width = r.width + 'px'; b.style.height = r.height + 'px';
+  }
+  function hide() { if (box) { box.style.display = 'none'; } }
+  function step(el) {
+    var name = el.tagName.toLowerCase();
+    if (el.id) { return name + '#' + el.id; }
+    var cls = (typeof el.className === 'string' ? el.className : '').trim().split(/\\s+/).filter(Boolean).slice(0, 2);
+    if (cls.length) { name += '.' + cls.join('.'); }
+    var parent = el.parentElement;
+    if (parent) {
+      var same = 0, index = 0;
+      for (var i = 0; i < parent.children.length; i++) {
+        if (parent.children[i].tagName === el.tagName) { same++; if (parent.children[i] === el) { index = same; } }
+      }
+      if (same > 1) { name += ':nth-of-type(' + index + ')'; }
+    }
+    return name;
+  }
+  function selector(el) {
+    var parts = [], node = el;
+    while (node && node.nodeType === 1 && parts.length < 5 && node !== doc.documentElement) {
+      parts.unshift(step(node));
+      if (node.id) { break; }
+      node = node.parentElement;
+    }
+    return parts.join(' > ');
+  }
+  function target(e) {
+    var t = e.target;
+    return t && t.nodeType === 1 && t !== box ? t : null;
+  }
+  function over(e) {
+    if (!on) { return; }
+    var t = target(e);
+    if (t) { current = t; outline(t); }
+  }
+  function pick(e) {
+    if (!on) { return; }
+    e.preventDefault(); e.stopImmediatePropagation();
+    var t = target(e) || current;
+    if (!t) { return; }
+    outline(t);
+    var r = t.getBoundingClientRect();
+    var html = t.outerHTML || '';
+    try {
+      parent.postMessage({ __zaramPreview: true, kind: 'picked', detail: JSON.stringify({
+        tag: t.tagName.toLowerCase(),
+        selector: selector(t),
+        text: (t.innerText || t.textContent || '').replace(/\\s+/g, ' ').trim().slice(0, 160),
+        html: html.length > 800 ? html.slice(0, 800) : html,
+        rect: { x: r.left, y: r.top, w: r.width, h: r.height }
+      }) }, '*');
+    } catch (err) { /* nothing to be done from in here */ }
+  }
+  function swallow(e) { if (on) { e.preventDefault(); e.stopImmediatePropagation(); } }
+  win.addEventListener('mouseover', over, true);
+  win.addEventListener('click', pick, true);
+  win.addEventListener('contextmenu', pick, true);
+  ['mousedown', 'mouseup', 'pointerdown', 'pointerup', 'dblclick', 'auxclick'].forEach(function (type) {
+    win.addEventListener(type, swallow, true);
+  });
+  win.addEventListener('keydown', function (e) {
+    if (on && e.key === 'Escape') {
+      try { parent.postMessage({ __zaramPreview: true, kind: 'pick-cancel', detail: '' }, '*'); } catch (err) {}
+    }
+  }, true);
+  win.addEventListener('message', function (event) {
+    if (event.source !== win.parent) { return; }
+    var data = event.data;
+    if (!data || data.__zaramPreviewControl !== true || data.action !== 'pick') { return; }
+    on = data.on === true;
+    if (on) {
+      if (doc.pointerLockElement && doc.exitPointerLock) { try { doc.exitPointerLock(); } catch (err) {} }
+      doc.documentElement.style.cursor = 'crosshair';
+    } else {
+      hide(); current = null;
+      doc.documentElement.style.cursor = '';
+    }
+  });
+})(window, document);
+<\/script>`;
+
+/** A loop that cannot end, found by reading the source.
+ *
+ *  Found 5 October 2026 on a Minecraft-style page the resident model wrote:
+ *  `for(let i=0;i<16;i)for(...)` — the `++` missing — twenty-three times, in
+ *  the code that draws the hotbar icons. `i` never changes, the loop never
+ *  ends, and the page froze before drawing anything. A frame cannot be
+ *  interrupted from outside while it is stuck in one, and in a browser tab the
+ *  whole tab goes with it, so the only safe moment to catch it is before it
+ *  runs.
+ *
+ *  **One shape, because it is the one that is certain enough to say.** A
+ *  `for` whose update clause is a bare name (`i`) does nothing on every turn.
+ *  It only ends if the body changes the variable itself or leaves the loop, so
+ *  the answer is "very likely", and the panel offers *Run anyway*. A general
+ *  halting check is not on offer and this does not pretend to be one: `while
+ *  (true)` is how every game loop is written, and flagging it would teach
+ *  people to click past the warning. */
+export interface StuckLoop {
+  /** 1-based line in the model's page. */
+  line: number;
+  /** The loop header as written, trimmed. */
+  text: string;
+}
+
+const BARE_UPDATE = /for\s*\(\s*(?:let|var|const)?\s*([A-Za-z_$][\w$]*)\s*=[^;()]*;[^;()]*;\s*\1\s*\)/g;
+
+export function findStuckLoop(source: string): StuckLoop | null {
+  BARE_UPDATE.lastIndex = 0;
+  const match = BARE_UPDATE.exec(source);
+  if (!match) return null;
+  return {
+    line: source.slice(0, match.index).split('\n').length,
+    text: match[0].replace(/\s+/g, ' ').slice(0, 80),
+  };
+}
+
 /** The sandbox the app frame runs under.
  *
  *  **`allow-same-origin` must never join this list.** Granted alongside
@@ -348,7 +503,14 @@ export const PLAYBACK = `<script>
  *  `sandbox` attribute. The two together are the documented footgun, and
  *  `previewableCode.test.ts` asserts against it directly rather than trusting
  *  a comment to be read. */
-export const APP_SANDBOX = 'allow-scripts';
+//:
+// **`allow-pointer-lock` added 5 October 2026.** A first-person game starts by
+// locking the pointer on a click; without the flag the request fails, the
+// page's "click to start" overlay never clears, and the game cannot be
+// played. Pointer lock reaches nothing outside the frame — it hides the
+// cursor and reports mouse movement to the page — and Escape always releases
+// it, which the browser guarantees and no page can override.
+export const APP_SANDBOX = 'allow-scripts allow-pointer-lock';
 
 /** A readable page rather than the browser's default serif on white. */
 export const FRAME_STYLE = `<style>
@@ -378,6 +540,9 @@ export function wrapForPreview(
    *  reason to reach anywhere, and granting it one would be surface
    *  bought for nothing. */
   allowedHosts: readonly string[] = [],
+  /** Libraries Zaram serves this page from its own copy, already rendered as
+   *  markup by `previewLibraries.vendorPage`. Empty for most pages. */
+  libraries = '',
 ): string {
   if (mode !== 'app') return DOCUMENT_CSP + FRAME_STYLE + source;
   // Three things ahead of the page, and the order of all three is load-bearing.
@@ -389,7 +554,22 @@ export function wrapForPreview(
   // Playback goes last of the three: it wraps the timers the page is about to
   // use, so it must be in place before the page's first line, and it needs the
   // reporter already listening for a callback that throws on resume.
-  return appCsp(allowedHosts) + FRAME_STYLE + ERROR_REPORTER + SEALED_STORAGE + PLAYBACK + source;
+  // **No `FRAME_STYLE` for an app — 5 October 2026.** Its 24px of padding
+  // and white page are right for a document and wrong for anything that
+  // draws to the whole window: a game sized to `innerWidth` sat inset under
+  // a black band, with a scrollbar. An app is shown as the browser would show
+  // the saved file, which is the promise the preview exists to keep.
+  // The libraries go last of the prefix: after the reporter, so a library
+  // that fails to start is reported, and before the page, which uses them.
+  return (
+    appCsp(allowedHosts, Boolean(libraries)) +
+    ERROR_REPORTER +
+    SEALED_STORAGE +
+    PLAYBACK +
+    PICKER +
+    libraries +
+    source
+  );
 }
 
 /** The languages worth offering a preview for, and the label each gets. */
@@ -403,8 +583,15 @@ export interface PreviewableBlock {
   language: string;
   /** Human label for the button and the panel heading. */
   label: string;
-  /** The block's contents, verbatim. */
+  /** The block's contents, verbatim. For an app of several files, the files
+   *  already joined into the one page the frame runs. */
   code: string;
+  /** Present when the reply wrote an app of several named files. `code` is
+   *  their joined form; these are what is shown as code and what is saved. */
+  files?: AppFile[];
+  /** Whether the joined page loads modules from `data:` URLs, so its policy
+   *  has to allow them. */
+  modules?: boolean;
 }
 
 /**
@@ -421,6 +608,14 @@ export interface PreviewableBlock {
  */
 export function extractPreviewable(text: string): PreviewableBlock | null {
   if (!text) return null;
+
+  // An app of several named files is one thing to run, so it is read first:
+  // its page alone would show unstyled and do nothing.
+  const files = extractAppFiles(text);
+  const bundled = files ? bundleApp(files) : null;
+  if (files && bundled) {
+    return { language: 'html', label: 'App', code: bundled.html, files, modules: bundled.modules };
+  }
 
   // ```html … ``` — the fence language may carry extra words (```html title=x)
   // which are ignored, and the closing fence is optional while streaming.
@@ -454,6 +649,7 @@ export function extractPreviewable(text: string): PreviewableBlock | null {
  *  three operating systems with different opinions about what a filename may
  *  contain. Producing something dull that works everywhere is the whole job. */
 export function filenameFor(block: PreviewableBlock): string {
+  if (block.files) return `${block.files.length} files, as a folder`;
   const extension = block.language === 'svg' ? 'svg' : 'html';
   const titled = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(block.code);
   const slug = (titled?.[1] ?? '')
@@ -482,7 +678,11 @@ export function filenameFor(block: PreviewableBlock): string {
  *  because the file exists only as a string in this tab. The revoke is
  *  deferred for the same measured reason it is there — Chrome cancels a
  *  download whose object URL is released before it has finished reading it. */
-export function savePreviewable(block: PreviewableBlock): void {
+export function savePreviewable(block: PreviewableBlock): Promise<string | null> {
+  // An app of several files is a folder, and a browser download is one file.
+  // It is written to Zaram's output directory instead -- new files only, no
+  // project -- and the folder is named back to the person.
+  if (block.files) return saveAppFolder(block);
   const type = block.language === 'svg' ? 'image/svg+xml' : 'text/html';
   const url = URL.createObjectURL(new Blob([block.code], { type: `${type};charset=utf-8` }));
   try {
@@ -496,4 +696,31 @@ export function savePreviewable(block: PreviewableBlock): void {
   } finally {
     setTimeout(() => URL.revokeObjectURL(url), 10_000);
   }
+  return Promise.resolve(null);
+}
+
+/** Keep an app of several files as a new folder, and return where. Throws with
+ *  the backend's own reason when it refuses, so the person reads what was wrong
+ *  rather than that something was. */
+export async function saveAppFolder(block: PreviewableBlock): Promise<string> {
+  const titled = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(block.code);
+  const response = await fetch(`${import.meta.env.VITE_ZARAM_API ?? ''}/apps/save`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      name: titled?.[1]?.trim() || 'app',
+      files: (block.files ?? []).map((f) => ({ path: f.path, content: f.code })),
+    }),
+  });
+  if (!response.ok) {
+    let reason = `the save failed (${response.status})`;
+    try {
+      const body = (await response.json()) as { detail?: unknown };
+      if (typeof body.detail === 'string') reason = body.detail;
+    } catch {
+      /* the status is the reason */
+    }
+    throw new Error(reason);
+  }
+  return String(((await response.json()) as { path?: string }).path ?? '');
 }

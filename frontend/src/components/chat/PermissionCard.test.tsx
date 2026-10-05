@@ -197,3 +197,42 @@ describe('when a grant does not save', () => {
     expect(onAllowed).not.toHaveBeenCalled();
   });
 });
+
+describe('run this once', () => {
+  it('is offered for a call the gate will not let a grant settle, and grants nothing', async () => {
+    // An install always asks: not grantable, so before this the card
+    // offered only Deny. A yes for this one call is the answer that fits.
+    const onAllowed = vi.fn();
+    render(
+      <PermissionCard
+        call={held({ grantable: false, grantScope: '', once: true, heldTask: 'plan-7' })}
+        onAllowed={onAllowed}
+      />,
+    );
+    expect(screen.queryByTestId('allow-tool')).toBeNull();
+
+    await user().click(screen.getByTestId('run-once'));
+
+    expect(onAllowed).toHaveBeenCalledWith({ planId: 'plan-7', runHeld: true });
+    for (const fn of [allowToolForSession, grantTool, setShell, setWrites, setRuns, setDrives]) {
+      expect(fn).not.toHaveBeenCalled();
+    }
+  });
+
+  it('is not offered when the backend says no, or when there is no task to carry on', () => {
+    render(<PermissionCard call={held({ once: false, heldTask: 'plan-7' })} onAllowed={vi.fn()} />);
+    expect(screen.queryByTestId('run-once')).toBeNull();
+    cleanup();
+    render(<PermissionCard call={held({ once: true })} onAllowed={vi.fn()} />);
+    expect(screen.queryByTestId('run-once')).toBeNull();
+  });
+
+  it('a grant carries the parked task on too, without confirming the call', async () => {
+    const onAllowed = vi.fn();
+    render(<PermissionCard call={held({ once: true, heldTask: 'plan-7' })} onAllowed={onAllowed} />);
+
+    await user().click(screen.getByTestId('allow-tool-session'));
+
+    await waitFor(() => expect(onAllowed).toHaveBeenCalledWith({ planId: 'plan-7', runHeld: false }));
+  });
+});

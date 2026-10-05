@@ -341,6 +341,17 @@ export function describeSystem(s: {
       tone: 'busy',
     };
   }
+  // `coding` fell through to the idle line until 5 October 2026, so a reply
+  // writing code read "Local · cloud ready" under an orb that looked idle.
+  // It is named as its own state, because the avatar types in it and only in
+  // it, and a label saying "Thinking" over a typing character disagrees with
+  // the body.
+  if (s.activity === 'coding') {
+    const locality = (s.routing?.providers ?? [])[0]?.locality;
+    const where =
+      locality === 'local' ? ' on this machine' : locality === 'cloud' ? ' remotely' : '';
+    return { label: 'Coding', detail: `Writing code${where}.`, tone: 'busy' };
+  }
   if (s.activity === 'thinking') {
     // **Read off the thing that answers, never off the machine's posture.**
     //

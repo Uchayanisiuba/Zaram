@@ -175,7 +175,13 @@ export default function ActivityPanel({
         style={{
           width: '100%',
           maxWidth: 880,
-          height: 'min(80vh, 100%)',
+          // **As tall as what it holds, up to the old height.** A fixed 80vh
+          // drew one recalled-facts row at the top of an empty glass sheet
+          // the size of the window (5 October 2026). An info panel fits its
+          // rows; a page -- `CodePreviewPanel`, `ArtifactPreview`, the
+          // browser -- keeps the full size, because a page needs the room
+          // whatever it contains.
+          maxHeight: 'min(80vh, 100%)',
           background: 'var(--color-glass)',
           border: '1px solid var(--color-border)',
         }}
@@ -207,7 +213,7 @@ export default function ActivityPanel({
         {/* The site's trace, one call per line: a dim key column carrying the
             verb, the target as the value, and the verdict in a role colour —
             dim for ran, amber for anything that needs the person. */}
-        <ol className="trace flex-1 overflow-y-auto px-4 py-3">
+        <ol className="trace min-h-0 flex-1 overflow-y-auto px-4 py-3">
           {calls.map((call, i) => {
             const { Icon, color, label } = VERDICTS[call.verdict] ?? UNKNOWN;
             // A plan step carries its own phrase; a tool call is looked up.

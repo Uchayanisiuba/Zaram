@@ -58,6 +58,16 @@ function Fence({ children }: { children?: ReactNode }) {
         borderRadius: 8,
         border: RULE,
         background: 'var(--color-glass)',
+        // **Wrapped, not scrolled — 5 October 2026.** This was `overflow-x:
+        // auto` alone, and the app hides every scrollbar (`index.css`), so a
+        // code block wider than the reading column was simply cut off at the
+        // right with nothing to say it scrolled: the maintainer read a 150-
+        // character line of a game as the reply being clipped. Lines now fold
+        // at the box's edge and indentation is kept; what is copied is the
+        // original text, unfolded. `overflowX` stays as the fallback for the
+        // one thing that cannot fold, a very long unbroken token.
+        whiteSpace: 'pre-wrap',
+        overflowWrap: 'anywhere',
         overflowX: 'auto',
         fontSize: 12,
         lineHeight: 1.5,
