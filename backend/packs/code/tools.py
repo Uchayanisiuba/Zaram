@@ -285,6 +285,24 @@ class CodeTools:
             tools.extend(self._shell.descriptors(SERVER_ID))
         return tools
 
+    def tools_for_request(self) -> List[ToolDescriptor]:
+        """The tools worth putting in front of the model *right now*.
+
+        With no project open there is nothing for a file tool to act on, and
+        each one can only answer "no coding project is open". Offering them
+        anyway cost prompt tokens on every turn of every non-code conversation
+        and invited the model to call one: asked for a CSS animation, the
+        resident model's first act was `list_files`, and its reply opened with
+        "I checked for an open project first". The checklist stays, because
+        writing a plan down needs no folder.
+
+        `list_tools` is unchanged: Settings lists what the server *can* do, and
+        a person deciding what to grant is owed the whole set.
+        """
+        if self._root_for() is None:
+            return [tool for tool in self._read_tools() if tool.name == PLAN]
+        return self.list_tools()
+
     def _read_tools(self) -> List[ToolDescriptor]:
         return [
             ToolDescriptor(

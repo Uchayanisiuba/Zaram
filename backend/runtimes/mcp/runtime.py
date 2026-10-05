@@ -347,8 +347,19 @@ class McpRuntime:
             server = await self._connect(cfg)
             if server is None:
                 continue
+            # A built-in may offer fewer tools *for this request* than it can
+            # list: the code pack has nothing to read, edit or run until a
+            # project is open, and offering fourteen tools that can only answer
+            # "no project is open" costs prompt tokens on every turn and invites
+            # the model to call them. Measured 4 October 2026: asked for a CSS
+            # animation with no project open, the resident model opened with
+            # `list_files` and then told the user it had checked for an open
+            # project. A stranger's server has no such hook and is listed whole.
+            lister = getattr(server, "tools_for_request", None)
+            if not callable(lister) or cfg.server_id not in self._builtin:
+                lister = server.list_tools
             try:
-                found.extend(await asyncio.to_thread(server.list_tools))
+                found.extend(await asyncio.to_thread(lister))
             except Exception as exc:  # noqa: BLE001
                 logger.warning("could not list tools on %s: %s", cfg.server_id, exc)
 

@@ -147,22 +147,64 @@ class TestTheProjectRecordCarriesIt:
 
 
 @pytest.mark.asyncio
-async def test_the_bootstrapper_attaches_the_code_server():
+async def test_the_bootstrapper_attaches_the_code_server(tmp_path):
     """Registering is not reaching, and this repository has the scars. Asserted
     against the real boot path — if the registration line is deleted, the tools
-    stop existing for the product while every other test here still passes."""
+    stop existing for the product while every other test here still passes.
+
+    With a project open: the file tools are offered only when there is a folder
+    for them to act on (see the next test), so this opens one."""
     from core.bootstrapper import KernelBootstrapper
 
     kernel = KernelBootstrapper()
     await kernel.boot()
     try:
+        set_active_root(str(tmp_path))
         listed = await kernel.mcp_runtime.execute("mcp.list_tools", {"query": "read a file"})
 
         assert listed["success"] is True
         offered = {tool["name"] for tool in listed["tools"] if tool["server"] == SERVER_ID}
         assert {"list_files", "read_lines", "search_code"} <= offered
     finally:
+        set_active_root(None)
         await kernel.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_with_no_project_open_the_file_tools_are_not_offered():
+    """Measured 4 October 2026. Asked for a looping CSS animation with no project
+    open, the resident model's first act was `list_files`, and its reply began
+    "I checked for an open project first". Fourteen tools that can only answer
+    "no project is open" cost prompt tokens on every turn of every conversation
+    that is not about code, and invite the call.
+
+    Only the checklist remains: writing a plan down needs no folder. The listing
+    Settings shows is a different question and is checked below."""
+    from core.bootstrapper import KernelBootstrapper
+
+    kernel = KernelBootstrapper()
+    await kernel.boot()
+    try:
+        set_active_root(None)
+        listed = await kernel.mcp_runtime.execute("mcp.list_tools", {"query": "make me a page"})
+        offered = {tool["name"] for tool in listed["tools"] if tool["server"] == SERVER_ID}
+        assert offered == {"plan"}
+
+        # The whole set is still there for a person deciding what to grant.
+        every = {t["name"] for t in await kernel.mcp_runtime.tools_on(SERVER_ID)}
+        assert {"list_files", "read_lines", "search_code", "write_file", "plan"} <= every
+    finally:
+        await kernel.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_a_strangers_server_is_never_narrowed_by_the_project_check():
+    """The hook belongs to Zaram's own servers. A server somebody attached is
+    listed whole -- its tools are not ours to hide."""
+    from runtimes.mcp.runtime import McpRuntime
+
+    source = __import__("inspect").getsource(McpRuntime.available_tools)
+    assert "cfg.server_id not in self._builtin" in source
 
 
 class TestAUserCanPointItAtARepository:
