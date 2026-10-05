@@ -252,7 +252,7 @@ export default function DomainList({ domains, sources, onChanged }: DomainListPr
                           {inDomain ? (
                             <Check size={12} style={{ color: 'var(--color-emerald)' }} />
                           ) : (
-                            <X size={12} style={{ color: 'var(--color-text-faint, #3a3f5c)' }} />
+                            <X size={12} style={{ color: 'var(--color-text-faint, #7d84ad)' }} />
                           )}
                           <span className="text-xs truncate flex-1" style={{ color: 'var(--color-text)' }}>
                             {source.name}

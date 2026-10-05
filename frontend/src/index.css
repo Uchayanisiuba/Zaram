@@ -87,9 +87,19 @@
 
   --color-text: #e2e4ee;
   --color-text-primary: var(--color-text);
-  --color-text-secondary: #4a4f6a;
-  --color-text-muted: #6b7099;
-  --color-text-faint: #3a3f5c;
+  /* **Text tokens, measured 4 October 2026.** The three below were #4a4f6a,
+     #6b7099 and #3a3f5c: 2.1:1, 3.5:1 and 1.6:1 against the lightest surface
+     they sit on, and the app sets whole sentences in them -- hints, the
+     explanation under every Settings row, footnotes. WCAG AA for text is 4.5:1;
+     the faint token was not readable at all. Each is the same hue, lifted
+     until it clears its target on the *worst* surface (the overlay, #1a1e2e),
+     so it clears every surface above it: muted 6.0, secondary 5.0, faint 4.5.
+     The hierarchy is flatter as a result and that is the honest price of text
+     that can be read; size and weight carry it now. `theme/contrast.test.ts`
+     reads these lines and fails if a lift is undone. */
+  --color-text-secondary: #868cab;
+  --color-text-muted: #979ab7;
+  --color-text-faint: #7d84ad;
 
   --color-border-subtle: rgba(255,255,255,0.06);
   --color-border-subtle-2: rgba(255,255,255,0.07);

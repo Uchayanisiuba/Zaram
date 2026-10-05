@@ -100,7 +100,7 @@ export default function CommandPalette({ onClose, onNavigate }: CommandPalettePr
           padding: '14px 16px',
           borderBottom: '1px solid rgba(255,255,255,0.07)',
         }}>
-          <Search size={32} style={{ color: '#6b7099', flexShrink: 0 }} />
+          <Search size={32} style={{ color: 'var(--color-text-muted)', flexShrink: 0 }} />
           <input
             ref={inputRef}
             value={query}
@@ -123,7 +123,7 @@ export default function CommandPalette({ onClose, onNavigate }: CommandPalettePr
             borderRadius: 4,
             background: 'rgba(255,255,255,0.06)',
             border: '1px solid rgba(255,255,255,0.1)',
-            color: '#6b7099',
+            color: 'var(--color-text-muted)',
             fontFamily: 'var(--font-mono)',
           }}>ESC</kbd>
         </div>
@@ -132,7 +132,7 @@ export default function CommandPalette({ onClose, onNavigate }: CommandPalettePr
         <div style={{ maxHeight: 800, overflowY: 'auto' }}>
           {/* Workspace commands */}
           <div style={{ padding: '8px 0' }}>
-            <div style={{ fontSize: 20, fontWeight: 600, letterSpacing: '0.08em', color: '#3a3f5c', padding: '6px 16px', textTransform: 'uppercase' }}>
+            <div style={{ fontSize: 20, fontWeight: 600, letterSpacing: '0.08em', color: 'var(--color-text-faint)', padding: '6px 16px', textTransform: 'uppercase' }}>
               Workspaces
             </div>
             {filtered.map((item, i) => (
@@ -149,15 +149,15 @@ export default function CommandPalette({ onClose, onNavigate }: CommandPalettePr
                   border: 'none',
                   borderLeft: `2px solid ${i === selected ? '#6366f1' : 'transparent'}`,
                   cursor: 'pointer',
-                  color: i === selected ? '#e2e4ee' : '#6b7099',
+                  color: i === selected ? '#e2e4ee' : 'var(--color-text-muted)',
                   transition: 'all 0.1s',
                   textAlign: 'left',
                 }}
                 onMouseEnter={() => setSelected(i)}
               >
-                <span style={{ color: i === selected ? '#818cf8' : '#6b7099' }}>{item.icon}</span>
+                <span style={{ color: i === selected ? '#818cf8' : 'var(--color-text-muted)' }}>{item.icon}</span>
                 <span style={{ flex: 1, fontSize: 26, fontWeight: 500 }}>{item.label}</span>
-                <span style={{ fontSize: 22, color: '#3a3f5c' }}>{item.sub}</span>
+                <span style={{ fontSize: 22, color: 'var(--color-text-faint)' }}>{item.sub}</span>
                 {i === selected && <ArrowRight size={24} style={{ color: '#6366f1' }} />}
               </button>
             ))}
@@ -166,7 +166,7 @@ export default function CommandPalette({ onClose, onNavigate }: CommandPalettePr
           {/* AI actions */}
           {query === '' && (
             <div style={{ padding: '4px 0 12px', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
-              <div style={{ fontSize: 20, fontWeight: 600, letterSpacing: '0.08em', color: '#3a3f5c', padding: '8px 16px 4px', textTransform: 'uppercase' }}>
+              <div style={{ fontSize: 20, fontWeight: 600, letterSpacing: '0.08em', color: 'var(--color-text-faint)', padding: '8px 16px 4px', textTransform: 'uppercase' }}>
                 Ask Zara
               </div>
               {AI_SUGGESTIONS.map((s, i) => (
@@ -181,13 +181,13 @@ export default function CommandPalette({ onClose, onNavigate }: CommandPalettePr
                     background: 'transparent',
                     border: 'none',
                     cursor: 'pointer',
-                    color: '#6b7099',
+                    color: 'var(--color-text-muted)',
                     fontSize: 24,
                     transition: 'all 0.1s',
                     textAlign: 'left',
                   }}
                   onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.04)'; e.currentTarget.style.color = '#e2e4ee' }}
-                  onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = '#6b7099' }}
+                  onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--color-text-muted)' }}
                   onClick={onClose}
                 >
                   <Command size={22} style={{ color: '#6366f1' }} />

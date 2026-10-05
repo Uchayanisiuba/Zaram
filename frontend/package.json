@@ -11,6 +11,7 @@
     "check:proxy": "node scripts/check-proxy-covers-backend.mjs",
     "check:speech": "node scripts/check-no-cloud-speech.mjs",
     "check:links": "node scripts/check-no-dead-links.mjs",
+    "check:contrast": "node scripts/check-text-contrast.mjs",
     "check:visemes": "node --experimental-strip-types scripts/check-visemes.mjs",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "typecheck": "tsc --noEmit",
