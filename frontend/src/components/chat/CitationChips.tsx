@@ -16,7 +16,12 @@
  */
 import { FileText, Diamond, Globe } from 'lucide-react';
 
-import { type ChatSource, sourceHost, sourceLeftDevice } from '@/services/chatClient';
+import {
+  type ChatSource,
+  historyNeedsAMark,
+  sourceHost,
+  sourceLeftDevice,
+} from '@/services/chatClient';
 import { QUOTED_SEGMENT } from './quotedNotice';
 
 /** Icon per kind. The kind is *what* it is; the colour is whether it left. */
@@ -61,6 +66,21 @@ export function CitationChip({
   const host = sourceHost(source);
   const label = host ? `${KIND_LABEL[source.kind]} — ${host}` : KIND_LABEL[source.kind];
 
+  // What became of the thing cited, for a chip restored from a past
+  // conversation. A fact deleted since is drawn like one forgotten just now --
+  // one mark for one fact, whenever it happened -- and a corrected one is
+  // marked differently, because the answer was written from wording the fact
+  // no longer has and that is not the same as the fact being gone.
+  const changed = historyNeedsAMark(source);
+  const struck = forgotten || changed === 'deleted';
+  const note = struck
+    ? changed === 'deleted' && !forgotten
+      ? ' — deleted since this answer'
+      : ' — forgotten'
+    : changed === 'corrected'
+      ? ' — corrected since this answer'
+      : '';
+
   // Never render a chip that is not clickable. Citing without linking fails
   // the only task a citation exists for — checking it — and for this product a
   // decorative citation is worse than none.
@@ -68,14 +88,15 @@ export function CitationChip({
     <button
       type="button"
       onClick={(e) => onOpen(source, e.currentTarget)}
-      title={`${label}${forgotten ? ' — forgotten' : ''}`}
-      aria-label={`Source ${source.number ?? ''}: ${label}`}
+      title={`${label}${note}`}
+      aria-label={`Source ${source.number ?? ''}: ${label}${note}`}
+      data-history={source.history?.state}
       className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full border text-xs leading-none align-baseline transition-colors hover:bg-white/5"
       style={{
         borderColor: left ? 'rgba(168,85,247,0.45)' : 'rgba(34,211,238,0.40)',
         color: left ? 'rgb(196,152,252)' : 'rgb(120,220,240)',
-        textDecoration: forgotten ? 'line-through' : 'none',
-        opacity: forgotten ? 0.55 : 1,
+        textDecoration: struck ? 'line-through' : changed === 'corrected' ? 'underline dotted' : 'none',
+        opacity: struck ? 0.55 : 1,
       }}
     >
       <Icon size={9} aria-hidden />
@@ -147,6 +168,10 @@ export default function CitationSummary({
   }
 
   const leftCount = cited.filter(sourceLeftDevice).length;
+  // Said in words as well as drawn, because a struck-through chip is a mark and
+  // a person reopening last week's answer deserves the sentence.
+  const deletedSince = cited.filter((s) => historyNeedsAMark(s) === 'deleted').length;
+  const correctedSince = cited.filter((s) => historyNeedsAMark(s) === 'corrected').length;
 
   return (
     <div className="mt-2 flex flex-wrap items-center gap-1.5">
@@ -183,6 +208,17 @@ export default function CitationSummary({
           <span className="text-slate-600">
             {' · '}
             {uncited} recalled, not cited
+          </span>
+        )}
+        {(deletedSince > 0 || correctedSince > 0) && (
+          <span style={{ color: 'rgb(251,191,36)' }} data-testid="history-segment">
+            {' · '}
+            {[
+              deletedSince > 0 ? `${deletedSince} deleted since` : '',
+              correctedSince > 0 ? `${correctedSince} corrected since` : '',
+            ]
+              .filter(Boolean)
+              .join(', ')}
           </span>
         )}
         {quoted && (

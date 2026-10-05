@@ -31,9 +31,16 @@ Spine shows provenance that no longer holds. None of that applies to a tool
 call, a checklist or a file: a tool ran or it did not, and a file is on disk.
 They are records of what happened rather than claims about what is true now.
 
-Restoring citations *as history* — re-resolved against the Spine, with the
-deleted ones shown as deleted — is the better answer and is a larger piece of
-work. It is not started; `docs/MILESTONES.md` carries it.
+**Citations arrive here as references, 4 October 2026, and not as claims.**
+Restoring them as history was the better answer and is what this now does, but
+the argument above still governs how: what is kept is *which fact or page an
+answer leaned on* -- an id, a kind, a number -- and never the fact's text. The
+text is the user's data, and a copy of it in the transcript would survive
+rule 4: delete the fact and its wording would still sit here. On reopen the
+references are resolved against the Spine as it is **now**, and a fact that was
+corrected or deleted says so (`conversations/citations.py`). A web page is the
+exception that proves it: what was read from the web is a record of something
+that happened and left the machine, so its title and address are kept.
 """
 
 from __future__ import annotations
@@ -53,6 +60,10 @@ MAX_FIELD_CHARS = 4_000
 #: showing, but it must not be able to put megabytes into a row that is read
 #: whole every time the conversation is opened.
 MAX_CALLS = 200
+
+#: How many citations one reply may keep. A reply that recalled hundreds is a
+#: different problem, and a row read whole on every open must stay small.
+MAX_SOURCES = 60
 
 
 def _clip(value: Any) -> str:
@@ -77,6 +88,7 @@ class TurnNotes:
         self._calls: List[Dict[str, Any]] = []
         self._plan: Optional[Dict[str, Any]] = None
         self._artifact_ids: List[str] = []
+        self._sources: List[Dict[str, Any]] = []
 
     # ---------------------------------------------------------------- input
 
@@ -112,6 +124,8 @@ class TurnNotes:
                 self._see_step_complete(data)
             elif kind == "artifact":
                 self._see_artifact(data)
+            elif kind == "source":
+                self._see_source(data)
         except Exception:
             # Same reasoning as the parse guard above.
             return
@@ -230,7 +244,48 @@ class TurnNotes:
         if isinstance(artifact_id, str) and artifact_id and artifact_id not in self._artifact_ids:
             self._artifact_ids.append(artifact_id)
 
+    def _see_source(self, data: Dict[str, Any]) -> None:
+        """A citation, kept as a reference. See the module docstring.
+
+        Nothing is stored that is the user's own text: not the excerpt, and for
+        a fact or a document not the title either (a memory's title *is* the
+        fact). What identifies the thing is enough to find it again.
+        """
+        if len(self._sources) >= MAX_SOURCES:
+            return
+        kind = str(data.get("kind") or "")
+        url = data.get("url")
+        record_id = data.get("record_id")
+        if not kind or not (url or record_id):
+            return
+        key = str(record_id or url)
+        if any((s.get("recordId") or s.get("url")) == key for s in self._sources):
+            return
+        ref: Dict[str, Any] = {
+            "kind": kind,
+            "url": url if isinstance(url, str) else None,
+            "number": data.get("number"),
+            "cited": bool(data.get("cited", True)),
+            "origin": data.get("origin"),
+            "relevance": data.get("relevance"),
+        }
+        if isinstance(record_id, str) and record_id:
+            ref["recordId"] = record_id
+        if kind == "web":
+            # A page that was read: a record of something that left the
+            # machine. The egress row is the link back to the log.
+            ref["title"] = _clip(data.get("title"))[:200]
+            if data.get("egress_id"):
+                ref["egressId"] = data["egress_id"]
+            if data.get("bytes_sent") is not None:
+                ref["bytesSent"] = data["bytes_sent"]
+        self._sources.append(ref)
+
     # --------------------------------------------------------------- output
+
+    @property
+    def sources(self) -> List[Dict[str, Any]]:
+        return [dict(s) for s in self._sources]
 
     @property
     def tool_calls(self) -> List[Dict[str, Any]]:
@@ -257,4 +312,9 @@ class TurnNotes:
         return list(self._artifact_ids)
 
     def is_empty(self) -> bool:
-        return not self._calls and self._plan is None and not self._artifact_ids
+        return (
+            not self._calls
+            and self._plan is None
+            and not self._artifact_ids
+            and not self._sources
+        )

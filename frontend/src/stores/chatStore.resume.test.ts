@@ -44,6 +44,7 @@ function message(over: Record<string, unknown> = {}) {
     toolCalls: [],
     plan: null,
     artifactIds: [],
+    sources: [],
     ...over,
   };
 }
@@ -145,18 +146,55 @@ describe('what a reopened reply carries', () => {
   });
 });
 
-describe('what it still refuses to restore', () => {
-  /** A citation is a live claim that *this* answer used *that* fact, and rule
-   *  4 lets the fact be corrected or deleted. Yesterday's citation rendered
-   *  against today's Spine shows provenance that no longer holds — worse than
-   *  showing none.
-   *
-   *  The fix above deliberately stops short of this line: a tool call, a
-   *  checklist and a file are records of what happened and cannot go stale. */
-  it('does not invent sources for a restored reply', async () => {
+describe('citations come back as history', () => {
+  /** This block used to be `what it still refuses to restore`, and asserted
+   *  that a restored reply had no sources. The reasoning was right for a
+   *  *claim*: a citation says this answer used that fact, and rule 4 lets the
+   *  fact be corrected or deleted. Changed 4 October 2026 to the better answer
+   *  — the backend keeps the reference and resolves it against the Spine when
+   *  the conversation is reopened, so each citation arrives saying what became
+   *  of its fact. What stays true from the old contract: nothing is invented. */
+  const cited = (over: Record<string, unknown> = {}) => ({
+    kind: 'memory',
+    url: 'memory:fact-1',
+    title: null,
+    excerpt: null,
+    relevance: 0.8,
+    cited: true,
+    number: 1,
+    egressId: null,
+    bytesSent: null,
+    origin: 'conversation',
+    recordId: 'fact-1',
+    history: { state: 'deleted' },
+    ...over,
+  });
+
+  it('restores the citations the backend resolved, with their history', async () => {
     fetchConversation.mockResolvedValue(
-      stored([message({ toolCalls: [{ server: 's', tool: 't', verdict: 'allow', reason: '', target: '', output: '', at: 0 }] })]),
+      stored([message({ sources: [cited(), cited({ url: 'memory:f2', recordId: 'f2', number: 2, history: { state: 'corrected' } })] })]),
     );
+    await useChatStore.getState().resumeConversation('conv_1');
+    const sources = useChatStore.getState().messages[0].sources;
+    expect(sources.map((s) => s.history?.state)).toEqual(['deleted', 'corrected']);
+  });
+
+  it('restores no passage, because the passage is the person’s own text', async () => {
+    fetchConversation.mockResolvedValue(stored([message({ sources: [cited()] })]));
+    await useChatStore.getState().resumeConversation('conv_1');
+    expect(useChatStore.getState().messages[0].sources[0].excerpt).toBeNull();
+  });
+
+  it('does not invent sources for a reply that had none', async () => {
+    fetchConversation.mockResolvedValue(stored([message()]));
+    await useChatStore.getState().resumeConversation('conv_1');
+    expect(useChatStore.getState().messages[0].sources).toEqual([]);
+  });
+
+  it('opens a transcript from a client that sent no sources field at all', async () => {
+    const legacy = message() as Record<string, unknown>;
+    delete legacy.sources;
+    fetchConversation.mockResolvedValue(stored([legacy as ReturnType<typeof message>]));
     await useChatStore.getState().resumeConversation('conv_1');
     expect(useChatStore.getState().messages[0].sources).toEqual([]);
   });

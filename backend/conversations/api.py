@@ -20,6 +20,7 @@ from typing import List, Optional
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
+from .citations import FactLookup, resolve_sources
 from .records import ConversationRecords, UnknownConversation
 
 router = APIRouter(prefix="/conversations", tags=["conversations"])
@@ -31,6 +32,19 @@ def set_records(records: ConversationRecords) -> None:
     """Attach the live store (called from `main.py`)."""
     global _RECORDS
     _RECORDS = records
+
+
+_FACT_LOOKUP: Optional[FactLookup] = None
+
+
+def set_fact_lookup(lookup: Optional[FactLookup]) -> None:
+    """Attach the way to find a fact by id (called from `main.py`).
+
+    Injected rather than imported: this package must not depend on the memory
+    runtime, and a transcript has to open when the Spine cannot be reached.
+    """
+    global _FACT_LOOKUP
+    _FACT_LOOKUP = lookup
 
 
 def _records() -> ConversationRecords:
@@ -72,6 +86,10 @@ def _message_dict(message) -> dict:
         "toolCalls": [dict(c) for c in message.tool_calls],
         "plan": message.plan,
         "artifactIds": list(message.artifact_ids),
+        # References, as stored. Resolved against the Spine by the route that
+        # reads a whole conversation, not here: this is also what the list and
+        # export paths see, and they have no business looking facts up.
+        "sources": [dict(s) for s in message.sources],
     }
 
 
@@ -148,9 +166,17 @@ async def read_conversation(conversation_id: str) -> dict:
         messages = records.messages(conversation_id)
     except UnknownConversation:
         raise HTTPException(status_code=404, detail="No such conversation")
+    out_messages = []
+    for m in messages:
+        item = _message_dict(m)
+        # Looked up now, against the Spine as it is now -- see `citations.py`.
+        # Only assistant replies carry any; the loop costs nothing otherwise.
+        if item["sources"]:
+            item["sources"] = await resolve_sources(item["sources"], _FACT_LOOKUP)
+        out_messages.append(item)
     return {
         **_conversation_dict(conversation),
-        "messages": [_message_dict(m) for m in messages],
+        "messages": out_messages,
     }
 
 

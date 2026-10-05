@@ -291,12 +291,14 @@ interface ChatState {
    *  The transcript comes back as text, attribution, and what the reply
    *  *did* — its checklist, its tool calls, and the files it produced.
    *
-   *  **Citations are still not restored, and that is not an oversight** — a
-   *  citation is a claim that *this* answer used *that* fact, and the fact
-   *  may since have been corrected or deleted (rule 4). Rendering yesterday's
-   *  citation against today's Spine would show provenance that no longer
-   *  holds, which is worse than showing none. Reasoning stays out too: it is
-   *  the model's working, never part of what it said.
+   *  **Citations are restored as history — changed 4 October 2026.** A
+   *  citation is a claim that *this* answer used *that* fact, and the fact may
+   *  since have been corrected or deleted (rule 4), so yesterday's citation
+   *  cannot be drawn as if it still held. The backend keeps only the
+   *  *reference* and resolves it against the Spine when the conversation is
+   *  reopened (`conversations/citations.py`); each arrives saying whether its
+   *  fact is live, corrected, deleted or could not be checked. Reasoning stays
+   *  out: it is the model's working, never part of what it said.
    *
    *  **The rest used to be excluded by the same sentence, and should not have
    *  been — corrected 3 October 2026.** The argument above is about claims
@@ -305,9 +307,7 @@ interface ChatState {
    *  was never a reason to drop them — they were simply never written down.
    *  See `conversations/turn_notes.py`.
    *
-   *  Restoring citations *as history* — re-resolved against the Spine, with
-   *  deleted facts shown as deleted — is the better answer to the half that
-   *  remains, and is a larger piece of work than this one. Not started. */
+   */
   resumeConversation: (conversationId: string) => Promise<void>;
 }
 
@@ -1046,7 +1046,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
           id: m.id,
           role: m.role,
           text: m.text,
-          sources: [],
+          // **Restored as history, 4 October 2026.** These arrive resolved by
+          // the backend against the Spine as it is now, so a fact that was
+          // corrected or deleted since says so (`history.state`) instead of
+          // asserting provenance that no longer holds. They are never the
+          // live thing: the passage is not restored, and `unchecked` -- the
+          // lookup could not be made -- is never rendered as deleted.
+          sources: m.sources ?? [],
           // An id whose artifact is gone drops out rather than rendering a
           // card for a file that is not there — the same refusal the live
           // card makes with `exists`.

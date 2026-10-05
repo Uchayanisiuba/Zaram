@@ -67,6 +67,24 @@ export interface ChatSource {
   origin: string | null;
   /** The fact's id, for correct/forget inline in the panel. */
   recordId: string | null;
+  /** Present only on a citation restored from a stored conversation, and what
+   *  tells it apart from a live one: **what became of the thing it cited, read
+   *  from the Spine when the conversation was reopened.**
+   *
+   *  `live` still there · `corrected` it has been corrected since the answer was
+   *  written · `deleted` it is gone · `recorded` a web page, which is a record
+   *  that bytes left rather than a claim about the Spine · `unchecked` it could
+   *  not be looked up. **`unchecked` is never `deleted`**: saying a fact is gone
+   *  because the lookup failed would be an invented value about the user's own
+   *  data. */
+  history?: { state: 'live' | 'corrected' | 'deleted' | 'recorded' | 'unchecked' };
+}
+
+/** A restored citation whose fact no longer says what the answer used.
+ *  The two states a reader must be told about; the others need no mark. */
+export function historyNeedsAMark(source: ChatSource): 'corrected' | 'deleted' | null {
+  const state = source.history?.state;
+  return state === 'corrected' || state === 'deleted' ? state : null;
 }
 
 /** Whether a source cost the user any privacy. The one question a citation

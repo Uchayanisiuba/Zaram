@@ -97,16 +97,15 @@ class Message:
     #: plan, the tool calls and the files — *"users should be able to go back
     #: to previous conversations and access them"*.
     #:
-    #: **These are records of what happened, which is why they are stored and
-    #: citations are not.** `chatStore.resumeConversation` already refuses to
-    #: restore sources, on the good ground that a citation is a live claim
-    #: that *this* answer used *that* fact, and the fact may since have been
-    #: corrected or deleted (rule 4) — so yesterday's citation rendered
-    #: against today's Spine shows provenance that no longer holds. None of
-    #: that applies here. A tool ran or it did not; a plan had the steps it
-    #: had; a file is on disk. Nothing about them becomes false later, so the
-    #: argument for dropping them was never made — they were simply never
-    #: written down.
+    #: **These are records of what happened, which is why they are stored
+    #: whole.** A citation is a live claim that *this* answer used *that* fact,
+    #: and the fact may since have been corrected or deleted (rule 4), so
+    #: yesterday's citation rendered as-is against today's Spine shows
+    #: provenance that no longer holds -- which is why `sources`, below, keeps
+    #: only a reference and is resolved on reopen. None of that applies here. A
+    #: tool ran or it did not; a plan had the steps it had; a file is on disk.
+    #: Nothing about them becomes false later, so the argument for dropping
+    #: them was never made -- they were simply never written down.
     tool_calls: tuple = ()
     #: The model's checklist for this turn, or ``None`` where there was none,
     #: which is most turns. Stored whole rather than as rows: it is read back
@@ -119,6 +118,13 @@ class Message:
     #: written — copying it here would make the transcript the second place
     #: that disagrees about where somebody's file is.
     artifact_ids: tuple = ()
+    #: What the reply leaned on, as **references**: a kind, an id or address, a
+    #: number, whether it was cited. Never the text of a fact or a document --
+    #: that is the user's data, and a copy here would survive rule 4. Resolved
+    #: against the Spine as it is *now* when the conversation is reopened, so a
+    #: corrected or deleted fact says so instead of showing provenance that no
+    #: longer holds. See `conversations/citations.py`.
+    sources: tuple = ()
 
 
 @dataclass(frozen=True)
@@ -265,6 +271,7 @@ class ConversationRecords:
                 ("tool_calls", "TEXT NOT NULL DEFAULT '[]'"),
                 ("plan", "TEXT NOT NULL DEFAULT ''"),
                 ("artifact_ids", "TEXT NOT NULL DEFAULT '[]'"),
+                ("sources", "TEXT NOT NULL DEFAULT '[]'"),
             ):
                 if column not in message_columns:
                     conn.execute(
@@ -314,6 +321,7 @@ class ConversationRecords:
         tool_calls: Optional[Sequence[dict]] = None,
         plan: Optional[dict] = None,
         artifact_ids: Optional[Sequence[str]] = None,
+        sources: Optional[Sequence[dict]] = None,
     ) -> Message:
         """Add one message and bump the conversation's activity time.
 
@@ -354,12 +362,13 @@ class ConversationRecords:
                 tool_calls=tuple(tool_calls or ()),
                 plan=plan,
                 artifact_ids=tuple(artifact_ids or ()),
+                sources=tuple(sources or ()),
             )
             conn.execute(
                 "INSERT INTO messages "
                 "(id, conversation_id, seq, role, text, created_at, model, "
-                "locality, tool_calls, plan, artifact_ids) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "locality, tool_calls, plan, artifact_ids, sources) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     message.id,
                     message.conversation_id,
@@ -372,6 +381,7 @@ class ConversationRecords:
                     _as_json(list(message.tool_calls), "[]"),
                     _as_json(message.plan, "") if message.plan else "",
                     _as_json(list(message.artifact_ids), "[]"),
+                    _as_json(list(message.sources), "[]"),
                 ),
             )
 
@@ -577,6 +587,7 @@ def _message_from(row: sqlite3.Row) -> Message:
         tool_calls=tuple(_from_json(_column(row, "tool_calls"), []) or []),
         plan=_from_json(_column(row, "plan"), None),
         artifact_ids=tuple(_from_json(_column(row, "artifact_ids"), []) or []),
+        sources=tuple(_from_json(_column(row, "sources"), []) or []),
     )
 
 

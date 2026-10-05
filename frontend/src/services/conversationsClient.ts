@@ -14,6 +14,7 @@
 // Type-only, so this adds no import at runtime and cannot close a cycle with
 // the store that reads this client. The shapes live with the renderer that
 // draws them; the backend writes them to match.
+import type { ChatSource } from '@/services/chatClient';
 import type { ChatPlan, ChatToolCall } from '@/stores/chatStore';
 
 const API_BASE = import.meta.env.VITE_ZARAM_API ?? '';
@@ -129,6 +130,10 @@ export interface StoredMessage {
    *  record here would make the transcript a second place that disagrees
    *  about where somebody's file is. */
   artifactIds: string[];
+  /** The citations this reply leaned on, **resolved against the Spine as it is
+   *  now** by the backend -- each says whether its fact is still there, was
+   *  corrected, or was deleted. Empty is the ordinary case. */
+  sources: ChatSource[];
 }
 
 export interface StoredConversation extends ConversationSummary {
@@ -162,6 +167,7 @@ function toMessage(row: Record<string, unknown>): StoredMessage {
     toolCalls: Array.isArray(row.toolCalls) ? (row.toolCalls as ChatToolCall[]) : [],
     plan: isPlan(row.plan) ? row.plan : null,
     artifactIds: Array.isArray(row.artifactIds) ? (row.artifactIds as string[]).map(String) : [],
+    sources: Array.isArray(row.sources) ? (row.sources as ChatSource[]) : [],
   };
 }
 

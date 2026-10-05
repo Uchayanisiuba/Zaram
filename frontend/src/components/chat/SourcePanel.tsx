@@ -72,6 +72,8 @@ export default function SourcePanel({
   const [loading, setLoading] = useState(true);
   const [deleting, setDeleting] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  /** The fact this citation points at no longer exists. */
+  const [gone, setGone] = useState(false);
 
   const panelRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
@@ -137,7 +139,14 @@ export default function SourcePanel({
         }
       })
       .catch((e: unknown) => {
-        if (!cancelled) setError(e instanceof Error ? e.message : 'Could not load this source.');
+        if (cancelled) return;
+        // A fact that is not there is a different answer from a lookup that
+        // failed, and the panel was saying "Could not load this source" for both.
+        // The first is the common case for a citation in a conversation reopened
+        // after the person forgot the fact -- and it should read as that.
+        const message = e instanceof Error ? e.message : '';
+        setGone(/no longer exists|\b404\b|not found|no such/i.test(message));
+        setError(message || 'Could not load this source.');
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -258,7 +267,14 @@ export default function SourcePanel({
             </div>
           )}
 
-          {error && !loading && (
+          {error && !loading && gone && (
+            <p data-testid="source-gone" className="text-xs leading-relaxed text-slate-400">
+              This fact has been deleted. The answer that cited it was written while it
+              existed; what it said is not kept anywhere, because you asked for it to go.
+            </p>
+          )}
+
+          {error && !loading && !gone && (
             <p className="text-xs leading-relaxed" style={{ color: '#fca5a5' }}>
               {error}
             </p>
@@ -281,6 +297,17 @@ export default function SourcePanel({
                 by Zaram.
               </p>
             </>
+          )}
+
+          {record && !loading && record.superseded_by && (
+            <p
+              data-testid="source-corrected"
+              className="mb-3 text-xs leading-relaxed"
+              style={{ color: 'rgb(251,191,36)' }}
+            >
+              Corrected after this answer was written. This is the wording the answer used;
+              the fact now says something else.
+            </p>
           )}
 
           {record && !loading && (

@@ -297,10 +297,30 @@ app.include_router(providers_router)
 # in `tests/test_routes_are_mounted.py`, which is the only place the claim that
 # these routes are reachable can be true.
 from conversations import ConversationRecords, default_db_path as conversations_db_path  # noqa: E402
-from conversations.api import router as conversations_router, set_records  # noqa: E402
+from conversations.api import router as conversations_router, set_fact_lookup, set_records  # noqa: E402
 from conversations.turn_notes import TurnNotes  # noqa: E402
 
 set_records(ConversationRecords(conversations_db_path()))
+
+
+async def _look_up_a_fact(record_id: str):
+    """Find one fact by id for a reopened conversation's citations.
+
+    Raises `FactLookupUnavailable` when the Spine is not up, which is a
+    different answer from "not there": the first must render as *unchecked* and
+    the second as *deleted*, and a lookup that could not be made must never be
+    allowed to claim the second.
+    """
+    from conversations.citations import FactLookupUnavailable
+
+    runtime = getattr(kernel, "memory_runtime", None)
+    store = getattr(runtime, "_store", None)
+    if store is None:
+        raise FactLookupUnavailable("the memory store is not available")
+    return await store.get(record_id)
+
+
+set_fact_lookup(_look_up_a_fact)
 app.include_router(conversations_router)
 
 # The MCP client has been live since 1 September and had no way in: attaching a
@@ -898,6 +918,7 @@ def _record_reply(
             tool_calls=notes.tool_calls if notes else None,
             plan=notes.plan if notes else None,
             artifact_ids=notes.artifact_ids if notes else None,
+            sources=notes.sources if notes else None,
         )
     except Exception as exc:
         logging.getLogger(__name__).warning("Chat: could not record the reply: %s", exc)

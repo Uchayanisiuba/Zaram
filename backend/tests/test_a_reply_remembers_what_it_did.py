@@ -265,36 +265,129 @@ class TestItCannotGrowWithoutBound:
 # ------------------------------------------------------- the line that holds
 
 
-class TestCitationsStayOut:
-    """The refusal `resumeConversation` already makes, and why this does not
-    widen it.
+class TestCitationsAreKeptAsReferencesOnly:
+    """What the store keeps of a citation, and what it must never.
 
-    A citation is a claim that *this* answer used *that* fact. Rule 4 lets
-    the fact be corrected or deleted, so rendering yesterday's citation
-    against today's Spine shows provenance that no longer holds — worse than
-    showing none. A tool call, a checklist and a file are records of what
-    happened, and nothing about them becomes false later.
+    This class used to be `TestCitationsStayOut` and asserted that sources were
+    not collected at all. That was the right refusal for a *claim* -- a citation
+    says this answer used that fact, rule 4 lets the fact be corrected or
+    deleted, and yesterday's citation against today's Spine shows provenance that
+    no longer holds. Changed 4 October 2026 to the better answer the old
+    docstring pointed at: keep the **reference** and look again on reopen
+    (`conversations/citations.py`). What survives from the old contract is the
+    part that was always the point -- the user's text does not enter the
+    transcript.
     """
 
-    def test_sources_are_not_collected(self):
-        notes = TurnNotes()
-        notes.see(frame("source", id="m1", text="the rate is 450/day", relevance=0.8))
-        assert notes.is_empty()
+    def _source(self, **over):
+        data = {
+            "kind": "memory",
+            "url": "memory:fact-1",
+            "title": "the rate is 450/day",
+            "excerpt": "Keyline pays 450 a day, net 30",
+            "relevance": 0.8,
+            "cited": True,
+            "number": 1,
+            "origin": "conversation",
+            "record_id": "fact-1",
+        }
+        data.update(over)
+        # Built directly: `frame(kind, **data)` already owns the name `kind`,
+        # and a source's own `kind` is data, not the frame's type.
+        return json.dumps({"type": "source", "data": data, "ts": 0, "seq": 0, "correlation_id": ""})
 
-    def test_reasoning_is_not_collected(self):
+    def test_a_citation_is_kept_as_a_reference(self):
+        notes = TurnNotes()
+        notes.see(self._source())
+        (ref,) = notes.sources
+        assert ref["kind"] == "memory"
+        assert ref["recordId"] == "fact-1"
+        assert ref["number"] == 1
+        assert ref["cited"] is True
+        assert not notes.is_empty()
+
+    def test_a_facts_wording_never_enters_the_transcript(self):
+        """The title of a memory citation *is* the fact, and the excerpt is the
+        user's own passage. Kept, either would outlive rule 4: delete the fact
+        and its text would still sit in the transcript."""
+        notes = TurnNotes()
+        notes.see(self._source())
+        (ref,) = notes.sources
+        assert "title" not in ref
+        assert "excerpt" not in ref
+        assert "450" not in str(ref)
+
+    def test_a_document_is_kept_without_its_text_too(self):
+        notes = TurnNotes()
+        notes.see(self._source(kind="document", url="C:/clients/keyline.pdf", record_id=None))
+        (ref,) = notes.sources
+        assert "title" not in ref and "excerpt" not in ref
+        assert ref["url"] == "C:/clients/keyline.pdf"
+
+    def test_a_web_page_keeps_its_title_and_its_egress_row(self):
+        """A record that a page was read and bytes left, not a claim about the
+        Spine. The egress row is the link back to the log."""
+        notes = TurnNotes()
+        notes.see(
+            self._source(
+                kind="web", url="https://example.com/a", title="A page", record_id=None,
+                egress_id="e1", bytes_sent=42, excerpt="a passage from the page",
+            )
+        )
+        (ref,) = notes.sources
+        assert ref["title"] == "A page"
+        assert ref["egressId"] == "e1"
+        assert ref["bytesSent"] == 42
+        assert "excerpt" not in ref
+
+    def test_the_same_source_twice_is_one_reference(self):
+        notes = TurnNotes()
+        notes.see(self._source())
+        notes.see(self._source())
+        assert len(notes.sources) == 1
+
+    def test_a_source_with_nothing_to_find_it_by_is_dropped(self):
+        notes = TurnNotes()
+        notes.see(json.dumps({"type": "source", "data": {"kind": "memory", "title": "a fact"}}))
+        assert notes.sources == []
+
+    def test_reasoning_is_still_not_collected(self):
         """The model's working, never part of what it said."""
         notes = TurnNotes()
         notes.see(frame("reasoning", content="let me think about this"))
         assert notes.is_empty()
 
-    def test_the_store_has_nowhere_to_put_one(self, records):
-        """Enforced by the schema rather than by remembering. A later caller
-        cannot pass sources to `append` because there is no parameter."""
-        import inspect
+    def test_the_store_keeps_them_and_reads_them_back(self, records):
+        conv = records.start()
+        records.append(
+            conv.id, "assistant", "the answer",
+            sources=[{"kind": "memory", "url": "memory:fact-1", "recordId": "fact-1", "number": 1}],
+        )
+        (message,) = records.messages(conv.id)
+        assert message.sources[0]["recordId"] == "fact-1"
 
-        taken = set(inspect.signature(records.append).parameters)
-        assert "sources" not in taken
-        assert "citations" not in taken
+    def test_a_database_that_predates_the_column_still_opens(self, tmp_path):
+        import sqlite3
+
+        from conversations.records import ConversationRecords
+
+        path = str(tmp_path / "old.db")
+        with sqlite3.connect(path) as conn:
+            conn.execute(
+                "CREATE TABLE conversations (id TEXT PRIMARY KEY, title TEXT NOT NULL DEFAULT '', "
+                "project_id TEXT NOT NULL DEFAULT '', created_at REAL NOT NULL, updated_at REAL NOT NULL)"
+            )
+            conn.execute(
+                "CREATE TABLE messages (id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, "
+                "seq INTEGER NOT NULL, role TEXT NOT NULL, text TEXT NOT NULL, created_at REAL NOT NULL, "
+                "model TEXT NOT NULL DEFAULT '', locality TEXT NOT NULL DEFAULT '')"
+            )
+            conn.execute("INSERT INTO conversations VALUES ('c1','t','',1,1)")
+            conn.execute("INSERT INTO messages VALUES ('m1','c1',1,'assistant','old reply',1,'','')")
+        reopened = ConversationRecords(path)
+        (message,) = reopened.messages("c1")
+        assert message.text == "old reply"
+        assert message.sources == ()
 
 
 # ----------------------------------------------------------------- the wire
