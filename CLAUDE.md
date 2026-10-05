@@ -1141,9 +1141,13 @@ spent rebuilding the former is an hour not spent on the latter.
 - **Assume unreachable until the caller is seen.** Parts of Zaram were built
   with Kilo Code and Trae, which produce a plausible, well-commented, fully
   tested whole and cannot check that anything calls it — and the tests they
-  write assert the scaffolding rather than the contract. **Fifteen complete,
-  tested, unreachable subsystems have been found**, including the
-  prompt-injection defence and a 1,261-line model-ranking engine. This is the
+  write assert the scaffolding rather than the contract. **Nineteen complete,
+  tested, unreachable subsystems have been found** (count as of 4 October
+  2026; `docs/MILESTONES.md` carries the running tally and is the authority
+  when this drifts, which it did: this line read fifteen while that file had
+  reached nineteen), including the prompt-injection defence, a 1,261-line
+  model-ranking engine, and the jobs-and-grants tools, which shipped in
+  alpha.3 and which the model could never call. This is the
   base rate here, not pessimism, and it is why "tests green" has repeatedly
   meant nothing. `npm run check:reachability` reports two of the shapes and is
   explicit that it misses three more — a dead branch inside a live function, an

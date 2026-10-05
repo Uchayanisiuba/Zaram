@@ -29,6 +29,241 @@ landed; the rest are listed here with enough of the reasoning that nobody
 has to re-derive it. **This block is the re-entry point** — none of the
 items below were declined, and none were dropped.
 
+#### 4 October, later — "keep going till it is all done", and what that turned up
+
+The rest of the open list, worked in one long sitting with the resident model
+loaded. Nothing is committed. **Two items are not done because they are the
+maintainer's to decide, not because they were hard:** cutting alpha.4, and which
+second voice engine (see the end).
+
+**Landed, each with tests, and the ones that have a screen seen on a real one:**
+
+* **Drawing hands the card back.** When a picture evicts the chat model, the
+  runtime remembers what it released and, after the last picture, says so and
+  reloads it in the background through `warm_local_model` — so the next question
+  is not the one that waits 106 s. Only if something was actually evicted.
+* **A push asks first.** `packs/code/publishing.py` finds `git push` in a command
+  Zaram is about to run, resolves the remote's host, and asks the gate for
+  `DataClass.REPO`. The log gets a count of commits and the remote, never
+  messages. Governs Zaram's commands, not the person's. **It reads command
+  lines and says so as a test:** `sh -c "…"` is seen; a built-up command is not.
+  Activity has a `repos` row per host a push reached.
+* **A send always asks.** `looks_outbound` (`send`, `reply`, `forward`,
+  `publish`, `submit`…, and `post`/`push`/`share`/`invite` unless the name also
+  looks like a read) behaves like a delete: confirms however much is granted,
+  never offered as "always", never covered by "run without stopping". Drafts are
+  untouched — held by definition. An existing test asserted that
+  `imap_send_email` ran unattended; it encoded the old contract and was changed.
+* **A terminal you can watch.** Shared `TerminalTools` held by the kernel (the
+  panel shows the shell Zaram uses), three routes under `/projects/{id}/terminal`,
+  a `TerminalPanel`, and the missing fourth checkbox in Project. Shells close at
+  shutdown. Seen: the person's command, labelled `you`, run in a real PowerShell.
+* **Citations as history.** `TurnNotes` keeps *references* — kind, id, number,
+  never the fact's words — and `conversations/citations.py` resolves them against
+  the Spine on reopen: live / corrected / deleted / recorded (web) / **unchecked,
+  which is never called deleted**. Chips strike through a deleted fact, mark a
+  corrected one, and the summary line says how many changed.
+* **TabbyAPI builds are listed and graded.** `tabby` entries in the model
+  manifest (repo, revision, parameters, bits per weight → size by arithmetic),
+  never `recommended`, a `hf download …` command with the folder left as a
+  placeholder, and the pull route refuses them (400). Zaram cannot fetch them:
+  TabbyAPI's model folder is its own setting.
+* **Playback and review on the HTML surface.** A `PLAYBACK` prelude in the sealed
+  frame holds animation frames, timeouts and intervals while paused and releases
+  them; CSS animations stop by a rule. Plus Restart and a Code view. **Seen in a
+  real sandboxed frame:** a generated CSS ball held still while the app behind it
+  moved; a generated endless runner's score froze at 50 for three seconds and
+  carried on (50 → 95) on resume. It says "pause", not "freeze": workers, audio
+  and video are not stopped.
+* **Text you can read.** `--color-text-faint` was 1.6:1 and `--color-text-muted`
+  3.5:1 on the surfaces they sit on, with whole sentences set in them. Lifted
+  (same hue) to 4.5/5.0/6.0 on the worst surface; `check:contrast` computes it
+  from `index.css` on every build and fails the old values 18 ways. Hierarchy is
+  flatter — size and weight carry it now.
+* **Thinking can be skipped for one message.** See the measurement below.
+  `thinking` and `retry` on `ChatRequest`, a `ContextVar`
+  (`core/thinking_override.py`) both local engines read, and an offer
+  ("Answer without thinking") that appears only once thinking has run 45 s with
+  no answer begun. The abandoned attempt commits nothing and touches nothing
+  shared — an abort is observed after its replacement has started.
+* **Project tools are not offered when no project is open.** The code pack's
+  fourteen tools could only answer "no project is open", cost prompt on every
+  turn, and invited the call. `tools_for_request` (built-ins only; Settings still
+  lists everything) leaves just the checklist.
+
+**What the live evaluation found.** `tests/test_eval_what_the_local_model_makes.py`
+(`-m measure`) sends six requests a person would type through the real `/chat`.
+Measured on the maintainer's 12 GB card, Qwen3.8-27B EXL3 2.20bpw on TabbyAPI:
+
+| Case | Thinking on | Thinking off |
+|---|---|---|
+| Looping CSS animation | **870 s**, 87% of frames were reasoning | **61 s** |
+| Three.js voxel world | not run (would be ~15 min) | 162 s |
+| Playable endless runner | not run | 160 s |
+| SVG fox logo | — | empty reply, 1 s (see below) → 50 s fixed |
+| Spreadsheet of expenses | — | 15 s, an artifact was made |
+| "Apple's stock price right now" | — | 8 s, states no price |
+
+The pages were opened in a real browser: the runner is a complete game (collision,
+score, game over, restart); the voxel world loads three.js from a real pinned
+CDN URL and is refused by default exactly as designed. **The setting's own
+comment predicted thinking costs "10–40 s".** It is on by default; whether to
+change that default is the maintainer's call, and the per-message offer is the
+mitigation that does not take the choice away.
+
+**Defects the evaluation found, all fixed:**
+
+* **"Draw a minimalist fox logo as an SVG" returned nothing.** `draw` within
+  reach of `logo` is the whole image rule, so it went to the image generator,
+  which said "No image model is installed" and ended the reply. SVG is text.
+  `_TEXT_FORMATS` (svg, html, css, ascii, mermaid, tikz, canvas, graphviz) now
+  gates both routing paths, and a request for something visual in one is CODE —
+  not image, and not vision (the first fix landed "make an SVG image of a fox" on
+  the rule for *reading* a picture). Negation ("not ASCII") and existing pictures
+  ("what is in this svg image") are respected.
+* **Three of Zaram's own tools were refused by the gate.** `draw_image`,
+  `record_job_posting` and `check_eligibility` are declared granted by their own
+  servers, which were registered read-only, and `decide` refuses a read-only
+  server's write *before* it reads grants. **The jobs-and-grants feature that
+  shipped in alpha.3 has never been callable by the model.** Their tests called
+  the tool code directly. `_effective_mode` now honours a built-in's own grant
+  (and only that; destructive and outbound still confirm), and
+  `test_every_tool_a_built_in_grants_can_actually_run` audits every built-in
+  through the real gate on the real boot. The nineteenth unreachable subsystem.
+* **A resident model was reported as "needs 7.4 GB, 1.1 GB free".** Introduced
+  by this session's own Tabby sizing: the preload gate asked a model already on
+  the card whether it would fit in what was left. Fixed, with the narrowing
+  tested.
+* **The model offered `draw_image` for an SVG.** Its description now says
+  written formats are not its job.
+
+**Smaller things worth knowing:**
+
+* `chooses_tools` trusts a model whose size is unknown. A small Tabby model now
+  has a derived size, so it is judged like any other. Intended; not tested
+  against a real small Tabby model.
+* The model calls `plan` for trivial requests (once, silently). Harmless.
+* **Not exercised:** Yahoo Finance parsing (needs web search on), driving Excel,
+  and GIMP over MCP. The spreadsheet case made an artifact; whether it is the
+  right artifact was not inspected.
+* Source-inspecting tests (`inspect.getsource`) fail if the file changes during
+  the run — one did, from editing `main.py` mid-run. It passes alone.
+
+**Needs the maintainer:**
+
+1. **Cutting alpha.4.** `scripts/release-notes.mjs` now covers this build (twelve
+   bullets added). Pushing a `v*` tag runs a public build, creates the Release,
+   commits to `main` and publishes the site, all under the maintainer's name, so
+   it is not done here. `site/index.html` carries a dated three-line alpha.4
+   entry that does not mention any of this; that is public copy and left alone.
+2. **A second voice engine.** Verified from the repositories: *sherpa-onnx* is
+   Apache-2.0, CPU-only, Windows x64 and others, and runs Piper, Kokoro, VITS and
+   Matcha models — a runtime, with each voice carrying its own licence, to be
+   checked per voice. *KittenTTS* code is Apache-2.0 but its newest model is
+   under a "Stellon Labs Community License" whose terms were not confirmed.
+   `CLAUDE.md` still says Kokoro and only Kokoro, with the reasoning (VRAM,
+   licence, platform). Adding one means a pip dependency (~tens of MB) and a
+   voice-model download, both of which want an explicit yes.
+
+#### 4 October, evening — "do everything in the milestone", and what that honestly covered
+
+Asked to take the open list in one sitting. Eleven pieces landed and were
+checked; the rest are listed below with why they did not, because "all of it"
+was not possible and saying so is the handoff. **Nothing is committed** — the
+tree is dirty with this session's work only.
+
+**Landed, each with tests, and the three screens seen in a real browser:**
+
+* **Voices.** A dated local manifest (`backend/voice/voices.manifest.json`, 54
+  voices, the upstream author's grades and `null` where he gave none) so
+  `/voice/voices` stops answering empty. `installed` is read from the HF cache
+  offline. Settings has a `VoiceBrowser` — searchable, grouped by language,
+  price on the button, voices needing `espeak-ng` / `misaki[ja]` greyed with
+  what they need. **A hole was closed on the way:** the torch pipeline fetched
+  a voice on first use through `KPipeline.load_voice` with nothing asked and
+  nothing logged; `KokoroProvider._ensure_voice` now asks the gate first, and
+  `fetch_voice` is gated like the model. `fetchVoices` would also have printed
+  `[object Object]` the moment the backend sent rows.
+  **Not seen:** an actual download. It pulls 523 kB from huggingface.co and
+  was left for the maintainer to press.
+* **Model browser.** Capability badges and a Details drawer. `capabilities`
+  is an optional manifest field set only where there is evidence (Qwen3's tool
+  and thinking support; the two entries whose own text says vision). **Empty
+  means "not stated", never "cannot"**, and a test says so. Not done: quantisation
+  *choices* (the manifest has one tag per model) and a README panel (a model's
+  page is a network call nobody asked for; the drawer says so).
+* **A Tabby model has a size.** `size_from_id` derives weights from a
+  quantisation named in the id — `27B` × `2.20bpw` ÷ 8 ≈ 7.4 GB — and is `None`
+  unless *both* figures are present, never for a cloud id, and marked
+  `size_source: "derived from the model id"`. It reads a naming convention,
+  not a model name. **Still open on the Tabby side:** EXL3 entries in the
+  manifest (so Zaram can *recommend* one).
+* **A BROWSING switch** in Settings, and its route. **`set_class_default`
+  existed with no HTTP route**, so the pane was refused by default and nothing
+  could change that. `PUT /egress/class-default` accepts `browse` only; the
+  policy refuses every other class and the route surfaces its sentence as 400.
+* **`DataClass.REPO`** — the repo-push class the GitHub work was waiting on.
+  Its own consent, not inherited from a connected host, and **not** in
+  `_MAY_DEFAULT_CLASS_WIDE`: "push anywhere" is the standing allow that must
+  never exist. Nothing pushes yet; this is the gate it will stand behind.
+* **Forget what Zaram remembers** in Settings, beside the export.
+  `POST /memory/purge` had been complete since 3 October, with a dry-run count
+  by default, **and no screen called it** — the eighteenth unreachable
+  subsystem. The delete button does not exist until a count has been read,
+  carries the number, and vanishes when any input changes.
+* **`npm run check:assets` was red** on a comment in `CodePreviewPanel.tsx`
+  quoting a `<script src=…>` tag as prose. Reworded; all five guards pass.
+
+* **Overlapping text in Settings, fixed.** The "Download a model" list painted
+  over every section below it. The wrapper had only `max-height: 420` and the
+  browser's root is `h-full`; a percentage of a parent with no definite height is
+  `auto`, so the list was never constrained and never scrolled. Wrapper is now a
+  flex column and the root `min-h-0`; measured at exactly 420 px with the list
+  scrolling inside it. `FirstRunPanel` had the identical pattern and got the same
+  fix. It predates this session; the Details drawer only made it worse.
+* **The per-source pane shows exceptions, not a log.** Destinations contacted
+  with no rule are one line with a count ("N other destinations were contacted
+  and have no rule — all refused"), opened on request and capped at 20. This was
+  the 41-rows-all-"Always" control from 3 October.
+* **"Size not reported" on the Tabby model in "On the card" is correct and left
+  alone.** That panel is what the server holds in VRAM, cache included; the
+  7.4 GB derived from the id is weights only and would read as a measurement it
+  is not.
+
+**Findings worth acting on, not fixed here:**
+
+* **Purge did not touch superseded facts — FIXED the same evening.**
+  Correcting a fact keeps the original row with its old wording, and `purge()`
+  and `forget_scope()` (project deletion) both read `all_records()`, which
+  hides those rows. "Forget everything" left the old wording on disk. Both now
+  read them. `matched` stays the facts the person can see and `superseded`
+  counts earlier versions apart, and the screen says "plus N earlier versions
+  of facts you corrected". A purged fact takes its earlier wordings with it
+  even when they fall outside the range, followed **backwards only** — a newer
+  fact outside the range is never taken. I did not check what else the
+  `memories` table holds, so the screen still claims nothing about documents.
+* **The backend on 8420 right now is older than this session's work** (started
+  12:34, before the routes). It will 404 the new routes until restarted. I ran
+  my own pair on 8421/5190 with `ZARAM_DATA_DIR` pointed at the scratchpad, so
+  nothing here touched the real Spine or egress policy.
+* **`ZARAM_BACKEND`** lets the Vite proxy target another port; `TrustedHost`
+  matches on hostname, so a backend on 8421 works. Useful when another chat
+  owns 8420.
+
+**Not done, and why:**
+
+| Item | Why not |
+|---|---|
+| Release/load for image generation | Needs the interface for a ~30 s swap designed first; no sensible small slice |
+| Getting more out of qwen3.8, playback/review | Needs a long interactive session against the model, not code |
+| GitHub and email | The class is in; the MCP servers, the draft-and-hold flow and the automation are separate work |
+| Where a running automation reports | Activity's question; undecided |
+| A terminal surface | Needs a terminal-emulator dependency, so a licence check first |
+| Citations as history | Re-resolving against the Spine is larger than a session slice |
+| The design pass | No measurable target was given |
+| A second TTS engine | A dependency-stack decision, deliberately separate |
+| Cutting alpha.4 | A tag and a release are outward-facing; the maintainer's to cut |
+
 #### 4 October, overnight — what landed, and the one thing still broken
 
 **The model browser does not work in the running app, and I did not find
@@ -124,7 +359,7 @@ it has not established.
 
 ### Open work, in the order it is worth doing
 
-**1. Voices — and the shape of this changed today.** It was recorded as
+**1. Voices — manifest and browser DONE 4 October evening; a second engine is still a separate decision.** It was recorded as
 *blocked on a dependency decision*. It is not, and the measurement says
 so: **Kokoro 0.9.4 is installed and speaking**, and `/voice/voices`
 returns `[]` because listing the pack means asking huggingface.co, which
@@ -143,25 +378,25 @@ the reasoning — VRAM, licence, platform coverage — and names Chatterbox
 among the excluded. That is a deliberate decision to revisit on its own
 terms, not inside a voice picker.
 
-**2. The model browser's richer presentation.** Capability badges, a
+**2. The model browser's richer presentation — badges and details DONE 4 October evening; quantisation choices and a README panel are not.** Capability badges, a
 README panel, quantisation choices, from the LM Studio reference. The
 route and the grading are done; this is the screen.
 
-**3. Image generation: release and load, legibly.** Asked for directly —
+**3. Image generation: release and load, legibly — return trip DONE 4 October later; the swap-out was done 12 September.** Asked for directly —
 Zaram should release the chat model's hold on the card, load the image
 model, and switch back when the questions stop being about pictures,
 *"finding creative ways to engage the user through the switches."* The
 pieces exist (`image_model` in settings, `/providers/release`); the
 sequencing and the telling do not.
 
-**4. Getting the most out of the local model.** The capability list sent
+**4. Getting the most out of the local model — measured 4 October later (table above); Excel, finance and GIMP not exercised.** The capability list sent
 with the Three.js request — voxel scene, endless runner, Yahoo Finance,
 Excel, GIMP/SVG. Three.js previewing is done and verified; the rest is
 untested against `qwen3.8`.
 
-**5. Playback and review on the HTML surface.**
+**5. Playback and review on the HTML surface — DONE 4 October later (pause/resume, restart, code view; seen in a real sealed frame).**
 
-**6. GitHub and email, end to end.** Sign in to GitHub and push to the
+**6. GitHub and email, end to end — the consent is DONE (push gate, `repos` row, sends always ask); signing in and attaching the servers is the user's.** Sign in to GitHub and push to the
 user's own account; draft and reply to email; an automation that runs at
 an interval and carries something like a job or grant application
 through. Draft-and-hold, never send unprompted — rule 6. Needs a
@@ -176,22 +411,22 @@ the navigation. That argues for staying in Settings. It does **not**
 answer where a *running* automation reports from, which is Activity's
 question and is not built.
 
-**9. A BROWSE switch in Settings.** `POST /egress/browse` exists and the
+**9. A BROWSE switch in Settings — DONE 4 October evening (and the route it needed).** `POST /egress/browse` exists and the
 pane uses it; nothing in Settings turns it off.
 
-**10. A terminal surface.** The permission card for it shipped; there is
+**10. A terminal surface — DONE 4 October later.** The permission card for it shipped; there is
 no component that shows a terminal.
 
-**11. Tabby: manifest entries and model sizing.** The manifest knows
+**11. Tabby: manifest entries and model sizing — both DONE; Zaram lists and grades EXL3 builds but does not fetch them.** The manifest knows
 Ollama models only, so a TabbyAPI model is invisible to the browser and
 unsized by the fit gate — and it is the model that answers here.
 
-**12. Citations as history.**
+**12. Citations as history — DONE 4 October later.**
 
-**13. The broader design pass.** One measured typography fix landed; the
+**13. The broader design pass — one measured fix landed 4 October later (text contrast, with a build guard); the rest of the brief is still open.** One measured typography fix landed; the
 *"sophisticated, premium, thought-through"* brief is otherwise open.
 
-**14. Cut alpha.4.** Last tag is `v0.1.0-alpha.3`.
+**14. Cut alpha.4 — notes updated, NOT cut: it is the maintainer's to tag.** Last tag is `v0.1.0-alpha.3`.
 
 **Standing blocker, unchanged and above all of these:** a stranger still
 cannot install this. Packaging is the milestone, not more capability.
@@ -231,7 +466,7 @@ cannot install this. Packaging is the milestone, not more capability.
 
 #### Open, with the reasoning that produced them
 
-**1. Pushing a repository needs its own data class.** The largest egress
+**1. Pushing a repository needs its own data class — the class (`DataClass.REPO`) is DONE 4 October evening; nothing pushes yet.** The largest egress
 Zaram can perform is the whole of somebody's project, including whatever
 is sitting in it. It cannot ride on `DataClass.BROWSE` or on a generic
 tool grant: own class, own consent, own log entry under rule 3.
@@ -291,7 +526,7 @@ test is not whether the model can do these — it demonstrably can — but
 whether Zaram's planner, tool budget and preview surface let it. Playback
 and review belong on the same HTML surface.
 
-**10. Purging memory, by range.** Rule 4 and the retention obligation both
+**10. Purging memory, by range — DONE 4 October evening; superseded versions included.** Rule 4 and the retention obligation both
 point at it, and `Activity` already argues the case: *a permanent record
 of every question you have asked is its own privacy problem*. Wanted:
 everything, or everything before or after a date.
