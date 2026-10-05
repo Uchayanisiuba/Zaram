@@ -7031,11 +7031,58 @@ async def voice_stream(request: VoiceStreamRequest):
 
 @app.get("/voice/voices")
 async def voice_list():
-    """List available voices."""
-    if not kernel.speech_runtime:
-        return {"voices": {}}
-    result = await kernel.speech_runtime.execute("speech.voices", {})
-    return result
+    """The pack's voices, named from a dated local manifest.
+
+    This used to ask the speech runtime, which asked HuggingFace — so it
+    answered empty on every working install, because rule 7g forbids a network
+    call nobody consented to. Naming the pack needs none; `installed` is read
+    from the local cache, and fetching a voice is `POST /voice/voices/{id}/download`.
+    """
+    from voice import voice_manifest
+
+    try:
+        from voice.config import KokoroConfig
+
+        backend = KokoroConfig.load().backend
+    except Exception:
+        backend = "torch"
+    return await asyncio.to_thread(
+        voice_manifest.catalogue, backend=backend, default_voice=_default_voice_name()
+    )
+
+
+@app.post("/voice/voices/{voice_id}/download")
+async def voice_download(voice_id: str):
+    """Fetch one voice, because a person pressed the button that says so.
+
+    Asks the egress gate like the model download does, so huggingface.co being
+    allowed is one decision for both and the entry is written before the first
+    byte (rule 3). Default deny is the ordinary answer on a machine that has
+    not allowed it, and is returned as a 403 carrying the gate's own sentence.
+    The id must be one the manifest listed; anything else is a 404 and nothing
+    is asked of the network.
+    """
+    from core.egress import EgressDenied
+    from voice import voice_manifest
+
+    if voice_id not in voice_manifest.known_ids():
+        raise HTTPException(status_code=404, detail="That is not one of the listed voices.")
+    try:
+        from voice.config import KokoroConfig
+
+        backend = KokoroConfig.load().backend
+    except Exception:
+        backend = "torch"
+    try:
+        await asyncio.to_thread(voice_manifest.fetch_voice, voice_id, backend=backend)
+    except EgressDenied as denied:
+        raise HTTPException(status_code=403, detail=str(denied)) from denied
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Zaram could not fetch that voice: {type(exc).__name__}. Nothing was changed.",
+        ) from exc
+    return {"id": voice_id, "installed": True}
 
 
 @app.get("/voice/health")

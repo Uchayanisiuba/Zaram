@@ -124,6 +124,7 @@ import {
 import { pastedKey } from '@/lib/pastedKey';
 import ModelSearchList from '@/components/settings/ModelSearchList';
 import ModelBrowser from '@/components/models/ModelBrowser';
+import VoiceBrowser from '@/components/voices/VoiceBrowser';
 import ContextWindowField from '@/components/settings/ContextWindowField';
 import OverflowField from '@/components/settings/OverflowField';
 
@@ -535,6 +536,7 @@ export default function SettingsWorkspace() {
 
   const [character, setCharacter] = useState<Character | null>(null);
   const [voices, setVoices] = useState<string[]>([]);
+  const [voicesOpen, setVoicesOpen] = useState(false);
   // Drafts, so a half-typed name is not saved on every keystroke.
   // Null means "not being edited" and falls back to the stored value —
   // distinct from an empty string, which is a deliberate clear.
@@ -1998,39 +2000,42 @@ export default function SettingsWorkspace() {
                     ? 'Voices come with the speech extra, which is not installed — see Speech ' +
                       'above. A picker over an empty list would be a control that does nothing.'
                     : voices.length === 0
-                      ? 'This is the voice that speaks replies. The rest of the pack is not ' +
-                        'listed here because listing it means asking huggingface.co, and ' +
-                        'nothing reaches the network without you asking for it. Replies are ' +
-                        'spoken when the avatar is showing, which is a decision you already ' +
-                        'made by choosing a face.'
-                      : 'Which voice speaks replies. Replies are spoken when the avatar is showing, ' +
-                        'which is a decision you already made by choosing a face.'
+                      ? 'This is the voice that speaks replies. Zaram could not read its list ' +
+                        'of the others. Replies are spoken when the avatar is showing, which ' +
+                        'is a decision you already made by choosing a face.'
+                      : 'Which voice speaks replies. The whole pack is listed from a file that ships ' +
+                        'with Zaram, so nothing is asked of the network until you download one. ' +
+                        'Replies are spoken when the avatar is showing, which is a decision you ' +
+                        'already made by choosing a face.'
                 }
               >
                 {voices.length > 0 && (
-                  <select
-                    value={character.voice}
-                    aria-label="Which voice speaks replies"
-                    onChange={(e) =>
-                      void run('voice', async () => {
-                        setCharacter(await saveCharacter({ voice: e.target.value }));
-                      })
-                    }
+                  <button
+                    type="button"
+                    aria-expanded={voicesOpen}
+                    onClick={() => setVoicesOpen((open) => !open)}
                     className="px-2 py-1 text-xs rounded-lg bg-transparent outline-none cursor-pointer"
                     style={{
                       border: '1px solid var(--color-border-subtle)',
                       color: 'var(--color-text)',
                     }}
                   >
-                    <option value="">Default</option>
-                    {voices.map((v) => (
-                      <option key={v} value={v}>
-                        {v}
-                      </option>
-                    ))}
-                  </select>
+                    {voicesOpen ? 'Close' : `Browse ${voices.length} voices`}
+                  </button>
                 )}
               </Row>
+              {voicesOpen && voices.length > 0 && (
+                <div className="px-4 pb-4">
+                  <VoiceBrowser
+                    selected={character.voice}
+                    onSelect={(id) =>
+                      void run('voice', async () => {
+                        setCharacter(await saveCharacter({ voice: id }));
+                      })
+                    }
+                  />
+                </div>
+              )}
             </>
           )}
         </Section>

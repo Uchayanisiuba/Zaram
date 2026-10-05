@@ -183,6 +183,10 @@ NETWORK_LIBRARY_GATED = {
     # is genuinely something to download. The torch path still has that hole:
     # KPipeline.load_voice downloads a .pt on first use with nothing asked.
     "voice/providers/kokoro_onnx.py": "asks get_gate().check() before any weight, voice or vocab download; loads cached files offline",
+    # The explicit, button-pressed route to one voice file. Gated like the model it belongs to:
+    # `fetch_voice` asks get_gate().check() before hf_hub_download, and the route turns a denial
+    # into a 403 with the gate's own sentence. `is_cached` here only reads the local cache.
+    "voice/voice_manifest.py": "asks get_gate().check() before downloading a voice file; the cache check is offline",
 }
 
 #: Modules that import a network library **in order to switch its network off**.

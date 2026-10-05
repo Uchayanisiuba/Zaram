@@ -1,0 +1,469 @@
+{
+  "generated": "2026-10-04",
+  "source": "hexgrad/Kokoro-82M VOICES.md, read 4 October 2026",
+  "note": "The pack's 54 voices, listed here so naming them needs no network call (rule 7g). 'grade' is the upstream author's own overall rating of how well the voice was trained (A best, F worst); it is not a Zaram measurement, and it is null where the author gave none. Each voice is a separate ~0.5 MB file, fetched once and only on request.",
+  "voice_bytes": 523000,
+  "front_ends": {
+    "a": {
+      "requires": null
+    },
+    "b": {
+      "requires": null
+    },
+    "e": {
+      "requires": "espeak-ng"
+    },
+    "f": {
+      "requires": "espeak-ng"
+    },
+    "h": {
+      "requires": "espeak-ng"
+    },
+    "i": {
+      "requires": "espeak-ng"
+    },
+    "p": {
+      "requires": "espeak-ng"
+    },
+    "j": {
+      "requires": "misaki[ja]"
+    },
+    "z": {
+      "requires": "misaki[zh]"
+    }
+  },
+  "voices": [
+    {
+      "id": "af_heart",
+      "name": "Heart",
+      "language_code": "a",
+      "language": "American English",
+      "gender": "female",
+      "grade": "A"
+    },
+    {
+      "id": "af_alloy",
+      "name": "Alloy",
+      "language_code": "a",
+      "language": "American English",
+      "gender": "female",
+      "grade": "C"
+    },
+    {
+      "id": "af_aoede",
+      "name": "Aoede",
+      "language_code": "a",
+      "language": "American English",
+      "gender": "female",
+      "grade": "C+"
+    },
+    {
+      "id": "af_bella",
+      "name": "Bella",
+      "language_code": "a",
+      "language": "American English",
+      "gender": "female",
+      "grade": "A-"
+    },
+    {
+      "id": "af_jessica",
+      "name": "Jessica",
+      "language_code": "a",
+      "language": "American English",
+      "gender": "female",
+      "grade": "D"
+    },
+    {
+      "id": "af_kore",
+      "name": "Kore",
+      "language_code": "a",
+      "language": "American English",
+      "gender": "female",
+      "grade": "C+"
+    },
+    {
+      "id": "af_nicole",
+      "name": "Nicole",
+      "language_code": "a",
+      "language": "American English",
+      "gender": "female",
+      "grade": "B-"
+    },
+    {
+      "id": "af_nova",
+      "name": "Nova",
+      "language_code": "a",
+      "language": "American English",
+      "gender": "female",
+      "grade": "C"
+    },
+    {
+      "id": "af_river",
+      "name": "River",
+      "language_code": "a",
+      "language": "American English",
+      "gender": "female",
+      "grade": "D"
+    },
+    {
+      "id": "af_sarah",
+      "name": "Sarah",
+      "language_code": "a",
+      "language": "American English",
+      "gender": "female",
+      "grade": "C+"
+    },
+    {
+      "id": "af_sky",
+      "name": "Sky",
+      "language_code": "a",
+      "language": "American English",
+      "gender": "female",
+      "grade": "C-"
+    },
+    {
+      "id": "am_adam",
+      "name": "Adam",
+      "language_code": "a",
+      "language": "American English",
+      "gender": "male",
+      "grade": "F+"
+    },
+    {
+      "id": "am_echo",
+      "name": "Echo",
+      "language_code": "a",
+      "language": "American English",
+      "gender": "male",
+      "grade": "D"
+    },
+    {
+      "id": "am_eric",
+      "name": "Eric",
+      "language_code": "a",
+      "language": "American English",
+      "gender": "male",
+      "grade": "D"
+    },
+    {
+      "id": "am_fenrir",
+      "name": "Fenrir",
+      "language_code": "a",
+      "language": "American English",
+      "gender": "male",
+      "grade": "C+"
+    },
+    {
+      "id": "am_liam",
+      "name": "Liam",
+      "language_code": "a",
+      "language": "American English",
+      "gender": "male",
+      "grade": "D"
+    },
+    {
+      "id": "am_michael",
+      "name": "Michael",
+      "language_code": "a",
+      "language": "American English",
+      "gender": "male",
+      "grade": "C+"
+    },
+    {
+      "id": "am_onyx",
+      "name": "Onyx",
+      "language_code": "a",
+      "language": "American English",
+      "gender": "male",
+      "grade": "D"
+    },
+    {
+      "id": "am_puck",
+      "name": "Puck",
+      "language_code": "a",
+      "language": "American English",
+      "gender": "male",
+      "grade": "C+"
+    },
+    {
+      "id": "am_santa",
+      "name": "Santa",
+      "language_code": "a",
+      "language": "American English",
+      "gender": "male",
+      "grade": "D-"
+    },
+    {
+      "id": "bf_alice",
+      "name": "Alice",
+      "language_code": "b",
+      "language": "British English",
+      "gender": "female",
+      "grade": "D"
+    },
+    {
+      "id": "bf_emma",
+      "name": "Emma",
+      "language_code": "b",
+      "language": "British English",
+      "gender": "female",
+      "grade": "B-"
+    },
+    {
+      "id": "bf_isabella",
+      "name": "Isabella",
+      "language_code": "b",
+      "language": "British English",
+      "gender": "female",
+      "grade": "C"
+    },
+    {
+      "id": "bf_lily",
+      "name": "Lily",
+      "language_code": "b",
+      "language": "British English",
+      "gender": "female",
+      "grade": "D"
+    },
+    {
+      "id": "bm_daniel",
+      "name": "Daniel",
+      "language_code": "b",
+      "language": "British English",
+      "gender": "male",
+      "grade": "D"
+    },
+    {
+      "id": "bm_fable",
+      "name": "Fable",
+      "language_code": "b",
+      "language": "British English",
+      "gender": "male",
+      "grade": "C"
+    },
+    {
+      "id": "bm_george",
+      "name": "George",
+      "language_code": "b",
+      "language": "British English",
+      "gender": "male",
+      "grade": "C"
+    },
+    {
+      "id": "bm_lewis",
+      "name": "Lewis",
+      "language_code": "b",
+      "language": "British English",
+      "gender": "male",
+      "grade": "D+"
+    },
+    {
+      "id": "jf_alpha",
+      "name": "Alpha",
+      "language_code": "j",
+      "language": "Japanese",
+      "gender": "female",
+      "grade": "C+"
+    },
+    {
+      "id": "jf_gongitsune",
+      "name": "Gongitsune",
+      "language_code": "j",
+      "language": "Japanese",
+      "gender": "female",
+      "grade": "C"
+    },
+    {
+      "id": "jf_nezumi",
+      "name": "Nezumi",
+      "language_code": "j",
+      "language": "Japanese",
+      "gender": "female",
+      "grade": "C-"
+    },
+    {
+      "id": "jf_tebukuro",
+      "name": "Tebukuro",
+      "language_code": "j",
+      "language": "Japanese",
+      "gender": "female",
+      "grade": "C"
+    },
+    {
+      "id": "jm_kumo",
+      "name": "Kumo",
+      "language_code": "j",
+      "language": "Japanese",
+      "gender": "male",
+      "grade": "C-"
+    },
+    {
+      "id": "zf_xiaobei",
+      "name": "Xiaobei",
+      "language_code": "z",
+      "language": "Mandarin Chinese",
+      "gender": "female",
+      "grade": "D"
+    },
+    {
+      "id": "zf_xiaoni",
+      "name": "Xiaoni",
+      "language_code": "z",
+      "language": "Mandarin Chinese",
+      "gender": "female",
+      "grade": "D"
+    },
+    {
+      "id": "zf_xiaoxiao",
+      "name": "Xiaoxiao",
+      "language_code": "z",
+      "language": "Mandarin Chinese",
+      "gender": "female",
+      "grade": "D"
+    },
+    {
+      "id": "zf_xiaoyi",
+      "name": "Xiaoyi",
+      "language_code": "z",
+      "language": "Mandarin Chinese",
+      "gender": "female",
+      "grade": "D"
+    },
+    {
+      "id": "zm_yunjian",
+      "name": "Yunjian",
+      "language_code": "z",
+      "language": "Mandarin Chinese",
+      "gender": "male",
+      "grade": "D"
+    },
+    {
+      "id": "zm_yunxi",
+      "name": "Yunxi",
+      "language_code": "z",
+      "language": "Mandarin Chinese",
+      "gender": "male",
+      "grade": "D"
+    },
+    {
+      "id": "zm_yunxia",
+      "name": "Yunxia",
+      "language_code": "z",
+      "language": "Mandarin Chinese",
+      "gender": "male",
+      "grade": "D"
+    },
+    {
+      "id": "zm_yunyang",
+      "name": "Yunyang",
+      "language_code": "z",
+      "language": "Mandarin Chinese",
+      "gender": "male",
+      "grade": "D"
+    },
+    {
+      "id": "ef_dora",
+      "name": "Dora",
+      "language_code": "e",
+      "language": "Spanish",
+      "gender": "female",
+      "grade": null
+    },
+    {
+      "id": "em_alex",
+      "name": "Alex",
+      "language_code": "e",
+      "language": "Spanish",
+      "gender": "male",
+      "grade": null
+    },
+    {
+      "id": "em_santa",
+      "name": "Santa",
+      "language_code": "e",
+      "language": "Spanish",
+      "gender": "male",
+      "grade": null
+    },
+    {
+      "id": "ff_siwis",
+      "name": "Siwis",
+      "language_code": "f",
+      "language": "French",
+      "gender": "female",
+      "grade": "B-"
+    },
+    {
+      "id": "hf_alpha",
+      "name": "Alpha",
+      "language_code": "h",
+      "language": "Hindi",
+      "gender": "female",
+      "grade": "C"
+    },
+    {
+      "id": "hf_beta",
+      "name": "Beta",
+      "language_code": "h",
+      "language": "Hindi",
+      "gender": "female",
+      "grade": "C"
+    },
+    {
+      "id": "hm_omega",
+      "name": "Omega",
+      "language_code": "h",
+      "language": "Hindi",
+      "gender": "male",
+      "grade": "C"
+    },
+    {
+      "id": "hm_psi",
+      "name": "Psi",
+      "language_code": "h",
+      "language": "Hindi",
+      "gender": "male",
+      "grade": "C"
+    },
+    {
+      "id": "if_sara",
+      "name": "Sara",
+      "language_code": "i",
+      "language": "Italian",
+      "gender": "female",
+      "grade": "C"
+    },
+    {
+      "id": "im_nicola",
+      "name": "Nicola",
+      "language_code": "i",
+      "language": "Italian",
+      "gender": "male",
+      "grade": "C"
+    },
+    {
+      "id": "pf_dora",
+      "name": "Dora",
+      "language_code": "p",
+      "language": "Brazilian Portuguese",
+      "gender": "female",
+      "grade": null
+    },
+    {
+      "id": "pm_alex",
+      "name": "Alex",
+      "language_code": "p",
+      "language": "Brazilian Portuguese",
+      "gender": "male",
+      "grade": null
+    },
+    {
+      "id": "pm_santa",
+      "name": "Santa",
+      "language_code": "p",
+      "language": "Brazilian Portuguese",
+      "gender": "male",
+      "grade": null
+    }
+  ]
+}

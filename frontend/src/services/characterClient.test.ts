@@ -9,7 +9,14 @@
  */
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 
-import { CharacterError, fetchCharacter, fetchVoices, saveCharacter } from './characterClient';
+import {
+  CharacterError,
+  downloadVoice,
+  fetchCharacter,
+  fetchVoiceCatalogue,
+  fetchVoices,
+  saveCharacter,
+} from './characterClient';
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), {
@@ -121,5 +128,51 @@ describe('an absent voice list is ordinary, not a failure', () => {
 
     fetchMock.mockResolvedValue(json({ voices: ['af_heart'] }));
     expect(await fetchVoices()).toEqual(['af_heart']);
+  });
+
+  it('reads the id out of a row rather than printing "[object Object]"', async () => {
+    fetchMock.mockResolvedValue(json({ voices: [{ id: 'af_heart' }, { id: 'am_adam' }] }));
+    expect(await fetchVoices()).toEqual(['af_heart', 'am_adam']);
+  });
+});
+
+describe('the voice catalogue', () => {
+  const row = {
+    id: 'bf_emma',
+    name: 'Emma',
+    language: 'British English',
+    language_code: 'b',
+    gender: 'female',
+    grade: 'B-',
+    size_bytes: 523000,
+    installed: false,
+    requires: null,
+    default: false,
+  };
+
+  it('keeps the grade the author gave and does not invent one where he gave none', async () => {
+    fetchMock.mockResolvedValue(
+      json({ generated: '2026-10-04', voices: [row, { ...row, id: 'ef_dora', grade: null }] }),
+    );
+    const found = await fetchVoiceCatalogue();
+    expect(found.generated).toBe('2026-10-04');
+    expect(found.voices.map((v) => v.grade)).toEqual(['B-', null]);
+  });
+
+  it('never throws, so a failed list cannot stop someone naming it', async () => {
+    fetchMock.mockRejectedValue(new Error('connection refused'));
+    expect(await fetchVoiceCatalogue()).toEqual({ generated: null, voices: [] });
+  });
+
+  it('downloads by posting to the voice’s own route', async () => {
+    fetchMock.mockResolvedValue(json({ id: 'bf_emma', installed: true }));
+    await downloadVoice('bf_emma');
+    expect(fetchMock.mock.calls[0][0]).toContain('/voice/voices/bf_emma/download');
+    expect(fetchMock.mock.calls[0][1].method).toBe('POST');
+  });
+
+  it('surfaces the backend sentence when a download fails', async () => {
+    fetchMock.mockResolvedValue(json({ detail: 'Zaram could not fetch that voice.' }, 502));
+    await expect(downloadVoice('bf_emma')).rejects.toThrow('Zaram could not fetch that voice.');
   });
 });

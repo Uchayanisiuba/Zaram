@@ -365,6 +365,35 @@ class KokoroProvider(VoiceProvider):
         self._pipeline = self._build_pipeline(wanted)
         return self._pipeline
 
+    def _ensure_voice(self, voice: str) -> None:
+        """Ask the gate before the torch pipeline fetches a voice nobody asked for.
+
+        `KPipeline.load_voice` calls `hf_hub_download` the first time a voice is
+        used, from inside synthesis — outside the window `_ensure_pipeline`
+        wraps, so choosing a voice in Settings could fetch half a megabyte from
+        huggingface.co with nothing asked and nothing logged. The ONNX backend
+        closed this for itself in `kokoro_onnx._fetch`; this is the same
+        ordering for the torch one: a cached voice touches nothing, and only an
+        absent one reaches the gate.
+
+        Skipped when a pipeline factory was injected (a test or an alternative
+        engine whose voices are not Kokoro's files) and for a name outside the
+        manifest, which Kokoro will refuse by itself.
+        """
+        if self._pipeline_factory is not None or self.config.backend != "torch":
+            return
+        from voice import voice_manifest
+
+        if voice not in voice_manifest.known_ids() or voice_manifest.is_cached(voice):
+            return
+        try:
+            voice_manifest.fetch_voice(voice, backend="torch", source="text-to-speech")
+        except EgressDenied as denied:
+            raise ProviderUnavailableError(
+                f"The {voice} voice is not on this machine yet. Downloading it from "
+                f"huggingface.co (about 0.5 MB, one time) was blocked: {denied}"
+            ) from denied
+
     def _to_wav_bytes(self, audio: Any, sample_rate: int) -> bytes:
         # Imported here, not at module scope. soundfile ships with the voice
         # extra, and a top-level import made this whole module unimportable on a
@@ -520,6 +549,7 @@ class KokoroProvider(VoiceProvider):
             # one. They agree for the default and differ the moment a user
             # picks a voice from another language in Settings.
             pipeline = self._ensure_pipeline(self._lang_for_voice(selected))
+            self._ensure_voice(selected)
         except Exception as exc:
             self._log.error(
                 "Kokoro unavailable: %s", exc, extra={**extra, "failure": type(exc).__name__}
