@@ -423,6 +423,42 @@
     </div>
   </section>
 
+  <section class="feature" id="apps">
+    <div class="feature-text">
+      <p class="kicker">Apps and pages</p>
+      <h2>Ask for an app. It is run before you see it.</h2>
+      <p>
+        Ask for a calculator, a landing page, a dashboard or a 3D game and it opens in a
+        preview inside the window — with <strong>no network</strong>, so a page cannot phone
+        home, and with three.js built in, so a 3D page works with the connection down.
+        Pause it, restart it, read the exact code that is running.
+      </p>
+      <p>
+        <strong>Before it reaches you, Zaram runs the page</strong> in a hidden browser that
+        has no route to any host. If the page freezes or throws, the model is asked to fix
+        it — twice at most — and the line under the reply says what happened. If nothing
+        could run it, that line says so instead of passing it.
+      </p>
+      <p>
+        Point at part of the page and ask for a change, or press <em>Fix this</em> on one
+        that stopped. A small app is one file. A bigger one arrives as several —
+        <code>index.html</code>, <code>style.css</code>, <code>game.js</code> — runs together
+        in the preview, and saves as a folder. No project, no terminal and no switches for
+        any of that. Anything that needs <code>npm</code> or a server still lives in a coding
+        project, where running things is its own permission.
+      </p>
+      <p class="aside">
+        Found by using it: a game the maintainer's local 27B model wrote had twenty-three
+        loops with no <code>++</code>, and froze the window before drawing anything. The
+        check reports it as hung in about eighteen seconds. A page that merely starts slowly
+        passes, with its start-up time on the line.
+      </p>
+    </div>
+    <figure class="shot">
+      <img src="img/apps.webp" width="1280" height="800" alt="A snake game Zaram wrote, running in the preview beside the conversation, with the line under the reply saying the page ran without errors." loading="lazy" decoding="async">
+    </figure>
+  </section>
+
   <section class="feature feature-plain">
     <div class="feature-text wide">
       <p class="kicker">Code</p>
@@ -782,6 +818,18 @@
         <p>Paste a posting or a funding call and it comes back as fields. Eligibility is checked against what Zaram already knows about you — and a criterion with no fact behind it is a question to ask you, never a no applied on your behalf. It drafts the letter. It never submits: the funders' own APIs have no submission endpoint, and that is the right line anyway.</p>
       </div>
       <div>
+        <h3>Thinking, for code</h3>
+        <p>The Thinking switch has a middle state. Off for everyday questions, on when you ask for code or a page. It is off until you choose it, because thinking can take minutes.</p>
+      </div>
+      <div>
+        <h3>Run this once</h3>
+        <p>When Zaram asks before an install or a delete, you can say yes to that one call. It runs, and the next one asks again.</p>
+      </div>
+      <div>
+        <h3>The unfinished work, first</h3>
+        <p>A new conversation offers what is unfinished in the project you touched last, and resumes it, ticking items off as it goes.</p>
+      </div>
+      <div>
         <h3>A shut-out tool server says so</h3>
         <p>Attached, reachable, and allowed to act are three different things. When a server is running but refused, the card names which of the three failed, instead of offering a tool that quietly never fires.</p>
       </div>
@@ -839,7 +887,7 @@
         <span>Milestones</span>
         <span class="spacer">each build, and what is next</span>
       </div>
-      <div class="panel-body"><span class="line"><span class="dim">15 Sep  </span><span class="cy">alpha.1</span>  memory · recall with sources · the egress log</span><span class="line"><span class="dim">        </span>         documents · code projects · the manual</span><span class="line"><span class="dim">21 Sep  </span><span class="cy">alpha.2</span>  a row for every step, where it happened</span><span class="line"><span class="dim">        </span>         thinking on/off · the model picks its tools</span><span class="line"><span class="dim">        </span>         name a folder and it opens · work that runs</span><span class="line"><span class="dim">        </span>         on its own, never approving itself</span><span class="line"><span class="dim">29 Sep  </span><span class="cy">alpha.3</span>  a stuck project: installs, its scripts, the app</span><span class="line"><span class="dim">        </span>         pictures out, and a full card that refuses</span><span class="line"><span class="dim">        </span>         jobs and grants · a folder you pick yourself</span><span class="line"><span class="dim">        </span>         zcode · the Spine from any terminal</span><span class="line"><span class="dim">3 Oct   </span><span class="cy">alpha.4</span>  type to find a model · the free ones marked</span><span class="line"><span class="dim">        </span>         and what each one does with what you send</span><span class="line"><span class="dim">        </span>         it opens your app, clicks through and checks</span><span class="line"><span class="dim">        </span>         its own work — and you watch it happen</span><span class="line"><span class="dim">next    </span>[ ]  a signed installer — no Windows warning</span><span class="line"><span class="dim">        </span>[ ]  five verbs on the summon key</span><span class="line"><span class="dim">        </span>[ ]  word search beside the vectors</span><span class="line"><span class="dim">        </span>[ ]  mail, GitHub, socials as attached tools</span><span class="line"><span class="dim">later   </span>[ ]  your Zaram on a second machine — sync</span></div>
+      <div class="panel-body"><span class="line"><span class="dim">15 Sep  </span><span class="cy">alpha.1</span>  memory · recall with sources · the egress log</span><span class="line"><span class="dim">        </span>         documents · code projects · the manual</span><span class="line"><span class="dim">21 Sep  </span><span class="cy">alpha.2</span>  a row for every step, where it happened</span><span class="line"><span class="dim">        </span>         thinking on/off · the model picks its tools</span><span class="line"><span class="dim">        </span>         name a folder and it opens · work that runs</span><span class="line"><span class="dim">        </span>         on its own, never approving itself</span><span class="line"><span class="dim">29 Sep  </span><span class="cy">alpha.3</span>  a stuck project: installs, its scripts, the app</span><span class="line"><span class="dim">        </span>         pictures out, and a full card that refuses</span><span class="line"><span class="dim">        </span>         jobs and grants · a folder you pick yourself</span><span class="line"><span class="dim">        </span>         zcode · the Spine from any terminal</span><span class="line"><span class="dim">5 Oct   </span><span class="cy">alpha.4</span>  ask for an app: it is run before you see it</span><span class="line"><span class="dim">        </span>         one file or several, and no project</span><span class="line"><span class="dim">        </span>         thinking: off · for code · on</span><span class="line"><span class="dim">        </span>         run this once · the terminal is read</span><span class="line"><span class="dim">        </span>         type to find a model · the free ones marked</span><span class="line"><span class="dim">        </span>         and what each one does with what you send</span><span class="line"><span class="dim">        </span>         it opens your app, clicks through and checks</span><span class="line"><span class="dim">        </span>         its own work — and you watch it happen</span><span class="line"><span class="dim">next    </span>[ ]  a signed installer — no Windows warning</span><span class="line"><span class="dim">        </span>[ ]  five verbs on the summon key</span><span class="line"><span class="dim">        </span>[ ]  word search beside the vectors</span><span class="line"><span class="dim">        </span>[ ]  mail, GitHub, socials as attached tools</span><span class="line"><span class="dim">later   </span>[ ]  your Zaram on a second machine — sync</span></div>
       <p class="panel-note">
         Dates are when a build reached testers, not when a feature was finished. Nothing
         on the <em>next</em> list is promised for a date; each lands when it has been
@@ -894,7 +942,7 @@
           <label for="fb-build">Which build</label>
           <select id="fb-build" name="build" required>
             <option value="" disabled selected>Choose one</option>
-            <option value="v0.1.0-alpha.4">v0.1.0-alpha.4 (3 October)</option>
+            <option value="v0.1.0-alpha.4">v0.1.0-alpha.4 (5 October)</option>
             <option value="v0.1.0-alpha.3">v0.1.0-alpha.3 (29 September)</option>
             <option value="v0.1.0-alpha.2">v0.1.0-alpha.2 (21 September)</option>
             <option value="other">Something else / not sure</option>
