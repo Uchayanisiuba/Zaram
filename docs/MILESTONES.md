@@ -515,9 +515,14 @@ avatar is the shape of it.
   startable runtime is one table entry once its CLI is looked at.
 * *Linux and macOS* detection is written and untested: this was built and run on
   Windows only.
-* The 92-file checkpoint commit (`485d764`) is still to be split into one commit
-  per feature; `git reset` to its parent and the per-hunk assignment recorded in
-  the session are the way.
+* **The 92-file checkpoint is split** into fifteen commits, one per feature, and the
+  follow-on work sits on top as a sixteenth. Done at hunk level through git plumbing
+  (the working tree was never touched), the final tree is asserted byte-identical to the
+  checkpoint, and **each commit was checked out alone, imported, tested and typechecked**
+  -- which found one misassignment (`test_egress_chokepoint.py` was filed under the push
+  commit because of its name; its one hunk is the voice manifest's) that every unit test
+  had missed. The unsplit history is kept as the branch `backup/before-the-split-4-oct`;
+  delete it when nobody needs it. Nothing has been pushed.
 
 #### Done
 
