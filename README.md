@@ -17,8 +17,8 @@ not developers building products.
 ## Try it
 
 **Windows, alpha.** The current build is
-[`v0.1.0-alpha.2`](https://github.com/Uchayanisiuba/Zaram/releases/tag/v0.1.0-alpha.2)
-— an installer and a portable build, 195 MiB each, with `SHA256SUMS.txt` beside them.
+[`v0.1.0-alpha.4`](https://github.com/Uchayanisiuba/Zaram/releases/tag/v0.1.0-alpha.4)
+— an installer and a portable build, 197 MiB each, with `SHA256SUMS.txt` beside them.
 It is not code-signed yet, so SmartScreen warns; *More info → Run anyway*. Everything
 works with a local model through [Ollama](https://ollama.com) and nothing else; a cloud
 key is optional and framed that way.
@@ -101,7 +101,7 @@ evidence of June it is the only part anybody owned at all.
 
 ## Status
 
-**Pre-v1, alpha.2 with testers from 21 September 2026.** What has been observed
+**Pre-v1, alpha.4 (5 October 2026), with testers from 21 September 2026.** What has been observed
 working, rather than merely written:
 
 - **The recall loop, end to end.** The Spine persists to SQLite with Ollama `bge-m3`
@@ -144,9 +144,11 @@ working, rather than merely written:
 - **Thinking has a middle state** — off, *for code*, on. Off by default for code; whether
   it helps is unmeasured, and `scripts/compare_thinking.py` is how it will be.
 - **An installer**, built by the release workflow on a hosted runner from the tag,
-  published as [`v0.1.0-alpha.2`](https://github.com/Uchayanisiuba/Zaram/releases/tag/v0.1.0-alpha.2)
-  with the SHA-256 beside it, and cold-installed from outside the checkout before the
-  tag was cut. Unsigned; SmartScreen will warn.
+  published as [`v0.1.0-alpha.4`](https://github.com/Uchayanisiuba/Zaram/releases/tag/v0.1.0-alpha.4)
+  with the SHA-256 beside it. Unsigned; SmartScreen will warn. **For alpha.4 the installer
+  itself has not been cold-installed** (alpha.2 and alpha.3 were): before the tag, a local
+  build was packaged, its backend was started on the bundled Python and the new routes were
+  called, but the desktop host was not launched because another instance held the port.
 - **You can watch it work.** A tool-using reply streams as it happens: a row for every
   step — *Searching the web…*, *Read a file* — between the paragraphs, in the order it
   happened, folding to one line when done. Each row opens what that step read, changed

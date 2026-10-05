@@ -294,11 +294,14 @@ mitigation that does not take the choice away.
 
 **Needs the maintainer:**
 
-1. **Cutting alpha.4.** `scripts/release-notes.mjs` now covers this build (twelve
-   bullets added). Pushing a `v*` tag runs a public build, creates the Release,
-   commits to `main` and publishes the site, all under the maintainer's name, so
-   it is not done here. `site/index.html` carries a dated three-line alpha.4
-   entry that does not mention any of this; that is public copy and left alone.
+1. **alpha.4 is cut — 5 October 2026, at the maintainer's instruction.** The tag
+   `v0.1.0-alpha.4` was pushed from the maintainer's own credential; the workflow built
+   on a hosted runner (success), published the installer, the portable build and
+   `SHA256SUMS.txt`, committed the site and published it. 197 MiB. **Still to do: a cold
+   install of the published installer** — the local build was packaged and its backend
+   was started on the bundled Python with the new routes called, but the desktop host
+   was not launched (port 8420 was held by a running development instance). `main` was
+   fast-forwarded to the branch to make the tag releasable, 66 commits at once.
 2. **A second voice engine.** Verified from the repositories: *sherpa-onnx* is
    Apache-2.0, CPU-only, Windows x64 and others, and runs Piper, Kokoro, VITS and
    Matcha models — a runtime, with each voice carrying its own licence, to be
@@ -405,7 +408,7 @@ tree is dirty with this session's work only.
 | Citations as history | Re-resolving against the Spine is larger than a session slice |
 | The design pass | No measurable target was given |
 | A second TTS engine | A dependency-stack decision, deliberately separate |
-| Cutting alpha.4 | A tag and a release are outward-facing; the maintainer's to cut |
+| Cutting alpha.4 | Done 5 October 2026 at the maintainer's instruction; the cold install is open |
 
 #### 4 October, overnight — what landed, and the one thing still broken
 
@@ -569,7 +572,7 @@ unsized by the fit gate — and it is the model that answers here.
 **13. The broader design pass — one measured fix landed 4 October later (text contrast, with a build guard); the rest of the brief is still open.** One measured typography fix landed; the
 *"sophisticated, premium, thought-through"* brief is otherwise open.
 
-**14. Cut alpha.4 — notes updated, NOT cut: it is the maintainer's to tag.** Last tag is `v0.1.0-alpha.3`.
+**14. Cut alpha.4 — CUT 5 October 2026.** Last tag is `v0.1.0-alpha.4`; the cold install of the published installer is the open part (see Current state).
 
 **Standing blocker, unchanged and above all of these:** a stranger still
 cannot install this. Packaging is the milestone, not more capability.
