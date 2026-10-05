@@ -25,18 +25,60 @@ case and it is the default: nothing here changes a request that did not ask.
 
 from __future__ import annotations
 
+import re
 from contextvars import ContextVar
 from typing import Optional
 
 _OVERRIDE: ContextVar[Optional[bool]] = ContextVar("zaram_thinking_override", default=None)
 
-__all__ = ["set_thinking_override", "thinking_override", "thinking_wanted"]
+__all__ = [
+    "decide_thinking",
+    "is_code_request",
+    "set_thinking_override",
+    "thinking_override",
+    "thinking_wanted",
+]
 
 
 def set_thinking_override(value: Optional[bool]) -> None:
     """For the request in flight. Called on every chat request, including the
     ones that pass ``None``, so a previous request's choice cannot leak."""
     _OVERRIDE.set(value if isinstance(value, bool) else None)
+
+
+#: Words that mean the request is for code or for a page, matched as whole words.
+#: Deliberately plain and short: a false positive costs thinking time for
+#: someone who chose "for code", a false negative costs the setting doing
+#: nothing for a request that was code.
+_CODE_WORDS = re.compile(
+    r"\b(code|coding|function|script|bug|debug|refactor|implement|algorithm|program|"
+    r"python|javascript|typescript|react|css|html|backend|frontend|compile|regex|sql|"
+    r"webpage|web ?page|website|game|app|three\.?js|webgl|canvas)\b",
+    re.IGNORECASE,
+)
+
+
+def is_code_request(text: str, last_answer: str = "") -> bool:
+    """Whether this request is for code or a page, or a follow-up to one."""
+    return bool(
+        _CODE_WORDS.search(text or "")
+        or "```" in (text or "")
+        or "```" in (last_answer or "")
+    )
+
+
+def decide_thinking(asked: Optional[bool], *, code: bool, for_code: bool) -> Optional[bool]:
+    """The override for one request.
+
+    What the message itself asked for wins. Otherwise a code request with
+    *thinking for code* on thinks, whatever the everyday setting is. ``None``
+    leaves the person's setting to decide, which is the ordinary case.
+    """
+    if asked is not None:
+        return asked
+    if code and for_code:
+        return True
+    return None
 
 
 def thinking_override() -> Optional[bool]:

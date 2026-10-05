@@ -440,6 +440,8 @@ class StreamEvent:
         grant_scope: str = "",
         step_id: str = "",
         plan_step: int | None = None,
+        held_task: str = "",
+        once: bool = False,
     ) -> StreamEvent:
         """One tool call, and what the gate said about it.
 
@@ -503,6 +505,12 @@ class StreamEvent:
                 # the server has no opinion, and the card then shows one
                 # rung fewer rather than a control that settles nothing.
                 "grant_scope": grant_scope,
+                # On a `confirm`: the task this call was parked on, so the
+                # card can carry on from it rather than ask the question
+                # again from nothing, and whether *Run this once* may be
+                # offered for it. Empty and false everywhere else.
+                "held_task": held_task,
+                "once": once,
                 # The mark every egress entry this call wrote carries
                 # (`core/egress/step_context.py`), so the working pane can
                 # ask the log what this call sent. Empty when unmarked.
@@ -667,6 +675,7 @@ class StreamEvent:
         target: str = "",
         detail: str = "",
         seconds: float | None = None,
+        output: str = "",
     ) -> StreamEvent:
         """A plan step has finished. `detail` is the one thing worth saying
         on the row after the verb — "4 results", or the error — and `seconds`
@@ -682,6 +691,10 @@ class StreamEvent:
                 "target": target,
                 "detail": detail,
                 "seconds": seconds,
+                # What the step found, for its output pane — for recall, the
+                # facts themselves, so "Recalled 6 facts" can be opened and
+                # read rather than taken on trust.
+                "output": output,
             },
             correlation_id=correlation_id,
         )

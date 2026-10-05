@@ -28,8 +28,12 @@ The three things that do have a caller:
 2. **Files that run later.** `.git/hooks/`, `.github/workflows/`, CI
    configs, editor task files: an edit there is a deferred command —
    writing `pre-commit` and then `git commit` runs it. They stay writable,
-   but a person sees every one: never covered by a grant, never by a plan's
-   *run without stopping*.
+   but a person sees every one: never covered by a grant. A plan the person
+   read and let *run without stopping* does cover one -- that is a person's
+   yes, for that plan -- and *Run this once* covers the call on the card.
+   (This read "never by a plan's run without stopping" until 5 October
+   2026; `test_the_persons_go_covers_a_hook` had asserted the opposite all
+   along, and the code agreed with the test.)
 
 3. **Running something whose cost is not in this repository.** Installing
    dependencies executes `postinstall` scripts fetched from a registry — the
@@ -47,6 +51,11 @@ The three things that do have a caller:
    vocabulary, never file content. A miss leaves the card as it is today,
    so partial coverage only moves toward caution.
 
+5. **The terminal, held to 2 and 3 and to deletes.** `terminal_floor`
+   reads the command line, because the terminal was the one route past every
+   rule keyed on a name -- added 5 October 2026, see its docstring for what
+   it does and does not catch.
+
 `decide` in `policy.py` stays name-based and one-directional; these run in
 `McpRuntime.execute` *before* it, on the arguments, and only ever make a
 verdict stricter.
@@ -54,6 +63,7 @@ verdict stricter.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Tuple
@@ -164,6 +174,144 @@ def runner_floor(tool_name: str, arguments: Mapping[str, Any]) -> Optional["Floo
     return None
 
 
+#: The terminal tool and the argument holding its command line. Named here, not
+#: imported from the pack, for the reason `INSTALL_RUNNER_PREFIX` gives: the
+#: security layer owns the rule and the pack conforms to it.
+TERMINAL_TOOL = "run_in_terminal"
+_TERMINAL_ARG = "command"
+
+#: A command line splits into commands at these, so `cd x && rm -rf y` is two.
+_SEPARATORS = re.compile(r"&&|\|\||[;|&\n]")
+
+#: Package managers, and the words after them that fetch and run code from a
+#: registry. Scaffolders (`npx`, `npm create`, `pnpm dlx`) are here too: each
+#: downloads a package and executes it, which is a postinstall with the
+#: install left out.
+_FETCHERS = {
+    "npm": {"install", "i", "add", "ci", "create", "init", "exec", "x"},
+    "pnpm": {"install", "i", "add", "create", "dlx", "exec"},
+    "yarn": {"install", "add", "create", "dlx"},
+    "bun": {"install", "i", "add", "create", "x"},
+    "pip": {"install"},
+    "pip3": {"install"},
+    "uv": {"add", "sync", "pip", "tool", "run"},
+    "poetry": {"add", "install"},
+    "pipx": {"install", "run"},
+    "cargo": {"install", "add"},
+    "go": {"install", "get"},
+    "gem": {"install"},
+    "composer": {"install", "require", "create-project"},
+    "dotnet": {"add", "tool"},
+    "winget": {"install"},
+    "choco": {"install"},
+    "scoop": {"install"},
+    "brew": {"install"},
+    "apt": {"install"},
+    "apt-get": {"install"},
+}
+#: Commands that are a fetch-and-run on their own, whatever follows them.
+_FETCH_ALWAYS = {"npx", "bunx", "pnpx", "uvx"}
+
+#: Commands that remove files. `git clean`, `git reset --hard` and a
+#: discarding checkout/restore remove *work*, and are the deletes git's own
+#: undo does not reach — which is the whole case for asking.
+_REMOVERS = {"rm", "rmdir", "rd", "del", "erase", "remove-item", "ri", "rimraf", "shred", "unlink"}
+
+#: Words that send something off this machine. `git push` is not here: the
+#: terminal refuses an unconsented push outright, before this floor is reached.
+_SENDERS = {"deploy", "publish", "release", "upload"}
+
+
+def _words(command: str) -> List[str]:
+    """One command's words, lower-cased, with a leading path stripped from the
+    program — `C:\\tools\\npm.cmd` is `npm`."""
+    words = command.strip().split()
+    if not words:
+        return []
+    program = re.split(r"[\\/]", words[0])[-1].lower()
+    program = re.sub(r"\.(exe|cmd|bat|ps1)$", "", program)
+    return [program] + [w.lower() for w in words[1:]]
+
+
+def _what_it_does(command: str) -> str:
+    """``"fetch"``, ``"remove"``, ``"send"`` or ``""`` for one command."""
+    words = _words(command)
+    if not words:
+        return ""
+    program, rest = words[0], words[1:]
+    first = next((w for w in rest if not w.startswith("-")), "")
+
+    if program in _REMOVERS:
+        return "remove"
+    if program == "git":
+        if first == "clean":
+            return "remove"
+        if first == "reset" and "--hard" in rest:
+            return "remove"
+        if first in ("checkout", "restore") and ("." in rest or "--" in rest):
+            return "remove"
+    if program in _FETCH_ALWAYS:
+        return "fetch"
+    if program in _FETCHERS and first in _FETCHERS[program]:
+        return "fetch"
+    if any(word in _SENDERS for word in [first] + rest[:2]) or program in _SENDERS:
+        return "send"
+    if program == "docker" and first == "push":
+        return "send"
+    if program == "twine" and first == "upload":
+        return "send"
+    return ""
+
+
+def terminal_floor(tool_name: str, arguments: Mapping[str, Any]) -> Optional["Floor"]:
+    """The floor under a terminal command, or ``None``.
+
+    **The same three rules the proper tools already had, applied to the
+    command line.** Found 5 October 2026: installing dependencies through the
+    project's install runner always asked, and the same `npm install` typed
+    into the terminal ran unasked; a tool named `delete_file` always asked,
+    and `rm -rf` in the terminal did not. The terminal was the one route past
+    every rule that keys on a name.
+
+    **A floor, not a sandbox, and it says so.** It reads what the model
+    *typed*, so it catches the ordinary case -- a model setting a project up
+    -- and not an adversary: a script that deletes, `powershell -enc`, or a
+    command spelled some way this list does not know all pass under the
+    terminal grant, which is the actual trust boundary and is off until a
+    person turns it on. One-directional like everything in this module: it
+    only ever makes a verdict stricter, and a command it does not recognise
+    runs exactly as it did before.
+    """
+    if tool_name != TERMINAL_TOOL:
+        return None
+    command = str(arguments.get(_TERMINAL_ARG) or "")
+    found = {_what_it_does(part) for part in _SEPARATORS.split(command)} - {""}
+    if "remove" in found:
+        return Floor(
+            "confirm",
+            "This command deletes files. Git can bring back what it tracks, and "
+            "nothing brings back the rest. Deleting always asks.",
+            grantable=False,
+            plan_may_cover=False,
+        )
+    if "fetch" in found:
+        return Floor(
+            "confirm",
+            "This downloads packages and runs whatever they ask to run when they "
+            "arrive, and that code comes from the registry rather than from this "
+            "project. Nothing undoes it. This always asks, whatever has been granted.",
+            grantable=False,
+        )
+    if "send" in found:
+        return Floor(
+            "confirm",
+            "This sends something beyond this machine, so it is not covered by "
+            "permission to use the terminal. This always asks.",
+            grantable=False,
+        )
+    return None
+
+
 @dataclass(frozen=True)
 class Floor:
     """What a floor said about one call."""
@@ -171,8 +319,15 @@ class Floor:
     #: ``"refuse"`` or ``"confirm"``.
     verdict: str
     reason: str
-    #: ``False`` for a confirm that no grant and no plan-level Go may cover.
+    #: ``False`` for a confirm that no grant may cover.
     grantable: bool = False
+    #: Whether a plan the person let *run without stopping* covers it. True for
+    #: the floors that were always covered that way -- a hook, an install, a
+    #: deploy -- and false for a delete in the terminal, for the reason
+    #: `ExecutionEngine._runs_uninterrupted` gives about deletes by name: "don't
+    #: stop for each change" was never consent to a removal. Only *Run this
+    #: once*, pressed on the call itself, covers one of those.
+    plan_may_cover: bool = True
 
 
 def floor_for(
@@ -192,6 +347,10 @@ def floor_for(
     running = runner_floor(tool_name, arguments)
     if running is not None:
         return running
+
+    typed = terminal_floor(tool_name, arguments)
+    if typed is not None:
+        return typed
 
     target = write_target(tool_name, arguments)
     if target is None:

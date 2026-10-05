@@ -174,6 +174,35 @@ def _scope_for(project_id: str | None) -> str | None:
     return project_scope(project_id)
 
 
+#: How each origin reads on the recall row. `CLAUDE.md` rule 7b: "from a
+#: proposal Zaram generated" reads differently from "from your client brief".
+_ORIGIN_WORDS = {
+    "user_document": "your document",
+    "conversation": "a conversation",
+    "generated": "Zaram wrote it",
+}
+
+
+def _recall_listing(recalled: list[Any], width: int = 110) -> str:
+    """One line per recalled fact: similarity, origin, and the start of it.
+
+    The similarity is the real number recall was decided on (`relevance`),
+    printed to two places -- never a percentage, which would read as a
+    confidence it is not. Rendered as text in the step's output pane.
+    """
+    lines = []
+    for result in recalled:
+        record = getattr(result, "record", None)
+        content = " ".join(str(getattr(record, "content", "") or "").split())
+        if len(content) > width:
+            content = content[: width - 1].rstrip() + "…"
+        origin = getattr(record, "origin", None)
+        origin = getattr(origin, "value", origin)
+        said = _ORIGIN_WORDS.get(str(origin or ""), "")
+        lines.append(f"{_relevance_of(result):.2f}  {said + ' · ' if said else ''}{content}")
+    return "\n".join(lines)
+
+
 def _relevance_of(result: Any) -> float:
     """How well a recalled memory bears on the question, 0..1.
 
@@ -485,7 +514,9 @@ class ExecutionEngine:
         except Exception:  # noqa: BLE001 - a root lookup must never fail a call
             return None
 
-    def _runs_uninterrupted(self, session_id: str, tool_name: str) -> bool:
+    def _runs_uninterrupted(
+        self, session_id: str, tool_name: str, arguments: dict | None = None
+    ) -> bool:
         """Whether this call may skip its confirmation because the person let
         the whole plan run.
 
@@ -498,6 +529,14 @@ class ExecutionEngine:
 
         if session_id not in self._uninterrupted:
             return False
+        if arguments is not None:
+            # A floor that says a plan may not cover it -- a delete typed into
+            # the terminal -- is the by-name rule below, read off the call.
+            from runtimes.mcp.floors import floor_for
+
+            under = floor_for("", tool_name, arguments, self._code_root())
+            if under is not None and not under.plan_may_cover:
+                return False
         # "Run without stopping" is consent to a plan's changes. Never to its
         # removals, and never to its sends: an email that goes out inside an
         # unattended run is the user's name on words they did not read.
@@ -629,6 +668,12 @@ class ExecutionEngine:
                 "memory.recall", -1,
                 step_id="recall",
                 done=f"Recalled {n} fact{'s' if n != 1 else ''}",
+                # **Which ones, on the row.** "Recalled 6 facts" said a number
+                # and nothing a person could check -- opening the row showed
+                # only that nothing had left the device (5 October 2026, the
+                # maintainer: *"is it really recalling, why is it always
+                # six"*). Each fact, its similarity and where it came from.
+                output=_recall_listing(recalled),
             )
         if recalled:
             # Before the sources, before the answer. A reader who is told
@@ -714,6 +759,11 @@ class ExecutionEngine:
         self._approved.discard(session_id)
         self._uninterrupted.discard(session_id)
         self._seed_plan(session_id, [])
+        # **A new question is a new task.** Without this the next park or
+        # finish in this session wrote over -- or deleted -- the row of the
+        # task before it, including one waiting on *Run this once*, so the
+        # button under the earlier reply pointed at a task that was gone.
+        self._plan_ids.pop(session_id, None)
         plan = self._drop_unavailable_steps(plan)
         plan.state = PlanState.RUNNING
         logger.debug("Engine: plan created with %d steps", len(plan.steps))
@@ -1642,8 +1692,14 @@ class ExecutionEngine:
         continuations_left: int | None = None,
         native_tools: list[dict[str, Any]] | None = None,
         clock: dict[str, int] | None = None,
+        first_call: "ToolCall | None" = None,
+        once: bool = False,
     ):
         """Call a tool, show the model what came back, and let it call another.
+
+        ``first_call`` is a call to make before reading anything the model
+        wrote: the one a resumed task was holding. ``once`` means the person
+        pressed *Run this once* on it, which confirms that call and no other.
 
         ``clock`` collects where the loop's time went — ``tools_ms`` inside
         tool calls, ``rounds_ms`` in the model rounds after the first — for
@@ -1734,8 +1790,16 @@ class ExecutionEngine:
                 spoken.append(rest)
             return rest
 
+        #: The one call a person said yes to by pressing *Run this once*. Held by
+        #: identity, so a later call with the same arguments is asked about
+        #: afresh -- the yes was for the call on the card.
+        once_call: "ToolCall | None" = first_call if once else None
+
         while True:
-            call = parse_call(text)
+            if first_call is not None:
+                call, first_call = first_call, None
+            else:
+                call = parse_call(text)
             if call is None:
                 # **Before "done": the project's own check, once.** A change
                 # the model calls finished is a change the type checker or
@@ -1791,7 +1855,7 @@ class ExecutionEngine:
                     yield rest
                 return
 
-            if self._plan_wants_go(session_id, call.tool):
+            if call is not once_call and self._plan_wants_go(session_id, call.tool):
                 # **Plan before act, as an offer.** The model wrote a plan of
                 # some length and now wants to change something. The person
                 # reads the plan first; Go is their consent for *this* plan,
@@ -1871,7 +1935,8 @@ class ExecutionEngine:
                     # delete is never covered by it (`looks_destructive`), a
                     # read-only server still refuses, and a new question
                     # clears it.
-                    "confirmed": self._runs_uninterrupted(session_id, call.tool),
+                    "confirmed": call is once_call
+                    or self._runs_uninterrupted(session_id, call.tool, call.arguments),
                     # For the conversation-scoped grants — the middle rung.
                     "session": session_id,
                 }))
@@ -1903,9 +1968,19 @@ class ExecutionEngine:
                 )
                 if created is not None:
                     reason = f"{reason} {created.render()}."
+                # **Written down with the call it is waiting on**, so the
+                # person's answer carries the task on rather than starting it
+                # again — and *Run this once* runs this call, not the one the
+                # model writes when asked a second time.
+                self._park(
+                    original_prompt, turns, model, session_id,
+                    f"Waiting for your say-so on `{call.tool}`.", held=call,
+                )
+                held_task = self._plan_ids.get(session_id, "") if self._plans is not None else ""
+                target = call_target(call.tool, call.arguments)
                 yield StreamEvent.tool_call(
                     call.server, call.tool, "confirm", reason,
-                    target=call_target(call.tool, call.arguments),
+                    target=target,
                     step_id=call_mark,
                     plan_step=plan_step,
                     # Carried so the row can offer the one thing that settles
@@ -1913,13 +1988,29 @@ class ExecutionEngine:
                     # the tool's name a second time.
                     grantable=bool(result.get("grantable")),
                     grant_scope=str(result.get("grant_scope") or ""),
+                    held_task=held_task,
+                    # Never for a call whose target the card cannot show: a
+                    # yes to something unseen is not a yes.
+                    once=bool(result.get("once")) and bool(target) and bool(held_task),
                 )
+                preamble = (
+                    f"`{call.tool}` on `{call.server}` needs your say-so "
+                    f"before it runs. {reason}"
+                )
+                if held_task:
+                    # **Stop, and do not guess.** The task is kept and the card
+                    # carries it on. Answering without the tool cost a whole
+                    # reply on a local model — the person waited for it, and
+                    # it was a generic answer to a question that needed the
+                    # tool (5 October 2026: a stack recommendation written
+                    # because the terminal was not yet allowed).
+                    notice = preamble.strip() + "\n"
+                    spoken.append(notice)
+                    yield notice
+                    return
                 yield from self._answer_without_the_tool(
                     original_prompt, call, reason, model, system_prompt, spoken,
-                    preamble=(
-                        f"`{call.tool}` on `{call.server}` needs your say-so "
-                        f"before it runs. {reason}"
-                    ),
+                    preamble=preamble,
                 )
                 return
 
@@ -2349,6 +2440,7 @@ class ExecutionEngine:
         model: str | None,
         session_id: str,
         reason: str,
+        held: "ToolCall | None" = None,
     ) -> None:
         """Write the unfinished task down, so a restart does not lose it.
 
@@ -2388,6 +2480,11 @@ class ExecutionEngine:
                     stopped_because=reason,
                     items=[PlanItem.from_json(i) for i in self._plan_items(session_id) if PlanItem.from_json(i)],
                     approved=session_id in self._approved,
+                    held=(
+                        PlanStep(server=held.server, tool=held.tool, arguments=dict(held.arguments), result=None)
+                        if held is not None
+                        else None
+                    ),
                 )
             )
             self._plan_ids[session_id] = stored.id
@@ -2454,8 +2551,13 @@ class ExecutionEngine:
         project_id: str | None = None,
         approve: bool = False,
         approve_level: str = "ask",
+        run_held: bool = False,
     ) -> Iterator[Any]:
         """Resume a stopped task, with a fresh window and a rebuilt context.
+
+        A task that stopped on a call waiting for the person's say-so makes
+        that call first -- through the gate, like any call. `run_held` is the
+        person's *Run this once*, and confirms that call and nothing after it.
 
         `approve` is the person's Go on the plan the task paused to show them:
         recorded on the task and on the session, so the resumed loop runs its
@@ -2511,7 +2613,9 @@ class ExecutionEngine:
                 "Zaram can look those up again if it needs them.",
                 kind="tool_loop",
             )
-        if not turns:
+        if not turns and pending.steps:
+            # Nothing fits although there was something to carry. A task held
+            # on its very first call has no steps at all, and is not this case.
             yield StreamEvent.notice(
                 "That task cannot be continued on this model — a single result "
                 "from it does not fit the window. A model with a larger context "
@@ -2556,6 +2660,21 @@ class ExecutionEngine:
         native_tools = list(self._resumed_native_tools)
 
         spoken: list[str] = []
+        if pending.held is not None:
+            yield from self._run_tool_loop(
+                buffered="",
+                shown=0,
+                original_prompt=pending.question,
+                model=model,
+                system_prompt=system_prompt,
+                spoken=spoken,
+                session_id=session_id,
+                turns=turns,
+                native_tools=native_tools,
+                first_call=ToolCall(pending.held.server, pending.held.tool, dict(pending.held.arguments)),
+                once=run_held,
+            )
+            return
         first = ExecutionStep(
             capability_id="reasoning.generate",
             input_data={
@@ -3038,11 +3157,26 @@ class ExecutionEngine:
         # *recently touched* of those above the floor, not the five most
         # relevant. Both halves have to be the same number or the floor is
         # protecting a list that something else already chose.
-        kept = sorted(
+        ranked = sorted(
             (r for r in results if _relevance_of(r) >= self.MIN_RECALL_SCORE),
             key=_relevance_of,
             reverse=True,
-        )[: self.MAX_RECALL]
+        )
+        # **One copy of a fact, not three.** The same generated code was stored
+        # once per time it was written, and measured on 5 October 2026 three of
+        # the six slots for one question held the identical ping-pong game. A
+        # duplicate adds nothing the model has not already read and costs a
+        # slot something else could have had. The first copy is the most
+        # relevant one, because the list is already in relevance order.
+        kept, seen = [], set()
+        for r in ranked:
+            key = " ".join(str(getattr(getattr(r, "record", None), "content", "") or "").split()).lower()
+            if key and key in seen:
+                continue
+            seen.add(key)
+            kept.append(r)
+            if len(kept) >= self.MAX_RECALL:
+                break
         logger.info("Engine: recalled %d/%d memories above threshold", len(kept), len(results))
         self._publish("memory.recalled", {
             "query": prompt[:100],
@@ -3088,8 +3222,9 @@ class ExecutionEngine:
         """Said out loud, because `CLAUDE.md` requires disabled capabilities
         to be visible rather than silent — and the inverse is just as true.
         A reply that quietly used somebody's Blender session should not be
-        the first the user hears of it. `servers` is what lets the orb report
-        *coding* before the first token."""
+        the first the user hears of it. `servers` is carried for the record;
+        the orb no longer reads it -- since 5 October 2026 *coding* starts when a
+        code tool runs or the reply opens a fence, never on the offer."""
         return StreamEvent.notice(
             f"{len(offered_tools)} attached tool"
             f"{'s are' if len(offered_tools) != 1 else ' is'} "
@@ -3150,6 +3285,12 @@ class ExecutionEngine:
             session_id,
             len(self._session_turns[session_id]),
         )
+
+    def last_answer(self, session_id: str) -> str:
+        """The last reply this session gave, or "". Read by the API to tell
+        whether a follow-up is about a page the previous reply wrote."""
+        turns = getattr(self, "_session_turns", {}).get(session_id) or []
+        return turns[-1][1] if turns else ""
 
     def _record_exchange(self, session_id: str, prompt: str, answer: str) -> None:
         """Keep the last few turns of this session, in memory only.

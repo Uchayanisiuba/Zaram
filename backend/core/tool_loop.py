@@ -211,7 +211,10 @@ def call_target(tool: str, arguments: Any) -> str:
 
     # Named in preference order rather than taking whatever comes first: a dict
     # has no order worth trusting, and the useful key differs by tool.
-    for key in ("path", "file", "query", "pattern", "directory", "runner"):
+    # `command` last: a terminal call has nothing else to show, and a card
+    # asking for a terminal command it does not print asks somebody to
+    # approve something they cannot see.
+    for key in ("path", "file", "query", "pattern", "directory", "runner", "command"):
         value = arguments.get(key)
         if isinstance(value, str) and value.strip():
             target = value.strip()

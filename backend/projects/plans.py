@@ -143,6 +143,15 @@ class Plan:
     #: hold file contents, which are the liability; the ticked list is the
     #: record of what was done, which is the asset.
     finished: bool = False
+    #: **The call the task stopped on, waiting for the person's say-so.**
+    #:
+    #: Kept so that *Run this once* runs exactly the call that was shown -- its
+    #: tool and its arguments, not whatever the model writes when asked again,
+    #: which can differ by a flag and would then ask again. The result is
+    #: always ``None``: it has not run. Cleared by the next save that does not
+    #: name one, so a task that has moved on cannot be made to run a call it
+    #: was holding an hour ago.
+    held: Optional[PlanStep] = None
 
     @property
     def done_count(self) -> int:
@@ -187,7 +196,8 @@ class PlanRecords:
                     updated_at      REAL NOT NULL,
                     items           TEXT NOT NULL DEFAULT '[]',
                     approved        INTEGER NOT NULL DEFAULT 0,
-                    finished        INTEGER NOT NULL DEFAULT 0
+                    finished        INTEGER NOT NULL DEFAULT 0,
+                    held            TEXT NOT NULL DEFAULT ''
                 )
                 """
             )
@@ -198,6 +208,7 @@ class PlanRecords:
                 ("items", "TEXT NOT NULL DEFAULT '[]'"),
                 ("approved", "INTEGER NOT NULL DEFAULT 0"),
                 ("finished", "INTEGER NOT NULL DEFAULT 0"),
+                ("held", "TEXT NOT NULL DEFAULT ''"),
             ):
                 if name not in columns:
                     conn.execute(f"ALTER TABLE plans ADD COLUMN {name} {ddl}")
@@ -298,22 +309,25 @@ class PlanRecords:
             items=list(plan.items),
             approved=plan.approved,
             finished=plan.finished,
+            held=plan.held,
         )
         with self._lock, self._connect() as conn:
             conn.execute(
                 "INSERT INTO plans (id, question, project_id, session_id, model, "
-                "stopped_because, created_at, updated_at, items, approved, finished) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                "stopped_because, created_at, updated_at, items, approved, finished, held) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
                 "ON CONFLICT(id) DO UPDATE SET question=excluded.question, "
                 "project_id=excluded.project_id, session_id=excluded.session_id, "
                 "model=excluded.model, stopped_because=excluded.stopped_because, "
                 "updated_at=excluded.updated_at, items=excluded.items, "
-                "approved=excluded.approved, finished=excluded.finished",
+                "approved=excluded.approved, finished=excluded.finished, "
+                "held=excluded.held",
                 (
                     stored.id, stored.question, stored.project_id, stored.session_id,
                     stored.model, stored.stopped_because, stored.created_at,
                     stored.updated_at, _dumps([i.to_json() for i in stored.items]),
                     1 if stored.approved else 0, 1 if stored.finished else 0,
+                    _dump_held(stored.held),
                 ),
             )
             conn.execute("DELETE FROM plan_steps WHERE plan_id = ?", (stored.id,))
@@ -352,7 +366,8 @@ class PlanRecords:
                 return True
             conn.execute("DELETE FROM plan_steps WHERE plan_id = ?", (plan_id,))
             conn.execute(
-                "UPDATE plans SET finished = 1, stopped_because = '', updated_at = ? WHERE id = ?",
+                "UPDATE plans SET finished = 1, stopped_because = '', held = '', "
+                "updated_at = ? WHERE id = ?",
                 (time.time(), plan_id),
             )
         return True
@@ -438,7 +453,32 @@ class PlanRecords:
             items=[i for i in (PlanItem.from_json(r) for r in (_loads(row["items"]) or [])) if i],
             approved=bool(row["approved"]),
             finished=bool(row["finished"]),
+            held=_load_held(row["held"] if "held" in row.keys() else ""),
         )
+
+
+def _dump_held(step: Optional[PlanStep]) -> str:
+    if step is None:
+        return ""
+    return _dumps({"server": step.server, "tool": step.tool, "arguments": step.arguments})
+
+
+def _load_held(text: str) -> Optional[PlanStep]:
+    """The held call, or ``None`` -- including for one that will not parse.
+
+    Unlike a step's result, a held call that cannot be read must not be
+    guessed at: it is about to run on a person's say-so, and the say-so was
+    for the call they were shown.
+    """
+    if not text:
+        return None
+    raw = _loads(text)
+    if not isinstance(raw, dict):
+        return None
+    server, tool, arguments = raw.get("server"), raw.get("tool"), raw.get("arguments")
+    if not (isinstance(server, str) and server and isinstance(tool, str) and tool):
+        return None
+    return PlanStep(server=server, tool=tool, arguments=arguments if isinstance(arguments, dict) else {}, result=None)
 
 
 def _dumps(value: Any) -> str:

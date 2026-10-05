@@ -54,6 +54,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import logging
 import re
 import shutil
@@ -337,8 +338,26 @@ class DrivingTools:
             self._shut(session)
 
     def _shut(self, session: BrowserSession) -> None:
+        # **The whole tree, not the first process.** A browser is a main
+        # process and a renderer, a GPU process and helpers, and `terminate()`
+        # reaches only the first. A page that was stuck in a loop leaves its
+        # renderer holding files in the profile open, so the profile could not
+        # be removed -- and `rmtree` raised, which on the page check replaced a
+        # verdict with a traceback. Found 5 October 2026, running the real
+        # Voxel World through the check. `taskkill /T` is Windows' way to end
+        # a tree; elsewhere the process group is the equivalent and
+        # `terminate` is what this has always done.
         try:
-            session.process.terminate()
+            if os.name == "nt":
+                subprocess.run(
+                    ["taskkill", "/PID", str(session.process.pid), "/T", "/F"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    timeout=10,
+                    check=False,
+                )
+            else:
+                session.process.terminate()
             session.process.wait(timeout=5)
         except Exception:
             try:
@@ -355,12 +374,14 @@ class DrivingTools:
         # `ignore_errors` it leaves it *silently*. The point of the fresh
         # profile is that it does not outlive the session, so this is worth
         # a second or so of patience.
-        for attempt in range(10):
-            shutil.rmtree(session.profile, ignore_errors=attempt < 9)
+        for attempt in range(20):
+            shutil.rmtree(session.profile, ignore_errors=True)
             if not Path(session.profile).exists():
                 return
-            time.sleep(0.1)
-        logger.debug("driving profile %s could not be removed", session.profile)
+            time.sleep(0.25)
+        # Said, not raised: a profile left behind is a nuisance, and the caller
+        # is usually holding a result that matters more.
+        logger.warning("driving profile %s could not be removed", session.profile)
 
     def _free_port(self) -> int:
         import socket
@@ -369,7 +390,13 @@ class DrivingTools:
             probe.bind(("127.0.0.1", 0))
             return int(probe.getsockname()[1])
 
-    def _launch(self, url: str) -> BrowserSession:
+    def _launch(
+        self, url: str, extra_args: tuple = (), software_gl: bool = False
+    ) -> BrowserSession:
+        # `extra_args` and `software_gl` are for `core/page_check.py`, which
+        # runs a model's page where it can be killed and needs WebGL without a
+        # GPU, and no name resolution at all. Defaults are what driving a
+        # person's own app has always launched with.
         browser = self._browser or find_browser()
         if not browser:
             raise RuntimeError(NO_BROWSER)
@@ -379,7 +406,7 @@ class DrivingTools:
             [
                 browser,
                 "--headless=new",
-                "--disable-gpu",
+                *(() if software_gl else ("--disable-gpu",)),
                 "--no-first-run",
                 "--no-default-browser-check",
                 # No extensions, no restored tabs, no sign-ins. See the module
@@ -388,6 +415,7 @@ class DrivingTools:
                 "--window-size=1280,900",
                 "--remote-debugging-port=%d" % port,
                 "--user-data-dir=%s" % profile,
+                *extra_args,
                 url,
             ],
             stdout=subprocess.DEVNULL,

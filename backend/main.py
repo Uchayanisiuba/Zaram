@@ -1317,6 +1317,11 @@ class ChatRequest(BaseModel):
     #: stopping. Meaningless without `approve_plan`, and never a stored
     #: preference — a level is chosen for the plan on screen.
     approve_level: str = "ask"
+    #: **Run this once**: the task stopped on a call waiting for the person's
+    #: say-so, and they said yes to that one call. Meaningful only with
+    #: `continue_task`, and it confirms that call and no other — never a
+    #: grant, never stored, and never set by anything but that press.
+    run_held: bool = False
     #: **Revise**: `text` is a correction to an earlier reply, and this is
     #: that reply with the question it answered. Composed into one prompt by
     #: `core.revise.revision_prompt` and sent down the ordinary plan path —
@@ -1908,6 +1913,38 @@ async def chat(request: ChatRequest):
         ),
         persona_prompt,
     )
+    # **How to write a page the preview can run**, only when one is asked for
+    # -- `core/page_guidance.py`. A revision is judged on the question it
+    # revises, because "you fall through the floor" names no page at all.
+    from core.page_guidance import PAGE_GUIDANCE, wants_page_guidance
+
+    try:
+        _last_answer = chat_router.execution_engine.last_answer(request.session_id)
+    except Exception:  # noqa: BLE001 - guidance must never fail a reply
+        _last_answer = ""
+    if wants_page_guidance(request.text, _last_answer) or (
+        request.revise is not None
+        and wants_page_guidance(request.revise.question + " " + request.revise.reply[:2000])
+    ):
+        system_prompt = system_prompt + "\n\n" + PAGE_GUIDANCE
+
+    # **Thinking for code**, when the person chose that middle state of the
+    # Thinking switch: a request for code or a page thinks even though the
+    # everyday setting is off. A message's own choice (`request.thinking`)
+    # still wins -- "answer without thinking" must keep working.
+    from core.thinking_override import decide_thinking, is_code_request
+
+    try:
+        _for_code = get_user_settings().thinking_for_code
+    except Exception:  # noqa: BLE001 - a setting that cannot be read changes nothing
+        _for_code = False
+    set_thinking_override(
+        decide_thinking(
+            request.thinking,
+            code=is_code_request(request.text, _last_answer),
+            for_code=_for_code,
+        )
+    )
 
     # The Kernel owns planning, search, grounding, and response generation.
     # The API layer passes the raw prompt through without independent search.
@@ -2085,6 +2122,7 @@ async def chat(request: ChatRequest):
             plan_id=request.plan_id,
             approve_plan=request.approve_plan,
             approve_level=request.approve_level,
+            run_held=request.run_held,
         ):
             _collect_answer(chunk, answer)
             # After `_collect_answer`, so a tool row's `at` counts the text
@@ -3325,6 +3363,9 @@ class RoutingPreferenceUpdate(BaseModel):
     #: leaves it unchanged. Applied by the local engines; a cloud provider's
     #: own reasoning control is not guessed at, so its thinking still shows.
     thinking: bool | None = None
+    #: Think for code and pages even when everyday thinking is off. `None`
+    #: leaves it unchanged.
+    thinking_for_code: bool | None = None
     #: How much context to ask a **local** model for, in tokens, or `0` for
     #: the server's own default. `None` leaves it unchanged.
     #: Which of `CONTEXT_POLICIES`. Validated in the store rather than
@@ -3455,6 +3496,9 @@ async def set_routing_preference(update: RoutingPreferenceUpdate):
 
     if update.thinking is not None:
         settings.set_thinking(update.thinking)
+
+    if update.thinking_for_code is not None:
+        settings.set_thinking_for_code(update.thinking_for_code)
 
     if update.context_policy is not None:
         settings.set_context_policy(update.context_policy)
@@ -5652,6 +5696,61 @@ class GenerateBody(BaseModel):
     #: is why the absence of branding does not read as a rendering failure.
     from_name: str = ""
     from_lines: list[str] = []
+
+
+class SaveAppFile(BaseModel):
+    path: str
+    content: str
+
+
+class SaveAppBody(BaseModel):
+    name: str = ""
+    files: list[SaveAppFile] = []
+
+
+class PreviewCheckBody(BaseModel):
+    #: The frame document the preview would run: policy, shims, libraries, page.
+    html: str
+
+
+@app.post("/preview/check")
+async def check_preview_page(body: PreviewCheckBody):
+    """Run a page a model wrote, hidden, and say whether it started and stayed up.
+
+    The page is loaded in a sealed frame in a throwaway browser with no route to
+    any host, so nothing it asks for leaves the machine and a page that never
+    ends costs a killed browser rather than a frozen window. `core/page_check.py`
+    says what it proves and what it does not. Always answers 200 with a verdict;
+    "could not check" is a verdict (`checked: false`), never a pass.
+    """
+    import asyncio
+
+    from core import page_check
+
+    if len(body.html.encode("utf-8")) > page_check.MAX_DOCUMENT_BYTES:
+        raise HTTPException(status_code=413, detail="The page is too large to check.")
+    verdict = await asyncio.to_thread(page_check.check_page, body.html)
+    return verdict.as_dict()
+
+
+@app.post("/apps/save")
+async def save_app_folder(body: SaveAppBody):
+    """Keep a multi-file app a reply wrote, as a new folder in the output directory.
+
+    Generative tier and no project: new files only, no overwrite, no delete,
+    paths confined to the folder it makes. `artifacts/app_folder.py` says what
+    is refused and why. The person pressed Save, which is the decision.
+    """
+    from artifacts.app_folder import AppFolderRefused, save_app
+    from artifacts.store import default_output_root
+
+    try:
+        folder = save_app(
+            default_output_root(), body.name, [(f.path, f.content) for f in body.files]
+        )
+    except AppFolderRefused as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+    return {"path": str(folder), "files": [f.path for f in body.files]}
 
 
 @app.post("/artifacts/generate")

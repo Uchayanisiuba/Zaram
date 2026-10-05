@@ -330,6 +330,13 @@ class UserSettings:
         # `think` and TabbyAPI's `enable_thinking` — and left alone for cloud
         # providers, whose controls differ per vendor and are not guessed at.
         self._thinking = True
+        # Think for code and pages even when `_thinking` is off: the middle
+        # state of the composer's Thinking switch. Off by default -- the
+        # setting above is the person's, and this only matters to someone who
+        # turned thinking off for everyday questions and still wants it when
+        # they ask for a program. Whether it helps is measured, not assumed:
+        # `scripts/compare_thinking.py`.
+        self._thinking_for_code = False
         self._load()
 
     @property
@@ -337,6 +344,16 @@ class UserSettings:
         """Whether a thinking model is asked to think. Read at request time by
         the local engines."""
         return self._thinking
+
+    @property
+    def thinking_for_code(self) -> bool:
+        return self._thinking_for_code
+
+    def set_thinking_for_code(self, on: bool) -> bool:
+        with self._lock:
+            self._thinking_for_code = bool(on)
+            self._save()
+        return self._thinking_for_code
 
     def set_thinking(self, on: bool) -> bool:
         with self._lock:
@@ -514,6 +531,7 @@ class UserSettings:
             "image_locality": self._image_locality.value,
             "image_model": self._image_model,
             "thinking": self._thinking,
+            "thinking_for_code": self._thinking_for_code,
             "context_policy": self._context_policy,
             "context_overrides": dict(self._context_overrides),
             "overflow_policy": self._overflow_policy,
@@ -795,6 +813,8 @@ class UserSettings:
         # default. The safe direction is the opposite of `web_search`'s — a
         # misread here costs a wait, not a byte leaving.
         self._thinking = raw.get("thinking") is not False
+        # The opposite default and the opposite reading: only an exact `true`.
+        self._thinking_for_code = raw.get("thinking_for_code") is True
 
         # The character. Read defensively and bounded on the way in: a settings
         # file is a file, a character is meant to travel as one, and the day

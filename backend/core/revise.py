@@ -20,12 +20,19 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-__all__ = ["Revision", "revision_prompt", "MAX_REPLY_CHARS", "MAX_QUESTION_CHARS"]
+__all__ = ["Revision", "revision_prompt", "MAX_REPLY_CHARS", "MAX_CODE_REPLY_CHARS", "MAX_QUESTION_CHARS"]
 
 #: Enough of the earlier reply for the correction to bite; a reply longer
 #: than this is cut from the end and said to be, so the model does not
 #: revise text it never saw as though it had.
 MAX_REPLY_CHARS = 12_000
+#: **A reply that carries code gets the whole of it -- 5 October 2026.** A page
+#: revised from its first 12,000 characters comes back without its ending: the
+#: "Block World" reply that prompted this was 12,771. Cutting prose loses
+#: detail; cutting code loses the program, and the model then rewrites the
+#: missing part from nothing. 40,000 characters is roughly 10,000 tokens, which
+#: the context resolution already sizes for on any model that would answer.
+MAX_CODE_REPLY_CHARS = 40_000
 MAX_QUESTION_CHARS = 4_000
 
 
@@ -54,7 +61,8 @@ def revision_prompt(revision: Revision, correction: str) -> str:
     second way to generate.
     """
     question, question_cut = _bounded(revision.question, MAX_QUESTION_CHARS)
-    reply, reply_cut = _bounded(revision.reply, MAX_REPLY_CHARS)
+    limit = MAX_CODE_REPLY_CHARS if "```" in (revision.reply or "") else MAX_REPLY_CHARS
+    reply, reply_cut = _bounded(revision.reply, limit)
     correction = (correction or "").strip()
 
     reply_note = " (the start of it; the rest was longer than fits here)" if reply_cut else ""

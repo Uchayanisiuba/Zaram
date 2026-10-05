@@ -546,6 +546,10 @@ class McpRuntime:
                 "tool": tool_name,
                 "reason": under.reason,
                 "grantable": False,
+                # A floor asks about *this call*, so a yes for this call is the
+                # one answer that settles it. Offered by the engine only when
+                # the card can show what the call is aimed at.
+                "once": True,
             }
 
         if decision.verdict is Verdict.CONFIRM and not confirmed:
@@ -581,6 +585,10 @@ class McpRuntime:
                 # the button-that-changes-nothing this file already
                 # refuses elsewhere.
                 "grant_scope": self._grant_scope(server_id, tool_name),
+                # Whether a yes for this one call may be offered. Not for a
+                # send: the card shows where a message goes and not what it
+                # says, and a send stays a draft until the person sends it.
+                "once": not looks_outbound(tool_name),
             }
 
         server = await self._connect(cfg)

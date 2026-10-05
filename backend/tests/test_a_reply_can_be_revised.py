@@ -67,3 +67,15 @@ def test_the_transport_composes_it_and_sends_it_down_the_ordinary_path(monkeypat
     assert "revising an earlier answer" in seen["prompt"]
     assert "add subtract" in seen["prompt"] and "it should also accept negatives" in seen["prompt"]
     assert "revise" not in seen["kwargs"]
+
+
+def test_a_reply_carrying_code_is_sent_whole():
+    # 5 October 2026: a 12,771-character page revised from its first 12,000
+    # came back without its ending.
+    from core.revise import MAX_CODE_REPLY_CHARS
+
+    page = "```html\n" + "x" * 20_000 + "\n```"
+    prompt = revision_prompt(Revision(question="make a game", reply=page), "make the button bigger")
+    assert prompt.count("x") == 20_000
+    assert "the rest was longer" not in prompt
+    assert MAX_CODE_REPLY_CHARS > MAX_REPLY_CHARS

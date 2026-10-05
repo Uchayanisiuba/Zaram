@@ -446,7 +446,7 @@ class TestPermissionIsNotTheEngineDecision:
             ],
             mcp,
         )
-        engine._runs_uninterrupted = lambda session_id, tool: True  # type: ignore[assignment]
+        engine._runs_uninterrupted = lambda session_id, tool, arguments=None: True  # type: ignore[assignment]
 
         list(engine.execute("what is in my blender scene"))
 
