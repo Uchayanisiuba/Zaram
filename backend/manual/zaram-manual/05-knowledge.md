@@ -6,6 +6,8 @@ Open **Knowledge** and choose **Add a folder**. Zaram reads every document it ca
 
 A folder stays watched: if you change a file in it, Zaram reads the new version; if you remove a file, Zaram notes that it has gone.
 
+![Knowledge: the drop area, the folders Zaram reads, and the domains that group them. The built-in Zaram domain is this manual.](assets/knowledge.png)
+
 ## Adding a single file, or text
 
 Drop a file onto Knowledge, use **Upload**, or paste text. Zaram keeps its own copy of uploaded files in its own folder, so the original can move without breaking anything.

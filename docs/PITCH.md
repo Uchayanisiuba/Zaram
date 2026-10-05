@@ -445,6 +445,49 @@ forbids it, and it would teach the wrong thing about what Zaram is.
 pack's offer gets pressed (revenue). Nothing gets a price until one pack does
 its job end to end without the maintainer in the room.
 
+## What can be shown today — updated 5 October 2026
+
+The pitch is stronger when it can be watched. This is what a person can be shown
+on the current build, in the order that lands, each of it seen working on the
+maintainer's machine rather than planned. **Nothing here is a traction figure and
+the Traction blank above stays blank.**
+
+**A five-minute demonstration**
+
+1. **Point it at a folder, ask something you did not know.** The answer cites the
+   file it came from, and opening the citation shows the passage. This is the
+   wedge from `CLAUDE.md`, and it works the same on invoices, grant letters or a
+   reading list.
+2. **Correct a fact and watch the answer change.** The memory is not a black box.
+3. **Open Activity.** Every request that left the machine, with the literal text,
+   and *0 bytes* for the ones that did not. One button cuts it all off.
+4. **Ask for an app.** *"A snake game, one file."* Zaram writes it, runs it in a
+   hidden browser that has no route to any host, and says on the line under the
+   reply whether it ran without errors. If it froze or threw, it asks the model
+   to fix it — twice at most — and says so. Then **Preview**, point at part of the
+   page, and ask for a change.
+5. **Ask for a document and a picture.** A proposal as `.docx`, a chart from your
+   own numbers, a picture drawn on a model you chose — each with what left the
+   machine stated beside it.
+
+**What is new since the last pitch edit, and why each is a point of difference**
+
+| Capability | The claim it supports |
+|---|---|
+| Apps in one file or several, run in a sealed preview with no network | *It builds things, and the page cannot phone home.* Nobody else's ambient assistant can say the second half. |
+| The page is run before it is shown, and fixed when it fails | *The model is not trusted to have got it right.* Found on a real failure: a local 27B model wrote a game with twenty-three loops that never end and froze the window; the check reports it as hung in about eighteen seconds. |
+| A multi-file app saves as a folder, no project or terminal | *Building is not gated behind setup.* Running commands still is, deliberately. |
+| Thinking for code (off, for code, on) | *Speed and care are one control, and the person sets it.* Not measured yet; the measuring script exists. |
+| Run this once, and a terminal that reads the command line | *Autonomy is granted, per call, and the floor under it is not negotiable.* |
+| Unfinished work first | *It remembers what you owe, including to yourself.* |
+
+**What it is not, and should not be sold as.** It does not play a game or judge
+whether an app is good: the check proves a page starts, stays up and throws no
+error. Full-stack work (a server, a database) needs a coding project and the
+person's switches, and the end-to-end trial of that chain has not been run. It
+is an alpha for Windows, unsigned, and the one number that matters most to the
+funders in this document — people using it — is still the blank.
+
 ## Discovered, not yet built — added 14 September 2026
 
 Recorded so they return as decisions rather than as new ideas. Each has a

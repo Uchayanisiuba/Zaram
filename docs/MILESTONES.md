@@ -22,6 +22,149 @@ publishing step over rather than finding another route. `CLAUDE.md`,
 
 *The latest work is first. Earlier sessions follow below.*
 
+### 5 October — what stood between asking for an app and getting one
+
+The maintainer asked, candidly, whether Zaram can build an app end to end. The
+honest answer was *every piece exists and the chain has not been watched*, and
+the audit behind it found five things in the way. Four are fixed; the fifth is
+the trial.
+
+* **Pressing Allow did nothing if the reply was still being written.** The
+  card appears when the gate holds a call, the reply goes on answering without
+  the tool, and `send` refuses while a reply streams — so the grant was saved
+  and the re-ask silently dropped. `chatStore.askAgainAfterAllowing` discards
+  the in-flight attempt first. `chatStore.allow.test.ts`.
+* **A floor card was a dead end.** An install, a delete or a hook always asks
+  and is not grantable, so the card offered only *Deny*. **Run this once** is a
+  yes for that one call: the engine parks the held call with the task
+  (`Plan.held`), the press resumes the task with `run_held`, and the resume
+  runs *that* call confirmed and asks about the next one afresh — never the
+  call the model writes when asked a second time. Not offered for a send, nor
+  for a call whose target the card cannot show. Every yes on the card now
+  carries the task on instead of asking the question again from nothing, and
+  a held call no longer costs a whole fallback reply on a local model.
+  `tests/test_run_this_once.py`, `PermissionCard.test.tsx`.
+* **The terminal skipped every rule keyed on a name.** `npm install` through the
+  install runner asked and through the terminal did not; `delete_file` asked
+  and `rm -rf` did not. `floors.terminal_floor` reads the command line: fetching
+  packages (`npx` and `npm create` included), deleting (`git clean`, `reset
+  --hard` included) and sending off the machine ask. A delete is not covered
+  by a plan's *run without stopping*. It is a floor, not a sandbox, and says so.
+* **The card never showed the terminal command** — `call_target` had no
+  `command` key. A yes to something unseen is not a yes.
+* **Four switches to find before building.** Project has **Let Zaram build
+  and run this**: the four boxes set in one request, each still visible and
+  revocable on its own, with the sentence saying what still asks.
+
+Two corrections to what was said in the audit itself, worth keeping because
+they were said with confidence: the 6-round cap does **not** stop a task —
+it hands over silently, three times, so about 24 rounds before it parks; and
+"a script Zaram just wrote asks before it runs" is not a rule, only a line
+added to a card that is already asking.
+
+Also built: the empty conversation's first rows are now **what is unfinished in
+the project touched last** (one task resumes; several are listed first, with
+*Run all in order*, which stops wherever a task waits on the person) and
+**pick up where you left off**, the last conversation by its own title. The
+invented *Recent* list in the left rail is gone.
+
+**"Recalled 6 facts" — always six, and mostly not relevant.** Six is
+`MAX_RECALL`. Measured on the real Spine (428 facts) for a Minecraft request:
+27 facts cleared the 0.42 floor, the top match (0.53) was an unrelated Ride
+Share line, and three of the six slots were one ping-pong file stored three
+times. The recall row now lists each fact with its similarity and origin when
+opened, and a duplicate takes one slot. **The floor itself is not fixed:** it
+was calibrated where unrelated questions scored ≤ 0.362, and on the real Spine
+short conversational lines score ~0.5 against almost anything ("good morning"
+reaches 0.59). Re-calibrating is a measurement job against
+`test_recall_at_scale.py` and the eval. Related, and also open: test prompts
+such as *"Reply with exactly: …"* were captured as facts, which is what
+crowds a real corpus.
+
+**A Minecraft-style page the resident model wrote could not be played, and
+none of the four reasons was the model's size.** (1) It loaded
+`three@0.160.0/build/three.min.js`, a file three.js stopped shipping in r160,
+so it failed with the network on as well as off. (2) The preview's sandbox had
+no `allow-pointer-lock`, so "click to start" could never lock the mouse. (3)
+The frame forced 24px padding and a white page onto apps, insetting the canvas.
+(4) The page's own start listener sat under its own overlay, and its physics
+let the player fall through the ground. Fixed: the preview serves three.js r185
+and five addons from Zaram's own copy for any CDN URL or import map
+(`lib/previewLibraries.ts`, executed for real in its test), pointer lock is
+allowed, apps are drawn unpadded. Seen in real Chromium: 6,712 blocks drawn,
+no errors, nothing fetched. For (4), whichever model answers is now told how
+the preview runs, only on page requests and follow-ups to a page
+(`core/page_guidance.py`) — including *reply with the whole page, never only
+the changed lines*, after a change came back as a fragment nobody could run.
+And the preview can talk back: **Fix this** on a page that stopped, and
+**Select** — point at part of the page, ask for a change — both sent as a
+revision that carries the page whole (`core/revise.py` no longer cuts a
+code-bearing reply at 12,000 characters; that page was 12,771).
+
+**Voxel World: an hour of the resident 27B's work that froze on its first line
+of effort, and what Zaram does now so the person is never the first to run
+it.** The page had twenty-three `for` loops with no `++`
+(`for(let i=0;i<16;i)`), so the hotbar-icon code never ended and the window
+froze before anything drew. Nothing else in it was wrong. The same prompt
+reportedly worked in another harness with the same model; that harness was not
+seen, so the account is an inference, not a finding: a harness runs what it
+writes, sees the freeze and fixes it before showing anything, and Zaram showed
+the first draft. Four things were built, in the order they act:
+
+* **Run it first.** After a reply that wrote a page, the interface asks the
+  backend to run it (`POST /preview/check`, `core/page_check.py`): the exact
+  frame document the preview would run, in the same sealed frame, in a
+  throwaway browser with **no route to any host** (name resolution off, and a
+  dead proxy for loopback and numeric addresses, which a test proves by
+  watching a listening server stay unvisited). Hangs are found by a heartbeat
+  placed ahead of the page; errors and `console.error` are read with their
+  line. No Chrome or Edge, or a page too large, is `checked: false` and is
+  said — never a pass. A page that fails is sent back to the model as a
+  visible message, **at most twice**, then handed to the person
+  (`stores/pageCheckStore.ts`); each reply carries a line saying what
+  happened, and the switch (*Page check on/off*) sits beside Thinking.
+  Measured on the real files: the original Voxel World comes back **hung**
+  after 17.8 s; the fixed one passes but **held still 8.7 s** at start-up on
+  software rendering, which the line reports with that caveat. It does not
+  play the game: it proves the page starts, stays up and throws nothing.
+* **Apps of several files need no project.** A reply that names its files on
+  the fence line, as the first line of a block, or on the line above, is read
+  as an app (`lib/appFiles.ts`): the preview joins them — stylesheets inline,
+  classic scripts inline (a `defer` one at the end of the body), modules and
+  everything they import through one import map of `data:` URLs with relative
+  imports rewritten to bare names — and runs them in the same seal. Seen in a
+  real browser: three modules in nested folders ran under the preview's
+  policy. **Save** writes a new folder under `generated/apps/` (`POST
+  /apps/save`, `artifacts/app_folder.py`): generative tier, new files only,
+  no overwrite and no delete, names that could leave the folder or run refused
+  with the reason. A project is still where anything that needs a process
+  lives — `npm install`, a dev server, a backend — because running commands
+  is the mutative tier; a saved folder can be opened as one later. Not built:
+  the one-press "continue this in a project" hand-off.
+* **Thinking has a middle state: for code.** The composer's switch cycles
+  *off → for code → on*; *for code* thinks when the request is for code or a
+  page (or follows one) even with everyday thinking off, and a message's own
+  choice still wins. Off by default. **Whether thinking helps was not
+  measured**: `scripts/compare_thinking.py` runs the same request on
+  and off through the chat route, runs every page through the same check, and
+  prints clean-start rate, time and thinking length. It needs the GPU and
+  has not been run; the same model once spent 870 s thinking about a bouncing
+  ball, which is why the default stays where it was.
+* **Start-up advice.** The page guidance now says to draw the first screen
+  before heavy work and build large things in pieces across frames, and how to
+  name files for an app.
+
+Found by actually running it: the shared browser shutdown killed only the
+first process, so a hung page's renderer kept the temp profile open, `rmtree`
+raised, and the traceback replaced the verdict. `DrivingTools._shut` now ends
+the whole tree on Windows and never raises; the check cannot lose a verdict to
+cleanup. And `check:proxy` refused the build until `/apps` and `/preview` were
+in `vite.config.js` and `electron/config.js` — without them both calls would
+have got the app's HTML back with a 200.
+
+**Still open: the trial.** A small app, all four switches on, watched end to
+end, with every stop written down. Not run — it needs the GPU.
+
 ### 3–4 October — what was asked for in one sitting, and what of it is done
 
 A long session took eleven separate requests from the maintainer. Six

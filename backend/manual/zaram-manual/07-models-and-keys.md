@@ -30,6 +30,8 @@ Nothing leaves your computer unless you allowed that destination. Connecting a p
 
 **Activity → What left** is the log: every request that went out, where, when, and what was in it. It cannot be edited, and it records refusals too.
 
+![Activity: 0 bytes left this device in the last 24 hours, one request blocked, every destination with deny, ask and allow, and the log's integrity check.](assets/activity.png)
+
 ## Cutting everything off
 
 **Activity → Destinations** lists every server Zaram has ever contacted, with a switch for each: allow, ask, block. *Block everything* stops all outbound traffic at once. A local model keeps working.

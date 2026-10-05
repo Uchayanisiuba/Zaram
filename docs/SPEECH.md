@@ -242,6 +242,17 @@ green and correct throughout.
 `speaking` is now set at the moment a clip **starts playing** — not when the
 queue opens, which claimed sound seconds before any existed.
 
+**And it is released when sound stops, not when the reply does — 5 October
+2026.** The loop used to wait for the *next* sentence to exist before playing
+the current one, holding `speaking` up the whole time. Code is never spoken, so
+a reply with two sentences before a code block kept the avatar in its talking
+pose, silent, for as long as the block took to write; `speaking` is drawn over
+`coding`, so the typing clip never played — the maintainer's report, after
+several attempts at the state itself. Now a clip plays as soon as it is ready,
+the next is fetched during playback, and if nothing is ready
+`SPEECH_GAP_MS` (250 ms) after a clip ends, `speaking` drops so the state
+underneath shows. `stores/speechStore.loop.test.ts` fails on the old loop.
+
 ### If the avatar is not the sample one
 
 `AvatarSample_Z.vrm` is morph-rigged, and the eased lerp above is correct for it.

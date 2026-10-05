@@ -10,13 +10,17 @@ When a tool is held for your say-so, the row that holds it offers **Allow — fo
 
 A model that can call tools decides for itself when to use one — you do not have to name the tool. Zaram still asks before anything changes or leaves.
 
+Some calls always ask, whatever you have granted: installing packages, deleting, and anything that sends something off this machine. The card for one of those offers **Run this once**: a yes to that single call. It runs, and the next call asks again. Pressing any of the buttons on the card carries the task on from where it stopped; the question is not asked again from the beginning.
+
+The terminal gets the same care as the named tools. Zaram reads the command line itself, so `npm install` asks whether it goes through the install runner or the terminal, and so does a command that deletes files or sends something off the machine.
+
 ## Projects
 
 A **project** groups work: its files, the facts that belong to it, and the tasks in flight. Create one under **Project**, give it a type, and open it; questions are then answered with that project's facts first, and documents you make are filed under it. Deleting a project asks what to do with its facts and files rather than just removing them.
 
 ## Working on code
 
-Open a project of type *coding* with a folder that holds a repository. Zaram then reads the code, searches it, edits files, and runs the project's own commands — its tests, its type checker, its build — never a free shell.
+Open a project of type *coding* with a folder that holds a repository. Under the project, **Let Zaram build and run this** turns on the four switches a build needs — writing files, running commands, driving the app and the terminal — in one press. Each switch is still visible on its own and can be turned off on its own, and installs and deletes still ask. Zaram then reads the code, searches it, edits files, and runs the project's own commands — its tests, its type checker, its build — never a free shell.
 
 What that looks like:
 

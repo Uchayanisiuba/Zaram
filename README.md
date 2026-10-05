@@ -134,6 +134,15 @@ working, rather than merely written:
 - **Generated documents** — .docx, .xlsx, .pdf, .md, .csv, charts — with preview.
 - **Speech both directions**, local and optional, keeping pace with the text rather than
   waiting for the reply to finish.
+- **Apps and pages, run before you see them** (5 October 2026). A page a model writes is
+  run in a hidden browser with no route to any host; a freeze or an error goes back to the
+  model, twice at most, and the line under the reply says what happened. The preview has no
+  network and three.js is built in. Apps of several files run together and save as a
+  folder, with no project. Measured on a real failure: a local 27B model's game with
+  twenty-three endless loops is reported as hung in about eighteen seconds. It proves a
+  page starts and stays up; it does not play it.
+- **Thinking has a middle state** — off, *for code*, on. Off by default for code; whether
+  it helps is unmeasured, and `scripts/compare_thinking.py` is how it will be.
 - **An installer**, built by the release workflow on a hosted runner from the tag,
   published as [`v0.1.0-alpha.2`](https://github.com/Uchayanisiuba/Zaram/releases/tag/v0.1.0-alpha.2)
   with the SHA-256 beside it, and cold-installed from outside the checkout before the

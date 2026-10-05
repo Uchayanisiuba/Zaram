@@ -1,5 +1,15 @@
 # Zaram Changelog
 
+## [0.1.0-alpha.4] — 5 October 2026
+
+The full notes for each build are `scripts/release-notes.mjs`, which is what the release page
+shows. In short: apps and pages written in chat are run before they are shown and fixed when
+they fail; apps of several files run together and save as a folder without a project; the
+Thinking switch gained *for code*; a held call can be allowed *once*; the terminal is read
+for installs, deletes and sends; the empty conversation offers the unfinished work first;
+the preview serves three.js offline, and can be pointed at ("Select") and asked for a change.
+See `docs/MILESTONES.md`, 5 October.
+
 ## [Unreleased] — Direction reset
 
 Zaram was repositioned from a "Local-First AI Productivity Operating System" to **the

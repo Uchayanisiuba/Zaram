@@ -26,7 +26,11 @@ A model that can plan writes a checklist at the top of its reply and ticks it as
 
 ## Thinking
 
-Some models think before they answer. The thought appears as one quiet line while it streams and folds away when the answer starts; click it to read the whole thing. **Thinking on/off** sits beside the routing choice at the bottom of the conversation. Off is much faster — a few tenths of a second instead of several seconds before the first word — and the answer is usually the same for ordinary questions. Turn it on for something hard.
+Some models think before they answer. The thought appears as one quiet line while it streams and folds away when the answer starts; click it to read the whole thing. **Thinking** sits beside the routing choice at the bottom of the conversation, and it has three settings: **off**, **for code** and **on**. Off is much faster — a few tenths of a second instead of several seconds before the first word — and the answer is usually the same for ordinary questions. *For code* answers everyday questions straight away and thinks only when you ask for code or a page. On thinks about everything, which is for something hard. Thinking can take minutes on a large model, so if a reply is still thinking after a long wait, Zaram offers **Answer without thinking** for that one message.
+
+## Pages and apps
+
+Ask for a page, a game or a small tool and a **Preview** button appears under the reply. Zaram runs the page first in a hidden browser and says on a line under the reply whether it ran without errors; **Page check on/off** sits beside Thinking. The whole story, including apps of several files, is in *Building apps and pages*.
 
 ## Naming a folder
 

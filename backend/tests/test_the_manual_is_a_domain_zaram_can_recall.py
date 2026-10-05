@@ -138,7 +138,8 @@ class TestAQuestionFindsThePage:
 
         for question, page in (
             ("how do I export my memory and take it with me", "04-memory"),
-            ("what does the uninstaller do with my data", "10-help-and-problems"),
+            ("what does the uninstaller do with my data", "11-help-and-problems"),
+            ("how do I save an app that has several files", "10-apps-and-pages"),
             ("how do I add a cloud key", "07-models-and-keys"),
         ):
             results = await index.search(MemoryQuery(query=question, max_results=3))
