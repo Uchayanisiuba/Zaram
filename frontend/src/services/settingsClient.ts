@@ -803,15 +803,27 @@ export interface EgressPolicy {
   /** Hosts contacted at least once. Offering a decision about a destination
    *  the user has actually met beats asking them to type hostnames. */
   hostsWithoutARule: string[];
+  /** Whether the browser pane may open pages: the standing answer for the
+   *  `browse` class. One decision rather than a rule per host, because a page
+   *  is sixty requests to companies nobody chose. */
+  browseAllowed: boolean;
 }
 
 export async function fetchEgressPolicy(): Promise<EgressPolicy> {
   const raw = (await get('/egress/policy')) as Record<string, unknown>;
+  const defaults = (raw.class_defaults ?? {}) as Record<string, unknown>;
   return {
     default: String(raw.default ?? 'deny'),
     rules: (raw.rules ?? {}) as Record<string, EgressMode>,
     hostsWithoutARule: (raw.hosts_without_a_rule ?? []) as string[],
+    browseAllowed: defaults.browse === 'allow',
   };
+}
+
+/** Let the browser pane open pages, or stop it. Every page it fetches is still
+ *  logged either way (rule 3); this is only whether it may. */
+export async function setBrowseAllowed(allow: boolean): Promise<void> {
+  await send('/egress/class-default', 'PUT', { data_class: 'browse', allow });
 }
 
 export async function setEgressPolicyForHost(host: string, mode: EgressMode): Promise<void> {

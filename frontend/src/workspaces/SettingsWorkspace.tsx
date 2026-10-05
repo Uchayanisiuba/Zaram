@@ -106,6 +106,7 @@ import {
   setImageLocality,
   type ImageSetting,
   forgetEgressPolicyForHost,
+  setBrowseAllowed,
   setEgressPolicyForHost,
   setKillSwitch,
   setSearchScope,
@@ -127,6 +128,10 @@ import ModelBrowser from '@/components/models/ModelBrowser';
 import VoiceBrowser from '@/components/voices/VoiceBrowser';
 import ContextWindowField from '@/components/settings/ContextWindowField';
 import OverflowField from '@/components/settings/OverflowField';
+
+/** How many destinations with no rule are drawn when the list is opened. The rest
+ *  are in Activity; a pane that renders every host ever met is the log again. */
+const UNRULED_SHOWN = 20;
 
 // --------------------------------------------------------------- primitives
 
@@ -537,6 +542,7 @@ export default function SettingsWorkspace() {
   const [character, setCharacter] = useState<Character | null>(null);
   const [voices, setVoices] = useState<string[]>([]);
   const [voicesOpen, setVoicesOpen] = useState(false);
+  const [showUnruled, setShowUnruled] = useState(false);
   // Drafts, so a half-typed name is not saved on every keystroke.
   // Null means "not being edited" and falls back to the stored value —
   // distinct from an empty string, which is a deliberate clear.
@@ -771,32 +777,95 @@ export default function SettingsWorkspace() {
                   />
                 ))}
 
-              {policy?.hostsWithoutARule.map((host) => (
-                <PolicyRow
-                  key={host}
-                  host={host}
-                  // Shown as "Never" because that is what happens to it — the
-                  // default is deny. Showing it as unset would be accurate
-                  // about the rule and wrong about the behaviour, and the
-                  // behaviour is the thing the user is checking.
-                  mode="deny"
-                  ruled={false}
-                  busy={busy === `policy:${host}`}
-                  onChange={(next) =>
-                    void run(`policy:${host}`, async () => {
-                      await setEgressPolicyForHost(host, next);
-                      setPolicy(await fetchEgressPolicy());
-                        setSearch(await fetchWebSearch());
-                    })
-                  }
-                />
-              ))}
+              {/* **The exceptions are the rules somebody set; everything else is a
+                  log.** This listed every destination ever contacted, and after a
+                  few browsing sessions that was 41 rows, each one a button — a
+                  control to click through, which is worse than none because it
+                  looks like protection (the 3 October finding behind
+                  `DataClass.BROWSE`). Browsing is now one decision above, so what
+                  is left here is a count and a door: the destinations are still
+                  one click away, because a refused provider is exactly the thing
+                  somebody comes to this pane to allow. */}
+              {policy && policy.hostsWithoutARule.length > 0 && (
+                <div className="flex flex-col gap-1.5">
+                  <button
+                    type="button"
+                    data-testid="unruled-toggle"
+                    aria-expanded={showUnruled}
+                    onClick={() => setShowUnruled((open) => !open)}
+                    className="self-start text-xs underline-offset-2 hover:underline"
+                    style={{ color: 'var(--color-cyan-light)' }}
+                  >
+                    {showUnruled
+                      ? 'Hide the destinations with no rule'
+                      : `${policy.hostsWithoutARule.length} other ${
+                          policy.hostsWithoutARule.length === 1 ? 'destination was' : 'destinations were'
+                        } contacted and ${
+                          policy.hostsWithoutARule.length === 1 ? 'has' : 'have'
+                        } no rule — all refused`}
+                  </button>
+                  {showUnruled &&
+                    policy.hostsWithoutARule.slice(0, UNRULED_SHOWN).map((host) => (
+                      <PolicyRow
+                        key={host}
+                        host={host}
+                        // Shown as "Never" because that is what happens to it — the
+                        // default is deny. Showing it as unset would be accurate
+                        // about the rule and wrong about the behaviour, and the
+                        // behaviour is the thing the user is checking.
+                        mode="deny"
+                        ruled={false}
+                        busy={busy === `policy:${host}`}
+                        onChange={(next) =>
+                          void run(`policy:${host}`, async () => {
+                            await setEgressPolicyForHost(host, next);
+                            setPolicy(await fetchEgressPolicy());
+                            setSearch(await fetchWebSearch());
+                          })
+                        }
+                      />
+                    ))}
+                  {showUnruled && policy.hostsWithoutARule.length > UNRULED_SHOWN && (
+                    <span className="text-xs" style={{ color: 'var(--color-text-faint)' }}>
+                      …and {policy.hostsWithoutARule.length - UNRULED_SHOWN} more. All of them are in
+                      Activity.
+                    </span>
+                  )}
+                </div>
+              )}
 
               {policy && Object.keys(policy.rules).length === 0 && policy.hostsWithoutARule.length === 0 && (
                 <span className="text-xs text-slate-500">
                   Nothing has been contacted yet, so there is nothing to decide about.
                 </span>
               )}
+            </div>
+          </Row>
+
+          <Row
+            label="Browsing"
+            value={policy === null ? 'unknown' : policy.browseAllowed ? 'on' : 'off'}
+            state={policy?.browseAllowed ? 'neutral' : 'good'}
+            detail={
+              'Whether the browser pane may open pages. One decision rather than one per site, ' +
+              'because a single page fetches from dozens of companies you never chose. ' +
+              'Every page it fetches is still recorded in Activity, on or off.'
+            }
+          >
+            <div data-testid="browse-toggle">
+              <Segmented<'on' | 'off'>
+                options={[
+                  { value: 'off', label: 'Off' },
+                  { value: 'on', label: 'On' },
+                ]}
+                value={policy?.browseAllowed ? 'on' : 'off'}
+                onChange={(next) =>
+                  void run('browse', async () => {
+                    await setBrowseAllowed(next === 'on');
+                    setPolicy(await fetchEgressPolicy());
+                  })
+                }
+              />
             </div>
           </Row>
 

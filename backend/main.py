@@ -3519,6 +3519,41 @@ async def set_egress_policy(update: EgressPolicyUpdate):
     return {"host": host, "mode": mode.value, "data_class": data_class.value}
 
 
+class ClassDefaultUpdate(BaseModel):
+    data_class: str
+    #: True sets one standing "allow" for the whole class; False removes it and
+    #: the per-host rules decide again. There is no standing *deny* to set,
+    #: because deny is what every destination already has.
+    allow: bool
+
+
+@app.put("/egress/class-default")
+async def set_egress_class_default(update: ClassDefaultUpdate):
+    """Turn a whole class of traffic on or off, for the classes that may be.
+
+    Today that is `browse` and nothing else. `EgressPolicy.set_class_default`
+    existed from 3 October, the browser pane read the answer, and **no route
+    set it** — so browsing was denied by default and the one control that
+    could change that lived only in the policy object. The refusal for any
+    other class is made there, where it cannot be routed around, and surfaces
+    here as a 400 carrying its own sentence.
+    """
+    from core.egress import DataClass, Mode, get_gate
+
+    try:
+        data_class = DataClass(update.data_class)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=f"data_class must be one of: {', '.join(c.value for c in DataClass)}",
+        )
+    try:
+        get_gate().policy.set_class_default(data_class, Mode.ALLOW if update.allow else None)
+    except ValueError as refusal:
+        raise HTTPException(status_code=400, detail=str(refusal))
+    return {"data_class": data_class.value, "allow": update.allow}
+
+
 @app.delete("/egress/policy/{host}")
 async def forget_egress_policy(host: str, data_class: str | None = None):
     """Remove a rule. What is removed reverts to the default, which is deny.
