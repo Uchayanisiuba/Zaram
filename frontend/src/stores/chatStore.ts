@@ -204,6 +204,9 @@ interface ChatState {
   streamingText: string;
   /** The model's working so far, for the panel above the reply. */
   streamingReasoning: string;
+  /** When the model began thinking for the reply in flight, or `null`. Read by
+   *  the offer to skip thinking, which appears only once this is old. */
+  streamingReasoningSince: number | null;
   /** Sources for the in-flight reply. They arrive before the tokens do. */
   streamingSources: ChatSource[];
   /** Files made during the in-flight reply. Arrive after the tokens, since a
@@ -277,6 +280,11 @@ interface ChatState {
    *  the user. */
   setDomains: (domainIds: string[]) => void;
   cancel: () => void;
+  /** Give up on a reply that is still thinking and ask the same question again
+   *  with thinking off, for this message only. Does nothing unless a reply is
+   *  in flight. The abandoned attempt is discarded whole — it never commits a
+   *  reasoning-only message to the transcript. */
+  answerWithoutThinking: () => Promise<void>;
   clear: () => void;
   /** Reopen a stored conversation, replacing what is on screen.
    *
@@ -364,6 +372,20 @@ function loadDomains(): string[] {
  *  without putting a non-serialisable object in the store. */
 let inFlight: AbortController | null = null;
 
+/** The arguments of the last `send`, so "answer without thinking" can ask the
+ *  same question again exactly as it was asked — same project, same domains,
+ *  same attachments. Module-level for the reason `inFlight` is. */
+let lastSend: { text: string; opts: Partial<ChatRequest>; attached: SentAttachment[] } | null = null;
+
+/** Attempts abandoned on purpose, as opposed to cancelled.
+ *
+ *  An abandoned `send` finishes *after* its replacement has started — an abort
+ *  is observed on a later tick — so its cleanup would commit a reasoning-only
+ *  message to the transcript and then switch the orb to idle and stop the
+ *  speech queue, all under the new request. A discarded attempt does none of
+ *  that: it touches nothing shared. */
+const discarded = new WeakSet<AbortController>();
+
 const newId = () =>
   `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 
@@ -391,6 +413,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   messages: [],
   streamingText: '',
   streamingReasoning: '',
+  streamingReasoningSince: null,
   streamingSources: [],
   streamingArtifacts: [],
   streamingNotices: [],
@@ -432,6 +455,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     inFlight?.abort();
     inFlight = new AbortController();
+    const mine = inFlight;
+    lastSend = { text: trimmed, opts, attached };
 
     set((s) => ({
       messages: [
@@ -450,6 +475,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       ],
       streamingText: '',
       streamingReasoning: '',
+      streamingReasoningSince: null,
       streamingSources: [],
       streamingAnsweredBy: null,
       turnUsage: { added: 0, reclaimed: 0, limit: null, measured: false },
@@ -551,6 +577,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             // and reading a model's working aloud is what this event exists
             // to stop. It also never joins `text_`, so it cannot be committed
             // to the transcript as something the model said.
+            if (!reasoning_) set({ streamingReasoningSince: Date.now() });
             reasoning_ += event.content;
             set({ streamingReasoning: reasoning_ });
             break;
@@ -835,6 +862,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }
     }
 
+    if (discarded.has(mine)) {
+      // Abandoned for a retry that has already started. Nothing here is the
+      // new request's to inherit: not the activity, not the speech queue, not
+      // `inFlight`, and above all not a committed message made of reasoning.
+      clearTimeout(warmingTimer);
+      return;
+    }
+
     settleActivity('idle');
 
     // Set once the exchange is over, so the bar reports what this reply
@@ -883,6 +918,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           : s.messages,
       streamingText: '',
       streamingReasoning: '',
+      streamingReasoningSince: null,
       streamingSources: [],
       streamingArtifacts: [],
       streamingNotices: [],
@@ -918,6 +954,37 @@ export const useChatStore = create<ChatState>((set, get) => ({
     inFlight = null;
   },
 
+  answerWithoutThinking: async () => {
+    const last = lastSend;
+    if (!last || !get().isStreaming || !inFlight) return;
+
+    discarded.add(inFlight);
+    inFlight.abort();
+    inFlight = null;
+
+    set((s) => {
+      // The question goes back in when it is sent again; leaving it here would
+      // show it twice. Only the one this attempt added — never an earlier turn.
+      const tail = s.messages[s.messages.length - 1];
+      const dropTail = tail?.role === 'user' && tail.text === last.text;
+      return {
+        messages: dropTail ? s.messages.slice(0, -1) : s.messages,
+        streamingText: '',
+        streamingReasoning: '',
+        streamingReasoningSince: null,
+        streamingSources: [],
+        streamingNotices: [],
+        streamingToolCalls: [],
+        streamingPlan: null,
+        streamingImageProgress: null,
+        streamingAnsweredBy: null,
+        isStreaming: false,
+      };
+    });
+
+    await get().send(last.text, { ...last.opts, thinking: false, retry: true }, last.attached);
+  },
+
   cancel: () => {
     inFlight?.abort();
     inFlight = null;
@@ -925,6 +992,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       isStreaming: false,
       streamingText: '',
       streamingReasoning: '',
+      streamingReasoningSince: null,
       streamingSources: [],
       streamingNotices: [],
   streamingToolCalls: [],
@@ -941,6 +1009,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       messages: [],
       streamingText: '',
       streamingReasoning: '',
+      streamingReasoningSince: null,
       streamingSources: [],
       streamingArtifacts: [],
       streamingNotices: [],
@@ -1026,6 +1095,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         projectId: stored.projectId || null,
         streamingText: '',
         streamingReasoning: '',
+        streamingReasoningSince: null,
         streamingSources: [],
         streamingArtifacts: [],
         streamingNotices: [],

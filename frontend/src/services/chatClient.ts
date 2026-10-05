@@ -381,6 +381,17 @@ export interface ChatRequest {
    *  behalf of a limit this side cannot see.
    */
   attachmentIds?: string[];
+  /** Thinking for this one message, over the Settings switch. Absent means the
+   *  setting decides, which is every ordinary request.
+   *
+   *  Sent by "answer without thinking" once thinking has run long: measured
+   *  4 October 2026, a looping CSS animation took 870 s on the resident 27B,
+   *  87% of it reasoning. The switch is the right control and the wrong moment
+   *  — nobody knows before asking, they know eighty seconds in. */
+  thinking?: boolean;
+  /** This repeats a question already in the transcript, so the backend answers
+   *  it without recording the person's message a second time. */
+  retry?: boolean;
   /** Which stored conversation this message continues, or omitted to begin one.
    *
    *  **Not `sessionId`, and the two must not be merged.** A session is a page
@@ -473,6 +484,8 @@ export async function* streamChat(
         domain_ids: req.domainIds ?? [],
         attachment_ids: req.attachmentIds ?? [],
         conversation_id: req.conversationId ?? '',
+        ...(req.thinking !== undefined ? { thinking: req.thinking } : {}),
+        ...(req.retry ? { retry: true } : {}),
         continue_task: req.continueTask ?? false,
         plan_id: req.planId ?? '',
         approve_plan: req.approvePlan ?? false,

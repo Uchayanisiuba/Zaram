@@ -24,6 +24,7 @@ from core.identity import compose_system_prompt, identity_preamble
 # only stayed latent because web search was off by default.
 # Per-request, and set before the planner runs. See the call site in `chat`.
 from core.planner import set_search_locality
+from core.thinking_override import set_thinking_override
 
 # --- LEGACY IMPORTS (Isolated for Fallback) ---
 from implementations.ollama_llm import OllamaLLM
@@ -736,7 +737,11 @@ def _open_conversation(request: "ChatRequest") -> tuple[str, bool]:
         else:
             conversation_id = records.start(project_id=request.project_id or "").id
             started = True
-        records.append(conversation_id, USER, request.text)
+        # A retry repeats a question already recorded -- the person abandoned an
+        # attempt that was still thinking and asked the same thing again. Two
+        # copies in the transcript would read as two questions.
+        if not (request.retry and not started):
+            records.append(conversation_id, USER, request.text)
     except UnknownConversation:
         logging.getLogger(__name__).info(
             "Chat: conversation %s is not in the store; this exchange is not recorded",
@@ -1174,6 +1179,16 @@ class ChatRequest(BaseModel):
     #: Empty means unrestricted — the ordinary case — which is not the same as
     #: a chosen domain that happens to hold nothing. See `_domain_scope`.
     domain_ids: list[str] = []
+    #: Thinking for this message only, over the setting. ``None`` (absent) means
+    #: the setting decides, which is every ordinary request. Sent by the
+    #: conversation's "answer without thinking" once thinking has run long --
+    #: see `core/thinking_override.py` for the 870-second case that made it
+    #: necessary, and for why it is not the setting.
+    thinking: Optional[bool] = None
+    #: This repeats a question already in the transcript: answer it, but do not
+    #: record the person's message a second time. Set only with the override
+    #: above, when the first attempt was abandoned before it said anything.
+    retry: bool = False
     #: Files attached to *this message*, by id from `POST /chat/attachments`.
     #:
     #: A third axis again, and the narrowest. A project says whose work this
@@ -1758,6 +1773,9 @@ async def chat(request: ChatRequest):
     # per-task under asyncio, so each request sees its own value and nothing
     # needs to be restored afterwards.
     set_search_locality(_locality_of_model(model))
+    # Called on every request, including the ones that pass None, so one
+    # message's choice cannot leak into the next.
+    set_thinking_override(request.thinking)
     print(f"[STAGE-7][Python] POST /chat received: text='{request.text[:50]}...' model={model} persona={request.persona}")
     print(f"[STAGE-7][Python] Full request text length: {len(request.text)} chars")
 

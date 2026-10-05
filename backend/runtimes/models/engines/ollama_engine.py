@@ -66,16 +66,17 @@ WireName = Callable[[str], str]
 
 
 def _thinking_wanted() -> bool:
-    """The person's *Thinking* control, read at request time.
+    """The person's *Thinking* control, read at request time -- or this one
+    message's override of it (`core/thinking_override.py`).
 
     Imported late so this module keeps not depending on settings at import;
     a settings store that cannot be reached answers *on*, which is the
     default and the direction that costs a wait rather than an answer.
     """
     try:
-        from core.user_settings import get_user_settings
+        from core.thinking_override import thinking_wanted
 
-        return bool(get_user_settings().thinking)
+        return thinking_wanted()
     except Exception:
         return True
 

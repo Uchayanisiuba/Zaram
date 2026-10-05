@@ -217,14 +217,14 @@ _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1", "[::1]", "0.0.0.0"
 
 
 def _thinking_wanted() -> bool:
-    """The person's *Thinking* control, read at request time; *on* when the
-    settings store cannot be reached — the direction that costs a wait, not
-    an answer. Same helper as `ollama_engine`'s, kept local for the same
-    import-boundary reason."""
+    """The person's *Thinking* control, read at request time, or this one
+    message's override of it; *on* when the settings store cannot be reached —
+    the direction that costs a wait, not an answer. Same helper as
+    `ollama_engine`'s, kept local for the same import-boundary reason."""
     try:
-        from core.user_settings import get_user_settings
+        from core.thinking_override import thinking_wanted
 
-        return bool(get_user_settings().thinking)
+        return thinking_wanted()
     except Exception:
         return True
 

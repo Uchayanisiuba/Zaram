@@ -43,6 +43,7 @@ import ProjectScopePicker from './ProjectScopePicker';
 import DomainScopePicker from './DomainScopePicker';
 import MicButton from './MicButton';
 import CitationSummary from './CitationChips';
+import ThinkingTooLong from './ThinkingTooLong';
 import { splitQuotedNotice } from './quotedNotice';
 import MessageActions from './MessageActions';
 import QuoteButton, {
@@ -140,6 +141,8 @@ export default function ChatSurface({ navigate }: Props) {
   const messages = useChatStore((s) => s.messages);
   const streamingText = useChatStore((s) => s.streamingText);
   const streamingReasoning = useChatStore((s) => s.streamingReasoning);
+  const streamingReasoningSince = useChatStore((s) => s.streamingReasoningSince);
+  const answerWithoutThinking = useChatStore((s) => s.answerWithoutThinking);
   const streamingSources = useChatStore((s) => s.streamingSources);
   const streamingArtifacts = useChatStore((s) => s.streamingArtifacts);
   const streamingNotices = useChatStore((s) => s.streamingNotices);
@@ -1400,6 +1403,13 @@ export default function ChatSurface({ navigate }: Props) {
                     text={streamingReasoning}
                     streaming
                     doing={streamingPlan?.items.find((i) => i.status === 'doing')?.text}
+                  />
+                  {/* Offered at the moment of doubt, not in advance (rule 7h):
+                      drawn only once thinking has run long with no answer begun. */}
+                  <ThinkingTooLong
+                    since={streamingReasoningSince}
+                    answering={streamingText.length > 0}
+                    onSkip={() => void answerWithoutThinking()}
                   />
                   {streamingText && (
                     <>
