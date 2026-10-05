@@ -29,6 +29,19 @@ export interface CatalogueModel {
    *  anywhere and is nobody's recommendation above 3 GB. */
   recommended: boolean;
   installed: boolean;
+  /** What the manifest says it can do. **Absent or empty means "not stated",
+   *  never "cannot"** — an entry lists a capability only where there is
+   *  evidence for it, so the browser draws a badge for what is claimed and
+   *  nothing for what is unknown. */
+  capabilities?: Array<'vision' | 'tools' | 'thinking'>;
+  /** What serves it. `ollama` is the one Zaram downloads; `tabby` is an EXL3
+   *  build, listed and graded but fetched by the person, because TabbyAPI's
+   *  model folder is its own setting and not Zaram's to guess. Absent on an
+   *  older backend, which means `ollama`. */
+  runtime?: 'ollama' | 'tabby';
+  /** For a `tabby` row: the command that fetches it, with the folder left as a
+   *  placeholder rather than filled with a guess. */
+  install_command?: string;
 }
 
 export interface ModelCatalogue {

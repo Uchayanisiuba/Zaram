@@ -236,3 +236,164 @@ class TestDownloadingAChosenModel:
         served = {m["name"] for m in client.get("/providers/recommendations").json()["models"]}
         known = {e.model.name for e in real(None)} | {e.model.name for e in real(9 * GB)}
         assert served <= known
+
+
+class TestCapabilities:
+    """Badges are claims, and a claim needs evidence.
+
+    Empty means "the list does not say", never "cannot". A made-up absence
+    would be a badge-shaped fact nobody measured.
+    """
+
+    def _write(self, tmp_path, entry):
+        path = tmp_path / "m.json"
+        path.write_text(json.dumps({
+            "generated": "x",
+            "tiers": [{"max_budget_gb": None, "models": [entry]}],
+        }), encoding="utf-8")
+        return str(path)
+
+    def test_a_stated_capability_comes_through(self, tmp_path):
+        path = self._write(tmp_path, {
+            "name": "a:1b", "size_bytes": 1, "why": "w", "capabilities": ["vision", "tools"],
+        })
+        assert catalogue_for(9 * GB, path=path)[0].model.capabilities == ("vision", "tools")
+
+    def test_an_entry_that_states_none_has_none(self, tmp_path):
+        path = self._write(tmp_path, {"name": "a:1b", "size_bytes": 1, "why": "w"})
+        assert catalogue_for(9 * GB, path=path)[0].model.capabilities == ()
+
+    def test_a_word_outside_the_vocabulary_is_dropped(self, tmp_path):
+        """A typo costs a badge, not a screen that renders whatever it was handed."""
+        path = self._write(tmp_path, {
+            "name": "a:1b", "size_bytes": 1, "why": "w", "capabilities": ["vision", "telepathy"],
+        })
+        assert catalogue_for(9 * GB, path=path)[0].model.capabilities == ("vision",)
+
+    def test_it_reaches_the_row_the_browser_renders(self, tmp_path):
+        path = self._write(tmp_path, {
+            "name": "a:1b", "size_bytes": 1, "why": "w", "capabilities": ["thinking"],
+        })
+        assert catalogue_for(9 * GB, path=path)[0].to_dict()["capabilities"] == ["thinking"]
+
+
+class TestTabbyBuildsAreListedAndGradedNotFetched:
+    """The manifest knew Ollama tags only, so a TabbyAPI model was invisible to
+    the browser and Zaram could not recommend a single model that its owner
+    could load. EXL3 builds are revisions of a repository, not tags: Zaram lists
+    and grades them, says whether they are here, and gives the command -- but
+    never fetches them, because TabbyAPI's model folder is its own setting.
+    """
+
+    @staticmethod
+    def _manifest(tmp_path, entries):
+        path = tmp_path / "m.json"
+        path.write_text(json.dumps({
+            "generated": "2026-10-04",
+            "tiers": [{"max_budget_gb": None, "models": [
+                {"name": "small:4b", "size_bytes": 2_500_000_000, "why": "ollama one"},
+            ]}],
+            "tabby": entries,
+        }), encoding="utf-8")
+        return str(path)
+
+    ENTRY = {
+        "name": "Big-27B-exl3-2.20bpw", "repo": "someone/Big-27B-exl3", "revision": "2.20bpw",
+        "parameters_b": 27, "bits_per_weight": 2.2, "why": "squeezed",
+        "capabilities": ["vision"],
+    }
+
+    def test_size_is_arithmetic(self, tmp_path):
+        path = self._manifest(tmp_path, [self.ENTRY])
+        entry = {e.model.name: e for e in catalogue_for(9 * GB, path=path)}["Big-27B-exl3-2.20bpw"]
+        assert entry.model.size_bytes == int(27e9 * 2.2 / 8)
+
+    def test_it_agrees_with_the_size_derived_from_the_served_name(self, tmp_path):
+        """A build listed here and the same build served must agree about how
+        big it is, or the browser and the residency gate contradict each other."""
+        from providers.discoverers.openai_compat import size_from_id
+
+        path = self._manifest(tmp_path, [self.ENTRY])
+        listed = {e.model.name: e for e in catalogue_for(9 * GB, path=path)}["Big-27B-exl3-2.20bpw"]
+        assert listed.model.size_bytes == size_from_id(listed.model.name)
+
+    def test_it_is_graded_against_the_budget_like_any_other(self, tmp_path):
+        path = self._manifest(tmp_path, [self.ENTRY])
+        assert {e.model.name: e.fits for e in catalogue_for(9 * GB, path=path)}["Big-27B-exl3-2.20bpw"] is True
+        assert {e.model.name: e.fits for e in catalogue_for(6 * GB, path=path)}["Big-27B-exl3-2.20bpw"] is False
+        assert {e.model.name: e.fits for e in catalogue_for(None, path=path)}["Big-27B-exl3-2.20bpw"] is None
+
+    def test_it_is_never_the_first_run_recommendation(self, tmp_path):
+        """`recommended` means what first run would offer, and first run offers
+        only what Zaram can fetch."""
+        from providers.model_manifest import recommend_for
+
+        path = self._manifest(tmp_path, [self.ENTRY])
+        assert all(e.recommended is False for e in catalogue_for(20 * GB, path=path) if e.model.runtime == "tabby")
+        assert "Big-27B-exl3-2.20bpw" not in [r.name for r in recommend_for(20 * GB, path=path)]
+
+    def test_it_says_what_serves_it_and_gives_the_command(self, tmp_path):
+        path = self._manifest(tmp_path, [self.ENTRY])
+        row = {e.model.name: e for e in catalogue_for(9 * GB, path=path)}["Big-27B-exl3-2.20bpw"].to_dict()
+        assert row["runtime"] == "tabby"
+        assert row["install_command"].startswith("hf download someone/Big-27B-exl3 --revision 2.20bpw")
+        assert "<your TabbyAPI models folder>" in row["install_command"]  # said, not guessed
+
+    def test_an_ollama_row_has_no_command(self, tmp_path):
+        path = self._manifest(tmp_path, [self.ENTRY])
+        row = {e.model.name: e for e in catalogue_for(9 * GB, path=path)}["small:4b"].to_dict()
+        assert row["runtime"] == "ollama"
+        assert "install_command" not in row
+
+    def test_installed_is_recognised_by_the_name_the_server_reports(self, tmp_path):
+        path = self._manifest(tmp_path, [self.ENTRY])
+        here = {e.model.name: e for e in catalogue_for(9 * GB, installed=["Big-27B-exl3-2.20bpw"], path=path)}
+        assert here["Big-27B-exl3-2.20bpw"].installed is True
+
+    @pytest.mark.parametrize("broken", [
+        {"name": "x", "bits_per_weight": 2.0},                   # no parameter count
+        {"name": "x", "parameters_b": 27},                       # no precision
+        {"name": "", "parameters_b": 27, "bits_per_weight": 2},  # no name
+        {"name": "x", "parameters_b": 0, "bits_per_weight": 2},  # a size of nothing
+        "not even a dict",
+    ])
+    def test_an_entry_that_cannot_state_its_size_is_left_out(self, tmp_path, broken):
+        path = self._manifest(tmp_path, [broken])
+        assert [e.model.name for e in catalogue_for(9 * GB, path=path)] == ["small:4b"]
+
+    def test_the_shipped_manifest_has_the_build_this_machine_runs(self):
+        names = [e.model.name for e in catalogue_for(9 * GB) if e.model.runtime == "tabby"]
+        assert "Qwen3.8-27B-exl3-2.20bpw" in names
+
+    def test_the_installed_names_include_what_an_openai_compatible_server_calls_it(self):
+        from types import SimpleNamespace
+
+        from providers.api import _installed_names
+
+        served = SimpleNamespace(
+            name="", display_name="Qwen3.8-27B-exl3-2.20bpw",
+            metadata={"raw_id": "Qwen3.8-27B-exl3-2.20bpw"},
+        )
+        ollama = SimpleNamespace(name="qwen3:8b", display_name="qwen3:8b", metadata={})
+        assert _installed_names([served, ollama]) == ["Qwen3.8-27B-exl3-2.20bpw", "qwen3:8b"]
+
+
+class TestThePullRouteRefusesWhatOllamaCannotFetch:
+    def test_a_tabby_build_is_a_400_and_nothing_is_logged(self, monkeypatch):
+        from fastapi.testclient import TestClient
+        from types import SimpleNamespace
+
+        import core.egress as egress_pkg
+
+        logged = []
+        monkeypatch.setattr(
+            egress_pkg, "get_gate",
+            lambda: SimpleNamespace(log=SimpleNamespace(append=lambda **k: logged.append(k))),
+            raising=False,
+        )
+        from main import app
+
+        response = TestClient(app).post("/providers/pull", json={"name": "Qwen3.8-27B-exl3-2.20bpw"})
+        assert response.status_code == 400
+        assert "TabbyAPI" in response.json()["detail"]
+        assert logged == []

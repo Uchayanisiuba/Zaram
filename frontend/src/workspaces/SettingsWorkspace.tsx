@@ -1185,8 +1185,14 @@ export default function SettingsWorkspace() {
                 <Download size={12} />
                 {showBrowser ? 'Hide the list' : 'Download a model'}
               </Button>
+              {/* A flex column, not a bare box with a max-height. The browser's
+                  root is `h-full`, and a percentage of a parent that has only a
+                  `max-height` is `auto` — so the list was never constrained, grew
+                  past this box and painted over every section below it. As a
+                  flex item with `min-h-0` it can shrink into the limit, and the
+                  list inside it scrolls. */}
               {showBrowser && (
-                <div style={{ maxHeight: 420 }}>
+                <div className="flex flex-col" style={{ maxHeight: 420 }}>
                   <ModelBrowser
                     onInstalled={() =>
                       void run('models', async () => setModels(await fetchModels()))

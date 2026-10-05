@@ -171,3 +171,88 @@ class TestWhatIsFreeNowDecides:
         runtime.set_free_vram_probe(broken)
 
         assert await runtime.warm_local_model() is True
+
+
+class TestAModelAlreadyOnTheCardIsNotAskedToFit:
+    """Found 4 October 2026 on the maintainer's own machine.
+
+    `/providers/resident` said *"Qwen3.8-27B-exl3-2.20bpw needs 7.4 GB and the
+    card has 1.1 GB free beside what is already running"* -- about the model that
+    was the thing running. The sentence became reachable the moment a TabbyAPI
+    model could be sized from its id: before, no size meant the check was
+    skipped. "Does it fit in what is free" is a question about *loading*, and
+    free space already has this model taken out of it.
+    """
+
+    class _Resident(_Manager):
+        def __init__(self, sizes, held, *, raises=False):
+            super().__init__(sizes)
+            self._held = held
+            self._raises = raises
+
+        def resident_now(self):
+            if self._raises:
+                raise RuntimeError("probe failed")
+            return self._held
+
+    @staticmethod
+    def _tight_card(runtime):
+        runtime.set_free_vram_probe(lambda: int(1.1 * GB))
+
+    @pytest.mark.asyncio
+    async def test_a_resident_model_is_not_refused_for_not_fitting(self):
+        get_user_settings().set_routing_preference("auto")
+        get_user_settings().set_default_model("")
+        manager = self._Resident({"tabby:Q-27B": int(7.4 * GB)}, {"Q-27B": None})
+        runtime, engine = _runtime(selected="tabby:Q-27B", manager=manager)
+        self._tight_card(runtime)
+
+        await runtime.warm_local_model()
+
+        assert runtime.preload_skipped_because == ""
+
+    @pytest.mark.asyncio
+    async def test_the_same_model_not_resident_is_still_refused(self):
+        """The check is narrowed, not removed: a model that would genuinely have
+        to be loaded onto a card with 1.1 GB free is exactly what it is for."""
+        get_user_settings().set_routing_preference("auto")
+        get_user_settings().set_default_model("")
+        manager = self._Resident({"tabby:Q-27B": int(7.4 * GB)}, {})
+        runtime, engine = _runtime(selected="tabby:Q-27B", manager=manager)
+        self._tight_card(runtime)
+
+        assert await runtime.warm_local_model() is False
+        assert "needs 7.4 GB" in runtime.preload_skipped_because
+
+    @pytest.mark.asyncio
+    async def test_another_model_being_resident_does_not_excuse_this_one(self):
+        get_user_settings().set_routing_preference("auto")
+        get_user_settings().set_default_model("")
+        manager = self._Resident({"tabby:Q-27B": int(7.4 * GB)}, {"something-else": 9 * GB})
+        runtime, engine = _runtime(selected="tabby:Q-27B", manager=manager)
+        self._tight_card(runtime)
+
+        assert await runtime.warm_local_model() is False
+
+    @pytest.mark.asyncio
+    async def test_a_probe_that_fails_is_not_evidence_it_is_loaded(self):
+        get_user_settings().set_routing_preference("auto")
+        get_user_settings().set_default_model("")
+        manager = self._Resident({"tabby:Q-27B": int(7.4 * GB)}, {"Q-27B": None}, raises=True)
+        runtime, engine = _runtime(selected="tabby:Q-27B", manager=manager)
+        self._tight_card(runtime)
+
+        assert await runtime.warm_local_model() is False
+        assert "needs 7.4 GB" in runtime.preload_skipped_because
+
+    @pytest.mark.asyncio
+    async def test_the_prefix_is_stripped_so_a_bare_server_id_matches(self):
+        get_user_settings().set_routing_preference("auto")
+        get_user_settings().set_default_model("")
+        manager = self._Resident({"ollama:qwen3:8b": int(5.2 * GB)}, {"qwen3:8b": 5 * GB})
+        runtime, engine = _runtime(selected="ollama:qwen3:8b", manager=manager)
+        self._tight_card(runtime)
+
+        await runtime.warm_local_model()
+
+        assert runtime.preload_skipped_because == ""

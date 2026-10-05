@@ -263,3 +263,117 @@ describe('the list says how old it is', () => {
     await waitFor(() => expect(screen.getByText(/9\.0 GB beside the parts/)).toBeTruthy());
   });
 });
+
+describe('what a model can do, and the details behind a row', () => {
+  it('draws a badge for each capability the list states', async () => {
+    fetchModelCatalogue.mockResolvedValue(
+      catalogue([model({ capabilities: ['vision', 'tools'] })]),
+    );
+    await open();
+    expect(await screen.findByTestId('capability-qwen3:8b-vision')).toHaveTextContent('reads images');
+    expect(screen.getByTestId('capability-qwen3:8b-tools')).toBeInTheDocument();
+    expect(screen.queryByTestId('capability-qwen3:8b-thinking')).toBeNull();
+  });
+
+  it('draws nothing for a model the list says nothing about', async () => {
+    await open();
+    await screen.findByTestId('model-qwen3:8b');
+    expect(screen.queryByLabelText('What it can do')).toBeNull();
+  });
+
+  it('says "does not say" in the details, never "cannot"', async () => {
+    await open();
+    await user().click(await screen.findByTestId('details-qwen3:8b'));
+    const panel = screen.getByTestId('details-panel-qwen3:8b');
+    expect(panel).toHaveTextContent('does not say');
+    expect(panel).not.toHaveTextContent(/cannot (see|use|think)/i);
+  });
+
+  it('does not claim a fit nobody measured', async () => {
+    fetchModelCatalogue.mockResolvedValue(catalogue([model({ fits: null })], null));
+    await open();
+    await user().click(await screen.findByTestId('details-qwen3:8b'));
+    expect(screen.getByTestId('details-panel-qwen3:8b')).toHaveTextContent('could not measure');
+  });
+
+  it('opens one panel at a time and closes it again', async () => {
+    fetchModelCatalogue.mockResolvedValue(
+      catalogue([model(), model({ name: 'qwen3:4b' })]),
+    );
+    await open();
+    const u = user();
+    await u.click(await screen.findByTestId('details-qwen3:8b'));
+    await u.click(screen.getByTestId('details-qwen3:4b'));
+    expect(screen.queryByTestId('details-panel-qwen3:8b')).toBeNull();
+    expect(screen.getByTestId('details-panel-qwen3:4b')).toBeInTheDocument();
+    await u.click(screen.getByTestId('details-qwen3:4b'));
+    expect(screen.queryByTestId('details-panel-qwen3:4b')).toBeNull();
+  });
+});
+
+describe('a TabbyAPI build', () => {
+  const tabby = (over: Partial<Record<string, unknown>> = {}) =>
+    model({
+      name: 'Qwen3.8-27B-exl3-2.20bpw',
+      size_bytes: 7_425_000_000,
+      runtime: 'tabby',
+      recommended: false,
+      install_command:
+        'hf download turboderp/Qwen3.8-27B-exl3 --revision SC_2.20bpw_H3_V3 --local-dir "<your TabbyAPI models folder>/Qwen3.8-27B-exl3-2.20bpw"',
+      ...over,
+    });
+
+  it('has no download button, because Zaram cannot fetch it', async () => {
+    fetchModelCatalogue.mockResolvedValue(catalogue([tabby()]));
+    await open();
+    await screen.findByTestId('model-Qwen3.8-27B-exl3-2.20bpw');
+    expect(screen.queryByTestId('download-Qwen3.8-27B-exl3-2.20bpw')).toBeNull();
+    expect(screen.getByTestId('via-tabby-Qwen3.8-27B-exl3-2.20bpw')).toHaveTextContent('you fetch this one');
+  });
+
+  it('says in the row that TabbyAPI serves it', async () => {
+    fetchModelCatalogue.mockResolvedValue(catalogue([tabby()]));
+    await open();
+    expect(await screen.findByTestId('model-Qwen3.8-27B-exl3-2.20bpw')).toHaveTextContent('TabbyAPI');
+  });
+
+  it('gives the command in Details, with the folder left as a placeholder', async () => {
+    fetchModelCatalogue.mockResolvedValue(catalogue([tabby()]));
+    await open();
+    await user().click(await screen.findByTestId('details-Qwen3.8-27B-exl3-2.20bpw'));
+    const command = screen.getByTestId('command-Qwen3.8-27B-exl3-2.20bpw');
+    expect(command).toHaveTextContent('hf download turboderp/Qwen3.8-27B-exl3');
+    expect(command).toHaveTextContent('<your TabbyAPI models folder>');
+  });
+
+  it('shows an installed one as installed, with no instruction to fetch it', async () => {
+    fetchModelCatalogue.mockResolvedValue(catalogue([tabby({ installed: true })]));
+    await open();
+    expect(await screen.findByTestId('installed-Qwen3.8-27B-exl3-2.20bpw')).toBeInTheDocument();
+    expect(screen.queryByTestId('via-tabby-Qwen3.8-27B-exl3-2.20bpw')).toBeNull();
+  });
+
+  it('is greyed with the reason when it will not fit, like any other', async () => {
+    fetchModelCatalogue.mockResolvedValue(catalogue([tabby({ fits: false })]));
+    await open();
+    expect(await screen.findByTestId('too-large-Qwen3.8-27B-exl3-2.20bpw')).toBeInTheDocument();
+  });
+
+  it('leaves an ordinary Ollama row alone', async () => {
+    await open();
+    expect(await screen.findByTestId('download-qwen3:8b')).toBeInTheDocument();
+    expect(screen.queryByTestId('via-tabby-qwen3:8b')).toBeNull();
+  });
+
+  it('copies the command', async () => {
+    fetchModelCatalogue.mockResolvedValue(catalogue([tabby()]));
+    // After `user()`: `userEvent.setup()` installs its own clipboard stub, and a
+    // spy placed before it is replaced and never called.
+    const u = user();
+    const writeText = vi.spyOn(navigator.clipboard, 'writeText');
+    await open();
+    await u.click(await screen.findByTestId('details-Qwen3.8-27B-exl3-2.20bpw'));
+    await u.click(screen.getByTestId('copy-Qwen3.8-27B-exl3-2.20bpw'));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(expect.stringContaining('hf download')));
+  });
+});

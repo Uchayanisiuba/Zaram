@@ -34,7 +34,7 @@
  * "fits" promises something nobody measured. It says so instead.
  */
 import { useCallback, useEffect, useState } from 'react';
-import { Check, Download, Loader2, Search } from 'lucide-react';
+import { Check, Copy, Download, Loader2, Search } from 'lucide-react';
 
 import {
   fetchModelCatalogue,
@@ -50,6 +50,24 @@ interface Props {
 
 type Pulling = { name: string; stage: string; completed: number; total: number } | null;
 
+/** What each capability means to someone who has never heard the word. The
+ *  badge carries the short form; the drawer carries the sentence. */
+const CAPABILITY_WORDS: Record<string, { badge: string; means: string }> = {
+  vision: { badge: 'reads images', means: 'Can look at a picture or a screenshot you give it, not only text.' },
+  tools: { badge: 'uses tools', means: 'Can call the tools you attach — search a folder, make a document — rather than only talk about them.' },
+  thinking: { badge: 'thinks first', means: 'Works through a problem before answering. Slower to start, better on anything with steps.' },
+};
+
+/** The part of a tag after the colon, which is where a build says how it was
+ *  squeezed. Said plainly where the manifest's own tags make it knowable, and
+ *  not guessed for a tag that does not. */
+function buildNote(name: string): string {
+  const tag = name.split(':')[1] ?? '';
+  if (/qat/i.test(tag)) return 'Trained at the size it ships in, so it loses less than an ordinary 4-bit build.';
+  if (/^\d+(\.\d+)?b$/i.test(tag)) return 'The size in billions of parameters; the default build for this size.';
+  return 'The default build.';
+}
+
 export default function ModelBrowser({ onInstalled }: Props) {
   const [models, setModels] = useState<CatalogueModel[]>([]);
   const [budget, setBudget] = useState<number | null>(null);
@@ -59,6 +77,19 @@ export default function ModelBrowser({ onInstalled }: Props) {
   const [pulling, setPulling] = useState<Pulling>(null);
   const [failure, setFailure] = useState('');
   const [reached, setReached] = useState(true);
+  const [openDetails, setOpenDetails] = useState<string | null>(null);
+  const [copied, setCopied] = useState<string | null>(null);
+
+  async function copy(name: string, text: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(name);
+      window.setTimeout(() => setCopied((was) => (was === name ? null : was)), 2000);
+    } catch {
+      // No clipboard (a locked-down webview): the command is on screen and
+      // selectable, which is the fallback. Not an error worth a banner.
+    }
+  }
 
   const load = useCallback(async () => {
     const catalogue = await fetchModelCatalogue();
@@ -124,7 +155,7 @@ export default function ModelBrowser({ onInstalled }: Props) {
     : models;
 
   return (
-    <div className="flex h-full flex-col" data-testid="model-browser">
+    <div className="flex h-full min-h-0 flex-col" data-testid="model-browser">
       <div className="relative mb-3">
         <Search
           size={14}
@@ -192,7 +223,35 @@ export default function ModelBrowser({ onInstalled }: Props) {
                     }}
                   >
                     {model.name} · {gigabytes(model.size_bytes)}
+                    {model.runtime === 'tabby' && ' · TabbyAPI'}
                   </p>
+                  {(model.capabilities?.length ?? 0) > 0 && (
+                    <ul className="mt-2 flex flex-wrap gap-1.5" aria-label="What it can do">
+                      {model.capabilities!.map((c) => (
+                        <li
+                          key={c}
+                          data-testid={`capability-${model.name}-${c}`}
+                          className="rounded-full px-2 py-0.5 text-[11px]"
+                          style={{
+                            border: '1px solid var(--color-border)',
+                            color: 'var(--color-text-muted)',
+                          }}
+                        >
+                          {CAPABILITY_WORDS[c]?.badge ?? c}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  <button
+                    type="button"
+                    data-testid={`details-${model.name}`}
+                    aria-expanded={openDetails === model.name}
+                    onClick={() => setOpenDetails((was) => (was === model.name ? null : model.name))}
+                    className="mt-2 text-xs underline-offset-2 hover:underline"
+                    style={{ color: 'var(--color-cyan-light)' }}
+                  >
+                    {openDetails === model.name ? 'Hide details' : 'Details'}
+                  </button>
                 </div>
 
                 <div className="flex shrink-0 items-center gap-2">
@@ -226,6 +285,17 @@ export default function ModelBrowser({ onInstalled }: Props) {
                     >
                       needs more memory than this machine has
                     </span>
+                  ) : model.runtime === 'tabby' ? (
+                    // Not a download button. Zaram cannot fetch an EXL3 build --
+                    // TabbyAPI keeps its models where its own config says -- so
+                    // the row says whose job it is, and Details has the command.
+                    <span
+                      data-testid={`via-tabby-${model.name}`}
+                      className="text-xs"
+                      style={{ color: 'var(--color-text-muted)' }}
+                    >
+                      you fetch this one — see Details
+                    </span>
                   ) : (
                     <button
                       type="button"
@@ -248,6 +318,83 @@ export default function ModelBrowser({ onInstalled }: Props) {
                   )}
                 </div>
               </div>
+
+              {openDetails === model.name && (
+                <dl
+                  data-testid={`details-panel-${model.name}`}
+                  className="mt-3 space-y-2 rounded-lg px-3 py-2 text-xs"
+                  style={{ background: 'var(--color-glass)', color: 'var(--color-text-muted)' }}
+                >
+                  <div>
+                    <dt className="mb-0.5 uppercase tracking-wide" style={{ color: 'var(--color-text-muted)', fontSize: 10 }}>Download</dt>
+                    <dd style={{ color: 'var(--color-text)' }}>
+                      About {gigabytes(model.size_bytes)}, once. Approximate: the download reports the
+                      real total as it goes.
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="mb-0.5 uppercase tracking-wide" style={{ color: 'var(--color-text-muted)', fontSize: 10 }}>This machine</dt>
+                    <dd style={{ color: 'var(--color-text)' }}>
+                      {model.fits === null
+                        ? 'Zaram could not measure this machine’s graphics memory, so it cannot say.'
+                        : model.fits
+                          ? 'Fits, with room left beside the parts Zaram keeps loaded.'
+                          : 'Needs more memory than this machine has.'}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="mb-0.5 uppercase tracking-wide" style={{ color: 'var(--color-text-muted)', fontSize: 10 }}>What it can do</dt>
+                    <dd style={{ color: 'var(--color-text)' }}>
+                      {(model.capabilities?.length ?? 0) > 0 ? (
+                        <ul className="space-y-1">
+                          {model.capabilities!.map((c) => (
+                            <li key={c}>
+                              <strong style={{ color: 'var(--color-text)' }}>
+                                {CAPABILITY_WORDS[c]?.badge ?? c}.
+                              </strong>{' '}
+                              {CAPABILITY_WORDS[c]?.means}
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        'Zaram’s list does not say. That is not the same as it being unable.'
+                      )}
+                    </dd>
+                  </div>
+                  {model.install_command && (
+                    <div>
+                      <dt className="mb-0.5 uppercase tracking-wide" style={{ color: 'var(--color-text-muted)', fontSize: 10 }}>How to get it</dt>
+                      <dd style={{ color: 'var(--color-text)' }}>
+                        Zaram does not download this one: TabbyAPI loads from a folder set in its own
+                        config, which Zaram cannot read. Run this, with that folder in place of the
+                        placeholder, then restart or reload TabbyAPI.
+                        <div
+                          className="mt-1.5 flex items-start gap-2 rounded px-2 py-1.5"
+                          style={{ background: 'rgba(0,0,0,0.3)', fontFamily: 'var(--font-mono)' }}
+                        >
+                          <code data-testid={`command-${model.name}`} className="min-w-0 flex-1 break-all select-all">
+                            {model.install_command}
+                          </code>
+                          <button
+                            type="button"
+                            data-testid={`copy-${model.name}`}
+                            aria-label="Copy the command"
+                            onClick={() => void copy(model.name, model.install_command!)}
+                            className="shrink-0 rounded p-1"
+                            style={{ color: 'var(--color-text-muted)' }}
+                          >
+                            {copied === model.name ? <Check size={13} aria-hidden /> : <Copy size={13} aria-hidden />}
+                          </button>
+                        </div>
+                      </dd>
+                    </div>
+                  )}
+                  <div>
+                    <dt className="mb-0.5 uppercase tracking-wide" style={{ color: 'var(--color-text-muted)', fontSize: 10 }}>This build</dt>
+                    <dd style={{ color: 'var(--color-text)' }}>{buildNote(model.name)}</dd>
+                  </div>
+                </dl>
+              )}
 
               {busy && pulling && (
                 <div className="mt-3">
@@ -300,6 +447,9 @@ export default function ModelBrowser({ onInstalled }: Props) {
           ? 'Zaram could not measure this machine’s graphics memory, so nothing here is marked as fitting or not.'
           : `Room for about ${gigabytes(budget)} beside the parts Zaram keeps loaded.`}
         {generated && ` List from ${generated}.`}
+        {/* Said once, where it is read: why Details holds a sentence and not a
+            model page. Fetching one would be a network call nobody asked for. */}
+        {' '}Details are the list’s own description — Zaram does not fetch a model’s page to fill them.
       </p>
     </div>
   );

@@ -152,6 +152,28 @@ class PullChoice(BaseModel):
     name: Optional[str] = None
 
 
+def _installed_names(models) -> List[str]:
+    """Every name a served model answers to, so the browser can tell it is here.
+
+    Ollama lists its own tag (`qwen3:8b`); an OpenAI-compatible server lists a
+    folder name (`Qwen3.8-27B-exl3-2.20bpw`) that the catalogue carries as the
+    display name and the raw id. All three are collected rather than one
+    guessed, because the manifest's name is whichever the server calls it.
+    """
+    names: List[str] = []
+    for m in models:
+        for candidate in (
+            getattr(m, "name", ""),
+            getattr(m, "display_name", ""),
+            (getattr(m, "metadata", None) or {}).get("raw_id", "")
+            if isinstance(getattr(m, "metadata", None), dict)
+            else "",
+        ):
+            if isinstance(candidate, str) and candidate and candidate not in names:
+                names.append(candidate)
+    return names
+
+
 @router.get("/recommendations")
 async def model_catalogue() -> dict:
     """Every model the manifest knows, graded against this machine.
@@ -179,7 +201,7 @@ async def model_catalogue() -> dict:
         try:
             manager = _PROVIDERS_RUNTIME.manager
             budget_bytes = manager.resident_budget_bytes()
-            installed = [m.name for m in manager.list_models() if getattr(m, "name", "")]
+            installed = _installed_names(manager.list_models())
         except Exception:
             logger.debug("catalogue: could not read the manager", exc_info=True)
 
@@ -367,6 +389,17 @@ async def pull_recommended_model(body: Optional[PullChoice] = None):
             (e.model for e in catalogue_for(budget_bytes) if e.model.name == wanted),
             None,
         )
+        if chosen is not None and chosen.runtime != "ollama":
+            # Listed so a person can see it exists and whether it fits; not
+            # fetched, because Ollama has no such tag and TabbyAPI's model
+            # folder is not Zaram's to guess. Refused before anything is logged.
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"{wanted!r} is a TabbyAPI build, which Zaram lists but does not "
+                    "download. Use the command shown with it."
+                ),
+            )
         if chosen is None:
             # Refused before the egress entry is written, so a rejected
             # request leaves no trace of a download that never started.

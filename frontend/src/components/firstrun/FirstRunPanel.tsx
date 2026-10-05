@@ -143,7 +143,7 @@ export default function FirstRunPanel({ report, onExplore, onConnected }: FirstR
                         curious click is the one thing a metered connection
                         cannot forgive. */}
                     {browsing ? (
-                      <div style={{ maxHeight: 360 }}>
+                      <div className="flex flex-col" style={{ maxHeight: 360 }}>
                         <ModelBrowser onInstalled={onConnected} />
                       </div>
                     ) : (

@@ -350,6 +350,19 @@ class ModelsRuntime(Runtime):
                     "would not fit"
                 )
 
+        # **A model that is already on the card is not asked to fit.** "Does it
+        # fit in what is free" is a question about loading, and what is free
+        # already has this model taken out of it: asking it of a resident model
+        # answers "7.4 GB needed, 1.1 GB free" about the thing that is using
+        # the other 7.4. That sentence was never reachable while a TabbyAPI
+        # model had no size, and became reachable the day a size could be
+        # derived from its id -- so this is the second half of that change, not
+        # a separate fix. Nothing is skipped here: the warm that follows is a
+        # cheap refresh for a model that is loaded, and a no-op for one on
+        # another server.
+        if self._already_resident(self._selected_model):
+            return ""
+
         free = None
         if callable(self._free_vram_probe):
             try:
@@ -363,6 +376,40 @@ class ModelsRuntime(Runtime):
                 f"{free / 1e9:.1f} GB free beside what is already running"
             )
         return ""
+
+    def _already_resident(self, model: Optional[str]) -> bool:
+        """Whether a local server reports this model loaded right now.
+
+        Matched on the names the model itself carries -- its catalogue id, its
+        display name, the raw id its server reports, and the bare id under a
+        `provider:` prefix -- never on anything about what the name looks like.
+        ``False`` for every unknown: a residency probe that failed is not
+        evidence the model is loaded, and the caller's size check is the
+        conservative answer.
+        """
+        if not model or self._provider_manager is None:
+            return False
+        probe = getattr(self._provider_manager, "resident_now", None)
+        if not callable(probe):
+            return False
+        try:
+            held = probe()
+        except Exception:  # noqa: BLE001
+            return False
+        if not held:
+            return False
+        info = self._catalogued(model)
+        names = {model}
+        if ":" in model:
+            names.add(model.split(":", 1)[1])
+        display = getattr(info, "display_name", None)
+        if isinstance(display, str) and display:
+            names.add(display)
+        metadata = getattr(info, "metadata", None)
+        raw = metadata.get("raw_id") if isinstance(metadata, dict) else None
+        if isinstance(raw, str) and raw:
+            names.add(raw)
+        return any(name in held for name in names)
 
     def _model_size_bytes(self, model: Optional[str]) -> Optional[int]:
         """On-disk size of the catalogued model, or None. `_catalogued` does

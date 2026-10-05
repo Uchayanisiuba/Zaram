@@ -8,11 +8,19 @@
         {
           "name": "qwen3:0.6b",
           "size_bytes": 523000000,
+          "capabilities": [
+            "tools",
+            "thinking"
+          ],
           "why": "The smallest one that holds a conversation, and small enough to finish on a metered connection. Thin on anything hard."
         },
         {
           "name": "qwen3:1.7b",
           "size_bytes": 1400000000,
+          "capabilities": [
+            "tools",
+            "thinking"
+          ],
           "why": "Noticeably better, if the download is affordable."
         }
       ]
@@ -23,6 +31,10 @@
         {
           "name": "qwen3:4b",
           "size_bytes": 2500000000,
+          "capabilities": [
+            "tools",
+            "thinking"
+          ],
           "why": "Writes, edits and summarises well for its size, and reads a long document in one go."
         }
       ]
@@ -33,11 +45,19 @@
         {
           "name": "qwen3:8b",
           "size_bytes": 5200000000,
+          "capabilities": [
+            "tools",
+            "thinking"
+          ],
           "why": "The usual choice on a modest card. Good at the jobs a local model does well, and quick enough to feel instant."
         },
         {
           "name": "qwen3:4b",
           "size_bytes": 2500000000,
+          "capabilities": [
+            "tools",
+            "thinking"
+          ],
           "why": "Smaller and faster, and it reads a long document in one go."
         }
       ]
@@ -48,11 +68,19 @@
         {
           "name": "gemma4:12b-it-qat",
           "size_bytes": 7200000000,
+          "capabilities": [
+            "vision",
+            "tools"
+          ],
           "why": "Reads pictures as well as text, calls tools on its own, and holds a long document. Trained at the size it ships in, so it loses less than an ordinary 4-bit build."
         },
         {
           "name": "qwen3:8b",
           "size_bytes": 5200000000,
+          "capabilities": [
+            "tools",
+            "thinking"
+          ],
           "why": "Smaller and quicker, if the card is doing other work."
         }
       ]
@@ -63,6 +91,11 @@
         {
           "name": "qwen3.8:27b",
           "size_bytes": 18000000000,
+          "capabilities": [
+            "vision",
+            "tools",
+            "thinking"
+          ],
           "why": "For a card with room to spare. Reads pictures, calls tools, thinks before answering, and holds a very long document."
         },
         {
@@ -73,9 +106,42 @@
         {
           "name": "gemma4:12b-it-qat",
           "size_bytes": 7200000000,
+          "capabilities": [
+            "vision",
+            "tools"
+          ],
           "why": "Reads pictures, calls tools, and leaves most of the card free."
         }
       ]
     }
-  ]
+  ],
+  "tabby": [
+    {
+      "name": "Qwen3.8-27B-exl3-2.20bpw",
+      "repo": "turboderp/Qwen3.8-27B-exl3",
+      "revision": "SC_2.20bpw_H3_V3",
+      "parameters_b": 27,
+      "bits_per_weight": 2.2,
+      "capabilities": [
+        "vision",
+        "tools",
+        "thinking"
+      ],
+      "why": "The 27B squeezed to 2.2 bits a weight, which is what lets it sit on a 12 GB card and still hold a long document. Served by TabbyAPI rather than Ollama."
+    },
+    {
+      "name": "Qwen3.8-27B-exl3-3.00bpw",
+      "repo": "turboderp/Qwen3.8-27B-exl3",
+      "revision": "SC_3.00bpw_H4_V4",
+      "parameters_b": 27,
+      "bits_per_weight": 3.0,
+      "capabilities": [
+        "vision",
+        "tools",
+        "thinking"
+      ],
+      "why": "The same 27B at 3 bits a weight: closer to the original, and about 3 GB bigger. For a card with room to spare. Served by TabbyAPI rather than Ollama."
+    }
+  ],
+  "tabby_note": "EXL3 builds are revisions of a repository, not Ollama tags, so Zaram lists and grades them but does not fetch them: where TabbyAPI keeps its models is its own setting and Zaram cannot know it. Size is arithmetic -- parameters x bits per weight / 8 -- and is for the weights only."
 }

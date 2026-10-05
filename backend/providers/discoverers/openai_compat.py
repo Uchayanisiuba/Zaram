@@ -426,6 +426,14 @@ class OpenAICompatibleAdapter:
         # Safe to widen: the cloud wire name comes from `resolve_for_model`,
         # which partitions the catalogue id and never reads this field.
         name = model_id.split("/")[-1]
+        # Local servers only. A cloud id never names the bits per weight it
+        # runs at, and a figure for a model on someone else's hardware would
+        # be graded against *this* machine's card.
+        derived_size = None if self.kind is ProviderKind.CLOUD_API else size_from_id(model_id)
+        metadata: Dict[str, Any] = {"owned_by": owned_by, "raw_id": model_id}
+        if derived_size is not None:
+            # Said, so nothing downstream mistakes arithmetic for a reading.
+            metadata["size_source"] = "derived from the model id"
         return ModelInfo(
             id=f"{self.provider_id}:{model_id}",
             display_name=model_id,
@@ -444,9 +452,51 @@ class OpenAICompatibleAdapter:
             endpoint=self.base_url,
             data_policy=self._data_policy,
             specialisation=specialisation_from_name(name),
-            metadata={"owned_by": owned_by, "raw_id": model_id},
+            metadata=metadata,
             context_length=_declared_window(entry),
+            size_bytes=derived_size,
         )
+
+
+#: A parameter count written as `27B`, `8b`, `0.6B` — a number followed by a
+#: lone `b`, not preceded by a letter or digit (so the `A3B` of a mixture's
+#: active-parameter suffix is not read as a size) and not followed by one (so
+#: `8bit` and `bpw` do not match). The first match is the total, which is what
+#: sits in memory: a mixture is named `30B-A3B`, total before active.
+_PARAMS_RE = re.compile(r"(?<![A-Za-z0-9.])(\d+(?:\.\d+)?)[bB](?![A-Za-z0-9])")
+#: Bits per weight, as exl2/exl3 quantisations name it: `2.20bpw`, `4.0bpw`.
+_BPW_RE = re.compile(r"(?<![A-Za-z0-9.])(\d+(?:\.\d+)?)\s*bpw", re.IGNORECASE)
+
+
+def size_from_id(model_id: str) -> Optional[int]:
+    """Weights in bytes, derived from a quantisation named in the id, or ``None``.
+
+    An OpenAI-compatible listing carries no size, so a model served over one
+    was unsizable and the residency gate graded nothing about it — and on this
+    maintainer's machine that is the model that answers. `Qwen3.8-27B-exl3-2.20bpw`
+    says both numbers needed: 27 billion parameters at 2.20 bits each is
+    27e9 × 2.20 / 8 ≈ 7.4 GB. That is arithmetic on what the id states, not a
+    guess.
+
+    **Both figures or nothing.** A parameter count alone does not give bytes
+    (the precision is missing), and a precision alone does not either; filling
+    either from a default would be a number chosen by looking at one model.
+    `None` is the honest answer for `llama-3.1-8b-instant` and for a GGUF
+    named `q4_k_m`, and every caller already handles it — the gate lets an
+    unmeasured model through rather than blocking on a guess.
+
+    Weights only, like `ModelInfo.size_bytes` for Ollama; the KV-cache
+    allowance is added by the gate, not here.
+    """
+    params = _PARAMS_RE.search(model_id or "")
+    bits = _BPW_RE.search(model_id or "")
+    if not params or not bits:
+        return None
+    count = float(params.group(1)) * 1e9
+    per_weight = float(bits.group(1))
+    if count <= 0 or per_weight <= 0 or per_weight > 32:
+        return None
+    return int(count * per_weight / 8)
 
 
 def _declared_window(entry: Dict[str, Any]) -> Optional[int]:
