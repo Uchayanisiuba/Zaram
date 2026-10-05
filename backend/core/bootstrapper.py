@@ -512,6 +512,13 @@ class KernelBootstrapper:
         )
         from runtimes.mcp.config import ServerConfig, WriteMode
 
+        # One terminal, held by the kernel and not made anonymously inside the
+        # tool set: the model reaches it through `CodeTools`, and the person
+        # reaches the *same sessions* through the Project panel. Two instances
+        # would be two shells in one folder and a panel that showed neither's
+        # output -- a terminal "the person can see" must be the one Zaram uses.
+        self.terminal_tools = TerminalTools()
+
         # **Every part of the pack is named here, and a test lists the tools
         # this produces against the real boot.** On 13 September the library
         # tools shipped with a measured test and were never registered here;
@@ -553,7 +560,7 @@ class KernelBootstrapper:
                 # `runners.py` still handles everything a project
                 # declares, and this is the separate capability for
                 # setting a project up in the first place.
-                shell=TerminalTools(),
+                shell=self.terminal_tools,
                 shell_granted=shell_granted,
             ),
         )

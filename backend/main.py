@@ -495,6 +495,16 @@ async def shutdown_event():
     # recogniser is built on first use, not at boot.
     from voice.stt.service import shutdown_recogniser
     await shutdown_recogniser()
+    # Shells Zaram or the person started in a project folder. They are child
+    # processes with pipes to this one; left open they outlive the backend,
+    # holding the folder, and the next launch finds a project whose shell is
+    # still running from last time.
+    terminal = getattr(kernel, "terminal_tools", None)
+    if terminal is not None:
+        try:
+            terminal.close_all()
+        except Exception as exc:  # noqa: BLE001 - shutdown must finish
+            print(f"[Shutdown] Could not close the terminals: {exc}")
     await kernel.shutdown()
 
 
@@ -4990,6 +5000,103 @@ async def update_project(project_id: str, body: ProjectUpdateRequest):
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     return _project_json(project)
+
+
+# --------------------------------------------------------------------------- #
+# The terminal, as a surface
+#
+# `packs/code/terminal.py` says it in as many words: *the person sees every
+# command and can type their own*. The tools existed from 3 October and nothing
+# let anybody look at the shell they were using, so a terminal Zaram could drive
+# was one its owner could not watch. These three routes are the surface; the
+# sessions are the kernel's own, so what the panel shows is what Zaram ran.
+#
+# The person's commands are labelled `user` and Zaram's `zaram`, and both are
+# kept -- a terminal that does not say who typed what is one nobody can audit.
+# What the person types is theirs and is not asked about; only Zaram's commands
+# pass the push check (`packs/code/publishing.py`).
+# --------------------------------------------------------------------------- #
+
+#: Lines of scrollback one read returns. The session keeps more.
+TERMINAL_READ_LINES = 400
+
+#: The longest command line the panel accepts. A paste that large is a mistake.
+TERMINAL_MAX_COMMAND = 8_000
+
+
+class TerminalCommand(BaseModel):
+    command: str
+
+
+def _terminal_for(project_id: str):
+    """(tools, root) for a project, or the HTTP error that says why not."""
+    tools = getattr(kernel, "terminal_tools", None)
+    if tools is None:
+        raise HTTPException(status_code=503, detail="The terminal is not available.")
+    try:
+        project = project_records.get(project_id)
+    except UnknownProject:
+        raise HTTPException(status_code=404, detail=f"No project called {project_id!r}.")
+    if not project.root:
+        raise HTTPException(
+            status_code=409,
+            detail="This project has no folder yet, so there is nowhere to run a command. "
+            "Point it at a folder first.",
+        )
+    if not project.shell:
+        raise HTTPException(
+            status_code=403,
+            detail="The terminal is off for this project. Turn it on in Project, then try again.",
+        )
+    return tools, Path(project.root)
+
+
+def _terminal_json(session) -> dict:
+    lines = session.scrollback[-TERMINAL_READ_LINES:] if session is not None else []
+    return {
+        "alive": bool(session is not None and session.alive()),
+        "lines": [line.to_json() for line in lines],
+    }
+
+
+@app.get("/projects/{project_id}/terminal")
+async def read_terminal(project_id: str):
+    """What is on this project's terminal, including what Zaram ran."""
+    tools, root = _terminal_for(project_id)
+    return {**_terminal_json(tools.session_for(root, create=False)), "cwd": str(root)}
+
+
+@app.post("/projects/{project_id}/terminal")
+async def type_in_terminal(project_id: str, body: TerminalCommand):
+    """Run the person's own command in the project's shell.
+
+    Blocks until it finishes, on a worker thread; the panel polls `GET` for the
+    lines while it does, so a long install is watched rather than waited on.
+    """
+    command = (body.command or "").strip()
+    if not command:
+        raise HTTPException(status_code=400, detail="No command was given.")
+    if len(command) > TERMINAL_MAX_COMMAND:
+        raise HTTPException(status_code=413, detail="That command line is too long.")
+    tools, root = _terminal_for(project_id)
+    session = tools.session_for(root)
+    if session is None:
+        raise HTTPException(status_code=500, detail="A terminal could not be started in this project.")
+    await asyncio.to_thread(session.run, command, who="user")
+    return {**_terminal_json(session), "cwd": str(root)}
+
+
+@app.delete("/projects/{project_id}/terminal")
+async def stop_terminal(project_id: str):
+    """Close the shell and whatever is running in it."""
+    tools, root = _terminal_for(project_id)
+    session = tools.session_for(root, create=False)
+    if session is None:
+        return {"stopped": False}
+    await asyncio.to_thread(session.close)
+    with tools._lock:
+        tools._sessions.pop(str(root), None)
+    return {"stopped": True}
 
 
 @app.delete("/projects/{project_id}")

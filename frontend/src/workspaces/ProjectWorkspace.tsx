@@ -34,6 +34,7 @@ import {
   Upload,
 } from 'lucide-react';
 import { UnfinishedSection } from '@/components/tasks/TaskLists';
+import TerminalPanel from '@/components/project/TerminalPanel';
 import { desktop, isDesktop } from '@/desktop/desktop-bridge';
 import { uploadFiles } from '@/services/ingestClient';
 import {
@@ -796,6 +797,7 @@ function EditsRow({ project }: { project: Project }) {
   const setWrites = useProjectStore((s) => s.setWrites);
   const setRuns = useProjectStore((s) => s.setRuns);
   const setDrives = useProjectStore((s) => s.setDrives);
+  const setShell = useProjectStore((s) => s.setShell);
   const fetchRunners = useProjectStore((s) => s.fetchRunners);
   const [busy, setBusy] = useState(false);
   const [runners, setRunners] = useState<string[] | null>(null);
@@ -832,6 +834,13 @@ function EditsRow({ project }: { project: Project }) {
     await setDrives(project.id, !project.drives);
     setBusy(false);
   }, [busy, project.id, project.drives, setDrives]);
+
+  const toggleShell = useCallback(async () => {
+    if (busy) return;
+    setBusy(true);
+    await setShell(project.id, !project.shell);
+    setBusy(false);
+  }, [busy, project.id, project.shell, setShell]);
 
   const runnerList =
     runners === null ? '…' : runners.length ? runners.join(', ') : 'none detected';
@@ -897,6 +906,25 @@ function EditsRow({ project }: { project: Project }) {
           development build rather than anything live.
         </span>
       )}
+      {/* **The fourth box, and the widest.** `run_command` can only offer what a
+          manifest declares; a terminal runs whatever the line says, which is
+          what makes `python -m venv` and `npm create` possible and what makes
+          it a separate decision. It was settable only from the permission
+          card until now -- a grant with no home on the row that governs it. */}
+      <label className="flex cursor-pointer items-center gap-2">
+        <input
+          type="checkbox"
+          checked={project.shell}
+          disabled={busy}
+          onChange={() => void toggleShell()}
+          data-testid="shell-allowed"
+          aria-label={`Zaram may use a terminal in ${project.name}`}
+        />
+        <span style={{ color: project.shell ? 'var(--color-text-muted)' : 'var(--color-text-faint)' }}>
+          Zaram may use a terminal in this folder — any command, and you see every one
+        </span>
+      </label>
+      {project.shell && <TerminalPanel projectId={project.id} />}
     </div>
   );
 }
