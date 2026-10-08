@@ -18,6 +18,7 @@ const path = require('node:path');
 const {
   panelBounds,
   handleBounds,
+  handleShape,
   panelUrl,
   DEFAULT_ACCELERATOR,
   PANEL,
@@ -64,6 +65,23 @@ test('ambient: the handle hugs the right edge and widens without moving its edge
   assert.strictEqual(rest.width, HANDLE.restWidth);
   // Vertically centred, so it is in the same place on every display.
   assert.strictEqual(rest.y, Math.round((FULL_HD.height - rest.height) / 2));
+});
+
+test('ambient: the handle takes input only where it was asked to be', () => {
+  // Windows made the 6 px handle a 64 px window whose invisible part lay over
+  // the next monitor and swallowed clicks there -- the history lip among them.
+  for (const hovered of [false, true]) {
+    const b = handleBounds(FULL_HD, hovered);
+    assert.deepStrictEqual(handleShape(b), [{ x: 0, y: 0, width: b.width, height: b.height }]);
+  }
+});
+
+test('ambient: the handle is clipped when it is made and every time it changes size', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'electron', 'native', 'ambient.js'), 'utf8');
+  const create = src.slice(src.indexOf('function createHandle()'), src.indexOf('function loadWithRetry'));
+  assert.match(create, /clipHandle\(win, bounds\)/);
+  const hover = src.slice(src.indexOf('function setHandleHovered'), src.indexOf('function start()'));
+  assert.match(hover, /handle\.setBounds\(bounds\);\s*clipHandle\(handle, bounds\)/);
 });
 
 test('ambient: the panel loads its own entry, not the shell', () => {

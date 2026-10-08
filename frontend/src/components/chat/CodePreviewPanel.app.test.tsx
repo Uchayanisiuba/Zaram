@@ -75,3 +75,13 @@ describe('a reply with several named files', () => {
     await waitFor(() => expect(screen.getByTestId('save-note').textContent).toContain('Not saved: not a path'));
   });
 });
+
+describe('keys reach the page', () => {
+  it('gives the frame keyboard focus when it loads, so a game hears the first arrow key', () => {
+    const focus = vi.spyOn(HTMLIFrameElement.prototype, 'focus');
+    render(<CodePreviewPanel block={extractPreviewable(reply)!} onClose={() => {}} />);
+    fireEvent.load(document.querySelector('iframe') as HTMLIFrameElement);
+    expect(focus).toHaveBeenCalled();
+    focus.mockRestore();
+  });
+});

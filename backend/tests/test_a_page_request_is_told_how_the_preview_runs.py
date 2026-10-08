@@ -116,3 +116,24 @@ def test_it_asks_for_the_first_screen_before_heavy_work():
 
     assert "Draw the first screen" in PAGE_GUIDANCE
     assert "small pieces across frames" in PAGE_GUIDANCE
+
+
+def test_it_tells_a_game_to_wait_for_the_player_and_not_to_replay_missed_time():
+    # A snake game the resident model wrote set off at once and had hit the wall
+    # before the first arrow key reached it. The page check passed it, because
+    # nothing threw.
+    from core.page_guidance import PAGE_GUIDANCE
+
+    assert "A game waits for the player" in PAGE_GUIDANCE
+    assert "do not move anything until the first key press or click" in PAGE_GUIDANCE
+    assert "Never advance a game by the time since the page loaded" in PAGE_GUIDANCE
+    assert "at most one move per frame" in PAGE_GUIDANCE
+
+
+def test_it_tells_a_game_to_start_slow():
+    # The same snake game started at a speed nobody could steer, then got faster.
+    from core.page_guidance import PAGE_GUIDANCE
+
+    assert "A game starts slow and gets harder" in PAGE_GUIDANCE
+    assert "one move every 300 to 400 ms" in PAGE_GUIDANCE
+    assert "has a floor" in PAGE_GUIDANCE

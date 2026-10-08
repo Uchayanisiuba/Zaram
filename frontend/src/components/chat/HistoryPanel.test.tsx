@@ -14,7 +14,7 @@
  * opens it.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import HistoryPanel from './HistoryPanel';
@@ -74,14 +74,61 @@ describe('the lip opens the panel', () => {
     expect(isOpen()).toBe(true);
   });
 
-  it('opens on focus, for a keyboard', async () => {
-    render(<HistoryPanel />);
-
+  // jsdom cannot tell a Tab from a press, so what the browser would answer to
+  // `:focus-visible` is stated here.
+  const focusAs = async (keyboard: boolean) => {
+    const real = Element.prototype.matches;
+    const spy = vi
+      .spyOn(Element.prototype, 'matches')
+      .mockImplementation(function (this: Element, selector: string) {
+        return selector === ':focus-visible' ? keyboard : real.call(this, selector);
+      });
     await act(async () => {
       screen.getByRole('button', { name: /past conversations/i }).focus();
     });
+    spy.mockRestore();
+  };
 
+  it('opens on focus, for a keyboard', async () => {
+    render(<HistoryPanel />);
+    await focusAs(true);
     expect(isOpen()).toBe(true);
+  });
+
+  it('does not open on the focus a press gives the lip', async () => {
+    // Opening on it slid the panel over the lip before the button came up, and
+    // the click that should have pinned it never fired.
+    render(<HistoryPanel />);
+    await focusAs(false);
+    expect(isOpen()).toBe(false);
+  });
+
+  it('pins on the press itself, without waiting for a click that may never land', async () => {
+    render(<HistoryPanel />);
+    fireEvent.pointerDown(screen.getByRole('button', { name: /past conversations/i }), { button: 0 });
+    expect(isOpen()).toBe(true);
+    expect(panel().style.background).toContain('surface');
+  });
+
+  it('does not toggle twice for one mouse click', async () => {
+    render(<HistoryPanel />);
+    const lip = screen.getByRole('button', { name: /past conversations/i });
+    fireEvent.pointerDown(lip, { button: 0 });
+    fireEvent.click(lip, { detail: 1 });
+    expect(panel().style.background).toContain('surface');
+    expect(isOpen()).toBe(true);
+  });
+
+  it('commits a peek when the open panel, which covers the lip, is pressed', async () => {
+    render(<HistoryPanel />);
+    const lip = screen.getByRole('button', { name: /past conversations/i });
+    await user().hover(lip);
+    await act(async () => {
+      vi.advanceTimersByTime(400);
+    });
+    expect(panel().style.background).toContain('elevated');
+    fireEvent.pointerDown(panel(), { button: 0 });
+    expect(panel().style.background).toContain('surface');
   });
 
   it('shows the new-conversation control once open', async () => {

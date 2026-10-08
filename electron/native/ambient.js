@@ -107,6 +107,27 @@ function handleBounds(workArea, hovered) {
 }
 
 /**
+ * The part of the handle window that may draw and take input: the rectangle
+ * that was asked for, in the window's own coordinates.
+ *
+ * **Windows does not make the window as small as Electron says it is.**
+ * Measured 6 October 2026: `getBounds()` reported the handle as 6 x 128 while
+ * Windows' own hit test (`WindowFromPoint`) gave that window every click from
+ * x 1914 to 1977 -- a 64 px native window, the extra 58 px invisible. On a
+ * second monitor to the right, that strip lay over the left edge of whatever
+ * was maximised there, including Zaram's own conversation-history lip, which
+ * then "stopped working" depending on which screen Zaram was on and how tall
+ * the lip happened to be. Clipping the window to this shape gave the clicks
+ * back at once, on the running app.
+ *
+ * Re-applied whenever the bounds change, because a shape is fixed in size
+ * and the hovered handle is wider than the resting one.
+ */
+function handleShape(bounds) {
+  return [{ x: 0, y: 0, width: bounds.width, height: bounds.height }];
+}
+
+/**
  * The URL the panel loads.
  *
  * A second Vite entry, so the panel is its own bundle. In development that is
@@ -185,15 +206,28 @@ function createAmbientSurface({ config, shortcuts, logger, accelerator, enabled 
     return win;
   }
 
+  /** Limit the handle window to the rectangle asked for -- see `handleShape`.
+   *  `setShape` exists on Windows and Linux, which is where the native window
+   *  outgrows the request; elsewhere there is nothing to clip. */
+  function clipHandle(win, bounds) {
+    if (typeof win.setShape !== 'function') return;
+    try {
+      win.setShape(handleShape(bounds));
+    } catch (error) {
+      log.warn('Edge handle could not be clipped to its size', { error: String(error) });
+    }
+  }
+
   function createHandle() {
+    const bounds = handleBounds(currentWorkArea(), false);
     const win = new BrowserWindow({
-      ...handleBounds(currentWorkArea(), false),
+      ...bounds,
       // A hairline is far below the default minimum size, so the minimum is
-      // stated rather than assumed. Electron honours the 6px request on
-      // Windows either way — measured, after `GetWindowRect` was read as
-      // saying otherwise and turned out to be reporting the DWM frame rather
-      // than the window. These are insurance against a platform that is less
-      // accommodating, not a fix for an observed failure.
+      // stated rather than assumed. On Windows it is not enough: the native
+      // window is still 64 px wide while `getBounds()` reports 6, and the
+      // `GetWindowRect` reading that said so was right after all -- Windows'
+      // own hit test agrees with it. `clipHandle` below is what holds the
+      // handle to its size.
       minWidth: 1,
       minHeight: 1,
       show: false,
@@ -217,6 +251,7 @@ function createAmbientSurface({ config, shortcuts, logger, accelerator, enabled 
     });
     win.setAlwaysOnTop(true, 'floating');
     win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    clipHandle(win, bounds);
     loadWithRetry(win, `${panelUrl(config.renderer.url)}#handle`);
     return win;
   }
@@ -287,7 +322,9 @@ function createAmbientSurface({ config, shortcuts, logger, accelerator, enabled 
    *  watching the cursor, which is the thing this module does not do. */
   function setHandleHovered(hovered) {
     if (handle && !handle.isDestroyed()) {
-      handle.setBounds(handleBounds(currentWorkArea(), Boolean(hovered)));
+      const bounds = handleBounds(currentWorkArea(), Boolean(hovered));
+      handle.setBounds(bounds);
+      clipHandle(handle, bounds);
     }
   }
 
@@ -344,6 +381,7 @@ module.exports = {
   createAmbientSurface,
   panelBounds,
   handleBounds,
+  handleShape,
   panelUrl,
   DEFAULT_ACCELERATOR,
   PANEL,

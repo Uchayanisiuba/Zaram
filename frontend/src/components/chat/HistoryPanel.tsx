@@ -228,6 +228,26 @@ export default function HistoryPanel() {
     setPeeking(false);
   };
 
+  /** What pressing the lip does: open it pinned, or close it if it is pinned.
+   *
+   *  Run on the **press**, not on the click that follows. A click needs the
+   *  press and the release on the same element, and the panel slides over the
+   *  lip the moment it opens -- by hover after `OPEN_DELAY_MS`, or by the focus
+   *  a press gives the button -- so a release that lands a moment later is on
+   *  the panel and the click never fires. Measured 5 October 2026 on the running
+   *  app: the same press pinned the panel six times in six at 150 ms and four
+   *  in six at 250 ms, and a click made once the peek was already open did
+   *  nothing at all. That is "it works sometimes". */
+  const togglePinned = () => {
+    clearTimers();
+    if (pinned) {
+      dismiss();
+      return;
+    }
+    setPinned(true);
+    setPeeking(true);
+  };
+
   const onResume = async (id: string) => {
     dismiss();
     await resume(id);
@@ -311,29 +331,30 @@ export default function HistoryPanel() {
           opacity: open ? 0 : 1,
         }}
         onMouseEnter={beginPeek}
-        onFocus={() => setPeeking(true)}
-        onClick={() => {
-          clearTimers();
-          // **A toggle, because `aria-expanded` above promises one.** This set
-          // `pinned` to true unconditionally, so the lip could open the panel
-          // and never close it: closing meant finding the X inside. A control
-          // that announces itself as expandable and cannot collapse is telling
-          // an assistive technology something untrue, and the plainest way to
-          // meet it is the keyboard path — tab to the lip, Enter to open,
-          // Enter again and nothing at all happens.
-          //
-          // Tested on `pinned`, not on `open`. `open` includes the hover peek,
-          // and a click during a peek should commit it rather than dismiss it
-          // — the header comment above is explicit that a hover is
-          // non-committal and a click is what commits. Reading `open` here
-          // would make clicking a hovered-open panel close it, which is the
-          // opposite of what the gesture means.
-          if (pinned) {
-            dismiss();
-            return;
+        onFocus={(e) => {
+          // A press focuses a button too, and opening on that put the panel
+          // under the pointer before the release. Only keyboard focus peeks.
+          let keyboard = true;
+          try {
+            keyboard = e.currentTarget.matches(':focus-visible');
+          } catch {
+            // No :focus-visible to ask: treat it as the keyboard, which is the
+            // case that has no other way in.
           }
-          setPinned(true);
-          setPeeking(true);
+          if (keyboard) setPeeking(true);
+        }}
+        onPointerDown={(e) => {
+          if (e.button !== 0) return;
+          togglePinned();
+        }}
+        onClick={(e) => {
+          // A mouse or touch press was handled on pointer-down. What is left
+          // is Enter or Space, which arrive as a click with no pointer
+          // (`detail` 0) and **a toggle, because `aria-expanded` promises one**.
+          // Tested on `pinned`, not on `open`: a hover peek is non-committal
+          // and a press is what commits it.
+          if (e.detail !== 0) return;
+          togglePinned();
         }}
       >
         <MessageSquare size={12} style={{ color: 'var(--color-text-muted)' }} />
@@ -374,6 +395,11 @@ export default function HistoryPanel() {
         onMouseEnter={() => {
           clearTimers();
           setPeeking(true);
+        }}
+        // The panel covers the lip once it is open, so a press meant for the lip
+        // lands here. It commits the peek: the header says a click pins it.
+        onPointerDown={() => {
+          if (!pinned) setPinned(true);
         }}
       >
         <header

@@ -601,10 +601,15 @@ export default function CodePreviewPanel({
           <iframe
             hidden={held}
             ref={frameRef}
-            onLoad={() =>
-              picking &&
-              frameRef.current?.contentWindow?.postMessage({ __zaramPreviewControl: true, action: 'pick', on: true }, '*')
-            }
+            onLoad={() => {
+              // Keys go to whatever has focus, and a sandboxed frame has none
+              // until it is clicked: a game that moves at once was dead before
+              // the first arrow press reached it.
+              frameRef.current?.focus();
+              if (picking) {
+                frameRef.current?.contentWindow?.postMessage({ __zaramPreviewControl: true, action: 'pick', on: true }, '*');
+              }
+            }}
             title={`${block.label} preview`}
             // Keyed on the allowance so the frame is rebuilt rather than
             // merely re-attributed: a CSP in a `<meta>` is read when the
