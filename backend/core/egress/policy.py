@@ -116,9 +116,15 @@ class DataClass(str, Enum):
         is the standing allow that must never exist, for the same reason the
         Spine has none.
 
-        The class is the consent. What it does not do is the pushing: that goes
-        through the terminal and the operating system's credential helper, so
-        Zaram never holds a token (see the milestone's note on GitHub).
+        The class is the consent. What it does not do is the pushing, and who
+        pushes has changed. Until 12 October 2026 a push went only through the
+        terminal and the operating system's credential helper, so Zaram never
+        held a token. Two routes now reach this class and both ask for it by
+        name: that terminal route (`packs/code/publishing.py`), and the GitHub
+        connection (`packs/github`), where Zaram *does* hold a token -- sealed to
+        the Windows user, never logged, never in a command line -- because a
+        pull request or an issue cannot be made without one. Holding it is the
+        price of that, said where it is paid (`packs/github/vault.py`).
     """
 
     PROMPT = "prompt"

@@ -129,6 +129,8 @@ export default defineConfig(({ command }) => ({
       '/starters': { target: BACKEND, changeOrigin: true },
       // Photographs found for a page the model described (`packs/photos`).
       '/photos': { target: BACKEND, changeOrigin: true },
+      // Connect GitHub, from Settings (`packs/github`).
+      '/github': { target: BACKEND, changeOrigin: true },
       '/artifacts': { target: BACKEND, changeOrigin: true },
       // What is listening on this machine, for the browser pane's new tab.
       // Added because `proxied.test.ts` refused the commit without it: an

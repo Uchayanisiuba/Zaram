@@ -251,6 +251,11 @@ Logo_Image/_preview.png
 backend/cloud-connections.json
 cloud-connections.json
 
+# The GitHub sign-in. Sealed to the Windows user with DPAPI where the platform
+# allows, and still not something to publish.
+backend/github-connection.json
+github-connection.json
+
 # The rest of the data directory, which in a checkout is backend/ itself.
 # The letterhead is the user's business name; mcp-servers.json is their tool
 # servers and the grants they gave each one. Neither is source.

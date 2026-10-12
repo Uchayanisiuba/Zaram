@@ -100,6 +100,8 @@ function createConfig(options) {
         '/starters',
         // Photographs found for a page the model described (`packs/photos`).
         '/photos',
+        // Connect GitHub, from Settings (`packs/github`).
+        '/github',
         '/diagnostics',
         '/extras',
         '/health',

@@ -140,6 +140,7 @@ class TestNothingPrivateIsCarried:
             # allow-list's own `*.json` include, one build from publishing
             # the maintainer's provider keys to every stranger.
             "backend/cloud-connections.json",
+            "backend/github-connection.json",
             "backend/settings.json",
             "backend/letterhead.json",
             "backend/mcp-servers.json",

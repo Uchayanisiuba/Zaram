@@ -763,6 +763,17 @@ class KernelBootstrapper:
             DrawTools(lambda capability, payload: run_sync(images_runtime.execute(capability, payload))),
         )
 
+        # GitHub: connect an account, then push the open project, open pull requests
+        # and file issues. Every action that changes something there asks every time
+        # (`policy.always_asks`), and can reach only the repositories the person chose
+        # when they installed the app on GitHub. `packs/github/tools.py`.
+        from packs.github import SERVER_ID as GITHUB_SERVER, GitHubTools
+
+        self.mcp_runtime.register_builtin(
+            ServerConfig(server_id=GITHUB_SERVER, writes=WriteMode.HOST_UNDO),
+            GitHubTools(active_root),
+        )
+
         # Zaram Self: built-in settings control server.
         # Always attached, HOST_UNDO — changes apply immediately, undone by the user in Settings.
         from runtimes.mcp.zaram_self import create_self_server

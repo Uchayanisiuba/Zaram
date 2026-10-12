@@ -44,6 +44,18 @@ What that looks like:
 
 Long tasks carry on across the model's memory limit on their own. A task that stops short is kept, with a **Continue** button, and survives a restart.
 
+## GitHub
+
+Under **Settings → GitHub**, press **Connect GitHub**. Zaram shows a short code; you type it at github.com in your own browser and approve. That is all: no password is entered in Zaram and none reaches it. Then press **Choose repositories** and pick the ones Zaram may use — GitHub only lets Zaram see the repositories you choose there, and you can change that at any time at github.com/settings/installations.
+
+Once connected, ask in the conversation: *push this project to my GitHub*, *open a pull request for this branch*, *file an issue about the crash*. With a coding project open, Zaram pushes its current branch to a repository you chose. It never forces a push, and it will not push to a repository you did not choose.
+
+**Every one of those asks you each time**, naming the repository, and there is no standing "always allow" for them — a push puts a whole project in front of whoever can read the repository, and a pull request or an issue is public words in your name. The first push to GitHub also asks once, separately, whether repositories may go there at all (**Activity → Destinations**), because that is a bigger decision than sending a message.
+
+Where the sign-in lives: **on this computer**, encrypted to your Windows account, and never on a server of ours. It is never written to the log and never put in a command line. **Disconnect** forgets it here; it does not take Zaram's access away on GitHub — do that at github.com/settings/applications.
+
+What it cannot do: it cannot create a repository on some accounts (GitHub may not allow an app to — create an empty one at github.com/new and choose it under *Choose repositories*), it cannot push changes to a repository's workflow files (GitHub requires a permission Zaram does not ask for), and it cannot sign in for you if device sign-in is switched off on the app.
+
 ## Work that runs on its own
 
 Under **Settings → Runs on its own**, give Zaram a question and a time: every day at nine, every Monday, or *when an obligation is coming up* — one run per commitment due within the next week, drafting the message that should go out about it. A run is an ordinary conversation, made without you: it recalls, plans, and uses tools exactly as a typed question does, and the first thing that needs your say-so **stops it** and files it under **Activity**, at the top, with the unfinished tasks — each with **Continue**. Nothing that runs on its own can approve itself, and nothing is ever sent. Three held runs in a row pause the trigger until you have looked.

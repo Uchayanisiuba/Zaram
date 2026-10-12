@@ -44,6 +44,7 @@ const PAIRED = new Set(['nvidia_nim', 'openrouter', 'groq']);
 import LetterheadSection from '../components/settings/LetterheadSection';
 import ToolsSection from '../components/settings/ToolsSection';
 import ComputerUseSection from '../components/settings/ComputerUseSection';
+import GitHubSection from '../components/settings/GitHubSection';
 import RunsOnItsOwnSection from '../components/settings/RunsOnItsOwnSection';
 import ReportSection from '../components/settings/ReportSection';
 import ManualReader from '../components/settings/ManualReader';
@@ -75,6 +76,7 @@ import {
   Monitor,
   Star,
   Info,
+  GitBranch,
 } from 'lucide-react';
 import SurfaceHeader from '../components/common/SurfaceHeader';
 import AdvancedModelField from '../components/settings/AdvancedModelField';
@@ -2035,6 +2037,19 @@ export default function SettingsWorkspace() {
           icon={<Wrench size={14} style={{ color: 'var(--color-indigo-light)' }} />}
         >
           <ToolsSection Row={Row} />
+        </Section>
+
+        {/* ---------------------------------------------------------- GitHub */}
+        {/* Connect an account so Zaram can push the open project, open pull
+            requests and file issues when asked. Its tools are a built-in
+            server (`packs/github`), so like every tool they are actions in the
+            conversation and get no menu item; this is only where the account
+            is connected. */}
+        <Section
+          title="GitHub"
+          icon={<GitBranch size={14} style={{ color: 'var(--color-indigo-light)' }} />}
+        >
+          <GitHubSection Row={Row} />
         </Section>
 
         {/* ----------------------------------------------------- Computer Use */}

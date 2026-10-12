@@ -340,6 +340,12 @@ from packs.photos.api import router as photos_router  # noqa: E402
 
 app.include_router(photos_router)
 
+# GitHub: connect an account, and the routes Settings uses. The model's own
+# GitHub tools are a built-in server registered in `core/bootstrapper.py`.
+from packs.github.api import router as github_router  # noqa: E402
+
+app.include_router(github_router)
+
 # --- KERNEL LIFECYCLE ---
 kernel = KernelBootstrapper()
 chat_router = None

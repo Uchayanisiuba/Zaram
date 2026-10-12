@@ -316,6 +316,8 @@ def always_asks(server_id: str, tool_name: str) -> bool:
     """
     if _is_self_server(server_id) and tool_name in _SELF_ALWAYS_ASK:
         return True
+    if _is_github_server(server_id) and tool_name in _GITHUB_ALWAYS_ASK:
+        return True
     return _is_cua_server(server_id) and tool_name in _CUA_ALWAYS_CONFIRM
 
 
@@ -330,6 +332,20 @@ _SELF_ALWAYS_ASK = frozenset({"grant_tool", "set_web_search"})
 
 def _is_self_server(server_id: str) -> bool:
     return (server_id or "") == "zaram-self"
+
+
+#: Zaram's GitHub tools that change something there, by name. A push puts a whole
+#: project in front of whoever can read the repository; a pull request or an issue
+#: is public words in the person's name -- so none of them can be settled by a
+#: standing yes. Kept in step with `packs/github/tools.WRITE_TOOLS` by test rather
+#: than imported, as `_SELF_ALWAYS_ASK` is, so this module keeps no dependency on a pack.
+_GITHUB_ALWAYS_ASK = frozenset({
+    "github_push_branch", "github_open_pull_request", "github_create_issue", "github_create_repository",
+})
+
+
+def _is_github_server(server_id: str) -> bool:
+    return (server_id or "") == "github"
 
 
 def _cua_decision(
@@ -406,6 +422,12 @@ def decide(
 
     if _is_self_server(server_id) and tool_name in _SELF_ALWAYS_ASK:
         return Decision(Verdict.CONFIRM, f"{tool_name} always asks; a standing yes is never kept for it")
+
+    if _is_github_server(server_id) and tool_name in _GITHUB_ALWAYS_ASK:
+        return Decision(
+            Verdict.CONFIRM,
+            f"{tool_name} changes something on GitHub, in your name. It asks every time; a standing yes is never kept for it.",
+        )
 
     destructive = looks_destructive(tool_name, annotations)
 

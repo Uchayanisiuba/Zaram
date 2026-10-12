@@ -147,6 +147,12 @@ Zaram has **six orbital nodes** around the Living Orb, each answering a differen
 - Hardware grading (VRAM fit)
 - Grant/revoke individual tools
 
+### GitHub
+- Connect by device code (a GitHub App you install on chosen repositories; no password and no token pass through the window)
+- The sign-in stays on this computer, sealed to the Windows account; Disconnect forgets it (revoking on GitHub is a link away)
+- Choose repositories on GitHub; list what Zaram can reach (private and read-only marked)
+- Ask in conversation: push this project, open a pull request, file an issue — each asks every time, no standing yes; no force push
+
 ### Appearance
 - Renderer: Orb / Avatar (frontend-only, not persisted)
 - Reduced motion (respects `prefers-reduced-motion`)
