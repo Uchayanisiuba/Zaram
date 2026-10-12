@@ -101,9 +101,11 @@ function createBrowserService({ logger, getWindow, reportEgress, isBrowseAllowed
         url: t.url,
         title: t.title,
         active: t.id === activeId,
+        error: t.error || '',
         canGoBack: safely(() => t.view.webContents.canGoBack(), false),
         canGoForward: safely(() => t.view.webContents.canGoForward(), false),
         loading: safely(() => t.view.webContents.isLoading(), false),
+        error: t.error || '',
       })),
       activeId,
     });
@@ -156,6 +158,15 @@ function createBrowserService({ logger, getWindow, reportEgress, isBrowseAllowed
     });
     wc.on('did-start-loading', publish);
     wc.on('did-stop-loading', publish);
+    wc.on('did-fail-load', (_event, code, description, url, isMainFrame) => {
+      if (!isMainFrame || code === -3) return;
+      record.error = `${description || 'Page failed to load'} (${url})`;
+      publish();
+    });
+    wc.on('render-process-gone', (_event, details) => {
+      record.error = `The page stopped (${details.reason}). Reload to try again.`;
+      publish();
+    });
 
     // A page asking for a new window gets a tab, not a popup -- and only if
     // the policy would have allowed typing it.
@@ -194,15 +205,24 @@ function createBrowserService({ logger, getWindow, reportEgress, isBrowseAllowed
     publish();
   }
 
-  function navigate(id, typed) {
+  async function navigate(id, typed) {
     const tab = tabs.get(id);
     if (!tab) return { ok: false, reason: 'no-such-tab' };
     const decision = decideNavigation(typed, { browseAllowed: isBrowseAllowed() });
     if (!decision.allow) return decision;
-    safely(() => tab.view.webContents.loadURL(decision.url), null);
     tab.url = decision.url;
+    tab.error = '';
     publish();
-    return decision;
+    try {
+      await tab.view.webContents.loadURL(decision.url);
+      tab.error = '';
+      publish();
+      return { ...decision, loaded: true };
+    } catch (error) {
+      tab.error = `Could not load ${decision.url}: ${error.message || String(error)}`;
+      publish();
+      return { ...decision, ok: false, loaded: false, reason: 'load-failed', error: tab.error };
+    }
   }
 
   function close(id) {

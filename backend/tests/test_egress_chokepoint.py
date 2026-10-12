@@ -1,4 +1,4 @@
-﻿"""No outbound HTTP anywhere except the gate.
+"""No outbound HTTP anywhere except the gate.
 
 This is the test that keeps Rule 3 true tomorrow. ``test_egress_gate.py`` proves
 the gate behaves correctly; this one proves the gate is the *only* way out, by
@@ -26,9 +26,12 @@ BACKEND = Path(__file__).resolve().parents[1]
 
 #: The gate is allowed to do outbound I/O. That is its job. ``aio.py`` is the
 #: async half of the same gate and is exempt for the same reason.
+#: ``network/session.py`` is the governed aiohttp transport — it wraps
+#: EgressGate and is the ONLY permitted way to make aiohttp requests.
 GATE_MODULES = {
     BACKEND / "core" / "egress" / "gate.py",
     BACKEND / "core" / "egress" / "aio.py",
+    BACKEND / "network" / "session.py",
 }
 
 #: Modules that talk only to loopback, with the reason each one is exempt.
@@ -46,6 +49,11 @@ LOCAL_ONLY = {
     # than trusting its own default -- an exemption written here has to be a
     # fact about the code, not an intention.
     "core/context_budget.py": "Ollama /api/ps on localhost:11434, loopback enforced",
+    # Asks Ollama and TabbyAPI what is loaded so the voice tier router can size a
+    # voice beside it. Two `requests.get` calls to literal 127.0.0.1 URLs and no
+    # host is a parameter, which `test_the_hardware_probe_names_only_loopback_urls`
+    # asserts by reading the source -- an exemption has to be a fact about the code.
+    "voice/hardware_probe.py": "Ollama /api/ps and TabbyAPI /v1/models on literal 127.0.0.1 ports",
     # The Spine as an MCP server: a *client* of the Zaram on this machine,
     # run as a separate process by Claude Code or Cline, with no gate of its
     # own. `require_loopback` refuses any base URL whose host is not
@@ -216,7 +224,23 @@ NETWORK_LIBRARY_DISARMED = {
     ),
 }
 
+#: Modules that import a network library only to read what is already on this
+#: disk. `huggingface_hub.scan_cache_dir` and `HF_HUB_CACHE` look at a directory;
+#: they contact nothing. Asserted, not believed: see
+#: ``test_local_read_exemptions_make_no_hub_call``.
+NETWORK_LIBRARY_LOCAL_READ = {
+    "voice/cleanup.py": "imports huggingface_hub for scan_cache_dir and HF_HUB_CACHE, which read the local cache directory",
+}
+
+#: What would make a local-read module a network path. Any of these appearing in
+#: one is the moment its exemption stops being true.
+HUB_CALLS = (
+    "hf_hub_download", "snapshot_download", "HfApi", "list_repo", "hf_hub_url",
+    "from_pretrained", "upload_file", "create_repo", "get_hf_file_metadata",
+)
+
 NETWORK_LIBRARY_EXEMPT = {
+    **NETWORK_LIBRARY_LOCAL_READ,
     **NETWORK_LIBRARY_DORMANT,
     **NETWORK_LIBRARY_GATED,
     **NETWORK_LIBRARY_REEXPORT,
@@ -734,3 +758,19 @@ class TestNothingBypassesTheGate:
             f"{rel} is exempted from the egress gate as {reason}, but contains "
             f"what looks like a remote URL:\n  " + "\n  ".join(suspicious)
         )
+
+
+def test_local_read_exemptions_make_no_hub_call():
+    for rel in NETWORK_LIBRARY_LOCAL_READ:
+        source = (BACKEND / rel).read_text(encoding="utf-8")
+        present = [name for name in HUB_CALLS if name in source]
+        assert not present, f"{rel} is exempt as a local read but now names {present}"
+
+
+def test_the_hardware_probe_names_only_loopback_urls():
+    import re
+
+    source = (BACKEND / "voice" / "hardware_probe.py").read_text(encoding="utf-8")
+    urls = re.findall(r"https?://[^\s\"')]+", source)
+    assert urls, "the probe was exempted for the URLs it names; none found, so the exemption is stale"
+    assert all(u.startswith("http://127.0.0.1:") for u in urls), urls

@@ -317,3 +317,39 @@ class TestZaramsOwnPacksAreNotTrimmed:
         runtime.register_builtin(ServerConfig(server_id="code"), Fake("code", 14))
         ask(runtime)
         assert asyncio.run(runtime.health_check())["servers"]["code"]["builtin"] is True
+
+
+class TestOneServersPinsDoNotStarveAnother:
+    """10 October 2026. The maintainer's Blender server has 28 pinned tools against a
+    budget of 8, and the budget left after pins was shared by every server -- so while
+    Blender was reachable, cua-driver's tools never reached the model at all."""
+
+    @pytest.fixture
+    def two(self, tmp_path):
+        store = ServerStore(tmp_path / "servers.json")
+        store.save({
+            "blender": ServerConfig(server_id="blender", command=["npx", "blender"], writes=WriteMode.HOST_UNDO),
+            "cua-driver": ServerConfig(server_id="cua-driver", command=["cua-driver", "mcp"], writes=WriteMode.HOST_UNDO),
+        })
+        runtime = McpRuntime(store=store)
+        runtime._connections["blender"] = Fake("blender", 40)
+        runtime._connections["cua-driver"] = Fake("cua-driver", 59)
+        return runtime, store
+
+    def test_a_server_without_pins_still_gets_the_whole_budget(self, two):
+        runtime, store = two
+        store.pin("blender", {f"edit_thing_{n:02d}" for n in range(28)})
+        tools = ask(runtime)["tools"]
+        from_cua = [t for t in tools if t["server"] == "cua-driver"]
+        assert len(from_cua) == runtime._budget
+        assert len([t for t in tools if t["server"] == "blender"]) == 28
+
+    def test_the_pinned_servers_other_tools_share_what_is_left(self, two):
+        runtime, store = two
+        store.pin("blender", {"edit_thing_00", "edit_thing_01"})
+        blender = [t for t in ask(runtime)["tools"] if t["server"] == "blender"]
+        assert len(blender) == runtime._budget  # 2 pinned + 6 of the rest
+
+    def test_with_nobody_pinning_nothing_changes(self, two):
+        runtime, _store = two
+        assert len(ask(runtime)["tools"]) == runtime._budget

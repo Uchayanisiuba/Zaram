@@ -157,6 +157,73 @@ class TestFetching:
         assert gate.asked == []
 
 
+class TestThePressedButtonIsTheConsent:
+    """The Download button answered "blocked" on a machine that had never opened
+    Activity -> Destinations, because the gate was asked with no grant. Pressing it
+    is the decision (rule 7j); a synthesis that wanders into a missing voice is not."""
+
+    @pytest.fixture
+    def real_gate(self, tmp_path):
+        from core.egress import EgressGate, set_gate
+        from core.egress.log import EgressLog
+        from core.egress.policy import EgressPolicy
+
+        policy = EgressPolicy(str(tmp_path / "policy.json"))
+        gate = EgressGate(EgressLog(str(tmp_path / "egress.db")), policy)
+        set_gate(gate)
+        yield gate, policy
+        set_gate(None)
+
+    def test_a_pressed_download_goes_through_on_a_gate_with_no_rules(self, real_gate, monkeypatch):
+        import huggingface_hub
+
+        gate, policy = real_gate
+        monkeypatch.setattr(huggingface_hub, "hf_hub_download", lambda **k: "path")
+        assert voice_manifest.fetch_voice("af_heart", asked_for=True) == "path"
+        entry = next(iter(gate.log.entries()))
+        assert entry.host == "huggingface.co" and entry.decision == "allowed"
+        assert not policy.has_rule("huggingface.co")
+
+    def test_the_same_fetch_not_asked_for_is_still_refused(self, real_gate, monkeypatch):
+        import huggingface_hub
+
+        from core.egress import EgressDenied
+
+        monkeypatch.setattr(
+            huggingface_hub, "hf_hub_download", lambda **k: pytest.fail("fetched without being asked")
+        )
+        with pytest.raises(EgressDenied):
+            voice_manifest.fetch_voice("af_heart")
+
+    def test_a_host_blocked_on_purpose_stays_blocked(self, real_gate, monkeypatch):
+        import huggingface_hub
+
+        from core.egress import EgressDenied
+        from core.egress.policy import Mode
+
+        _gate, policy = real_gate
+        policy.set("huggingface.co", Mode.DENY)
+        monkeypatch.setattr(
+            huggingface_hub, "hf_hub_download", lambda **k: pytest.fail("fetched past a block")
+        )
+        with pytest.raises(EgressDenied):
+            voice_manifest.fetch_voice("af_heart", asked_for=True)
+
+    def test_the_route_says_it_was_asked_for(self):
+        from pathlib import Path
+
+        source = (Path(__file__).resolve().parents[1] / "main.py").read_text(encoding="utf-8")
+        assert "voice_manifest.fetch_voice, voice_id, backend=backend, asked_for=True" in source
+
+    def test_speech_does_not_claim_it_was_asked_for(self):
+        from pathlib import Path
+
+        source = (
+            Path(__file__).resolve().parents[1] / "voice" / "providers" / "kokoro.py"
+        ).read_text(encoding="utf-8")
+        assert "asked_for" not in source
+
+
 class TestTheRoutesAreMounted:
     """A complete, tested, unreachable subsystem is this repository's most
     common defect."""

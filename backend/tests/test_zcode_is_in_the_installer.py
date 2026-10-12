@@ -90,6 +90,29 @@ def third_party_imports(module: Path) -> set[str]:
     }
 
 
+def cli_sources() -> list[Path]:
+    """Every file the command line is made of: a package since 10 October 2026, one
+    file before. The guard below has to read all of them, or a new import in
+    `cli/commands/` would be pinned by nobody."""
+    package = BACKEND / "cli"
+    return sorted(package.rglob("*.py")) if package.is_dir() else [BACKEND / "cli.py"]
+
+
+#: Third-party imports the CLI makes **on purpose without a pin in requirements.txt**,
+#: with the reason. Asserted, not believed: `test_an_optional_import_is_guarded...`.
+OPTIONAL_CLI_IMPORTS = {
+    "asciichart": "an optional chart library: imported inside try/except ImportError "
+                  "with a plain-text fallback, and named under the `cli-visual` extra",
+}
+
+
+def cli_third_party_imports() -> set[str]:
+    found: set[str] = set()
+    for source in cli_sources():
+        found |= third_party_imports(source)
+    return found - set(OPTIONAL_CLI_IMPORTS)
+
+
 #: The import name each distribution provides, where the two differ. Only the
 #: ones ZCode actually reaches; a general mapping would be a package index.
 IMPORT_TO_DISTRIBUTION = {
@@ -111,8 +134,8 @@ class TestEveryImportIsDeclared:
         an empty set and report a guarantee it never checked — which is the
         assertion-free test `CLAUDE.md` calls worse than no test.
         """
-        assert third_party_imports(BACKEND / "cli.py"), (
-            "parsed no third-party imports from cli.py — the parser is broken, "
+        assert cli_third_party_imports(), (
+            "parsed no third-party imports from the CLI — the parser is broken, "
             "not the dependency list"
         )
 
@@ -120,15 +143,33 @@ class TestEveryImportIsDeclared:
         pins = pinned_names()
         missing = sorted(
             name
-            for name in third_party_imports(BACKEND / "cli.py")
+            for name in cli_third_party_imports()
             if IMPORT_TO_DISTRIBUTION.get(name, name).lower().replace("_", "-")
             not in pins
         )
         assert not missing, (
-            f"cli.py imports {missing}, which requirements.txt does not pin. "
+            f"the CLI imports {missing}, which requirements.txt does not pin. "
             "The bundled runtime installs from requirements.txt, so ZCode "
             "would work here and fail on every install."
         )
+
+    def test_an_optional_import_is_guarded_and_has_a_fallback(self):
+        for name in OPTIONAL_CLI_IMPORTS:
+            guarded = False
+            for source in cli_sources():
+                tree = ast.parse(source.read_text(encoding="utf-8"))
+                for node in ast.walk(tree):
+                    if not isinstance(node, ast.Try):
+                        continue
+                    imports_it = any(
+                        isinstance(n, ast.Import) and any(a.name.split(".")[0] == name for a in n.names)
+                        for n in ast.walk(ast.Module(body=node.body, type_ignores=[]))
+                    )
+                    catches = any(
+                        h.type is not None and "ImportError" in ast.dump(h.type) for h in node.handlers
+                    )
+                    guarded = guarded or (imports_it and catches)
+            assert guarded, f"{name} is exempted as optional but is not imported inside try/except ImportError"
 
     @pytest.mark.parametrize("distribution", ["typer", "rich"])
     def test_the_two_that_were_missing_stay_pinned(self, distribution):

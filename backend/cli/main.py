@@ -80,13 +80,146 @@ from rich.console import Console
 from rich.table import Table
 
 from zaram_mcp import DEFAULT_API, Spine, pair as pair_with_zaram
+from .visual import (
+    render_comparison,
+    render_comparison_list,
+    render_schema,
+    render_schema_list,
+    render_analytics_chart,
+    render_analytics_list,
+    render_dashboard,
+)
 
 app = typer.Typer(
     name="zaram",
-    help="Your Spine, from the command line. Recall, remember, correct.",
+    help="Your Spine, from the command line. Recall, remember, correct, visualize.",
     add_completion=False,
     no_args_is_help=True,
 )
+
+# --- Visual subcommands ----------------------------------------------------- #
+
+@app.command(name="compare")
+def compare_cmd(
+    topic: Optional[str] = typer.Argument(
+        None,
+        help="Topic to compare: memory, browser, search, pipeline",
+    ),
+    list_topics: bool = typer.Option(
+        False,
+        "--list",
+        "-l",
+        help="List available comparison topics",
+    ),
+    as_json: bool = typer.Option(
+        False,
+        "--json",
+        help="Machine-readable JSON output",
+    ),
+) -> None:
+    """Show feature comparison tables."""
+    if list_topics:
+        print(render_comparison_list())
+        return
+    
+    if not topic:
+        print(render_comparison_list())
+        return
+    
+    result = render_comparison(topic, as_json=as_json)
+    print(result)
+
+
+@app.command(name="schema")
+def schema_cmd(
+    name: Optional[str] = typer.Argument(
+        None,
+        help="Schema name: memory, egress, pipeline, browser, project <project_id>",
+    ),
+    project_id: Optional[str] = typer.Option(
+        None,
+        "--project",
+        "-p",
+        help="Project ID for project-scoped schema",
+    ),
+    list_schemas: bool = typer.Option(
+        False,
+        "--list",
+        "-l",
+        help="List available schemas",
+    ),
+    graph_easy: bool = typer.Option(
+        False,
+        "--graph-easy",
+        help="Output in Graph-Easy format",
+    ),
+) -> None:
+    """Show ASCII flowcharts for system architectures."""
+    if list_schemas:
+        print(render_schema_list())
+        return
+    
+    if not name:
+        print(render_schema_list())
+        return
+    
+    # Handle project schema with optional project_id
+    if name.lower() == "project":
+        result = render_schema("project", as_graph_easy=graph_easy)
+    else:
+        result = render_schema(name, as_graph_easy=graph_easy)
+    
+    print(result)
+
+
+@app.command(name="analytics")
+def analytics_cmd(
+    metric: Optional[str] = typer.Argument(
+        None,
+        help="Metric to chart: tokens, latency, decay, egress",
+    ),
+    hours: int = typer.Option(
+        24,
+        "--hours",
+        "-h",
+        min=1,
+        max=168,
+        help="Hours of data to show (1-168)",
+    ),
+    list_metrics: bool = typer.Option(
+        False,
+        "--list",
+        "-l",
+        help="List available metrics",
+    ),
+    dashboard: bool = typer.Option(
+        False,
+        "--dashboard",
+        "-d",
+        help="Show full dashboard",
+    ),
+    as_json: bool = typer.Option(
+        False,
+        "--json",
+        help="Machine-readable JSON output",
+    ),
+) -> None:
+    """Show analytics charts."""
+    if list_metrics:
+        print(render_analytics_list())
+        return
+    
+    if dashboard:
+        print(render_dashboard())
+        return
+    
+    if not metric:
+        print(render_analytics_list())
+        return
+    
+    result = render_analytics_chart(metric, hours=hours, as_json=as_json)
+    print(result)
+
 
 #: What the command calls itself in usage and errors. See the docstring:
 #: Typer's `name=` above is not what Click prints.
@@ -135,7 +268,8 @@ def _credential() -> str:
         raise typer.Exit(code=2) from exc
 
 
-def _client() -> Spine:
+def _client_factory() -> Spine:
+    """Internal factory for Spine client. Replace this to mock."""
     return Spine(_credential(), os.environ.get(_ENV_API) or DEFAULT_API)
 
 
@@ -217,6 +351,7 @@ def recall(
     nothing is a bug, and a terminal is the easiest place in the product to
     quietly drop the citation because it costs a column.
     """
+    from . import _client
     spine = _client()
     try:
         payload = spine.recall(query, project, limit)
@@ -259,6 +394,7 @@ def remember(
     honestly: a fact stated outside any project genuinely is not about one, and
     inventing a project for it would be a value nobody entered.
     """
+    from . import _client
     spine = _client()
     try:
         payload = spine.remember(text, project)
@@ -283,6 +419,7 @@ def correct(
     *correction* and not a delete: what the fact used to say is part of the
     record, and an interface that silently replaces it is one nobody can audit.
     """
+    from . import _client
     spine = _client()
     try:
         payload = spine.correct(fact_id, text)
@@ -300,6 +437,7 @@ def show(
     fact_id: str = typer.Argument(..., help="The fact's id."),
 ) -> None:
     """Print one fact as JSON, for piping."""
+    from . import _client
     spine = _client()
     try:
         payload = spine._call("GET", f"/memory/{fact_id}")  # noqa: SLF001
@@ -311,6 +449,7 @@ def show(
 @app.command()
 def projects(as_json: bool = typer.Option(False, "--json")) -> None:
     """List the projects a fact can be scoped to."""
+    from . import _client
     spine = _client()
     try:
         payload = spine.projects()

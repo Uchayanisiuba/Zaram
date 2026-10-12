@@ -187,7 +187,7 @@ def test_no_message_offers_a_command_that_does_not_exist(monkeypatch, tmp_path):
     import re
 
     source = Path(zaram_cli.__file__).read_text(encoding="utf-8")
-    offered = set(re.findall(r"`?\b(zaram|zcode)\s+(?:pair|recall|remember|correct|show|projects)\b", source))
+    offered = set(re.findall(r"`?\b(zaram|zcode)\s+(?:pair|recall|remember|correct|show|projects|compare|schema|analytics)\b", source))
     assert offered <= {zaram_cli.PROGRAM}, (
         f"cli.py tells the user to run {sorted(offered - {zaram_cli.PROGRAM})}, "
         f"but the command is `{zaram_cli.PROGRAM}`"
@@ -216,7 +216,12 @@ def test_the_cli_is_a_client_of_the_memory_and_not_a_second_owner():
         command.name or command.callback.__name__
         for command in zaram_cli.app.registered_commands
     }
-    assert commands == {"pair", "recall", "remember", "correct", "show", "projects"}
+    # Core Spine commands + Visual Engine commands
+    expected = {
+        "pair", "recall", "remember", "correct", "show", "projects",
+        "compare", "schema", "analytics",
+    }
+    assert commands == expected
     assert "ask" not in commands
     assert "export" not in commands
 

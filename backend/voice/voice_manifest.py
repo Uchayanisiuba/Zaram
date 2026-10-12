@@ -165,7 +165,9 @@ def known_ids(path: str = MANIFEST_PATH) -> set[str]:
     return {str(v["id"]) for v in data.get("voices") or [] if isinstance(v, dict) and v.get("id")}
 
 
-def fetch_voice(voice_id: str, *, backend: str = "torch", source: str = "voices") -> str:
+def fetch_voice(
+    voice_id: str, *, backend: str = "torch", source: str = "voices", asked_for: bool = False
+) -> str:
     """Download one voice, having asked the gate first.
 
     **Gated, like the model itself.** The Kokoro weights already need
@@ -181,14 +183,30 @@ def fetch_voice(voice_id: str, *, backend: str = "torch", source: str = "voices"
 
     The id must be in the manifest. A name arriving in a request body that the
     user was never shown is not a thing to fetch.
+
+    **`asked_for` is the Download button, and only that.** Default deny meant the
+    button answered "blocked" on a machine that had never been to Activity ->
+    Destinations, with nothing on the row saying where to go: the same failure as
+    the cua-driver Install button, and for the same reason. Pressing a button
+    that names this one file *is* the decision (rule 7j), so the route passes
+    `asked_for=True` and the gate is given a grant for exactly that URL, logged
+    as what it was. A host the user blocked on purpose stays blocked and so does
+    the kill switch (`EgressGate.check`). Speech synthesis fetching a missing
+    voice mid-sentence is nobody pressing anything, so it does not pass it.
     """
-    from core.egress import EgressDenied, get_gate
+    from core.egress import EgressDenied, SearchReadGrant, get_gate
 
     if voice_id not in known_ids():
         raise KeyError(voice_id)
     repo, filename, revision = _location(voice_id, backend)
+    url = f"https://huggingface.co/{repo}"
+    grant = (
+        SearchReadGrant.of([url], because="downloading a voice you asked for by pressing Download")
+        if asked_for
+        else None
+    )
     try:
-        get_gate().check(f"https://huggingface.co/{repo}", source=source)
+        get_gate().check(url, source=source, grant=grant)
     except EgressDenied as denied:
         # Refusal is the ordinary answer on a machine that has not allowed the
         # host, so it is named and handled here rather than left to surface as
