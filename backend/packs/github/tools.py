@@ -63,7 +63,9 @@ READ_TOOLS = frozenset({GET_STATUS, LIST_REPOSITORIES})
 #: The tools that change something on GitHub. Each asks every time.
 WRITE_TOOLS = frozenset({PUSH_BRANCH, OPEN_PULL_REQUEST, CREATE_ISSUE, CREATE_REPOSITORY})
 
-HOW_TO_PERMIT = "Every GitHub action asks each time; there is no standing yes for it."
+#: Nothing to add to the gate's own sentence, which already says a GitHub write asks
+#: every time. A second phrasing was appended to every card until 12 October 2026.
+HOW_TO_PERMIT = ""
 
 GIT_TIMEOUT_SECONDS = 180
 

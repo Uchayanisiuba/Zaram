@@ -583,6 +583,53 @@ class TestEveryChangeAsksEveryTime:
         assert tools.granted_tools() == READ_TOOLS and tools.mutative_tools() == WRITE_TOOLS
 
 
+class TestTheCardCanSayYes:
+    """A write that can never be granted for good must be answerable once.
+
+    Found 12 October 2026, the first time a push was asked for live: the card
+    offers *Run this once* only for a call whose target it can show, and only
+    when the gate says a one-time yes may be offered. None of the GitHub writes
+    had a target, and the push reads as a send by its name, so every one of
+    them reached a card whose only button was Deny. These go through the real
+    runtime and the real target, not the tool's own code.
+    """
+
+    CALLS = {
+        PUSH_BRANCH: {"repository": "octo/site", "branch": "main"},
+        OPEN_PULL_REQUEST: {"repository": "octo/site", "title": "Tidy", "head": "tidy"},
+        CREATE_ISSUE: {"repository": "octo/site", "title": "It crashes"},
+        CREATE_REPOSITORY: {"name": "site"},
+    }
+
+    def test_the_calls_cover_every_write(self):
+        assert set(self.CALLS) == WRITE_TOOLS
+
+    @pytest.mark.parametrize("name", sorted(WRITE_TOOLS))
+    def test_the_card_can_show_where_it_goes(self, name):
+        from core.tool_loop import call_target
+
+        target = call_target(name, self.CALLS[name])
+        assert target
+        if name != CREATE_REPOSITORY:
+            assert target.startswith("octo/site")
+
+    @pytest.mark.parametrize("name", sorted(WRITE_TOOLS))
+    def test_the_gate_offers_this_once_and_never_always(self, name, github, project, tmp_path):
+        import asyncio
+
+        from runtimes.mcp.config import ServerConfig, ServerStore, WriteMode
+        from runtimes.mcp.runtime import CALL, McpRuntime
+
+        connect_as_octo()
+        tools, _ = tools_for(github, project)
+        runtime = McpRuntime(ServerStore(tmp_path / "mcp.json"))
+        runtime.register_builtin(ServerConfig(server_id="github", writes=WriteMode.HOST_UNDO), tools)
+        answer = asyncio.run(runtime.execute(CALL, {"server": "github", "tool": name, "arguments": self.CALLS[name]}))
+        assert answer.get("needs_confirmation") is True
+        assert answer["once"] is True
+        assert answer["grantable"] is False
+
+
 class TestWhatTheModelIsOffered:
     def test_unconnected_it_is_offered_only_the_status(self, github):
         tools, _ = tools_for(github)

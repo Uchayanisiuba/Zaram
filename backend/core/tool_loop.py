@@ -225,7 +225,9 @@ def call_target(tool: str, arguments: Any) -> str:
             target = value.strip()
             break
     else:
-        return ""
+        target = _repository_target(tool, arguments)
+        if not target:
+            return ""
 
     # A line range earns its place: it is what makes a citation openable.
     start = arguments.get("start")
@@ -235,6 +237,28 @@ def call_target(tool: str, arguments: Any) -> str:
 
     target = "".join(ch for ch in target if ch.isprintable())
     return target[:TARGET_LIMIT]
+
+
+def _repository_target(tool: str, arguments: dict) -> str:
+    """Where a GitHub call goes, and what it carries: ``owner/name`` and the branch or title.
+
+    Found 12 October 2026, the first time a push was asked for live: none of the
+    GitHub writes named a key above, so the card had no target, and a card with
+    no target offers no *Run this once* -- while those tools can never be granted
+    for good. Every one of them could only be denied. A repository and a branch
+    are exactly what a person needs to see to say yes to a push.
+    """
+    def text(key: str) -> str:
+        value = arguments.get(key)
+        return value.strip() if isinstance(value, str) else ""
+
+    repository = text("repository")
+    if not repository and tool.endswith("create_repository") and text("name"):
+        return f"new private repository {text('name')}"
+    if not repository:
+        return ""
+    detail = text("branch") or text("head") or text("title")
+    return f"{repository} · {detail}" if detail else repository
 
 
 #: How much of a tool's answer travels to the screen. The model sees the

@@ -774,7 +774,11 @@ class McpRuntime:
                 # Whether a yes for this one call may be offered. Not for a
                 # send: the card shows where a message goes and not what it
                 # says, and a send stays a draft until the person sends it.
-                "once": not looks_outbound(tool_name),
+                # **Except a tool no grant can settle** -- for that one, this
+                # call's yes is the only yes there is, and without it the card
+                # offers nothing but Deny. A GitHub push reads as a send by its
+                # name and was exactly that, found live 12 October 2026.
+                "once": always_asks(server_id, tool_name) or not looks_outbound(tool_name),
             }
 
         server = await self._connect(cfg)
