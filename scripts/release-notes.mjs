@@ -31,6 +31,12 @@ const repo = 'https://github.com/Uchayanisiuba/Zaram';
 /** What each build brought, in the site's own words — the same list the
  *  Milestones panel carries. Add the next tag above the last. */
 const BROUGHT = {
+  'v0.1.0-alpha.6': [
+    '**Connect GitHub, and Zaram can push your project.** *Settings → GitHub → Connect* shows a short code; you type it at github.com in your own browser, so no password and no token ever passes through Zaram. You choose which repositories the Zaram app may reach, on GitHub. Then, in a conversation: “push this project”, “open a pull request for this branch”, “file an issue about the crash”.',
+    '**Every change on GitHub asks, every time.** A push, a pull request, an issue and a new repository each stop at a card that names the repository and the branch or title; there is no “always allow” for them. A push is never forced, only reaches repositories you installed the app on, and is logged as a repository leaving — how many commits and where, never what they said.',
+    '**The sign-in stays on your computer.** It is sealed to your Windows account, never put in a command line or a reply, and *Disconnect* forgets it (withdrawing the app’s access on GitHub is a link away).',
+    '**Known: not proven against a real repository.** The sign-in, the sealed token, the model choosing the GitHub tool and the approval card were all seen working with the resident model. A push, a pull request and an issue against an actual repository were not run before this tag. GitHub does not let an app sign-in create a repository on a personal account, so Zaram says to create an empty one at github.com/new and add it to the app.',
+  ],
   'v0.1.0-alpha.5': [
     '**Ask for a Minecraft-style game, a racer or a platformer, and it plays.** Each started from a page that was played before it shipped — walked, jumped, driven round a track — and the model changes what you asked for instead of writing the collision again at 2.2 bits. Say “from scratch” and it does. A website *about* a go-kart track is a website, not a game.',
     '**Real photos from the web, for a site or a document.** Say “source images online” and the page gets credited photographs from Openverse, with Wikimedia Commons behind it. You are asked once per source, with every search shown; the photos are paced under the free limit and kept, so asking again costs nothing. A brochure or report carries them too, with a Photo credits section. Zaram decides whether a page needs photos at all — a game does not.',

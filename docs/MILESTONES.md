@@ -13029,3 +13029,40 @@ against the live model; any cloud picture. The release notes say so.
 **Left out of the commits on purpose:** scratch files from earlier sessions at the
 repository root (`check_patterns*.py`, `debug_*.py`, `floor_results.json`) and
 Kilo's `.kilo/plans/`.
+
+### 12 October — GitHub is connected, and what was and was not seen
+
+A GitHub App (`zaram-app`) the person installs on the repositories they choose,
+signed in with the device flow, so the window never holds a password or a token.
+`backend/packs/github` (sign-in, token vault, small API client, six tools),
+Settings → GitHub, a manual section, and `tests/test_github_connects_and_pushes.py`
+(78). The token is sealed to the Windows account (DPAPI), travels only in git's
+environment or a bearer header, and is scrubbed from anything echoed back. Every
+write — push, pull request, issue, new repository — asks each time and offers no
+standing yes (`policy.always_asks`); a push is never forced, only reaches
+repositories the app is installed on, and is announced to the egress gate as
+`DataClass.REPO`: a count of commits and a place, never content.
+
+**Seen live, on the resident 27B and a private backend:** the device sign-in
+completing at github.com; the connection read back after a backend restart;
+Settings showing "connected as"; the model choosing `github_get_status` and then
+`github_create_repository` from a plain request; the approval card.
+
+**Found by asking it live, and fixed:** every GitHub write reached a card whose
+only button was Deny. "Run this once" needs a target the card can show and the
+gate's leave; the writes named no key the card reads, and the push reads as a
+send by its name. Since none of them can be granted for good, none of them could
+be approved. `call_target` now names the repository and branch, head or title;
+`once` is offered for a tool no grant can settle. Tests go through the real
+runtime for every write. This is the second time in this codebase that tests
+called a tool's code directly and never the gate in front of it.
+
+**Not seen:** a push, a pull request and an issue against a real repository (the
+throwaway one needed the person to create it — GitHub refuses repository creation
+to an app sign-in on a personal account, which Zaram says in words); the packaged
+window; a cold install of the published installer.
+
+**Two settings were made on GitHub for this:** Device Flow enabled, and the app
+opted out of expiring user tokens (Zaram holds no client secret, so it cannot
+refresh one; a token that does not expire is sealed on this machine and revoked
+by Disconnect plus GitHub's own page).
