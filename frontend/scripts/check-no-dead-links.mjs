@@ -22,6 +22,9 @@ import path from 'node:path';
 const SRC = path.resolve('src');
 const QUARANTINE = 'legacy';
 const DEAD = /target\s*=\s*["'{]\s*['"]?_blank/;
+// A line that carries this marker is a link in a *page Zaram is building* -- saved, then opened in
+// a real browser, where a new tab works -- and not in the app's own window. Per line, and said.
+const ALLOWED = /check-no-dead-links:\s*allow/;
 
 async function walk(dir) {
   const out = [];
@@ -44,7 +47,7 @@ export function scanText(text, { rel = 'fixture.tsx' } = {}) {
     // Prose in a block comment may name the attribute — this file's own
     // docstring does. Only a line that looks like JSX or a string literal
     // counts: an `=` attribute, or a query selector in a test.
-    if (DEAD.test(code) && !/^\s*\*/.test(line) && !/querySelector|expect\(/.test(code)) {
+    if (DEAD.test(code) && !ALLOWED.test(line) && !/^\s*\*/.test(line) && !/querySelector|expect\(/.test(code)) {
       out.push(`${rel}:${i + 1} is a target="_blank" link, which the packaged app denies.\n      ${line.trim()}`);
     }
   });
@@ -52,8 +55,9 @@ export function scanText(text, { rel = 'fixture.tsx' } = {}) {
 }
 
 const SELF_TEST = `<a href={u} target="_blank" rel="noreferrer">x</a>`;
+const SELF_TEST_ALLOWED = `<a href={u} target="_blank">x</a> // check-no-dead-links: allow -- page content`;
 const SELF_TEST_CRLF = '// a comment naming target="_blank"\r\nconst x = 1;\r\n';
-if (scanText(SELF_TEST).length !== 1 || scanText(SELF_TEST_CRLF).length !== 0) {
+if (scanText(SELF_TEST).length !== 1 || scanText(SELF_TEST_CRLF).length !== 0 || scanText(SELF_TEST_ALLOWED).length !== 0) {
   console.error('check-no-dead-links: the scanner no longer catches the thing it exists to catch.');
   process.exit(2);
 }

@@ -434,6 +434,14 @@
         Pause it, restart it, read the exact code that is running.
       </p>
       <p>
+        <strong>Some pages are hard to write from nothing, so Zaram starts from one that
+        works.</strong> Ask for a Minecraft-style game, a racer or a platformer and the model
+        changes a page that was already played — walked, jumped, driven round a track — instead
+        of inventing the collision again, which is where a small local model goes wrong. Say
+        <em>from scratch</em> and it does. It is a page, not a prompt tuned to one model: any
+        model that can read code can build on it.
+      </p>
+      <p>
         <strong>Before it reaches you, Zaram runs the page</strong> in a hidden browser that
         has no route to any host. If the page freezes or throws, the model is asked to fix
         it — twice at most — and the line under the reply says what happened. If nothing
@@ -455,7 +463,41 @@
       </p>
     </div>
     <figure class="shot">
-      <img src="img/apps.webp" width="1280" height="800" alt="A snake game Zaram wrote, running in the preview beside the conversation, with the line under the reply saying the page ran without errors." loading="lazy" decoding="async">
+      <img src="img/apps.webp" width="1280" height="800" alt="A Minecraft-style game Zaram built, running in the preview beside the conversation: a block world of grass, water and trees with a hotbar along the bottom, and the line under the reply saying the page ran without errors." loading="lazy" decoding="async">
+    </figure>
+  </section>
+
+  <section class="feature reverse" id="code-in-view">
+    <div class="feature-text">
+      <p class="kicker">Code, in view</p>
+      <h2>Watch it write the code.</h2>
+      <p>
+        While Zaram is writing code, the character beside the conversation types. The camera
+        eases back so you see its head and its hands, and a neon keyboard spawns under them.
+        It only does this while code is genuinely being written — thinking about code is
+        thinking, and the typing starts when a code tool runs or a code block begins. Then
+        the camera comes back to its face.
+      </p>
+      <p>
+        What it is typing is not a demo. Ask for an app or a game and the page is written,
+        <strong>run in a hidden browser with no network</strong>, and fixed if it froze or
+        threw, before you see it. In a coding project the same conversation reads the files,
+        changes them as git commits you can revert, runs the app and checks its own work.
+        Your folder, your model, your permission at each step — and nothing about the code
+        leaves the machine unless you send it.
+      </p>
+      <p class="aside">
+        The character reports what the system is doing and nothing else: its glow and the
+        keyboard take the colour of the state, purple for coding. It never shows which model
+        answered, and it never pretends to feel anything.
+      </p>
+    </div>
+    <figure class="shot">
+      <picture>
+        <source media="(prefers-reduced-motion: reduce)" srcset="img/avatar-coding-still.webp">
+        <img src="img/avatar-coding.webp" width="440" height="458" alt="Zaram's robot character typing on a glowing neon keyboard while it writes code, its hands moving across the keys." loading="lazy" decoding="async">
+      </picture>
+      <figcaption>The avatar in the coding state, recorded from the app. Under reduced motion it holds still.</figcaption>
     </figure>
   </section>
 
@@ -887,7 +929,7 @@
         <span>Milestones</span>
         <span class="spacer">each build, and what is next</span>
       </div>
-      <div class="panel-body"><span class="line"><span class="dim">15 Sep  </span><span class="cy">alpha.1</span>  memory · recall with sources · the egress log</span><span class="line"><span class="dim">        </span>         documents · code projects · the manual</span><span class="line"><span class="dim">21 Sep  </span><span class="cy">alpha.2</span>  a row for every step, where it happened</span><span class="line"><span class="dim">        </span>         thinking on/off · the model picks its tools</span><span class="line"><span class="dim">        </span>         name a folder and it opens · work that runs</span><span class="line"><span class="dim">        </span>         on its own, never approving itself</span><span class="line"><span class="dim">29 Sep  </span><span class="cy">alpha.3</span>  a stuck project: installs, its scripts, the app</span><span class="line"><span class="dim">        </span>         pictures out, and a full card that refuses</span><span class="line"><span class="dim">        </span>         jobs and grants · a folder you pick yourself</span><span class="line"><span class="dim">        </span>         zcode · the Spine from any terminal</span><span class="line"><span class="dim">5 Oct   </span><span class="cy">alpha.4</span>  ask for an app: it is run before you see it</span><span class="line"><span class="dim">        </span>         one file or several, and no project</span><span class="line"><span class="dim">        </span>         thinking: off · for code · on</span><span class="line"><span class="dim">        </span>         run this once · the terminal is read</span><span class="line"><span class="dim">        </span>         type to find a model · the free ones marked</span><span class="line"><span class="dim">        </span>         and what each one does with what you send</span><span class="line"><span class="dim">        </span>         it opens your app, clicks through and checks</span><span class="line"><span class="dim">        </span>         its own work — and you watch it happen</span><span class="line"><span class="dim">next    </span>[ ]  a signed installer — no Windows warning</span><span class="line"><span class="dim">        </span>[ ]  five verbs on the summon key</span><span class="line"><span class="dim">        </span>[ ]  word search beside the vectors</span><span class="line"><span class="dim">        </span>[ ]  mail, GitHub, socials as attached tools</span><span class="line"><span class="dim">later   </span>[ ]  your Zaram on a second machine — sync</span></div>
+      <div class="panel-body"><span class="line"><span class="dim">15 Sep  </span><span class="cy">alpha.1</span>  memory · recall with sources · the egress log</span><span class="line"><span class="dim">        </span>         documents · code projects · the manual</span><span class="line"><span class="dim">21 Sep  </span><span class="cy">alpha.2</span>  a row for every step, where it happened</span><span class="line"><span class="dim">        </span>         thinking on/off · the model picks its tools</span><span class="line"><span class="dim">        </span>         name a folder and it opens · work that runs</span><span class="line"><span class="dim">        </span>         on its own, never approving itself</span><span class="line"><span class="dim">29 Sep  </span><span class="cy">alpha.3</span>  a stuck project: installs, its scripts, the app</span><span class="line"><span class="dim">        </span>         pictures out, and a full card that refuses</span><span class="line"><span class="dim">        </span>         jobs and grants · a folder you pick yourself</span><span class="line"><span class="dim">        </span>         zcode · the Spine from any terminal</span><span class="line"><span class="dim">5 Oct   </span><span class="cy">alpha.4</span>  ask for an app: it is run before you see it</span><span class="line"><span class="dim">        </span>         one file or several, and no project</span><span class="line"><span class="dim">        </span>         thinking: off · for code · on</span><span class="line"><span class="dim">        </span>         run this once · the terminal is read</span><span class="line"><span class="dim">        </span>         type to find a model · the free ones marked</span><span class="line"><span class="dim">        </span>         and what each one does with what you send</span><span class="line"><span class="dim">        </span>         it opens your app, clicks through and checks</span><span class="line"><span class="dim">        </span>         its own work — and you watch it happen</span><span class="line"><span class="dim">12 Oct  </span><span class="cy">alpha.5</span>  a Minecraft-style game, a racer, a platformer</span><span class="line"><span class="dim">        </span>         photos from the web, credited</span><span class="line"><span class="dim">        </span>         your pictures in pages and documents</span><span class="line"><span class="dim">        </span>         the avatar types on a neon keyboard</span><span class="line"><span class="dim">next    </span>[ ]  a signed installer — no Windows warning</span><span class="line"><span class="dim">        </span>[ ]  five verbs on the summon key</span><span class="line"><span class="dim">        </span>[ ]  word search beside the vectors</span><span class="line"><span class="dim">        </span>[ ]  mail, GitHub, socials as attached tools</span><span class="line"><span class="dim">later   </span>[ ]  your Zaram on a second machine — sync</span></div>
       <p class="panel-note">
         Dates are when a build reached testers, not when a feature was finished. Nothing
         on the <em>next</em> list is promised for a date; each lands when it has been
@@ -942,6 +984,7 @@
           <label for="fb-build">Which build</label>
           <select id="fb-build" name="build" required>
             <option value="" disabled selected>Choose one</option>
+            <option value="v0.1.0-alpha.5">v0.1.0-alpha.5 (12 October)</option>
             <option value="v0.1.0-alpha.4">v0.1.0-alpha.4 (5 October)</option>
             <option value="v0.1.0-alpha.3">v0.1.0-alpha.3 (29 September)</option>
             <option value="v0.1.0-alpha.2">v0.1.0-alpha.2 (21 September)</option>

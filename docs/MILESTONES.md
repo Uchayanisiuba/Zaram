@@ -22,6 +22,113 @@ publishing step over rather than finding another route. `CLAUDE.md`,
 
 *The latest work is first. Earlier sessions follow below.*
 
+### 11 October — pages are built on what works, and pictures become content
+
+Uncommitted, on `feature/spine-hybrid-retrieval`. Verified live against the
+resident Qwen3.8-27B (exl3, 2.2 bits, Tabby) through the real interface on a
+private backend and scratch data directory.
+
+* **Tested starting points** (`backend/starters`). A Minecraft-style game had
+  been asked for across two days and never played: every from-scratch draft had
+  a physics defect no load check sees. For a voxel world, a 3D racer and a 3D
+  platformer the model is now given a page that has been played and replies
+  with SEARCH/REPLACE edits the window applies (`lib/pageEdits.ts`,
+  `lib/replyPage.ts`). Plain requests came back in ~95 s (voxel) and 106 s
+  (racing) against 20–90 minutes before; a ten-edit customisation applied
+  cleanly. A missing `++` is put back rather than sent for a fix. A request
+  for a *website about* the thing ("a site for my go-kart track") is not
+  handed a game.
+* **Attached pictures go into what Zaram builds** (`attachments/pictures.py`,
+  `lib/pagePictures.ts`). The model is told names, never bytes; the window puts
+  the pictures into the copy that is run, checked or saved, and the documents
+  runtime places them as `ImageBlock`s recorded as `user_document` sources.
+* **Photographs for a site** (`packs/photos`, `lib/pagePhotos.ts`). The model
+  writes `photo:<description>`; the window asks the backend, which searches
+  Openverse through the egress gate after one consent question, keeps only
+  commercial-and-modifiable licences, and the page gets a credits line. Found
+  live and fixed: the hero (a CSS background) was read last and dropped by the
+  limit of eight; one slow download abandoned every remaining photo; a model
+  told to name the place did so in one run of two, so the place is now read
+  from the person's own request; opening an old conversation started a search
+  and a consent question for a page nobody was looking at.
+* **`/starters` was missing from the packaged app's proxy list** — the voxel
+  starter would have worked in development and failed in every install.
+  `check-proxy-covers-backend.mjs` caught it when `/photos` was added.
+
+Then, the same day, built by supervised Sonnet agents and reviewed here:
+
+* **Pictures are kept with their conversation** (`conversations/pictures.py`):
+  as long as the conversation, deleted with it, 1 GB cap oldest first, a
+  remove control in History, never indexed. Verified live across a backend
+  restart: the reopened page took its picture from the kept copy.
+* **Invoices/quotes take a logo, CVs a photo, decks a picture per slide**, in
+  HTML, .docx and .pptx; an unknown name is left out and said.
+* **Photo search paces itself** (18/min for Openverse), remembers what a
+  description resolved to, and falls back to Wikimedia Commons — its own
+  consent question, never covered by Openverse's.
+* **Attached text no longer chooses the plan** (`planner._asked`): routing,
+  search queries and tool listings read the person's words; the model still
+  reads the file. A search query never carries a document's text.
+* **"Allow for this project" now sticks** — `start_app_stack` was missing from
+  the set the `runs` switch grants; Always is hidden where it cannot work.
+* **A started app opens in Zaram's own browser pane** once it answers
+  (`lib/openStartedApp.ts`, `apps.page_url`); the Project row has Change
+  folder / Run app / Run all services chips.
+* **The coding state frames head and typing hands and brings a neon keyboard**
+  (`embodiment/holoKeyboard.ts`): facing the avatar, sized once from shoulder
+  span, with a mouse on its right.
+* Found in review: a game named as the person's own ("a screenshot of our
+  racing game") was handed the racing starter; a model that cannot see was
+  told to "ask rather than guess" and asked instead of building; the
+  readiness probe hung up unread and put a traceback in the app's log; a dead,
+  broken duplicate `_start_stack`.
+
+Still open: Openverse's anonymous tier is 20 requests a minute (paced, not
+lifted); the auto-open pane is unit-tested only, because the private instance
+runs outside Electron; the memory side (`_recall`, `_remember`) still reads the
+composed prompt, so an attachment's text can reach a stored fact.
+
+### 10–11 October — computer use works on a stranger's desktop, and Zaram can change itself
+
+Uncommitted, on `feature/spine-hybrid-retrieval`. Verified live against the
+resident Qwen3.8-27B (exl3, Tabby) through a private backend on a scratch data
+directory; mocked tests passed for each of these before the live run found it.
+
+* **cua-driver installs, connects and can be switched off** (Settings → Computer
+  Use, On · Off). Telemetry off before first run (`DO_NOT_TRACK=1`). The install
+  is a one-time exact-URL grant (`SearchReadGrant`).
+* **A screenshot was pasted into the prompt as text.** `get_window_state` returns
+  a 2.2 MB base64 PNG beside a 4.7 KB text tree; the run died at "prompt length
+  1690633 exceeds 65536". Pictures are now saved to `screens/tools/` (newest 40
+  kept), shown on the step card, and handed to a model the catalogue says can see
+  through `images` — the channel the cloud engines class as `IMAGE`, so a cloud
+  model is asked about pictures once. `runtime.keep_media`, `engine._sight`.
+* **A tool's structure was sent beside its text.** `list_apps`: 554 characters
+  of text, 98 KB of `structuredContent`. The model is now sent an MCP result's
+  `content` text (`tool_loop._what_the_tool_said`), and any one result is cut to
+  `carry_tokens` with a note (`tool_loop.bounded`) so it cannot be dropped whole
+  by a handoff.
+* **The model said "I don't have a browser of my own" after driving one.** With
+  computer use on, `_briefing` now says it drives the person's own apps and
+  browser and should look before reporting.
+* **`zaram-self` never worked — the twentieth unreachable subsystem.** Its
+  handlers were `async`, the runtime ran them in a thread and got a coroutine,
+  and every call returned `success: True` having changed nothing;
+  `set_renderer` reported success by design and `list_voices` imported a
+  function that does not exist. The runtime now awaits an async built-in, and
+  the server was rewritten: every change is read back, the window-owned
+  settings (indicator, open place) travel as `apply` on the tool-call event
+  from this server only, and `grant_tool` and `set_web_search` always ask.
+  Nothing in it touches the kill switch, site rules or keys.
+  `tests/test_zaram_can_change_its_own_settings.py` goes through the runtime.
+
+Still open: the tools travel twice per round (system-prompt text ~6k tokens and
+native schemas ~10.6k on Tabby), both in the cached prefix; Zaram's own tools
+skip the tool budget, so 31 are offered on a desktop request; the stranger-tool
+ranker is still never wired (`set_ranker`); `git pull`/`clone` from the terminal
+is not logged (only `git push` is gated, as `DataClass.REPO`); the model has no
+tool to attach a new MCP server.
+
 ### 5 October — what stood between asking for an app and getting one
 
 The maintainer asked, candidly, whether Zaram can build an app end to end. The
@@ -12782,3 +12889,117 @@ Still broken, found and not fixed:
 
 - One unexplained 404 on every page load.
 
+
+### 12 October — the model on TabbyAPI is loaded at launch, not at the first message
+
+Reported: *"I set Zaram up to warm the local LLM after loading dependencies on
+launch. It still warms up after my first prompt."* True for the maintainer's
+setup, and the cause was a refusal that read as caution. The boot preload
+warmed Ollama's pick and **skipped any model served by another local server**,
+on the grounds that no OpenAI-compatible server can load without generating.
+TabbyAPI can: `POST /v1/model/load`, the twin of the unload route
+`release_resident` already uses. With `model_name:` empty and
+`inline_model_loading: true` (deliberate, see `docs/RUNNING.md`), nothing is on
+the card until a request names a model, so the first message of every session
+paid the whole cold start.
+
+Three changes, one idea (warm the model that will answer, ask the server rather
+than assume):
+
+* `OpenAICompatibleEngine.load` asks the server to load, loopback only, and
+  **never swaps**: a server already holding the model is warm, one holding a
+  different model is left alone (a Tabby load unloads first). A server without
+  the route answers 404/405 and is left as it was; nothing is generated.
+* `LocalDispatchEngine.warm` calls it instead of returning False.
+* `ModelsRuntime` warms the **chosen default** (`_warm_target`) rather than
+  `_selected_model`, which is what lets the old "default is elsewhere, so load
+  nothing" refusal go: there is no second chat model to refuse. `prefer_cloud`
+  and the does-it-fit-beside-everything-else check stand.
+* `main.py` retries the preload once a server Zaram started has answered.
+  Before, the preload ran ~20 s ahead of Tabby and found nothing to warm.
+
+`tests/test_a_second_server_is_loaded_at_launch.py` runs against a real
+loopback server speaking Tabby's routes. Two older tests asserted the refusal
+and were rewritten, not deleted: the contract changed.
+
+**Not yet seen on a real 27B.** The card was full of desktop apps (12.0 of 12.3
+GB used with Tabby stopped), so the load itself was not run. Two things to check
+on the first real launch: that `/v1/model/load` applies the keys named in
+`use_as_default` (`reasoning`, `tool_format`) the way an inline load does, and
+that `/providers/resident` shows no "needs X GB and the card has Y free" refusal
+when the desktop is lighter.
+
+### 12 October — the coding keyboard loses its mouse and gains width
+
+The maintainer's call: no mouse beside the board, and a board wide enough that
+the right arm is still over it when the clip reaches out to the side. Measured
+with the new read-only `?keyboardDebug` hook (`window.__zaramKeyboard`): typing
+puts the left hand at +0.21..+0.32 and the reach takes the right hand to -0.35,
+both at or past the edges of the old 0.57 board. `BOARD_PER_SHOULDER` 0.76 ->
+1.06 (and `BOARD_PER_HEAD` 1.3 -> 1.82), so the board is 0.80 and spans +-0.40.
+`HANDS_ON_BOARD` 0.85 -> 0.55 of the width, so the same absolute line (typing
+0.30-0.35 apart, reaching 0.50-0.67) still holds the board still through the
+reach. Seen in the browser pane at the reach: the hand over the board's left
+end, the board unmoved.
+
+### 12 October — a question about the open project reads the project
+
+Reported with a screenshot: Ride Share open, a repository at `C:\RideShare`,
+and *"What are the unfinished tasks in Ride Share?"* answered by a web search
+(the Zeigarnik effect) and a reply telling the person to look in the folder.
+The question reads as a search, and the search plan sits ahead of the arm that
+offers the repository's tools. `core/open_project.py` carries the open project's
+name per request (a `ContextVar`, set beside the code root in
+`_open_code_project`, for every project type) and answers whether a message is
+about it: the name, flattened for case and spacing, or "this project / the app
+/ our repo". Both classifier paths drop `requires_search` for such a message;
+with a repository open the planner then offers the tools; the recall block names
+the project beside its folder. Asking for the web in words ("online", "on the
+web", "google") still searches. `tests/test_a_question_about_the_open_project_reads_it.py`
+(14). Not yet seen against the live model — the card was full.
+
+### 12 October — a website with photos is built, not drawn
+
+Reported: *"Build a luxury resort website ... source the internet for images you
+need"* started an image generation. The keyword planner read "images" as IMAGE
+(and "find photos online for it" as a file search), so the plan was
+`image.generate` and no page. `create_plan` now reclassifies an IMAGE or
+FILESYSTEM reading as an ordinary page turn when the request builds a page and
+any picture is named *after* the page (`_a_page_with_pictures_in_it`): the photo
+pack finds the pictures while the page is written. A picture named first
+("generate an image for my website", "make a logo for my web app") stays a
+drawing. `tests/test_a_site_with_photos_is_not_a_drawing.py`; 533 image, drawing
+and vision tests unchanged. Seen on the planner only, not yet against the live
+model.
+
+### 12 October — the model decides whether a page needs photos
+
+The maintainer's shape: *build a website* and Zaram works out whether it needs
+photographs and finds them; *generate an image of a dog* and it draws one. The
+photo guidance used to be offered only when `wants_photos`, a keyword list,
+recognised a site with a public face. It is now offered on every page Zaram
+builds (`asks_to_build_a_page`), except one taken over by a tested starter, and
+the guidance itself says when photos belong and when they do not. Nothing is
+searched unless the page writes a `photo:` reference. Drawing requests are
+untouched. A page that asks for a *drawn* picture inside it gets a photo and a
+one-line explanation: pages cannot carry generated pictures yet (a `drawn:`
+reference resolved through the image runtime is the open follow-up).
+
+### 12 October — pictures asked for from the web are found, for pages and documents
+
+The maintainer's rule: "source images", "get photos online" in a request for a
+website, an app or a document means photos from the web, never a drawing.
+`core/sourced_pictures.py` recognises the wording (typos included). The planner
+never plans `image.generate` for it: a page stays a page (`photo:` references,
+resolved by the window as before); a request that names a document becomes a
+document even where bge-m3 read it as a chat turn (measured: "Write a brochure
+document about Lagos tourism, source images online" routed as neither), and its
+body step is told to write `![alt](photo:description)`. The documents runtime
+resolves those through the photo pack's `find_photos` -- rule-8 check, the one
+consent question per source, pacing, cache -- places them as `ImageBlock`s, ends
+the file with a Photo credits section and records each as a `web` source. A
+photo not found stays as its alt text. `markdown_blocks` wraps a spaced
+`photo:` address in `<>` before parsing (CommonMark takes no bare spaces).
+Decks, invoices and CVs (the structured kinds) do not take web photos yet.
+`tests/test_pictures_from_the_web_are_found_not_drawn.py`: 33 deterministic,
+9 measured on the real router.
