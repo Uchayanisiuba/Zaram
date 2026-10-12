@@ -27,7 +27,7 @@ const CONFIG = {
   // suffix the installer's filename does not (v0.1.0-alpha.1 holds
   // Zaram-0.1.0-x64.exe), so the link is built from both. Written by
   // scripts/site-release.mjs on release; empty means "v" + version.
-  releaseTag: "v0.1.0-alpha.5",
+  releaseTag: "v0.1.0-alpha.6",
   sizeMb:  199,
   repo:    "Uchayanisiuba/Zaram",
 
@@ -51,7 +51,7 @@ const CONFIG = {
 
   // Paste the SHA-256 from the release page. Leave empty and the page says the
   // checksum is still pending, rather than showing a blank box.
-  sha256: "d2a588ee6c9958442216c08366eb1d782c89374eafa6fda5c2eeeb35cd9e8c7e",
+  sha256: "402c309b9f91420f534b8979e96b89e4dab7e8075ea7effd136d48965cea2fbc",
 
   // ── THE WAITLIST ──────────────────────────────────────────────────────────
   // Paste the endpoint from whichever form host you signed up with, and name it
