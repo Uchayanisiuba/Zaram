@@ -15,7 +15,8 @@ site/
   styles.css     palette from docs/UI-SPEC.md, so site and product agree
   site.js        CONFIG at the top is the only thing you edit
   favicon.ico    copied from build/icon.ico
-  img/           screenshots, downscaled to webp (130 KB for all five)
+  img/           screenshots, downscaled to webp; avatar-coding.webp is a ~0.5 MB looping
+                 recording of the avatar typing, loaded lazily, with a still for reduced motion
 ```
 
 ---
