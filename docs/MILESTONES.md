@@ -13003,3 +13003,29 @@ photo not found stays as its alt text. `markdown_blocks` wraps a spaced
 Decks, invoices and CVs (the structured kinds) do not take web photos yet.
 `tests/test_pictures_from_the_web_are_found_not_drawn.py`: 33 deterministic,
 9 measured on the real router.
+
+### 12 October — alpha.5 is cut, and what was and was not verified
+
+The tag `v0.1.0-alpha.5` was pushed at the maintainer's instruction from the
+maintainer's own credential; `main` was fast-forwarded to the branch first (4
+commits). The hosted build succeeded, published the installer, the portable
+build and `SHA256SUMS.txt` (199 MiB), committed `site/site.js` and published
+the site. Checked afterwards: the installer's digest on GitHub equals the
+checksum in the release notes; the live site serves the new sections and images;
+the download link returns the full file.
+
+**Verified before the tag:** `typecheck`, `check:guards` (two guard failures were
+found and fixed: test fixtures with remote-looking addresses, and the photo
+credits' new-tab links, now a per-line allowance), `check:payload` (479 backend
+files, no user data), `check:reachability`, the whole frontend suite on one
+worker (146 files, 1618 tests), the backend files for each changed area, and a
+real turn on the resident 27B: "Build me a Minecraft-style game" answered from
+the voxel starting point in 81 s, with the preview at 60 fps.
+
+**Not verified:** a cold install of the published installer (alpha.4 had the
+same gap); a started app opening in the packaged window; the project-aware plan
+against the live model; any cloud picture. The release notes say so.
+
+**Left out of the commits on purpose:** scratch files from earlier sessions at the
+repository root (`check_patterns*.py`, `debug_*.py`, `floor_results.json`) and
+Kilo's `.kilo/plans/`.
